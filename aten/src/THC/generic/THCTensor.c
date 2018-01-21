@@ -787,7 +787,7 @@ void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst)
 static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
 {
   self->refcount = 1;
-  self->storage = NULL;
+  self->storage = THCStorage_(new)(state);
   self->storageOffset = 0;
   self->size = NULL;
   self->stride = NULL;

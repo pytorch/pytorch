@@ -31,7 +31,8 @@ import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
-                                 Cauchy, Chi2, Dirichlet, Exponential, Gamma,
+                                 Cauchy, Chi2, Dirichlet, Distribution,
+                                 Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, Multinomial, Normal,
                                  OneHotCategorical, Pareto, StudentT, Uniform,
                                  constraints, kl_divergence)
@@ -52,10 +53,25 @@ except ImportError:
     TEST_NUMPY = False
 
 
+def pairwise(Dist, *params):
+    """
+    Creates a pair of distributions `Dist` initialzed to test each element of
+    param with each other.
+    """
+    params1 = [torch.Tensor([p] * len(p)) for p in params]
+    params2 = [p.transpose(0, 1) for p in params1]
+    return Dist(*params1), Dist(*params2)
+
+
 # Register all distributions for generic tests.
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
     Example(Bernoulli, [
+        {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
+        {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
+        {'probs': 0.3},
+    ]),
+    Example(Geometric, [
         {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
         {'probs': 0.3},
@@ -103,6 +119,20 @@ EXAMPLES = [
     Example(Exponential, [
         {'rate': Variable(torch.randn(5, 5).abs(), requires_grad=True)},
         {'rate': Variable(torch.randn(1).abs(), requires_grad=True)},
+    ]),
+    Example(FisherSnedecor, [
+        {
+            'df1': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.randn(1).abs(), requires_grad=True),
+            'df2': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'df1': Variable(torch.Tensor([1.0])),
+            'df2': 1.0,
+        }
     ]),
     Example(Gamma, [
         {
@@ -267,6 +297,13 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     pass
 
+    def test_has_examples(self):
+        distributions_with_examples = set(e.Dist for e in EXAMPLES)
+        for Dist in globals().values():
+            if isinstance(Dist, type) and issubclass(Dist, Distribution) and Dist is not Distribution:
+                self.assertIn(Dist, distributions_with_examples,
+                              "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
+
     def test_bernoulli(self):
         p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
         r = Variable(torch.Tensor([0.3]), requires_grad=True)
@@ -306,6 +343,39 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+
+    def test_geometric(self):
+        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
+        r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        s = 0.3
+        self.assertEqual(Geometric(p).sample_n(8).size(), (8, 3))
+        self.assertEqual(Geometric(1).sample(), 0)
+        self.assertEqual(Geometric(1).log_prob(torch.Tensor([1])), -float('inf'), allow_inf=True)
+        self.assertEqual(Geometric(1).log_prob(torch.Tensor([0])), 0)
+        self.assertTrue(isinstance(Geometric(p).sample().data, torch.Tensor))
+        self.assertEqual(Geometric(r).sample_n(8).size(), (8, 1))
+        self.assertEqual(Geometric(r).sample().size(), (1,))
+        self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2, 1))
+        self.assertEqual(Geometric(s).sample().size(), (1,))
+        self._gradcheck_log_prob(Geometric, (p,))
+        self.assertRaises(ValueError, lambda: Geometric(0))
+        self.assertRaises(NotImplementedError, Geometric(r).rsample)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_geometric_log_prob_and_entropy(self):
+        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
+        s = 0.3
+
+        def ref_log_prob(idx, val, log_prob):
+            prob = p.data[idx]
+            self.assertEqual(log_prob, scipy.stats.geom(prob, loc=-1).logpmf(val))
+
+        self._check_log_prob(Geometric(p), ref_log_prob)
+        self._check_log_prob(Geometric(logits=p.log() - (-p).log1p()), ref_log_prob)
+
+        # check entropy computation
+        self.assertEqual(Geometric(p).entropy().data, scipy.stats.geom(p.data.numpy(), loc=-1).entropy(), prec=1e-3)
+        self.assertEqual(Geometric(s).entropy()[0], scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
 
     def test_binomial(self):
         p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
@@ -687,7 +757,7 @@ class TestDistributions(TestCase):
                                         'Gamma(concentration={}, rate={})'.format(alpha, beta))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_pareto_shape(self):
+    def test_pareto(self):
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         scale_1d = torch.randn(1).abs()
@@ -716,7 +786,7 @@ class TestDistributions(TestCase):
                                         'Pareto(scale={}, alpha={})'.format(scale, alpha))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_gumbel_shape(self):
+    def test_gumbel(self):
         loc = Variable(torch.randn(2, 3), requires_grad=True)
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         loc_1d = torch.randn(1)
@@ -743,6 +813,35 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Gumbel(loc, scale),
                                         scipy.stats.gumbel_r(loc=loc, scale=scale),
                                         'Gumbel(loc={}, scale={})'.format(loc, scale))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_fishersnedecor(self):
+        df1 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        df1_1d = torch.randn(1).abs()
+        df2_1d = torch.randn(1).abs()
+        self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
+        self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample_n(1).size(), (1,))
+
+        def ref_log_prob(idx, x, log_prob):
+            f1 = df1.data.view(-1)[idx]
+            f2 = df2.data.view(-1)[idx]
+            expected = scipy.stats.f.logpdf(x, f1, f2)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(FisherSnedecor(df1, df2), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_fishersnedecor_sample(self):
+        set_rng_seed(1)  # see note [Randomized statistical tests]
+        for df1, df2 in product([0.1, 0.5, 1.0, 5.0, 10.0], [0.1, 0.5, 1.0, 5.0, 10.0]):
+            self._check_sampler_sampler(FisherSnedecor(df1, df2),
+                                        scipy.stats.f(df1, df2),
+                                        'FisherSnedecor(loc={}, scale={})'.format(df1, df2))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_chi2_shape(self):
@@ -888,6 +987,18 @@ class TestDistributions(TestCase):
              (1, 2)),
             (Normal(loc=torch.Tensor([0]), scale=torch.Tensor([[1]])),
              (1, 1)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=1),
+             (2,)),
+            (FisherSnedecor(df1=1, df2=torch.Tensor([1, 1])),
+             (2,)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([1])),
+             (2,)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([[1], [1]])),
+             (2, 2)),
+            (FisherSnedecor(df1=torch.Tensor([1, 1]), df2=torch.Tensor([[1]])),
+             (1, 2)),
+            (FisherSnedecor(df1=torch.Tensor([1]), df2=torch.Tensor([[1]])),
+             (1, 1)),
             (Gamma(concentration=torch.Tensor([1, 1]), rate=1),
              (2,)),
             (Gamma(concentration=1, rate=torch.Tensor([1, 1])),
@@ -967,6 +1078,10 @@ class TestDistributions(TestCase):
                 'loc': torch.Tensor([[[0, 0, 0], [0, 0, 0]]]),
                 'scale': torch.Tensor([1, 1])
             }),
+            (FisherSnedecor, {
+                'df1': torch.Tensor([1, 1]),
+                'df2': torch.Tensor([1, 1, 1]),
+            }),
             (Gumbel, {
                 'loc': torch.Tensor([[0, 0]]),
                 'scale': torch.Tensor([1, 1, 1, 1])
@@ -982,10 +1097,6 @@ class TestDistributions(TestCase):
             (Laplace, {
                 'loc': torch.Tensor([0, 0]),
                 'scale': torch.Tensor([1, 1, 1])
-            }),
-            (Pareto, {
-                'scale': torch.Tensor([1, 1]),
-                'alpha': torch.Tensor([1, 1, 1])
             }),
             (Pareto, {
                 'scale': torch.Tensor([1, 1]),
@@ -1260,6 +1371,26 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, bernoulli.log_prob, self.tensor_sample_2)
         self.assertEqual(bernoulli.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
 
+    def test_geometric_shape_scalar_params(self):
+        geometric = Geometric(0.3)
+        self.assertEqual(geometric._batch_shape, torch.Size())
+        self.assertEqual(geometric._event_shape, torch.Size())
+        self.assertEqual(geometric.sample().size(), torch.Size((1,)))
+        self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, geometric.log_prob, self.scalar_sample)
+        self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(geometric.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
+    def test_geometric_shape_tensor_params(self):
+        geometric = Geometric(torch.Tensor([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        self.assertEqual(geometric._batch_shape, torch.Size((3, 2)))
+        self.assertEqual(geometric._event_shape, torch.Size(()))
+        self.assertEqual(geometric.sample().size(), torch.Size((3, 2)))
+        self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
+        self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, geometric.log_prob, self.tensor_sample_2)
+        self.assertEqual(geometric.log_prob(torch.ones(3, 1, 1)).size(), torch.Size((3, 3, 2)))
+
     def test_beta_shape_scalar_params(self):
         dist = Beta(0.1, 0.1)
         self.assertEqual(dist._batch_shape, torch.Size())
@@ -1503,47 +1634,83 @@ class TestDistributionShapes(TestCase):
 
 
 class TestKL(TestCase):
+
     def setUp(self):
+
+        class Binomial30(Binomial):
+            def __init__(self, probs):
+                super(Binomial30, self).__init__(30, probs)
+
+        # These are pairs of distributions with 4 x 4 paramters as specified.
+        # The first of the pair e.g. bernoulli[0] varies column-wise and the second
+        # e.g. bernoulli[1] varies row-wise; that way we test all param pairs.
+        bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
+        binomial30 = pairwise(Binomial30, [0.1, 0.2, 0.6, 0.9])
+        beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
+        chi2 = pairwise(Chi2, [1.0, 2.0, 2.5, 5.0])
+        exponential = pairwise(Exponential, [1.0, 2.5, 5.0, 10.0])
+        gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
+        gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
+        laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
+        normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
+        uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
+        uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
+        uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
+        uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
+        dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
+                                         [0.5, 0.4, 0.1],
+                                         [0.33, 0.33, 0.34],
+                                         [0.2, 0.2, 0.4]])
+
+        # These tests should pass with precision = 0.01, but that makes tests very expensive.
+        # Instead, we test with precision = 0.2 and only test with higher precision locally
+        # when adding a new KL implementation.
+        # The following pairs are not tested due to very high variance of the monte carlo
+        # estimator; their implementations have been reviewed with extra care:
+        # - (pareto, normal)
+        self.precision = 0.1  # Set this to 0.01 when testing a new KL implementation.
+        self.max_samples = int(1e07)  # Increase this when testing at smaller precision.
+        self.samples_per_batch = int(1e04)
         self.finite_examples = [
-            (Bernoulli(0.7), Bernoulli(0.3)),
-            (Binomial(30, 0.7), Binomial(30, 0.3)),
-            (Beta(1, 2), Beta(3, 4)),
-            (Beta(1, 2), Chi2(3)),
-            (Beta(1, 2), Exponential(3)),
-            (Beta(1, 2), Gamma(3, 4)),
-            (Beta(1, 2), Normal(-3, 4)),
-            (Chi2(2), Chi2(3)),
-            (Chi2(2), Gamma(3, 4)),
-            (Chi2(2), Exponential(3)),
-            (Dirichlet(torch.Tensor([1, 2])), Dirichlet(torch.Tensor([3, 4]))),
-            (Exponential(1), Chi2(2)),
-            (Exponential(1), Exponential(2)),
-            (Exponential(1), Gamma(2, 3)),
-            (Exponential(1), Gumbel(-2, 3)),
-            (Exponential(2), Normal(-3, 4)),
-            (Gamma(1, 2), Chi2(3)),
-            (Gamma(1, 2), Exponential(3)),
-            (Gamma(1, 2), Gamma(3, 4)),
-            (Gamma(1, 2), Gumbel(-3, 4)),
-            (Gumbel(-1, 2), Gumbel(-3, 4)),
-            (Gumbel(-1, 2), Normal(-3, 4)),  # This case fails for n <= 22000
-            (Laplace(1, 2), Laplace(-3, 4)),
-            (Laplace(-1, 2), Normal(-3, 4)),
-            (Normal(-1, 2), Gumbel(-3, 4)),
-            (Normal(1, 2), Normal(-3, 4)),
-            (Pareto(1, 2), Chi2(3)),
-            (Pareto(1, 2), Exponential(3)),  # This case fails for n <= 22000
-            (Pareto(1, 2), Gamma(3, 4)),  # This case fails for n <= 22000
-            (Pareto(1, 2), Laplace(-3, 4)),
-            (Pareto(1, 2), Laplace(3, 4)),
-            (Pareto(1, 3), Normal(-2, 4)),
-            (Uniform(0.25, 0.75), Beta(3, 4)),
-            (Uniform(1, 2), Chi2(3)),
-            (Uniform(1, 2), Exponential(3)),
-            (Uniform(1, 2), Gamma(3, 4)),
-            (Uniform(-1, 2), Gumbel(-3, 4)),
-            (Uniform(-1, 2), Normal(-3, 4)),
-            (Uniform(2, 3), Pareto(1, 4))
+            (bernoulli, bernoulli),
+            (beta, beta),
+            (beta, chi2),
+            (beta, exponential),
+            (beta, gamma),
+            (beta, normal),
+            (binomial30, binomial30),
+            (chi2, chi2),
+            (chi2, exponential),
+            (chi2, gamma),
+            (chi2, normal),
+            (dirichlet, dirichlet),
+            (exponential, chi2),
+            (exponential, exponential),
+            (exponential, gamma),
+            (exponential, gumbel),
+            (exponential, normal),
+            (gamma, chi2),
+            (gamma, exponential),
+            (gamma, gamma),
+            (gamma, gumbel),
+            (gamma, normal),
+            (gumbel, gumbel),
+            (gumbel, normal),
+            (laplace, laplace),
+            (laplace, normal),
+            (normal, gumbel),
+            (normal, normal),
+            (pareto, chi2),
+            (pareto, exponential),
+            (pareto, gamma),
+            (uniform_within_unit, beta),
+            (uniform_positive, chi2),
+            (uniform_positive, exponential),
+            (uniform_positive, gamma),
+            (uniform_real, gumbel),
+            (uniform_real, normal),
+            (uniform_pareto, pareto),
         ]
 
         self.infinite_examples = [
@@ -1595,18 +1762,44 @@ class TestKL(TestCase):
 
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for p, q in self.finite_examples:
-            x = p.sample(sample_shape=(23000,))
-            expected = (p.log_prob(x) - q.log_prob(x)).mean(0)
+        for (p, _), (_, q) in self.finite_examples:
+            print('Testing KL({}, {})'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
-            message = 'Incorrect KL({}, {}). expected {}, actual {}'.format(
-                type(p).__name__, type(q).__name__, expected, actual)
-            self.assertEqual(expected, actual, prec=0.1, message=message)
+            numerator = 0
+            denominator = 0
+            while denominator < self.max_samples:
+                x = p.sample(sample_shape=(self.samples_per_batch,))
+                numerator += (p.log_prob(x) - q.log_prob(x)).sum(0)
+                denominator += x.size(0)
+                expected = numerator / denominator
+                error = torch.abs(expected - actual) / (1 + expected)
+                if error[error == error].max() < self.precision:
+                    break
+            self.assertLess(error[error == error].max(), self.precision, '\n'.join([
+                'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
+                'Expected ({} Monte Carlo samples): {}'.format(denominator, expected),
+                'Actual (analytic): {}'.format(actual),
+            ]))
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
             self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
+
+    def test_kl_shape(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    kl = kl_divergence(dist, dist)
+                except NotImplementedError:
+                    continue
+                expected_shape = dist.batch_shape if dist.batch_shape else torch.Size([1])
+                self.assertEqual(kl.shape, expected_shape, message='\n'.join([
+                    '{} example {}/{}'.format(Dist.__name__, i, len(params)),
+                    'Expected {}'.format(expected_shape),
+                    'Actual {}'.format(kl.shape),
+                ]))
 
     def test_entropy_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
@@ -1617,7 +1810,7 @@ class TestKL(TestCase):
                     actual = dist.entropy()
                 except NotImplementedError:
                     continue
-                x = dist.sample(sample_shape=(20000,))
+                x = dist.sample(sample_shape=(50000,))
                 expected = -dist.log_prob(x).mean(0)
                 if isinstance(actual, Variable):
                     actual = actual.data

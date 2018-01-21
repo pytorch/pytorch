@@ -5,7 +5,6 @@
 #include "torch/csrc/Types.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/cuda/THCP.h"
-
 #include "torch/csrc/cuda/nccl.h"
 
 #include <nccl.h>
@@ -55,6 +54,8 @@ static std::vector<THCStream*> unpack_streams(PyObject* obj, size_t size) {
   }
   return streams;
 }
+
+static std::vector<at::Tensor> extract_tensors(PyObject* obj);
 
 static std::vector<ncclComm_t> unpack_comms(PyObject* obj, size_t size) {
   if (obj == Py_None) {
@@ -114,8 +115,8 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
     return NULL;
   }
 
-  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
-  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+  std::vector<at::Tensor> inputs = extract_tensors(_inputs);
+  std::vector<at::Tensor> outputs = extract_tensors(_outputs);
   std::vector<THCStream*> streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -158,8 +159,8 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
     return NULL;
   }
 
-  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
-  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+  std::vector<at::Tensor> inputs = extract_tensors(_inputs);
+  std::vector<at::Tensor> outputs = extract_tensors(_outputs);
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -198,7 +199,7 @@ PyObject * THCPModule_nccl_broadcast(PyObject *self, PyObject *args) {
     return NULL;
   }
 
-  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
+  std::vector<at::Tensor> inputs = extract_tensors(_inputs);
   THPUtils_assert(root >= 0 && (size_t)root < inputs.size(), "invalid root");
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
@@ -221,8 +222,8 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
     return NULL;
   }
 
-  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
-  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+  std::vector<at::Tensor> inputs = extract_tensors(_inputs);
+  std::vector<at::Tensor> outputs = extract_tensors(_outputs);
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -266,8 +267,8 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
     return NULL;
   }
 
-  std::vector<at::Tensor> inputs = THPUtils_PySequence_to_TensorList(_inputs);
-  std::vector<at::Tensor> outputs = THPUtils_PySequence_to_TensorList(_outputs);
+  std::vector<at::Tensor> inputs = extract_tensors(_inputs);
+  std::vector<at::Tensor> outputs = extract_tensors(_outputs);
   auto streams = unpack_streams(_streams, inputs.size());
   auto user_comms = unpack_comms(_comms, inputs.size());
 
@@ -293,4 +294,22 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
+  auto seq = THPObjectPtr(PySequence_Fast(obj, "expected a sequence"));
+  if (!seq) throw python_error();
+
+  std::vector<at::Tensor> list;
+  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
+  for (Py_ssize_t i = 0; i < length; i++) {
+    PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
+    if (THPVariable_Check(item)) {
+      auto var = (THPVariable*) item;
+      list.emplace_back(var->cdata.data());
+    } else {
+      list.emplace_back(torch::createTensor(item));
+    }
+  }
+  return list;
 }

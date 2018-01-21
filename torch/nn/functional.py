@@ -12,6 +12,7 @@ from .modules import utils
 from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
+from ._functions.thnn.fold import Col2Im, Im2Col
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
@@ -1934,3 +1935,43 @@ def normalize(input, p=2, dim=1, eps=1e-12):
         eps (float): small value to avoid division by zero. Default: 1e-12
     """
     return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
+
+
+def assert_int_or_pair(arg, arg_name, message):
+    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+
+
+def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
+    r"""
+    See :class:`torch.nn.Unfold` for details
+    """
+
+    if input is not None and input.dim() == 4:
+        msg = '{} must be int or 2-tuple for 4D input'
+        assert_int_or_pair(kernel_size, 'kernel_size', msg)
+        assert_int_or_pair(dilation, 'dilation', msg)
+        assert_int_or_pair(padding, 'padding', msg)
+        assert_int_or_pair(stride, 'stride', msg)
+
+        return Im2Col.apply(input, _pair(kernel_size),
+                            _pair(dilation), _pair(padding), _pair(stride))
+    else:
+        raise NotImplementedError("Input Error: Only 4D input Tensors supported (got {}D)".format(input.dim()))
+
+
+def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
+    r"""
+    See :class:`torch.nn.Fold` for details
+    """
+    if input is not None and input.dim() == 3:
+        msg = '{} must be int or 2-tuple for 3D input'
+        assert_int_or_pair(output_size, 'output_size', msg)
+        assert_int_or_pair(kernel_size, 'kernel_size', msg)
+        assert_int_or_pair(dilation, 'dilation', msg)
+        assert_int_or_pair(padding, 'padding', msg)
+        assert_int_or_pair(stride, 'stride', msg)
+
+        return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
+                            _pair(dilation), _pair(padding), _pair(stride))
+    else:
+        raise NotImplementedError("Input Error: Only 3D input Tensors supported (got {}D)".format(input.dim()))

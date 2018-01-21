@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 from collections import Iterable
+import torch.testing
 import sys
 
 
@@ -206,7 +207,7 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     return True
 
 
-def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3):
+def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3, gen_non_contig_grad_outputs=False):
     """Check gradients of gradients computed via small finite differences
        against analytical gradients
     This function checks that backpropagating through the gradients computed
@@ -236,11 +237,14 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         # If grad_outputs is not specified, create random variables of the same
         # shape, type, and device as the outputs
         def randn_like(x):
-            var = x.randn_like()
+            var = torch.testing.randn_like(x if x.is_floating_point() else x.double())
+            if gen_non_contig_grad_outputs:
+                var = torch.testing.make_non_contiguous(var)
             var.requires_grad = True
             return var
         outputs = _as_tuple(func(*inputs))
-        grad_outputs = [randn_like(x) for x in outputs]
+        grad_outputs_gen = (randn_like(x) for x in outputs)
+        grad_outputs = list(grad_outputs_gen) if not isinstance(inputs, tuple) else tuple(grad_outputs_gen)
 
     def new_func(*input_args):
         input_args = input_args[:-len(grad_outputs)]

@@ -49,6 +49,9 @@
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
+- func: cudnn_is_acceptable(Tensor self) -> bool
+  variants: function
+
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
   variants: function
 
@@ -181,6 +184,9 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
+- func: empty_like(Tensor self) -> Tensor
+  variants: function
+
 - func: expand(Tensor self, IntList size) -> Tensor
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
@@ -193,6 +199,8 @@
 - func: is_cuda(Tensor self) -> bool
 
 - func: is_distributed(Tensor self) -> bool
+
+- func: is_floating_point(Tensor self) -> bool
 
 - func: is_nonzero(Tensor self) -> bool
 
@@ -228,6 +236,7 @@
 - func: pin_memory(Tensor self) -> Tensor
 
 - func: randn_like(Tensor self) -> Tensor
+  variants: function
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function

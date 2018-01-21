@@ -11,6 +11,7 @@ from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
+from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
@@ -187,14 +188,13 @@ def _kl_binomial_binomial(p, q):
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
-    sum_p_alpha = p.concentration.sum(-1)
-    sum_q_alpha = q.concentration.sum(-1)
-    t1 = torch.lgamma(sum_p_alpha)
-    t2 = torch.lgamma(sum_q_alpha)
-    t3 = p.concentration.lgamma().sum(-1)
-    t4 = q.concentration.lgamma().sum(-1)
-    t5 = (p.concentration - q.concentration) * (p.concentration.digamma() - sum_p_alpha.digamma())
-    return t1 - t3 - t2 + t4 + t5.sum(-1)
+    sum_p_concentration = p.concentration.sum(-1)
+    sum_q_concentration = q.concentration.sum(-1)
+    t1 = sum_p_concentration.lgamma() - sum_q_concentration.lgamma()
+    t2 = (p.concentration.lgamma() - q.concentration.lgamma()).sum(-1)
+    t3 = p.concentration - q.concentration
+    t4 = p.concentration.digamma() - sum_p_concentration.digamma().unsqueeze(-1)
+    return t1 - t2 + (t3 * t4).sum(-1)
 
 
 @register_kl(Exponential, Exponential)
@@ -224,6 +224,11 @@ def _kl_gumbel_gumbel(p, q):
     return t1 + t2 + t3 - (1 + _euler_gamma)
 
 
+@register_kl(Geometric, Geometric)
+def _kl_geometric_geometric(p, q):
+    return -p.entropy() - torch.log1p(-q.probs) / p.probs - q.logits
+
+
 @register_kl(Laplace, Laplace)
 def _kl_laplace_laplace(p, q):
     # From http://www.mast.queensu.ca/~communications/Papers/gil-msc11.pdf
@@ -242,11 +247,9 @@ def _kl_lognormal_lognormal(p, q):
 
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
-    std_dev_ratio = p.scale / q.scale
-    t1 = -std_dev_ratio.log()
-    t2 = std_dev_ratio.pow(2)
-    t3 = ((p.loc - q.loc) / q.scale).pow(2)
-    return t1 + (t2 + t3 - 1) / 2
+    var_ratio = (p.scale / q.scale).pow(2)
+    t1 = ((p.loc - q.loc) / q.scale).pow(2)
+    return 0.5 * (var_ratio + t1 - 1 - var_ratio.log())
 
 
 @register_kl(Pareto, Pareto)
@@ -404,7 +407,7 @@ def _kl_gumbel_infinity(p, q):
 def _kl_gumbel_normal(p, q):
     param_ratio = p.scale / q.scale
     t1 = (param_ratio / math.sqrt(2 * math.pi)).log()
-    t2 = (math.pi * param_ratio) / 12
+    t2 = (math.pi * param_ratio * 0.5).pow(2) / 3
     t3 = ((p.loc + p.scale * _euler_gamma - q.loc) / q.scale).pow(2) * 0.5
     return -t1 + t2 + t3 - (_euler_gamma + 1)
 
@@ -479,18 +482,7 @@ def _kl_pareto_gamma(p, q):
     result[p.alpha <= 1] = float('inf')
     return result
 
-
-@register_kl(Pareto, Laplace)
-def _kl_pareto_laplace(p, q):
-    ct1 = p.alpha / (p.alpha - 1)
-    ct2 = q.loc / q.scale
-    ct3 = (p.scale / q.loc).pow(p.alpha)
-    result = ct1 * p.scale / q.scale - ct2
-    if (p.scale < q.loc).any():
-        result[p.scale < q.loc] += 2 * ct3 * ct2 * (1 - ct1)
-        result[p.scale < q.loc] *= -1
-    result += (2 * p.alpha * q.scale / p.scale).log() - 1 - p.alpha.reciprocal()
-    return result
+# TODO: Add Pareto-Laplace KL Divergence
 
 
 @register_kl(Pareto, Normal)

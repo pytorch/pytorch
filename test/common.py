@@ -191,10 +191,10 @@ class TestCase(unittest.TestCase):
         return tg
 
     def unwrapVariables(self, x, y):
-        if isinstance(x, Variable) and isinstance(y, Variable):
-            return x.data, y.data
-        elif isinstance(x, Variable) or isinstance(y, Variable):
-            raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
+        if isinstance(x, Variable):
+            x = x.data
+        if isinstance(y, Variable):
+            y = y.data
         return x, y
 
     def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
@@ -214,7 +214,7 @@ class TestCase(unittest.TestCase):
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
                     # check that NaNs are in the same locations
                     nan_mask = a != a
-                    self.assertTrue(torch.equal(nan_mask, b != b))
+                    self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
                     if diff.is_signed():
