@@ -35,36 +35,38 @@ class CheckpointFunction(Function):
 
     @staticmethod
     def backward(ctx, *grads):
-        real_inputs = ctx.saved_variables
-        # We need to create new Variables to mark this place in the graph.
-        # Reusing real_inputs would be incorrect if a case like this:
-        #
-        # y = checkpoint(lambda x: x + 1, x)
-        # z = checkpoint(lambda x, y: x + y, x, y)
-        #
-        # This would fail, because when grad((x + y), (x, y)) is called in
-        # the second checkpoint, autograd would traverse all paths from (x + y)
-        # to the definition of x, which includes the first checkpoint. To
-        # prevent this situation, we create views of the inputs, which lets us
-        # still get all correctness checks, but uniquely marks the place up to
-        # which we want to differentiate, because all views are independent nodes
-        # (i.e. there is no path from one to another via .grad_fn chain).
-        inputs = [i[:] for i in real_inputs]
         with torch.enable_grad():
+            real_inputs = ctx.saved_variables
+            # We need to create new Variables to mark this place in the graph.
+            # Reusing real_inputs would be incorrect if a case like this:
+            #
+            # y = checkpoint(lambda x: x + 1, x)
+            # z = checkpoint(lambda x, y: x + y, x, y)
+            #
+            # This would fail, because when grad((x + y), (x, y)) is called in
+            # the second checkpoint, autograd would traverse all paths from (x + y)
+            # to the definition of x, which includes the first checkpoint. To
+            # prevent this situation, we create views of the inputs, which lets us
+            # still get all correctness checks, but uniquely marks the place up to
+            # which we want to differentiate, because all views are independent nodes
+            # (i.e. there is no path from one to another via .grad_fn chain).
+            inputs = [i[:] for i in real_inputs]
             outputs = ctx.run_function(*inputs)
-        if isinstance(outputs, Variable):
-            outputs = (outputs,)
+            if isinstance(outputs, Variable):
+                outputs = (outputs,)
 
-        # Some inputs might not need gradients so we filter them out
-        # and later return None as grad for those inputs
-        filtered_inputs = [i for i in inputs if i.requires_grad]
-        grads = torch.autograd.grad(outputs, filtered_inputs, grads)
+            # Some inputs might not need gradients so we filter them out
+            # and later return None as grad for those inputs
+            filtered_inputs = [i for i in inputs if i.requires_grad]
+            if not filtered_inputs:
+                return (None,) * (1 + len(inputs))
+            grads = torch.autograd.grad(outputs, filtered_inputs, grads)
 
-        # Append None for input grads which don't require grad. The first input
-        # is a run_function whose grad is None
-        grads_it = iter(grads)
-        return (None,) + tuple(next(grads_it) if i.requires_grad else None
-                               for i in inputs)
+            # Append None for input grads which don't require grad. The first input
+            # is a run_function whose grad is None
+            grads_it = iter(grads)
+            return (None,) + tuple(next(grads_it) if i.requires_grad else None
+                                for i in inputs)
 
 
 def checkpoint(run_function, *args):
