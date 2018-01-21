@@ -289,6 +289,10 @@ def stream(stream):
     Arguments:
         stream (Stream): selected stream. This manager is a no-op if it's
             ``None``.
+
+    .. note:: Streams are per-device, and this function changes the "current
+       stream" only for the currently selected device.  It is illegal to select
+       a stream that belongs to a different device.
     """
     if stream is None:
         yield
