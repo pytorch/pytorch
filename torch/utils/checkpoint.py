@@ -33,6 +33,28 @@ class CheckpointFunction(Function):
             outputs = run_function(*var_args)
         return unpack_variables(outputs)
 
+    # @staticmethod
+    # def backward(ctx, *args):
+    #     inputs = ctx.saved_tensors
+    #     inputs_list = repackage_inputs(inputs, requires_grad=True)
+    #     with torch.enable_grad():
+    #         outputs = ctx.run_function(*inputs_list)
+    #
+    #     if isinstance(outputs, tuple):
+    #         output_list = list(outputs)
+    #     elif isinstance(outputs, Variable) or torch.is_tensor(outputs):
+    #         output_list = [outputs]
+    #     out_grads = [grad for grad in args]
+    #     torch.autograd.backward(output_list, out_grads)
+    #
+    #     input_grads = None
+    #     if isinstance(inputs_list, tuple):
+    #         input_grads = tuple(inp.grad for inp in inputs_list)
+    #         return (None,) + input_grads
+    #     elif isinstance(inputs_list, Variable) or torch.is_tensor(inputs_list):
+    #         input_grads = inputs_list.grad
+    #         return None, input_grads
+
     @staticmethod
     def backward(ctx, *grads):
         with torch.enable_grad():
@@ -65,8 +87,8 @@ class CheckpointFunction(Function):
             # Append None for input grads which don't require grad. The first input
             # is a run_function whose grad is None
             grads_it = iter(grads)
-            return (None,) + tuple(next(grads_it) if i.requires_grad else None
-                                for i in inputs)
+            return (None,) + tuple(
+                next(grads_it) if i.requires_grad else None for i in inputs)
 
 
 def checkpoint(run_function, *args):
@@ -134,6 +156,7 @@ def checkpoint_sequential(modules, segments, *inputs):
 
     segment_size = len(modules) // segments
     # the last chunk has to be non-volatile
+    end = -1
     for start in range(0, segment_size * (segments - 1), segment_size):
         end = start + segment_size - 1
         inputs = checkpoint(run_function(start, end, modules), *inputs)
