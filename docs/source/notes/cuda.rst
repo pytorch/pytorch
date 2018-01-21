@@ -46,9 +46,9 @@ Asynchronous execution
 ----------------------
 
 By default, GPU operations are asynchronous.  When you call a function that
-involves GPU, the operations are *enqueued* to the particular device, but not
+uses the GPU, the operations are *enqueued* to the particular device, but not
 necessarily executed until later.  This allows us to execute more computations
-in parallel, including operations in CPU or other GPUs.
+in parallel, including operations on CPU or other GPUs.
 
 In general, the effect of asynchronous computation is invisible to the caller,
 because (1) each device executes operations in the order they are queued, and
@@ -57,7 +57,7 @@ between CPU and GPU or between two GPUs.  Hence, computation will proceed as if
 every operation was executed synchronously.
 
 You can force synchronous computation by setting environment variable
-`CUDA_LAUNCH_BLOCKING=1`.  This can be handy when an error occurs inside GPU.
+`CUDA_LAUNCH_BLOCKING=1`.  This can be handy when an error occurs on the GPU.
 (With asynchronous execution, such an error isn't reported until after the
 operation is actually executed, so the stack trace does not show where it was
 requested.)
@@ -73,7 +73,7 @@ A `CUDA stream`_ is a linear sequence of execution that belongs to a specific
 device.  You normally do not need to create one explicitly: by default, each
 device uses its own "default" stream.
 
-Operations inside each stream is serialized in the order they are created,
+Operations inside each stream are serialized in the order they are created,
 but operations from different streams can execute concurrently in any
 relative order, unless explicit synchronization functions (such as
 :meth:`~torch.cuda.synchronize` or :meth:`~torch.cuda.Stream.wait_stream`) are
