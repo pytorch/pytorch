@@ -52,7 +52,7 @@ class CheckpointFunction(Function):
         inputs = [i[:] for i in real_inputs]
         with torch.enable_grad():
             outputs = ctx.run_function(*inputs)
-        if isinstance(outputs, Variable)
+        if isinstance(outputs, Variable):
             outputs = (outputs,)
 
         # Some inputs might not need gradients so we filter them out
