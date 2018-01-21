@@ -26,19 +26,25 @@ namespace mkl {
 template <typename T>
 class MKLSumOp final : public MKLOperator<T> {
  public:
+  USE_MKLOPERATOR_FUNCTIONS(T);
+
   MKLSumOp(const OperatorDef& operator_def, Workspace* ws)
       : MKLOperator<T>(operator_def, ws) {
     coefficients_.resize(this->InputSize(), 1);
+    // caffe2::AddOp support broadcast but dnnSumCreate() doesn't.
+    bool broadcast = OperatorBase::GetSingleArgument<bool>("broadcast", false);
+    OPERATOR_NEEDS_FEATURE(
+        !broadcast, "Broadcast is not yet supported with MKLDNN.");
   }
 
   bool RunOnDevice() override {
-    const MKLMemory<float>& X0 = OperatorBase::Input<MKLMemory<float>>(0);
-    MKLMemory<float>* Y = OperatorBase::Output<MKLMemory<float>>(0);
+    const MKLMemory<T>& X0 = Input(0);
+    MKLMemory<T>* Y = Output(0);
     bool dims_changed;
     CHECK_INPUT_DIMS(X0, dims_changed);
     if (dims_changed) {
       primitive_.Reset(
-          dnnSumCreate<float>,
+          dnnSumCreate<T>,
           nullptr,
           this->InputSize(),
           X0.layout(),
@@ -49,7 +55,7 @@ class MKLSumOp final : public MKLOperator<T> {
       buffer_.Reset(X0.dims(), primitive_, dnnResourceDst, true);
     }
     for (auto i = 0; i < this->InputSize(); ++i) {
-      const MKLMemory<float>& Xi = OperatorBase::Input<MKLMemory<float>>(i);
+      const MKLMemory<T>& Xi = Input(i);
       CAFFE_ENFORCE(dnnLayoutCompare_F32(X0.layout(), Xi.layout()));
       resources_[dnnResourceMultipleSrc + i] = Xi.buffer();
     }
@@ -65,19 +71,14 @@ class MKLSumOp final : public MKLOperator<T> {
   }
 
  private:
-  // Input: X, W, b
-  // Output: Y
   std::vector<float> coefficients_;
   vector<TIndex> cached_input_dims_;
-  PrimitiveWrapper<T> primitive_;
-  MKLMemory<T> buffer_;
-  void* resources_[dnnResourceNumber] = {0};
-  INPUT_TAGS(INPUT, FILTER, BIAS);
 };
 
 } // namespace mkl
 
 REGISTER_MKL_OPERATOR(Sum, mkl::MKLSumOp<float>);
+REGISTER_MKL_OPERATOR(Add, mkl::MKLSumOp<float>);
 
 } // namespace caffe2
 
