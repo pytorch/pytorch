@@ -8,10 +8,12 @@ import tempfile
 import unittest
 import traceback
 import torch
+import torch.nn as nn
 import torch.utils.data
 import torch.cuda
 import warnings
 from torch.autograd import Variable
+from torch.utils.checkpoint import checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
@@ -108,6 +110,48 @@ class DatasetMock(object):
 
     def __len__(self):
         return 10
+
+
+class TestCheckpoint(TestCase):
+
+    def test_checkpoint(self):
+        model = nn.Sequential(
+            nn.Linear(100, 50),
+            nn.ReLU(),
+            nn.Linear(50, 20),
+            nn.ReLU(),
+            nn.Linear(20, 5),
+            nn.ReLU()
+        )
+
+        x = Variable(torch.randn(1, 100), requires_grad=True)
+
+        # not checkpointed
+        original = model
+        out = original(x)
+        out_not_checkpointed = out.data.clone()
+        original.zero_grad()
+        out.sum().backward()
+        grad_not_checkpointed = {}
+        for name, param in model.named_parameters():
+            grad_not_checkpointed[name] = param.grad.data.clone()
+
+        # checkpointed
+        chunks = 2
+        modules = [module for k, module in model._modules.items()]
+        input_var = Variable(x.data, requires_grad=True)
+        out = checkpoint_sequential(modules, chunks, input_var)
+        out_checkpointed = out.data.clone()
+        model.zero_grad()
+        out.sum().backward()
+        grad_checkpointed = {}
+        for name, param in model.named_parameters():
+            grad_checkpointed[name] = param.grad.data.clone()
+
+        # compare the output and parameters gradients
+        self.assertEqual(out_checkpointed, out_not_checkpointed)
+        for name in grad_checkpointed:
+            self.assertEqual(grad_checkpointed[name], grad_not_checkpointed[name])
 
 
 class TestDataLoader(TestCase):
