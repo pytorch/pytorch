@@ -4,11 +4,14 @@ from torch.distributions.utils import broadcast_all
 from torch.nn.functional import sigmoid
 
 __all__ = [
+    'AbsTransform',
     'AffineTransform',
-    'Transform',
     'ExpTransform',
     'InverseTransform',
-    'AbsTransform',
+    'LogprobTransform',
+    'SigmoidTransform',
+    'StickBreakingTransform',
+    'Transform',
 ]
 
 
@@ -225,5 +228,4 @@ class StickBreakingTransform(Transform):
         numer = sigmoid(y)
         denom = (1 - numer).cumprod(-1)
         probs = torch.cat([numer, one], -1) * torch.cat([one, denom], -1)
-        # probs /= probs.sum(-1, True)
         return probs

@@ -37,9 +37,9 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
-from torch.distributions.transforms import (AffineTransform, ExpTransform,
-                                            InverseTransform, LogprobTransform,
-                                            SigmoidTransform,
+from torch.distributions.transforms import (AbsTransform, AffineTransform,
+                                            ExpTransform, InverseTransform,
+                                            LogprobTransform, SigmoidTransform,
                                             StickBreakingTransform)
 from torch.distributions.utils import _finfo, probs_to_logits
 

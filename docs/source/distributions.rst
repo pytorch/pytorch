@@ -74,7 +74,7 @@ Probability distributions - torch.distributions
     :members:
 
 :hidden:`HalfNormal`
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: HalfNormal
     :members:
@@ -83,6 +83,12 @@ Probability distributions - torch.distributions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Laplace
+    :members:
+
+:hidden:`LogNormal`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LogNormal
     :members:
 
 :hidden:`Normal`
@@ -101,6 +107,12 @@ Probability distributions - torch.distributions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Pareto
+    :members:
+
+:hidden:`TransformedDistribution`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformedDistribution
     :members:
 
 :hidden:`StudentT`
@@ -123,3 +135,57 @@ Probability distributions - torch.distributions
 
 .. autofunction:: kl_divergence
 .. autofunction:: register_kl
+
+`Transforms`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.distributions.transforms
+.. currentmodule:: torch.distributions.transforms
+
+:hidden:`Transform`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Transform
+    :members:
+
+:hidden:`InverseTransform`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: InverseTransform
+    :members:
+
+:hidden:`AbsTransform`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AbsTransform
+    :members:
+
+:hidden:`AffineTransform`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AffineTransform
+    :members:
+
+:hidden:`ExpTransform`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ExpTransform
+    :members:
+
+:hidden:`LogprobTransform`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LogprobTransform
+    :members:
+
+:hidden:`SigmoidTransform`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: SigmoidTransform
+    :members:
+
+:hidden:`StickBreakingTransform`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: StickBreakingTransform
+    :members:
