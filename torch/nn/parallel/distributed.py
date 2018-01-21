@@ -42,7 +42,7 @@ class DistributedDataParallel(Module):
     (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
-        This module works only with the ``nccl`` and ``gloo`` backend.
+        This module works only with the ``nccl`` and ``gloo`` backends.
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
