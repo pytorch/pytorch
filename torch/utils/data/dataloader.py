@@ -147,7 +147,7 @@ def pin_memory_batch(batch):
         return {k: pin_memory_batch(sample) for k, sample in batch.items()}
     elif isinstance(batch, collections.Sequence):
         try:
-            return batch._make([pin_memory_batch(sample) for sample in batch])
+            return type(batch)(*(pin_memory_batch(sample) for sample in batch))
         except AttributeError:
             return [pin_memory_batch(sample) for sample in batch]
     else:

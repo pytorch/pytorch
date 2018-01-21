@@ -518,7 +518,7 @@ class TestDictDataLoader(TestCase):
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
-            
+
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_with_collate(self):
         from collections import namedtuple
