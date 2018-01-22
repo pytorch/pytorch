@@ -32,7 +32,8 @@ policy, the code for implementing REINFORCE would be as follows::
 Another way to implement these stochastic/policy gradients would be to use the
 reparameterization trick from :meth:`~torch.distributions.Distribution.rsample`
 method, where parameterized random variable can be defined as parameterized
-deterministic function of a parameter-free random variable.
+deterministic function of a parameter-free random variable. The reparameterized sample
+requires to be differentiable.
 """
 
 from .bernoulli import Bernoulli
