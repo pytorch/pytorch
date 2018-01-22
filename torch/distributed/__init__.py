@@ -551,16 +551,6 @@ def new_group(ranks=None):
         "collective only supported in process-group mode"
     if ranks is None:
         ranks = list(range(get_world_size()))
-
-    # Check for the unsupported sub-group for NCCL backend
-    elif _backend == dist_backend.NCCL and \
-            set(ranks) != set(range(get_world_size())):
-        raise RuntimeError("Currently NCCL backend only supports full group "
-                           "creation. In other words, every rank in the "
-                           "process group needs to be a member of the new "
-                           "group to be created and sub-group creation is "
-                           "currently not supported")
-
     return torch._C._dist_new_group(ranks)
 
 
