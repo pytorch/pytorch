@@ -203,7 +203,7 @@ class TestOperators(hu.HypothesisTestCase):
             return (x / y, )
 
         def non_zero(x):
-            return abs(x) > 10e-5
+            return abs(x) > 1e-2
 
         def div_dtypes():
             return st.sampled_from([np.float32, np.float64])
