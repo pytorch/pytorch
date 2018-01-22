@@ -7,7 +7,7 @@
 
 namespace at {
 
-std::vector<int64_t> infer_size(IntList a, IntList b);
+AT_API std::vector<int64_t> infer_size(IntList a, IntList b);
 std::tuple<std::vector<int64_t>, std::vector<int64_t> > inferExpandGeometry(const Tensor &tensor, IntList sizes);
 
 // avoid copy-construction of Tensor by using a reference_wrapper.
