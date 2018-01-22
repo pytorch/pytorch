@@ -732,13 +732,17 @@ class TestSparse(TestCase):
         self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
 
     def _test_new_device(self, size, device):
+        from torch.autograd import Variable
         with torch.cuda.device(device):
             x = torch.cuda.sparse.DoubleTensor(*size)
+            v = Variable(x)
         self.assertEqual(x.get_device(), device)
         x1 = x.new()
         x2 = x.new(2, 3)
         self.assertEqual(x1.get_device(), device)
         self.assertEqual(x2.get_device(), device)
+        self.assertEqual(v.new().get_device(), device)
+        self.assertEqual(v.new(2, 3).get_device(), device)
 
     @cuda_only
     def test_new_device_single_gpu(self):
@@ -761,6 +765,18 @@ class TestSparse(TestCase):
         x = self.SparseTensor()
         self.assertTrue(x.is_sparse)
         self.assertTrue(torch.autograd.Variable(x).is_sparse)
+
+    def test_resize_as(self):
+        def do_test(t):
+            y = t.new().resize_as_(t).zero_()
+            self.assertEqual(y.shape, t.shape)
+            # Check that y can be added to t. Currently, this requires that
+            # _dimI and _dimV match.
+            self.assertEqual(t, t + y)
+
+        from torch.autograd import Variable
+        do_test(self.SparseTensor())
+        do_test(Variable(self.SparseTensor()))
 
 
 class TestUncoalescedSparse(TestSparse):
