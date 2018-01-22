@@ -38,7 +38,7 @@ assert find_executable('make'), 'Could not find "make" executable!'
 try:
     git_version = subprocess.check_output(['git', 'describe', '--tags', 'HEAD'],
                                           cwd=TOP_DIR).decode('ascii').strip()
-except subprocess.CalledProcessError:
+except (OSError, subprocess.CalledProcessError):
     git_version = None
 
 with open(os.path.join(TOP_DIR, 'VERSION_NUMBER')) as version_file:
