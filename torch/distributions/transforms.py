@@ -34,9 +34,16 @@ class Transform(object):
     def __init__(self):
         self._cache = {}
 
+    def __eq__(self, other):
+        return type(other) is type(self)
+
+    def __ne__(self, other):
+        # Necessary for Python2
+        return not self.__eq__(other)
+
     def forward(self, x):
         """
-        Invokes the bijection `x => y`.
+        Invokes the memoized transform `x => y`.
         """
         try:
             return self._cache['forward', x]
@@ -48,7 +55,7 @@ class Transform(object):
 
     def inverse(self, y):
         """
-        Inverts the bijection `y => x`.
+        Inverts the memoized transform `y => x`.
         """
         try:
             return self._cache['inverse', y]
@@ -167,6 +174,9 @@ class AffineTransform(Transform):
         self.scale = scale
         self.event_dim = event_dim
 
+    def __eq__(self, other):
+        return (type(other) is AffineTransform) and self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
+
     def _forward(self, x):
         return self.loc + self.scale * x
 
@@ -176,9 +186,10 @@ class AffineTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         result = torch.abs(self.scale).log()
         shape = x.shape
-        for _ in range(self.event_dim):
-            result = result.sum(-1)
-            shape = shape[:-1]
+        if self.event_dim:
+            # NOTE: no need for contiguous here
+            result = result.view(*result.size()[:-self.event_dim], -1).sum(-1)
+            shape = shape[:-self.event_dim]
         return result.expand(shape)
 
 

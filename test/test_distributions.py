@@ -33,7 +33,7 @@ from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, Laplace, Multinomial, Normal,
+                                 Gumbel, HalfNormal, Laplace, LogNormal, Multinomial, Normal,
                                  OneHotCategorical, Pareto, StudentT, Uniform,
                                  constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
@@ -167,6 +167,25 @@ EXAMPLES = [
             'loc': torch.Tensor([1.0, 0.0]),
             'scale': torch.Tensor([1e-5, 1e-5]),
         },
+    ]),
+    Example(LogNormal, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'loc': torch.Tensor([1.0, 0.0]),
+            'scale': torch.Tensor([1e-5, 1e-5]),
+        },
+    ]),
+    Example(HalfNormal, [
+        {'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True)},
+        {'scale': Variable(torch.randn(1).abs(), requires_grad=True)},
+        {'scale': torch.Tensor([1e-5, 1e-5])},
     ]),
     Example(Normal, [
         {
@@ -588,6 +607,89 @@ class TestDistributions(TestCase):
         self.assertEqual(scale.grad, eps)
         loc.grad.zero_()
         scale.grad.zero_()
+
+    def test_lognormal(self):
+        mean = Variable(torch.randn(5, 5), requires_grad=True)
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        mean_1d = Variable(torch.randn(1), requires_grad=True)
+        std_1d = Variable(torch.randn(1), requires_grad=True)
+        mean_delta = torch.Tensor([1.0, 0.0])
+        std_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(LogNormal(mean, std).sample().size(), (5, 5))
+        self.assertEqual(LogNormal(mean, std).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(LogNormal(mean_1d, std_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(LogNormal(mean_1d, std_1d).sample().size(), (1,))
+        self.assertEqual(LogNormal(0.2, .6).sample_n(1).size(), (1,))
+        self.assertEqual(LogNormal(-0.7, 50.0).sample_n(1).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        set_rng_seed(1)
+        self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(LogNormal, (mean, std))
+        self._gradcheck_log_prob(LogNormal, (mean, 1.0))
+        self._gradcheck_log_prob(LogNormal, (0.0, std))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lognormal_logprob(self):
+        mean = Variable(torch.randn(5, 1), requires_grad=True)
+        std = Variable(torch.randn(5, 1).abs(), requires_grad=True)
+
+        def ref_log_prob(idx, x, log_prob):
+            m = mean.data.view(-1)[idx]
+            s = std.data.view(-1)[idx]
+            expected = scipy.stats.lognorm(s=s, scale=math.exp(m)).logpdf(x)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(LogNormal(mean, std), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lognormal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(LogNormal(mean, std),
+                                        scipy.stats.lognorm(scale=math.exp(mean), s=std),
+                                        'LogNormal(loc={}, scale={})'.format(mean, std))
+
+    def test_halfnormal(self):
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        std_1d = Variable(torch.randn(1), requires_grad=True)
+        std_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(HalfNormal(std).sample().size(), (5, 5))
+        self.assertEqual(HalfNormal(std).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(HalfNormal(std_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(HalfNormal(std_1d).sample().size(), (1,))
+        self.assertEqual(HalfNormal(.6).sample_n(1).size(), (1,))
+        self.assertEqual(HalfNormal(50.0).sample_n(1).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        set_rng_seed(1)
+        self.assertEqual(HalfNormal(std_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[0, 0], [0, 0]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(HalfNormal, (std,))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_halfnormal_logprob(self):
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+
+        def ref_log_prob(idx, x, log_prob):
+            s = std.data.view(-1)[idx]
+            expected = scipy.stats.halfnorm(scale=s).logpdf(x)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(HalfNormal(std), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_halfnormal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for std in [0.1, 1.0, 10.0]:
+            self._check_sampler_sampler(HalfNormal(std),
+                                        scipy.stats.halfnorm(scale=std),
+                                        'HalfNormal(scale={})'.format(std))
 
     def test_normal(self):
         loc = Variable(torch.randn(5, 5), requires_grad=True)
@@ -1342,7 +1444,7 @@ class TestDistributionShapes(TestCase):
                 dist = Dist(**param)
                 try:
                     actual_shape = dist.entropy().size()
-                    expected_shape = dist._batch_shape
+                    expected_shape = dist.batch_shape
                     if not expected_shape:
                         expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
@@ -1641,7 +1743,7 @@ class TestKL(TestCase):
             def __init__(self, probs):
                 super(Binomial30, self).__init__(30, probs)
 
-        # These are pairs of distributions with 4 x 4 paramters as specified.
+        # These are pairs of distributions with 4 x 4 parameters as specified.
         # The first of the pair e.g. bernoulli[0] varies column-wise and the second
         # e.g. bernoulli[1] varies row-wise; that way we test all param pairs.
         bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
@@ -1652,6 +1754,8 @@ class TestKL(TestCase):
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
+        lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        halfnormal = pairwise(HalfNormal, [1.0, 2.0, 3.0, 4.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
@@ -1698,6 +1802,8 @@ class TestKL(TestCase):
             (gumbel, gumbel),
             (gumbel, normal),
             (laplace, laplace),
+            (lognormal, lognormal),
+            (halfnormal, halfnormal),
             (laplace, normal),
             (normal, gumbel),
             (normal, normal),

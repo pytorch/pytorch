@@ -240,11 +240,6 @@ def _kl_laplace_laplace(p, q):
     return t1 + t2 + t3 - 1
 
 
-@register_kl(LogNormal, LogNormal)
-def _kl_lognormal_lognormal(p, q):
-    return kl_divergence(p.base_dist, q.base_dist)
-
-
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
     var_ratio = (p.scale / q.scale).pow(2)

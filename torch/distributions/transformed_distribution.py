@@ -18,9 +18,8 @@ class TransformedDistribution(Distribution):
         if isinstance(transforms, Transform):
             self.transforms = [transforms, ]
         elif isinstance(transforms, list):
-            for transform in transforms:
-                if not isinstance(transform, Transform):
-                    raise ValueError("transforms must be a Transform or a list of Transforms")
+            if not all(isinstance(t, Transform) for t in transforms):
+                raise ValueError("transforms must be a Transform or a list of Transforms")
             self.transforms = transforms
 
     @constraints.dependent_property
@@ -29,10 +28,7 @@ class TransformedDistribution(Distribution):
 
     @constraints.dependent_property
     def support(self):
-        try:
-            return self.transforms[-1].codomain
-        except IndexError:
-            return self.base_dist.support
+        return self.transforms[-1].codomain if self.transforms else self.base_dist.support
 
     @property
     def has_rsample(self):
