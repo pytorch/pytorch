@@ -35,6 +35,8 @@ IS_LINUX = (platform.system() == 'Linux')
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 
+WITH_SCALARS = check_env_flag('WITH_SCALARS')
+
 try:
     import ninja
     WITH_NINJA = True
@@ -605,6 +607,9 @@ if DEBUG:
     else:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
+
+if WITH_SCALARS:
+    extra_compile_args += ['-DWITH_SCALARS']
 
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
