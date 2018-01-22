@@ -650,11 +650,24 @@ class TestSparse(TestCase):
             'div': lambda x: x.div(2),
             'div_': lambda x: x.div_(2),
             'pow': lambda x: x.pow(2),
+            '_nnz': lambda x: x._nnz(),
+            'is_coalesced': lambda x: x.is_coalesced(),
+            'coalesce': lambda x: x.coalesce(),
+            'to_dense': lambda x: x.to_dense(),
         }
 
         for test_name, test_fn in to_test_one_arg.items():
             var1 = sparse_var.clone()
             tensor1 = sparse_mat.clone()
+
+            out_var = test_fn(var1)
+            out_tensor = test_fn(tensor1)
+
+            if isinstance(out_tensor, int) or isinstance(out_tensor, bool):
+                self.assertEqual(out_var, out_tensor)
+                continue
+
+            # Assume output is variable / tensor
             self.assertEqual(test_fn(var1).data, test_fn(tensor1),
                              test_name)
 
