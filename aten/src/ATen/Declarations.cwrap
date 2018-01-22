@@ -3981,8 +3981,6 @@
   types:
     - Float
     - Double
-  backends:
-    - CPU
   return: argument 0
   variants:
     - method
