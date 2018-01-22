@@ -1948,6 +1948,35 @@ def to_one_hot(y, depth=None):
     Args:
         y: input integer (IntTensor, LongTensor or Variable) of any shape
         depth (int):  the size of the one hot dimension
+        
+    Examples::
+        >>> to_one_hot(torch.arange(0, 5) % 3)
+         1  0  0
+         0  1  0
+         0  0  1
+         1  0  0
+         0  1  0
+        [torch.FloatTensor of size 5x3]
+        >>> to_one_hot(torch.arange(0, 5) % 3, depth=5)
+         1  0  0  0  0
+         0  1  0  0  0
+         0  0  1  0  0
+         1  0  0  0  0
+         0  1  0  0  0
+        [torch.FloatTensor of size 5x5]
+        >>> to_one_hot(torch.arange(0, 6).view(3,2) % 3)
+        (0 ,.,.) = 
+          1  0  0
+          0  1  0
+
+        (1 ,.,.) = 
+          0  0  1
+          1  0  0
+
+        (2 ,.,.) = 
+          0  1  0
+          0  0  1
+        [torch.FloatTensor of size 3x2x3]
     """
     y_tensor = y.data if isinstance(y, Variable) else y
     y_tensor = y_tensor.type(torch.LongTensor).view(-1, 1)
