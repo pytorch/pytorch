@@ -40,7 +40,7 @@ class Logistic(Distribution):
         shape = self._extended_shape(sample_shape)
         eps = _finfo(self.scale).eps
         U = self.loc.new(shape).uniform_(eps, 1-eps)
-        return self.loc + self.scale * (U.log() - (1-U).log())
+        return self.loc + self.scale * (U.log() - (-U).log1p())
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

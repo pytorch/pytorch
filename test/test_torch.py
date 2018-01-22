@@ -4807,6 +4807,14 @@ class TestTorch(TestCase):
         self.assertIsInstance(x.char().sum(), int)
         self.assertIsInstance(x.byte().sum(), int)
 
+    def test_assertEqual(self):
+        x = torch.FloatTensor([0])
+        self.assertEqual(x, 0)
+        xv = torch.autograd.Variable(x)
+        self.assertEqual(xv, 0)
+        self.assertEqual(x, xv)
+        self.assertEqual(xv, x)
+
     def test_new(self):
         x = torch.autograd.Variable(torch.Tensor())
         y = torch.autograd.Variable(torch.randn(4, 4))
