@@ -35,6 +35,7 @@
   name: zeros
   variants:
     - function
+  aten_sparse: True
   auto_gpu: False
   return: argument 0
   arguments:
@@ -46,6 +47,7 @@
 [[
   name: zeros_like
   cname: zerosLike
+  aten_sparse: True
   variants:
     - function
   return: argument 0
@@ -205,6 +207,7 @@
     - method
     - function
   cname: newTranspose
+  aten_sparse: True
   cpu_half: True
   auto_gpu: False
   return: THTensor*
@@ -235,11 +238,18 @@
     - method
     - function
   auto_gpu: False
-  cname: newTranspose
   return: THTensor*
+  cname: newTranspose
+  aten_sparse: True
   before_call: |
-    long ndim = arg_self->nDimension;
-    THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
+    if (self.is_sparse) {
+      int64_t nDimI = arg_self->nDimensionI;
+      int64_t nDimV = arg_self->nDimensionV;
+      THPUtils_assert(nDimI == 2 && nDimV == 0, "t() expects a 2D sparse tensor, but self is %ldD indices and %ldD values", nDimI, nDimV);
+    } else {
+      long ndim = arg_self->nDimension;
+      THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
+    }
   arguments:
     - THTensor* self
     - CONSTANT 0
@@ -2218,15 +2228,13 @@
   name: pow
   types:
     - floating_point
-  backends:
-    - CPU
-    - CUDA
   variants:
     - method
     - function
   return: argument 0
   options:
     - cname: pow
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2557,6 +2565,7 @@
           default: AS_REAL(1)
           kwarg_only: True
     - cname: csub
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2580,6 +2589,7 @@
           default: AS_REAL(1)
           kwarg_only: True
     - cname: csub
+      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -2603,6 +2613,7 @@
         - THTensor* self
         - real other
     - cname: cmul
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2620,6 +2631,7 @@
         - THTensor* self
         - real other
     - cname: cmul
+      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -2634,6 +2646,7 @@
   return: argument 0
   options:
     - cname: div
+      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2652,6 +2665,7 @@
   return: argument 0
   options:
     - cname: div
+      aten_sparse: True
       arguments:
         - THTensor* self
         - THTensor* self

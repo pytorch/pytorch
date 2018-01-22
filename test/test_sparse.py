@@ -635,6 +635,49 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
 
+    def test_sparse_variable_methods(self):
+        # TODO: delete when tensor/variable are merged
+        from torch.autograd import Variable
+        i = self.IndexTensor([[0, 1, 1], [2, 0, 2]])
+        v = self.ValueTensor([3, 4, 5])
+        sparse_mat = self.SparseTensor(i, v, torch.Size([2, 3]))
+        sparse_var = Variable(sparse_mat)
+
+        to_test_one_arg = {
+            'zeros_like': lambda x: torch.zeros_like(x),
+            'transpose': lambda x: x.transpose(0, 1),
+            't': lambda x: x.t(),
+            'div': lambda x: x.div(2),
+            'div_': lambda x: x.div_(2),
+            'pow': lambda x: x.pow(2),
+        }
+
+        for test_name, test_fn in to_test_one_arg.items():
+            var1 = sparse_var.clone()
+            tensor1 = sparse_mat.clone()
+            self.assertEqual(test_fn(var1).data, test_fn(tensor1),
+                             test_name)
+
+        i = self.IndexTensor([[0, 0, 1], [1, 2, 1]])
+        v = self.ValueTensor([3, 3, 4])
+        sparse_mat2 = self.SparseTensor(i, v, torch.Size([2, 3]))
+        sparse_var2 = Variable(sparse_mat2)
+
+        to_test_two_arg = {
+            'sub': lambda x, y: x.sub(y),
+            'sub_': lambda x, y: x.sub_(y),
+            'mul': lambda x, y: x.mul(y),
+            'mul_': lambda x, y: x.mul_(y),
+        }
+
+        for test_name, test_fn in to_test_two_arg.items():
+            var1 = sparse_var.clone()
+            var2 = sparse_var2.clone()
+            tensor1 = sparse_mat.clone()
+            tensor2 = sparse_mat2.clone()
+            self.assertEqual(test_fn(var1, var2).data,
+                             test_fn(tensor1, tensor2), test_name)
+
     def test_sparse_mask_hybrid(self):
         self._test_sparse_mask_hybrid_fixed()
 
