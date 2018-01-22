@@ -360,14 +360,14 @@ struct THCCachingAllocator
   {
     // Try cudaMalloc. If cudaMalloc fails, frees all non-split cached blocks
     // and retries.
-    cudaError_t err = cudaMalloc(devPtr, size);
+    cudaError_t err = cudaMallocManaged(devPtr, size, CU_MEM_ATTACH_GLOBAL);
     if (err != cudaSuccess) {
       cudaGetLastError();
       err = free_cached_blocks(device);
       if (err != cudaSuccess) {
         return err;
       }
-      err = cudaMalloc(devPtr, size);
+      err = cudaMallocManaged(devPtr, size, CU_MEM_ATTACH_GLOBAL);
       if (err != cudaSuccess) {
         return err;
       }
