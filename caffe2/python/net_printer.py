@@ -400,6 +400,7 @@ def print_job(text, job):
     with text.context('Job.current().stop_signals'):
         for out in job.stop_signals:
             text.add(_print_task_output(out))
+    text(job.download_group, 'Job.current().download_group')
     text(job.exit_group, 'Job.current().exit_group')
 
 

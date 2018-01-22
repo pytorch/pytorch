@@ -19,12 +19,12 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 from caffe2.python.schema import Struct, ConstRecord
-from caffe2.python import core, workspace
+from caffe2.python import core, workspace, model_helper
 from caffe2.python.session import LocalSession
 from caffe2.python.dataset import Dataset
 from caffe2.python.pipeline import pipe
 from caffe2.python.checkpoint import (
-    CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner,
+    CheckpointManager, MultiNodeCheckpointManager, Job, JobRunner, epoch_limiter,
     UploadTaskGroupBuilder, db_name)
 from caffe2.python.net_builder import ops
 from caffe2.python.task import Node, Task, TaskGroup, WorkspaceType, Cluster
@@ -273,3 +273,45 @@ class TestCheckpoint(TestCase):
             # make sure all epochs are executed even though saving the checkpoint failed
             # Saving checkpoint failure should not cause job failure
             self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
+
+    def test_download_group_simple(self):
+        """
+        A simple test that ensures we have download task group
+        executed between epoch_group and exit_group.
+        """
+        model = model_helper.ModelHelper(name="test_model")
+        download_net = core.Net("download_net")
+
+        for name in ["input1", "input2", "output", "download_result"]:
+            model.param_init_net.ConstantFill([],
+                                              [name],
+                                              shape=[8, ],
+                                              value=1.0,
+                                              run_once=0)
+        model.net.Add(["input1", "input2"], ["output"])
+        download_net.Copy(["output"], ["download_result"])
+
+        # All blob values are initialized as 1.0, after download_net executed
+        # we expect to see download result is the same as training result.
+        with Job() as job:
+            with Node("trainer:0"):
+                epoch_limiter(1)
+                with job.init_group:
+                    Task(step=model.param_init_net)
+                with job.epoch_group:
+                    with Task():
+                        with ops.loop(1):
+                            ops.net(model.net)
+                with job.download_group:
+                    Task(step=download_net)
+
+        ws = workspace.C.Workspace()
+        session = LocalSession(ws)
+        job_runner = JobRunner(job)
+        job_runner(session)
+
+        expected_result = np.full(8, 2.0).astype(np.float32)
+        self.assertTrue(np.array_equal(expected_result,
+                                       ws.fetch_blob("output")))
+        self.assertTrue(np.array_equal(expected_result,
+                                       ws.fetch_blob("download_result")))
