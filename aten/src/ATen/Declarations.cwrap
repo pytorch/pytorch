@@ -4161,6 +4161,58 @@
 ]]
 
 [[
+  name: to_dense
+  cname: toDense
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseTensor*
+  arguments:
+  - THTensor* self
+]]
+
+[[
+  name: _nnz
+  cname: nnz
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: int64_t
+  arguments:
+  - THTensor* self
+]]
+
+[[
+  name: coalesce 
+  cname: newCoalesce
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THTensor*
+  arguments:
+     - THTensor* self
+]]
+
+[[
+  name: is_coalesced 
+  cname: isCoalesced
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: bool 
+  arguments:
+     - THTensor* self
+]]
+
+[[
   name: _indices
   variants:
     - method
