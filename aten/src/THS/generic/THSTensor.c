@@ -176,7 +176,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   return self;
 }
 
-THSTensor *THSTensor_(newWithSize)(THLongStorage *size)
+THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);

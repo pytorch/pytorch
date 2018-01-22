@@ -413,7 +413,13 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
 }
 
 Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
-  return resize_(self, the_template.sizes());
+  auto& self_ = unpack(self, "self", 0);
+  auto& the_template_ = unpack(the_template, "the_template", 1);
+  if (static_cast<Variable&>(self).requires_grad()) {
+    at::runtime_error("cannot resize variables that require grad");
+  }
+  baseType->resize_as_(self_, the_template_);
+  return self;
 }
 
 Tensor VariableType::contiguous(const Tensor & self) const {
