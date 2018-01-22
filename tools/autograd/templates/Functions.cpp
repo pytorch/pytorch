@@ -304,11 +304,15 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   int64_t nDims = sizes.size();
 
   // Let's say the input had size (1, 1). input.squeeze(), with scalars
-  // disabled, produces a result of size (1,). The following for loop
-  // assumes that the result of input.squeeze() has no dimensions of
-  // size 1, but in this edge case there is 1 dimension of size 1.
-  if (self.dim() == 1 and self.size(0) == 1) {
-    --nDims;
+  // disabled, produces a result of size (1,). This needs some
+  // special handling because for all other cases we unsqueeze every
+  // dimension that has size 1; doing that here would lead to one extra
+  // unsqueezed dimension
+  if (self.sizes().equals({1})) {
+    for (int64_t dim = 0; dim < nDims - 1; dim++) {
+      result = result.unsqueeze(dim);
+    }
+    return result;
   }
 
   for (int64_t dim = 0; dim < nDims; dim++) {
