@@ -17,9 +17,7 @@ install_ubuntu() {
           ca-certificates \
           cmake \
           curl \
-          doxygen \
           git \
-          graphviz \
           libgoogle-glog-dev \
           libhiredis-dev \
           libiomp-dev \
