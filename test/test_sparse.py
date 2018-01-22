@@ -767,15 +767,16 @@ class TestSparse(TestCase):
         self.assertTrue(torch.autograd.Variable(x).is_sparse)
 
     def test_resize_as(self):
+        def do_test(t):
+            y = t.new().resize_as_(t).zero_()
+            self.assertEqual(y.shape, t.shape)
+            # Check that y can be added to t. Currently, this requires that
+            # _dimI and _dimV match.
+            self.assertEqual(t, t + y)
+
         from torch.autograd import Variable
-        x = self.SparseTensor()
-        v = Variable(x)
-
-        def empty_like(t):
-            return t.new().resize_as_(t)
-
-        self.assertEqual(empty_like(x).shape, x.shape)
-        self.assertEqual(empty_like(v).shape, v.shape)
+        do_test(self.SparseTensor())
+        do_test(Variable(self.SparseTensor()))
 
 
 class TestUncoalescedSparse(TestSparse):
