@@ -68,7 +68,7 @@ std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
       PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
       if (!THPUtils_checkLong(item)) {
         std::ostringstream oss;
-        oss << "expected long at position " << i << ", but got: " << THPUtils_typename(item);
+        oss << "expected int at position " << i << ", but got: " << THPUtils_typename(item);
         throw std::runtime_error(oss.str());
       }
       sizes[i] = THPUtils_unpackLong(item);
