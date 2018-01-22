@@ -67,6 +67,13 @@ ENDIF()
 
 IF(GLOO_FOUND)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
+  MESSAGE(STATUS "Found Gloo, will compile with Gloo distributed backend")
+  IF(WITH_GLOO_IBVERBS)
+    MESSAGE(STATUS "Building the gloo backend with infiniband support")
+    ADD_DEFINITIONS(-DWITH_GLOO_IBVERBS=1)
+  ELSE()
+    MESSAGE(STATUS "Building the gloo backend with ethernet support")
+  ENDIF()
 ENDIF()
 
 IF(NCCL_FOUND)
