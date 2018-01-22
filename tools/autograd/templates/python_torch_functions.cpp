@@ -23,8 +23,8 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
-static const Tensor & set_requires_grad(const Tensor &self, bool requires_grad) {
-  Variable(self).get()->_requires_grad = requires_grad;
+static Tensor set_requires_grad(Tensor self, bool requires_grad) {
+  static_cast<Variable&>(self).get()->_requires_grad = requires_grad;
   return self;
 }
 
