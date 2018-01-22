@@ -177,10 +177,9 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
 }
 
 Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
-  auto ndims = self.ndimension();
-  if (dim0 < 0 || dim0 >= ndims || dim1 < 0 || dim1 >= ndims) {
-    throw std::runtime_error("dimension out of range");
-  }
+  auto ndims = self.dim();
+  dim0 = maybe_wrap_dim(dim0, ndims);
+  dim1 = maybe_wrap_dim(dim1, ndims);
   if (dim0 == dim1) {
     return self;
   }
