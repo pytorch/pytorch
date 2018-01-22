@@ -187,8 +187,8 @@ class AffineTransform(Transform):
         result = torch.abs(self.scale).log()
         shape = x.shape
         if self.event_dim:
-            # NOTE: no need for contiguous here
-            result = result.view(*result.size()[:-self.event_dim], -1).sum(-1)
+            result_size = result.size()[:-self.event_dim] + (-1,)
+            result = result.view(result_size).sum(-1)
             shape = shape[:-self.event_dim]
         return result.expand(shape)
 
