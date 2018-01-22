@@ -38,6 +38,13 @@ static Tensor new_with_tensor(const Type& type, Tensor other) {
   return other.slice();
 }
 
+static Tensor new_with_tensor_copy(const Type& type, Tensor other) {
+  if (other.type() != type) {
+    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString());
+  }
+  return type.copy(other);
+}
+
 static std::vector<int64_t> compute_sizes(PyObject* seq) {
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
@@ -159,8 +166,8 @@ Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
-static const Tensor & set_requires_grad(const Tensor &self, bool requires_grad) {
-  torch::autograd::Variable(self).get()->_requires_grad = requires_grad;
+static Tensor set_requires_grad(Tensor self, bool requires_grad) {
+  static_cast<torch::autograd::Variable&>(self).get()->_requires_grad = requires_grad;
   return self;
 }
 
@@ -173,6 +180,7 @@ Tensor variable_data_factory(const Type& type, PyObject* args, PyObject* kwargs)
   PyObject* parsed_args[3];
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    return set_requires_grad(new_with_tensor_copy(type, r.tensor(0)), r.toBool(1));
     return set_requires_grad(new_with_tensor(type, r.tensor(0)), r.toBool(1));
   } else if (r.idx == 1) {
     return set_requires_grad(new_from_data(type, r.toInt64(1), r.pyobject(0)), r.toBool(2));

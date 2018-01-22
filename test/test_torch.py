@@ -1044,6 +1044,18 @@ class TestTorch(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
+    def test_variable_factory(self):
+        expected = torch.autograd.Variable(torch.Tensor([1, 1]))
+        # test data
+        res1 = torch.autograd.variable([1, 1])
+        self.assertEqual(res1, expected)
+
+        # test copy
+        res2 = torch.autograd.variable(expected)
+        self.assertEqual(res2, expected)
+        res2[1] = 2
+        self.assertEqual(expected, torch.ones_like(expected))
+
     def test_diag(self):
         x = torch.rand(100, 100)
         res1 = torch.diag(x)
