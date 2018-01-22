@@ -58,7 +58,7 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
   return false;
 }
 
-std::vector<int64_t> THPUtils_tryUnpackLongs(PyObject *arg) {
+std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
   bool tuple = PyTuple_Check(arg);
   bool list = PyList_Check(arg);
   if (tuple || list) {

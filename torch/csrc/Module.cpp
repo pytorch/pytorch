@@ -461,8 +461,8 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   PyObject *arg2 = PyTuple_GET_ITEM(args, 1);
   THPUtils_assert(THPSize_Check(arg2), "expected a torch.Size as argument 2");
 
-  auto size1 = THPUtils_tryUnpackLongs(arg1);
-  auto size2 = THPUtils_tryUnpackLongs(arg2);
+  auto size1 = THPUtils_unpackLongs(arg1);
+  auto size2 = THPUtils_unpackLongs(arg2);
   auto sizes = at::infer_size(size1, size2);
   return THPSize_New(sizes.size(), sizes.data());
   END_HANDLE_TH_ERRORS
