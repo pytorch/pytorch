@@ -2324,6 +2324,7 @@ method_tests = [
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
     ('slice', (S, S, S), (-2, 1, -1, 2)),
     ('squeeze', (S, 1, S, 1), NO_ARGS),
+    ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
     ('squeeze', (1,), (0,), '1d_dim0', [0]),
