@@ -28,6 +28,11 @@ policy, the code for implementing REINFORCE would be as follows::
     next_state, reward = env.step(action)
     loss = -m.log_prob(action) * reward
     loss.backward()
+
+Another way to implement these stochastic/policy gradients would be to use the
+reparameterization trick from :meth:`~torch.distributions.Distribution.rsample`
+method, where parameterized random variable can be defined as parameterized
+deterministic function of a parameter-free random variable.
 """
 
 from .bernoulli import Bernoulli
