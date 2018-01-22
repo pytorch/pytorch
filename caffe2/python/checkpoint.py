@@ -44,9 +44,12 @@ class Job(object):
     exit when any of the stop signals added with `add_stop_signal` is True
     at the end of an epoch.
 
-    The `exit_group` will be run only once at the very end of the job, when one
-    of the stopping criterias for `epoch_group` was met. The role of this group
-    is save the results of training in the end of the job.
+    The download_group will be run only once, after all the executions of
+    epoch_group finish. Its role is to collect the distribute scattered
+    parameters back after training.
+
+    The `exit_group` will be run only once at the very end of the job, the
+    role of this group is to save the results of training in the end of the job.
 
     Jobs are context-driven, so that Tasks can be added to the active Job
     without having to explicitly pass the job object around.
@@ -78,11 +81,12 @@ class Job(object):
     """
     def __init__(self,
                  init_group=None, epoch_group=None,
-                 exit_group=None, stop_signals=None,
-                 nodes_to_checkpoint=None):
+                 download_group=None, exit_group=None,
+                 stop_signals=None, nodes_to_checkpoint=None):
         self.init_group = init_group or TaskGroup(
             workspace_type=WorkspaceType.GLOBAL)
         self.epoch_group = epoch_group or TaskGroup()
+        self.download_group = download_group or TaskGroup()
         self.exit_group = exit_group or TaskGroup()
         self.stop_signals = stop_signals or []
         self._nodes_to_checkpoint = nodes_to_checkpoint
@@ -97,6 +101,7 @@ class Job(object):
         return Job(
             init_group=session_class.compile(self.init_group),
             epoch_group=session_class.compile(self.epoch_group),
+            download_group=session_class.compile(self.download_group),
             exit_group=session_class.compile(self.exit_group),
             stop_signals=self.stop_signals,
             nodes_to_checkpoint=self.nodes_to_checkpoint())
@@ -570,6 +575,12 @@ class JobRunner(object):
                 epoch, self.checkpoint_manager)
             session.run(upload_task_group)
             logger.info('Finished uploading the checkpoints')
+
+        # Download the parameters to save
+        session.run(self.job.download_group)
+        logger.info('Finished downloading the parameters')
+
+        # Finally run the exit step to save nets
         session.run(self.job.exit_group)
         logger.info('Finished running the exit group')
         return epoch
