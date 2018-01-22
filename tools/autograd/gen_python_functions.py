@@ -302,17 +302,16 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['AutoGPU'] = auto_gpu(declaration)
 
         requires_grad = None
-        if len(declaration.get('python_binding_arguments', [])) > 0:
-            if len(declaration['python_binding_arguments']) > 1:
-                raise RuntimeError("found more than 1 entry in python_binding_arguments")
-            for arg in declaration['python_binding_arguments']:
-                if not arg['name'] == 'requires_grad' or not arg['type'] == 'bool':
-                    raise RuntimeError(("found {} in python_binding_arguments but only "
-                                        "bool requires_grad is supported".format(arg)))
-                # we have to use out_idx if there is an out variant because the base variant
-                # won't have the full arg_idx count
-                requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
-                requires_grad = parse_arg(arg, requires_grad_idx)[0]
+        if len(declaration.get('python_binding_arguments', [])) > 1:
+            raise RuntimeError("found more than 1 entry in python_binding_arguments")
+        for arg in declaration.get('python_binding_arguments', []):
+            if not arg['name'] == 'requires_grad' or not arg['type'] == 'bool':
+                raise RuntimeError(("found {} in python_binding_arguments but only "
+                                    "bool requires_grad is supported".format(arg)))
+            # we have to use out_idx if there is an out variant because the base variant
+            # won't have the full arg_idx count
+            requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
+            requires_grad = parse_arg(arg, requires_grad_idx)[0]
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
