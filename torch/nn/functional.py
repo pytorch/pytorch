@@ -1941,14 +1941,18 @@ def assert_int_or_pair(arg, arg_name, message):
     assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
 
 
-def to_one_hot(y, n_dims=None):
+def to_one_hot(y, depth=None):
     r""" 
-    Takes integer y (tensor or variable) with n dims and converts it to 1-hot representation with n + 1 dims.
+    Takes integer with n dims and converts it to 1-hot representation with n + 1 dims.
+    The n+1'st dimension will have zeros everywhere but at y'th index, where it will be equal to 1.
+    Args:
+        y: input integer (IntTensor, LongTensor or Variable) of any shape
+        depth (int):  the size of the one hot dimension
     """
     y_tensor = y.data if isinstance(y, Variable) else y
     y_tensor = y_tensor.type(torch.LongTensor).view(-1, 1)
-    n_dims = n_dims if n_dims is not None else int(torch.max(y_tensor)) + 1
-    y_one_hot = torch.zeros(y_tensor.size()[0], n_dims).scatter_(1, y_tensor, 1)
+    depth = depth if depth is not None else int(torch.max(y_tensor)) + 1
+    y_one_hot = torch.zeros(y_tensor.size()[0], depth).scatter_(1, y_tensor, 1)
     y_one_hot = y_one_hot.view(*y.shape, -1)
     return Variable(y_one_hot) if isinstance(y, Variable) else y_one_hot
 
