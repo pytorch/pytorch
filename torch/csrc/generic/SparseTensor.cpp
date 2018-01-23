@@ -111,7 +111,7 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
   // torch.SparseTensor(torch.Size sizes)
   else if (num_args == 1 && THPSize_Check(first_arg)) {
     THLongStoragePtr sizes(THPUtils_unpackSize(first_arg));
-    self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
+    self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get(), nullptr);
   }
   // torch.SparseTensor(torch.LongTensor indices, torch.LongTensor values)
   else if (num_args == 2 && THPIndexTensor_Check(first_arg)) {
@@ -149,7 +149,7 @@ static PyObject * THSPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
     }
     // torch.SparseTensor(int ...)
     else if (THPUtils_tryUnpackLongVarArgs(args, 0, sizes)) {
-      self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get());
+      self->cdata = THSTensor_(newWithSize)(LIBRARY_STATE sizes.get(), nullptr);
     }
     else goto invalid_arguments; // All other cases
   }

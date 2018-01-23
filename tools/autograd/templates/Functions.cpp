@@ -301,6 +301,16 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   auto result = self;
+
+  // Let's say the input had size (1, 1). input.squeeze(), with scalars
+  // disabled, produces a result of size (1,). This needs some
+  // special handling because for all other cases we unsqueeze every
+  // dimension that has size 1; doing that here would lead to one extra
+  // unsqueezed dimension
+  if (self.sizes().equals({1})) {
+    return result.view(sizes);
+  }
+
   int64_t nDims = sizes.size();
   for (int64_t dim = 0; dim < nDims; dim++) {
     if (sizes[dim] == 1) {

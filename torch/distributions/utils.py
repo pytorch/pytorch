@@ -4,7 +4,7 @@ from numbers import Number
 import math
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable
+from torch.autograd import Variable, variable
 
 # This follows semantics of numpy.finfo.
 _Finfo = namedtuple('_Finfo', ['eps', 'tiny'])
@@ -64,9 +64,9 @@ def broadcast_all(*values):
       - `torch.Tensor` and `torch.autograd.Variable` instances are broadcasted as
         per the `broadcasting rules
         <http://pytorch.org/docs/master/notes/broadcasting.html>`_
-      - numbers.Number instances (scalars) are upcast to Tensor/Variable having
-        the same size and type as the first tensor passed to `values`. If all the
-        values are scalars, then they are upcasted to `torch.Tensor` having size
+      - numbers.Number instances (scalars) are upcast to Variables having
+        the same size and type as the first tensor passed to `values`.  If all the
+        values are scalars, then they are upcasted to Variables having size
         `(1,)`.
 
     Args:
@@ -89,11 +89,14 @@ def broadcast_all(*values):
         for idx in tensor_idxs:
             values[idx] = values[idx].expand(broadcast_shape)
         template = values[tensor_idxs[0]]
+        if len(scalar_idxs) > 0 and not isinstance(template, torch.autograd.Variable):
+            raise ValueError(('Input arguments containing instances of numbers.Number and torch.Tensor '
+                              'are not currently supported.  Use torch.autograd.Variable instead of torch.Tensor'))
         for idx in scalar_idxs:
             values[idx] = template.new(template.size()).fill_(values[idx])
     else:
         for idx in scalar_idxs:
-            values[idx] = torch.Tensor([values[idx]])
+            values[idx] = variable(values[idx])
     return values
 
 

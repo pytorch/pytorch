@@ -800,6 +800,13 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
+    def test_requires_grad_factory(self):
+        x = Variable(torch.randn(2, 3))
+        fns = [torch.ones_like, torch.testing.randn_like]
+        for fn in fns:
+            for val in [True, False]:
+                self.assertEqual(val, fn(x, requires_grad=val).requires_grad)
+
     def test_grad_assignment(self):
         x = Variable(torch.randn(5, 5))
         a = Variable(torch.randn(2, 2))  # size mismatch
@@ -2324,6 +2331,7 @@ method_tests = [
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
     ('slice', (S, S, S), (-2, 1, -1, 2)),
     ('squeeze', (S, 1, S, 1), NO_ARGS),
+    ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
     ('squeeze', (1,), (0,), '1d_dim0', [0]),
