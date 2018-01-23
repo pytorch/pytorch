@@ -333,11 +333,11 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   return result;
 }
 
-Tensor maybe_unsqueeze(const Tensor & self, int64_t dim, int64_t dim_size) {
+Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
 #ifdef WITH_SCALARS
-  if (self.size(dim) == 1) {
+  if (sizes[dim] == 1) {
 #else
-  if (self.size(dim) == 1 && self.sizes().size() != 1) {
+  if (sizes[dim] == 1 && sizes.size() != 1) {
 #endif
     return self.unsqueeze(dim);
   }
