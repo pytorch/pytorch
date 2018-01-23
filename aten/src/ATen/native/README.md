@@ -3,7 +3,7 @@ make use of other ATen operations (e.g., it is not necessary to bind into
 TH/THC code).  These functions are declared in this file and then folded
 into the ATen code generation process.
 
-== Registering it in `native_functions.yaml` ==
+## Registering it in `native_functions.yaml`
 
 The first step is to write an entry for your function in
 `native_functions.yaml`.  The format is as follows:
@@ -69,7 +69,7 @@ argument in `norm`) or have a type that doesn't allow default value
 None/NULL/nullptr (e.g., `int64_t fft_size` argument in stft, which we want to
 default to value of another argument if not provided).
 
-== Writing the implementation ==
+## Writing the implementation
 
 Implementations of native functions go in an appropriate C++ file in the
 `native/` directory (they are organized roughly by topic, but there is no
