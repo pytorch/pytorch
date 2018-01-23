@@ -468,6 +468,14 @@ PyObject *THPModule_inferSize(PyObject *_unused, PyObject *args)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPModule_with_scalars(PyObject *_unused, PyObject *args) {
+#ifdef WITH_SCALARS
+  Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
+}
+
 static PyObject *THPModule_setBackcompatBroadcastWarn(PyObject *module, PyObject *arg) {
   THPUtils_assert(PyBool_Check(arg), "set_backcompat_broadcast_warn expects a bool, "
           "but got %s", THPUtils_typename(arg));
@@ -595,6 +603,7 @@ static PyMethodDef TorchMethods[] = {
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
+  {"_with_scalars",(PyCFunction)THPModule_with_scalars, METH_NOARGS,  NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
   {"_set_backcompat_keepdim_warn", (PyCFunction)THPModule_setBackcompatKeepdimWarn, METH_O, NULL},
