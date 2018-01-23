@@ -36,16 +36,6 @@ template<typename T>
 inline T* Tensor::data() const {
   runtime_error("data() cast to unexpected type.");
 }
-
-#if AT_CUDA_ENABLED()
- 
- template<>
-   inline __half* Tensor::data() const {
-   return static_cast<__half*>(this->data_ptr());
- }
- 
-#endif
- 
 #define DEFINE_CAST(T,name,_) \
 template<> \
 inline T* Tensor::data() const { \
@@ -58,6 +48,13 @@ inline T* Tensor::to##name##Data() const { return data<T>(); }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_CAST)
 #undef DEFINE_CAST
+
+#if AT_CUDA_ENABLED()
+template<>
+inline __half* Tensor::data() const {
+  return reinterpret_cast<__half*>(data<Half>());
+}
+#endif
 
 #define DEFINE_TO_C_TYPE(T,name,_) \
 inline T Tensor::toC##name () const { return pImpl->localScalar().to##name (); }
