@@ -552,7 +552,7 @@
   self: unsqueeze_to(grad, self.sizes());
 
 - name: squeeze(Tensor self, int64_t dim)
-  self: maybe_unsqueeze(grad, dim, self.size(dim) == 1 && self.sizes().size() != 1)
+  self: unsqueeze_to(grad, dim, self.sizes())
 
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)

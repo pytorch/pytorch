@@ -23,6 +23,7 @@
 #     differentiable subcomponents.
 #
 from __future__ import print_function
+import os
 import sys
 from .utils import CodeTemplate, nested_dict, write
 from .gen_autograd import VIEW_FUNCTIONS, template_path
@@ -458,7 +459,7 @@ def emit_body(declaration):
     body.append(declare_returned_variables())
     body.append(emit_call(env))
     if requires_derivative:
-        if inplace and is_view:
+        if inplace and is_view and not os.environ.get('WITH_SCALARS'):
             body.append('ensure_no_aten_scalars(self);')
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
