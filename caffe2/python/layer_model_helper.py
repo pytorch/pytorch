@@ -392,8 +392,12 @@ class LayerModelHelper(model_helper.ModelHelper):
         # TODO(amalevich): Add add support for ifbpy inline documentation
         if layers.layer_exists(layer):
             def wrapper(*args, **kwargs):
-                return self.add_layer(
-                    layers.create_layer(layer, self, *args, **kwargs))
+                new_layer = layers.create_layer(layer, self, *args, **kwargs)
+                if kwargs.get("output_to_metrics", False):
+                    new_layer.export_output_for_metrics()
+                if kwargs.get("params_to_metrics", False):
+                    new_layer.export_params_for_metrics()
+                return self.add_layer(new_layer)
             return wrapper
         elif core.IsOperator(layer):
             def wrapper(*args, **kwargs):
@@ -406,10 +410,19 @@ class LayerModelHelper(model_helper.ModelHelper):
 
                 if 'name' not in kwargs:
                     kwargs['name'] = layer
-                return self.add_layer(
-                    layers.create_layer('Functional',
-                                        self, *args, function=apply_operator,
-                                        **kwargs))
+
+                new_layer = layers.create_layer(
+                    'Functional',
+                    self, *args, function=apply_operator,
+                    **kwargs
+                )
+
+                if kwargs.get("output_to_metrics", False):
+                    new_layer.export_output_for_metrics()
+                if kwargs.get("params_to_metrics", False):
+                    new_layer.export_params_for_metrics()
+
+                return self.add_layer(new_layer)
             return wrapper
         else:
             raise ValueError(
