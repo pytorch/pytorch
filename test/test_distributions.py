@@ -33,10 +33,9 @@ from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, HalfNormal, Laplace, LogNormal,
-                                 Multinomial, Normal, OneHotCategorical,
-                                 Pareto, StudentT, Uniform, constraints,
-                                 kl_divergence)
+                                 Gumbel, Laplace, LogNormal, Multinomial, Normal,
+                                 OneHotCategorical, Pareto, StudentT, Uniform,
+                                 constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
@@ -182,11 +181,6 @@ EXAMPLES = [
             'loc': torch.Tensor([1.0, 0.0]),
             'scale': torch.Tensor([1e-5, 1e-5]),
         },
-    ]),
-    Example(HalfNormal, [
-        {'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True)},
-        {'scale': Variable(torch.randn(1).abs(), requires_grad=True)},
-        {'scale': torch.Tensor([1e-5, 1e-5])},
     ]),
     Example(Normal, [
         {
@@ -653,44 +647,6 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(LogNormal(mean, std),
                                         scipy.stats.lognorm(scale=math.exp(mean), s=std),
                                         'LogNormal(loc={}, scale={})'.format(mean, std))
-
-    def test_halfnormal(self):
-        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
-        std_1d = Variable(torch.randn(1), requires_grad=True)
-        std_delta = torch.Tensor([1e-5, 1e-5])
-        self.assertEqual(HalfNormal(std).sample().size(), (5, 5))
-        self.assertEqual(HalfNormal(std).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(HalfNormal(std_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(HalfNormal(std_1d).sample().size(), (1,))
-        self.assertEqual(HalfNormal(.6).sample_n(1).size(), (1,))
-        self.assertEqual(HalfNormal(50.0).sample_n(1).size(), (1,))
-
-        # sample check for extreme value of mean, std
-        set_rng_seed(1)
-        self.assertEqual(HalfNormal(std_delta).sample(sample_shape=(1, 2)),
-                         torch.Tensor([[[0, 0], [0, 0]]]),
-                         prec=1e-4)
-
-        self._gradcheck_log_prob(HalfNormal, (std,))
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_halfnormal_logprob(self):
-        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
-
-        def ref_log_prob(idx, x, log_prob):
-            s = std.data.view(-1)[idx]
-            expected = scipy.stats.halfnorm(scale=s).logpdf(x)
-            self.assertAlmostEqual(log_prob, expected, places=3)
-
-        self._check_log_prob(HalfNormal(std), ref_log_prob)
-
-    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
-    def test_halfnormal_sample(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
-        for std in [0.1, 1.0, 10.0]:
-            self._check_sampler_sampler(HalfNormal(std),
-                                        scipy.stats.halfnorm(scale=std),
-                                        'HalfNormal(scale={})'.format(std))
 
     def test_normal(self):
         loc = Variable(torch.randn(5, 5), requires_grad=True)
@@ -1756,7 +1712,6 @@ class TestKL(TestCase):
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
-        halfnormal = pairwise(HalfNormal, [1.0, 2.0, 3.0, 4.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
@@ -1804,7 +1759,6 @@ class TestKL(TestCase):
             (gumbel, normal),
             (laplace, laplace),
             (lognormal, lognormal),
-            (halfnormal, halfnormal),
             (laplace, normal),
             (normal, gumbel),
             (normal, normal),
