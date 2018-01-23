@@ -64,6 +64,16 @@ $PYCMD test_cuda.py $@
 echo "Running NCCL tests"
 $PYCMD test_nccl.py $@
 
+echo "Running C++ Extensions tests"
+cd cpp_extensions
+$PYCMD setup.py install --root ./install
+previous_pythonpath="$PYTHONPATH"
+export PYTHONPATH="$PWD/$(find ./install -name site-packages):$PYTHONPATH"
+cd ..
+$PYCMD test_cpp_extensions.py $@
+export PYTHONPATH="$previous_pythonpath"
+rm -rf cpp_extensions/install
+
 # Skipping test_distributed for Windows because it doesn't have fcntl
 if [[ "$OSTYPE" != "msys" ]]; then
     distributed_set_up() {
