@@ -43,9 +43,19 @@ def get_sparse_lookup_predictor_version(version):
     return version
 
 
+def _is_id_list(input_record):
+    return schema.equal_schemas(input_record, IdList)
+
+
+def _is_id_score_list(input_record):
+    return schema.equal_schemas(input_record,
+                                IdScoreList,
+                                check_field_types=False)
+
+
 class SparseLookup(ModelLayer):
     _id_list_supported_reducers = [
-        'PositionWeighted', 'LogMeanExp', 'LogSumExp', 'Max', 'Mean', 'Sum',
+        'LogMeanExp', 'LogSumExp', 'Max', 'Mean', 'Sum',
         'WeightedSum', 'WeightedMean', 'Sqrt', 'None']
 
     _id_score_list_supported_reducers = [
@@ -65,6 +75,10 @@ class SparseLookup(ModelLayer):
             format(type(inner_shape))
 
         if reducer == "PositionWeighted":
+            assert _is_id_score_list(self.input_record), (
+                "PositionWeighted only support IdScoreList, but got {} " +
+                "please use PositionWeighted layer to convert IdList " +
+                "to IdScoreList").format(repr(self.input_record))
             self.external_weights = input_record.values()
         self.reducer = reducer
 
@@ -78,12 +92,9 @@ class SparseLookup(ModelLayer):
         self.weight_init = weight_init if weight_init else (
             'UniformFill', {'min': -scale, 'max': scale})
 
-        if schema.equal_schemas(self.input_record, IdList):
+        if _is_id_list(self.input_record):
             sparse_key = self.input_record.items()
-        elif schema.equal_schemas(
-                self.input_record,
-                IdScoreList,
-                check_field_types=False):
+        elif _is_id_score_list(self.input_record):
             sparse_key = self.input_record.keys()
         else:
             raise NotImplementedError()
@@ -299,11 +310,9 @@ class SparseLookup(ModelLayer):
             **cur_scope.get(get_sparse_lookup_predictor_version.__name__,
                             {'version': 'fp32'}))
 
-        if schema.equal_schemas(self.input_record, IdList):
+        if _is_id_list(self.input_record):
             self._add_ops_id_list(net, version=version)
-        elif schema.equal_schemas(self.input_record,
-                                  IdScoreList,
-                                  check_field_types=False):
+        elif _is_id_score_list(self.input_record):
             self._add_ops_id_score_list(net, version=version)
         else:
             raise "Unsupported input type {0}".format(self.input_record)

@@ -43,6 +43,7 @@ from caffe2.python.layers.layers import (
     IdList,
     set_request_only,
     is_request_only_scalar,
+    get_key,
 )
 
 
@@ -171,7 +172,7 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [mat_mul_spec])
 
-    def testSparseLookup(self):
+    def testSparseLookupSumPooling(self):
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('sparse', schema.Struct(
                 ('sparse_feature_0', schema.List(
@@ -182,7 +183,7 @@ class TestLayers(LayersTestCase):
         embedding_dim = 64
         embedding_after_pooling = self.model.SparseLookup(
             record.sparse.sparse_feature_0, [embedding_dim], 'Sum')
-        self.model.output_schema = embedding_after_pooling
+        self.model.output_schema = schema.Struct()
         self.assertEqual(
             schema.Scalar((np.float32, (embedding_dim, ))),
             embedding_after_pooling
@@ -203,6 +204,123 @@ class TestLayers(LayersTestCase):
                 init_ops[0].output[0],
                 record.sparse.sparse_feature_0.items(),
                 record.sparse.sparse_feature_0.lengths(),
+            ],
+            [embedding_after_pooling()]
+        )
+        self.assertNetContainOps(train_net, [sparse_lookup_op_spec])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
+
+    def testSparseLookupIncorrectPositionWeightedOnIdList(self):
+        '''
+        Currently the implementation of SparseLookup assumed input is id_score_list
+        when use PositionWeighted.
+        '''
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.List(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1000)))),
+            )),
+        ))
+
+        embedding_dim = 64
+        with self.assertRaises(AssertionError):
+            self.model.SparseLookup(
+                record.sparse.sparse_feature_0, [embedding_dim], 'PositionWeighted')
+
+    def testSparseLookupPositionWeightedOnIdList(self):
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('sparse_feature_0', schema.List(
+                    schema.Scalar(np.int64,
+                                  metadata=schema.Metadata(categorical_limit=1000)))),
+            )),
+        ))
+
+        # convert id_list to id_score_list with PositionWeighted layer
+        sparse_segment = record.sparse.sparse_feature_0
+        pos_w_layer = self.model.PositionWeighted(sparse_segment)
+
+        sparse_segment = schema.Map(
+            keys=get_key(sparse_segment),
+            values=pos_w_layer.position_weights,
+            lengths_blob=sparse_segment.lengths
+        )
+
+        embedding_dim = 64
+        embedding_after_pooling = self.model.SparseLookup(
+            sparse_segment, [embedding_dim], 'PositionWeighted')
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("ConstantFill", None, None),  # position_weights/pos_w
+                OpSpec("UniformFill", None, None),
+                OpSpec("ConstantFill", None, None),
+            ]
+        )
+        self.assertNetContainOps(train_net, [
+            OpSpec("LengthsRangeFill", None, None),
+            OpSpec("Gather", None, None),
+            OpSpec("SparseLengthsWeightedSum", None, None),
+        ])
+
+        predict_net = self.get_predict_net()
+        self.assertNetContainOps(predict_net, [
+            OpSpec("LengthsRangeFill", None, None),
+            OpSpec("Gather", None, None),
+            OpSpec("SparseLengthsWeightedSum", None, None),
+        ])
+
+    def testSparseLookupPositionWeightedOnIdScoreList(self):
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('sparse', schema.Struct(
+                ('id_score_list_0', schema.Map(
+                    schema.Scalar(
+                        np.int64,
+                        metadata=schema.Metadata(
+                            categorical_limit=1000
+                        ),
+                    ),
+                    np.float32
+                )),
+            )),
+        ))
+
+        embedding_dim = 64
+        embedding_after_pooling = self.model.SparseLookup(
+            record.sparse.id_score_list_0, [embedding_dim], 'PositionWeighted')
+        self.model.output_schema = schema.Struct()
+        self.assertEqual(
+            schema.Scalar((np.float32, (embedding_dim, ))),
+            embedding_after_pooling
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+
+        init_ops = self.assertNetContainOps(
+            train_init_net,
+            [
+                OpSpec("UniformFill", None, None),
+                OpSpec("ConstantFill", None, None),
+            ]
+        )
+        sparse_lookup_op_spec = OpSpec(
+            'SparseLengthsWeightedSum',
+            [
+                init_ops[0].output[0],
+                record.sparse.id_score_list_0.values(),
+                record.sparse.id_score_list_0.keys(),
+                record.sparse.id_score_list_0.lengths(),
             ],
             [embedding_after_pooling()]
         )
