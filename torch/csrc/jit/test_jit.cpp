@@ -8,6 +8,9 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/argument_spec.h"
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -600,6 +603,76 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
   out << *graph << "\n";
 }
 
+autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
+  return autograd::make_variable(t.rand(sizes), requires_grad);
+}
+autograd::Variable undef() {
+  return autograd::Variable();
+}
+
+int device(const autograd::Variable & v) {
+  return v.type().is_cuda() ? v.get_device() : -1;
+}
+
+bool isEqual(at::IntList lhs, at::IntList rhs) {
+  return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
+  if(!ti.defined())
+    return ti.defined() == v.defined();
+  return
+    ti.device() == device(v) &&
+    ti.requires_grad() == v.requires_grad() &&
+    ti.type() == v.type().scalarType() &&
+    isEqual(ti.sizes(), v.sizes()) &&
+    isEqual(ti.strides(), v.strides());
+}
+
+void argumentSpecTest() {
+  auto & CF = at::CPU(at::kFloat);
+  auto & CD = at::CPU(at::kDouble);
+  auto & GF = at::CUDA(at::kFloat);
+  auto & GD = at::CUDA(at::kDouble);
+
+  autograd::variable_list list =  { var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()};
+  // make sure we have some non-standard strides
+  list[1].transpose_(0, 1);
+
+  // same list but different backing values
+  autograd::variable_list list2 = { var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()};
+  list2[1].transpose_(0, 1);
+
+
+  ArgumentSpec a(true, list);
+  ArgumentSpec b(true, list);
+  JIT_ASSERT(a.hashCode() == b.hashCode());
+
+  JIT_ASSERT(a == b);
+  ArgumentSpec d(true, list2);
+  JIT_ASSERT(d == a && d.hashCode() == a.hashCode());
+
+  for(size_t i = 0; i < list.size(); ++i) {
+    JIT_ASSERT(isEqual(a.tensorInfo(i), list[i]));
+  }
+  ArgumentSpec no_grad(/*with_grad=*/false, list);
+  JIT_ASSERT(no_grad != a);
+
+  std::unordered_set<ArgumentSpec> spec;
+  spec.insert(std::move(a));
+  JIT_ASSERT(spec.count(b) > 0);
+  JIT_ASSERT(spec.count(no_grad) == 0);
+  spec.insert(std::move(no_grad));
+  JIT_ASSERT(spec.count(ArgumentSpec(true,list)) == 1);
+
+  list2[1].transpose_(0,1);
+  ArgumentSpec c(true, list2); // same as list, except for one stride
+  JIT_ASSERT(!(c == a));
+  JIT_ASSERT(spec.count(c) == 0);
+
+}
+
+
 std::string runJITCPPTests() {
   std::stringstream out;
   testCreateAutodiffSubgraphs(out);
@@ -611,6 +684,7 @@ std::string runJITCPPTests() {
   fusionTests();
   attributesTest();
   internedStringsTests();
+  argumentSpecTest();
   return out.str();
 }
 
