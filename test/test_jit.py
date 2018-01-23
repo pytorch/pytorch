@@ -560,6 +560,7 @@ class TestJit(TestCase):
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
 
+    @unittest.expectedFailure
     def test_inplace_flags(self):
         class InplaceFn(Function):
             @staticmethod
