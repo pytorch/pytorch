@@ -251,6 +251,41 @@ class MKLMemory {
     }
   }
 
+  /**
+   * Resizes the tensor without touching underlying storage.
+   * This requires the total size of the tensor to remains constant.
+   */
+  template <typename IndexType>
+  void Reshape(const vector<IndexType>& dims) {
+    CAFFE_ENFORCE(
+        layout_is_user_layout_,
+        "Reshape is not allowed for custom layouts. "
+        "Convert to plain layout before invoking Reshape().");
+
+    TIndex new_size = 1;
+    for (auto i = 0; i < dims.size(); ++i) {
+      CAFFE_ENFORCE_GE_WITH_CALLER(dims[i], 0);
+      new_size *= dims[i];
+    }
+    CAFFE_ENFORCE_WITH_CALLER(
+        new_size == size_,
+        "New size and old size are not equal. Reshape is not possible.");
+
+    vector<TIndex> new_dims(dims.size());
+    vector<size_t> size(dims.size());
+    vector<size_t> strides(dims.size());
+    for (int i = 0; i < dims.size(); ++i) {
+      new_dims[i] = dims[i];
+      size[i] = dims[dims.size() - i - 1];
+      strides[i] = (i == 0) ? 1 : strides[i - 1] * size[i - 1];
+    }
+    dims_ = new_dims;
+    user_layout_.Reset(dims.size(), size.data(), strides.data());
+    layout_.Reset(dims.size(), size.data(), strides.data());
+    convert_in_.Reset(dnnConversionCreate<T>, user_layout_, layout_);
+    convert_out_.Reset(dnnConversionCreate<T>, layout_, user_layout_);
+  }
+
   // Destructs the MKLMemory.
   ~MKLMemory() {}
 
