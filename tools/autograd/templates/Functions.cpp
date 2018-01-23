@@ -334,6 +334,7 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
 }
 
 Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
 #ifdef WITH_SCALARS
   if (sizes[dim] == 1) {
 #else
@@ -439,7 +440,7 @@ Tensor trace_backward(const Tensor & grad, IntList sizes) {
   grad_input.index_fill_(0, indices, grad);
 #else
   auto grad_data = static_cast<const Variable&>(grad).data();
-  grad_input.index_fill_(0, indices, grad);
+  grad_input.index_fill_(0, indices, Scalar(grad_data[0]));
 #endif
   return grad_input.view(sizes);
 }
