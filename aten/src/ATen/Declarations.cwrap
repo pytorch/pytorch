@@ -4097,7 +4097,7 @@
 
 [[
   name: sparse_raw_resize_
-  variants: [method, function]
+  variants: [method]
   backends:
     - SparseCPU
     - SparseCUDA
