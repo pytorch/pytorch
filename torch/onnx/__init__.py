@@ -420,6 +420,7 @@ def _symbolic_override_wrapper_maker(symbolic_fn, first_arg_only, fn):
 
     return wrapper
 
+
 def symbolic_override(symbolic_fn):
     """
     Decorator to override ONNX export of the a function with specified subgraph.
