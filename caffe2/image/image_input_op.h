@@ -43,11 +43,13 @@ class ImageInputOp final
   // MULTI_LABEL_DENSE: dense label embedding vector for label embedding regression
   // MULTI_LABEL_WEIGHTED_SPARSE: sparse active label indices with per-label weights
   // for multi-label classification
+  // SINGLE_LABEL_WEIGHTED: single integer label for multi-class classification with weighted sampling
   enum LABEL_TYPE {
     SINGLE_LABEL = 0,
     MULTI_LABEL_SPARSE = 1,
     MULTI_LABEL_DENSE = 2,
-    MULTI_LABEL_WEIGHTED_SPARSE = 3
+    MULTI_LABEL_WEIGHTED_SPARSE = 3,
+    SINGLE_LABEL_WEIGHTED = 4
   };
 
   // INCEPTION_STYLE: Random crop with size 8% - 100% image area and aspect
@@ -266,14 +268,15 @@ ImageInputOp<Context>::ImageInputOp(
 
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be nonnegative.");
   if (use_caffe_datum_) {
-    CAFFE_ENFORCE_EQ(label_type_, SINGLE_LABEL,
+    CAFFE_ENFORCE(label_type_ == SINGLE_LABEL || label_type_ == SINGLE_LABEL_WEIGHTED,
       "Caffe datum only supports single integer label");
   }
-  if (label_type_ !=  SINGLE_LABEL) {
+  if (label_type_ !=  SINGLE_LABEL && label_type_ != SINGLE_LABEL_WEIGHTED) {
     CAFFE_ENFORCE_GT(num_labels_, 0,
       "Number of labels must be set for using either sparse label indices or dense label embedding.");
   }
-  if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE) {
+  if (label_type_ == MULTI_LABEL_WEIGHTED_SPARSE ||
+    label_type_ == SINGLE_LABEL_WEIGHTED) {
     additional_inputs_offset_ = 3;
   } else {
     additional_inputs_offset_ = 2;
@@ -382,7 +385,7 @@ ImageInputOp<Context>::ImageInputOp(
       TIndex(crop_),
       TIndex(crop_),
       TIndex(color_ ? 3 : 1));
-  if (label_type_ != SINGLE_LABEL) {
+  if (label_type_ != SINGLE_LABEL && label_type_ != SINGLE_LABEL_WEIGHTED) {
     prefetched_label_.Resize(TIndex(batch_size_), TIndex(num_labels_));
   } else {
     prefetched_label_.Resize(vector<TIndex>(1, batch_size_));
@@ -549,7 +552,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     }
 
     if (label_proto.data_type() == TensorProto::FLOAT) {
-      if (label_type_ == SINGLE_LABEL) {
+      if (label_type_ == SINGLE_LABEL || label_type_ == SINGLE_LABEL_WEIGHTED) {
         DCHECK_EQ(label_proto.float_data_size(), 1);
         prefetched_label_.mutable_data<float>()[item_id] =
             label_proto.float_data(0);
@@ -580,7 +583,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         LOG(ERROR) << "Unknown label type:" << label_type_;
       }
     } else if (label_proto.data_type() == TensorProto::INT32) {
-      if (label_type_ == SINGLE_LABEL) {
+      if (label_type_ == SINGLE_LABEL || label_type_ == SINGLE_LABEL_WEIGHTED) {
         DCHECK_EQ(label_proto.int32_data_size(), 1);
         prefetched_label_.mutable_data<int>()[item_id] =
             label_proto.int32_data(0);
