@@ -237,13 +237,15 @@ class GRUCellTest(hu.HypothesisTestCase):
 
     # Test just for GRUUnitOp
     @given(
+        seed=st.integers(0, 2**32 - 1),
         input_tensor=gru_unit_op_input(),
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
         **hu.gcs
     )
     @ht_settings(max_examples=15)
-    def test_gru_unit_op(self, input_tensor, fwd_only, drop_states, gc, dc):
+    def test_gru_unit_op(self, seed, input_tensor, fwd_only, drop_states, gc, dc):
+        np.random.seed(seed)
         outputs_with_grads = [0]
         ref = gru_unit
         ref = partial(ref)
@@ -292,6 +294,7 @@ class GRUCellTest(hu.HypothesisTestCase):
                 )
 
     @given(
+        seed=st.integers(0, 2**32 - 1),
         input_tensor=gru_input(),
         fwd_only=st.booleans(),
         drop_states=st.booleans(),
@@ -299,7 +302,8 @@ class GRUCellTest(hu.HypothesisTestCase):
         **hu.gcs
     )
     @ht_settings(max_examples=20)
-    def test_gru_main(self, **kwargs):
+    def test_gru_main(self, seed, **kwargs):
+        np.random.seed(seed)
         for outputs_with_grads in [[0], [1], [0, 1]]:
             self.gru_base(gru_cell.GRU, gru_reference,
                            outputs_with_grads=outputs_with_grads,
