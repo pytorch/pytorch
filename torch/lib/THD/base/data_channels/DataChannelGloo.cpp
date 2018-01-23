@@ -5,9 +5,9 @@
 
 #if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
 #include "gloo/transport/ibverbs/device.h"
-#else
-#include "gloo/transport/tcp/device.h"
 #endif
+
+#include "gloo/transport/tcp/device.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -78,30 +78,31 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
   // This helper function automatically detects the IB device in the system
   auto ibDeviceNames = ::gloo::transport::ibverbs::getDeviceNames();
 
-  if (!ibDeviceNames.size()) {
-    throw std::runtime_error("Cannot find any Infiniband (IBVERB) devices to "
-                             "initialize in the Gloo backend");
-  }
-  // Currently, gloo only supports a single IB device and will use the first one
-  auto ibDeviceToUse = ibDeviceNames[0];
+  // If there are IB devices, we will use IB
+  if (!ibDeviceNames.empty()) {
+    // Currently, gloo only supports a single IB device and will use the first
+    auto ibDeviceToUse = ibDeviceNames[0];
 
-  ::gloo::transport::ibverbs::attr attr = {
-    .name = ibDeviceToUse,
-    .port = 1,
-    .index = 0,
-  };
+    ::gloo::transport::ibverbs::attr attr = {
+      .name = ibDeviceToUse,
+      .port = 1,
+      .index = 0,
+    };
 
-  _deviceList.push_back(::gloo::transport::ibverbs::CreateDevice(attr));
+    _deviceList.push_back(::gloo::transport::ibverbs::CreateDevice(attr));
 
-#else
-
-  // Default options listen on this host's name.
-  // NOTE: when hostname has bad configuration in `/etc/hosts` processes
-  // will not connect to each other.
-  ::gloo::transport::tcp::attr attr(config.public_address.c_str());
-  _deviceList.push_back(::gloo::transport::tcp::CreateDevice(attr));
+  // Otherwise, fallback to use TCP instead
+  } else
 
 #endif
+
+  {
+    // Default options listen on this host's name.
+    // NOTE: when hostname has bad configuration in `/etc/hosts` processes
+    // will not connect to each other.
+    ::gloo::transport::tcp::attr attr(config.public_address.c_str());
+    _deviceList.push_back(::gloo::transport::tcp::CreateDevice(attr));
+  }
 
   if (_rank == 0) {
     _addr = "localhost";

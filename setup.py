@@ -34,7 +34,7 @@ IS_LINUX = (platform.system() == 'Linux')
 
 WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
-WITH_GLOO_IBVERBS = check_env_flag('WITH_GLOO_IBVERBS')
+WITH_GLOO_IBVERBS = WITH_DISTRIBUTED and not check_env_flag('NO_GLOO_IBVERBS')
 
 WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
