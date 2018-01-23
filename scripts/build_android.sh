@@ -53,14 +53,14 @@ CMAKE_ARGS=()
 CMAKE_ARGS+=("-DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=$CAFFE2_ROOT/build_host_protoc/bin/protoc")
 
 # Use android-cmake to build Android project from CMake.
-CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$CAFFE2_ROOT/third_party/android-cmake/android.toolchain.cmake")
+CMAKE_ARGS+=("-DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake")
 
 # Don't build artifacts we don't need
 CMAKE_ARGS+=("-DBUILD_TEST=OFF")
 CMAKE_ARGS+=("-DBUILD_BINARY=OFF")
 CMAKE_ARGS+=("-DBUILD_PYTHON=OFF")
 CMAKE_ARGS+=("-DBUILD_SHARED_LIBS=OFF")
-CMAKE_ARGS+=("-DANDROID_TOOLCHAIN_NAME=arm-linux-androideabi-4.9")
+CMAKE_ARGS+=("-DANDROID_TOOLCHAIN=gcc")
 
 # Disable unused dependencies
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
@@ -77,8 +77,9 @@ fi
 
 # Android specific flags
 CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
-CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON FP16")
+CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
+CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 
 # Compiler flags
 CMAKE_ARGS+=("-DCMAKE_C_FLAGS=")
