@@ -1,3 +1,4 @@
+#include "pthread.h"
 #include "THGeneral.h"
 #include "THRandom.h"
 
@@ -190,9 +191,11 @@ uint64_t THRandom_random(THGenerator *_generator)
 {
   uint64_t y;
 
+  pthread_mutex_lock(&_generator->mutex);
   if (--(_generator->left) == 0)
     THRandom_nextState(_generator);
   y = *(_generator->state + (_generator->next)++);
+  pthread_mutex_unlock(&_generator->mutex);
 
   /* Tempering */
   y ^= (y >> 11);

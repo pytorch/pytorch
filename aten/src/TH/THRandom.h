@@ -2,6 +2,7 @@
 #define TH_RANDOM_INC
 
 #include "THGeneral.h"
+#include <pthread.h>
 
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
@@ -20,6 +21,7 @@ typedef struct THGenerator {
   double normal_y;
   double normal_rho;
   int normal_is_valid; /* = 0; */
+  pthread_mutex_t mutex;
 } THGenerator;
 
 #define torch_Generator "torch.Generator"
