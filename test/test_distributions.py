@@ -2240,6 +2240,15 @@ class TestTransforms(TestCase):
                 'Actual: {}'.format(actual),
             ]))
 
+    def test_equality(self):
+        for x, y in product(self.univariate, self.univariate):
+            if x is y:
+                self.assertTrue(x == y)
+                self.assertFalse(x != y)
+            else:
+                self.assertFalse(x == y)
+                self.assertTrue(x != y)
+
 
 if __name__ == '__main__':
     run_tests()

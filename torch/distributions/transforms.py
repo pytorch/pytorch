@@ -29,7 +29,7 @@ class Transform(object):
     bijective = False
 
     def __eq__(self, other):
-        return type(other) is type(self)
+        return self is other
 
     def __ne__(self, other):
         # Necessary for Python2
@@ -133,6 +133,11 @@ class InverseTransform(Transform):
     def bijective(self):
         return self.transform.bijective
 
+    def __eq__(self, other):
+        if not isinstance(other, InverseTransform):
+            return False
+        return self.transform == other.transform
+
     def forward(self, x):
         return self.transform.inverse(x)
 
@@ -150,6 +155,9 @@ class ExpTransform(Transform):
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
+
+    def __eq__(self, other):
+        return isinstance(other, ExpTransform)
 
     def forward(self, x):
         return x.exp()
@@ -169,6 +177,9 @@ class SigmoidTransform(Transform):
     codomain = constraints.unit_interval
     bijective = True
 
+    def __eq__(self, other):
+        return isinstance(other, SigmoidTransform)
+
     def forward(self, x):
         return sigmoid(x)
 
@@ -185,6 +196,9 @@ class AbsTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.positive
+
+    def __eq__(self, other):
+        return isinstance(other, AbsTransform)
 
     def forward(self, x):
         return x.abs()
@@ -214,7 +228,9 @@ class AffineTransform(Transform):
         self.event_dim = event_dim
 
     def __eq__(self, other):
-        return (type(other) is AffineTransform) and self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
+        if not isinstance(other, AffineTransform):
+            return False
+        return self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
 
     def forward(self, x):
         return self.loc + self.scale * x
@@ -244,6 +260,9 @@ class BoltzmannTransform(CachedTransform):
     domain = constraints.real
     codomain = constraints.simplex
 
+    def __eq__(self, other):
+        return isinstance(other, BoltzmannTransform)
+
     def _forward(self, x):
         logprobs = x
         probs = (logprobs - logprobs.max(-1, True)[0]).exp()
@@ -271,6 +290,9 @@ class StickBreakingTransform(CachedTransform):
     domain = constraints.real
     codomain = constraints.simplex
     bijective = True
+
+    def __eq__(self, other):
+        return isinstance(other, StickBreakingTransform)
 
     def _forward(self, x):
         shape = x.shape[:-1] + (1 + x.shape[-1],)
