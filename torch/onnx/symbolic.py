@@ -535,7 +535,7 @@ def RNN_symbolic_builder(cell_type, *args, **kwargs):
     elif cell_type == 'GRU':
         return GRU_symbolic_builder(*args, **kwargs)
     else:
-        return _unimplemented("RNN", "cell type " + cell_type)
+        return lambda *args, **kwargs: _unimplemented("RNN", "cell type " + cell_type)
 
 
 def reform_weights(g, w, n, intervals):
@@ -544,14 +544,14 @@ def reform_weights(g, w, n, intervals):
 
 
 def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    if batch_first:
-        return _unimplemented("LSTM", "batch_first")
-    if dropout:
-        return _unimplemented("LSTM", "dropout")
-    if bidirectional:
-        return _unimplemented("LSTM", "bidirectional")
-
     def symbolic(g, input, all_weights, h0_and_c0, **fkwargs):
+        if batch_first:
+            return _unimplemented("LSTM", "batch_first")
+        if dropout:
+            return _unimplemented("LSTM", "dropout")
+        if bidirectional:
+            return _unimplemented("LSTM", "bidirectional")
+
         h0, c0 = h0_and_c0
 
         # TODO elide this argument to increase parametricity. This is
@@ -580,18 +580,18 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
         h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
         return prev_output, h_outs, None
 
-    return torch.onnx.symbolic_override(symbolic)
+    return symbolic
 
 
 def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    if batch_first:
-        return _unimplemented("GRU", "batch_first")
-    if dropout:
-        return _unimplemented("GRU", "dropout")
-    if bidirectional:
-        return _unimplemented("GRU", "bidirectional")
-
     def symbolic(g, input, all_weights, h0, **fkwargs):
+        if batch_first:
+            return _unimplemented("GRU", "batch_first")
+        if dropout:
+            return _unimplemented("GRU", "dropout")
+        if bidirectional:
+            return _unimplemented("GRU", "bidirectional")
+
         # TODO elide this argument to increase parametricity. This is
         # nontrivial because we provide subsequent optional arguments,
         # and ONNX does not have a mechanism for skipping non-trailing
@@ -618,4 +618,4 @@ def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropo
         h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
         return prev_output, h_outs
 
-    return torch.onnx.symbolic_override(symbolic)
+    return symbolic
