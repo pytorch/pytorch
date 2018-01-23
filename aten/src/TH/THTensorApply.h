@@ -370,16 +370,16 @@
   if( CONTIG1 && CONTIG2 ){                                                                    \
     ptrdiff_t iter = 0;                                                                        \
     if(tp != rp) {                                                                             \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp)) \
       PRAGMA(ivdep) \
+      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp)) \
       for (iter = 0; iter < SIZE; iter++) {                             \
         TYPE2 *TENSOR2##_data = tp+iter;                                \
         TYPE1 *TENSOR1##_data = rp+iter;                                \
         CODE                                                            \
       }\
     } else {\
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp) )  \
       PRAGMA(simd) \
+      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE2* TENSOR2##_data = tp+iter;\
         TYPE1* TENSOR1##_data = rp+iter;\
@@ -448,8 +448,8 @@
   if(CONTIG1 && CONTIG2 && CONTIG3){                                                                    \
     ptrdiff_t iter = 0;\
     if (rp != tp) { \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
       PRAGMA(ivdep) \
+      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
         TYPE2 *TENSOR2##_data = tp+iter; \
@@ -457,6 +457,7 @@
         CODE                                \
       } \
     } else {\
+      PRAGMA(simd) \
       PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
