@@ -320,8 +320,8 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
       if (tensor.defined()) {
         auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
         var.rebase_history(output_nr, grad_fn);
-        output_nr++;
       }
+      output_nr++;
     }
   }
 }
@@ -346,8 +346,8 @@ static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
         auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
         var.get()->output_nr = output_nr;
         var.get()->_grad_fn = grad_fn;
-        output_nr++;
       }
+      output_nr++;
     }
   }
 }
