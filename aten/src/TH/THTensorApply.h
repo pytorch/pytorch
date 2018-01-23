@@ -256,7 +256,6 @@
 
 #define TH_OMP_OVERHEAD_THRESHOLD_OMP 5000
 #include <omp.h>
-#include <x86intrin.h>
 
 /*
  * Calcuate the memory offset of an element in a tensor. The strategy is below:
