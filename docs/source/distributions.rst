@@ -147,9 +147,11 @@ Probability distributions - torch.distributions
 
 .. automodule:: torch.distributions.transforms
     :members:
+    :member-order: bysource
 
 `Constraints`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.constraints
     :members:
+    :member-order: bysource
