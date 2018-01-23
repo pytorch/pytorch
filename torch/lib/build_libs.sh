@@ -168,6 +168,10 @@ function build_aten() {
   # purpusefully not passing C_FLAGS for the same reason as above
   ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
   cd ../..
+
+  if [ ! -f "${INSTALL_DIR}/lib/libATen.so" ]; then
+    ln -s "${INSTALL_DIR}/lib/libATen.so.1" "${INSTALL_DIR}/lib/libATen.so"
+  fi
 }
 
 # In the torch/lib directory, create an installation directory
