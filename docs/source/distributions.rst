@@ -152,52 +152,10 @@ Probability distributions - torch.distributions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.transforms
-.. currentmodule:: torch.distributions.transforms
+    :members:
 
-:hidden:`Transform`
+`Constraints`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: Transform
-    :members:
-
-:hidden:`InverseTransform`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: InverseTransform
-    :members:
-
-:hidden:`AbsTransform`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: AbsTransform
-    :members:
-
-:hidden:`AffineTransform`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: AffineTransform
-    :members:
-
-:hidden:`ExpTransform`
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: ExpTransform
-    :members:
-
-:hidden:`LogprobTransform`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: LogprobTransform
-    :members:
-
-:hidden:`SigmoidTransform`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: SigmoidTransform
-    :members:
-
-:hidden:`StickBreakingTransform`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: StickBreakingTransform
+.. automodule:: torch.distributions.constraints
     :members:

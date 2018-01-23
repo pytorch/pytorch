@@ -6,9 +6,10 @@ from torch.nn.functional import sigmoid
 __all__ = [
     'AbsTransform',
     'AffineTransform',
+    'BoltzmannTransform',
+    'CachedTransform',
     'ExpTransform',
     'InverseTransform',
-    'LogprobTransform',
     'SigmoidTransform',
     'StickBreakingTransform',
     'Transform',
@@ -21,18 +22,11 @@ class Transform(object):
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
-    Transforms are intended to be short-lived objects. They memoize the forward
-    and inverse computations to avoid work; therefore :meth:`inverse` is
-    nearly free after calling :meth:`forward`. To clear the memoization cache,
-    delete the object and create a new object.
-
     Derived classes should implement one or both of :meth:`_forward` or
     :meth:`_inverse` and should implement :meth:`log_abs_det_jacobian`.
     Derived classes may store intermediate results in the `._cache` dict.
     """
-
-    def __init__(self):
-        self._cache = {}
+    bijective = False
 
     def __eq__(self, other):
         return type(other) is type(self)
@@ -43,27 +37,69 @@ class Transform(object):
 
     def forward(self, x):
         """
+        Abstract method to compute forward transformation.
+        """
+        raise NotImplementedError
+
+    def inverse(self, y):
+        """
+        Abstract method to compute inverse transformation.
+        """
+        raise NotImplementedError
+
+    def log_abs_det_jacobian(self, x, y):
+        """
+        Computes the log det jacobian `log |dy/dx|` given input and output.
+        """
+        raise NotImplementedError
+
+
+class CachedTransform(Transform):
+    """
+    Abstract base class for transforms that implement one of :meth:`forward`
+    or :meth:`backward` via by caching the latest value (i.e. an LRU(1) cache).
+
+    This class is useful for tranforms whose inverses are either expensive or
+    numerically unstable. Note that care must be taken with memoized values
+    since the autograd graph may be reversed. For example while the following
+    works::
+
+        y = t.forward(x)
+        t.log_abs_det_jacobian(x, y).backward()  # x will receive gradients.
+
+    However the following will error due to dependency reversal::
+
+        y = t.forward(x)
+        z = t.inverse(y)
+        grad(z.sum(), [y])  # error because z is x
+
+    Derived classes should implement one or both of :meth:`_forward` and
+    :meth:`_backward`.
+    """
+    def __init__(self):
+        self._cached_x_y = None, None
+
+    def forward(self, x):
+        """
         Invokes the memoized transform `x => y`.
         """
-        try:
-            return self._cache['forward', x]
-        except KeyError:
-            y = self._forward(x)
-            self._cache['forward', x] = y
-            self._cache['inverse', y] = x
-            return y
+        x_old, y_old = self._cached_x_y
+        if x is x_old:
+            return y_old
+        y = self._forward(x)
+        self._cached_x_y = x, y
+        return y
 
     def inverse(self, y):
         """
         Inverts the memoized transform `y => x`.
         """
-        try:
-            return self._cache['inverse', y]
-        except KeyError:
-            x = self._inverse(y)
-            self._cache['forward', x] = y
-            self._cache['inverse', y] = x
-            return x
+        x_old, y_old = self._cached_x_y
+        if y is y_old:
+            return x_old
+        x = self._inverse(y)
+        self._cached_x_y = x, y
+        return x
 
     def _forward(self, x):
         """
@@ -77,36 +113,34 @@ class Transform(object):
         """
         raise NotImplementedError
 
-    def log_abs_det_jacobian(self, x, y):
-        """
-        Computes the log det jacobian `log |dy/dx|` given input and output.
-        """
-        raise NotImplementedError
-
 
 class InverseTransform(Transform):
     """
     Inverts a single :class:`Transform`.
     """
-    def __init__(self, bijector):
-        self.bijector = bijector
+    def __init__(self, transform):
+        self.transform = transform
 
     @constraints.dependent_property
     def domain(self):
-        return self.bijector.codomain
+        return self.transform.codomain
 
     @constraints.dependent_property
     def codomain(self):
-        return self.bijector.domain
+        return self.transform.domain
+
+    @property
+    def bijective(self):
+        return self.transform.bijective
 
     def forward(self, x):
-        return self.bijector.inverse(x)
+        return self.transform.inverse(x)
 
     def inverse(self, y):
-        return self.bijector.forward(y)
+        return self.transform.forward(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return -self.bijector.log_abs_det_jacobian(y, x)
+        return -self.transform.log_abs_det_jacobian(y, x)
 
 
 class ExpTransform(Transform):
@@ -115,11 +149,12 @@ class ExpTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.positive
+    bijective = True
 
-    def _forward(self, x):
+    def forward(self, x):
         return x.exp()
 
-    def _inverse(self, y):
+    def inverse(self, y):
         return y.log()
 
     def log_abs_det_jacobian(self, x, y):
@@ -132,11 +167,12 @@ class SigmoidTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.unit_interval
+    bijective = True
 
-    def _forward(self, x):
+    def forward(self, x):
         return sigmoid(x)
 
-    def _inverse(self, y):
+    def inverse(self, y):
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
@@ -145,13 +181,16 @@ class SigmoidTransform(Transform):
 
 class AbsTransform(Transform):
     """
-    Transform via the mapping `y = abs(x)`
+    Transform via the mapping `y = abs(x)`.
     """
     domain = constraints.real
     codomain = constraints.positive
 
-    def _forward(self, x):
+    def forward(self, x):
         return x.abs()
+
+    def inverse(self, y):
+        return y
 
 
 class AffineTransform(Transform):
@@ -167,20 +206,20 @@ class AffineTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.real
+    bijective = True
 
     def __init__(self, loc, scale, event_dim=0):
         super(AffineTransform, self).__init__()
-        self.loc = loc
-        self.scale = scale
+        self.loc, self.scale = broadcast_all(loc, scale)
         self.event_dim = event_dim
 
     def __eq__(self, other):
         return (type(other) is AffineTransform) and self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
 
-    def _forward(self, x):
+    def forward(self, x):
         return self.loc + self.scale * x
 
-    def _inverse(self, y):
+    def inverse(self, y):
         return (y - self.loc) / self.scale
 
     def log_abs_det_jacobian(self, x, y):
@@ -193,50 +232,59 @@ class AffineTransform(Transform):
         return result.expand(shape)
 
 
-class LogprobTransform(Transform):
+class BoltzmannTransform(CachedTransform):
     """
-    Transform from the simplex to unconstrained space via `y = log(x)`.
+    Transform from unconstrained space to the simplex via `y = exp(x)` then
+    normalizing.
 
     This is not bijective and cannot be used for HMC. However this acts mostly
     coordinate-wise (except for the final normalization), and this is
     appropriate for coordinate-wise optimization algorithms.
     """
-    domain = constraints.simplex
-    codomain = constraints.positive
+    domain = constraints.real
+    codomain = constraints.simplex
 
     def _forward(self, x):
-        probs = x
-        return probs.log()
-
-    def _inverse(self, y):
-        logprobs = y
+        logprobs = x
         probs = (logprobs - logprobs.max(-1, True)[0]).exp()
         probs /= probs.sum(-1, True)
         return probs
 
+    def _inverse(self, y):
+        probs = y
+        return probs.log()
 
-class StickBreakingTransform(Transform):
+
+class StickBreakingTransform(CachedTransform):
     """
-    Transform from the simplex to unconstrained of one fewer dimension via a
-    stick-breaking process.
+    Transform from unconstrained space to the simplex of one additional
+    dimension via a stick-breaking process.
+
+    This transform arises as an iterated sigmoid transform in a stick-breaking
+    construction of the `Dirichlet` distribution: the first logit is
+    transformed via sigmoid to the first probability and the probability of
+    everything else, and then the process recurses.
 
     This is bijective and appropriate for use in HMC; however it mixes
     coordinates together and is less appropriate for optimization.
     """
-    domain = constraints.simplex
-    codomain = constraints.positive
+    domain = constraints.real
+    codomain = constraints.simplex
+    bijective = True
 
     def _forward(self, x):
-        pmf = x
-        cmf = pmf.cumsum(-1)
-        sf = 1 - cmf
-        units = x[..., :-1] / sf[..., :-1]
-        return units.log()
-
-    def _inverse(self, y):
-        shape = y.shape[:-1] + (1 + y.shape[-1],)
-        one = y.new([1]).expand(y.shape[:-1] + (1,))
-        numer = sigmoid(y)
+        shape = x.shape[:-1] + (1 + x.shape[-1],)
+        one = x.new([1]).expand(x.shape[:-1] + (1,))
+        numer = sigmoid(x)
         denom = (1 - numer).cumprod(-1)
         probs = torch.cat([numer, one], -1) * torch.cat([one, denom], -1)
         return probs
+
+    def _inverse(self, y):
+        pmf = y
+        cmf = pmf.cumsum(-1)
+        sf = 1 - cmf
+        units = y[..., :-1] / sf[..., :-1]
+        return units.log()
+
+    # TODO implement .log_abs_det_jacobian()

@@ -33,14 +33,15 @@ from torch.autograd import Variable, grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, HalfNormal, Laplace, LogNormal, Multinomial, Normal,
-                                 OneHotCategorical, Pareto, StudentT, Uniform,
-                                 constraints, kl_divergence)
+                                 Gumbel, HalfNormal, Laplace, LogNormal,
+                                 Multinomial, Normal, OneHotCategorical,
+                                 Pareto, StudentT, Uniform, constraints,
+                                 kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
-                                            ExpTransform, InverseTransform,
-                                            LogprobTransform, SigmoidTransform,
+                                            BoltzmannTransform, ExpTransform,
+                                            InverseTransform, SigmoidTransform,
                                             StickBreakingTransform)
 from torch.distributions.utils import _finfo, probs_to_logits
 
@@ -2128,18 +2129,18 @@ class TestLazyLogitsInitialization(TestCase):
 class TestTransforms(TestCase):
     def setUp(self):
         self.univariate = [
+            AbsTransform(),
             ExpTransform(),
-            InverseTransform(ExpTransform()),
             SigmoidTransform(),
-            LogprobTransform(),
-            InverseTransform(SigmoidTransform()),
             AffineTransform(Variable(torch.Tensor(5).normal_()),
                             Variable(torch.Tensor(5).normal_())),
             AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
                             Variable(torch.Tensor(4, 5).normal_())),
-            LogprobTransform(),
+            BoltzmannTransform(),
             StickBreakingTransform(),
         ]
+        for t in self.univariate[:]:
+            self.univariate.append(InverseTransform(t))
 
     def _generate_data(self, constraint):
         x = torch.Tensor(4, 5)
@@ -2163,7 +2164,24 @@ class TestTransforms(TestCase):
             except NotImplementedError:
                 continue
             x2 = transform.inverse(y)  # should be implemented at least by caching
-            self.assertEqual(x2, x, message='{}.forward().inverse() error'.format(transform))
+            y2 = transform.forward(x2)  # should be implemented at least by caching
+            if transform.bijective:
+                # verify function inverse
+                self.assertEqual(x2, x, message='\n'.join([
+                    '{}.forward().inverse() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = .forward(x) = {}'.format(y),
+                    'x2 = .inverse(y) = {}'.format(x2),
+                ]))
+            else:
+                # verify weaker function pseudo-inverse
+                self.assertEqual(y2, y, message='\n'.join([
+                    '{}.forward().inverse().forward() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = .forward(x) = {}'.format(y),
+                    'x2 = .inverse(y) = {}'.format(x2),
+                    'y2 = .inverse(y) = {}'.format(y2),
+                ]))
 
     def test_forward_inverse_no_cache(self):
         for transform in self.univariate:
@@ -2171,14 +2189,26 @@ class TestTransforms(TestCase):
             try:
                 y = transform.forward(x)
                 x2 = transform.inverse(y.clone())  # bypass cache
+                y2 = transform.forward(x2)
             except NotImplementedError:
                 continue
-            self.assertEqual(x2, x, message='\n'.join([
-                '{}.forward().inverse() error'.format(transform),
-                'x = {}'.format(x),
-                'y = .forward(x) = {}'.format(y),
-                'x2 = .inverse(y) = {}'.format(x2),
-            ]))
+            if transform.bijective:
+                # verify function inverse
+                self.assertEqual(x2, x, message='\n'.join([
+                    '{}.forward().inverse() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = .forward(x) = {}'.format(y),
+                    'x2 = .inverse(y) = {}'.format(x2),
+                ]))
+            else:
+                # verify weaker function pseudo-inverse
+                self.assertEqual(y2, y, message='\n'.join([
+                    '{}.forward().inverse().forward() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = .forward(x) = {}'.format(y),
+                    'x2 = .inverse(y) = {}'.format(x2),
+                    'y2 = .inverse(y) = {}'.format(y2),
+                ]))
 
     def test_univariate_forward_jacobian(self):
         for transform in self.univariate:
