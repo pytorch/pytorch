@@ -674,6 +674,9 @@
 - name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
+- name: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
+  weight: embedding_bag_backward(grad, indices, offsets, result1, result2, weight.size(0), scale_grad_by_freq, mode, sparse)
+
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
 
