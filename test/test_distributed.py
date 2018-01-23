@@ -24,7 +24,7 @@ if not dist.is_available():
     sys.exit(0)
 
 SKIP_IF_NO_CUDA_EXIT_CODE = 75
-SKIP_IF_SINGLE_GPU_EXIT_CODE = 76
+SKIP_IF_NO_MULTIGPU_EXIT_CODE = 76
 
 
 def skip_if_no_cuda_distributed(func):
@@ -39,13 +39,15 @@ def skip_if_no_cuda_distributed(func):
     return wrapper
 
 
-def skip_if_single_gpu(func):
-    func.skip_if_single_gpu = True
+def skip_if_no_multigpu(func):
+    func.skip_if_no_multigpu = True
 
     @wraps(func)
     def wrapper(*args, **kwargs):
+        if not torch.cuda.is_available():
+            sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
         if torch.cuda.device_count() < 2:
-            sys.exit(SKIP_IF_SINGLE_GPU_EXIT_CODE)
+            sys.exit(SKIP_IF_NO_MULTIGPU_EXIT_CODE)
 
         return func(*args, **kwargs)
     return wrapper
@@ -561,6 +563,7 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
+    # MULTIGPU TESTS
     def _init_multigpu_helper(self):
         nGPUs = torch.cuda.device_count()
         world_size = dist.get_world_size()
@@ -588,8 +591,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl',
                      "Only Nccl backend supports broadcast multigpu")
-    @skip_if_no_cuda_distributed
-    @skip_if_single_gpu
+    @skip_if_no_multigpu
     def test_broadcast_multigpu(self):
         group, group_id, rank = self._init_global_test()
         visible_gpus_per_rank = self._init_multigpu_helper()
@@ -617,8 +619,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl',
                      "Only Nccl backend supports allreduce multigpu")
-    @skip_if_no_cuda_distributed
-    @skip_if_single_gpu
+    @skip_if_no_multigpu
     def test_all_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
         visible_gpus_per_rank = self._init_multigpu_helper()
@@ -645,8 +646,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl',
                      "Only Nccl backend supports reduce multigpu")
-    @skip_if_single_gpu
-    @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
         visible_gpus_per_rank = self._init_multigpu_helper()
@@ -680,8 +680,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl',
                      "Only Nccl backend supports allgather multigpu")
-    @skip_if_single_gpu
-    @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_all_gather_multigpu(self):
         group, group_id, rank = self._init_global_test()
         visible_gpus_per_rank = self._init_multigpu_helper()
@@ -691,7 +690,7 @@ class _DistTestBase(object):
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
-    class TestTCPOrGloo(TestCase, _DistTestBase):
+    class TestDistBackend(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
         JOIN_TIMEOUT = 15
@@ -738,8 +737,11 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
         def _run(self, rank):
             self.rank = rank
             try:
-                dist.init_process_group(init_method=INIT_METHOD, backend=BACKEND, world_size=int(WORLD_SIZE))
+                dist.init_process_group(init_method=INIT_METHOD,
+                                        backend=BACKEND,
+                                        world_size=int(WORLD_SIZE))
             except RuntimeError as e:
+                print('Error initializing process group', e)
                 if 'recompile' in e.args[0]:
                     sys.exit(0)
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
@@ -748,7 +750,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
             sys.exit(0)
 
         def _join_and_reduce(self, fn):
-            skip_ok = getattr(fn, "skip_if_no_cuda_distributed", False)
+            skip_ok = getattr(fn, "skip_if_no_cuda_distributed", False) \
+                or getattr(fn, "skip_if_no_multigpu", False)
             for p in self.processes:
                 p.join(self.JOIN_TIMEOUT)
                 if not skip_ok:
@@ -756,16 +759,17 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
 
             if skip_ok:
                 first_process = self.processes[0]
-                # do this first so we don't give an error message about mismatched exit codes if the first isn't valid
+                # do this first so we don't give an error message about
+                # mismatched exit codes if the first isn't valid
                 assert first_process.exitcode == 0 \
                     or first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE \
-                    or first_process.exitcode == SKIP_IF_SINGLE_GPU_EXIT_CODE
+                    or first_process.exitcode == SKIP_IF_NO_MULTIGPU_EXIT_CODE
 
                 for p in self.processes:
                     self.assertEqual(p.exitcode, first_process.exitcode)
                 if first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE:
                     raise unittest.SkipTest("cuda is not available")
-                if first_process.exitcode == SKIP_IF_SINGLE_GPU_EXIT_CODE:
+                if first_process.exitcode == SKIP_IF_NO_MULTIGPU_EXIT_CODE:
                     raise unittest.SkipTest("multigpu is not available")
 
 elif BACKEND == 'mpi':
