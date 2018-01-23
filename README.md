@@ -174,7 +174,7 @@ export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root direct
 conda install numpy pyyaml mkl setuptools cmake cffi
 
 # Add LAPACK support for the GPU
-conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
+conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 ```
 
 On macOS

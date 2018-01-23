@@ -13,7 +13,7 @@ from .gradcheck import gradcheck
 from .grad_mode import no_grad, enable_grad
 from . import profiler
 
-__all__ = ['Variable', 'Function', 'backward', 'grad_mode']
+__all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable']
 
 
 def _make_grads(outputs, grads):
@@ -139,6 +139,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         outputs, grad_outputs, retain_graph, create_graph,
         inputs)
 
+variable = torch._C._VariableFunctions.variable
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
