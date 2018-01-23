@@ -36,7 +36,7 @@ void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
 
 } // anonymous namespace
 
-extern void runJITCPPTests();
+extern std::string runJITCPPTests();
 
 void initJITBindings(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();

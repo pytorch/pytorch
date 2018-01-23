@@ -7,13 +7,13 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_engine.h"
-
 #include <vector>
 #include <iostream>
 
@@ -536,7 +536,16 @@ void testADFormulas() {
   }
 }
 
-void runJITCPPTests() {
+void testCreateAutodiffSubgraphs(std::ostream & out) {
+  auto graph = build_lstm();
+  CreateAutodiffSubgraphs(*graph, /*threshold=*/2);
+  out << "testCreateAutodiffSubgraphs\n";
+  out << *graph << "\n";
+}
+
+std::string runJITCPPTests() {
+  std::stringstream out;
+  testCreateAutodiffSubgraphs(out);
   testADFormulas();
   interpTest();
   interpStageTest();
@@ -544,6 +553,7 @@ void runJITCPPTests() {
   fusionTests();
   attributesTest();
   internedStringsTests();
+  return out.str();
 }
 
 }}

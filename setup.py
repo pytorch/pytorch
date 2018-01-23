@@ -470,6 +470,7 @@ main_sources = [
     "torch/csrc/jit/python_arg_flatten.cpp",
     "torch/csrc/jit/python_compiled_function.cpp",
     "torch/csrc/jit/variable_flags.cpp",
+    "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
