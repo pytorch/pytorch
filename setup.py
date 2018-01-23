@@ -348,6 +348,19 @@ class install(setuptools.command.install.install):
     def run(self):
         if not self.skip_build:
             self.run_command('build_deps')
+
+        # Copy include directories necessary to compile C++ extensions.
+        def copy_and_overwrite(src, dst):
+            print('copying {} -> {}'.format(src, dst))
+            if os.path.exists(dst):
+                shutil.rmtree(dst)
+            shutil.copytree(src, dst)
+
+        copy_and_overwrite('torch/csrc', 'torch/lib/include/torch/csrc/')
+        copy_and_overwrite('torch/lib/pybind11/include/pybind11/',
+                           'torch/lib/include/pybind11')
+        shutil.copy2('torch/torch.h', 'torch/lib/include/torch/torch.h')
+
         setuptools.command.install.install.run(self)
 
 
@@ -736,20 +749,35 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
-
 if __name__ == '__main__':
-    setup(name="torch", version=version,
-          description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
-          ext_modules=extensions,
-          cmdclass=cmdclass,
-          packages=packages,
-          package_data={'torch': [
-              'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll', 'lib/*.lib',
-              'lib/torch_shm_manager',
-              'lib/*.h',
-              'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-              'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
-              'lib/include/ATen/*.h',
-          ]},
-          install_requires=['pyyaml', 'numpy'],
-          )
+    setup(
+        name="torch",
+        version=version,
+        description=("Tensors and Dynamic neural networks in "
+                     "Python with strong GPU acceleration"),
+        ext_modules=extensions,
+        cmdclass=cmdclass,
+        packages=packages,
+        package_data={
+            'torch': [
+                'lib/*.so*',
+                'lib/*.dylib*',
+                'lib/*.dll',
+                'lib/*.lib',
+                'lib/torch_shm_manager',
+                'lib/*.h',
+                'lib/include/ATen/*.h',
+                'lib/include/pybind11/*.h',
+                'lib/include/pybind11/detail/*.h',
+                'lib/include/TH/*.h',
+                'lib/include/TH/generic/*.h',
+                'lib/include/THC/*.h',
+                'lib/include/THC/generic/*.h',
+                'lib/include/torch/csrc/*.h',
+                'lib/include/torch/csrc/autograd/*.h',
+                'lib/include/torch/csrc/jit/*.h',
+                'lib/include/torch/csrc/utils/*.h',
+                'lib/include/torch/torch.h',
+            ]
+        },
+        install_requires=['pyyaml', 'numpy'], )
