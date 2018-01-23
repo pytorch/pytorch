@@ -11,12 +11,15 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+
 #include <vector>
 #include <iostream>
 
@@ -672,6 +675,32 @@ void argumentSpecTest() {
 
 }
 
+void shapeAnalysisTest() {
+
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2*input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
+  auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+  auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+  auto g = build_lstm();
+  ArgumentSpec spec(false, {v(input), v(hx), v(cx), v(w_ih), v(w_hh) });
+  PropagateInputShapes(*g, spec);
+  at::Tensor r0, r1;
+  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
+  auto o0 = g->outputs()[0]->type()->expect<TensorType>();
+  auto o1 = g->outputs()[1]->type()->expect<TensorType>();
+  JIT_ASSERT(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
+  JIT_ASSERT(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
+
+}
 
 std::string runJITCPPTests() {
   std::stringstream out;
@@ -685,6 +714,7 @@ std::string runJITCPPTests() {
   attributesTest();
   internedStringsTests();
   argumentSpecTest();
+  shapeAnalysisTest();
   return out.str();
 }
 
