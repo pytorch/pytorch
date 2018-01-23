@@ -33,7 +33,8 @@ class FC(SamplingTrainableMixin, ModelLayer):
                  bias_init=None, weight_optim=None, bias_optim=None, name='fc',
                  weight_reg=None, bias_reg=None, **kwargs):
         super(FC, self).__init__(model, name, input_record, **kwargs)
-        assert isinstance(input_record, schema.Scalar), "Incorrect input type"
+        assert isinstance(input_record, schema.Scalar), (
+            "Incorrect input type {}".format(input_record))
         assert len(input_record.field_types()[0].shape) > 0, (
             "FC expects limited dimensions of the input tensor")
 
