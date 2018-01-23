@@ -105,10 +105,10 @@ void THTensor_(copy)(THTensor *tensor, THTensor *src)
         ptrdiff_t len = end - offset;
         real *tensorData = rp + offset;
         real *srcData = sp + offset;
-        THVector_(copy)(tensorData, srcData, len);  
+        THVector_(copy)(tensorData, srcData, len);
       }
 #else
-        THVector_(copy)(rp, sp, srcSize);  
+        THVector_(copy)(rp, sp, srcSize);
 #endif
 
 #else
