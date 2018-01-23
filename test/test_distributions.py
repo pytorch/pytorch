@@ -370,7 +370,7 @@ class TestDistributions(TestCase):
 
         # check entropy computation
         self.assertEqual(Geometric(p).entropy().data, scipy.stats.geom(p.data.numpy(), loc=-1).entropy(), prec=1e-3)
-        self.assertEqual(Geometric(s).entropy()[0], scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
+        self.assertEqual(float(Geometric(s).entropy()[0]), scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
 
     def test_binomial(self):
         p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
@@ -399,11 +399,11 @@ class TestDistributions(TestCase):
         bin0 = Binomial(total_count, 0)
         self.assertEqual(bin0.sample(), 0)
         self.assertAlmostEqual(bin0.log_prob(variable([0]))[0], 0, places=3)
-        self.assertEqual(bin0.log_prob(variable([1])).exp().data[0], 0, allow_inf=True)
+        self.assertEqual(float(bin0.log_prob(variable([1])).exp()), 0, allow_inf=True)
         bin1 = Binomial(total_count, 1)
         self.assertEqual(bin1.sample(), total_count)
         self.assertAlmostEqual(bin1.log_prob(variable([total_count]))[0], 0, places=3)
-        self.assertEqual(bin1.log_prob(variable([total_count - 1])).exp().data[0], 0, allow_inf=True)
+        self.assertEqual(float(bin1.log_prob(variable([total_count - 1])).exp()), 0, allow_inf=True)
 
     def test_multinomial_1d(self):
         total_count = 10
@@ -951,7 +951,7 @@ class TestDistributions(TestCase):
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
             expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)[0]
-            self.assertAlmostEqual(actual_log_prob, expected_log_prob, places=3, allow_inf=True)
+            self.assertAlmostEqual(float(actual_log_prob), expected_log_prob, places=3, allow_inf=True)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
