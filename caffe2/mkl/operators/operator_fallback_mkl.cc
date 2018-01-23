@@ -17,6 +17,7 @@
 #include "caffe2/mkl/operators/operator_fallback_mkl.h"
 
 #include "caffe2/mkl/utils/mkl_operator.h"
+#include "caffe2/operators/channel_shuffle_op.h"
 #include "caffe2/operators/cross_entropy_op.h"
 #include "caffe2/operators/dropout_op.h"
 #include "caffe2/operators/elementwise_linear_op.h"
@@ -82,5 +83,8 @@ REGISTER_MKL_OPERATOR(
 REGISTER_MKL_OPERATOR(
     ElementwiseLinear,
     mkl::MKLFallbackOp<ElementwiseLinearOp<float, CPUContext>>);
+REGISTER_MKL_OPERATOR(
+    ChannelShuffle,
+    mkl::MKLFallbackOp<ChannelShuffleOp<CPUContext>>);
 
 } // namespace caffe2
