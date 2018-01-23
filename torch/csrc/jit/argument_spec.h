@@ -156,7 +156,7 @@ private:
   const int i;
 };
 
-std::ostream & operator<<(std::ostream & out, const TensorInfo & info) {
+inline std::ostream & operator<<(std::ostream & out, const TensorInfo & info) {
   if(!info.defined()) {
     return out << "<undefined>";
   }
@@ -167,7 +167,8 @@ std::ostream & operator<<(std::ostream & out, const TensorInfo & info) {
     << ", strides=" << info.strides() << ")";
   return out;
 }
-std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
+
+inline std::ostream& operator<<(std::ostream & out, const ArgumentSpec & spec) {
   out << "{";
   for(size_t i = 0; i < spec.size(); ++i) {
     if (i > 0)
