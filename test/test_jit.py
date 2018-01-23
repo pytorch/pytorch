@@ -1165,6 +1165,11 @@ class TestJit(TestCase):
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
 
+    def test_nested_inplace(self):
+        x = Variable(torch.randn(2, 2))
+        trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        self.assertExpectedTrace(trace)
+
 
 if __name__ == '__main__':
     run_tests()

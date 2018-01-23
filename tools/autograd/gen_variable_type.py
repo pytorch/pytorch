@@ -123,15 +123,22 @@ if (${cond}) {
 RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");""")
 
-RECORD_TRACE = CodeTemplate("""\
+PRE_RECORD_TRACE = CodeTemplate("""\
+jit::tracer::PreTraceInfo trace_info;
 if (jit::tracer::isTracing( ${tensor_args} )) {
-  jit::Node *n = jit::tracer::recordTrace( "${trace_name}", ${trace_inputs}, ${trace_outputs} );
+  trace_info = jit::tracer::preRecordTrace( "${trace_name}", ${trace_inputs} );
   ${record_attributes}
 }
 """)
 
+POST_RECORD_TRACE = CodeTemplate("""\
+if (trace_info.state != nullptr) {
+  jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
+}
+""")
+
 RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(n, jit::Symbol("${name}"), ${name});""")
+setattr(trace_info.n, jit::Symbol("${name}"), ${name});""")
 
 
 def gen_variable_type(out, aten_declarations):
@@ -306,15 +313,15 @@ def emit_body(declaration):
         # Operations involving Generator and Storage are not traceable
         # at the moment
         if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in declaration['arguments']):
-            return ''
+            return ('', '')
         # We can't trace functions which don't have any Tensor or TensorList returns
         if 'Tensor' not in declaration['return_type']:
-            return ''
+            return ('', '')
         tensor_args = [arg for arg in arguments if arg['simple_type'] in {'Tensor', 'TensorList'}]
         if len(tensor_args) == 0:
-            return ''
+            return ('', '')
         if base_name in DONT_RECORD_TRACE:
-            return ''
+            return ('', '')
 
         # Note [clang-802.0.42 tuple overload bug]
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -353,8 +360,6 @@ def emit_body(declaration):
             if arg['simple_type'] in {'Tensor', 'TensorList'}:
                 continue
             local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
-        if not local['record_attributes']:
-            local['record_attributes'].append('(void)n;')
 
         local['trace_name'] = declaration['api_name']
         if local['trace_name'].endswith('_'):
@@ -362,7 +367,7 @@ def emit_body(declaration):
         local['trace_outputs'] = get_trace_outputs(declaration)
 
         combined = nested_dict(local, nested_dict(env, declaration))
-        return RECORD_TRACE.substitute(combined)
+        return (PRE_RECORD_TRACE.substitute(combined), POST_RECORD_TRACE.substitute(combined))
 
     def declare_returned_variables():
         if modifies_arguments:
@@ -457,6 +462,10 @@ def emit_body(declaration):
         body.extend(emit_check_inplace())
         body.extend(setup_derivative())
     body.append(declare_returned_variables())
+
+    pre_record_trace, post_record_trace = emit_record_trace(env)
+
+    body.append(pre_record_trace)
     body.append(emit_call(env))
     if requires_derivative:
         if inplace and is_view and not os.environ.get('WITH_SCALARS'):
@@ -465,11 +474,9 @@ def emit_body(declaration):
         # requires that the counter is incremented before it is called
         body.extend(emit_increment_version())
         body.append(emit_history())
-    # record_trace must appear before save_outputs so that saved outputs
-    # have their tracing_state saved
-    body.append(emit_record_trace(env))
     if requires_derivative:
         body.append(emit_save_outputs())
+    body.append(post_record_trace)
     body.append('return {};'.format(get_return_value()))
     return body
 
