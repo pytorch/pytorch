@@ -54,10 +54,14 @@ class MKLSumOp final : public MKLOperator<T> {
       }
       buffer_.Reset(X0.dims(), primitive_, dnnResourceDst, true);
     }
+    input_views_.resize(this->InputSize());
     for (auto i = 0; i < this->InputSize(); ++i) {
       const MKLMemory<T>& Xi = Input(i);
-      CAFFE_ENFORCE(dnnLayoutCompare_F32(X0.layout(), Xi.layout()));
-      resources_[dnnResourceMultipleSrc + i] = Xi.buffer();
+      CAFFE_ENFORCE_EQ(X0.dims(), Xi.dims());
+      // Input layouts might be different depending on preceding primitives.
+      // Create a consistent view as dnnSumCreate expects it that way.
+      input_views_[i] = Xi.View(X0.layout());
+      resources_[dnnResourceMultipleSrc + i] = input_views_[i].get();
     }
     if (Y != &X0) {
       // TODO: MKLDNN seems broken in the in-place case, so when we specify
@@ -73,6 +77,7 @@ class MKLSumOp final : public MKLOperator<T> {
  private:
   std::vector<float> coefficients_;
   vector<TIndex> cached_input_dims_;
+  vector<std::shared_ptr<void>> input_views_;
 };
 
 } // namespace mkl

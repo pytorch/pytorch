@@ -479,13 +479,17 @@ class MKLMemory {
     return layout_;
   }
 
+  inline bool is_user_layout() const {
+    return layout_is_user_layout_;
+  }
+
   // Returns a view of the content. We mark this function const, but be noted
   // that the returned std::shared_ptr is not const protected - user discretion
   // is recommended for correctness.
   std::shared_ptr<void> View(
       dnnLayout_t layout_wanted,
-      dnnPrimitive_t primitive,
-      dnnResourceType_t type) const {
+      dnnPrimitive_t primitive = nullptr,
+      dnnResourceType_t type = dnnResourceNumber) const {
     std::lock_guard<std::mutex> lock(buffer_lock_);
     if (dnnLayoutCompare<T>(layout_wanted, layout_)) {
       // If they are the same, return the original content.
@@ -499,7 +503,7 @@ class MKLMemory {
           dnnConversionCreate<T>, layout_, layout_wanted);
       MKLDNN_SAFE_CALL(dnnConversionExecute<T>(
           convert, buffer_.get(), temp_buffer));
-      if (FLAGS_caffe2_mkl_implicit_layout_change) {
+      if (primitive && FLAGS_caffe2_mkl_implicit_layout_change) {
         VLOG(2) << "Implicit layout change set. "
                    "Changing the underlying storage.";
         // We will need to call Reset to set up all the member variables.
