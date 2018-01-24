@@ -94,6 +94,7 @@ class DataParallelModelTest(TestCase):
             devices=devices,
             cpu_device=not gpu,
             shared_model=not gpu,
+            combine_spatial_bn=not gpu,
         )
         data_parallel_model.AddBlobSync(model, ["sync_num"])
 

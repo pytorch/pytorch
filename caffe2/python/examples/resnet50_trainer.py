@@ -446,6 +446,7 @@ def Train(args):
         optimize_gradient_memory=False,
         cpu_device=args.use_cpu,
         shared_model=args.use_cpu,
+        combine_spatial_bn=args.use_cpu,
     )
 
     if args.model_parallel:
