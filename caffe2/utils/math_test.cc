@@ -289,15 +289,20 @@ TEST(MathTest, TranposeTest) {
 
   {
     // Test for 1D transpose.
-    TensorCPU X(std::vector<int>{3});
-    TensorCPU Y(std::vector<int>{3});
+    const std::vector<int> x_dims = {3};
+    const std::vector<int> y_dims = {3};
+    const std::vector<int> axes = {0};
+    TensorCPU X(x_dims);
+    TensorCPU Y(y_dims);
     for (int i = 0; i < 3; ++i) {
       X.mutable_data<float>()[i] = static_cast<float>(i + 1);
     }
     math::Transpose<float, CPUContext>(
-        X.dims(),
-        Y.dims(),
-        {0},
+        1,
+        x_dims.data(),
+        y_dims.data(),
+        axes.data(),
+        3,
         X.data<float>(),
         Y.mutable_data<float>(),
         &cpu_context);
@@ -308,15 +313,20 @@ TEST(MathTest, TranposeTest) {
 
   {
     // Test for 2D transpose.
-    TensorCPU X(std::vector<int>{2, 3});
-    TensorCPU Y(std::vector<int>{3, 2});
+    const std::vector<int> x_dims = {2, 3};
+    const std::vector<int> y_dims = {3, 2};
+    const std::vector<int> axes = {1, 0};
+    TensorCPU X(x_dims);
+    TensorCPU Y(y_dims);
     for (int i = 0; i < 6; ++i) {
       X.mutable_data<float>()[i] = static_cast<float>(i + 1);
     }
     math::Transpose<float, CPUContext>(
-        X.dims(),
-        Y.dims(),
-        {1, 0},
+        2,
+        x_dims.data(),
+        y_dims.data(),
+        axes.data(),
+        6,
         X.data<float>(),
         Y.mutable_data<float>(),
         &cpu_context);
@@ -329,15 +339,20 @@ TEST(MathTest, TranposeTest) {
 
   {
     // Test for 3D transpose.
-    TensorCPU X(std::vector<int>{2, 2, 2});
-    TensorCPU Y(std::vector<int>{2, 2, 2});
+    const std::vector<int> x_dims = {2, 2, 2};
+    const std::vector<int> y_dims = {2, 2, 2};
+    const std::vector<int> axes1 = {1, 2, 0};
+    TensorCPU X(x_dims);
+    TensorCPU Y(y_dims);
     for (int i = 0; i < 8; ++i) {
       X.mutable_data<float>()[i] = static_cast<float>(i + 1);
     }
     math::Transpose<float, CPUContext>(
-        X.dims(),
-        Y.dims(),
-        {1, 2, 0},
+        3,
+        x_dims.data(),
+        y_dims.data(),
+        axes1.data(),
+        8,
         X.data<float>(),
         Y.mutable_data<float>(),
         &cpu_context);
@@ -347,12 +362,15 @@ TEST(MathTest, TranposeTest) {
       EXPECT_FLOAT_EQ(expected_output1[i], Y.data<float>()[i]);
     }
 
+    const std::vector<int> axes2 = {1, 0, 2};
     math::Set<float, CPUContext>(
         Y.size(), 0.0f, Y.mutable_data<float>(), &cpu_context);
     math::Transpose<float, CPUContext>(
-        X.dims(),
-        Y.dims(),
-        {1, 0, 2},
+        3,
+        x_dims.data(),
+        y_dims.data(),
+        axes2.data(),
+        8,
         X.data<float>(),
         Y.mutable_data<float>(),
         &cpu_context);

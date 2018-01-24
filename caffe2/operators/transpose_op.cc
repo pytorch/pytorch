@@ -22,21 +22,6 @@
 
 namespace caffe2 {
 
-template <>
-template <typename T>
-bool TransposeOp<CPUContext>::DoRunWithType() {
-  const auto& X = Input(0);
-  auto* Y = Output(0);
-  math::Transpose<T, CPUContext>(
-      X.dims(),
-      new_dims_,
-      axes_,
-      X.template data<T>(),
-      Y->template mutable_data<T>(),
-      &context_);
-  return true;
-}
-
 REGISTER_CPU_OPERATOR(Transpose, TransposeOp<CPUContext>);
 
 #ifdef CAFFE2_HAS_MKL_DNN
@@ -114,5 +99,7 @@ class GetTransposeGradient : public GradientMakerBase {
     return ops;
   }
 };
+
 REGISTER_GRADIENT(Transpose, GetTransposeGradient);
+
 } // namespace caffe2

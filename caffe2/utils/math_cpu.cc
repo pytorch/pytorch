@@ -1517,23 +1517,23 @@ namespace {
 #ifdef CAFFE2_USE_HPTT
 
 bool TryTransposeWithHPTT(
-    const std::vector<TIndex>& dims,
-    const std::vector<int>& axes,
+    const int num_axes,
+    const int* dims,
+    const int* axes,
     const float* X,
     float* Y) {
-  std::vector<int> axes_cm(axes.size());
-  std::vector<int> dims_cm(axes.size());
-  const int n = axes.size();
+  std::vector<int> axes_cm(num_axes);
+  std::vector<int> dims_cm(num_axes);
 
   // Convert row-major index to column-major.
-  const auto cm_fn = [n](const int i) { return n - i - 1; };
-  for (int i = 0; i < n; ++i) {
+  const auto cm_fn = [num_axes](const int i) { return num_axes - i - 1; };
+  for (int i = 0; i < num_axes; ++i) {
     axes_cm[i] = cm_fn(axes[cm_fn(i)]);
     dims_cm[i] = dims[cm_fn(i)];
   }
   auto plan = hptt::create_plan(
       axes_cm.data(),
-      n,
+      num_axes,
       1.0,
       X,
       dims_cm.data(),
@@ -1552,26 +1552,22 @@ bool TryTransposeWithHPTT(
 
 #endif // CAFFE2_USE_HPTT
 
-std::vector<TIndex> MakeBase(
-    const std::vector<TIndex>& dims,
-    const std::vector<int>& axes,
-    const int num) {
-  std::vector<TIndex> base(num, 0);
-  std::vector<TIndex> buff(num, 0);
-  TIndex cur_base = 1;
-  for (int i = num - 1; i >= 0; --i) {
-    buff[i] = cur_base;
-    cur_base *= dims[i];
+std::vector<int>
+ComputeXStrides(const int num_axes, const int* dims, const int* axes) {
+  std::vector<int> x_strides(num_axes);
+  std::vector<int> buff(num_axes);
+  int cur_stride = 1;
+  for (int i = num_axes - 1; i >= 0; --i) {
+    buff[i] = cur_stride;
+    cur_stride *= dims[i];
   }
-  for (int i = 0; i < num; ++i) {
-    base[i] = buff[axes[i]];
+  for (int i = 0; i < num_axes; ++i) {
+    x_strides[i] = buff[axes[i]];
   }
-  return base;
+  return x_strides;
 }
 
-void IncreaseIndex(
-    const std::vector<TIndex>& dims,
-    std::vector<TIndex>* index) {
+void IncreaseIndex(const int* dims, std::vector<int>* index) {
   for (int i = index->size() - 1; i >= 0; --i) {
     ++index->at(i);
     if (index->at(i) >= dims[i]) {
@@ -1584,17 +1580,15 @@ void IncreaseIndex(
 
 template <typename T>
 void TransposeCPU(
-    const std::vector<TIndex>& x_dims,
-    const std::vector<TIndex>& y_dims,
-    const std::vector<int>& axes,
+    const int num_axes,
+    const int* x_dims,
+    const int* y_dims,
+    const int* axes,
+    const int data_size,
     const T* X,
     T* Y) {
-  const TIndex count = std::accumulate(
-      x_dims.cbegin(), x_dims.cend(), TIndex(1), std::multiplies<TIndex>());
-  const int num_axes = axes.size();
-
   // Measure amount of contiguous data we can copy at once
-  TIndex block_size = 1;
+  int block_size = 1;
   int num_shared_idxs = 0;
   for (int i = num_axes - 1; i >= 0 && axes[i] == i; --i) {
     block_size *= y_dims[i];
@@ -1602,17 +1596,17 @@ void TransposeCPU(
   }
 
   if (num_axes < 2 || num_shared_idxs == num_axes) {
-    memcpy(Y, X, count * sizeof(T));
+    memcpy(Y, X, data_size * sizeof(T));
     return;
   }
 
   const int itr_axes = num_axes - num_shared_idxs;
-  const std::vector<TIndex> base_x = MakeBase(x_dims, axes, itr_axes);
-  std::vector<TIndex> index_digits(itr_axes, 0);
-  const TIndex num_blocks = count / block_size;
-  for (TIndex y_index = 0; y_index < num_blocks; ++y_index) {
-    const TIndex x_index = std::inner_product(
-        base_x.cbegin(), base_x.cend(), index_digits.cbegin(), TIndex(0));
+  const std::vector<int> x_strides = ComputeXStrides(itr_axes, x_dims, axes);
+  std::vector<int> index_digits(itr_axes, 0);
+  const int num_blocks = data_size / block_size;
+  for (int y_index = 0; y_index < num_blocks; ++y_index) {
+    const int x_index = std::inner_product(
+        x_strides.cbegin(), x_strides.cend(), index_digits.cbegin(), 0);
     if (block_size == 1) {
       Y[y_index] = X[x_index];
     } else {
@@ -1629,30 +1623,34 @@ void TransposeCPU(
 
 template <>
 void Transpose<float, CPUContext>(
-    const std::vector<TIndex>& x_dims,
-    const std::vector<TIndex>& y_dims,
-    const std::vector<int>& axes,
+    const int num_axes,
+    const int* x_dims,
+    const int* y_dims,
+    const int* axes,
+    const int data_size,
     const float* X,
     float* Y,
     CPUContext* /* context */) {
 #ifdef CAFFE2_USE_HPTT
-  if (TryTransposeWithHPTT(x_dims, axes, X, Y)) {
+  if (TryTransposeWithHPTT(num_axes, x_dims, axes, X, Y)) {
     return;
   }
 #endif // CAFFE2_USE_HPTT
-  TransposeCPU(x_dims, y_dims, axes, X, Y);
+  TransposeCPU(num_axes, x_dims, y_dims, axes, data_size, X, Y);
 }
 
-#define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
-  template <>                                 \
-  void Transpose<T, CPUContext>(              \
-      const std::vector<TIndex>& x_dims,      \
-      const std::vector<TIndex>& y_dims,      \
-      const std::vector<int>& axes,           \
-      const T* X,                             \
-      T* Y,                                   \
-      CPUContext* /* context */) {            \
-    TransposeCPU(x_dims, y_dims, axes, X, Y); \
+#define CAFFE2_SPECIALIZED_TRANSPOSE(T)                            \
+  template <>                                                      \
+  void Transpose<T, CPUContext>(                                   \
+      const int num_axes,                                          \
+      const int* x_dims,                                           \
+      const int* y_dims,                                           \
+      const int* axes,                                             \
+      const int data_size,                                         \
+      const T* X,                                                  \
+      T* Y,                                                        \
+      CPUContext* /* context */) {                                 \
+    TransposeCPU(num_axes, x_dims, y_dims, axes, data_size, X, Y); \
   }
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_TRANSPOSE(int)
