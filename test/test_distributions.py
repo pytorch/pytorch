@@ -270,6 +270,21 @@ class TestDistributions(TestCase):
             self.assertLess(-threshold, bias, message)
             self.assertLess(bias, threshold, message)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def _check_sampler_discrete(self, torch_dist, ref_dist, message,
+                                num_samples=10000, failure_rate=1e-3):
+        """Runs a Chi2-test for the support, but ignores tail instead of combining"""
+        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        if isinstance(torch_samples, Variable):
+            torch_samples = torch_samples.data
+        torch_samples = torch_samples.cpu().numpy()
+        unique, counts = np.unique(torch_samples, return_counts=True)
+        pmf = ref_dist.pmf(unique)
+        msk = (counts > 5) & ((pmf * num_samples) > 5)
+        self.assertGreater(pmf[msk].sum(), 0.9, "Distribution is too sparse for test; try increasing num_samples")
+        chisq, p = scipy.stats.chisquare(counts[msk], pmf[msk] * num_samples)
+        self.assertGreater(p, failure_rate, message)
+
     def _check_enumerate_support(self, dist, examples):
         for param, expected in examples:
             param = torch.Tensor(param)
@@ -371,6 +386,14 @@ class TestDistributions(TestCase):
         # check entropy computation
         self.assertEqual(Geometric(p).entropy().data, scipy.stats.geom(p.data.numpy(), loc=-1).entropy(), prec=1e-3)
         self.assertEqual(float(Geometric(s).entropy()[0]), scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_geometric_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for prob in [0.01, 0.18, 0.8]:
+            self._check_sampler_discrete(Geometric(prob),
+                                         scipy.stats.geom(p=prob, loc=-1),
+                                         'Geometric(prob={})'.format(prob))
 
     def test_binomial(self):
         p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
