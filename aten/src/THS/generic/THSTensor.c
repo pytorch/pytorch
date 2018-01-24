@@ -345,7 +345,6 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   i = self->size[d1];
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
-  self->coalesced = 0;
   THLongTensor_free(indices);
 }
 
