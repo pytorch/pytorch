@@ -264,7 +264,7 @@
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: thnn_conv_transpose3d(Tensor self, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 
