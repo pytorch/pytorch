@@ -1,12 +1,13 @@
 from numbers import Number
 
 import torch
+from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.distribution import ExponentialFamily
+from torch.distributions.utils import broadcast_all, lazy_property
 
 
-class Exponential(Distribution):
+class Exponential(ExponentialFamily):
     r"""
     Creates a Exponential distribution parameterized by `rate`.
 
@@ -23,6 +24,7 @@ class Exponential(Distribution):
     params = {'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
+    _zero_carrier_measure = True
 
     def __init__(self, rate):
         self.rate, = broadcast_all(rate)
@@ -39,3 +41,15 @@ class Exponential(Distribution):
 
     def entropy(self):
         return 1.0 - torch.log(self.rate)
+
+    def natural_params(self):
+        return self._natural_params
+
+    @lazy_property
+    def _natural_params(self):
+        V1 = Variable(-self.rate, required_grad=True)
+        return (V1, )
+
+    def log_normalizer(self):
+        x = self._natural_params
+        return -torch.log(-x)
