@@ -1,0 +1,29 @@
+testCreateAutodiffSubgraphs
+graph(%0 : UNKNOWN_TYPE
+      %1 : UNKNOWN_TYPE
+      %2 : UNKNOWN_TYPE
+      %3 : UNKNOWN_TYPE
+      %4 : UNKNOWN_TYPE) {
+  %5 : UNKNOWN_TYPE = mm(%1, %4)
+  %6 : UNKNOWN_TYPE = mm(%0, %3)
+  %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %5)
+  %8 : UNKNOWN_TYPE, %9 : UNKNOWN_TYPE, %10 : UNKNOWN_TYPE, %11 : UNKNOWN_TYPE = chunk[chunks=4, dim=1](%7)
+  %12 : UNKNOWN_TYPE = sigmoid(%8)
+  %13 : UNKNOWN_TYPE = sigmoid(%11)
+  %14 : UNKNOWN_TYPE = tanh(%10)
+  %15 : UNKNOWN_TYPE = sigmoid(%9)
+  %21 : UNKNOWN_TYPE = GraphExecutor_0(%12, %14, %15, %2)
+  %19 : UNKNOWN_TYPE = tanh(%21)
+  %20 : UNKNOWN_TYPE = mul(%13, %19)
+  return (%20, %21);
+}
+with GraphExecutor_0 = graph(%1 : UNKNOWN_TYPE
+      %2 : UNKNOWN_TYPE
+      %4 : UNKNOWN_TYPE
+      %5 : UNKNOWN_TYPE) {
+  %0 : UNKNOWN_TYPE = mul(%1, %2)
+  %3 : UNKNOWN_TYPE = mul(%4, %5)
+  %6 : UNKNOWN_TYPE = add[alpha={1}](%3, %0)
+  return (%6);
+}
+
