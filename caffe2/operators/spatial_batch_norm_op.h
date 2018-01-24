@@ -33,7 +33,8 @@ class SpatialBNOp : public Operator<Context> {
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)),
         momentum_(OperatorBase::GetSingleArgument<float>("momentum", 0.9f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+        num_batches_(OperatorBase::GetSingleArgument<int>("num_batches", 1)) {
     // TODO(jiayq): update the input and output size checks.
     CAFFE_ENFORCE(
         (is_test_ && OutputSize() == 1) || (!is_test_ && OutputSize() == 5));
@@ -52,7 +53,8 @@ class SpatialBNOp : public Operator<Context> {
   double epsilon_;
   double momentum_;
   StorageOrder order_;
-  INPUT_TAGS(INPUT, SCALE, BIAS, EST_MEAN, EST_VAR);
+  int num_batches_;
+  INPUT_TAGS(INPUT, SCALE, BIAS, EST_MEAN, EST_VAR, SUMS, SUMSQ);
   OUTPUT_TAGS(OUTPUT, RUNNING_MEAN, RUNNING_VAR, SAVED_MEAN, SAVED_INV_VAR);
 };
 
@@ -65,8 +67,9 @@ class SpatialBNGradientOp : public Operator<Context> {
         is_test_(OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)),
         epsilon_(OperatorBase::GetSingleArgument<float>("epsilon", 1e-5f)),
         order_(StringToStorageOrder(
-            OperatorBase::GetSingleArgument<string>("order", "NCHW"))) {
-    CAFFE_ENFORCE(InputSize() == 5);
+            OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
+        num_batches_(OperatorBase::GetSingleArgument<int>("num_batches", 1)) {
+    CAFFE_ENFORCE(InputSize() == 5 || InputSize() == 7);
     CAFFE_ENFORCE(OutputSize() == 3);
   }
   ~SpatialBNGradientOp() {}
@@ -79,8 +82,16 @@ class SpatialBNGradientOp : public Operator<Context> {
   bool is_test_;
   double epsilon_;
   StorageOrder order_;
+  int num_batches_;
 
-  INPUT_TAGS(INPUT, SCALE, OUTPUT_GRAD, SAVED_MEAN, SAVED_INV_VAR);
+  INPUT_TAGS(
+      INPUT,
+      SCALE,
+      OUTPUT_GRAD,
+      SAVED_MEAN,
+      SAVED_INV_VAR,
+      AGGREGATE_SCALE_GRAD,
+      AGGREGATE_BIAS_GRAD);
   OUTPUT_TAGS(INPUT_GRAD, SCALE_GRAD, BIAS_GRAD);
 };
 
