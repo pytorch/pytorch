@@ -928,6 +928,13 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    def test_bernoulli_variable(self):
+        # TODO: delete when tensor/variable are merged
+        from torch.autograd import Variable
+        x = torch.cuda.FloatTensor([0, 1]).cuda()
+        x_var = Variable(x)
+        self.assertEqual(x_var.bernoulli().data, x.bernoulli())
+
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
         y = torch.randn(2, 1, 1).cuda()
