@@ -12,6 +12,7 @@ __all__ = [
     'is_dependent',
     'less_than',
     'lower_cholesky',
+    'lower_triangular',
     'nonnegative_integer',
     'positive',
     'positive_integer',
@@ -160,6 +161,14 @@ class _Simplex(Constraint):
         return (value >= 0) & ((value.sum(-1, True) - 1).abs() < 1e-6)
 
 
+class _LowerTriangular(Constraint):
+    """
+    Constrain to lower-triangular square matrices.
+    """
+    def check(self, value):
+        return (torch.tril(value) == value).min(-1).min(-1)
+
+
 class _LowerCholesky(Constraint):
     """
     Constrain to lower-triangular square matrices with nonnegative diagonals.
@@ -183,4 +192,5 @@ less_than = _LessThan
 unit_interval = _Interval(0, 1)
 interval = _Interval
 simplex = _Simplex()
+lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
