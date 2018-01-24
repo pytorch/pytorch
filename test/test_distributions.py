@@ -49,6 +49,7 @@ except ImportError:
 
 SCALAR_SHAPE = () if torch._C._with_scalars() else (1,)
 
+
 def pairwise(Dist, *params):
     """
     Creates a pair of distributions `Dist` initialzed to test each element of
