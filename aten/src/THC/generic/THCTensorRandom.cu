@@ -417,6 +417,15 @@ THC_API void THCTensor_(bernoulli)(THCState* state, THCTensor *self_, double p)
   THCTensor_(freeCopyTo)(state, self, self_);
 };
 
+void THCTensor_(bernoulli_Tensor)(THCState *state, THCTensor *self, THCTensor* p)
+{
+#if defined(THC_REAL_IS_FLOAT)
+  THCTensor_(bernoulli_FloatTensor)(state, self, p);
+#elif defined(THC_REAL_IS_DOUBLE)
+  THCTensor_(bernoulli_DoubleTensor)(state, self, p);
+#endif
+}
+
 #define DEFINE_BERNOULLI_TENSOR(NAME, PROB_TYPE, PROB_DATA_TYPE)               \
 THC_API void THCTensor_(NAME)(THCState* state,                                 \
         THCTensor *self_, PROB_TYPE *probs_)                                   \
