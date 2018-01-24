@@ -128,39 +128,48 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);
 }
 
-Node* recordTrace(std::string op, // TODO: make this a Symbol
-                  at::ArrayRef<Variable> inputs,
-                  at::ArrayRef<Variable> outputs) {
-  auto state = getTracingState(inputs);
-  auto& graph = state->graph;
-  // TODO: Technically, we could reduce the scope of the lock, but since we
-  // haven't actually specified what the locking contract is, be conservative.
-  auto state_lock = state->lock();
+// We must record the nodes of inputs before we actually carry out
+// the operation, because an inplace operation may destroy the information
+// we're interested in.  See #4480.
+PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
+                            at::ArrayRef<Variable> inputs) {
+  PreTraceInfo info;
+  info.state = getTracingState(inputs);
+  auto& graph = info.state->graph;
+  auto state_lock = info.state->lock();
 
   Node *n = graph->create(Symbol(op), 0 /* initial outputs */);
   auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
 
   for (Variable input : inputs) {
-    n->addInput(getValueTrace(state, input));
+    n->addInput(getValueTrace(info.state, input));
   }
 
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  auto assignOutput = [&state](const Variable & output, Value * value) {
+  info.n = n;
+
+  return info;  // RVO
+}
+
+void postRecordTrace(const PreTraceInfo& info,
+                     at::ArrayRef<Variable> outputs) {
+  // TODO: Technically, we could reduce the scope of the lock, but since we
+  // haven't actually specified what the locking contract is, be conservative.
+  auto state_lock = info.state->lock();
+
+  auto assignOutput = [&info](const Variable & output, Value * value) {
     if (output.defined()) {
       value->inferTypeFrom(output.data());
-      setValueTrace(state, output, value);
+      setValueTrace(info.state, output, value);
     }
   };
 
-  for(size_t i = 0; i < outputs.size(); i++) {
-    assignOutput(outputs[i], n->addOutput());
+  for (size_t i = 0; i < outputs.size(); i++) {
+    assignOutput(outputs[i], info.n->addOutput());
   }
-
-  // Return the n so that attributes can be added.
-  return n;
 }
 
 }}}
