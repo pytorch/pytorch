@@ -36,14 +36,14 @@ extern "C" {
  * \brief The device type in DLContext.
  */
 typedef enum {
-  kCPU = 1,
-  kGPU = 2,
-  // kCPUPinned = kCPU | kGPU
-  kCPUPinned = 3,
-  kOpenCL = 4,
-  kMetal = 8,
-  kVPI = 9,
-  kROCM = 10,
+  kDLCPU = 1,
+  kDLGPU = 2,
+  // kDLCPUPinned = kDLCPU | kDLGPU
+  kDLCPUPinned = 3,
+  kDLOpenCL = 4,
+  kDLMetal = 8,
+  kDLVPI = 9,
+  kDLROCM = 10,
 } DLDeviceType;
 
 /*!
@@ -60,9 +60,9 @@ typedef struct {
  * \brief The type code options DLDataType.
  */
 typedef enum {
-  kInt = 0U,
-  kUInt = 1U,
-  kFloat = 2U,
+  kDLInt = 0U,
+  kDLUInt = 1U,
+  kDLFloat = 2U,
 } DLDataTypeCode;
 
 /*!
@@ -116,22 +116,25 @@ typedef struct {
 } DLTensor;
 
 /*!
- * \brief C Tensor object, manage memory of DLTensor.
+ * \brief C Tensor object, manage memory of DLTensor. This data structure is
+ *  intended to faciliate the borrowing of DLTensor by another framework. It is
+ *  not meant to transfer the tensor. When the borrowing framework doesn't need
+ *  the tensor, it should call the deleter to notify the host that the resource
+ *  is no longer needed.
  */
 typedef struct DLManagedTensor {
-  /*! \DLTensor which is being memory managed */
-  DLTensor dlTensor;
-  /*! \brief context in which DLManagedTensor is used in a framework. It can
-   *   also be NULL
+  /*! \brief DLTensor which is being memory managed */
+  DLTensor dl_tensor;
+  /*! \brief the context of the original host framework of DLManagedTensor in
+   *   which DLManagedTensor is used in the framework. It can also be NULL.
    */
-  void * ctx;
+  void * manager_ctx;
   /*! \brief Destructor signature void (*)(void*) - this should be called
-   *   to destruct ctx which holds the DLManagedTensor. It can be NULL if there
-   *   is no way for the caller to provide a reasonable destructor.
+   *   to destruct manager_ctx which holds the DLManagedTensor. It can be NULL
+   *   if there is no way for the caller to provide a reasonable destructor.
    */
-  void (*destructor)(DLManagedTensor * self);
+  void (*deleter)(struct DLManagedTensor * self);
 } DLManagedTensor;
-
 #ifdef __cplusplus
 }  // DLPACK_EXTERN_C
 #endif
