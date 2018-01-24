@@ -29,6 +29,7 @@ import numpy as np
 
 class TestNGramOps(hu.HypothesisTestCase):
     @given(
+        seed=st.integers(0, 2**32 - 1),
         N=st.integers(min_value=10, max_value=100),
         D=st.integers(min_value=2, max_value=10),
         out_of_vcb=st.floats(min_value=0, max_value=0.5),
@@ -37,8 +38,17 @@ class TestNGramOps(hu.HypothesisTestCase):
         **hu.gcs_cpu_only
     )
     def test_ngram_from_categorical_op(
-        self, N, D, out_of_vcb, max_categorical_limit, max_in_vcb_val, gc, dc
+        self,
+        seed,
+        N,
+        D,
+        out_of_vcb,
+        max_categorical_limit,
+        max_in_vcb_val,
+        gc,
+        dc,
     ):
+        np.random.seed(seed)
         col_num = max(int(D / 2), 1)
         col_ids = np.random.choice(D, col_num, False).astype(np.int32)
         categorical_limits = np.random.randint(
