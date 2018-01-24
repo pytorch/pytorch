@@ -25,6 +25,18 @@ Transform proposal bounding boxes to target bounding box using bounding box
     regression deltas.
 )DOC")
     .Arg("weights", "vector<float> weights [wx, wy, ww, wh] for the deltas")
+    .Arg(
+        "apply_scale",
+        "bool (default true), transform the boxes to the scaled image space"
+        " after applying the bbox deltas."
+        "Set to false to match the detectron code, set to true for keypoint"
+        " models and for backward compatibility")
+    .Arg(
+        "correct_transform_coords",
+        "bool (default false), Correct bounding box transform coordates,"
+        " see bbox_transform() in boxes.py "
+        "Set to true to match the detectron code, set to false for backward"
+        " compatibility")
     .Input(
         0,
         "rois",
@@ -69,12 +81,14 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
 
   CAFFE_ENFORCE_EQ(iminfo_in.size(), 3);
   ConstEigenVectorArrayMap<float> iminfo(iminfo_in.data<float>(), 3);
-  int img_h = iminfo(0);
-  int img_w = iminfo(1);
+  const float scale_before = iminfo(2);
+  const float scale_after = apply_scale_ ? iminfo(2) : 1.0;
+  int img_h = int(iminfo(0) / scale_before + 0.5);
+  int img_w = int(iminfo(1) / scale_before + 0.5);
 
   Eigen::Map<const ERArrXXf> boxes0(
       roi_in.data<float>(), roi_in.dim32(0), roi_in.dim32(1));
-  auto boxes = boxes0.rightCols(4);
+  auto boxes = boxes0.rightCols(4) / scale_before;
 
   Eigen::Map<const ERArrXXf> deltas0(
       delta_in.data<float>(), delta_in.dim32(0), delta_in.dim32(1));
@@ -86,9 +100,14 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
   int num_classes = deltas0.cols() / 4;
   for (int k = 0; k < num_classes; k++) {
     auto deltas = deltas0.block(0, k * 4, N, 4);
-    auto trans_boxes = utils::bbox_transform(boxes, deltas, weights_);
+    auto trans_boxes = utils::bbox_transform(
+        boxes,
+        deltas,
+        weights_,
+        utils::BBOX_XFORM_CLIP_DEFAULT,
+        correct_transform_coords_);
     auto clip_boxes = utils::clip_boxes(trans_boxes, img_h, img_w);
-    new_boxes.block(0, k * 4, N, 4) = clip_boxes;
+    new_boxes.block(0, k * 4, N, 4) = clip_boxes * scale_after;
   }
 
   return true;

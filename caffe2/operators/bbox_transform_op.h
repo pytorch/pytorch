@@ -17,7 +17,12 @@ class BBoxTransformOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws),
         weights_(OperatorBase::GetRepeatedArgument<T>(
             "weights",
-            vector<T>{1.0f, 1.0f, 1.0f, 1.0f})) {
+            vector<T>{1.0f, 1.0f, 1.0f, 1.0f})),
+        apply_scale_(
+            OperatorBase::GetSingleArgument<bool>("apply_scale", true)),
+        correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
+            "correct_transform_coords",
+            false)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -30,6 +35,15 @@ class BBoxTransformOp final : public Operator<Context> {
  protected:
   // weights [wx, wy, ww, wh] to apply to the regression target
   vector<T> weights_;
+  // Transform the boxes to the scaled image space after applying the bbox
+  //   deltas.
+  // Set to false to match the detectron code, set to true for the keypoint
+  //   model and for backward compatibility
+  bool apply_scale_{true};
+  // Correct bounding box transform coordates, see bbox_transform() in boxes.py
+  // Set to true to match the detectron code, set to false for backward
+  //   compatibility
+  bool correct_transform_coords_{false};
 };
 
 } // namespace caffe2
