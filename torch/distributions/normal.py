@@ -3,11 +3,12 @@ from numbers import Number
 
 import torch
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
+from torch.autograd import Variable
 
 
-class Normal(Distribution):
+class Normal(ExponentialFamily):
     r"""
     Creates a normal (also called Gaussian) distribution parameterized by
     `loc` and `scale`.
@@ -27,6 +28,8 @@ class Normal(Distribution):
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
+    _natural_params = None
+    _zero_carrier_measure = True
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -54,3 +57,14 @@ class Normal(Distribution):
 
     def entropy(self):
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
+
+    def natural_params(self):
+        if self._natural_params is None:
+            V1 = Variable(self.loc / self.scale.pow(2), requires_grad=True)
+            V2 = Variable(-0.5 * self.scale.pow(2).reciprocal(), requires_grad=True)
+            self._natural_params = (V1, V2)
+        return self._natural_params
+
+    def log_normalizer(self):
+        x, y = self._natural_params
+        return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)

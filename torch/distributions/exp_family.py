@@ -5,6 +5,8 @@ from torch.autograd import Variable
 
 class ExponentialFamily(Distribution):
 
+    _zero_carrier_measure = None
+
     def natural_params(self):
         """
         Abstract method for natural parameters. Returns a tuple of Variables based
@@ -19,15 +21,8 @@ class ExponentialFamily(Distribution):
         """
         raise NotImplementedError
 
-    def zero_carrier_measure(self):
-        """
-        Abstract method for carrier measure. Returns a bool for distribution
-        if whether the carrier_measure is zero
-        """
-        raise NotImplementedError
-
     def entropy(self):
-        if self.zero_carrier_measure():
+        if self._zero_carrier_measure:
             nparams = self.natural_params()
             lg_normal = self.log_normalizer()
             gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
@@ -35,3 +30,5 @@ class ExponentialFamily(Distribution):
             for np, g in zip(nparams, gradients):
                 result -= torch.dot(np, g)
             return result
+        else:
+            raise ValueError("There is no closed form solution for non-zero carrier measure")

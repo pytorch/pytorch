@@ -39,6 +39,7 @@ from .chi2 import Chi2
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
+from .exp_family import ExponentialFamily
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
@@ -62,6 +63,7 @@ __all__ = [
     'Dirichlet',
     'Distribution',
     'Exponential',
+    'ExponentialFamily',
     'FisherSnedecor',
     'Gamma',
     'Geometric',
