@@ -25,6 +25,7 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
+from tools.setup_helpers.ib_detect import WITH_IB_DEVICES
 
 DEBUG = check_env_flag('DEBUG')
 
@@ -137,7 +138,9 @@ def build_libs(libs):
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
-    if WITH_GLOO_IBVERBS:
+
+    if WITH_DISTRIBUTED and (WITH_IB_DEVICES or
+                             check_env_flag("WITH_GLOO_IBVERBS")):
         build_libs_cmd += ['--with-gloo-ibverbs']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
