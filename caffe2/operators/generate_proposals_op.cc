@@ -141,8 +141,12 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 
   // Transform anchors into proposals via bbox transformations
   static const std::vector<float> bbox_weights{1.0, 1.0, 1.0, 1.0};
-  auto proposals =
-      utils::bbox_transform(all_anchors.array(), bbox_deltas, bbox_weights);
+  auto proposals = utils::bbox_transform(
+      all_anchors.array(),
+      bbox_deltas,
+      bbox_weights,
+      utils::BBOX_XFORM_CLIP_DEFAULT,
+      correct_transform_coords_);
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)

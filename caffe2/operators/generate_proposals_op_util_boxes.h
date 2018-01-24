@@ -27,17 +27,21 @@ const float BBOX_XFORM_CLIP_DEFAULT = log(1000.0 / 16.0);
 // weights: weights [wx, wy, ww, wh] for the deltas
 // bbox_xform_clip: minimum bounding box width and height in log-space after
 //     transofmration
+// correct_transform_coords: Correct bounding box transform coordates. Set to
+//     true to match the detectron code, set to false for backward compatibility
 // return: pixel coordinates of the bounding boxes
 //     size (M, 4), format [x1; y1; x2; y2]
 // see "Rich feature hierarchies for accurate object detection and semantic
 //     segmentation" Appendix C for more details
+// reference: detectron/lib/utils/boxes.py bbox_transform()
 template <class Derived1, class Derived2>
 EArrXXt<typename Derived1::Scalar> bbox_transform(
     const Eigen::ArrayBase<Derived1>& boxes,
     const Eigen::ArrayBase<Derived2>& deltas,
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
-    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT) {
+    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
+    const bool correct_transform_coords = false) {
   using T = typename Derived1::Scalar;
   using EArrXX = EArrXXt<T>;
   using EArrX = EArrXt<T>;
@@ -67,15 +71,17 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
   EArrX pred_w = dw.exp() * widths;
   EArrX pred_h = dh.exp() * heights;
 
+  T offset(correct_transform_coords ? 1.0 : 0.0);
+
   EArrXX pred_boxes = EArrXX::Zero(deltas.rows(), deltas.cols());
   // x1
   pred_boxes.col(0) = pred_ctr_x - T(0.5) * pred_w;
   // y1
   pred_boxes.col(1) = pred_ctr_y - T(0.5) * pred_h;
   // x2
-  pred_boxes.col(2) = pred_ctr_x + T(0.5) * pred_w;
+  pred_boxes.col(2) = pred_ctr_x + T(0.5) * pred_w - offset;
   // y2
-  pred_boxes.col(3) = pred_ctr_y + T(0.5) * pred_h;
+  pred_boxes.col(3) = pred_ctr_y + T(0.5) * pred_h - offset;
 
   return pred_boxes;
 }
