@@ -47,11 +47,15 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
       Input(SAVED_INV_VAR).data<float>(), C);
 
   auto* dX = Output(INPUT_GRAD);
+  dX->ResizeLike(X);
+
   auto* dScale = Output(SCALE_GRAD);
   auto* dBias = Output(BIAS_GRAD);
-  dX->ResizeLike(X);
-  dScale->ResizeLike(scale);
-  dBias->ResizeLike(scale);
+
+  if (num_batches_ == 1) {
+    dScale->ResizeLike(scale);
+    dBias->ResizeLike(scale);
+  }
 
   // dBias = np.sum(dY, axis=0)
   // dScale = np.sum((X - mean) / inv_std * dy, axis=0)
@@ -61,8 +65,10 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
   EigenVectorArrayMap<float> dBias_arr(dBias->mutable_data<float>(), C);
   EigenVectorArrayMap<float> dScale_arr(dScale->mutable_data<float>(), C);
 
-  dBias_arr.setZero();
-  dScale_arr.setZero();
+  if (num_batches_ == 1) {
+    dBias_arr.setZero();
+    dScale_arr.setZero();
+  }
 
   const auto scaleInvVarNHW = scale_arr * inv_var_arr / (N * sample_size);
 
@@ -74,12 +80,19 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
           dX->mutable_data<float>(), sample_size, N * C);
       dX_arr.setZero();
 
-      for (int nc = 0; nc < N * C; ++nc) {
-        int c = nc % C;
-        dBias_arr(c) += dY_arr.col(nc).sum();
-        dScale_arr(c) +=
-            ((X_arr.col(nc) - mean_arr(c)) * inv_var_arr(c) * dY_arr.col(nc))
-                .sum();
+      if (num_batches_ == 1) {
+        for (int nc = 0; nc < N * C; ++nc) {
+          int c = nc % C;
+          dBias_arr(c) += dY_arr.col(nc).sum();
+          dScale_arr(c) +=
+              ((X_arr.col(nc) - mean_arr(c)) * inv_var_arr(c) * dY_arr.col(nc))
+                  .sum();
+        }
+      } else {
+        for (int c = 0; c < C; ++c) {
+          dBias_arr(c) /= num_batches_;
+          dScale_arr(c) /= num_batches_;
+        }
       }
       for (int nc = 0; nc < N * C; ++nc) {
         int c = nc % C;
@@ -118,9 +131,12 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
 
 REGISTER_CPU_OPERATOR(SpatialBNGradient, SpatialBNGradientOp<CPUContext>);
 
-// Input: X, scale, dY, mean, variance
+// Input: X, scale, dY, mean, variance, dscale, dbias
 // Output: dX, dscale, dbias
-OPERATOR_SCHEMA(SpatialBNGradient).NumInputs(5).NumOutputs(3);
+OPERATOR_SCHEMA(SpatialBNGradient)
+    .NumInputs({5, 7})
+    .NumOutputs(3)
+    .AllowInplace({{5, 1}, {6, 2}});
 
 // Spatial batch normalization's gradient, depending on the various input sizes,
 // is a bit more complex than usual gradient operators.
@@ -130,7 +146,7 @@ class GetSpatialBNGradient : public GradientMakerBase {
     // Check if we are in training or testing mode.
     bool is_test =
         ArgumentHelper::GetSingleArgument(def_, OpSchema::Arg_IsTest, 0);
-
+    int num_batches = ArgumentHelper::GetSingleArgument(def_, "num_batches", 1);
     vector<string> grad_outputs{GI(0), GI(1), GI(2)};
     vector<string> grad_inputs;
     if (is_test) {
@@ -141,6 +157,10 @@ class GetSpatialBNGradient : public GradientMakerBase {
       CAFFE_ENFORCE_EQ(def_.input_size(), 5);
       CAFFE_ENFORCE_EQ(def_.output_size(), 1);
       grad_inputs = vector<string>{I(0), I(1), GO(0), I(3), I(4)};
+    } else if (num_batches > 1) {
+      CAFFE_ENFORCE_EQ(def_.input_size(), 7);
+      CAFFE_ENFORCE_EQ(def_.output_size(), 5);
+      grad_inputs = vector<string>{I(0), I(1), GO(0), O(3), O(4), GI(1), GI(2)};
     } else {
       CAFFE_ENFORCE_EQ(def_.input_size(), 5);
       CAFFE_ENFORCE_EQ(def_.output_size(), 5);
