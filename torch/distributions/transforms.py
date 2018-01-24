@@ -1,6 +1,6 @@
 import torch
 from torch.distributions import constraints
-from torch.distributions.utils import broadcast_all
+from torch.distributions.utils import broadcast_all, lazy_property
 from torch.nn.functional import sigmoid
 
 __all__ = [
@@ -22,11 +22,18 @@ class Transform(object):
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
-    Derived classes should implement one or both of :meth:`_forward` or
-    :meth:`_inverse` and should implement :meth:`log_abs_det_jacobian`.
+    Derived classes should implement one or both of :meth:`__call__` or
+    :meth:`inverse` and should implement :meth:`log_abs_det_jacobian`.
     Derived classes may store intermediate results in the `._cache` dict.
     """
     bijective = False
+
+    @lazy_property
+    def inv(self):
+        """
+        Returns the inverse :class:`Transform` of this transform.
+        """
+        return InverseTransform(self)
 
     def __eq__(self, other):
         return self is other
@@ -35,9 +42,9 @@ class Transform(object):
         # Necessary for Python2
         return not self.__eq__(other)
 
-    def forward(self, x):
+    def __call__(self, x):
         """
-        Abstract method to compute forward transformation.
+        Abstract method to compute __call__ transformation.
         """
         raise NotImplementedError
 
@@ -56,7 +63,7 @@ class Transform(object):
 
 class CachedTransform(Transform):
     """
-    Abstract base class for transforms that implement one of :meth:`forward`
+    Abstract base class for transforms that implement one of :meth:`__call__`
     or :meth:`backward` via by caching the latest value (i.e. an LRU(1) cache).
 
     This class is useful for tranforms whose inverses are either expensive or
@@ -64,29 +71,29 @@ class CachedTransform(Transform):
     since the autograd graph may be reversed. For example while the following
     works::
 
-        y = t.forward(x)
+        y = t(x)
         t.log_abs_det_jacobian(x, y).backward()  # x will receive gradients.
 
     However the following will error due to dependency reversal::
 
-        y = t.forward(x)
-        z = t.inverse(y)
+        y = t(x)
+        z = t.inv(y)
         grad(z.sum(), [y])  # error because z is x
 
-    Derived classes should implement one or both of :meth:`_forward` and
-    :meth:`_backward`.
+    Derived classes should implement one or both of :meth:`_call` and
+    :meth:`_inverse`.
     """
     def __init__(self):
         self._cached_x_y = None, None
 
-    def forward(self, x):
+    def __call__(self, x):
         """
         Invokes the memoized transform `x => y`.
         """
         x_old, y_old = self._cached_x_y
         if x is x_old:
             return y_old
-        y = self._forward(x)
+        y = self._call(x)
         self._cached_x_y = x, y
         return y
 
@@ -101,9 +108,9 @@ class CachedTransform(Transform):
         self._cached_x_y = x, y
         return x
 
-    def _forward(self, x):
+    def _call(self, x):
         """
-        Abstract method to compute forward transformation.
+        Abstract method to compute __call__ transformation.
         """
         raise NotImplementedError
 
@@ -118,34 +125,36 @@ class InverseTransform(Transform):
     """
     Inverts a single :class:`Transform`.
     """
+    __slots__ = ['inv']
+
     def __init__(self, transform):
-        self.transform = transform
+        self.inv = transform
 
     @constraints.dependent_property
     def domain(self):
-        return self.transform.codomain
+        return self.inv.codomain
 
     @constraints.dependent_property
     def codomain(self):
-        return self.transform.domain
+        return self.inv.domain
 
     @property
     def bijective(self):
-        return self.transform.bijective
+        return self.inv.bijective
 
     def __eq__(self, other):
         if not isinstance(other, InverseTransform):
             return False
-        return self.transform == other.transform
+        return self.inv == other.inv
 
-    def forward(self, x):
-        return self.transform.inverse(x)
+    def __call__(self, x):
+        return self.inv.inverse(x)
 
     def inverse(self, y):
-        return self.transform.forward(y)
+        return self.inv.__call__(y)
 
     def log_abs_det_jacobian(self, x, y):
-        return -self.transform.log_abs_det_jacobian(y, x)
+        return -self.inv.log_abs_det_jacobian(y, x)
 
 
 class ExpTransform(Transform):
@@ -159,7 +168,7 @@ class ExpTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, ExpTransform)
 
-    def forward(self, x):
+    def __call__(self, x):
         return x.exp()
 
     def inverse(self, y):
@@ -180,7 +189,7 @@ class SigmoidTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, SigmoidTransform)
 
-    def forward(self, x):
+    def __call__(self, x):
         return sigmoid(x)
 
     def inverse(self, y):
@@ -200,7 +209,7 @@ class AbsTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, AbsTransform)
 
-    def forward(self, x):
+    def __call__(self, x):
         return x.abs()
 
     def inverse(self, y):
@@ -232,7 +241,7 @@ class AffineTransform(Transform):
             return False
         return self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
 
-    def forward(self, x):
+    def __call__(self, x):
         return self.loc + self.scale * x
 
     def inverse(self, y):
@@ -263,7 +272,7 @@ class BoltzmannTransform(CachedTransform):
     def __eq__(self, other):
         return isinstance(other, BoltzmannTransform)
 
-    def _forward(self, x):
+    def _call(self, x):
         logprobs = x
         probs = (logprobs - logprobs.max(-1, True)[0]).exp()
         probs /= probs.sum(-1, True)
@@ -294,7 +303,7 @@ class StickBreakingTransform(CachedTransform):
     def __eq__(self, other):
         return isinstance(other, StickBreakingTransform)
 
-    def _forward(self, x):
+    def _call(self, x):
         shape = x.shape[:-1] + (1 + x.shape[-1],)
         one = x.new([1]).expand(x.shape[:-1] + (1,))
         numer = sigmoid(x)

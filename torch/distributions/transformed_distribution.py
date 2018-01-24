@@ -46,23 +46,23 @@ class TransformedDistribution(Distribution):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched. Samples first from base distribution
-        and applies transform.forward() for every transform in the list.
+        and applies `transform()` for every transform in the list.
         """
         x = self.base_dist.sample(sample_shape)
         for transform in self.transforms:
-            x = transform.forward(x)
+            x = transform(x)
         return x
 
     def rsample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
-        are batched. Samples first from base distribution and applies transform.forward()
+        are batched. Samples first from base distribution and applies `transform()`
         for every transform in the list.
         """
         x = self.base_dist.rsample(sample_shape)
         for transform in self.transforms:
-            x = transform.forward(x)
+            x = transform(x)
         return x
 
     def log_prob(self, value):

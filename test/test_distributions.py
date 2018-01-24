@@ -2082,7 +2082,7 @@ class TestLazyLogitsInitialization(TestCase):
 
 class TestTransforms(TestCase):
     def setUp(self):
-        self.univariate = [
+        self.transforms = [
             AbsTransform(),
             ExpTransform(),
             SigmoidTransform(),
@@ -2093,8 +2093,8 @@ class TestTransforms(TestCase):
             BoltzmannTransform(),
             StickBreakingTransform(),
         ]
-        for t in self.univariate[:]:
-            self.univariate.append(InverseTransform(t))
+        for t in self.transforms[:]:
+            self.transforms.append(t.inv)
 
     def _generate_data(self, constraint):
         x = torch.Tensor(4, 5)
@@ -2110,98 +2110,102 @@ class TestTransforms(TestCase):
             return x
         raise ValueError('Unsupported constraint: {}'.format(constraint))
 
-    def test_forward_inverse_cache(self):
-        for transform in self.univariate:
-            x = Variable(self._generate_data(transform.domain), requires_grad=True)
-            try:
-                y = transform.forward(x)
-            except NotImplementedError:
-                continue
-            x2 = transform.inverse(y)  # should be implemented at least by caching
-            y2 = transform.forward(x2)  # should be implemented at least by caching
-            if transform.bijective:
-                # verify function inverse
-                self.assertEqual(x2, x, message='\n'.join([
-                    '{}.forward().inverse() error'.format(transform),
-                    'x = {}'.format(x),
-                    'y = .forward(x) = {}'.format(y),
-                    'x2 = .inverse(y) = {}'.format(x2),
-                ]))
-            else:
-                # verify weaker function pseudo-inverse
-                self.assertEqual(y2, y, message='\n'.join([
-                    '{}.forward().inverse().forward() error'.format(transform),
-                    'x = {}'.format(x),
-                    'y = .forward(x) = {}'.format(y),
-                    'x2 = .inverse(y) = {}'.format(x2),
-                    'y2 = .inverse(y) = {}'.format(y2),
-                ]))
-
-    def test_forward_inverse_no_cache(self):
-        for transform in self.univariate:
-            x = Variable(self._generate_data(transform.domain), requires_grad=True)
-            try:
-                y = transform.forward(x)
-                x2 = transform.inverse(y.clone())  # bypass cache
-                y2 = transform.forward(x2)
-            except NotImplementedError:
-                continue
-            if transform.bijective:
-                # verify function inverse
-                self.assertEqual(x2, x, message='\n'.join([
-                    '{}.forward().inverse() error'.format(transform),
-                    'x = {}'.format(x),
-                    'y = .forward(x) = {}'.format(y),
-                    'x2 = .inverse(y) = {}'.format(x2),
-                ]))
-            else:
-                # verify weaker function pseudo-inverse
-                self.assertEqual(y2, y, message='\n'.join([
-                    '{}.forward().inverse().forward() error'.format(transform),
-                    'x = {}'.format(x),
-                    'y = .forward(x) = {}'.format(y),
-                    'x2 = .inverse(y) = {}'.format(x2),
-                    'y2 = .inverse(y) = {}'.format(y2),
-                ]))
-
-    def test_univariate_forward_jacobian(self):
-        for transform in self.univariate:
-            x = Variable(self._generate_data(transform.domain), requires_grad=True)
-            try:
-                y = transform.forward(x)
-                actual = transform.log_abs_det_jacobian(x, y)
-            except NotImplementedError:
-                continue
-            expected = torch.abs(grad([y.sum()], [x])[0]).log()
-            self.assertEqual(actual, expected, message='\n'.join([
-                'Bad {}.log_abs_det_jacobian() disagrees with .forward()'.format(transform),
-                'Expected: {}'.format(expected),
-                'Actual: {}'.format(actual),
-            ]))
-
-    def test_univariate_inverse_jacobian(self):
-        for transform in self.univariate:
-            y = Variable(self._generate_data(transform.codomain), requires_grad=True)
-            try:
-                x = transform.inverse(y)
-                actual = transform.log_abs_det_jacobian(x, y)
-            except NotImplementedError:
-                continue
-            expected = -torch.abs(grad([x.sum()], [y])[0]).log()
-            self.assertEqual(actual, expected, message='\n'.join([
-                '{}.log_abs_det_jacobian() disagrees with .inverse()'.format(transform),
-                'Expected: {}'.format(expected),
-                'Actual: {}'.format(actual),
-            ]))
+    def test_inv_inv(self):
+        for t in self.transforms:
+            self.assertTrue(t.inv.inv is t)
 
     def test_equality(self):
-        for x, y in product(self.univariate, self.univariate):
+        for x, y in product(self.transforms, self.transforms):
             if x is y:
                 self.assertTrue(x == y)
                 self.assertFalse(x != y)
             else:
                 self.assertFalse(x == y)
                 self.assertTrue(x != y)
+
+    def test_forward_inverse_cache(self):
+        for transform in self.transforms:
+            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            try:
+                y = transform(x)
+            except NotImplementedError:
+                continue
+            x2 = transform.inv(y)  # should be implemented at least by caching
+            y2 = transform(x2)  # should be implemented at least by caching
+            if transform.bijective:
+                # verify function inverse
+                self.assertEqual(x2, x, message='\n'.join([
+                    '{}().inv() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = (x) = {}'.format(y),
+                    'x2 = .inv(y) = {}'.format(x2),
+                ]))
+            else:
+                # verify weaker function pseudo-inverse
+                self.assertEqual(y2, y, message='\n'.join([
+                    '{}().inv()() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = (x) = {}'.format(y),
+                    'x2 = .inv(y) = {}'.format(x2),
+                    'y2 = .inv(y) = {}'.format(y2),
+                ]))
+
+    def test_forward_inverse_no_cache(self):
+        for transform in self.transforms:
+            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            try:
+                y = transform(x)
+                x2 = transform.inv(y.clone())  # bypass cache
+                y2 = transform(x2)
+            except NotImplementedError:
+                continue
+            if transform.bijective:
+                # verify function inverse
+                self.assertEqual(x2, x, message='\n'.join([
+                    '{}().inv() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = (x) = {}'.format(y),
+                    'x2 = .inv(y) = {}'.format(x2),
+                ]))
+            else:
+                # verify weaker function pseudo-inverse
+                self.assertEqual(y2, y, message='\n'.join([
+                    '{}().inv()() error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = (x) = {}'.format(y),
+                    'x2 = .inv(y) = {}'.format(x2),
+                    'y2 = .inv(y) = {}'.format(y2),
+                ]))
+
+    def test_univariate_forward_jacobian(self):
+        for transform in self.transforms:
+            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            try:
+                y = transform(x)
+                actual = transform.log_abs_det_jacobian(x, y)
+            except NotImplementedError:
+                continue
+            expected = torch.abs(grad([y.sum()], [x])[0]).log()
+            self.assertEqual(actual, expected, message='\n'.join([
+                'Bad {}.log_abs_det_jacobian() disagrees with ()'.format(transform),
+                'Expected: {}'.format(expected),
+                'Actual: {}'.format(actual),
+            ]))
+
+    def test_univariate_inverse_jacobian(self):
+        for transform in self.transforms:
+            y = Variable(self._generate_data(transform.codomain), requires_grad=True)
+            try:
+                x = transform.inv(y)
+                actual = transform.log_abs_det_jacobian(x, y)
+            except NotImplementedError:
+                continue
+            expected = -torch.abs(grad([x.sum()], [y])[0]).log()
+            self.assertEqual(actual, expected, message='\n'.join([
+                '{}.log_abs_det_jacobian() disagrees with .inv()'.format(transform),
+                'Expected: {}'.format(expected),
+                'Actual: {}'.format(actual),
+            ]))
 
 
 if __name__ == '__main__':
