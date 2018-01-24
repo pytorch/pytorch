@@ -15,13 +15,13 @@
  */
 
 // Implements the math functions for CPU.
+
 #include <cub/block/block_reduce.cuh>
+#include <cub/cub.cuh>
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
-
-#include <cub/cub.cuh>
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -2137,5 +2137,89 @@ void Maximum(
       context->cuda_stream()>>>(N, alpha, x, y);
 }
 
-}  // namespace math
-}  // namespace caffe2
+namespace {
+
+constexpr int kCompileTimeCUDAMaxTransposeDims = 8;
+
+__device__ void ComputeYStride(
+    const int num_axes,
+    const int* y_dims,
+    const int* axes,
+    int* y_strides) {
+  int buff[kCompileTimeCUDAMaxTransposeDims];
+  int cur_stride = 1;
+  for (int i = num_axes - 1; i >= 0; --i) {
+    buff[i] = cur_stride;
+    cur_stride *= y_dims[i];
+  }
+  for (int i = 0; i < num_axes; ++i) {
+    y_strides[axes[i]] = buff[i];
+  }
+}
+
+__device__ int GetYIndex(
+    const int num_axes,
+    const int* x_dims,
+    const int* y_strides,
+    int x_index) {
+  int y_index = 0;
+  for (int i = num_axes - 1; i >= 0 && x_index > 0; --i) {
+    y_index += x_index % x_dims[i] * y_strides[i];
+    x_index /= x_dims[i];
+  }
+  return y_index;
+}
+
+template <typename T>
+__global__ void TransposeCUDA(
+    const int num_axes,
+    const int* x_dims,
+    const int* y_dims,
+    const int* axes,
+    const int data_size,
+    const T* X,
+    T* Y) {
+  __shared__ int y_strides[kCompileTimeCUDAMaxTransposeDims];
+  ComputeYStride(num_axes, y_dims, axes, y_strides);
+  __syncthreads();
+  CUDA_1D_KERNEL_LOOP(x_index, data_size) {
+    const int y_index = GetYIndex(num_axes, x_dims, y_strides, x_index);
+#if __CUDA_ARCH__ >= 350
+    Y[y_index] = __ldg(X + x_index);
+#else
+    Y[y_index] = X[x_index];
+#endif
+  }
+}
+
+} // namespace
+
+#define CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(T)                  \
+  template <>                                                 \
+  void Transpose<T, CUDAContext>(                             \
+      const int num_axes,                                     \
+      const int* x_dims,                                      \
+      const int* y_dims,                                      \
+      const int* axes,                                        \
+      const int data_size,                                    \
+      const T* X,                                             \
+      T* Y,                                                   \
+      CUDAContext* context) {                                 \
+    CAFFE_ENFORCE(                                            \
+        num_axes <= kCompileTimeCUDAMaxTransposeDims,         \
+        "num_axes exceeds compile time max.");                \
+    TransposeCUDA<T>                                          \
+        <<<CAFFE_GET_BLOCKS(data_size),                       \
+           CAFFE_CUDA_NUM_THREADS,                            \
+           0,                                                 \
+           context->cuda_stream()>>>(                         \
+            num_axes, x_dims, y_dims, axes, data_size, X, Y); \
+  }
+CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(float)
+CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(double)
+CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(int)
+CAFFE2_SPECIALIZED_CUDA_TRANSPOSE(long)
+#undef CAFFE2_SPECIALIZED_CUDA_TRANSPOSE
+
+} // namespace math
+} // namespace caffe2

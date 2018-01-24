@@ -20,8 +20,6 @@
 // still keep it simple, so all platforms would be able to support it fairly
 // easily.
 
-#include <vector>
-
 // We include the cblas header here so that we can obtain the macros from cblas.
 extern "C" {
 #include "caffe2/utils/cblas.h"
@@ -204,9 +202,11 @@ void Maximum(
 // y_dims.
 template <typename T, class Context>
 void Transpose(
-    const std::vector<TIndex>& x_dims,
-    const std::vector<TIndex>& y_dims,
-    const std::vector<int>& axes,
+    const int num_axes,
+    const int* x_dims,
+    const int* y_dims,
+    const int* axes,
+    const int data_size,
     const T* X,
     T* Y,
     Context* context);

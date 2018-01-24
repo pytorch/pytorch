@@ -335,6 +335,128 @@ INSTANTIATE_TEST_CASE_P(
     GemmBatchedGPUTest,
     testing::Combine(testing::Bool(), testing::Bool()));
 
+class TransposeGPUTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    if (!HasCudaGPU()) {
+      return;
+    }
+    option_.set_device_type(CUDA);
+    cuda_context_ = make_unique<CUDAContext>(option_);
+    Blob* blob_x = ws_.CreateBlob("X");
+    Blob* blob_y = ws_.CreateBlob("Y");
+    Blob* blob_x_dims = ws_.CreateBlob("x_dims");
+    Blob* blob_y_dims = ws_.CreateBlob("y_dims");
+    Blob* blob_axes = ws_.CreateBlob("axes");
+    X_ = blob_x->GetMutable<Tensor<CUDAContext>>();
+    Y_ = blob_y->GetMutable<Tensor<CUDAContext>>();
+    x_dims_device_ = blob_x_dims->GetMutable<Tensor<CUDAContext>>();
+    y_dims_device_ = blob_y_dims->GetMutable<Tensor<CUDAContext>>();
+    axes_device_ = blob_axes->GetMutable<Tensor<CUDAContext>>();
+  }
+
+  void SetData(
+      const std::vector<int>& x_dims,
+      const std::vector<int>& y_dims,
+      const std::vector<int>& axes,
+      const std::vector<float>& x_data) {
+    x_dims_device_->Resize(x_dims.size());
+    cuda_context_->Copy<int, CPUContext, CUDAContext>(
+        x_dims.size(), x_dims.data(), x_dims_device_->mutable_data<int>());
+    y_dims_device_->Resize(y_dims.size());
+    cuda_context_->Copy<int, CPUContext, CUDAContext>(
+        y_dims.size(), y_dims.data(), y_dims_device_->mutable_data<int>());
+    axes_device_->Resize(axes.size());
+    cuda_context_->Copy<int, CPUContext, CUDAContext>(
+        axes.size(), axes.data(), axes_device_->mutable_data<int>());
+    X_->Resize(x_dims);
+    Y_->Resize(y_dims);
+    for (std::size_t i = 0; i < x_data.size(); ++i) {
+      math::Set<float, CUDAContext>(
+          1, x_data[i], X_->mutable_data<float>() + i, cuda_context_.get());
+    }
+  }
+
+  void RunTranspose(const int num_axes, const int data_size) {
+    math::Transpose<float, CUDAContext>(
+        num_axes,
+        x_dims_device_->data<int>(),
+        y_dims_device_->data<int>(),
+        axes_device_->data<int>(),
+        data_size,
+        X_->data<float>(),
+        Y_->mutable_data<float>(),
+        cuda_context_.get());
+    cuda_context_->FinishDeviceComputation();
+  }
+
+  void VerifyResult(const std::vector<float>& expected_output) {
+    Blob* blob_y_host = ws_.CreateBlob("Y_host");
+    auto* Y_host = blob_y_host->GetMutable<TensorCPU>();
+    Y_host->CopyFrom<CUDAContext, CUDAContext>(*Y_, cuda_context_.get());
+    cuda_context_->FinishDeviceComputation();
+    ASSERT_EQ(expected_output.size(), Y_host->size());
+    for (std::size_t i = 0; i < expected_output.size(); ++i) {
+      EXPECT_FLOAT_EQ(expected_output[i], Y_host->data<float>()[i]);
+    }
+  }
+
+  Workspace ws_;
+  DeviceOption option_;
+  std::unique_ptr<CUDAContext> cuda_context_;
+  Tensor<CUDAContext>* X_ = nullptr;
+  Tensor<CUDAContext>* Y_ = nullptr;
+  Tensor<CUDAContext>* x_dims_device_ = nullptr;
+  Tensor<CUDAContext>* y_dims_device_ = nullptr;
+  Tensor<CUDAContext>* axes_device_ = nullptr;
+};
+
+TEST_F(TransposeGPUTest, TransposeGPUFloatTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  {
+    // Test for 1D transpose.
+    const std::vector<int> x_dims = {3};
+    const std::vector<int> y_dims = {3};
+    const std::vector<int> axes = {0};
+    SetData(x_dims, y_dims, axes, {1.0f, 2.0f, 3.0f});
+    RunTranspose(1, 3);
+    VerifyResult({1.0f, 2.0f, 3.0f});
+  }
+  {
+    // Test for 2D transpose.
+    const std::vector<int> x_dims = {2, 3};
+    const std::vector<int> y_dims = {3, 2};
+    const std::vector<int> axes = {1, 0};
+    SetData(x_dims, y_dims, axes, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f});
+    RunTranspose(2, 6);
+    VerifyResult({1.0f, 4.0f, 2.0f, 5.0f, 3.0f, 6.0f});
+  }
+  {
+    // Test for 3D transpose.
+    const std::vector<int> x_dims = {2, 2, 2};
+    const std::vector<int> y_dims = {2, 2, 2};
+    const std::vector<int> axes1 = {1, 2, 0};
+    SetData(
+        x_dims,
+        y_dims,
+        axes1,
+        {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f});
+    RunTranspose(3, 8);
+    VerifyResult({1.0f, 5.0f, 2.0f, 6.0f, 3.0f, 7.0f, 4.0f, 8.0f});
+
+    const std::vector<int> axes2 = {1, 0, 2};
+    SetData(
+        x_dims,
+        y_dims,
+        axes2,
+        {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f});
+    RunTranspose(3, 8);
+    VerifyResult({1.0f, 2.0f, 5.0f, 6.0f, 3.0f, 4.0f, 7.0f, 8.0f});
+  }
+}
+
 } // namespace
 
 } // namespace caffe2

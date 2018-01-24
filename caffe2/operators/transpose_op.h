@@ -46,35 +46,59 @@ class TransposeOp final : public Operator<Context> {
   bool RunOnDevice() override {
     const auto& X = Input(0);
     auto* Y = Output(0);
-    new_dims_.resize(X.ndim());
-    if (axes_.size() == 0) {
-      axes_.resize(X.ndim());
-      for (int i = 0; i < axes_.size(); ++i) {
-        axes_[i] = axes_.size() - 1 - i;
+    const int num_axes = X.ndim();
+    const std::vector<int> x_dims(X.dims().cbegin(), X.dims().cend());
+    std::vector<int> y_dims(num_axes);
+    if (axes_.empty()) {
+      axes_.resize(num_axes);
+      for (int i = 0; i < num_axes; ++i) {
+        axes_[i] = num_axes - 1 - i;
       }
-      new_dims_.assign(X.dims().rbegin(), X.dims().rend());
+      y_dims.assign(X.dims().rbegin(), X.dims().rend());
     } else {
       CAFFE_ENFORCE_EQ(X.ndim(), axes_.size());
-      for (int i = 0; i < new_dims_.size(); ++i) {
-        new_dims_[i] = X.dim(axes_[i]);
+      for (int i = 0; i < num_axes; ++i) {
+        y_dims[i] = X.dim32(axes_[i]);
       }
     }
-    Y->Resize(new_dims_);
+    Y->Resize(y_dims);
+    SetDeviceTensor(x_dims, &x_dims_device_);
+    SetDeviceTensor(y_dims, &y_dims_device_);
+    SetDeviceTensor(axes_, &axes_device_);
+
     // Do the actual transpose, which is implemented in DoRunWithType().
     return DispatchHelper<TensorTypes<float, double, int, long>>::call(
         this, Input(0));
   }
 
  protected:
+  void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
+    tensor->Resize(data.size());
+    context_.template Copy<int, CPUContext, Context>(
+        data.size(), data.data(), tensor->template mutable_data<int>());
+  }
+
   template <typename T>
-  bool DoRunWithType();
+  bool DoRunWithType() {
+    const auto& X = Input(0);
+    auto* Y = Output(0);
+    math::Transpose<T, Context>(
+        axes_.size(),
+        x_dims_device_.template data<int>(),
+        y_dims_device_.template data<int>(),
+        axes_device_.template data<int>(),
+        X.size(),
+        X.template data<T>(),
+        Y->template mutable_data<T>(),
+        &context_);
+    return true;
+  }
 
   std::vector<int> axes_;
-  std::vector<TIndex> new_dims_;
-  // buffer_ is used in TransposeOp<CUDAContext> so we can obtain a consistent
-  // buffer on the GPU. It is not used in the CPUContext implementation.
-  Tensor<Context> buffer_;
-  TensorCPU buffer_cpu_;
+
+  Tensor<Context> x_dims_device_;
+  Tensor<Context> y_dims_device_;
+  Tensor<Context> axes_device_;
 };
 
 } // namespace caffe2
