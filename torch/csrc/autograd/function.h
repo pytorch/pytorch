@@ -50,8 +50,11 @@ struct FunctionFlags {
 };
 
 struct Function : std::enable_shared_from_this<Function> {
+  static thread_local uint64_t function_counter;
+
   Function()
     : num_inputs(0)
+    , time(function_counter++)
     , next_functions()
     , pre_hooks()
     , post_hooks()
@@ -60,6 +63,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   Function(FunctionFlags&& flags)
     : num_inputs(0)
+    , time(function_counter++)
     , next_functions(std::move(flags.next_functions))
     , pre_hooks()
     , post_hooks()
@@ -152,6 +156,7 @@ struct Function : std::enable_shared_from_this<Function> {
                                const variable_list& inputs, const variable_list& outputs);
 
   int num_inputs;
+  uint64_t time;
   function_list next_functions;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
