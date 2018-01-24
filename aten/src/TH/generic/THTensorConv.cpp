@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensorConv.c"
+#define TH_GENERIC_FILE "generic/THTensorConv.cpp"
 #else
 
 /*
@@ -11,14 +11,14 @@ void THTensor_(validXCorr2Dptr)(real *r_,
                                        real *k_, int64_t kr, int64_t kc,
                                        int64_t sr, int64_t sc)
 {
-  int64_t or = (ir - kr) / sr + 1;
+  int64_t or_ = (ir - kr) / sr + 1;
   int64_t oc = (ic - kc) / sc + 1;
 
   int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (oc < 4))  {
     /* regular convolution */
-    for(yy = 0; yy < or; yy++) {
+    for(yy = 0; yy < or_; yy++) {
       for(xx = 0; xx < oc; xx++) {
         /* Dot product in two dimensions... (between input image and the mask) */
         real *pi_ = t_ + yy*sr*ic + xx*sc;
@@ -38,7 +38,7 @@ void THTensor_(validXCorr2Dptr)(real *r_,
 
   } else {
     /* SSE-based convolution */
-    for(yy = 0; yy < or; yy++) {
+    for(yy = 0; yy < or_; yy++) {
       real *pi_ = t_ + yy*sr*ic;
       real *pw_ = k_;
       for (ky = 0; ky < kr; ky++) {
@@ -64,14 +64,14 @@ void THTensor_(validConv2Dptr)(real *r_,
                                       real *k_, int64_t kr, int64_t kc,
                                       int64_t sr, int64_t sc)
 {
-  int64_t or = (ir - kr) / sr + 1;
+  int64_t or_ = (ir - kr) / sr + 1;
   int64_t oc = (ic - kc) / sc + 1;
 
   int64_t xx, yy, kx, ky;
 
   if ((sc != 1) || (oc < 4))  {
     /* regular convolution */
-    for(yy = 0; yy < or; yy++) {
+    for(yy = 0; yy < or_; yy++) {
       for(xx = 0; xx < oc; xx++) {
         /* Dot product in two dimensions... (between input image and the mask) */
         real *pi_ = t_ + yy*sr*ic + xx*sc;
@@ -91,7 +91,7 @@ void THTensor_(validConv2Dptr)(real *r_,
 
   } else {
     /* SSE-based convolution */
-    for(yy = 0; yy < or; yy++) {
+    for(yy = 0; yy < or_; yy++) {
       real *pw_ = k_ + kr*kc - 1;
       real *pi_ = t_ + yy*sr*ic;
       for (ky = 0; ky < kr; ky++) {
@@ -224,7 +224,7 @@ void THTensor_(validXCorr2DRevptr)(real *r_,
                                           real *k_, int64_t kr, int64_t kc,
                                           int64_t sr, int64_t sc)
 {
-  int64_t or = ir - (kr - 1) * sr;
+  int64_t or_ = ir - (kr - 1) * sr;
   int64_t oc = ic - (kc - 1) * sc;
 
   int64_t xx, yy, kx, ky;
@@ -237,7 +237,7 @@ void THTensor_(validXCorr2DRevptr)(real *r_,
         real *pi_ = t_ + yy*sr*ic + xx*sc;
         real z = *k_++ * alpha;
 
-        for(ky = 0; ky < or; ky++) {
+        for(ky = 0; ky < or_; ky++) {
           for(kx = 0; kx < oc; kx++)
             po_[kx] += z * pi_[kx];
           pi_ += ic;
@@ -254,7 +254,7 @@ void THTensor_(validXCorr2DRevptr)(real *r_,
         real *pi_ = t_ + yy*sr*ic + xx*sc;
         real z = *k_++ * alpha;
 
-        for(ky = 0; ky < or; ky++) {
+        for(ky = 0; ky < or_; ky++) {
           THVector_(cadd)(po_, po_, pi_, z, oc);
           pi_ += ic;
           po_ += oc;
@@ -273,14 +273,14 @@ void THTensor_(validXCorr3Dptr)(real *r_,
                                        int64_t st, int64_t sr, int64_t sc)
 {
   int64_t ot = (it - kt) / st + 1;
-  int64_t or = (ir - kr) / sr + 1;
+  int64_t or_ = (ir - kr) / sr + 1;
   int64_t oc = (ic - kc) / sc + 1;
 
   int64_t zz, xx, yy;
 
   for (zz = 0; zz < ot; zz++)
   {
-    for(yy = 0; yy < or; yy++)
+    for(yy = 0; yy < or_; yy++)
     {
       for(xx = 0; xx < oc; xx++)
       {
@@ -318,14 +318,14 @@ void THTensor_(validConv3Dptr)(real *r_,
                                       int64_t st, int64_t sr, int64_t sc)
 {
   int64_t ot = (it - kt) / st + 1;
-  int64_t or = (ir - kr) / sr + 1;
+  int64_t or_ = (ir - kr) / sr + 1;
   int64_t oc = (ic - kc) / sc + 1;
 
   int64_t zz, xx, yy;
 
   for(zz = 0; zz < ot; zz++)
   {
-    for(yy = 0; yy < or; yy++)
+    for(yy = 0; yy < or_; yy++)
     {
       for(xx = 0; xx < oc; xx++)
       {
@@ -363,7 +363,7 @@ void THTensor_(fullConv3Dptr)(real *r_,
                                      real *k_, int64_t kt, int64_t kr, int64_t kc,
                                      int64_t st, int64_t sr, int64_t sc)
 {
-  int64_t or = (ir - 1) * sr + kr;
+  int64_t or_ = (ir - 1) * sr + kr;
   int64_t oc = (ic - 1) * sc + kc;
 
   int64_t zz, xx, yy;
@@ -375,7 +375,7 @@ void THTensor_(fullConv3Dptr)(real *r_,
       for(xx = 0; xx < ic; xx++)
       {
         /* Outer product in two dimensions... (between input image and the mask) */
-        real *po_ = r_ + zz*st*or*oc + yy*sr*oc + xx*sc;
+        real *po_ = r_ + zz*st*or_*oc + yy*sr*oc + xx*sc;
         real *pw_ = k_;
         int64_t kz, kx, ky;
         /* printf("Output Plane : %ld,%ld,%ld, input val=%g\n",zz,yy,xx,*t_); */
@@ -393,7 +393,7 @@ void THTensor_(fullConv3Dptr)(real *r_,
             po_ += oc; /* next input line */
             pw_ += kc; /* next mask line */
           }
-          po_ += (or-kr)*oc; /* next output slice */
+          po_ += (or_-kr)*oc; /* next output slice */
           /* printf("\n"); */
         }
         t_++;
@@ -411,7 +411,7 @@ void THTensor_(fullXCorr3Dptr)(real *r_,
                                       real *k_, int64_t kt, int64_t kr, int64_t kc,
                                       int64_t st, int64_t sr, int64_t sc)
 {
-  int64_t or = (ir - 1) * sr + kr;
+  int64_t or_ = (ir - 1) * sr + kr;
   int64_t oc = (ic - 1) * sc + kc;
 
   int64_t zz, xx, yy;
@@ -423,7 +423,7 @@ void THTensor_(fullXCorr3Dptr)(real *r_,
       for(xx = 0; xx < ic; xx++)
       {
         /* Outer product in two dimensions... (between input image and the mask) */
-        real *po_ = r_ + zz*st*or*oc + yy*sr*oc + xx*sc;
+        real *po_ = r_ + zz*st*or_*oc + yy*sr*oc + xx*sc;
         real *pw_ = k_ + kt*kr*kc -1;
         int64_t kz, kx, ky;
         for(kz = 0; kz < kt; kz++)
@@ -437,7 +437,7 @@ void THTensor_(fullXCorr3Dptr)(real *r_,
             po_ += oc; /* next input line */
             pw_ -= kc; /* next mask line */
           }
-          po_ += (or-kr)*oc; /* next output slice */
+          po_ += (or_-kr)*oc; /* next output slice */
         }
         t_++;
       }
@@ -457,7 +457,7 @@ void THTensor_(validXCorr3DRevptr)(real *r_,
                                           int64_t st, int64_t sr, int64_t sc)
 {
   int64_t ot = it - (kt - 1) * st;
-  int64_t or = ir - (kr - 1) * sr;
+  int64_t or_ = ir - (kr - 1) * sr;
   int64_t oc = ic - (kc - 1) * sc;
 
   int64_t zz, xx, yy;
@@ -473,14 +473,14 @@ void THTensor_(validXCorr3DRevptr)(real *r_,
         int64_t kz, kx, ky;
         for(kz = 0; kz < ot; kz++)
         {
-          for(ky = 0; ky < or; ky++)
+          for(ky = 0; ky < or_; ky++)
           {
             for(kx = 0; kx < oc; kx++)
               po_[kx] += z * pi_[kx];
             pi_ += ic;
             po_ += oc;
           }
-          pi_ += (ir-or)*ic; /* next input slice */
+          pi_ += (ir-or_)*ic; /* next input slice */
         }
       }
     }

@@ -9,10 +9,10 @@
 #include "THTensorDimApply.h"
 #include "THMath.h"
 
-#include "generic/THTensor.c"
+#include "generic/THTensor.cpp"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THTensor.c"
+#include "generic/THTensor.cpp"
 #include "THGenerateHalfType.h"
 
 #include "generic/THTensorCopy.c"
@@ -21,13 +21,13 @@
 #include "generic/THTensorCopy.c"
 #include "THGenerateHalfType.h"
 
-#include "generic/THTensorRandom.c"
+#include "generic/THTensorRandom.cpp"
 #include "THGenerateAllTypes.h"
 
 #include "generic/THTensorMath.c"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THTensorConv.c"
+#include "generic/THTensorConv.cpp"
 #include "THGenerateAllTypes.h"
 
 #include "generic/THTensorLapack.c"

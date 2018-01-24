@@ -1,5 +1,5 @@
 #ifndef THS_GENERIC_FILE
-#define THS_GENERIC_FILE "generic/THSTensor.c"
+#define THS_GENERIC_FILE "generic/THSTensor.cpp"
 #else
 
 /******************************************************************************
@@ -78,7 +78,7 @@ static void THSTensor_(rawInit)(THSTensor *self)
 
 THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
-  self->size = THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
+  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
 
   for (int64_t d = 0; d < nDimI + nDimV; d++) {
     self->size[d] = size[d];
@@ -127,7 +127,7 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
 /* Empty init */
 THSTensor *THSTensor_(new)(void)
 {
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   return self;
 }
@@ -143,7 +143,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   int64_t nDimI, nDimV;
   THLongTensor *ignore;
 
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
 
   nDimI = THLongTensor_size(indices, 0);
@@ -179,7 +179,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, size->size, 0, size->data);
 
@@ -190,7 +190,7 @@ THSTensor *THSTensor_(newWithSize1d)(int64_t size0)
 {
   int64_t size[1] = {size0};
 
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, 1, 0, size);
 
@@ -201,7 +201,7 @@ THSTensor *THSTensor_(newWithSize2d)(int64_t size0, int64_t size1)
 {
   int64_t size[2] = {size0, size1};
 
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, 2, 0, size);
 
@@ -212,7 +212,7 @@ THSTensor *THSTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2
 {
   int64_t size[3] = {size0, size1, size2};
 
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, 3, 0, size);
 
@@ -223,7 +223,7 @@ THSTensor *THSTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2
 {
   int64_t size[4] = {size0, size1, size2, size3};
 
-  THSTensor *self = THAlloc(sizeof(THSTensor));
+  THSTensor *self = (THSTensor *)THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
   THSTensor_(rawResize)(self, 4, 0, size);
 

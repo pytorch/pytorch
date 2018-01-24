@@ -13,7 +13,7 @@
 /* Creates (unseeded) new generator*/
 static THGenerator* THGenerator_newUnseeded()
 {
-  THGenerator *self = THAlloc(sizeof(THGenerator));
+  THGenerator *self = (THGenerator *)THAlloc(sizeof(THGenerator));
   memset(self, 0, sizeof(THGenerator));
   self->left = 1;
   self->seeded = 0;
