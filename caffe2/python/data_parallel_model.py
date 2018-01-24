@@ -24,7 +24,8 @@ from future.utils import viewitems, viewkeys, viewvalues
 import logging
 import copy
 
-from caffe2.python import model_helper, dyndep, scope, workspace, core, memonger
+from caffe2.python import \
+    model_helper, dyndep, scope, workspace, core, memonger, utils
 from caffe2.proto import caffe2_pb2
 
 import numpy as np
@@ -68,6 +69,7 @@ def Parallelize(
     cpu_device=False,
     num_threads_per_device=4,
     shared_model=False,
+    combine_spatial_bn=False,
 ):
     '''
     Function to create a model that can run on many GPUs or CPUs.
@@ -113,6 +115,11 @@ def Parallelize(
       blobs_to_keep :   A list of blob names to keep and don't free during
                         dynamic memory optimization (for example loss blob).
       cpu_device        Use CPU instead of GPU.
+      combine_spatial_bn:
+                        When set to True, applies batch normalization across
+                        all devices within the node. If False, batch
+                        normalization will be done separately for each device.
+                        This option is currently only supported on the CPU.
     '''
     assert scope.CurrentDeviceScope() is None \
         or scope.CurrentDeviceScope().device_type == caffe2_pb2.CPU, \
@@ -232,6 +239,14 @@ def Parallelize(
 
     log.info("Adding gradient operators")
     _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
+
+    if combine_spatial_bn:
+        assert(cpu_device), \
+            'combine_spatial_bn is currently only supported on the CPU'
+        assert(has_parameter_updates), \
+            'combine_spatial_bn should only be used for train model'
+        _InterleaveOps(model_helper_obj)
+        _InterDeviceBatchNormalization(model_helper_obj)
 
     _ValidateParams(model_helper_obj.params)
 
@@ -1338,6 +1353,9 @@ def _AllReduceBlobsSingleHost(blob_names, devices, model, net, use_nccl):
     for blob_name in blob_names:
         # Group by blob_name for reduce.
         blobs_group = list(viewvalues(model._device_grouped_blobs[blob_name]))
+        if len(blobs_group) == 1:
+            # Non-reducible
+            continue
         assert len(blobs_group) == len(devices), \
             "Each GPU from {}, should have a copy of {}.".format(
                 devices, blob_name)
@@ -1525,23 +1543,21 @@ def _GroupByDevice(model, devices, params, non_data_params):
     grouped = OrderedDict()
     # Only consider params that were created to be  "data parallel"
     params = params[len(non_data_params):]
-    assert len(params) % len(devices) == 0,\
-           "There should be equal number of params per device"
 
-    num_params_per_device = int(len(params) / len(devices))
-
-    for i, p in enumerate(params):
+    for _i, p in enumerate(params):
         assert isinstance(p, core.BlobReference) or \
             isinstance(p, core.GradientSlice), \
             "Param {} is not BlobReference or GradientSlice".format(p)
 
         name = stripBlobName(p)
-        gpuid = devices[i // num_params_per_device]
+        gpuid = None
 
         if isinstance(p, core.BlobReference):
+            gpuid = int(p.GetNameScope().split("_")[1].split("/")[0])
             assert "{}_{}/".format(model._device_prefix, gpuid) in p.GetNameScope(),\
                 "Param {} expected to have namescope '{}_{}'".format(str(p), model._device_prefix, gpuid)
         else:
+            gpuid = int(p.indices.GetNameScope().split("_")[1].split("/")[0])
             assert "{}_{}/".format(model._device_prefix, gpuid) in p.indices.GetNameScope(),\
                 "Indices {} expected to have namescope '{}_{}'".format(str(p), model._device_prefix, gpuid)
             assert "{}_{}/".format(model._device_prefix, gpuid) in p.values.GetNameScope(),\
@@ -1550,20 +1566,6 @@ def _GroupByDevice(model, devices, params, non_data_params):
         if name not in grouped:
             grouped[name] = {}
         grouped[name][gpuid] = p
-
-    # Confirm consistency
-    for j, (p, ps) in enumerate(viewitems(grouped)):
-        assert \
-            len(ps) == len(devices), \
-            "Param {} does not have value for each device (only {}: {})".format(
-                p, len(ps), ps,
-            )
-        # Ensure ordering
-        if (ps[devices[0]] != params[j]):
-            log.error("Params: {}".format(params))
-            log.error("Grouped: {}".format(list(viewkeys(grouped))))
-            assert ps[devices[0]] == params[j], \
-                "Incorrect ordering: {}".format(ps)
 
     return grouped
 
@@ -1827,3 +1829,129 @@ def _RunComparison(model, blob_name, device=None):
                 "allcompare failed on shard {}.".format(rendezvous['shard_id'])
 
         return True
+
+
+def _InterleaveOps(model):
+    '''
+    Data Parallel Model creates a net with ops in one device grouped together.
+    This will interleave the ops so that each op for each device is next
+    to each other in the net. Kind of like combining decks of cards. This
+    ensures that progress is made along the critical path roughly concurrently
+    for each device, which is important due to the extra intra-node
+    synchronization required for multi-device batch normalization.
+    '''
+    orig_ops = list(model.net.Proto().op)
+    num_devices = len(model._devices)
+    num_ops_per_dev = len(orig_ops) // num_devices
+    assert num_devices * num_ops_per_dev == len(orig_ops), \
+           'Number of ops per device in original net is not uniform'
+    new_ops = []
+    ops = {d: [] for d in range(num_devices)}
+    for op in orig_ops:
+        ops[op.device_option.cuda_gpu_id].append(op)
+
+    for j in range(num_ops_per_dev):
+        tp = None
+        for d in model._devices:
+            if tp is None:
+                tp = ops[d][j].type
+            new_ops.append(ops[d][j])
+            # Sanity
+            assert ops[d][j].type == tp, \
+                "Type mismatch {} / {}".format(tp, ops[d][j].type)
+
+    del model.net.Proto().op[:]
+    model.net.Proto().op.extend(new_ops)
+
+
+def _InterDeviceBatchNormalization(model):
+    orig_ops = list(model.net.Proto().op)
+    new_ops = []
+    num_devices = len(model._devices)
+    batch_norm_ops = []
+    injected_ops = []
+
+    spatial_bn_phase = False
+    sums_blobs = []
+    sumsq_blobs = []
+    name = []
+    input_blob_name = None
+
+    spatial_bn_gradient_phase = False
+    scale_grad_blobs = []
+    bias_grad_blobs = []
+
+    for op in orig_ops:
+        if op.type != 'SpatialBN' and op.type != 'SpatialBNGradient':
+            if spatial_bn_phase:
+                new_ops.extend(injected_ops)
+                new_ops.append(
+                    core.CreateOperator("Sum",
+                                        sums_blobs,
+                                        input_blob_name + "_sums_combined"))
+                new_ops.append(
+                    core.CreateOperator("Sum",
+                                        sumsq_blobs,
+                                        input_blob_name + "_sumsq_combined"))
+                new_ops.extend(batch_norm_ops)
+                injected_ops = []
+                batch_norm_ops = []
+                sums_blobs = []
+                sumsq_blobs = []
+                spatial_bn_phase = False
+                input_blob_name = None
+            elif spatial_bn_gradient_phase:
+                new_ops.extend(injected_ops)
+                scale_blob = \
+                    "cpu_0/" + stripBlobName(scale_grad_blobs[0]) + "_combined"
+                bias_blob = \
+                    "cpu_0/" + stripBlobName(bias_grad_blobs[0]) + "_combined"
+                new_ops.append(
+                    core.CreateOperator("Sum", scale_grad_blobs, scale_blob))
+                new_ops.append(
+                    core.CreateOperator("Sum", bias_grad_blobs, bias_blob))
+                for blob in scale_grad_blobs:
+                    new_ops.append(
+                        core.CreateOperator("Copy", scale_blob, blob))
+                for blob in bias_grad_blobs:
+                    new_ops.append(core.CreateOperator("Copy", bias_blob, blob))
+                new_ops.extend(batch_norm_ops)
+                injected_ops = []
+                batch_norm_ops = []
+                scale_grad_blobs = []
+                bias_grad_blobs = []
+                spatial_bn_gradient_phase = False
+            new_ops.append(op)
+        elif op.type == 'SpatialBN':
+            spatial_bn_phase = True
+            if input_blob_name is None:
+                input_blob_name = op.input[0]
+            name = op.input[0]
+            injected_ops.append(
+                core.CreateOperator(
+                    "ChannelStats",
+                    name,
+                    [name + "_sums", name + "_sumsq"]))
+            sums_blobs.append(name + "_sums")
+            sumsq_blobs.append(name + "_sumsq")
+            op.input.append(input_blob_name + "_sums_combined")
+            op.input.append(input_blob_name + "_sumsq_combined")
+            op.arg.extend([utils.MakeArgument("num_batches", num_devices)])
+            batch_norm_ops.append(op)
+        elif op.type == 'SpatialBNGradient':
+            spatial_bn_gradient_phase = True
+            injected_ops.append(
+                core.CreateOperator("ChannelBackpropStats",
+                                    [op.input[0], op.input[3], op.input[4],
+                                     op.input[2]],
+                                    [op.output[1], op.output[2]]))
+            scale_grad_blobs.append(op.output[1])
+            bias_grad_blobs.append(op.output[2])
+            op.arg.extend([utils.MakeArgument("num_batches", num_devices)])
+            op.input.extend([op.output[1], op.output[2]])
+            batch_norm_ops.append(op)
+
+    assert not spatial_bn_phase, \
+        "Net modification for inter-device batch normalization failed"
+    del model.net.Proto().op[:]
+    model.net.Proto().op.extend(new_ops)
