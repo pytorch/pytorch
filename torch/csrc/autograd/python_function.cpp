@@ -305,10 +305,10 @@ using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
 // Bump the counters of all recorded dirty input tensors, adding each of them
 // into dirty_inputs.  Also does some sanity checking.
-static std::unordered_set<PyObject*> _parse_dirty_inputs(THPFunction *self)
+static std::vector<PyObject*> _parse_dirty_inputs(THPFunction *self)
 {
   // Increase versions of modified tensors
-  std::unordered_set<PyObject*> dirty_inputs;
+  std::vector<PyObject*> dirty_inputs;
   if (!self->dirty_tensors) return dirty_inputs;
 
   THPFunction_assert(PyTuple_Check(self->dirty_tensors), "autograd "
@@ -321,7 +321,7 @@ static std::unordered_set<PyObject*> _parse_dirty_inputs(THPFunction *self)
         "only accept variables, but argument %d is of type %s", i,
         THPUtils_typename(obj));
 
-    dirty_inputs.insert(obj);
+    dirty_inputs.push_back(obj);
     auto variable = (THPVariable*)obj;
     variable->cdata.version_counter().increment();
   }
@@ -374,8 +374,7 @@ static void _wrap_outputs(THPFunction *self,
         Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
   };
 
-  // Wraps an output Tensor in a Variable or returns the previous wrapper in
-  // the case of in-place modification.
+  // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, int output_nr, bool is_input, bool is_modified,
                          bool is_non_differentiable) {
     if (is_non_differentiable) {
@@ -398,7 +397,6 @@ static void _wrap_outputs(THPFunction *self,
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
-      // return make_variable_view(std::move(prev), std::move(data), output_nr, cdata);
       var = var.slice();
       var.get()->output_nr = output_nr;
       var.get()->_grad_fn = cdata;
@@ -408,12 +406,11 @@ static void _wrap_outputs(THPFunction *self,
     }
   };
 
-  std::unordered_set<PyObject*> seen;
   for (int i = 0; i < num_outputs; i++) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
 
     bool is_input = inputs.count(obj) > 0;
-    bool is_modified = dirty_inputs.count(obj) > 0;
+    bool is_modified = std::find(dirty_inputs.begin(), dirty_inputs.end(), obj) != dirty_inputs.end();
     bool is_non_differentiable = non_differentiable.count(obj) > 0;
 
     auto var = as_variable(obj, i);
