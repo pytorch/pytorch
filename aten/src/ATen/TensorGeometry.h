@@ -8,6 +8,18 @@ namespace at {
 struct AT_API TensorGeometry {
   TensorGeometry() : storage_offset_(0) {}
 
+  explicit TensorGeometry(IntList sizes)
+    : sizes_(sizes)
+    , strides_(sizes.size())
+    , storage_offset_(0) {
+      int64_t dim = 0;
+      int64_t expected_stride = 1;
+      for (int64_t i = dim - 1; i >= 0; i--) {
+        strides_[i] = expected_stride;
+        expected_stride *= sizes_[i];
+      }
+  }
+
   explicit TensorGeometry(const Tensor& t)
     : sizes_(t.sizes())
     , strides_(t.strides())
