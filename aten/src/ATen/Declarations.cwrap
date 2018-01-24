@@ -4175,6 +4175,32 @@
 ]]
 
 [[
+  name: _dimI
+  cname: nDimensionI
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: int64_t
+  arguments:
+  - THTensor* self
+]]
+
+[[
+  name: _dimV
+  cname: nDimensionV
+  variants:
+    - method
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: int64_t
+  arguments:
+  - THTensor* self
+]]
+
+[[
   name: _nnz
   cname: nnz
   variants:

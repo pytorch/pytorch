@@ -654,6 +654,8 @@ class TestSparse(TestCase):
             'is_coalesced': lambda x: x.is_coalesced(),
             'coalesce': lambda x: x.coalesce(),
             'to_dense': lambda x: x.to_dense(),
+            '_dimI': lambda x: x._dimI(),
+            '_dimV': lambda x: x._dimV(),
         }
 
         for test_name, test_fn in to_test_one_arg.items():
