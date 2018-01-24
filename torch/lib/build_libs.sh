@@ -21,6 +21,12 @@ if [[ "$1" == "--with-nnpack" ]]; then
   shift
 fi
 
+WITH_GLOO_IBVERBS=0
+if [[ "$1" == "--with-gloo-ibverbs" ]]; then
+  WITH_GLOO_IBVERBS=1
+  shift
+fi
+
 cd "$(dirname "$0")/../.."
 PWD=`printf "%q\n" "$(pwd)"`
 BASE_DIR="$PWD"
@@ -47,9 +53,15 @@ else
 fi
 CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
+THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $WITH_CUDA -eq 1 ]]; then
     GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+fi
+# Gloo infiniband support
+if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
+    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
+    THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -181,6 +193,8 @@ for arg in "$@"; do
         build gloo $GLOO_FLAGS
     elif [[ "$arg" == "ATen" ]]; then
         build_aten
+    elif [[ "$arg" == "THD" ]]; then
+        build THD $THD_FLAGS
     else
         build $arg
     fi

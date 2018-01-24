@@ -25,6 +25,8 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
+from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
+    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
 
 DEBUG = check_env_flag('DEBUG')
 
@@ -32,8 +34,6 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
-WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
 
 WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
@@ -137,6 +137,9 @@ def build_libs(libs):
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
+
+    if WITH_GLOO_IBVERBS:
+        build_libs_cmd += ['--with-gloo-ibverbs']
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
