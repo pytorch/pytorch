@@ -33,14 +33,16 @@ from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, Laplace, LogNormal, Multinomial, Normal,
-                                 OneHotCategorical, Pareto, StudentT, Uniform,
-                                 constraints, kl_divergence)
+                                 Gumbel, Laplace, LogNormal, Multinomial,
+                                 Normal, OneHotCategorical, Pareto, StudentT,
+                                 Uniform, constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             BoltzmannTransform, ExpTransform,
-                                            InverseTransform, SigmoidTransform,
+                                            InverseTransform,
+                                            LowerCholeskyTransform,
+                                            SigmoidTransform,
                                             StickBreakingTransform)
 from torch.distributions.utils import _finfo, probs_to_logits
 
@@ -2092,23 +2094,30 @@ class TestTransforms(TestCase):
                             Variable(torch.Tensor(4, 5).normal_())),
             BoltzmannTransform(),
             StickBreakingTransform(),
+            LowerCholeskyTransform(),
         ]
         for t in self.transforms[:]:
             self.transforms.append(t.inv)
 
-    def _generate_data(self, constraint):
+    def _generate_data(self, transform):
+        domain = transform.domain
+        codomain = transform.codomain
         x = torch.Tensor(4, 5)
-        if constraint is constraints.real:
+        if domain is constraints.lower_cholesky or codomain is constraints.lower_cholesky:
+            x = torch.Tensor(6, 6)
+            x = x.normal_()
+            return x
+        elif domain is constraints.real:
             return x.normal_()
-        elif constraint is constraints.positive:
+        elif domain is constraints.positive:
             return x.normal_().exp()
-        elif constraint is constraints.unit_interval:
+        elif domain is constraints.unit_interval:
             return x.uniform_()
-        elif constraint is constraints.simplex:
+        elif domain is constraints.simplex:
             x = x.normal_().exp()
             x /= x.sum(-1, True)
             return x
-        raise ValueError('Unsupported constraint: {}'.format(constraint))
+        raise ValueError('Unsupported domain: {}'.format(domain))
 
     def test_inv_inv(self):
         for t in self.transforms:
@@ -2125,7 +2134,7 @@ class TestTransforms(TestCase):
 
     def test_forward_inverse_cache(self):
         for transform in self.transforms:
-            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            x = Variable(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
             except NotImplementedError:
@@ -2135,24 +2144,24 @@ class TestTransforms(TestCase):
             if transform.bijective:
                 # verify function inverse
                 self.assertEqual(x2, x, message='\n'.join([
-                    '{}().inv() error'.format(transform),
+                    '{} t.inv(t(-)) error'.format(transform),
                     'x = {}'.format(x),
-                    'y = (x) = {}'.format(y),
-                    'x2 = .inv(y) = {}'.format(x2),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
                 ]))
             else:
                 # verify weaker function pseudo-inverse
                 self.assertEqual(y2, y, message='\n'.join([
-                    '{}().inv()() error'.format(transform),
+                    '{} t(t.inv(t(-))) error'.format(transform),
                     'x = {}'.format(x),
-                    'y = (x) = {}'.format(y),
-                    'x2 = .inv(y) = {}'.format(x2),
-                    'y2 = .inv(y) = {}'.format(y2),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
+                    'y2 = t(x2) = {}'.format(y2),
                 ]))
 
     def test_forward_inverse_no_cache(self):
         for transform in self.transforms:
-            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            x = Variable(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
                 x2 = transform.inv(y.clone())  # bypass cache
@@ -2162,24 +2171,24 @@ class TestTransforms(TestCase):
             if transform.bijective:
                 # verify function inverse
                 self.assertEqual(x2, x, message='\n'.join([
-                    '{}().inv() error'.format(transform),
+                    '{} t.inv(t(-)) error'.format(transform),
                     'x = {}'.format(x),
-                    'y = (x) = {}'.format(y),
-                    'x2 = .inv(y) = {}'.format(x2),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
                 ]))
             else:
                 # verify weaker function pseudo-inverse
                 self.assertEqual(y2, y, message='\n'.join([
-                    '{}().inv()() error'.format(transform),
+                    '{} t(t.inv(t(-))) error'.format(transform),
                     'x = {}'.format(x),
-                    'y = (x) = {}'.format(y),
-                    'x2 = .inv(y) = {}'.format(x2),
-                    'y2 = .inv(y) = {}'.format(y2),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
+                    'y2 = t(x2) = {}'.format(y2),
                 ]))
 
     def test_univariate_forward_jacobian(self):
         for transform in self.transforms:
-            x = Variable(self._generate_data(transform.domain), requires_grad=True)
+            x = Variable(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
                 actual = transform.log_abs_det_jacobian(x, y)
@@ -2194,7 +2203,7 @@ class TestTransforms(TestCase):
 
     def test_univariate_inverse_jacobian(self):
         for transform in self.transforms:
-            y = Variable(self._generate_data(transform.codomain), requires_grad=True)
+            y = Variable(self._generate_data(transform.inv), requires_grad=True)
             try:
                 x = transform.inv(y)
                 actual = transform.log_abs_det_jacobian(x, y)

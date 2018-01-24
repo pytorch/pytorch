@@ -44,7 +44,7 @@ class Transform(object):
 
     def __call__(self, x):
         """
-        Abstract method to compute __call__ transformation.
+        Abstract method to compute forward transformation.
         """
         raise NotImplementedError
 
@@ -110,7 +110,7 @@ class CachedTransform(Transform):
 
     def _call(self, x):
         """
-        Abstract method to compute __call__ transformation.
+        Abstract method to compute forward transformation.
         """
         raise NotImplementedError
 
@@ -319,3 +319,26 @@ class StickBreakingTransform(CachedTransform):
         return units.log()
 
     # TODO implement .log_abs_det_jacobian()
+
+
+class LowerCholeskyTransform(Transform):
+    """
+    Transform from unconstrained matrices to lower-triangular matrices with
+    nonnegative diagonal entries.
+
+    This is useful for parameterizing positive definite matrices in terms of
+    their Cholesky factorization.
+    """
+    domain = constraints.real
+    codomain = constraints.lower_cholesky
+
+    def __eq__(self, other):
+        return isinstance(other, LowerCholeskyTransform)
+
+    def __call__(self, x):
+        if x.dim() != 2:
+            raise NotImplementedError
+        return x.tril(-1) + x.diag().exp().diag()
+
+    def inverse(self, y):
+        return y.tril(-1) + y.diag().log().diag()
