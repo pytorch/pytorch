@@ -114,9 +114,9 @@ else()
         google/protobuf/service.h
         PATHS ${_PROTOBUF_INSTALL_PREFIX}/include
         NO_DEFAULT_PATH)
+      find_package(Protobuf)
     endif()
 
-    find_package(Protobuf)
   endif()
 endif()
 
