@@ -2,10 +2,10 @@ graph(%0 : Float(4, 4)
       %1 : Float(4, 4)) {
   %2 : Float(4!, 2), %3 : Float(4!, 2) = chunk[chunks=2, dim=1](%0)
   %4 : Float(4!, 2), %5 : Float(4!, 2) = chunk[chunks=2, dim=1](%1)
-  %6 : Float(4, 2) = fusion_group_0(%2, %4, %3, %5)
+  %6 : Float(4, 2) = FusionGroup_0(%2, %4, %3, %5)
   return (%6);
 }
-with fusion_group_0 = graph(%3 : Float(4!, 2)
+with FusionGroup_0 = graph(%3 : Float(4!, 2)
       %4 : Float(4!, 2)
       %6 : Float(4!, 2)
       %7 : Float(4!, 2)) {

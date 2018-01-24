@@ -7,6 +7,15 @@ namespace torch { namespace jit {
 
 using value_list = std::vector<Value*>;
 
+
+std::unordered_set<Symbol> differentiable_kinds = {
+  kadd, ksub, kmul,
+};
+
+bool isDifferentiable(Node * n) {
+  return differentiable_kinds.count(n->kind()) > 0;
+}
+
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = node->inputs();
