@@ -209,6 +209,13 @@ class CheckpointManager(object):
 
         self._path_prefix = path_prefix
         self._path_type = path_type
+        if self._metadata_handler:
+            self._metadata_handler.init(
+                db_prefix=self._db_prefix,
+                db_type=self._db_type,
+                node_names=[str(self._node_name)],
+                path_prefix=self._path_prefix,
+                path_type=self._path_type)
 
         with Task(outputs=[self._blob_names]) as task:
             if retrieve_from_epoch is None:
@@ -308,14 +315,7 @@ class CheckpointManager(object):
 
     def write_checkpoint_metadata(self, epoch):
         if self._metadata_handler is not None:
-            self._metadata_handler.write(
-                epoch=epoch,
-                db_type=self._db_type,
-                db_prefix=self._db_prefix,
-                path_type=self._path_type,
-                path_prefix=self._path_prefix,
-                node_names=[self._node_name],
-            )
+            self._metadata_handler.write(epoch=epoch)
 
     def get_resume_from_epoch_id(self, user_epoch=None):
         last_epoch = user_epoch
@@ -369,6 +369,13 @@ class MultiNodeCheckpointManager(object):
         self._path_prefix = path_prefix
         self._path_type = path_type
         self._node_names = [str(node) for node in nodes]
+        if self._metadata_handler:
+            self._metadata_handler.init(
+                db_prefix=self._db_prefix,
+                db_type=self._db_type,
+                node_names=self._node_names,
+                path_prefix=self._path_prefix,
+                path_type=self._path_type)
         for node in nodes:
             with Node(node):
                 manager = CheckpointManager(
@@ -447,14 +454,7 @@ class MultiNodeCheckpointManager(object):
 
     def write_checkpoint_metadata(self, epoch):
         if self._metadata_handler is not None:
-            self._metadata_handler.write(
-                epoch=epoch,
-                db_type=self._db_type,
-                db_prefix=self._db_prefix,
-                path_type=self._path_type,
-                path_prefix=self._path_prefix,
-                node_names=self._node_names,
-            )
+            self._metadata_handler.write(epoch=epoch)
 
     def get_resume_from_epoch_id(self, user_epoch=None):
         last_epoch = user_epoch
