@@ -465,6 +465,11 @@ Dropout layers
 .. autoclass:: AlphaDropout
     :members:
 
+:hidden:`Zoneout`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Zoneout
+    :members:
 
 Sparse layers
 ----------------------------------

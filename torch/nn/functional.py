@@ -575,6 +575,12 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
 
 
+def zoneout(previous_input, current_input, p=None, mask=None, training=False,
+            inplace=False):
+    return _functions.dropout.Zoneout.apply(previous_input, current_input, p,
+                                            mask, training, inplace)
+
+
 def threshold(input, threshold, value, inplace=False):
     """Thresholds each element of the input Tensor.
 

@@ -1354,6 +1354,73 @@ class TestNN(NNTestCase):
             self.assertLess(abs(output.data.std() - std), 0.1)
             output.backward(input)
 
+    def test_Zoneout(self):
+        previous_input = torch.randn(5000)
+        current_input = torch.randn(5000)
+        previous_mean, current_mean = previous_input.mean(), current_input.mean()
+        for p in [0, 0.15, 1]:
+            module = nn.Zoneout(p)
+            module.training = True
+            current_input_var = Variable(current_input, requires_grad=True)
+            previous_input_var = Variable(previous_input, requires_grad=True)
+            output = module(current_input_var, previous_input_var)
+            expected_mean = p * current_mean + (1 - p) * previous_mean
+            self.assertLess(abs(output.data.mean() - expected_mean), 0.1)
+            output.backward(current_input)
+            current_input_grad = current_input_var.grad.data
+            self.assertLess(
+                abs(current_input_grad.mean() - p * current_input.mean()),
+                0.1
+            )
+
+            # Check that these don't raise errors
+            module.__repr__()
+            str(module)
+
+    def test_Zoneout_during_inference(self):
+        current_input_var = Variable(torch.randn(5000), requires_grad=True)
+        previous_input_var = Variable(torch.randn(5000), requires_grad=True)
+        module = nn.Zoneout(0.5)
+        module.training = False
+        output = module(current_input_var, previous_input_var)
+        self.assertTrue(output.equal(current_input_var))
+        output.backward(current_input_var.data)
+        self.assertTrue(current_input_var.equal(current_input_var.grad))
+
+    def test_Zoneout_with_shared_mask(self):
+        previous_input = torch.randn(5000)
+        current_input = torch.randn(5000)
+        p = 0.2
+        probabilities = torch.Tensor(5000).fill_(p)
+        mask = torch.ByteTensor(5000)
+        mask.bernoulli_(probabilities)
+        mask_mean = mask.type(torch.FloatTensor).mean()
+        module = nn.Zoneout(mask=mask)
+        module.training = True
+        current_input_var = Variable(current_input, requires_grad=True)
+        previous_input_var = Variable(previous_input, requires_grad=True)
+        output = module(current_input_var.clone(), previous_input_var.clone())
+        output2 = module(current_input_var.clone(), previous_input_var.clone())
+        # make sure mask is shared across time-steps
+        self.assertLess(abs(output.data.mean() - output2.data.mean()), 0.1)
+        output.backward(current_input.clone())
+        current_input_grad = current_input_var.grad.data
+        self.assertLess(
+            abs(current_input_grad.mean() - mask_mean * current_input.mean()),
+            0.1
+        )
+
+    def test_Zoneout_argument_validation(self):
+        self.assertRaises(ValueError, lambda: nn.Zoneout())
+        self.assertRaises(ValueError, lambda: nn.Zoneout(1.3))
+        self.assertRaises(ValueError, lambda: nn.Zoneout(2))
+        self.assertRaises(ValueError, lambda: nn.Zoneout(-2))
+        self.assertRaises(ValueError, lambda: nn.Zoneout(mask=torch.Tensor(5)))
+
+        v = Variable(torch.ones(1))
+        self.assertRaises(ValueError, lambda: F.zoneout(v, v, p=3.5))
+        self.assertRaises(ValueError, lambda: F.zoneout(v, v, mask=v))
+
     def _test_InstanceNorm(self, cls, input):
         b, c = input.size(0), input.size(1)
         input_var = Variable(input)
