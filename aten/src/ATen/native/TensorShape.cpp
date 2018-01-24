@@ -3,6 +3,8 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 
+#include <algorithm>
+
 namespace at {
 namespace native {
 
@@ -146,6 +148,59 @@ Tensor stack(TensorList tensors, int64_t dim) {
     inputs[i] = tensors[i].unsqueeze(dim);
   }
   return at::cat(inputs, dim);
+}
+
+
+static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
+  int64_t ndimI = self._indices().size(0);
+  if (dim0 >= ndimI || dim1 >= ndimI) {
+    runtime_error(
+        "sparse transpose_: transposed dimensions must be sparse ",
+        "Got nDimI: %llu, d0: %llu, d1: %llu",
+        (long long)ndimI, (long long)dim0, (long long)dim1);
+  }
+
+  auto indices = self._indices();
+  auto row0 = indices.select(0, dim0);
+  auto row1 = indices.select(0, dim1);
+
+  // swap row0 and row1
+  auto tmp = at::zeros_like(row0);
+  tmp.copy_(row0);
+  row0.copy_(row1);
+  row1.copy_(tmp);
+
+  std::vector<int64_t> sizes(self.sizes());
+  std::swap(sizes[dim0], sizes[dim1]);
+
+  return self.sparse_raw_resize_(sizes, -1, -1);
+}
+
+Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
+  auto ndims = self.dim();
+  dim0 = maybe_wrap_dim(dim0, ndims);
+  dim1 = maybe_wrap_dim(dim1, ndims);
+  if (dim0 == dim1) {
+    return self;
+  }
+
+  if (self.is_sparse()) {
+    return sparse_transpose_(self, dim0, dim1);
+  }
+
+  std::vector<int64_t> strides(self.strides());
+  std::vector<int64_t> sizes(self.sizes());
+  std::swap(strides[dim0], strides[dim1]);
+  std::swap(sizes[dim0], sizes[dim1]);
+  return self.as_strided_(sizes, strides);
+}
+
+Tensor & t_(Tensor & self) {
+  if (self.ndimension() != 2) {
+    runtime_error("t_() expects a 2D tensor, but self is %llu",
+                  (long long)self.ndimension());
+  }
+  return self.transpose_(0, 1);
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >

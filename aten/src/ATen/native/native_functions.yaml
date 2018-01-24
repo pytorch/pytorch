@@ -287,6 +287,10 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+- func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+
+- func: t_(Tensor self) -> Tensor
+
 - func: type_as(Tensor self, Tensor other) -> Tensor
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
