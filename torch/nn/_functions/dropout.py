@@ -88,12 +88,13 @@ class Zoneout(InplaceFunction):
                 not isinstance(mask, torch.cuda.ByteTensor):
             raise ValueError("mask must be a ByteTensor")
         if current_input.size() != previous_input.size():
-            raise ValueError('Current and previous inputs must be of the same '
-                             'size, but current has size {current} and '
-                             'previous has size {previous}.'.format(
-                current='x'.join(str(size) for size in current_input.size()),
-                previous='x'.join(str(size) for size in previous_input.size()))
-                            )
+            raise ValueError(
+                'Current and previous inputs must be of the same '
+                'size, but current has size {current} and '
+                'previous has size {previous}.'.format(
+                    current='x'.join(str(size) for size in current_input.size()),
+                    previous='x'.join(str(size) for size in previous_input.size()))
+            )
         if type(current_input) != type(previous_input):
             raise ValueError('Current and previous inputs must be of the same '
                              'type, but current is {current} and previous is '
@@ -127,8 +128,7 @@ class Zoneout(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.train:
-            return grad_output * Variable(ctx.current_mask), \
-                   grad_output * Variable(ctx.previous_mask), \
-                   None, None, None, None
+            return grad_output * Variable(ctx.current_mask), grad_output * Variable(ctx.previous_mask), \
+                None, None, None, None
         else:
             return grad_output, None, None, None, None, None

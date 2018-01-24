@@ -211,20 +211,20 @@ class AlphaDropout(Module):
 
 
 class Zoneout(Module):
-    r"""During training of an RNN, randomly swaps some of the elements of the 
-    input tensor with its values from a previous time-step with probability *p* 
-    using samples from a Bernoulli distribution. The elements to be swapped are 
-    randomized on every time-step by default, but a shared mask can be 
+    r"""During training of an RNN, randomly swaps some of the elements of the
+    input tensor with its values from a previous time-step with probability *p*
+    using samples from a Bernoulli distribution. The elements to be swapped are
+    randomized on every time-step by default, but a shared mask can be
     provided.
 
-    Zoneout is a variant of dropout designed specifically for regularizing 
-    recurrent connections of LSTMs or GRUs. While dropout applies a zero mask 
-    to its inputs, zoneout applies an identity mask when incrementing a 
+    Zoneout is a variant of dropout designed specifically for regularizing
+    recurrent connections of LSTMs or GRUs. While dropout applies a zero mask
+    to its inputs, zoneout applies an identity mask when incrementing a
     time-step.
-    
-    It has proven to be an effective technique for regularization of LSTMs 
-    and GRUs as, contrary to dropout, gradient information and state 
-    information are more readily propagated through time. For further 
+
+    It has proven to be an effective technique for regularization of LSTMs
+    and GRUs as, contrary to dropout, gradient information and state
+    information are more readily propagated through time. For further
     information, consult the paper
     `Zoneout: Regularizing RNNs by Randomly Preserving Hidden Activation`_ .
 
@@ -233,10 +233,10 @@ class Zoneout(Module):
 
     Args:
         p: probability of an element to be zeroed. Default: None.
-        inplace: If set to ``True``, will do this operation in-place. 
+        inplace: If set to ``True``, will do this operation in-place.
         Default: ``False``
-        mask: `ByteTensor`. A mask used to select elements to be swapped. 
-        The intended use case for this argument is sharing a zoneout mask 
+        mask: `ByteTensor`. A mask used to select elements to be swapped.
+        The intended use case for this argument is sharing a zoneout mask
         across several time-steps.
 
     Shape:
@@ -244,12 +244,12 @@ class Zoneout(Module):
         - Output: `Same`. Output is of the same shape as input
 
     Examples::
-    
+
         >>> zoneout = nn.Zoneout(p=0.15)
         >>> current_hidden_state = Variable(torch.Tensor([1, 2, 3]))
         >>> previous_hidden_state = Variable(torch.Tensor([4, 5, 6]))
         >>> output = zoneout(current_hidden_state, previous_hidden_state)
-        
+
     Using a shared mask:
         >>> mask = torch.ByteTensor(1, 3).bernoulli()
         >>> zoneout = nn.Zoneout(mask=mask)
@@ -267,8 +267,8 @@ class Zoneout(Module):
         ...     h = zoneout(h, h_prev)
         ...     h, h_prev = rnn(input[i], h_prev), h
         ...     output.append(h)
-        
-    .. _Zoneout: Regularizing RNNs by Randomly Preserving Hidden Activation: 
+
+    .. _Zoneout: Regularizing RNNs by Randomly Preserving Hidden Activation:
     https://arxiv.org/abs/1606.01305
     """
 
