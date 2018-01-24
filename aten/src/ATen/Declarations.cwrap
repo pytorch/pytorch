@@ -219,20 +219,6 @@
       wrap_dim: self
 ]]
 [[
-  name: transpose_
-  cname: transpose
-  cpu_half: True
-  auto_gpu: False
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-    - arg: long dim0
-      wrap_dim: self
-    - arg: long dim1
-      wrap_dim: self
-]]
-[[
   name: t
   variants:
     - method
@@ -251,20 +237,6 @@
       THPUtils_assert(ndim == 2, "t() expects a 2D tensor, but self is %ldD", ndim);
     }
   arguments:
-    - THTensor* self
-    - CONSTANT 0
-    - CONSTANT 1
-]]
-[[
-  name: t_
-  cname: transpose
-  auto_gpu: False
-  return: self
-  before_call: |
-    long ndim = arg_self->nDimension;
-    THPUtils_assert(ndim == 2, "t_() expects a 2D tensor, but self is %ldD", ndim);
-  arguments:
-    - THTensor* self
     - THTensor* self
     - CONSTANT 0
     - CONSTANT 1
@@ -4121,6 +4093,34 @@
       storage_offset = self_->tensor->storageOffset;
     }
     ${THTensor}_setStorage(${state,}self_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
+    self_->maybeScalar(size.size() == 0);
+]]
+
+[[
+  name: sparse_raw_resize_
+  variants: [method]
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: argument 0
+  arguments:
+    - THTensor* self
+    - THSize* size
+    - int64_t nDimI
+    - int64_t nDimV
+  aten_custom_call: |
+    /*
+     * Sets sizes, nDimI, and nDimV of a sparse tensor directly without any
+     * safety checks. If nDimI and/or nDimV are -1, recompute them from
+     * indices and values, respectively.
+     */
+    if (nDimI == -1) {
+      nDimI = self._indices().size(0);
+    }
+    if (nDimV == -1) {
+      nDimV = self._values().dim() - 1;
+    }
+    ${THTensor}_rawResize(${state,}self_->tensor, nDimI, nDimV, (*size_).data);
     self_->maybeScalar(size.size() == 0);
 ]]
 

@@ -646,7 +646,9 @@ class TestSparse(TestCase):
         to_test_one_arg = {
             'zeros_like': lambda x: torch.zeros_like(x),
             'transpose': lambda x: x.transpose(0, 1),
+            'transpose_': lambda x: x.transpose(0, 1),
             't': lambda x: x.t(),
+            't_': lambda x: x.t_(),
             'div': lambda x: x.div(2),
             'div_': lambda x: x.div_(2),
             'pow': lambda x: x.pow(2),
