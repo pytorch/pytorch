@@ -1730,6 +1730,7 @@ class TestKL(TestCase):
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
+        poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
@@ -1750,6 +1751,7 @@ class TestKL(TestCase):
         self.samples_per_batch = int(1e04)
         self.finite_examples = [
             (bernoulli, bernoulli),
+            (bernoulli, poisson),
             (beta, beta),
             (beta, chi2),
             (beta, exponential),
@@ -1780,6 +1782,7 @@ class TestKL(TestCase):
             (pareto, chi2),
             (pareto, exponential),
             (pareto, gamma),
+            (poisson, poisson),
             (uniform_within_unit, beta),
             (uniform_positive, chi2),
             (uniform_positive, exponential),
@@ -1827,6 +1830,8 @@ class TestKL(TestCase):
             (Pareto(2, 1), Gamma(3, 4)),
             (Pareto(1, 2), Normal(-3, 4)),
             (Pareto(1, 2), Pareto(3, 4)),
+            (Poisson(2), Bernoulli(0.5)),
+            (Poisson(2.3), Binomial(10, 0.2)),
             (Uniform(-1, 1), Beta(2, 2)),
             (Uniform(0, 2), Beta(3, 4)),
             (Uniform(-1, 2), Beta(3, 4)),
