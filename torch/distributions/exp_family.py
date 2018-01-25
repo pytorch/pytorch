@@ -27,7 +27,7 @@ class ExponentialFamily(Distribution):
         """
         if not self._zero_carrier_measure:
             raise ValueError("There is no closed form solution for non-zero carrier measure")
-        nparams = self.natural_params()
+        nparams = [p for p in self.natural_params() if p.requires_grad]
         lg_normal = self.log_normalizer()
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
         result = lg_normal.clone()
@@ -42,7 +42,7 @@ class ExponentialFamily(Distribution):
         if not type(self) == type(dist):
             raise ValueError("The cross KL-divergence between different exponential families cannot \
                                 be computed")
-        self_nparams = self.natural_params()
+        self_nparams = [p for p in self.natural_params() if p.requires_grad]
         dist_nparams = dist.natural_params()
         lg_normal = self.log_normalizer()
         gradients = torch.autograd.grad(lg_normal.sum(), self_nparams, create_graph=True)

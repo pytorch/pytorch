@@ -3,12 +3,13 @@ from numbers import Number
 import math
 
 import torch
+from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.exp_family import ExponentialFamily
+from torch.distributions.utils import broadcast_all, lazy_property
 
 
-class Pareto(Distribution):
+class Pareto(ExponentialFamily):
     r"""
     Samples from a Pareto Type 1 distribution.
 
@@ -25,6 +26,7 @@ class Pareto(Distribution):
     """
     has_rsample = True
     params = {'alpha': constraints.positive, 'scale': constraints.positive}
+    _zero_carrier_measure = True
 
     def __init__(self, scale, alpha):
         self.scale, self.alpha = broadcast_all(scale, alpha)
@@ -49,3 +51,22 @@ class Pareto(Distribution):
 
     def entropy(self):
         return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))
+
+    def natural_params(self):
+        return self._natural_params
+
+    @lazy_property
+    def _natural_params(self):
+        # note that self.scale is fixed, meaning that it is not a natural parameter
+        if isinstance(self.alpha, Variable):
+            V1 = Variable(-self.alpha.data - 1, requires_grad=True)
+            V2 = Variable(self.scale.data)
+        else:
+            V1 = Variable(-self.alpha - 1, requires_grad=True)
+            V2 = Variable(self.scale)
+        return (V1, V2)
+
+    def log_normalizer(self):
+        x, y = self._natural_params
+        term = x + 1
+        return -torch.log(-term) + term * torch.log(y)
