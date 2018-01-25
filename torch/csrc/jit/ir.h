@@ -211,6 +211,8 @@ public:
     return uses_;
   }
 
+  void replaceFirstUseWith(Value * newValue);
+
   // Replaces all uses of this node with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
@@ -1031,13 +1033,18 @@ inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
 }
 
-inline void Value::replaceAllUsesWith(Value * newValue) {
+inline void Value::replaceFirstUseWith(Value * newValue) {
   JIT_ASSERT(owningGraph() == newValue->owningGraph());
-  for(auto u : uses()) {
-    u.user->inputs_[u.offset] = newValue;
-    newValue->uses_.push_back(u);
+  auto u = uses()[0];
+  u.user->inputs_[u.offset] = newValue;
+  newValue->uses_.push_back(u);
+  uses_.erase(uses_.begin());
+}
+
+inline void Value::replaceAllUsesWith(Value * newValue) {
+  while (!uses().empty()) {
+    replaceFirstUseWith(newValue);
   }
-  uses_.clear();
 }
 
 inline Node::Node(Graph * graph_, NodeKind kind_) :

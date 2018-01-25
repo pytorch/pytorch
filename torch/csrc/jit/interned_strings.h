@@ -45,6 +45,8 @@ _(value) \
 _(Subgraph) \
 _(BatchNormalization) \
 _(Conv) \
+_(PackPadded) \
+_(PadPacked) \
 _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \
@@ -61,6 +63,9 @@ _(strides) \
 _(stride) \
 _(pads) \
 _(pad) \
+_(RNN) \
+_(LSTM) \
+_(GRU) \
 _(beta) \
 _(alpha) \
 _(dilations) \

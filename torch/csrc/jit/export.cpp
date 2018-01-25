@@ -190,9 +190,10 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     encodeValueInfo(v, output);
   }
   for (auto node : g->nodes()) {
-    if (node->kind() == kUndefined && !node->hasUses()) {
-      // Undefined nodes never show up in ONNX; they're just a tool
-      // to help symbolics do the right thing.
+    if (node->kind() == kUndefined) {
+      // Undefined nodes are used to implement optional inputs. One
+      // way to "not provide" an optional input is to create an
+      // Undefined node, and pass its output as that input.
       continue;
     }
     auto p_n = p_g->add_node();
@@ -200,7 +201,11 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
       p_n->set_doc_string(node->getSourceLocation()->python_traceback);
     }
     for(auto input : node->inputs()) {
-      p_n->add_input(value_name(input));
+      if (input->node()->kind() == kUndefined) {
+        p_n->add_input("");
+      } else {
+        p_n->add_input(value_name(input));
+      }
     }
     for(auto output : node->outputs()) {
       p_n->add_output(value_name(output));
@@ -243,9 +248,6 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       // Expand is not a real ONNX operator yet, reject it
       if (node->kind() == kExpand) {
         FAIL_EXPORT("Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support");
-      }
-      if (node->kind() == kUndefined) {
-        FAIL_EXPORT("Couldn't export undefined constant tensor (please file an issue)")
       }
       std::string n = node->kind().toString();
       if (n.size() == 0) {

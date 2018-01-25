@@ -29,6 +29,15 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
 
     """
+    def __new__(cls, *args):
+        # support being called as `PackedSequence(data, batch_sizes)`
+        if len(args) == 2:
+            return super(PackedSequence, cls).__new__(cls, *args)
+        # support being called as `PackedSequence((data, batch_sizes))`
+        else:
+            assert len(args) == 1
+            return super(PackedSequence, cls).__new__(cls, *args[0])
+
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
         if self.is_cuda:
@@ -81,7 +90,20 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
-def pack_padded_sequence(input, lengths, batch_first=False):
+def _pack_padded_sequence(input, lengths, batch_first=False):
+    data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
+
+    return PackedSequence(data, batch_sizes)
+
+
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimization pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+    return g.op("PackPadded", input, lengths, outputs=2)
+
+
+def pack_padded_sequence(input, *args, **kwargs):
     r"""Packs a Variable containing padded sequences of variable length.
 
     Input can be of size ``TxBx*`` where T is the length of the longest sequence
@@ -108,12 +130,53 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Returns:
         a :class:`PackedSequence` object
     """
-    data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
+    import torch
+    if torch._C._jit_is_tracing(input):
+        from torch.onnx import symbolic_override
+        return symbolic_override(_symbolic_pack_padded_sequence)(_pack_padded_sequence)(input, *args, **kwargs)
+    else:
+        return _pack_padded_sequence(input, *args, **kwargs)
 
-    return PackedSequence(data, batch_sizes)
+
+def _pad_packed_sequence(sequence, batch_first=False, padding_value=0):
+    var_data, batch_sizes = sequence
+    max_batch_size = int(batch_sizes[0])
+    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
+    output = Variable(output)
+
+    lengths = []
+    data_offset = 0
+    prev_batch_size = int(batch_sizes[0])
+    prev_i = 0
+    for i, batch_size in enumerate(batch_sizes.tolist() + [0]):
+        if batch_size != prev_batch_size:
+            l = prev_batch_size * (i - prev_i)
+            tmp = var_data[data_offset:data_offset + l]
+            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
+            data_offset += l
+            prev_i = i
+        dec = prev_batch_size - batch_size
+        if dec > 0:
+            lengths.extend((i,) * dec)
+        prev_batch_size = batch_size
+
+    lengths.reverse()
+
+    if batch_first:
+        output = output.transpose(0, 1)
+    # This Variable doesn't actually have any history (well,
+    # technically it does; it's just untracked), it is purely here to
+    # make ONNX export easier. That is to say, from an autodiff
+    # standpoint this doesn't make any sense.
+    return output, Variable(torch.LongTensor(lengths))
 
 
-def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
+    # See comment on _symbolic_pack_padded_sequence
+    return g.op("PadPacked", input.data, input.batch_sizes, outputs=2)
+
+
+def pad_packed_sequence(input, *args, **kwargs):
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -135,32 +198,12 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
         containing the list of lengths of each sequence in the batch.
 
     """
-    var_data, batch_sizes = sequence
-    max_batch_size = list(batch_sizes.data)[0]
-    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
-    output = Variable(output)
-
-    lengths = []
-    data_offset = 0
-    prev_batch_size = batch_sizes[0]
-    prev_i = 0
-    for i, batch_size in enumerate(list(batch_sizes.data) + [0]):
-        if batch_size != prev_batch_size:
-            l = prev_batch_size * (i - prev_i)
-            tmp = var_data[data_offset:data_offset + l]
-            output[prev_i:i, :prev_batch_size] = tmp.view(i - prev_i, prev_batch_size, *tmp.size()[1:])
-            data_offset += l
-            prev_i = i
-        dec = prev_batch_size - batch_size
-        if dec > 0:
-            lengths.extend((i,) * dec)
-        prev_batch_size = batch_size
-
-    lengths.reverse()
-
-    if batch_first:
-        output = output.transpose(0, 1)
-    return output, Variable(torch.LongTensor(lengths))
+    import torch
+    if torch._C._jit_is_tracing(input.data):
+        from torch.onnx import symbolic_override
+        return symbolic_override(_symbolic_pad_packed_sequence)(_pad_packed_sequence)(input, *args, **kwargs)
+    else:
+        return _pad_packed_sequence(input, *args, **kwargs)
 
 
 def pad_sequence(sequences, batch_first=False):
