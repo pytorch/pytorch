@@ -47,6 +47,5 @@ class Poisson(Distribution):
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
-        param_shape = value.size()
-        rate = self.rate.expand(param_shape)
+        rate, value = broadcast_all(self.rate, value)
         return (rate.log() * value) - rate - (value + 1).lgamma()
