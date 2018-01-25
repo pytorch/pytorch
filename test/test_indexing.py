@@ -1,6 +1,7 @@
 from common import TestCase, run_tests
+import unittest
 import torch
-from torch.autograd import Variable
+from torch.autograd import Variable, variable
 
 
 class TestIndexing(TestCase):
@@ -91,6 +92,108 @@ class TestIndexing(TestCase):
         mask = torch.zeros(4, 3).byte()
         y[mask] = -1
         self.assertEqual(x, y)
+
+    def test_index_getitem_copy_bools_slices(self):
+        true = variable(1).byte()
+        false = variable(0).byte()
+
+        tensors = [Variable(torch.randn(2, 3))]
+        if torch._C._with_scalars():
+            tensors.append(variable(3))
+
+        for a in tensors:
+            self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
+            self.assertEqual(variable([]), a[False])
+            if torch._C._with_scalars():
+                self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
+                self.assertEqual(variable([]), a[false])
+            self.assertEqual(a.data_ptr(), a[None].data_ptr())
+            self.assertEqual(a.data_ptr(), a[...].data_ptr())
+
+    def test_index_setitem_bools_slices(self):
+        true = variable(1).byte()
+        false = variable(0).byte()
+
+        tensors = [Variable(torch.randn(2, 3))]
+        if torch._C._with_scalars():
+            tensors.append(variable(3))
+
+        for a in tensors:
+            a_clone = a.clone()
+            # prefix with a 1,1, to ensure we are compatible with numpy which cuts off prefix 1s
+            # (some of these ops already prefix a 1 to the size)
+            neg_ones = torch.ones_like(a) * -1
+            neg_ones_expanded = neg_ones.unsqueeze(0).unsqueeze(0)
+            a[True] = neg_ones_expanded
+            self.assertEqual(a, neg_ones)
+            a[False] = 5
+            self.assertEqual(a, neg_ones)
+            if torch._C._with_scalars():
+                a[true] = neg_ones_expanded * 2
+                self.assertEqual(a, neg_ones * 2)
+                a[false] = 5
+                self.assertEqual(a, neg_ones * 2)
+            a[None] = neg_ones_expanded * 3
+            self.assertEqual(a, neg_ones * 3)
+            a[...] = neg_ones_expanded * 4
+            self.assertEqual(a, neg_ones * 4)
+            if a.dim() == 0:
+                with self.assertRaises(RuntimeError):
+                    a[:] = neg_ones_expanded * 5
+
+    def test_setitem_expansion_error(self):
+        a = Variable(torch.randn(2, 3))
+        # check prefix with  non-1s doesn't work
+        a_expanded = a.expand(torch.Size([5, 1]) + a.size())
+        with self.assertRaises(RuntimeError):
+            a[True] = a_expanded
+        with self.assertRaises(RuntimeError):
+            a[true] = torch.autograd.Variable(a_expanded)
+
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_getitem_scalars(self):
+        zero = variable(0).long()
+        one = variable(1).long()
+
+        # non-scalar indexed with scalars
+        a = Variable(torch.randn(2, 3))
+        self.assertEqual(a[0], a[zero])
+        self.assertEqual(a[0][1], a[zero][one])
+        self.assertEqual(a[0, 1], a[zero, one])
+        self.assertEqual(a[0, one], a[zero, 1])
+
+        # scalar indexed with scalar
+        r = variable(0).normal_()
+        with self.assertRaises(RuntimeError):
+            r[:]
+        with self.assertRaises(RuntimeError):
+            r[zero]
+        self.assertEqual(r, r[...])
+
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_setitem_scalars(self):
+        zero = variable(0).long()
+
+        # non-scalar indexed with scalars
+        a = Variable(torch.randn(2, 3))
+        a_set_with_number = a.clone()
+        a_set_with_scalar = a.clone()
+        b = Variable(torch.randn(3))
+
+        a_set_with_number[0] = b
+        a_set_with_scalar[zero] = b
+        self.assertEqual(a_set_with_number, a_set_with_scalar)
+        a[1, zero] = 7.7
+        self.assertEqual(7.7, a[1, 0])
+
+        # scalar indexed with scalars
+        r = variable(0).normal_()
+        with self.assertRaises(RuntimeError):
+            r[:] = 8.8
+        with self.assertRaises(RuntimeError):
+            r[zero] = 8.8
+        r[...] = 9.9
+        self.assertEqual(9.9, r)
 
     def test_basic_advanced_combined(self):
         # From the NumPy indexing example
