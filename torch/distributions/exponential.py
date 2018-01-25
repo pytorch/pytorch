@@ -31,7 +31,7 @@ class Exponential(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        return self.rate.new(*shape).exponential_() / self.rate
+        return self.rate.new(shape).exponential_() / self.rate
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

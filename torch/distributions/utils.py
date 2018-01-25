@@ -51,7 +51,7 @@ def _broadcast_shape(shapes):
     Args:
         shapes (list of torch.Size): list of tensor sizes
     """
-    shape = torch.Size([1])
+    shape = torch.Size() if torch._C._with_scalars() else torch.Size([1])
     for s in shapes:
         shape = torch._C._infer_size(s, shape)
     return shape
