@@ -17,6 +17,8 @@
 #ifndef CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 #define CAFFE2_OPERATORS_CONV_POOL_OP_BASE_H_
 
+#include <vector>
+
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
@@ -342,6 +344,28 @@ class ConvPoolOpBase : public Operator<Context> {
             &pads_[dims.size() + dim],
             &output_unused);
       }
+    }
+  }
+
+  void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
+    if (tensor->size() != data.size()) {
+      tensor->Resize(data.size());
+      context_.template Copy<int, CPUContext, Context>(
+          data.size(), data.data(), tensor->template mutable_data<int>());
+    }
+  }
+
+  template <typename T>
+  void SetBiasMultiplier(const int size, Tensor<Context>* bias_multiplier_) {
+    if (bias_multiplier_->size() != size) {
+      // If the helper bias multiplier is not image size, reshape and fill it
+      // with one.
+      bias_multiplier_->Resize(std::vector<TIndex>{size});
+      math::Set<T, Context>(
+          size,
+          static_cast<T>(1),
+          bias_multiplier_->template mutable_data<T>(),
+          &context_);
     }
   }
 
@@ -691,6 +715,7 @@ protected:
   using ConvPoolOpBase<Context>::shared_buffer_;   \
   using ConvPoolOpBase<Context>::GetDims;          \
   using ConvPoolOpBase<Context>::GetDimsSize;      \
+  using ConvPoolOpBase<Context>::SetDeviceTensor;  \
   using ConvPoolOpBase<Context>::ws_
 };
 
