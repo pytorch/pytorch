@@ -77,6 +77,12 @@
 #include "generic/Col2Im.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/Col2Row.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Col2Vol.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/SpatialClassNLLCriterion.c"
 #include "THGenerateFloatTypes.h"
 
@@ -135,6 +141,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/PReLU.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Row2Col.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/RReLU.c"
@@ -252,6 +261,9 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/SpatialGridSamplerBilinear.c"
+#include "THGenerateFloatTypes.h"
+
+#include "generic/Vol2Col.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/VolumetricAveragePooling.c"

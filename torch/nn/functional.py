@@ -12,7 +12,7 @@ from .modules import utils
 from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
-from ._functions.thnn.fold import Col2Im, Im2Col
+from ._functions.thnn.fold import Col2Row, Col2Im, Col2Vol, Row2Col, Im2Col, Vol2Col
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
@@ -2007,8 +2007,8 @@ def normalize(input, p=2, dim=1, eps=1e-12):
     return input / input.norm(p, dim, True).clamp(min=eps).expand_as(input)
 
 
-def assert_int_or_pair(arg, arg_name, message):
-    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+def assert_int_or_tuple(arg, arg_name, dim, message):
+    assert isinstance(arg, int) or len(arg) == dim, message.format(arg_name, dim, dim + 2)
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
@@ -2016,32 +2016,49 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
     See :class:`torch.nn.Unfold` for details
     """
 
-    if input is not None and input.dim() == 4:
-        msg = '{} must be int or 2-tuple for 4D input'
-        assert_int_or_pair(kernel_size, 'kernel_size', msg)
-        assert_int_or_pair(dilation, 'dilation', msg)
-        assert_int_or_pair(padding, 'padding', msg)
-        assert_int_or_pair(stride, 'stride', msg)
+    dim = input.dim() - 2
+    msg = '{} must be int or {}-tuple for {}D input'
+    assert_int_or_tuple(kernel_size, 'kernel_size', dim, msg)
+    assert_int_or_tuple(dilation, 'dilation', dim, msg)
+    assert_int_or_tuple(padding, 'padding', dim, msg)
+    assert_int_or_tuple(stride, 'stride', dim, msg)
 
+    if input.dim() == 3:
+        return Row2Col.apply(input, _single(kernel_size),
+                             _single(dilation), _single(padding), _single(stride))
+    elif input.dim() == 4:
         return Im2Col.apply(input, _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
+    elif input.dim() == 5:
+        return Vol2Col.apply(input, _triple(kernel_size),
+                             _triple(dilation), _triple(padding), _triple(stride))
     else:
-        raise NotImplementedError("Input Error: Only 4D input Tensors supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported (got {}D)"
+                                  .format(input.dim()))
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     r"""
     See :class:`torch.nn.Fold` for details
     """
-    if input is not None and input.dim() == 3:
-        msg = '{} must be int or 2-tuple for 3D input'
-        assert_int_or_pair(output_size, 'output_size', msg)
-        assert_int_or_pair(kernel_size, 'kernel_size', msg)
-        assert_int_or_pair(dilation, 'dilation', msg)
-        assert_int_or_pair(padding, 'padding', msg)
-        assert_int_or_pair(stride, 'stride', msg)
 
-        return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
+    assert isinstance(output_size, tuple) and len(output_size) in [1, 2, 3]
+    dim = len(output_size)
+
+    msg = '{} must be int or {}-tuple for {}D output'
+    assert_int_or_tuple(kernel_size, 'kernel_size', dim, msg)
+    assert_int_or_tuple(dilation, 'dilation', dim, msg)
+    assert_int_or_tuple(padding, 'padding', dim, msg)
+    assert_int_or_tuple(stride, 'stride', dim, msg)
+
+    if dim == 1:
+        return Col2Row.apply(input, output_size, _single(kernel_size),
+                             _single(dilation), _single(padding), _single(stride))
+    elif dim == 2:
+        return Col2Im.apply(input, output_size, _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
+    elif dim == 3:
+        return Col2Vol.apply(input, output_size, _triple(kernel_size),
+                             _triple(dilation), _triple(padding), _triple(stride))
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors supported (got {}D)".format(input.dim()))

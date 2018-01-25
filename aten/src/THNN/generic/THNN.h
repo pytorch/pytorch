@@ -437,6 +437,44 @@ TH_API void THNN_(Linear_accGradParameters)(
           THTensor *addBuffer,
           accreal scale);
 
+TH_API void THNN_(Row2Col_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kW,
+          int dW,
+          int padW,
+          int sW);
+
+TH_API void THNN_(Row2Col_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int inputWidth,
+          int kW,
+          int dW,
+          int padW,
+          int sW);
+
+TH_API void THNN_(Col2Row_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int outputWidth,
+          int kW,
+          int dW,
+          int padW,
+          int sW);
+
+TH_API void THNN_(Col2Row_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int kW,
+          int dW,
+          int padW,
+          int sW);
+
 TH_API void THNN_(RReLU_updateOutput)(
           THNNState *state,
           THTensor *input,
@@ -1301,6 +1339,44 @@ TH_API void THNN_(unfolded_copy)(
           int nInputPlane,
           int inputWidth, int inputHeight,
           int outputWidth, int outputHeight);
+
+TH_API void THNN_(Vol2Col_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int kT, int kH, int kW,
+          int dT, int dH, int dW,
+          int padT, int padH, int padW,
+          int sT, int sH, int sW);
+
+TH_API void THNN_(Vol2Col_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int inputDepth, int inputHeight, int inputWidth,
+          int kT, int kH, int kW,
+          int dT, int dH, int dW,
+          int padT, int padH, int padW,
+          int sT, int sH, int sW);
+
+TH_API void THNN_(Col2Vol_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *output,
+          int outputDepth, int outputHeight, int outputWidth,
+          int kT, int kH, int kW,
+          int dT, int dH, int dW,
+          int padT, int padH, int padW,
+          int sT, int sH, int sW);
+
+TH_API void THNN_(Col2Vol_updateGradInput)(
+          THNNState *state,
+          THTensor *gradOutput,
+          THTensor *gradInput,
+          int kT, int kH, int kW,
+          int dT, int dH, int dW,
+          int padT, int padH, int padW,
+          int sT, int sH, int sW);
 
 TH_API void THNN_(VolumetricAveragePooling_updateOutput)(
           THNNState *state,
