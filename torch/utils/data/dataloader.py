@@ -3,20 +3,27 @@ import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
     _remove_worker_pids, _error_if_any_worker_fails
 from .sampler import SequentialSampler, RandomSampler, BatchSampler
-from .utils import ExceptionWrapper, QueueWrapper
 import signal
 import functools
 import collections
 import re
 import sys
 import threading
+import traceback
 from torch._six import string_classes, int_classes
-
 
 if sys.version_info[0] == 2:
     import Queue as queue
 else:
     import queue
+
+
+class ExceptionWrapper(object):
+    r"Wraps an exception plus traceback to communicate across threads"
+
+    def __init__(self, exc_info):
+        self.exc_type = exc_info[0]
+        self.exc_msg = "".join(traceback.format_exception(*exc_info))
 
 
 _use_shared_memory = False
@@ -149,7 +156,11 @@ handler needs to be set for all DataLoaders in a process."""
 
 
 def _set_SIGCHLD_handler():
-    if sys.platform == 'win32':  # Windows doesn't support SIGCHLD handler
+    # Windows doesn't support SIGCHLD handler
+    if sys.platform == 'win32':
+        return
+    # can't set signal in child threads
+    if not isinstance(threading.current_thread(), threading._MainThread):
         return
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:
@@ -185,8 +196,8 @@ class DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queue = QueueWrapper(multiprocessing.SimpleQueue())
-            self.worker_result_queue = QueueWrapper(multiprocessing.SimpleQueue())
+            self.index_queue = multiprocessing.SimpleQueue()
+            self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False
@@ -203,7 +214,7 @@ class DataLoaderIter(object):
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
-                self.data_queue = QueueWrapper(queue.Queue())
+                self.data_queue = queue.Queue()
                 if self.pin_memory:
                     maybe_device_id = torch.cuda.current_device()
                 else:
@@ -351,8 +362,8 @@ class DataLoader(object):
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: 0)
         worker_init_fn (callable, optional): If not None, this will be called on each
-            worker subprocess with the worker id as input, after seeding and before data
-            loading. (default: None)
+            worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
+            input, after seeding and before data loading. (default: None)
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
