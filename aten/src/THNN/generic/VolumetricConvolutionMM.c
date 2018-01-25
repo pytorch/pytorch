@@ -113,7 +113,11 @@ static THTensor* THNN_(view_weight)(THTensor *weight)
   return weight;
 }
 
-/* note: due to write issues, this one cannot be parallelized as well as unfolded_copy */
+
+// Kernel for fast unfold+copy
+// Borrowed from Theano
+// Authors: Arjun Jain, Frédéric Bastien, Jan Schlüter, Nicolas Ballas
+
 static void THNN_(unfolded_acc_vol)(
           THTensor *finput,
           THTensor *input,
@@ -126,19 +130,19 @@ static void THNN_(unfolded_acc_vol)(
           int pT,
           int pW,
           int pH,
-          long nInputPlane,
-          long inputDepth,
-          long inputWidth,
-          long inputHeight,
-          long outputDepth,
-          long outputWidth,
-          long outputHeight)
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
 #ifdef _OPENMP
   int inOmp = omp_in_parallel();
-  #pragma omp parallel if (!inOmp)
+  #pragma omp parallel if (!inOmp) firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, nInputPlane, inputHeight, inputWidth, inputDepth)
   {
     size_t num_threads = omp_get_num_threads();
     size_t tid = omp_get_thread_num();
@@ -147,54 +151,54 @@ static void THNN_(unfolded_acc_vol)(
     int64_t line_index_offset = tid * seg_len_tmp;
     int64_t line_seg_len = (tid == num_threads - 1)? (n-line_index_offset) : seg_len_tmp;
 
-    long w = line_index_offset % inputWidth + pW;
-    long h_index = line_index_offset / inputWidth;
-    long h = h_index % inputHeight + pH;
-    long d_index = h_index / inputHeight;
-    long d = d_index % inputDepth + pT;
-    long c = d_index / inputDepth;
+    int64_t w = line_index_offset % inputWidth + pW;
+    int64_t h_index = line_index_offset / inputWidth;
+    int64_t h = h_index % inputHeight + pH;
+    int64_t d_index = h_index / inputHeight;
+    int64_t d = d_index % inputDepth + pT;
+    int64_t c = d_index / inputDepth;
 #else
     int64_t line_seg_len = nInputPlane * inputHeight * inputWidth * inputDepth;
-    int line_index_offset = 0;
-    long w = pW;
-    long h = pH;
-    long d = pT;
-    long c = 0;;
+    int64_t line_index_offset = 0;
+    int64_t w = pW;
+    int64_t h = pH;
+    int64_t d = pT;
+    int64_t c = 0;;
 #endif
-    long outputHW = outputHeight * outputWidth;
-    long outputDHW = outputDepth * outputHW;
-    long kHkW = kH*kW;
-    long kTkHkW = kT*kHkW;
+    int64_t outputHW = outputHeight * outputWidth;
+    int64_t outputDHW = outputDepth * outputHW;
+    int64_t kHkW = kH*kW;
+    int64_t kTkHkW = kT*kHkW;
 
-    register long coeff_d_col = outputHW - dT * kHkW * outputDHW;
-    register long coeff_h_col = outputWidth - dH * kW * outputDHW;
-    register long coeff_w_col = (1 - dW * outputDHW);
+    register int64_t coeff_d_col = outputHW - dT * kHkW * outputDHW;
+    register int64_t coeff_h_col = outputWidth - dH * kW * outputDHW;
+    register int64_t coeff_w_col = (1 - dW * outputDHW);
 
     int64_t count = 0;
     while (count < line_seg_len) {
       // compute the start and end of the output
-      int w_col_start = (w < kW) ? 0 : (w - kW) / dW + 1;
-      int w_col_tmp = w / dW + 1;
-      int w_col_end = w_col_tmp < outputWidth? w_col_tmp : outputWidth;
+      int64_t w_col_start = (w < kW) ? 0 : (w - kW) / dW + 1;
+      int64_t w_col_tmp = w / dW + 1;
+      int64_t w_col_end = w_col_tmp < outputWidth? w_col_tmp : outputWidth;
 
-      int h_col_start = (h < kH) ? 0 : (h - kH) / dH + 1;
-      int h_col_tmp = h / dH + 1;
-      int h_col_end = h_col_tmp < outputHeight? h_col_tmp : outputHeight;
+      int64_t h_col_start = (h < kH) ? 0 : (h - kH) / dH + 1;
+      int64_t h_col_tmp = h / dH + 1;
+      int64_t h_col_end = h_col_tmp < outputHeight? h_col_tmp : outputHeight;
 
-      int d_col_start = (d < kT) ? 0 : (d - kT) / dT + 1;
-      int d_col_tmp = d / dT + 1;
-      int d_col_end = d_col_tmp < outputDepth? d_col_tmp : outputDepth;
+      int64_t d_col_start = (d < kT) ? 0 : (d - kT) / dT + 1;
+      int64_t d_col_tmp = d / dT + 1;
+      int64_t d_col_end = d_col_tmp < outputDepth? d_col_tmp : outputDepth;
 
       real val = 0;
-      int offset = (c * kTkHkW + d * kHkW + h * kW + w) * outputDHW;
+      int64_t offset = (c * kTkHkW + d * kHkW + h * kW + w) * outputDHW;
 
-      register int offset_w_col_start = w_col_start * coeff_w_col;
-      register int offset_d_col_start = d_col_start * coeff_d_col;
-      register int offset_h_col_start = h_col_start * coeff_h_col;
-      int offset_w_col = offset_w_col_start + offset;
-      int offset_d_col;
-      int offset_h_col;
-      int w_col, d_col, h_col;
+      register int64_t offset_w_col_start = w_col_start * coeff_w_col;
+      register int64_t offset_d_col_start = d_col_start * coeff_d_col;
+      register int64_t offset_h_col_start = h_col_start * coeff_h_col;
+      int64_t offset_w_col = offset_w_col_start + offset;
+      int64_t offset_d_col;
+      int64_t offset_h_col;
+      int64_t w_col, d_col, h_col;
       for (w_col = w_col_start; w_col < w_col_end; ++w_col) {
         offset_d_col = offset_d_col_start + offset_w_col;
         for (d_col = d_col_start; d_col < d_col_end; ++d_col) {
@@ -207,9 +211,10 @@ static void THNN_(unfolded_acc_vol)(
         }
         offset_w_col += coeff_w_col;
       }
-      input_data[line_index_offset+count] = val;
 
+      input_data[line_index_offset+count] = val;
       count++;
+
       if (count < line_seg_len) {
         if (w - pW + 1 == inputWidth) {
           w = pW;
@@ -231,6 +236,41 @@ static void THNN_(unfolded_acc_vol)(
 #endif
 }
 
+/*
+  Modified from the version of CUDA implementation, the loop iterations is larger than that one.
+  The large loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
+  The more simpler code is below:
+
+  real *input_data = THTensor_(data)(input);
+  real *finput_data = THTensor_(data)(finput);
+
+  int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
+  #pragma omp parallel for firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, inputHeight, inputWidth, inputDepth)
+  for (int64_t idx = 0; idx < n ; ++idx) {
+    int64_t w_out = line_index_offset % outputWidth;
+    int64_t remained = line_index_offset / outputWidth;
+    int64_t h_out = remained % outputHeight;
+    remained /= outputHeight;
+    int64_t d_out = remained % outputDepth;
+    remained /= outputDepth;
+    int k = remained % kW;
+    remained /= kW;
+    int j = remained % kH;
+    remained /= kH;
+    int i = remained % kT;
+    int64_t nip = remained / kT;
+
+    int64_t d = d_out * dT - pT + i;
+    int64_t h = h_out * dH - pH + j;
+    int64_t w = w_out * dW - pW + k;
+
+    finput_data[idx] = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
+      input_data[nip*inputDepth*inputWidth*inputHeight+ d*inputHeight*inputWidth + h*inputWidth + w] : 0;
+  }
+
+  However, there are 6 quotient and 6 module operations which are very time-consuming. So we choose relatively
+  more complex but efficient pattern.
+*/
 static void THNN_(unfolded_copy_vol)(
           THTensor *finput,
           THTensor *input,
@@ -243,123 +283,96 @@ static void THNN_(unfolded_copy_vol)(
           int pT,
           int pW,
           int pH,
-          long nInputPlane,
-          long inputDepth,
-          long inputWidth,
-          long inputHeight,
-          long outputDepth,
-          long outputWidth,
-          long outputHeight)
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
 
 #ifdef _OPENMP
   int inOmp = omp_in_parallel();
-  #pragma omp parallel if (!inOmp)
+  #pragma omp parallel if (!inOmp) firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, nInputPlane, inputHeight, inputWidth, inputDepth)
   {
     size_t num_threads = omp_get_num_threads();
     size_t tid = omp_get_thread_num();
-    int64_t n = nInputPlane*kT*kH*kW;
+    int64_t n = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
     int64_t seg_len_tmp = n / num_threads;
     int64_t line_index_offset = tid * seg_len_tmp;
     int64_t line_seg_len = (tid == num_threads - 1)? (n-line_index_offset) : seg_len_tmp;
 
-    long kw = line_index_offset % kW;
-    long remained = line_index_offset / kW;
-    long kh = remained % kH;
-    remained = remained / kH;
-    long kt = remained % kT;
-    long nip = remained / kT;
+    int64_t w_out = line_index_offset % outputWidth;
+    int64_t remained = line_index_offset / outputWidth;
+    int64_t h_out = remained % outputHeight;
+    remained /= outputHeight;
+    int64_t d_out = remained % outputDepth;
+    remained /= outputDepth;
+    int k = remained % kW;
+    remained /= kW;
+    int j = remained % kH;
+    remained /= kH;
+    int i = remained % kT;
+    int64_t nip = remained / kT;
 #else
-    int64_t line_seg_len = nInputPlane*kT*kH*kW;
-    long kw = 0;
-    long kh = 0;
-    long kt = 0;
-    long nip = 0;
+    int64_t line_seg_len = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
+    int64_t line_index_offset = 0;
+    int64_t w_out = 0;
+    int64_t h_out = 0;
+    int64_t d_out = 0;
+    int i = 0;
+    int j = 0;
+    int k = 0;
+    int64_t nip = 0;
 #endif
-    long dstkwStride = outputDepth*outputHeight*outputWidth;
-    long dstkhStride = kW*dstkwStride;
-    long dstktStride = kH*dstkhStride;
-    long dstnipStride = kT*dstktStride;
-
-    long srcnipStride = inputDepth*inputHeight*inputWidth;
-
-    real *dst = finput_data
-      + nip * dstnipStride
-      + kt  * dstktStride
-      + kh  * dstkhStride
-      + kw  * dstkwStride;
-    real *src = input_data + nip*srcnipStride;
 
     int64_t count = 0;
-    long t,x,y,it,ix,iy;
+    real* dst = finput_data + line_index_offset;
+    register int64_t inputHW = inputHeight*inputWidth;
+    register int64_t inputDHW = inputHW*inputDepth;
+
     while (count < line_seg_len) {
-      if (pT > 0 || pH > 0 || pW > 0)
-      {
-        for (t = 0; t < outputDepth; t++)
-        {
-          it = t*dT - pT + kt;
-          for (y = 0; y < outputHeight; y++)
-          {
-            iy = y*dH - pH + kh;
-            for (x = 0; x < outputWidth; x++)
-            {
-              ix = x*dW - pW + kw;
-              if (it < 0 || it >= inputDepth || iy < 0 || iy >= inputHeight || ix < 0 || ix >= inputWidth)
-                memset(dst+t*outputHeight*outputWidth+y*outputWidth+x, 0, sizeof(real)*(1));
-              else
-                memcpy(dst+t*outputHeight*outputWidth+y*outputWidth+x, src+it*inputHeight*inputWidth+iy*inputWidth+ix, sizeof(real)*(1));
-            }
-          }
-        }
-      }
-      else
-      {
-        for (t = 0; t < outputDepth; t++)
-        {
-          it = t*dT + kt;
-          for (y = 0; y < outputHeight; y++)
-          {
-            iy = y*dH + kh;
-            for(x = 0; x < outputWidth; x++)
-            {
-              ix = x*dW + kw;
-              memcpy(dst+t*outputHeight*outputWidth+y*outputWidth+x, src+it*inputHeight*inputWidth+iy*inputWidth+ix, sizeof(real)*(1));
-            }
-          }
-        }
-      }
+      int64_t w = w_out * dW - pW + k;
+      int64_t h = h_out * dH - pH + j;
+      int64_t d = d_out * dT - pT + i;
+
+
+      *dst = (h >= 0 && w >= 0 && d >= 0 && h < inputHeight && w < inputWidth && d < inputDepth) ?
+        input_data[nip*inputDHW+ d*inputHW + h*inputWidth + w] : 0;
+
       count++;
       if (count < line_seg_len) {
-        if (kw + 1 == kW) {
-          dst -= kw*dstkwStride;
-          kw = 0;
-          if (kh + 1 == kH) {
-            dst -= kh*dstkhStride;
-            kh = 0;
-            if (kt  + 1== kT) {
-              dst -= kt*dstktStride;
-              kt = 0;
-              nip++;
-              dst += dstnipStride;
-              src += srcnipStride;
-            }
-            else {
-              kt++;
-              dst += dstktStride;
+        dst++;
+        w_out++;
+        if (w_out == outputWidth) {
+          w_out = 0;
+          h_out++;
+          if (h_out == outputHeight) {
+            h_out = 0;
+            d_out++;
+            if (d_out == outputDepth) {
+              d_out = 0;
+              k++;
+              if(k == kW) {
+                k = 0;
+                j++;
+                if(j == kH) {
+                  j = 0;
+                  i++;
+                  if(i == kT) {
+                    i = 0;
+                    nip++;
+                  }
+                }
+              }
             }
           }
-          else {
-            kh++;
-            dst += dstkhStride;
-          }
-        }
-        else {
-          kw++;
-          dst += dstkwStride;
         }
       }
+
     }
 #ifdef _OPENMP
   }
