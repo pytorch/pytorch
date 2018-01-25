@@ -34,8 +34,9 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-
-WITH_SCALARS = True
+if not 'WITH_SCALARS' in os.environ:
+    os.environ['WITH_SCALARS'] = '1'
+WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
 try:
     import ninja
