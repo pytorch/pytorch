@@ -14,7 +14,7 @@ from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
-from common import TestCase, run_tests, skipIfNoLapack
+from common import TestCase, run_tests, skipIfNoLapack, IS_WINDOWS
 from torch.autograd import Variable, Function
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -2273,14 +2273,6 @@ method_tests = [
     ('norm', (S,), (2, 0, True), 'keepdim_2_dim_1d', [1]),
     ('norm', (S,), (3, 0, True), 'keepdim_3_dim_1d', [1]),
     ('clone', (S, M, S), NO_ARGS),
-    ('dist', (S, S, S), ((S, S, S),)),
-    ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
-    ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
-    ('dist', (S, 1, S), ((S, S),), 'broadcast_all'),
-    ('dist', (S, S, S), ((S, S, S), 4), '4'),
-    ('dist', (S, S, S), ((S,), 4), '4_broadcast_rhs'),
-    ('dist', (S,), ((S, S, S), 4), '4_broadcast_lhs'),
-    ('dist', (S, 1, S), ((S, S), 4), '4_broadcast_all'),
     ('diag', (M, M), NO_ARGS, '2d'),
     ('diag', (M,), NO_ARGS, '1d'),
     ('diag', (M, M), (1,), '2d_1'),
@@ -2387,6 +2379,17 @@ method_tests = [
 ]
 # TODO: clamp with min/max
 
+if not IS_WINDOWS:
+    method_tests += [
+        ('dist', (S, S, S), ((S, S, S),)),
+        ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
+        ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
+        ('dist', (S, 1, S), ((S, S),), 'broadcast_all'),
+        ('dist', (S, S, S), ((S, S, S), 4), '4'),
+        ('dist', (S, S, S), ((S,), 4), '4_broadcast_rhs'),
+        ('dist', (S,), ((S, S, S), 4), '4_broadcast_lhs'),
+        ('dist', (S, 1, S), ((S, S), 4), '4_broadcast_all'),
+    ]
 
 def create_input(call_args, requires_grad=True, non_contiguous=False):
     if not isinstance(call_args, tuple):
