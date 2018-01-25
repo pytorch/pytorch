@@ -334,7 +334,7 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
           "with the bound [val] <= %d", INT_MAX);
 }
 
-#if CUDA_VERSION >= 9100
+#if CUDA_VERSION >= 9010
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
                              half alpha, const half *a, long lda, long strideA, const half *b, long ldb, long strideB,
                              half beta, half *c, long ldc, long strideC, long batchCount)
