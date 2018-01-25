@@ -17,6 +17,7 @@ from .laplace import Laplace
 from .normal import Normal
 from .pareto import Pareto
 from .uniform import Uniform
+from torch.autograd import Variable, variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -104,7 +105,11 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    return tensor.new([float('inf')]).expand_as(tensor)
+    # verbose because of differening Variable/Tensor apis and lack of dtypes
+    if isinstance(tensor, Variable):
+        return variable(float('inf')).type_as(tensor).expand_as(tensor)
+    else:
+        return tensor.new([float('inf')]).expand_as(tensor)
 
 
 def _x_log_x(tensor):
