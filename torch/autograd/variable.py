@@ -45,7 +45,8 @@ class Variable(_C._VariableBase):
         if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
-        result = type(self)(self.data.clone())
+        with torch.no_grad():
+            result = self.clone()
         result.requires_grad = self.requires_grad
         memo[id(self)] = result
         return result

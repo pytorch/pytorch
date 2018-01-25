@@ -4440,6 +4440,13 @@ class TestTorch(TestCase):
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
 
+    def test_deepcopy_scalar(self):
+        from copy import deepcopy
+        from torch.autograd import variable
+        a = variable(5)
+        self.assertEqual(a.size(), deepcopy(a).size())
+        self.assertEqual(a, deepcopy(a))
+
     def test_copy(self):
         from copy import copy
         a = torch.randn(5, 5)
