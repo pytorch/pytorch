@@ -60,7 +60,8 @@ class TestNGramOps(hu.HypothesisTestCase):
         ]
         vals = np.array([x for l in vcb for x in l], dtype=np.int32)
 
-        floats = -np.random.rand(N, D).astype(np.float32)
+        # Enforce round(floats) to be negative.
+        floats = np.random.rand(N, D).astype(np.float32) - 2
         expected_output = []
         for i in range(N):
             val = 0
