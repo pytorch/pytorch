@@ -91,6 +91,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Laplace
     :members:
 
+:hidden:`Logistic`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Logistic
+    :members:
+
 :hidden:`Normal`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

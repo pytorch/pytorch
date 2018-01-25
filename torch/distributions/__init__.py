@@ -45,6 +45,7 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
+from .logistic import Logistic
 from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -68,6 +69,7 @@ __all__ = [
     'Geometric',
     'Gumbel',
     'Laplace',
+    'Logistic',
     'Multinomial',
     'Normal',
     'OneHotCategorical',
