@@ -142,6 +142,7 @@ class TestIndexing(TestCase):
                     a[:] = neg_ones_expanded * 5
 
     def test_setitem_expansion_error(self):
+        true = variable(1).byte()
         a = Variable(torch.randn(2, 3))
         # check prefix with  non-1s doesn't work
         a_expanded = a.expand(torch.Size([5, 1]) + a.size())
