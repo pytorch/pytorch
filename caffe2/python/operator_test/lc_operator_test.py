@@ -34,7 +34,7 @@ class TestLocallyConnectedOp(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]),
            use_bias=st.booleans(),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_lc_2d(
             self, kernel, size, input_channels, output_channels, batch_size,
             order, use_bias, gc, dc):
@@ -97,7 +97,7 @@ class TestLocallyConnectedOp(hu.HypothesisTestCase):
         ref_op = lc_2d_nchw if order == "NCHW" else lc_2d_nhwc
 
         self.assertReferenceChecks(
-            device_option=hu.cpu_do,
+            device_option=gc,
             op=op,
             inputs=inputs,
             reference=ref_op,
@@ -111,7 +111,7 @@ class TestLocallyConnectedOp(hu.HypothesisTestCase):
            output_channels=st.integers(1, 3),
            batch_size=st.integers(1, 3),
            use_bias=st.booleans(),
-           **hu.gcs_cpu_only)
+           **hu.gcs)
     def test_lc_1d(
             self, kernel, size, input_channels, output_channels, batch_size,
             use_bias, gc, dc):
@@ -155,7 +155,7 @@ class TestLocallyConnectedOp(hu.HypothesisTestCase):
             return [output]
 
         self.assertReferenceChecks(
-            device_option=hu.cpu_do,
+            device_option=gc,
             op=op,
             inputs=inputs,
             reference=lc_1d_nchw,
