@@ -1759,7 +1759,7 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            print('Testing KL({}, {})'.format(type(p).__name__, type(q).__name__))
+            print('Testing KL({}, {}) using Monte Carlo'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0
@@ -1776,6 +1776,23 @@ class TestKL(TestCase):
                 'Expected ({} Monte Carlo samples): {}'.format(denominator, expected),
                 'Actual (analytic): {}'.format(actual),
             ]))
+
+    def test_kl_exponential_family(self):
+        for (p, _), (_, q) in self.finite_examples:
+            if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
+                print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
+                actual = kl_divergence(p, q)
+                expected = ExponentialFamily.kl_divergence(p, q)
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
+                self.assertEqual(actual, expected, message='\n'.join([
+                    'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
+                    'Expected (using Bregman Divergence) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max())
+                ]))
+            else:
+                continue
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:

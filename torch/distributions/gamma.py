@@ -4,7 +4,7 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
@@ -14,7 +14,7 @@ def _standard_gamma(concentration):
     return concentration._standard_gamma()
 
 
-class Gamma(Distribution):
+class Gamma(ExponentialFamily):
     r"""
     Creates a Gamma distribution parameterized by shape `concentration` and `rate`.
 

@@ -22,6 +22,9 @@ class ExponentialFamily(Distribution):
         raise NotImplementedError
 
     def entropy(self):
+        """
+        Method to compute the entropy using Bregman divergence of the log normalizer
+        """
         if not self._zero_carrier_measure:
             raise ValueError("There is no closed form solution for non-zero carrier measure")
         nparams = self.natural_params()
@@ -30,4 +33,20 @@ class ExponentialFamily(Distribution):
         result = lg_normal.clone()
         for np, g in zip(nparams, gradients):
             result -= np * g
+        return result
+
+    def kl_divergence(self, dist):
+        """
+        Method to compute the KL-divergence between self and dist :math:`KL(self || dist)`
+        """
+        if not type(self) == type(dist):
+            raise ValueError("The cross KL-divergence between different exponential families cannot \
+                                be computed")
+        self_nparams = self.natural_params()
+        dist_nparams = dist.natural_params()
+        lg_normal = self.log_normalizer()
+        gradients = torch.autograd.grad(lg_normal.sum(), self_nparams, create_graph=True)
+        result = dist.log_normalizer() - lg_normal.clone()
+        for snp, dnp, g in zip(self_nparams, dist_nparams, gradients):
+            result -= (dnp - snp) * g
         return result
