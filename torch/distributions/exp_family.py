@@ -16,7 +16,7 @@ class ExponentialFamily(Distribution):
 
     def log_normalizer(self):
         """
-        Abstract method for log normalizer function. Returns a Variable of shape 
+        Abstract method for log normalizer function. Returns a Variable of shape
         `batch_shape` based on the distribution
         """
         raise NotImplementedError

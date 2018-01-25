@@ -66,12 +66,12 @@ class Gamma(ExponentialFamily):
 
     @lazy_property
     def _natural_params(self):
-        try:
-            V1 = Variable(self.concentration - 1, requires_grad=True)
-            V2 = Variable(-self.rate, requires_grad=True)
-        except:
+        if isinstance(self.concentration, Variable):
             V1 = Variable(self.concentration.data - 1, requires_grad=True)
             V2 = Variable(-self.rate.data, requires_grad=True)
+        else:
+            V1 = Variable(self.concentration - 1, requires_grad=True)
+            V2 = Variable(-self.rate, requires_grad=True)
         return (V1, V2)
 
     def log_normalizer(self):

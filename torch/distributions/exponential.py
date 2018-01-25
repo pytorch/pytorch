@@ -47,10 +47,10 @@ class Exponential(ExponentialFamily):
 
     @lazy_property
     def _natural_params(self):
-        try:
-            V1 = Variable(-self.rate, requires_grad=True)
-        except:
+        if isinstance(self.rate, Variable):
             V1 = Variable(-self.rate.data, requires_grad=True)
+        else:
+            V1 = Variable(-self.rate, requires_grad=True)
         return (V1, )
 
     def log_normalizer(self):
