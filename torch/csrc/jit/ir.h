@@ -598,13 +598,7 @@ protected:
   //
   // NB: This does NOT clone stages.  You're expected to set the stage correctly
   // if you are going to preserve it.
-  virtual void cloneFrom(Node * s) {
-    if (s->hasType()) setType(s->type());
-    setDebugName(s->debugName());
-    setSourceLocation(s->getSourceLocation());
-    scope_ = s->scope_;
-    copyAttributes(*s);
-  }
+  virtual void cloneFrom(Node * s);
 };
 
 struct Graph {
@@ -891,6 +885,16 @@ inline Node* Node::makeMultireturn() {
   select->insertAfter(this);
   setType(multiType());
   return select;
+}
+
+inline void Node::cloneFrom(Node * s) {
+  if (s->hasType()) setType(s->type());
+  setDebugName(s->debugName());
+  setSourceLocation(s->getSourceLocation());
+	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
+    scope_ = s->scope_;
+  }
+  copyAttributes(*s);
 }
 
 // Helper macros for constructing switch statements over Node types
