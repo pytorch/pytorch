@@ -20,6 +20,11 @@ std::unordered_set<NodeKind> broadcasting = {
   kGemm,
 };
 
+bool isRNN(const Node *node) {
+  auto k = node->kind();
+  return k == kRNN || k == kLSTM || k == kGRU;
+}
+
 bool isNopTranspose(const std::vector<int64_t> & perm) {
   for (int64_t i = 0, perm_size = perm.size(); i < perm_size; i++)
     if (perm[i] != i)
@@ -171,6 +176,66 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != kPackPadded) {
+      continue;
+    }
+    if (n->outputs()[0]->uses().size() != 1) {
+      // For now, only handle the case where there is one consumer.
+      continue;
+    }
+    Node * rnn = n->outputs()[0]->uses()[0].user;
+    if (!isRNN(rnn)) {
+      continue;
+    }
+
+    // remove PackPadded from in front of the RNN
+    n->outputs()[0]->replaceFirstUseWith(n->inputs()[0]);
+    n->outputs()[1]->replaceFirstUseWith(n->inputs()[1]);
+
+    // and insert new PackPadded after the RNN
+    Node * newPackPadded = graph->create(kPackPadded, 2);
+    newPackPadded->insertAfter(rnn);
+
+    // make things consume from the new PackPadded
+    rnn->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
+    n->outputs()[1]->replaceAllUsesWith(newPackPadded->outputs()[1]);
+
+    // setup the new PackPadded's inputs
+    newPackPadded->addInput(rnn->outputs()[0]);
+    newPackPadded->addInput(n->inputs()[1]);
+
+    it.destroyCurrent();
+  }
+}
+
+void removeNopPacking(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->begin(); it != graph->end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != kPadPacked) {
+      continue;
+    }
+    Node* input = n->inputs()[0]->node();
+    if (input->kind() != kPackPadded) {
+      continue;
+    }
+    if (input != n->inputs()[1]->node()) {
+      continue;
+    }
+    n->outputs()[0]->replaceAllUsesWith(input->inputs()[0]);
+    n->outputs()[1]->replaceAllUsesWith(input->inputs()[1]);
+
+    n->removeAllInputs();
+    input->destroy();
+    it.destroyCurrent();
+  }
+}
+
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -179,8 +244,9 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
 //    local information.  This optimization is not useful for PyTorch as 'expand'
 //    is free.
 //  - Fusing of consecutive transposes
-//  - Elimiation of NOP transposes
+//  - Elimination of NOP transposes
 //  - Fusing of transposes into Gemm
+//  - Elimination of PaddedSequences
 //
 // Before you write an optimization here, ask yourself, "Could I do this
 // optimization on ATen operators"?  If so, you should seriously consider
@@ -195,6 +261,8 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   fuseConsecutiveTransposes(graph);
   eliminateNopTranspose(graph);
   fuseTransposeIntoGemm(graph);
+  pushPackingPastRnn(graph);
+  removeNopPacking(graph);
 }
 
 }}

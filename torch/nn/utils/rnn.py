@@ -81,7 +81,7 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
-def pack_padded_sequence(input, lengths, batch_first=False):
+def _pack_padded_sequence(input, lengths, batch_first=False):
     r"""Packs a Variable containing padded sequences of variable length.
 
     Input can be of size ``TxBx*`` where T is the length of the longest sequence
@@ -113,7 +113,23 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(data, batch_sizes)
 
 
-def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimizatino pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+    return g.op("PackPadded", input, lengths, outputs=2)
+
+
+def pack_padded_sequence(input, *args, **kwargs):
+    import torch
+    if torch._C._jit_is_tracing(input):
+        from torch.onnx import symbolic_override
+        return symbolic_override(_symbolic_pack_padded_sequence)(_pack_padded_sequence)(input, *args, **kwargs)
+    else:
+        return _pack_padded_sequence(input, *args, **kwargs)
+
+
+def _pad_packed_sequence(sequence, batch_first=False, padding_value=0):
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
@@ -161,6 +177,20 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
     if batch_first:
         output = output.transpose(0, 1)
     return output, Variable(torch.LongTensor(lengths))
+
+
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
+    # See comment on _symbolic_pack_padded_sequence
+    return g.op("PadPacked", input.data, input.batch_sizes, outputs=2)
+
+
+def pad_packed_sequence(input, *args, **kwargs):
+    import torch
+    if torch._C._jit_is_tracing(input.data):
+        from torch.onnx import symbolic_override
+        return symbolic_override(_symbolic_pad_packed_sequence)(_pad_packed_sequence)(input, *args, **kwargs)
+    else:
+        return _pad_packed_sequence(input, *args, **kwargs)
 
 
 def pad_sequence(sequences, batch_first=False):

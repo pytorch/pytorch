@@ -1,6 +1,7 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
 from torch.nn.modules.utils import _single, _pair, _triple
+from torch.nn.utils.rnn import PackedSequence
 import warnings
 
 import torch.onnx
@@ -554,16 +555,12 @@ def Elman_RNN_symbolic_builder(
     if bidirectional:
         return _unimplemented("RNN", "bidirectional")
 
-    def symbolic(g, input, all_weights, h0, **fkwargs):
-        # TODO elide this argument to increase parametricity. This is
-        # nontrivial because we provide subsequent optional arguments,
-        # and ONNX does not have a mechanism for skipping non-trailing
-        # optional arguments.
-        sequence_len, batch_size = input.type().sizes()[0:2]
-        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
-
+    def symbolic(g, input, all_weights, h0, batch_sizes):
         prev_output = input
         h_outs = []
+
+        sequence_lens = g.op("Undefined") if batch_sizes is None else batch_sizes
+
         for i in range(num_layers):
             weight_ih, weight_hh, bias_ih, bias_hh = all_weights[i]
 
@@ -579,29 +576,25 @@ def Elman_RNN_symbolic_builder(
         h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
         return prev_output, h_outs
 
-    return torch.onnx.symbolic_override(symbolic)
+    return symbolic
 
 
 def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0_and_c0, **fkwargs):
-        if batch_first:
-            return _unimplemented("LSTM", "batch_first")
-        if dropout:
-            return _unimplemented("LSTM", "dropout")
-        if bidirectional:
-            return _unimplemented("LSTM", "bidirectional")
+    if batch_first:
+        return _unimplemented("LSTM", "batch_first")
+    if dropout:
+        return _unimplemented("LSTM", "dropout")
+    if bidirectional:
+        return _unimplemented("LSTM", "bidirectional")
 
+    def symbolic(g, input, all_weights, h0_and_c0, batch_sizes):
         h0, c0 = h0_and_c0
-
-        # TODO elide this argument to increase parametricity. This is
-        # nontrivial because we provide subsequent optional arguments,
-        # and ONNX does not have a mechanism for skipping non-trailing
-        # optional arguments.
-        sequence_len, batch_size = input.type().sizes()[0:2]
-        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
 
         prev_output = input
         h_outs = []
+
+        sequence_lens = g.op("Undefined") if batch_sizes is None else batch_sizes
+
         for i in range(num_layers):
             # pytorch is input, forget, cell, output.
             # onnx is    input, output, forget, cell.
@@ -623,23 +616,20 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
 
 
 def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
-    def symbolic(g, input, all_weights, h0, **fkwargs):
-        if batch_first:
-            return _unimplemented("GRU", "batch_first")
-        if dropout:
-            return _unimplemented("GRU", "dropout")
-        if bidirectional:
-            return _unimplemented("GRU", "bidirectional")
+    if batch_first:
+        return _unimplemented("GRU", "batch_first")
+    if dropout:
+        return _unimplemented("GRU", "dropout")
+    if bidirectional:
+        return _unimplemented("GRU", "bidirectional")
 
-        # TODO elide this argument to increase parametricity. This is
-        # nontrivial because we provide subsequent optional arguments,
-        # and ONNX does not have a mechanism for skipping non-trailing
-        # optional arguments.
-        sequence_len, batch_size = input.type().sizes()[0:2]
-        sequence_lens = g.op('Constant', value_t=torch.IntTensor(batch_size).fill_(sequence_len))
+    def symbolic(g, input, all_weights, h0, batch_sizes):
 
         prev_output = input
         h_outs = []
+
+        sequence_lens = g.op("Undefined") if batch_sizes is None else batch_sizes
+
         for i in range(num_layers):
             # pytorch is reset, input, hidden
             # onnx is    input, reset, hidden

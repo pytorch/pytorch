@@ -63,7 +63,7 @@ def init_weight_descriptor(fn, weight):
 
 
 def _input_size(fn, input):
-    if fn.batch_sizes is not None:
+    if fn.variable_length:
         return (input.size(0), fn.input_size)
     else:
         return (fn.seq_length, fn.mini_batch, fn.input_size)
@@ -74,7 +74,7 @@ def _hidden_size(fn):
 
 
 def _output_size(fn, input):
-    if fn.batch_sizes is not None:
+    if fn.variable_length:
         return (input.size(0), fn.hidden_size * fn.num_directions)
     else:
         return (fn.seq_length, fn.mini_batch, fn.hidden_size * fn.num_directions)
@@ -187,12 +187,12 @@ def _copyParams(params_from, params_to):
             param_to.copy_(param_from, broadcast=False)
 
 
-def forward(fn, input, hx, weight, output, hy):
+def forward(fn, input, hx, weight, output, hy, batch_sizes):
     with torch.cuda.device_of(input):
         lib = cudnn.lib
         handle = cudnn.get_handle()
         fn.datatype = cudnn._typemap[input.type()]
-        is_input_packed = fn.batch_sizes is not None
+        is_input_packed = fn.variable_length
 
         if fn.mode == cudnn.CUDNN_LSTM:
             hx, cx = hx
@@ -207,8 +207,8 @@ def forward(fn, input, hx, weight, output, hy):
             raise RuntimeError('dropout supported only in cudnn v5.1 and above')
 
         if is_input_packed:
-            fn.seq_length = len(fn.batch_sizes)
-            fn.mini_batch = fn.batch_sizes[0]
+            fn.seq_length = len(batch_sizes.data)
+            fn.mini_batch = batch_sizes.data[0]
             fn.input_size = input.size(-1)
         else:
             fn.seq_length, fn.mini_batch, fn.input_size = input.size()
@@ -227,8 +227,8 @@ def forward(fn, input, hx, weight, output, hy):
         # init descriptors
         fn.rnn_desc = init_rnn_descriptor(fn, handle)
         if is_input_packed:
-            fn.x_descs = cudnn.descriptor_sequence(x, fn.batch_sizes)
-            fn.y_descs = cudnn.descriptor_sequence(y, fn.batch_sizes)
+            fn.x_descs = cudnn.descriptor_sequence(x, list(batch_sizes.data))
+            fn.y_descs = cudnn.descriptor_sequence(y, list(batch_sizes.data))
         else:
             fn.x_descs = cudnn.descriptor(x[0], fn.seq_length)
             fn.y_descs = cudnn.descriptor(y[0], fn.seq_length)
@@ -315,7 +315,7 @@ def forward(fn, input, hx, weight, output, hy):
 
 def backward_grad(fn, input, hx, weight, output, grad_output, grad_hy, grad_input, grad_hx):
     with torch.cuda.device_of(input):
-        is_input_packed = fn.batch_sizes is not None
+        is_input_packed = fn.variable_length
         handle = cudnn.get_handle()
 
         if fn.mode == cudnn.CUDNN_LSTM:
@@ -410,7 +410,7 @@ def _num_linear_layers(fn):
 
 def backward_weight(fn, input, hx, output, weight, grad_weight):
     with torch.cuda.device_of(input):
-        is_input_packed = fn.batch_sizes is not None
+        is_input_packed = fn.variable_length
         handle = cudnn.get_handle()
 
         if fn.mode == cudnn.CUDNN_LSTM:
