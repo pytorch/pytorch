@@ -15,7 +15,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack
-from torch.autograd import Variable, Function
+from torch.autograd import Variable, Function, variable
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
 
@@ -2296,6 +2296,7 @@ method_tests = [
     ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
     ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
+    ('index_fill', (S, S), (0, index_variable(2, S), variable(2)), 'variable_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
@@ -2306,6 +2307,8 @@ method_tests = [
      'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('fill_', (S, S, S), (1,), 'number'),
+    ('fill_', (S, S, S), (variable(1),), 'variable'),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('ne_', (S, S, S), ((S, S, S),)),
@@ -2353,6 +2356,7 @@ method_tests = [
     ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
      'broadcast_all'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)), 'variable'),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
     ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
@@ -2567,7 +2571,8 @@ for test in method_tests:
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                if not exclude_tensor_method(name, test_name):
+                has_scalar = self_variable.dim() == 0 or any(x.dim() == 0 for x in args_variable if isinstance(x, Variable))
+                if not exclude_tensor_method(name, test_name) and not has_scalar:  # scalar API doesn't work on tensors
                     output_tensor = getattr(self_tensor, name)(*args_tensor)
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))
