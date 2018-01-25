@@ -374,8 +374,11 @@ static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) 
   return dataOffset;
 }
 
-static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
+static void THTensor_(checkLinearIndex)(int64_t linearIndex, int64_t numel) {
   THArgCheck(linearIndex < numel && linearIndex >= -numel, 2, "out of range: %d out of %d", (int)linearIndex, (int)numel);
+}
+
+static int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t numel) {
   return linearIndex < 0 ? linearIndex + numel : linearIndex;
 }
 
@@ -389,23 +392,32 @@ void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
   ptrdiff_t srcElements = THTensor_(nElement)(src);
   real* src_data = THTensor_(data)(src);
   real* dst_data = THTensor_(data)(dst);
-
   ptrdiff_t nIndices = THLongTensor_nElement(index);
-  if (THTensor_(isContiguous)(src)) {
-    ptrdiff_t i;
-    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-    for (i = 0; i < nIndices; i++) {
-      int64_t linearIndex = THTensor_(wrapLinearIndex)(index_data[i], srcElements);
-      dst_data[i] = src_data[linearIndex];
+  int isContiguous = THTensor_(isContiguous)(src);
+
+  // Exceptions must not be thrown across OpenMP parallel sections, so we
+  // record the value of the invalid index and throw the exception after the
+  // loop.
+  int64_t invalidIdx = -1;
+
+  ptrdiff_t i;
+  #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+  for (i = 0; i < nIndices; i++) {
+    int64_t idx = index_data[i];
+    if (idx < srcElements && idx >= -srcElements) {
+      idx = THTensor_(wrapLinearIndex)(idx, srcElements);
+      if (isContiguous) {
+        dst_data[i] = src_data[idx];
+      } else {
+        dst_data[i] = src_data[THTensor_(dataOffset)(src, idx)];
+      }
+    } else {
+      THAtomicCompareAndSwapLong(&invalidIdx, -1, idx);
     }
-  } else {
-    ptrdiff_t i;
-    #pragma omp parallel for if(nIndices > TH_OMP_OVERHEAD_THRESHOLD) private(i)
-    for (i = 0; i < nIndices; i++) {
-      int64_t linearIndex = THTensor_(wrapLinearIndex)(index_data[i], srcElements);
-      int64_t dataOffset = THTensor_(dataOffset)(src, linearIndex);
-      dst_data[i] = src_data[dataOffset];
-    }
+  }
+
+  if (invalidIdx >= 0) {
+    THTensor_(checkLinearIndex)(invalidIdx, srcElements);
   }
 
   THLongTensor_free(index);
@@ -424,6 +436,7 @@ void THTensor_(put)(THTensor *tensor, THLongTensor *index, THTensor *src, int ac
   int is_contiguous = THTensor_(isContiguous)(tensor);
 
   TH_TENSOR_APPLY2(int64_t, index, real, src,
+    THTensor_(checkLinearIndex)(*index_data, numel);
     int64_t linearIndex = THTensor_(wrapLinearIndex)(*index_data, numel);
     int64_t dataOffset = is_contiguous ? linearIndex : THTensor_(dataOffset)(tensor, linearIndex);
     if (accumulate) {
