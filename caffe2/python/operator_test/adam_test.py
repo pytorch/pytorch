@@ -236,6 +236,7 @@ class TestAdam(hu.HypothesisTestCase):
             ref_row_wise_sparse,
             input_device_options=input_device_options)
 
-    if __name__ == "__main__":
-        import unittest
-        unittest.main()
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()
