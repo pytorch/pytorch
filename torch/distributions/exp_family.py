@@ -22,13 +22,12 @@ class ExponentialFamily(Distribution):
         raise NotImplementedError
 
     def entropy(self):
-        if self._zero_carrier_measure:
-            nparams = self.natural_params()
-            lg_normal = self.log_normalizer()
-            gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
-            result = lg_normal.clone()
-            for np, g in zip(nparams, gradients):
-                result -= torch.dot(np, g)
-            return result
-        else:
+        if not self._zero_carrier_measure:
             raise ValueError("There is no closed form solution for non-zero carrier measure")
+        nparams = self.natural_params()
+        lg_normal = self.log_normalizer()
+        gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
+        result = lg_normal.clone()
+        for np, g in zip(nparams, gradients):
+            result -= np * g
+        return result

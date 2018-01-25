@@ -54,5 +54,5 @@ class Exponential(ExponentialFamily):
         return (V1, )
 
     def log_normalizer(self):
-        x,  = self._natural_params
+        x, = self._natural_params
         return -torch.log(-x)

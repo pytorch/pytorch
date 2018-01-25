@@ -296,7 +296,7 @@ class TestDistributions(TestCase):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
         for Dist in globals().values():
             if isinstance(Dist, type) and issubclass(Dist, Distribution) \
-                and Dist is not Distribution and Dist is not ExponentialFamily:
+                    and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
@@ -1822,22 +1822,23 @@ class TestKL(TestCase):
 
     def test_entropy_exponential_family(self):
         for Dist, params in EXAMPLES:
-            if issubclass(Dist, ExponentialFamily):
-                for i, param in enumerate(params):
-                    dist = Dist(**param)
-                    try:
-                        actual = dist.entropy()
-                    except NotImplementedError:
-                        continue
-                    expected = ExponentialFamily.entropy(dist)
-                    self.assertEqual(actual, expected.data, prec=0.2, message='\n'.join([
-                        '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
-                        'Expected (Bregman Divergence) {}'.format(expected.data),
-                        'Actual (analytic) {}'.format(actual),
-                        'max error = {}'.format(torch.abs(actual - expected).max())
-                    ]))
-            else:
+            if not issubclass(Dist, ExponentialFamily):
                 continue
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                expected = ExponentialFamily.entropy(dist)
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
+                self.assertEqual(actual, expected, message='\n'.join([
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
+                    'Expected (Bregman Divergence) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max())
+                ]))
 
 
 class TestConstraints(TestCase):
