@@ -65,7 +65,7 @@ class TestLengthsReducerOpsFused8BitRowwise(hu.HypothesisTestCase):
                 engine='fp16'
             )
             net.SparseLengthsWeightedSumFused8BitRowwise(
-                [quantized_data, 'indices', 'lengths', 'weights'],
+                [quantized_data, 'weights', 'indices', 'lengths'],
                 'sum_quantized'
             )
         else:

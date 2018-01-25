@@ -33,7 +33,7 @@ OPERATOR_SCHEMA(SparseLengthsSumFused8BitRowwise)
         0,
         "DATA",
         "uint8 tensor obtained with "
-        "operator FloatToFusedRowwiseQuantized8Bits")
+        "operator FloatToFused8BitRowwiseQuantized")
     .Input(
         1,
         "INDICES",
@@ -59,7 +59,7 @@ OPERATOR_SCHEMA(SparseLengthsWeightedSumFused8BitRowwise)
         0,
         "DATA",
         "uint8 tensor obtained with "
-        "operator FloatToFusedRowwiseQuantized8Bits")
+        "operator FloatToFused8BitRowwiseQuantized")
     .Input(
         1,
         "INDICES",
@@ -93,7 +93,7 @@ OPERATOR_SCHEMA(SparseLengthsMeanFused8BitRowwise)
         0,
         "DATA",
         "uint8 tensor obtained with "
-        "operator FloatToFusedRowwiseQuantized8Bits")
+        "operator FloatToFused8BitRowwiseQuantized")
     .Input(
         1,
         "INDICES",
