@@ -522,7 +522,6 @@ class TestDictDataLoader(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pin_memory_with_collate(self):
         from collections import namedtuple
-        from pprint import pprint
         Batch = namedtuple('Batch', ['data', 'labels'])
 
         def collate(x):
