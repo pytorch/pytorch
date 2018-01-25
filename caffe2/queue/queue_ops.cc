@@ -96,7 +96,12 @@ execution step.
 The 1st input is the queue and the last output is the status. The rest are
 data blobs.
 )DOC")
-    .Input(0, "weights", "Weights for sampling from multiple queues");
+    .Arg("weights", "Weights for sampling from multiple queues")
+    .Arg(
+        "table_idx_blob",
+        "The index of the blob (among the output blob list) "
+        "that will be used to store the index of the table chosen to read the "
+        "current batch.");
 
 NO_GRADIENT(CreateBlobsQueue);
 NO_GRADIENT(EnqueueBlobs);

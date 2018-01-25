@@ -211,7 +211,10 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   WeightedSampleDequeueBlobsOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
+      : Operator<Context>(operator_def, ws),
+        table_idx_blob_(
+            OperatorBase::GetSingleArgument<int>("table_idx_blob", -1)) {
+    CAFFE_ENFORCE_LT(table_idx_blob_, OutputSize() - 1);
     vector<float> weights = OperatorBase::GetRepeatedArgument<float>("weights");
     if (weights.empty()) {
       weights.resize(InputSize(), 1.0f);
@@ -239,14 +242,21 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     math::RandUniform<float, Context>(1, 0.0f, 1.0f, &r, &context_);
     auto lb = lower_bound(cumProbs_.begin(), cumProbs_.end(), r);
     CAFFE_ENFORCE(lb != cumProbs_.end(), "Cannot find ", r, " in cumProbs_.");
-
-    auto queue = Operator<Context>::Inputs()[lb - cumProbs_.begin()]
+    const int32_t idx = lb - cumProbs_.begin();
+    auto queue = Operator<Context>::Inputs()[idx]
                      ->template Get<std::shared_ptr<BlobsQueue>>();
 
     CAFFE_ENFORCE(queue);
     auto size = queue->getNumBlobs();
     CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
     bool status = queue->blockingRead(this->Outputs());
+    if (table_idx_blob_ >= 0) {
+      auto* table_idx_blob_out = Output(table_idx_blob_);
+      table_idx_blob_out->Resize(1);
+      int32_t* data = table_idx_blob_out->template mutable_data<int32_t>();
+      data[0] = idx;
+    }
+
     Output(size)->Resize();
     math::Set<bool, Context>(
         1, !status, Output(size)->template mutable_data<bool>(), &context_);
@@ -255,5 +265,6 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
 
  private:
   vector<float> cumProbs_;
+  int table_idx_blob_;
 };
 }
