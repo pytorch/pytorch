@@ -85,7 +85,12 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
   }
 
  private:
-  INPUT_TAGS(DATA, INDICES, LENGTHS, WEIGHTS);
+  enum {
+    DATA = 0,
+    WEIGHTS = 1,
+    INDICES = 1 + with_weights,
+    LENGTHS = 2 + with_weights,
+  };
 };
 
 } // namespace caffe2
