@@ -62,8 +62,12 @@ class Normal(ExponentialFamily):
 
     @lazy_property
     def _natural_params(self):
-        V1 = Variable(self.loc / self.scale.pow(2), requires_grad=True)
-        V2 = Variable(-0.5 * self.scale.pow(2).reciprocal(), requires_grad=True)
+        try:
+            V1 = Variable(self.loc / self.scale.pow(2), requires_grad=True)
+            V2 = Variable(-0.5 * self.scale.pow(2).reciprocal(), requires_grad=True)
+        except:
+            V1 = Variable((self.loc / self.scale.pow(2)).data, requires_grad=True)
+            V2 = Variable(-0.5 * self.scale.pow(2).reciprocal().data, requires_grad=True)
         return (V1, V2)
 
     def log_normalizer(self):

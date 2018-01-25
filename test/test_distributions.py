@@ -30,7 +30,7 @@ from itertools import product
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck
-from torch.distributions import Distribution
+from torch.distributions import Distribution, ExponentialFamily
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, Normal, OneHotCategorical, Multinomial, Pareto,
@@ -295,7 +295,8 @@ class TestDistributions(TestCase):
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
         for Dist in globals().values():
-            if isinstance(Dist, type) and issubclass(Dist, Distribution) and Dist is not Distribution:
+            if isinstance(Dist, type) and issubclass(Dist, Distribution) \
+                and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
@@ -1818,6 +1819,25 @@ class TestKL(TestCase):
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max()),
                 ]))
+
+    def test_entropy_exponential_family(self):
+        for Dist, params in EXAMPLES:
+            if issubclass(Dist, ExponentialFamily):
+                for i, param in enumerate(params):
+                    dist = Dist(**param)
+                    try:
+                        actual = dist.entropy()
+                    except NotImplementedError:
+                        continue
+                    expected = ExponentialFamily.entropy(dist)
+                    self.assertEqual(actual, expected.data, prec=0.2, message='\n'.join([
+                        '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
+                        'Expected (Bregman Divergence) {}'.format(expected.data),
+                        'Actual (analytic) {}'.format(actual),
+                        'max error = {}'.format(torch.abs(actual - expected).max())
+                    ]))
+            else:
+                continue
 
 
 class TestConstraints(TestCase):

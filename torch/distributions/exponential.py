@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.distribution import ExponentialFamily
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, lazy_property
 
 
@@ -47,9 +47,12 @@ class Exponential(ExponentialFamily):
 
     @lazy_property
     def _natural_params(self):
-        V1 = Variable(-self.rate, required_grad=True)
+        try:
+            V1 = Variable(-self.rate, requires_grad=True)
+        except:
+            V1 = Variable(-self.rate.data, requires_grad=True)
         return (V1, )
 
     def log_normalizer(self):
-        x = self._natural_params
+        x,  = self._natural_params
         return -torch.log(-x)
