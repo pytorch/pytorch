@@ -35,7 +35,7 @@ IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
 
-WITH_SCALARS = check_env_flag('WITH_SCALARS')
+WITH_SCALARS = True
 
 try:
     import ninja
