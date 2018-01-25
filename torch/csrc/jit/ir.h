@@ -603,11 +603,7 @@ protected:
   //
   // NB: This does NOT clone stages.  You're expected to set the stage correctly
   // if you are going to preserve it.
-  virtual void cloneFrom(Node * s) {
-    setSourceLocation(s->getSourceLocation());
-    scope_ = s->scope_;
-    copyAttributes(*s);
-  }
+  virtual void cloneFrom(Node * s);
 };
 
 struct Graph {
@@ -907,6 +903,14 @@ inline void Node::destroy() {
   removeAllInputs();
   removeFromList();
   graph_->freeNode(this);
+}
+
+inline void Node::cloneFrom(Node * s) {
+	setSourceLocation(s->getSourceLocation());
+	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
+		scope_ = s->scope_;
+	}
+	copyAttributes(*s);
 }
 
 inline Value* Value::setUniqueName(const std::string & name) {
