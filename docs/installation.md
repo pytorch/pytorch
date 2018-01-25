@@ -7,6 +7,8 @@ Get latest source from GitHub.
     git clone --recursive https://github.com/caffe2/caffe2.git
     cd caffe2
 
+Note that you might need to uninstall existing Eigen and pybind11 packages due to compile-time dependencies when building from source. For this reason, Caffe2 uses git submodules to reference external packages in the third_party folder. These are downloaded with the --recursive option.
+
 #### MacOS X
 
     brew install openblas glog gtest automake protobuf leveled lmdb
