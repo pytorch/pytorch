@@ -251,20 +251,20 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   THArgCheck(THCTensor_(isContiguous)(state, weight), 4,
              "weight tensor has to be contiguous");
 
+  THNN_(SpatialConvolutionMM_shapeCheck)
+       (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, 0);
+
   // Params
   int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
   int nOutputPlane = weight->size[0];
 
   int freeWeight = 0;
-  if (weight && weight->nDimension == 4) {
+  if (weight->nDimension == 4) {
     int64_t s1 = weight->size[0];
     int64_t s2 = weight->size[1] * weight->size[2] * weight->size[3];
     weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
     freeWeight = 1;
   }
-
-  THNN_(SpatialConvolutionMM_shapeCheck)
-       (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, 0);
 
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
