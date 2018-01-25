@@ -28,6 +28,17 @@ class Transform(object):
     """
     bijective = False
 
+    def __init__(self, cache_size=0):
+        if cache_size == 0:
+            self.__call__ = self._call
+            self.inverse = self._inverse
+        elif cache_size == 1:
+            self._cached_x_y = None, None
+            self.__call__ = self._cached_call
+            self.inverse = self._cached_inverse
+        else:
+            raise NotImplementedError('cache_size must be 0 or 1')
+
     @lazy_property
     def inv(self):
         """
@@ -42,6 +53,28 @@ class Transform(object):
         # Necessary for Python2
         return not self.__eq__(other)
 
+    def _cached_call(self, x):
+        """
+        Invokes the memoized transform `x => y`.
+        """
+        x_old, y_old = self._cached_x_y
+        if x is x_old:
+            return y_old
+        y = self._call(x)
+        self._cached_x_y = x, y
+        return y
+
+    def _cached_inverse(self, y):
+        """
+        Inverts the memoized transform `y => x`.
+        """
+        x_old, y_old = self._cached_x_y
+        if y is y_old:
+            return x_old
+        x = self._inverse(y)
+        self._cached_x_y = x, y
+        return x
+    
     def __call__(self, x):
         """
         Abstract method to compute forward transformation.
@@ -53,7 +86,7 @@ class Transform(object):
         Abstract method to compute inverse transformation.
         """
         raise NotImplementedError
-
+    
     def log_abs_det_jacobian(self, x, y):
         """
         Computes the log det jacobian `log |dy/dx|` given input and output.
@@ -84,41 +117,7 @@ class CachedTransform(Transform):
     :meth:`_inverse`.
     """
     def __init__(self):
-        self._cached_x_y = None, None
-
-    def __call__(self, x):
-        """
-        Invokes the memoized transform `x => y`.
-        """
-        x_old, y_old = self._cached_x_y
-        if x is x_old:
-            return y_old
-        y = self._call(x)
-        self._cached_x_y = x, y
-        return y
-
-    def inverse(self, y):
-        """
-        Inverts the memoized transform `y => x`.
-        """
-        x_old, y_old = self._cached_x_y
-        if y is y_old:
-            return x_old
-        x = self._inverse(y)
-        self._cached_x_y = x, y
-        return x
-
-    def _call(self, x):
-        """
-        Abstract method to compute forward transformation.
-        """
-        raise NotImplementedError
-
-    def _inverse(self, y):
-        """
-        Abstract method to compute inverse transformation.
-        """
-        raise NotImplementedError
+        super(CachedTransform, self).__init__(1)
 
 
 class InverseTransform(Transform):
@@ -129,6 +128,7 @@ class InverseTransform(Transform):
 
     def __init__(self, transform):
         self.inv = transform
+        super(InverseTransform, self).__init__(0)
 
     @constraints.dependent_property
     def domain(self):
@@ -147,10 +147,10 @@ class InverseTransform(Transform):
             return False
         return self.inv == other.inv
 
-    def __call__(self, x):
+    def _call(self, x):
         return self.inv.inverse(x)
 
-    def inverse(self, y):
+    def _inverse(self, y):
         return self.inv.__call__(y)
 
     def log_abs_det_jacobian(self, x, y):
@@ -168,10 +168,10 @@ class ExpTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, ExpTransform)
 
-    def __call__(self, x):
+    def _call(self, x):
         return x.exp()
 
-    def inverse(self, y):
+    def _inverse(self, y):
         return y.log()
 
     def log_abs_det_jacobian(self, x, y):
@@ -189,10 +189,10 @@ class SigmoidTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, SigmoidTransform)
 
-    def __call__(self, x):
+    def _call(self, x):
         return sigmoid(x)
 
-    def inverse(self, y):
+    def _inverse(self, y):
         return y.log() - (-y).log1p()
 
     def log_abs_det_jacobian(self, x, y):
@@ -209,10 +209,10 @@ class AbsTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, AbsTransform)
 
-    def __call__(self, x):
+    def _call(self, x):
         return x.abs()
 
-    def inverse(self, y):
+    def _inverse(self, y):
         return y
 
 
@@ -241,10 +241,10 @@ class AffineTransform(Transform):
             return False
         return self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
 
-    def __call__(self, x):
+    def _call(self, x):
         return self.loc + self.scale * x
 
-    def inverse(self, y):
+    def _inverse(self, y):
         return (y - self.loc) / self.scale
 
     def log_abs_det_jacobian(self, x, y):
@@ -335,10 +335,10 @@ class LowerCholeskyTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
 
-    def __call__(self, x):
+    def _call(self, x):
         if x.dim() != 2:
             raise NotImplementedError
         return x.tril(-1) + x.diag().exp().diag()
 
-    def inverse(self, y):
+    def _inverse(self, y):
         return y.tril(-1) + y.diag().log().diag()

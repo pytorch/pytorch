@@ -28,7 +28,8 @@ class LogNormal(TransformedDistribution):
     has_rsample = True
 
     def __init__(self, loc, scale):
-        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform())
+        a= ExpTransform()
+        super(LogNormal, self).__init__(Normal(loc, scale), a)
 
     @property
     def loc(self):
