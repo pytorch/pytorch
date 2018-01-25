@@ -1335,10 +1335,12 @@ class TestOperators(hu.HypothesisTestCase):
 
         # Create one consumer dequeue net and one consumer exist net
         consumer_net = core.Net('weight_sample_dequeue_net')
+        table_idx_blob = np.random.randint(low=-1, high=num_blobs, size=1)
         blobs = consumer_net.WeightedSampleDequeueBlobs(
             queues,
             num_blobs + 1,
-            weights=np.random.uniform(low=0.0, high=1.0, size=(num_queues,))
+            weights=np.random.uniform(low=0.0, high=1.0, size=(num_queues,)),
+            table_idx_blob=table_idx_blob[0],
         )
         status = blobs[-1]
         consumer_net.Python(append)(status)

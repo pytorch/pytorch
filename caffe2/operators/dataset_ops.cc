@@ -263,6 +263,7 @@ class CheckDatasetConsistencyOp : public Operator<CPUContext> {
     limits.assign(sizes.size(), std::numeric_limits<TOffset>::max());
     for (int i = 0; i < iterator_.fields().size(); ++i) {
       int lengthIdx = iterator_.fields()[i].lengthFieldId + 1;
+      CAFFE_ENFORCE_GT(Input(i).ndim(), 0);
       TOffset size = (TOffset)Input(i).dims()[0];
       if (limits[lengthIdx] == std::numeric_limits<TOffset>::max()) {
         limits[lengthIdx] = size;
