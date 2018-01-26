@@ -27,19 +27,20 @@ from past.builtins import basestring
 from caffe2.python.model_helper import ModelHelper
 
 # flake8: noqa
-from caffe2.python.helpers.dropout import *
-from caffe2.python.helpers.arg_scope import *
-from caffe2.python.helpers.fc import *
-from caffe2.python.helpers.pooling import *
-from caffe2.python.helpers.normalization import *
-from caffe2.python.helpers.nonlinearity import *
-from caffe2.python.helpers.array_helpers import *
 from caffe2.python.helpers.algebra import *
-from caffe2.python.helpers.train import *
-from caffe2.python.helpers.conv import *
-from caffe2.python.helpers.tools import *
-from caffe2.python.helpers.elementwise_linear import *
+from caffe2.python.helpers.arg_scope import *
+from caffe2.python.helpers.array_helpers import *
 from caffe2.python.helpers.control_ops import *
+from caffe2.python.helpers.conv import *
+from caffe2.python.helpers.db_input import *
+from caffe2.python.helpers.dropout import *
+from caffe2.python.helpers.elementwise_linear import *
+from caffe2.python.helpers.fc import *
+from caffe2.python.helpers.nonlinearity import *
+from caffe2.python.helpers.normalization import *
+from caffe2.python.helpers.pooling import *
+from caffe2.python.helpers.tools import *
+from caffe2.python.helpers.train import *
 
 
 class HelperWrapper(object):
@@ -80,6 +81,7 @@ class HelperWrapper(object):
         'batch_mat_mul' : batch_mat_mul,
         'cond' : cond,
         'loop' : loop,
+        'db_input' : db_input,
     }
 
     def __init__(self, wrapped):
