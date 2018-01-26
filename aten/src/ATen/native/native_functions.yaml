@@ -367,6 +367,12 @@
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
+- func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
+  dispatch:
+    CPU: _gesv_helper_cpu
+    CUDA: _gesv_helper_cuda
+
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
