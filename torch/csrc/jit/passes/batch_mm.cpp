@@ -153,6 +153,8 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     if (node->kind() == mm_kind) {
       tokens[node] = TreeToken::fromMM(node);
     } else if (node->kind() == add_kind) {
+      // NOTE: x + 2 is add[other={2}](%x)
+      if (node->inputs().size() != 2) continue;
       Node *lhs = node->inputs()[0]->node();
       Node *rhs = node->inputs()[1]->node();
       auto lhs_it = tokens.find(lhs);
