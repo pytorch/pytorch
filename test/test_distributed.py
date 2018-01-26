@@ -40,6 +40,7 @@ def skip_if_no_cuda_distributed(func):
 
 
 def skip_if_no_multigpu(func):
+    """ Nccl multigpu tests requires at least 2 GPUS. Skip if this is not met"""
     func.skip_if_no_multigpu = True
 
     @wraps(func)
@@ -563,27 +564,42 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
-    # MULTIGPU TESTS
+    # MULTIGPU TESTS(ONLY FOR NCCL BACKEND)
     def _init_multigpu_helper(self):
+        """Multigpu tests are designed to simulate the multi nodes with multi
+        GPUs on each node. Nccl backend requires equal #GPUs in each process.
+        On a single node, all visible GPUs are evenly
+        divided to subsets, each process only uses a subset.
+        """
         nGPUs = torch.cuda.device_count()
         world_size = dist.get_world_size()
         visible_devices = range(nGPUs)
+
+        # This is a hack for a known NCCL issue using multiprocess
+        # in conjunction with multiple threads to manage different GPUs which
+        # may cause ncclCommInitRank to fail.
+        # http://docs.nvidia.com/deeplearning/sdk/nccl-release-notes/rel_2.1.4.html#rel_2.1.4
+        # It slows down the performance of collective operations.
+        # Without this setting NCCL might throw unhandled error.
+        os.environ['NCCL_MAX_NRINGS'] = '1'
+
         nGPUs_per_process = int(nGPUs / world_size)
-        visible_gpus_per_rank = {}
+        rankToGPUMapping = {}
         for i in range(world_size):
-            visible_gpus_per_rank[i] = visible_devices[
+            rankToGPUMapping[i] = visible_devices[
                 i * nGPUs_per_process: (i + 1) * nGPUs_per_process]
-        return visible_gpus_per_rank
+        return rankToGPUMapping
 
     def _test_broadcast_multigpu_helper(self, group, group_id,
-                                        rank, visible_gpus_per_rank):
+                                        rank, rankToGPUMapping):
         for src in group:
             expected_tensor = _build_tensor(src + 1)
             tensors = [_build_tensor(src + 1, -1).cuda(device=i)
-                       for i in visible_gpus_per_rank[rank]]
+                       for i in rankToGPUMapping[rank]]
             if rank == src:
                 tensors[0] = expected_tensor.cuda(
-                    device=visible_gpus_per_rank[rank][0])
+                    device=rankToGPUMapping[rank][0])
+
             dist.broadcast_multigpu(tensors, src, group_id)
             for tensor in tensors:
                 self.assertEqual(tensor, expected_tensor)
@@ -594,21 +610,21 @@ class _DistTestBase(object):
     @skip_if_no_multigpu
     def test_broadcast_multigpu(self):
         group, group_id, rank = self._init_global_test()
-        visible_gpus_per_rank = self._init_multigpu_helper()
+        rankToGPUMapping = self._init_multigpu_helper()
         self._test_broadcast_multigpu_helper(group, group_id,
-                                             rank, visible_gpus_per_rank)
+                                             rank, rankToGPUMapping)
 
     def _test_all_reduce_multigpu_helper(self, group, group_id, rank,
-                                         visible_gpus_per_rank, op,
+                                         rankToGPUMapping, op,
                                          master_value, worker_value,
                                          expected_value):
         for src in group:
             if rank == src:
                 tensors = [_build_tensor(src + 1, master_value).cuda(device=i)
-                           for i in visible_gpus_per_rank[rank]]
+                           for i in rankToGPUMapping[rank]]
             else:
                 tensors = [_build_tensor(src + 1, worker_value).cuda(device=i)
-                           for i in visible_gpus_per_rank[rank]]
+                           for i in rankToGPUMapping[rank]]
 
             dist.all_reduce_multigpu(tensors, op, group_id)
             expected_tensor = _build_tensor(src + 1, expected_value)
@@ -622,24 +638,24 @@ class _DistTestBase(object):
     @skip_if_no_multigpu
     def test_all_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
-        visible_gpus_per_rank = self._init_multigpu_helper()
+        rankToGPUMapping = self._init_multigpu_helper()
         self._test_all_reduce_multigpu_helper(
-            group, group_id, rank, visible_gpus_per_rank, dist.reduce_op.SUM,
-            2, 10, (2 + 10 * (len(group) - 1)) * len(visible_gpus_per_rank[0]))
+            group, group_id, rank, rankToGPUMapping, dist.reduce_op.SUM,
+            2, 10, (2 + 10 * (len(group) - 1)) * len(rankToGPUMapping[0]))
 
     def _test_reduce_multigpu_helper(self, group, group_id, rank,
-                                     visible_gpus_per_rank, op, master_value,
+                                     rankToGPUMapping, op, master_value,
                                      worker_value, expected_value):
         for src in group:
             if rank == src:
                 tensors = [_build_tensor(src + 1, master_value).cuda(device=i)
-                           for i in visible_gpus_per_rank[rank]]
+                           for i in rankToGPUMapping[rank]]
                 dist.reduce_multigpu(tensors, src, op, group_id)
                 expected_tensor = _build_tensor(src + 1, expected_value)
                 self.assertEqual(tensors[0], expected_tensor)
             else:
                 tensors = [_build_tensor(src + 1, worker_value).cuda(device=i)
-                           for i in visible_gpus_per_rank[rank]]
+                           for i in rankToGPUMapping[rank]]
                 dist.reduce_multigpu(tensors, src, op, group_id)
 
         self._barrier()
@@ -649,32 +665,29 @@ class _DistTestBase(object):
     @skip_if_no_multigpu
     def test_reduce_multigpu(self):
         group, group_id, rank = self._init_global_test()
-        visible_gpus_per_rank = self._init_multigpu_helper()
+        rankToGPUMapping = self._init_multigpu_helper()
         self._test_reduce_multigpu_helper(
-            group, group_id, rank, visible_gpus_per_rank, dist.reduce_op.SUM,
-            2, 10, (2 + 10 * (len(group) - 1)) * len(visible_gpus_per_rank[0]))
+            group, group_id, rank, rankToGPUMapping, dist.reduce_op.SUM,
+            2, 10, (2 + 10 * (len(group) - 1)) * len(rankToGPUMapping[0]))
 
     def _test_all_gather_multigpu_helper(self, group, group_id, rank,
-                                         visible_gpus_per_rank):
+                                         rankToGPUMapping):
         for dest in group:
             tensors = [_build_tensor(dest + 1).cuda(device=i)
-                       for i in visible_gpus_per_rank[rank]]
+                       for i in rankToGPUMapping[rank]]
 
-            output_r = []
-            expected_output = _build_tensor(dest + 1)
-            for r in visible_gpus_per_rank.keys():
-                for gpu in visible_gpus_per_rank[r]:
-                    output_r.append(_build_tensor(dest + 1, 0))
-
+            # construct expected output along with
+            # a place holder to receive all gather results
             output_tensors = []
-            for gpu in visible_gpus_per_rank[rank]:
-                gpu_tensors = [t.cuda(device=gpu) for t in output_r]
-                output_tensors.append(gpu_tensors)
+            expected_output = []
+            output_per_gpu = [_build_tensor(dest + 1, -1)] * len(rankToGPUMapping[0]) * len(group)
+            expected_per_gpu = [_build_tensor(dest + 1)] * len(rankToGPUMapping[0]) * len(group)
+            for gpu in rankToGPUMapping[rank]:
+                output_tensors.append([t.cuda(device=gpu) for t in output_per_gpu])
+                expected_output.append([t.cuda(device=gpu) for t in expected_per_gpu])
 
             dist.all_gather_multigpu(output_tensors, tensors, group_id)
-            for tensor_list in output_tensors:
-                for t in tensor_list:
-                    self.assertEqual(t, expected_output)
+            self.assertEqual(output_tensors, expected_output)
 
         self._barrier()
 
@@ -683,9 +696,9 @@ class _DistTestBase(object):
     @skip_if_no_multigpu
     def test_all_gather_multigpu(self):
         group, group_id, rank = self._init_global_test()
-        visible_gpus_per_rank = self._init_multigpu_helper()
+        rankToGPUMapping = self._init_multigpu_helper()
         self._test_all_gather_multigpu_helper(group, group_id, rank,
-                                              visible_gpus_per_rank)
+                                              rankToGPUMapping)
 
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
@@ -741,9 +754,9 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
                                         backend=BACKEND,
                                         world_size=int(WORLD_SIZE))
             except RuntimeError as e:
-                print('Error initializing process group', e)
                 if 'recompile' in e.args[0]:
                     sys.exit(0)
+                raise RuntimeError('Error initializing process group')
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()
