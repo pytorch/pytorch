@@ -18,6 +18,7 @@ static THGenerator* THGenerator_newUnseeded()
   self->left = 1;
   self->seeded = 0;
   self->normal_is_valid = 0;
+  self->mutex = new std::mutex();
   return self;
 }
 
@@ -32,11 +33,13 @@ THGenerator* THGenerator_new()
 THGenerator* THGenerator_copy(THGenerator *self, THGenerator *from)
 {
     memcpy(self, from, sizeof(THGenerator));
+    self->mutex = new std::mutex();
     return self;
 }
 
 void THGenerator_free(THGenerator *self)
 {
+  delete self->mutex;
   THFree(self);
 }
 

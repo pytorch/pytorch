@@ -15,7 +15,7 @@ typedef struct THGenerator {
   int seeded; /* = 0; */
   uint64_t next;
   uint64_t state[_MERSENNE_STATE_N]; /* the array for the state vector  */
-  std::mutex mutex; /* mutex for using this generator */
+  std::mutex *mutex; /* mutex for using this generator */
   /********************************/
 
   /* For normal distribution */
