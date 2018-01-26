@@ -29,6 +29,7 @@ HARDCODED_DIFFERENTIABLE_OUTPUTS = {
     # Suppose that 'foo' is a function for which outputs 0 and 1 are
     # differentiable, and 2 is not.  Then you would write:
     # 'foo': (0, 1),
+    '_cudnn_rnn': (0, 1, 2),
 }
 
 
