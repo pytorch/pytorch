@@ -124,7 +124,7 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle) const {
       DropoutDescriptor dropout_desc;
-      dropout_desc.set(handle, 0, {}, 0);  // dummy dropout descriptor
+      dropout_desc.set(handle, 0, {}, 0);
       return descriptor(handle, std::move(dropout_desc));
     }
   };

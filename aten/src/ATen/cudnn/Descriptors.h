@@ -200,6 +200,9 @@ inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
     void *states,
     size_t stateSizeInBytes,
     unsigned long long seed) {
+  // Try to accurately simulate cuDNN's behavior, for our cuDNN 6 friends
+  if (states == nullptr) return CUDNN_STATUS_INVALID_VALUE;
+  if (stateSizeInBytes == 0) return CUDNN_STATUS_INVALID_VALUE;
   dropoutDesc->dropout = dropout;
   dropoutDesc->nstates = stateSizeInBytes;
   dropoutDesc->states = states;
@@ -232,14 +235,15 @@ struct DropoutDescriptor
   // I'm cheap! Call me!
   // See Note [cuDNN dropout descriptor initialization]
   void set(cudnnHandle_t handle, float dropout, at::Tensor state_, long long int seed) {
-    void *state_ptr = nullptr;
-    size_t state_size = 0;
     if (dropout > 0) {
       state = state_;
-      state_ptr = state.data_ptr();
-      state_size = state.size(0);
+      void *state_ptr = state.data_ptr();
+      size_t state_size = state.size(0);
+      CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, seed));
+    } else {
+      // Empirically, expensiveSet is cheap when dropout is 0
+      expensiveSet(handle, dropout, seed);
     }
-    CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, seed));
   }
 };
 
