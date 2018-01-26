@@ -25,11 +25,11 @@
   scalar_check:
     output: 'true'
 
-- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true)
+- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true, bool reduce=true)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
     is_target: target_->isScalar()
 
 - name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
