@@ -188,7 +188,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_IMPORT static CaffeTypeId Id();
+  CAFFE2_EXPORT static CaffeTypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -310,7 +310,7 @@ class TypeMeta {
  */
 #define CAFFE_KNOWN_TYPE(T)                            \
   template <>                                          \
-  CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {        \
+  CaffeTypeId TypeMeta::Id<T>() {                      \
     static bool type_id_bit[1];                        \
     static TypeNameRegisterer<T> registerer(           \
         reinterpret_cast<CaffeTypeId>(type_id_bit));   \

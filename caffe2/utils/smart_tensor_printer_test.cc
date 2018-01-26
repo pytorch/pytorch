@@ -47,8 +47,7 @@ void printTensorAndCheck(const std::vector<T>& values) {
   CPUContext cpuContext;
 
   Tensor<CPUContext> tensor(
-      std::vector<TIndex>{static_cast<TIndex>(values.size())},
-	  values, &cpuContext);
+      std::vector<TIndex>{values.size()}, values, &cpuContext);
 
   SmartTensorPrinter::PrintTensor(tensor);
   expect_stderr_contains(values);

@@ -146,11 +146,6 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       int H,
       int W,
       int D) {
-#if CUDNN_VERSION_MIN(7,0,0)
-    const int CC = C;
-#else
-    const int CC = C / group_;
-#endif
     switch (order_) {
       case StorageOrder::NHWC:
         if (size == 4) {
@@ -158,7 +153,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               desc_,
               cudnnTypeWrapper<T>::type,
               N,
-              CC,
+#if CUDNN_VERSION_MIN(7,0,0)
+              C,
+#else
+              C / group_,
+#endif
               H,
               W,
               H * W * C,
@@ -166,8 +165,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               W * C,
               C));
         } else {
-          vector<int> dims = {N, H, W, D, CC};
-          vector<int> strides = {H * W * D * CC, W * D * CC, D * CC, CC, 1};
+#if !CUDNN_VERSION_MIN(7,0,0)
+          C = C / group_;
+#endif
+          vector<int> dims = {N, H, W, D, C};
+          vector<int> strides = {H * W * D * C, W * D * C, D * C, C, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
               desc_,
               cudnnTypeWrapper<T>::type,
@@ -182,7 +184,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               desc_,
               cudnnTypeWrapper<T>::type,
               N,
-              CC,
+#if CUDNN_VERSION_MIN(7,0,0)
+              C,
+#else
+              C / group_,
+#endif
               H,
               W,
               C * H * W,
@@ -190,8 +196,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
               W,
               1));
         } else {
-          vector<int> dims = {N, CC, H, W, D};
-          vector<int> strides = {CC * H * W * D, H * W * D, W * D, D, 1};
+#if !CUDNN_VERSION_MIN(7,0,0)
+          C = C / group_;
+#endif
+          vector<int> dims = {N, C, H, W, D};
+          vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
               desc_,
               cudnnTypeWrapper<T>::type,
@@ -356,16 +365,15 @@ bool CudnnConvOp::DoRunWithType() {
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
       if (kernel_.size() == 2) {
-#if CUDNN_VERSION_MIN(7,0,0)
-        const int MM = M;
-#else
-        const int MM = M / group_;
-#endif
         CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
             GetCudnnTensorFormat(order_),
-            MM,
+#if CUDNN_VERSION_MIN(7,0,0)
+            M,
+#else
+            M / group_,
+#endif
             C / group_,
             kernel_h(),
             kernel_w()));
@@ -721,16 +729,15 @@ bool CudnnConvGradientOp::DoRunWithType() {
     if (filter_changed) {
       cudnn_filter_dims_ = filter.dims();
       if (kernel_.size() == 2) {
-#if CUDNN_VERSION_MIN(7,0,0)
-        const int MM = M;
-#else
-        const int MM = M / group_;
-#endif        
         CUDNN_ENFORCE(cudnnSetFilter4dDescriptor(
             filter_desc_,
             cudnnTypeWrapper<T_W>::type,
             GetCudnnTensorFormat(order_),
-            MM,
+#if CUDNN_VERSION_MIN(7,0,0)
+            M,
+#else
+            M / group_,
+#endif
             C / group_,
             kernel_h(),
             kernel_w()));

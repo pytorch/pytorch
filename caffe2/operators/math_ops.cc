@@ -114,7 +114,7 @@ class GetPowGradient : public GradientMakerBase {
       pow_arg.set_f(exponent - 1);
     } else {
       LOG(WARNING) << "In-place Pow gradient, possible loss of precision";
-      constexpr float kEps = 1e-12f;
+      constexpr float kEps = 1e-12;
       CAFFE_ENFORCE(std::fabs(exponent) > kEps);
       pow_arg.set_f((exponent - 1) / exponent);
     }

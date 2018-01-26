@@ -18,38 +18,15 @@
 
 namespace caffe2 {
 
-EventCreateFunction* Event::event_creator() {
-  static EventCreateFunction event_creator_[MaxDeviceTypes];
-  return event_creator_;
-}
-EventRecordFunction* Event::event_recorder() {
-  static EventRecordFunction event_recorder_[MaxDeviceTypes];
-  return event_recorder_;
-}
-Event::EWFMatrix Event::event_waiter() {
-  static EventWaitFunction event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
-  return event_waiter_;
-}
-EventFinishFunction* Event::event_finisher() {
-  static EventFinishFunction event_finisher_[MaxDeviceTypes];
-  return event_finisher_;
-}
-EventQueryFunction* Event::event_querier() {
-  static EventQueryFunction event_querier_[MaxDeviceTypes];
-  return event_querier_;
-}
-EventErrorMessageFunction* Event::event_err_msg_getter() {
-  static EventErrorMessageFunction event_err_msg_getter_[MaxDeviceTypes];
-  return event_err_msg_getter_;
-}
-EventSetFinishedFunction* Event::event_finished_setter() {
-  static EventSetFinishedFunction event_finished_setter_[MaxDeviceTypes];
-  return event_finished_setter_;
-}
-EventResetFunction* Event::event_resetter() {
-  static EventResetFunction event_resetter_[MaxDeviceTypes];
-  return event_resetter_;
-}
+EventCreateFunction Event::event_creator_[MaxDeviceTypes];
+EventRecordFunction Event::event_recorder_[MaxDeviceTypes];
+EventWaitFunction Event::event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
+EventFinishFunction Event::event_finisher_[MaxDeviceTypes];
+
+EventQueryFunction Event::event_querier_[MaxDeviceTypes];
+EventErrorMessageFunction Event::event_err_msg_getter_[MaxDeviceTypes];
+EventSetFinishedFunction Event::event_finished_setter_[MaxDeviceTypes];
+EventResetFunction Event::event_resetter_[MaxDeviceTypes];
 
 namespace {
 const std::string kNoError = "No error";

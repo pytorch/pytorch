@@ -3,24 +3,22 @@
 function(custom_protobuf_find)
   set(CAFFE2_USE_CUSTOM_PROTOBUF ON PARENT_SCOPE)
   message(STATUS "Use custom protobuf build.")
+  # For a custom protobuf build, we will always use static protobuf.
+  option(protobuf_BUILD_SHARED_LIBS "" OFF)
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
+  # MSVC protobuf built with static library explicitly uses /MT and /MTd which
+  # makes things a bit tricky, so we set it off.
+  #option(protobuf_MSVC_STATIC_RUNTIME "" OFF)
   if (APPLE)
     # Protobuf generated files triggers a deprecated atomic operation warning
     # so we turn it off here.
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations" PARENT_SCOPE)
   endif()
-  # If we are building Caffe2 as shared libs, we will also build protobuf as shared libs.
-  set(protobuf_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-  # We will make sure that protobuf and caffe2 uses the same msvc runtime.
-  set(protobuf_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  if (MSVC AND BUILD_SHARED_LIBS)
-    add_definitions(-DPROTOBUF_USE_DLLS)
-  endif()
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
   # To build shared Caffe2 libraries that link to a static protobuf,
   # we need those static libraries to be compiled as PIC.
-  #set_property(TARGET libprotobuf PROPERTY POSITION_INDEPENDENT_CODE ON)
+  set_property(TARGET libprotobuf PROPERTY POSITION_INDEPENDENT_CODE ON)
   set(PROTOBUF_LIBRARIES libprotobuf PARENT_SCOPE)
   set(PROTOBUF_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/third_party/protobuf/src PARENT_SCOPE)
   set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
@@ -160,18 +158,13 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
     # generate sources if we're using protoc from the third_party
     # directory and are building it as part of the Caffe2 build. If
     # points to an existing path, it is a no-op.
-    if (MSVC)
-      set(PROTOBUF_DLLEXPORT_DECL dllexport_decl=CAFFE2_API:)
-    else()
-      set(PROTOBUF_DLLEXPORT_DECL)
-    endif()
     add_custom_command(
       OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc"
              "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
              "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
       COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
-      COMMAND ${PROTOBUF_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${PROTOBUF_DLLEXPORT_DECL}${PROJECT_BINARY_DIR} ${abs_fil}
+      COMMAND ${PROTOBUF_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out    "${PROJECT_BINARY_DIR}" ${abs_fil}
       COMMAND ${PROTOBUF_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
       DEPENDS ${PROTOBUF_PROTOC_EXECUTABLE} ${abs_fil}
       COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )

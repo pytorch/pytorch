@@ -135,7 +135,7 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 
 #define CAFFE2_DEFINE_typed_var(type, name, default_value, help_str)           \
   namespace caffe2 {                                                           \
-    CAFFE2_EXPORT type FLAGS_##name = default_value;                           \
+    type FLAGS_##name = default_value;                                         \
     namespace {                                                                \
       class Caffe2FlagParser_##name : public Caffe2FlagParser {                \
        public:                                                                 \
@@ -164,7 +164,7 @@ CAFFE_DECLARE_REGISTRY(Caffe2FlagsRegistry, Caffe2FlagParser, const string&);
 // DECLARE_typed_var should be used in header files and in the global namespace.
 #define CAFFE2_DECLARE_typed_var(type, name)                                   \
   namespace caffe2 {                                                           \
-    CAFFE2_IMPORT extern type FLAGS_##name;                                    \
+    extern type FLAGS_##name;                                                  \
   }  // namespace caffe2
 
 #define CAFFE2_DECLARE_int(name) CAFFE2_DECLARE_typed_var(int, name)

@@ -131,29 +131,21 @@ void RecurrentBaseOp<T>::initialize(
 
   // RNN setup
   {
-#if CUDNN_VERSION_MIN(7,0,0)
     CUDNN_ENFORCE(cudnnSetRNNDescriptor(
+#if CUDNN_MAJOR >= 7
         cudnn_wrapper_.inline_cudnn_handle(),
-        rnnDesc_,
-        hiddenSize,
-        numLayers,
-        dropoutDesc_,
-        rnnInput,
-        rnnDirection,
-        rnnMode,
-        CUDNN_RNN_ALGO_STANDARD, // TODO: verify correctness / efficiency.
-        cudnnTypeWrapper<T>::type));
-#else
-    CUDNN_ENFORCE(cudnnSetRNNDescriptor(
-        rnnDesc_,
-        hiddenSize,
-        numLayers,
-        dropoutDesc_,
-        rnnInput,
-        rnnDirection,
-        rnnMode,
-        cudnnTypeWrapper<T>::type));
 #endif
+        rnnDesc_,
+        hiddenSize,
+        numLayers,
+        dropoutDesc_,
+        rnnInput,
+        rnnDirection,
+        rnnMode,
+#if CUDNN_MAJOR >= 7
+        CUDNN_RNN_ALGO_STANDARD, // TODO: verify correctness / efficiency.
+#endif
+        cudnnTypeWrapper<T>::type));
   }
   // X setup
   {
