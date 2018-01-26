@@ -178,8 +178,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0])),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5])),
         },
     ]),
     Example(OneHotCategorical, [
