@@ -375,6 +375,7 @@ struct Workspace {
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
+  Workspace& operator=(Workspace&&) = default;
   ~Workspace() {
     if (data) {
       THCudaFree(globalContext().lazyInitCUDA(), data);

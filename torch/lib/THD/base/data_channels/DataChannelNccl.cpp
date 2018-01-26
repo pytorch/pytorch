@@ -619,6 +619,21 @@ void DataChannelNccl::barrier(THDGroup groupId) {
 
 
 THDGroup DataChannelNccl::newGroup(const std::vector<rank_type>& ranks) {
+  /**
+   * Check if the input rank is a full group since
+   * NCCL data channel currently doesn't support sub-group creation
+   */
+  std::vector<rank_type> ranksToCompare = std::vector<rank_type>(ranks);
+  std::sort(ranksToCompare.begin(), ranksToCompare.end());
+  for (size_t i = 0; i < ranksToCompare.size(); ++i) {
+    if (ranksToCompare[i] != static_cast<rank_type>(i)) {
+      throw std::runtime_error("NCCL backend currently only supports fullgroup "
+                               "creation. In other words, every rank in the "
+                               "process group needs to be a member of the new "
+                               "group to be created and sub-group creation is "
+                               "currently not supported.");
+    }
+  }
 
   std::unique_lock<std::mutex> channelLock(_mutex);
 

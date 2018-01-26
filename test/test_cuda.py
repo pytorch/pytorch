@@ -315,11 +315,13 @@ tests = [
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
-    ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
     # TODO: add det to here once Variable and Tensor are the same thing
 ]
+
+if not IS_WINDOWS:
+    tests.append(('qr', large_2d_lapack, lambda t: [], 'big', float_types))
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
@@ -927,6 +929,13 @@ class TestCuda(TestCase):
         y = torch.randn(1, SIZE, SIZE).cuda()
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+    def test_bernoulli_variable(self):
+        # TODO: delete when tensor/variable are merged
+        from torch.autograd import Variable
+        x = torch.cuda.FloatTensor([0, 1]).cuda()
+        x_var = Variable(x)
+        self.assertEqual(x_var.bernoulli().data, x.bernoulli())
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()

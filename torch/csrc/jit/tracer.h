@@ -275,6 +275,14 @@ inline void exit(const variable_list& outputs) {
 // with an Eval in the trace).
 void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
 
-Node* recordTrace(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
+// Pre-recorded information about the trace before we actually carry
+// out the trace
+struct PreTraceInfo {
+  std::shared_ptr<TracingState> state;
+  Node *n;
+};
+
+PreTraceInfo preRecordTrace(std::string op, at::ArrayRef<Variable> inputs);
+void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 }}} // namespace torch::jit::tracer

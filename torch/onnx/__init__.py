@@ -297,10 +297,6 @@ def _run_symbolic_function(g, n, inputs, aten=False):
         # See Note [Export inplace]
         if n.kind().endswith('_'):
             op_name = n.kind()[:-1]
-        elif n.kind().endswith('_forward'):
-            # NB: it seems the tracing generates duplicate ops,
-            # such as both threshold and threshold_forward, introduced in #4395.
-            return inputs
         else:
             op_name = n.kind()
         # Export ops in aten mode.

@@ -328,6 +328,29 @@ class TestSparse(TestCase):
             y = y.transpose(i, j)
             self.assertEqual(self.safeToDense(x), y)
 
+    def test_transpose_coalesce_invariant(self):
+        # If a sparse tensor is coalesced, its transpose should be the same
+        # If a sparse tensor is uncoalesed, its transpose should be the same
+        x_coalesced = self._gen_sparse(2, 3, 4)[0].coalesce()
+        x_indices = x_coalesced._indices()
+        x_values = x_coalesced._values()
+
+        y_uncoalesced = self.SparseTensor(
+            torch.cat([x_indices, x_indices], dim=1),
+            torch.cat([x_values, x_values]),
+            x_coalesced.size())
+
+        self.assertTrue(x_coalesced.is_coalesced())
+        self.assertFalse(y_uncoalesced.is_coalesced())
+
+        self.assertTrue(x_coalesced.transpose(0, 1).is_coalesced())
+        self.assertFalse(y_uncoalesced.transpose(0, 1).is_coalesced())
+
+        x_coalesced.transpose_(0, 1)
+        y_uncoalesced.transpose_(0, 1)
+        self.assertTrue(x_coalesced.is_coalesced())
+        self.assertFalse(y_uncoalesced.is_coalesced())
+
     @cpu_only
     def test_mm(self):
         def test_shape(di, dj, dk):
@@ -646,7 +669,9 @@ class TestSparse(TestCase):
         to_test_one_arg = {
             'zeros_like': lambda x: torch.zeros_like(x),
             'transpose': lambda x: x.transpose(0, 1),
+            'transpose_': lambda x: x.transpose(0, 1),
             't': lambda x: x.t(),
+            't_': lambda x: x.t_(),
             'div': lambda x: x.div(2),
             'div_': lambda x: x.div_(2),
             'pow': lambda x: x.pow(2),
@@ -654,6 +679,8 @@ class TestSparse(TestCase):
             'is_coalesced': lambda x: x.is_coalesced(),
             'coalesce': lambda x: x.coalesce(),
             'to_dense': lambda x: x.to_dense(),
+            '_dimI': lambda x: x._dimI(),
+            '_dimV': lambda x: x._dimV(),
         }
 
         for test_name, test_fn in to_test_one_arg.items():

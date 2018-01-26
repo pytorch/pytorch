@@ -220,7 +220,6 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   int64_t i = self->size[d1];
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
-  self->coalesced = 0;
   THCIndexTensor_(free)(state, indices);
   THCIndexTensor_(free)(state, buffer);
   THCIndexTensor_(free)(state, slice1);

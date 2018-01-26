@@ -881,7 +881,9 @@ class TestJit(TestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_cpp(self):
-        torch._C._jit_run_cpp_tests()
+        # rather than rebuild assertExpected in cpp,
+        # just glob all the cpp outputs into one file for now
+        self.assertExpected(torch._C._jit_run_cpp_tests())
 
     def test_batchnorm(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
@@ -1164,6 +1166,11 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(m, (Variable(torch.randn(2, 2)),), nderivs=0)
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
+
+    def test_nested_inplace(self):
+        x = Variable(torch.randn(2, 2))
+        trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        self.assertExpectedTrace(trace)
 
 
 if __name__ == '__main__':
