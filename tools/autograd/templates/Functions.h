@@ -17,6 +17,14 @@ using at::IntList;
 using at::Type;
 using at::TensorGeometry;
 
+inline std::vector<Tensor> unpack_list(const std::vector<SavedVariable>& xs) {
+  std::vector<Tensor> r;
+  for (const auto& x : xs) {
+    r.emplace_back(x.unpack());
+  }
+  return r;
+}
+
 struct TypeAndSize {
   TypeAndSize() : type(nullptr) {}
   /* implicit */
