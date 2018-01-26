@@ -3193,7 +3193,8 @@
     - THTensor* tensor2
 ]]
 [[
-  name: gesv
+  name: _th_gesv
+  cname: gesv
   types:
     - Float
     - Double
