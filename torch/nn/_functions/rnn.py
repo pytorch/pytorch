@@ -348,16 +348,29 @@ def RNN(*args, **kwargs):
     # nodes and export them to ONNX in this form
     # Check the first argument explicitly to reduce the overhead of creating
     # the lambda
-    import torch.onnx.symbolic
+    #import torch.onnx.symbolic
 
-    @torch.onnx.symbolic_override_first_arg_based(
-        torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
-    )
+    #@torch.onnx.symbolic_override_first_arg_based(
+    #    torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
+    #)
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
         else:
             func = AutogradRNN(*args, **kwargs)
+
+        # Hack for the tracer that allows us to represent RNNs as single
+        # nodes and export them to ONNX in this form
+        # Check the first argument explicitly to reduce the overhead of creating
+        # the lambda. We need special handling here because the forward()
+        # function gets reconstructed each and every time when RNN() is invoked
+        # and we don't want to pay the cost of decorator invocation
+        import torch
+        if torch._C._jit_is_tracing(input):
+            import torch.onnx.symbolic
+            decorator = torch.onnx.symbolic_override_first_arg_based(
+                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+            func = decorator(func)
 
         return func(input, *fargs, **fkwargs)
 
