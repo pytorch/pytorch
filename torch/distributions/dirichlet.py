@@ -55,7 +55,6 @@ class Dirichlet(ExponentialFamily):
     params = {'concentration': constraints.positive}
     support = constraints.simplex
     has_rsample = True
-    mean_carrier_measure = float('nan')  # There is no closed form solution
 
     def __init__(self, concentration):
         self.concentration, = broadcast_all(concentration)

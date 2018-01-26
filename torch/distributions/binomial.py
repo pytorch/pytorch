@@ -33,7 +33,6 @@ class Binomial(ExponentialFamily):
     """
     params = {'probs': constraints.unit_interval}
     has_enumerate_support = True
-    mean_carrier_measure = float('nan')  # There is no closed form solution
 
     def __init__(self, total_count=1, probs=None, logits=None):
         if not isinstance(total_count, Number):

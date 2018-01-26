@@ -1929,7 +1929,7 @@ class TestKL(TestCase):
                     continue
                 try:
                     expected = ExponentialFamily.entropy(dist)
-                except ValueError:
+                except NotImplementedError:
                     continue
                 if isinstance(expected, Variable) and not isinstance(actual, Variable):
                     expected = expected.data

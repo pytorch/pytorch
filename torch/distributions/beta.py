@@ -28,7 +28,6 @@ class Beta(ExponentialFamily):
     params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
     support = constraints.unit_interval
     has_rsample = True
-    mean_carrier_measure = float('nan')  # There is no closed form solution
 
     def __init__(self, concentration1, concentration0):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
