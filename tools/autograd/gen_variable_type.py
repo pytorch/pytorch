@@ -295,6 +295,9 @@ def emit_body(declaration):
                 if inplace and is_output:
                     var = 'self'
                 expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+            elif arg['type'] == 'TensorList':
+                name += '_'
+                expr = 'make_saved_variable_list({})'.format(arg['name'])
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 

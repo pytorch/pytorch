@@ -196,6 +196,15 @@ std::vector<at::Tensor> VariableType::unpack_idxs(at::TensorList tl, const char 
   return ret;
 }
 
+// Assumed that saved tensor lists are never inplace outputs
+static std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
+  std::vector<SavedVariable> r;
+  for (const auto& tensor : tensors) {
+    r.emplace_back(tensor, false /* is output */);
+  }
+  return r;
+}
+
 static Tensor as_variable(Tensor tensor) {
   return make_variable(std::move(tensor));
 }
