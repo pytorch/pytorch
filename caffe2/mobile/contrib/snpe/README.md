@@ -29,3 +29,5 @@ and adding the operator to your model as you would normally.
 ## Debug
 
 `libSNPE.so` is a shared library that is loaded at runtime.  You may need to specify the location of the library on your Android device when running standalone binaries.  The runtime assumes it will be able to `dlopen()` a file named `libSNPE.so` at the location specified by `gSNPELocation()`.  Either change this value at runtime or use an environment variable such as `LD_LIBRARY_PATH`.
+
+You also need `libgnustl_shared.so` from Android NDK to be loaded in order to run standalone binaries. 
