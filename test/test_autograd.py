@@ -2417,8 +2417,8 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
         elif isinstance(arg, tuple) and len(arg) == 0:
-            # FixMe: maybe use 'torch.randn()' or similar when we have scalar factories
-            var = Variable(torch.randn(1).double(), requires_grad=requires_grad)._scalar_sum()
+            var = variable(1).double().normal_()
+            var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):
             return Variable(maybe_non_contig(torch.randn(*arg).double()), requires_grad=requires_grad)
@@ -2478,8 +2478,6 @@ def exclude_tensor_method(name, test_name):
         'test_slice',
         'test_where',
         'test_where_broadcast_all',
-        'test__scalar_sum_scalar_arg',
-        'test__scalar_sum_tensor_arg',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
