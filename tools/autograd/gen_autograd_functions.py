@@ -124,6 +124,10 @@ def process_function(func):
             release_variables.append('{}_.data.reset();'.format(name))
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
+        elif arg['type'] == 'TensorList':
+            saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
+            release_variables.append('{}_.clear();'.format(name))
+            unpack.append('auto {} = unpack_list({}_);'.format(name, name))
         elif arg['type'] == 'IntList':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
         else:
