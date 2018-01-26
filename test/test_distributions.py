@@ -1873,8 +1873,6 @@ class TestKL(TestCase):
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max())
                 ]))
-            else:
-                continue
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
