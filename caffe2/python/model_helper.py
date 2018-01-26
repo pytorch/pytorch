@@ -20,7 +20,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, scope, workspace
+from caffe2.python import core, scope, workspace, helpers
 from caffe2.python.modeling import parameter_info
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
@@ -444,12 +444,8 @@ class ModelHelper(object):
             """You cannot pass reader to model_helper.TensorProtosDBInput.
                Use model.net.TensorProtosDBInput instead to create the op."""
 
-        dbreader_name = "dbreader_" + db
-        dbreader = self.param_init_net.CreateDB(
-            [], dbreader_name,
-            db=db, db_type=db_type)
-        return self.net.TensorProtosDBInput(
-            dbreader, blob_out, batch_size=batch_size)
+        return helpers.db_input.db_input(
+            self, blob_out, batch_size, db, db_type, **kwargs)
 
     def GetDevices(self):
         assert len(self._devices) > 0, \
