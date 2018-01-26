@@ -302,7 +302,10 @@ def emit_body(declaration):
                            if arg.get('output', False)]
             return '{' + ', '.join(output_args) + '}'
         trace_outs = [r['name'] for r in declaration['returns']]
-        return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
+        if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
+            return CodeTemplate("flatten( ${outs} )").substitute(outs=trace_outs)
+        else:
+            return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
     def emit_record_trace(env):
         # Operations involving Generator and Storage are not traceable
@@ -359,6 +362,7 @@ def emit_body(declaration):
         local['trace_name'] = declaration['api_name']
         if local['trace_name'].endswith('_'):
             local['trace_name'] = local['trace_name'][:-1]
+
         local['trace_outputs'] = get_trace_outputs(declaration)
 
         combined = nested_dict(local, nested_dict(env, declaration))
@@ -369,8 +373,9 @@ def emit_body(declaration):
             return ''
         if len(declaration['returns']) == 1:
             return ''
-        names = [ret['name'] for ret in declaration['returns']]
-        return 'Tensor {};'.format(', '.join(names))
+        # TODO: this will be ugly
+        names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
+        return '\n'.join(names)
 
     def wrap_output(call):
         if 'Tensor' not in declaration['return_type']:
