@@ -49,6 +49,9 @@ TH_API uint64_t THRandom_random(THGenerator *_generator);
 TH_API uint64_t THRandom_random64(THGenerator *_generator);
 
 /* Generates a uniform random double on [0,1). */
+TH_API double THRandom_standard_uniform(THGenerator *_generator);
+
+/* Generates a uniform random double on [a, b). */
 TH_API double THRandom_uniform(THGenerator *_generator, double a, double b);
 
 /* Generates a uniform random float on [0,1). */

@@ -10,6 +10,8 @@
 
 namespace torch { namespace autograd {
 
+thread_local uint64_t Function::function_counter = 0;
+
 template<typename T>
 auto makeFlags(const T &inputs) -> FunctionFlags {
   int num_inputs = inputs.size();

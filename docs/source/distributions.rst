@@ -115,16 +115,22 @@ Probability distributions - torch.distributions
 .. autoclass:: Pareto
     :members:
 
-:hidden:`TransformedDistribution`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+:hidden:`Poisson`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autoclass:: TransformedDistribution
+.. autoclass:: Poisson
     :members:
 
 :hidden:`StudentT`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: StudentT
+    :members:
+
+:hidden:`TransformedDistribution`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformedDistribution
     :members:
 
 :hidden:`Uniform`

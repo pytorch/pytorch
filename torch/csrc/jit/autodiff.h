@@ -12,4 +12,7 @@ namespace torch { namespace jit {
 // (aka backward) of inputs to the first stage w.r.t. the outputs of the first stage.
 void differentiate(std::shared_ptr<Graph>& graph);
 
+// can we take a derivative of this node symbolically?
+bool isDifferentiable(Node * n);
+
 }}

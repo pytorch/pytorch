@@ -218,7 +218,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
     indices.emplace_back();
   }
   // if the non-null indices are not all adjacent, transpose self and indices
-  // together so that they're adjacent at the frot
+  // together so that they're adjacent at the front
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices) = transposeToFront(self, indices);
   }

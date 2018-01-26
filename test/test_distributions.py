@@ -26,6 +26,7 @@ import math
 import unittest
 from collections import namedtuple
 from itertools import product
+from random import shuffle
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
@@ -34,8 +35,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
-                                 Normal, OneHotCategorical, Pareto, StudentT,
-                                 Uniform, constraints, kl_divergence)
+                                 Normal, OneHotCategorical, Pareto, Poisson,
+                                 StudentT, Uniform, constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
@@ -53,6 +54,9 @@ try:
     import scipy.special
 except ImportError:
     TEST_NUMPY = False
+
+SCALAR_SHAPE = () if torch._C._with_scalars() else (1,)
+TEST_CUDA = torch.cuda.is_available()
 
 
 def pairwise(Dist, *params):
@@ -216,6 +220,17 @@ EXAMPLES = [
             'alpha': 1.0
         }
     ]),
+    Example(Poisson, [
+        {
+            'rate': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'rate': Variable(torch.randn(3).abs(), requires_grad=True),
+        },
+        {
+            'rate': 0.2,
+        }
+    ]),
     Example(Uniform, [
         {
             'low': Variable(torch.zeros(5, 5), requires_grad=True),
@@ -246,7 +261,7 @@ class TestDistributions(TestCase):
         s = distribution.sample()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
-        if not expected_shape:
+        if not expected_shape and not torch._C._with_scalars():
             expected_shape = torch.Size((1,))  # Work around lack of scalars.
         self.assertEqual(s.size(), expected_shape)
 
@@ -269,7 +284,7 @@ class TestDistributions(TestCase):
         if isinstance(torch_samples, Variable):
             torch_samples = torch_samples.data
         torch_samples = torch_samples.cpu().numpy()
-        ref_samples = ref_dist.rvs(num_samples)
+        ref_samples = ref_dist.rvs(num_samples).astype(np.float64)
         if multivariate:
             # Project onto a random axis.
             axis = np.random.normal(size=torch_samples.shape[-1])
@@ -277,7 +292,8 @@ class TestDistributions(TestCase):
             torch_samples = np.dot(torch_samples, axis)
             ref_samples = np.dot(ref_samples, axis)
         samples = [(x, +1) for x in torch_samples] + [(x, -1) for x in ref_samples]
-        samples.sort()
+        shuffle(samples)  # necessary to prevent stable sort from making uneven bins for discrete
+        samples.sort(key=lambda x: x[0])
         samples = np.array(samples)[:, 1]
 
         # Aggragate into bins filled with roughly zero-mean unit-variance RVs.
@@ -290,6 +306,21 @@ class TestDistributions(TestCase):
         for bias in bins:
             self.assertLess(-threshold, bias, message)
             self.assertLess(bias, threshold, message)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def _check_sampler_discrete(self, torch_dist, ref_dist, message,
+                                num_samples=10000, failure_rate=1e-3):
+        """Runs a Chi2-test for the support, but ignores tail instead of combining"""
+        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        if isinstance(torch_samples, Variable):
+            torch_samples = torch_samples.data
+        torch_samples = torch_samples.cpu().numpy()
+        unique, counts = np.unique(torch_samples, return_counts=True)
+        pmf = ref_dist.pmf(unique)
+        msk = (counts > 5) & ((pmf * num_samples) > 5)
+        self.assertGreater(pmf[msk].sum(), 0.9, "Distribution is too sparse for test; try increasing num_samples")
+        chisq, p = scipy.stats.chisquare(counts[msk], pmf[msk] * num_samples)
+        self.assertGreater(p, failure_rate, message)
 
     def _check_enumerate_support(self, dist, examples):
         for param, expected in examples:
@@ -321,15 +352,15 @@ class TestDistributions(TestCase):
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
     def test_bernoulli(self):
-        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
-        r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        p = variable([0.7, 0.2, 0.4], requires_grad=True)
+        r = variable(0.3, requires_grad=True)
         s = 0.3
         self.assertEqual(Bernoulli(p).sample_n(8).size(), (8, 3))
         self.assertTrue(isinstance(Bernoulli(p).sample().data, torch.Tensor))
-        self.assertEqual(Bernoulli(r).sample_n(8).size(), (8, 1))
-        self.assertEqual(Bernoulli(r).sample().size(), (1,))
-        self.assertEqual(Bernoulli(r).sample((3, 2)).size(), (3, 2, 1))
-        self.assertEqual(Bernoulli(s).sample().size(), (1,))
+        self.assertEqual(Bernoulli(r).sample_n(8).size(), (8,) + SCALAR_SHAPE)
+        self.assertEqual(Bernoulli(r).sample().size(), SCALAR_SHAPE)
+        self.assertEqual(Bernoulli(r).sample((3, 2)).size(), (3, 2,) + SCALAR_SHAPE)
+        self.assertEqual(Bernoulli(s).sample().size(), SCALAR_SHAPE)
         self._gradcheck_log_prob(Bernoulli, (p,))
 
         def ref_log_prob(idx, val, log_prob):
@@ -361,18 +392,18 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
 
     def test_geometric(self):
-        p = Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)
-        r = Variable(torch.Tensor([0.3]), requires_grad=True)
+        p = variable([0.7, 0.2, 0.4], requires_grad=True)
+        r = variable(0.3, requires_grad=True)
         s = 0.3
         self.assertEqual(Geometric(p).sample_n(8).size(), (8, 3))
         self.assertEqual(Geometric(1).sample(), 0)
         self.assertEqual(Geometric(1).log_prob(variable(1)), -float('inf'), allow_inf=True)
         self.assertEqual(Geometric(1).log_prob(variable(0)), 0)
         self.assertTrue(isinstance(Geometric(p).sample().data, torch.Tensor))
-        self.assertEqual(Geometric(r).sample_n(8).size(), (8, 1))
-        self.assertEqual(Geometric(r).sample().size(), (1,))
-        self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2, 1))
-        self.assertEqual(Geometric(s).sample().size(), (1,))
+        self.assertEqual(Geometric(r).sample_n(8).size(), (8,) + SCALAR_SHAPE)
+        self.assertEqual(Geometric(r).sample().size(), SCALAR_SHAPE)
+        self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2) + SCALAR_SHAPE)
+        self.assertEqual(Geometric(s).sample().size(), SCALAR_SHAPE)
         self._gradcheck_log_prob(Geometric, (p,))
         self.assertRaises(ValueError, lambda: Geometric(0))
         self.assertRaises(NotImplementedError, Geometric(r).rsample)
@@ -391,7 +422,15 @@ class TestDistributions(TestCase):
 
         # check entropy computation
         self.assertEqual(Geometric(p).entropy().data, scipy.stats.geom(p.data.numpy(), loc=-1).entropy(), prec=1e-3)
-        self.assertEqual(float(Geometric(s).entropy()[0]), scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
+        self.assertEqual(float(Geometric(s).entropy()), scipy.stats.geom(s, loc=-1).entropy().item(), prec=1e-3)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_geometric_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for prob in [0.01, 0.18, 0.8]:
+            self._check_sampler_discrete(Geometric(prob),
+                                         scipy.stats.geom(p=prob, loc=-1),
+                                         'Geometric(prob={})'.format(prob))
 
     def test_binomial(self):
         p = Variable(torch.arange(0.05, 1, 0.1), requires_grad=True)
@@ -475,8 +514,7 @@ class TestDistributions(TestCase):
 
     def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
-        # TODO: this should return a 0-dim tensor once we have Scalar support
-        self.assertEqual(Categorical(p).sample().size(), (1,))
+        self.assertEqual(Categorical(p).sample().size(), SCALAR_SHAPE)
         self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
         self.assertEqual(Categorical(p).sample_n(1).size(), (1,))
@@ -545,6 +583,49 @@ class TestDistributions(TestCase):
             ([[0.1, 0.9], [0.3, 0.7]], [[[1, 0], [1, 0]], [[0, 1], [0, 1]]]),
         ]
         self._check_enumerate_support(OneHotCategorical, examples)
+
+    def test_poisson_shape(self):
+        rate = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        rate_1d = Variable(torch.randn(1).abs(), requires_grad=True)
+        self.assertEqual(Poisson(rate).sample().size(), (2, 3))
+        self.assertEqual(Poisson(rate).sample_n(7).size(), (7, 2, 3))
+        self.assertEqual(Poisson(rate_1d).sample().size(), (1,))
+        self.assertEqual(Poisson(rate_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Poisson(2.0).sample_n(2).size(), (2,))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_poisson_log_prob(self):
+        rate = Variable(torch.randn(2, 3).abs(), requires_grad=True)
+        rate_1d = Variable(torch.randn(1).abs(), requires_grad=True)
+
+        def ref_log_prob(idx, x, log_prob):
+            l = rate.data.view(-1)[idx]
+            expected = scipy.stats.poisson.logpmf(x, l)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        set_rng_seed(0)
+        self._check_log_prob(Poisson(rate), ref_log_prob)
+        self._gradcheck_log_prob(Poisson, (rate,))
+        self._gradcheck_log_prob(Poisson, (rate_1d,))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_poisson_sample(self):
+        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        for rate in [0.1, 1.0, 5.0]:
+            self._check_sampler_discrete(Poisson(rate),
+                                         scipy.stats.poisson(rate),
+                                         'Poisson(lambda={})'.format(rate),
+                                         failure_rate=1e-3)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_poisson_gpu_sample(self):
+        set_rng_seed(0)
+        for rate in [0.12, 0.9, 4.0]:
+            self._check_sampler_discrete(Poisson(torch.Tensor([rate]).cuda()),
+                                         scipy.stats.poisson(rate),
+                                         'Poisson(lambda={}, cuda)'.format(rate),
+                                         failure_rate=1e-3)
 
     def test_uniform(self):
         low = Variable(torch.zeros(5, 5), requires_grad=True)
@@ -798,7 +879,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Gamma(alpha, beta).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample_n(1).size(), (1, 1))
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
-        self.assertEqual(Gamma(0.5, 0.5).sample().size(), (1,))
+        self.assertEqual(Gamma(0.5, 0.5).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Gamma(0.5, 0.5).sample_n(1).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
@@ -827,7 +908,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Pareto(scale, alpha).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample_n(1).size(), (1, 1))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample().size(), (1,))
-        self.assertEqual(Pareto(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(Pareto(1.0, 1.0).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Pareto(1.0, 1.0).sample_n(1).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
@@ -856,7 +937,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Gumbel(loc, scale).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Gumbel(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(Gumbel(1.0, 1.0).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Gumbel(1.0, 1.0).sample_n(1).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
@@ -885,7 +966,7 @@ class TestDistributions(TestCase):
         self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), (1,))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), SCALAR_SHAPE)
         self.assertEqual(FisherSnedecor(1.0, 1.0).sample_n(1).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
@@ -912,7 +993,8 @@ class TestDistributions(TestCase):
         self.assertEqual(Chi2(df).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Chi2(df_1d).sample_n(1).size(), (1, 1))
         self.assertEqual(Chi2(df_1d).sample().size(), (1,))
-        self.assertEqual(Chi2(0.5).sample().size(), (1,))
+        self.assertEqual(Chi2(variable(0.5, requires_grad=True)).sample().size(), SCALAR_SHAPE)
+        self.assertEqual(Chi2(0.5).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Chi2(0.5).sample_n(1).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
@@ -938,7 +1020,8 @@ class TestDistributions(TestCase):
         self.assertEqual(StudentT(df).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(StudentT(df_1d).sample_n(1).size(), (1, 1))
         self.assertEqual(StudentT(df_1d).sample().size(), (1,))
-        self.assertEqual(StudentT(0.5).sample().size(), (1,))
+        self.assertEqual(StudentT(variable(0.5, requires_grad=True)).sample().size(), SCALAR_SHAPE)
+        self.assertEqual(StudentT(0.5).sample().size(), SCALAR_SHAPE)
         self.assertEqual(StudentT(0.5).sample_n(1).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
@@ -966,7 +1049,7 @@ class TestDistributions(TestCase):
             actual_log_prob = dist.log_prob(x)
             for i in range(num_samples):
                 expected_log_prob = scipy.stats.t.logpdf(x[i], df=df, loc=loc, scale=scale)
-                self.assertAlmostEqual(actual_log_prob[i], expected_log_prob, places=3)
+                self.assertAlmostEqual(float(actual_log_prob[i]), float(expected_log_prob), places=3)
 
     def test_dirichlet_shape(self):
         alpha = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
@@ -1005,7 +1088,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Beta(con1, con0).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Beta(con1_1d, con0_1d).sample().size(), (4,))
         self.assertEqual(Beta(con1_1d, con0_1d).sample((1,)).size(), (1, 4))
-        self.assertEqual(Beta(0.1, 0.3).sample().size(), (1,))
+        self.assertEqual(Beta(0.1, 0.3).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Beta(0.1, 0.3).sample((5,)).size(), (5,))
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
@@ -1016,8 +1099,8 @@ class TestDistributions(TestCase):
             dist = Beta(con1, con0)
             x = dist.sample()
             actual_log_prob = dist.log_prob(x).sum()
-            expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)[0]
-            self.assertAlmostEqual(float(actual_log_prob), expected_log_prob, places=3, allow_inf=True)
+            expected_log_prob = scipy.stats.beta.logpdf(x, con1, con0)
+            self.assertAlmostEqual(float(actual_log_prob), float(expected_log_prob), places=3, allow_inf=True)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_beta_sample(self):
@@ -1403,9 +1486,7 @@ class TestDistributionShapes(TestCase):
                 dist = Dist(**param)
                 try:
                     actual_shape = dist.entropy().size()
-                    expected_shape = dist.batch_shape
-                    if not expected_shape:
-                        expected_shape = torch.Size((1,))  # TODO Remove this once scalars are supported.
+                    expected_shape = dist.batch_shape if dist.batch_shape else torch.Size(SCALAR_SHAPE)
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
                         Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
@@ -1416,7 +1497,7 @@ class TestDistributionShapes(TestCase):
         bernoulli = Bernoulli(0.3)
         self.assertEqual(bernoulli._batch_shape, torch.Size())
         self.assertEqual(bernoulli._event_shape, torch.Size())
-        self.assertEqual(bernoulli.sample().size(), torch.Size((1,)))
+        self.assertEqual(bernoulli.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(bernoulli.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, bernoulli.log_prob, self.scalar_sample)
         self.assertEqual(bernoulli.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1436,7 +1517,7 @@ class TestDistributionShapes(TestCase):
         geometric = Geometric(0.3)
         self.assertEqual(geometric._batch_shape, torch.Size())
         self.assertEqual(geometric._event_shape, torch.Size())
-        self.assertEqual(geometric.sample().size(), torch.Size((1,)))
+        self.assertEqual(geometric.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(geometric.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, geometric.log_prob, self.scalar_sample)
         self.assertEqual(geometric.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1456,7 +1537,7 @@ class TestDistributionShapes(TestCase):
         dist = Beta(0.1, 0.1)
         self.assertEqual(dist._batch_shape, torch.Size())
         self.assertEqual(dist._event_shape, torch.Size())
-        self.assertEqual(dist.sample().size(), torch.Size((1,)))
+        self.assertEqual(dist.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, dist.log_prob, self.scalar_sample)
         self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1517,7 +1598,7 @@ class TestDistributionShapes(TestCase):
         cauchy = Cauchy(0, 1)
         self.assertEqual(cauchy._batch_shape, torch.Size())
         self.assertEqual(cauchy._event_shape, torch.Size())
-        self.assertEqual(cauchy.sample().size(), torch.Size((1,)))
+        self.assertEqual(cauchy.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(cauchy.sample(torch.Size((3, 2))).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, cauchy.log_prob, self.scalar_sample)
         self.assertEqual(cauchy.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1547,7 +1628,7 @@ class TestDistributionShapes(TestCase):
         gamma = Gamma(1, 1)
         self.assertEqual(gamma._batch_shape, torch.Size())
         self.assertEqual(gamma._event_shape, torch.Size())
-        self.assertEqual(gamma.sample().size(), torch.Size((1,)))
+        self.assertEqual(gamma.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(gamma.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, gamma.log_prob, self.scalar_sample)
         self.assertEqual(gamma.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1567,7 +1648,7 @@ class TestDistributionShapes(TestCase):
         chi2 = Chi2(1)
         self.assertEqual(chi2._batch_shape, torch.Size())
         self.assertEqual(chi2._event_shape, torch.Size())
-        self.assertEqual(chi2.sample().size(), torch.Size((1,)))
+        self.assertEqual(chi2.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(chi2.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, chi2.log_prob, self.scalar_sample)
         self.assertEqual(chi2.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1587,7 +1668,7 @@ class TestDistributionShapes(TestCase):
         st = StudentT(1)
         self.assertEqual(st._batch_shape, torch.Size())
         self.assertEqual(st._event_shape, torch.Size())
-        self.assertEqual(st.sample().size(), torch.Size((1,)))
+        self.assertEqual(st.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(st.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, st.log_prob, self.scalar_sample)
         self.assertEqual(st.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1607,7 +1688,7 @@ class TestDistributionShapes(TestCase):
         pareto = Pareto(1, 1)
         self.assertEqual(pareto._batch_shape, torch.Size())
         self.assertEqual(pareto._event_shape, torch.Size())
-        self.assertEqual(pareto.sample().size(), torch.Size((1,)))
+        self.assertEqual(pareto.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(pareto.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, pareto.log_prob, self.scalar_sample)
         self.assertEqual(pareto.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1617,7 +1698,7 @@ class TestDistributionShapes(TestCase):
         normal = Normal(0, 1)
         self.assertEqual(normal._batch_shape, torch.Size())
         self.assertEqual(normal._event_shape, torch.Size())
-        self.assertEqual(normal.sample().size(), torch.Size((1,)))
+        self.assertEqual(normal.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(normal.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, normal.log_prob, self.scalar_sample)
         self.assertEqual(normal.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1637,7 +1718,7 @@ class TestDistributionShapes(TestCase):
         uniform = Uniform(0, 1)
         self.assertEqual(uniform._batch_shape, torch.Size())
         self.assertEqual(uniform._event_shape, torch.Size())
-        self.assertEqual(uniform.sample().size(), torch.Size((1,)))
+        self.assertEqual(uniform.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(uniform.sample(torch.Size((3, 2))).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, uniform.log_prob, self.scalar_sample)
         self.assertEqual(uniform.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1657,7 +1738,7 @@ class TestDistributionShapes(TestCase):
         expon = Exponential(1.)
         self.assertEqual(expon._batch_shape, torch.Size())
         self.assertEqual(expon._event_shape, torch.Size())
-        self.assertEqual(expon.sample().size(), torch.Size((1,)))
+        self.assertEqual(expon.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(expon.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, expon.log_prob, self.scalar_sample)
         self.assertEqual(expon.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1677,7 +1758,7 @@ class TestDistributionShapes(TestCase):
         laplace = Laplace(0, 1)
         self.assertEqual(laplace._batch_shape, torch.Size())
         self.assertEqual(laplace._event_shape, torch.Size())
-        self.assertEqual(laplace.sample().size(), torch.Size((1,)))
+        self.assertEqual(laplace.sample().size(), torch.Size(SCALAR_SHAPE))
         self.assertEqual(laplace.sample((3, 2)).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.scalar_sample)
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
@@ -1857,7 +1938,7 @@ class TestKL(TestCase):
                     kl = kl_divergence(dist, dist)
                 except NotImplementedError:
                     continue
-                expected_shape = dist.batch_shape if dist.batch_shape else torch.Size([1])
+                expected_shape = dist.batch_shape if dist.batch_shape else torch.Size(SCALAR_SHAPE)
                 self.assertEqual(kl.shape, expected_shape, message='\n'.join([
                     '{} example {}/{}'.format(Dist.__name__, i, len(params)),
                     'Expected {}'.format(expected_shape),

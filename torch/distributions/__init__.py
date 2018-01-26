@@ -51,6 +51,7 @@ from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
+from .poisson import Poisson
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
@@ -76,6 +77,7 @@ __all__ = [
     'OneHotCategorical',
     'Pareto',
     'StudentT',
+    'Poisson',
     'Uniform',
     'TransformedDistribution',
     'kl_divergence',

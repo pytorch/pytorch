@@ -118,7 +118,7 @@ generators = {
     },
     'CUDAGenerator.h': {
         'name': 'CUDA',
-        'th_generator': '',
+        'th_generator': 'THCGenerator * generator;',
         'header': 'THC/THC.h'
     },
 }

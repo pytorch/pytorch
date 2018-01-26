@@ -65,7 +65,11 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
 }
 
 Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
+#ifdef WITH_SCALARS
+  if (!keepdim) {
+#else
   if (!keepdim && self.dim() > 1) {
+#endif
     grad = grad.unsqueeze(dim);
     norm = norm.unsqueeze(dim);
   }
@@ -98,7 +102,11 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
 }
 
 Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
-  if (!keepdim && sizes.size() > 1) {
+#ifdef WITH_SCALARS
+  if (!keepdim) {
+#else
+   if (!keepdim && sizes.size() > 1) {
+#endif
     return grad.unsqueeze(dim).expand(sizes);
   } else {
     return grad.expand(sizes);
@@ -302,6 +310,7 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   auto result = self;
 
+#ifndef WITH_SCALARS
   // Let's say the input had size (1, 1). input.squeeze(), with scalars
   // disabled, produces a result of size (1,). This needs some
   // special handling because for all other cases we unsqueeze every
@@ -310,6 +319,7 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   if (self.sizes().equals({1})) {
     return result.view(sizes);
   }
+#endif
 
   int64_t nDims = sizes.size();
   for (int64_t dim = 0; dim < nDims; dim++) {
@@ -320,8 +330,13 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   return result;
 }
 
-Tensor maybe_unsqueeze(const Tensor & self, int64_t dim, bool unsqueeze) {
-  if (unsqueeze) {
+Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+#ifdef WITH_SCALARS
+  if (sizes[dim] == 1) {
+#else
+  if (sizes[dim] == 1 && sizes.size() != 1) {
+#endif
     return self.unsqueeze(dim);
   }
   return self;
@@ -387,14 +402,22 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
 }
 
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
-  auto grad_data = static_cast<Variable&>(grad).data();
   auto grad_input = zeros_like(input);
+#ifdef WITH_SCALARS
+  grad_input.masked_fill_(input == value, grad);
+#else
+  auto grad_data = static_cast<Variable&>(grad).data();
   grad_input.masked_fill_(input == value, Scalar(grad_data[0]));
+#endif
   return grad_input;
 }
 
 Tensor select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) {
+#ifdef WITH_SCALARS
+  if (!keepdim) {
+#else
   if (!keepdim && sizes.size() > 1) {
+#endif
     grad = grad.unsqueeze(dim);
     indices = indices.unsqueeze(dim);
   }
@@ -406,13 +429,16 @@ Tensor trace_backward(const Tensor & grad, IntList sizes) {
     throw std::runtime_error("expected matrix input");
   }
 
-  // TODO: simplify once index_fill_(Tensor) is implemented on Variable
-  auto grad_data = static_cast<const Variable&>(grad).data();
   auto& long_type = grad.type().toScalarType(at::kLong);
 
   auto grad_input = grad.type().zeros(sizes[0] * sizes[1]);
   auto indices = long_type.arange(0, grad_input.numel(), sizes[1] + 1);
+#ifdef WITH_SCALARS
+  grad_input.index_fill_(0, indices, grad);
+#else
+  auto grad_data = static_cast<const Variable&>(grad).data();
   grad_input.index_fill_(0, indices, Scalar(grad_data[0]));
+#endif
   return grad_input.view(sizes);
 }
 

@@ -224,19 +224,21 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
       printPyObject(out, scalar);
     }
     out << ")";
-  IR_ELSEIF(FusionGroup)
-    if(groups) {
-      out << "fusion_group_" << groups->size();
-      groups->push_back(value);
-    } else {
-      out << "fusion_group[" << *n->g(kSubgraph) << "]";
-    }
   IR_ELSEIFM_CONST(CppOp)
     out << "CppOp[" << value->name() << "]";
   IR_ELSE()
-    out << n->kind().toString();
-    if(n->hasAttributes()) {
-      printAttributes(out,n);
+    if(n->hasAttribute(kSubgraph)) {
+      if(groups) {
+        out << n->kind().toString() << "_" << groups->size();
+        groups->push_back(n);
+      } else {
+        out << n->kind().toString() << "[" << *n->g(kSubgraph) << "]";
+      }
+    } else {
+      out << n->kind().toString();
+      if(n->hasAttributes()) {
+        printAttributes(out,n);
+      }
     }
   IR_END()
   out << "(" << n->inputs() << ")";
@@ -270,7 +272,7 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
   for(auto fg : groups) {
-    out << "with fusion_group_" <<i++ << " = " << *fg->g(kSubgraph);
+    out << "with " << fg->kind().toString() << "_" <<i++ << " = " << *fg->g(kSubgraph);
   }
   /*
   // Uncomment this to debug all_nodes issues
