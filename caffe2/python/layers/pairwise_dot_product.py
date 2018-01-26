@@ -41,21 +41,20 @@ class PairwiseDotProduct(ModelLayer):
             "either (all_embeddings) xor (x_embeddings and y_embeddings) " +
             "should be given."
         )
-        x_embeddings = (
-            input_record['all_embeddings'] if 'all_embeddings' in input_record
-            else input_record['x_embeddings']
-        )
-        y_embeddings = (input_record['all_embeddings']
-                        if 'all_embeddings' in input_record
-                        else input_record['y_embeddings'])
+        if 'all_embeddings' in input_record:
+            x_embeddings = input_record['all_embeddings']
+            y_embeddings = input_record['all_embeddings']
+        else:
+            x_embeddings = input_record['x_embeddings']
+            y_embeddings = input_record['y_embeddings']
+
         assert isinstance(x_embeddings, schema.Scalar), (
             "Incorrect input type for x. Expected Scalar, " +
             "but received: {0}".format(x_embeddings))
-        if 'y_embeddings' in input_record:
-            assert isinstance(y_embeddings, schema.Scalar), (
-                "Incorrect input type for y. Expected Scalar, " +
-                "but received: {0}".format(y_embeddings)
-            )
+        assert isinstance(y_embeddings, schema.Scalar), (
+            "Incorrect input type for y. Expected Scalar, " +
+            "but received: {0}".format(y_embeddings)
+        )
 
         if 'indices_to_gather' in input_record:
             indices_to_gather = input_record['indices_to_gather']

@@ -46,6 +46,9 @@ from caffe2.python.layers.layers import (
     get_key,
 )
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 class TestLayers(LayersTestCase):
     def testAddLoss(self):
@@ -328,6 +331,137 @@ class TestLayers(LayersTestCase):
 
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
+
+    def testPairwiseDotProductWithAllEmbeddings(self):
+        embedding_dim = 64
+        N = 5
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('all_embeddings', schema.Scalar(
+                ((np.float32, (N, embedding_dim)))
+            )),
+        ))
+        current = self.model.PairwiseDotProduct(
+            record, N * N)
+
+        self.assertEqual(
+            schema.Scalar((np.float32, (N * N, ))),
+            current
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+        self.assertNetContainOps(train_init_net, [])
+        self.assertNetContainOps(train_net, [
+            OpSpec("BatchMatMul", None, None),
+            OpSpec("Flatten", None, None),
+        ])
+
+    def testPairwiseDotProductWithXandYEmbeddings(self):
+        embedding_dim = 64
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('x_embeddings', schema.Scalar(
+                ((np.float32, (5, embedding_dim)))
+            )),
+            ('y_embeddings', schema.Scalar(
+                ((np.float32, (6, embedding_dim)))
+            )),
+        ))
+        current = self.model.PairwiseDotProduct(
+            record, 5 * 6)
+
+        self.assertEqual(
+            schema.Scalar((np.float32, (5 * 6, ))),
+            current
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+        self.assertNetContainOps(train_init_net, [])
+        self.assertNetContainOps(train_net, [
+            OpSpec("BatchMatMul", None, None),
+            OpSpec("Flatten", None, None),
+        ])
+
+    def testPairwiseDotProductWithXandYEmbeddingsAndGather(self):
+        embedding_dim = 64
+
+        output_idx = [1, 3, 5]
+        output_idx_blob = self.model.add_global_constant(
+            self.model.net.NextScopedBlob('pairwise_dot_product_gather'),
+            output_idx,
+            dtype=np.int32,
+        )
+        indices_to_gather = schema.Scalar(
+            (np.int32, len(output_idx)),
+            output_idx_blob,
+        )
+
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('x_embeddings', schema.Scalar(
+                ((np.float32, (5, embedding_dim)))
+            )),
+            ('y_embeddings', schema.Scalar(
+                ((np.float32, (6, embedding_dim)))
+            )),
+            ('indices_to_gather', indices_to_gather),
+        ))
+        current = self.model.PairwiseDotProduct(
+            record, len(output_idx))
+
+        # This assert is not necessary,
+        # output size is passed into PairwiseDotProduct
+        self.assertEqual(
+            schema.Scalar((np.float32, (len(output_idx), ))),
+            current
+        )
+
+        train_init_net, train_net = self.get_training_nets()
+        self.assertNetContainOps(train_init_net, [])
+        self.assertNetContainOps(train_net, [
+            OpSpec("BatchMatMul", None, None),
+            OpSpec("Flatten", None, None),
+            OpSpec("BatchGather", None, None),
+        ])
+
+    def testPairwiseDotProductIncorrectInput(self):
+        embedding_dim = 64
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('x_embeddings', schema.Scalar(
+                ((np.float32, (5, embedding_dim)))
+            )),
+        ))
+        with self.assertRaises(AssertionError):
+            self.model.PairwiseDotProduct(
+                record, 25)
+
+        record = schema.NewRecord(self.model.net, schema.Struct(
+            ('all_embeddings', schema.List(np.float32))
+        ))
+        with self.assertRaises(AssertionError):
+            self.model.PairwiseDotProduct(
+                record, 25)
+
+    def testConcat(self):
+        embedding_dim = 64
+        input_record = self.new_record(schema.Struct(
+            ('input1', schema.Scalar((np.float32, (embedding_dim, )))),
+            ('input2', schema.Scalar((np.float32, (embedding_dim, )))),
+            ('input3', schema.Scalar((np.float32, (embedding_dim, )))),
+        ))
+
+        output = self.model.Concat(input_record)
+        self.assertEqual(
+            schema.Scalar((np.float32, ((len(input_record.fields) * embedding_dim, )))),
+            output
+        )
+
+        # Note that in Concat layer we assume first dimension is batch.
+        # so input is B * embedding_dim
+        # add_axis=1 make it B * 1 * embedding_dim
+        # concat on axis=1 make it B * N * embedding_dim
+        output = self.model.Concat(input_record, axis=1, add_axis=1)
+        self.assertEqual(
+            schema.Scalar((np.float32, ((len(input_record.fields), embedding_dim)))),
+            output
+        )
 
     def testSamplingTrain(self):
         output_dims = 1000
