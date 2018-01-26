@@ -95,9 +95,6 @@ class Binomial(ExponentialFamily):
         values = values.expand((-1,) + self._batch_shape)
         return values
 
-    def entropy(self):
-        raise NotImplementedError
-
     @lazy_property
     def natural_params(self):
         # note that self.total_count is fixed, meaning that is effectively not a natural parameter
