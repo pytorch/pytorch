@@ -20,4 +20,15 @@ if [ -n "$UPLOAD_TO_CONDA" ]; then
   CONDA_BLD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 fi
 
-conda build "${CAFFE2_ROOT}/conda" ${CONDA_BLD_ARGS[@]} "$@"
+# Reinitialize submodules
+git submodule sync
+git submodule foreach git fetch
+git submodule update --init
+
+# Separate build folder for CUDA builds so that the packages have different
+# names
+if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
+  conda build "${CAFFE2_ROOT}/conda/cuda" ${CONDA_BLD_ARGS[@]} "$@"
+else
+  conda build "${CAFFE2_ROOT}/conda/no_cuda" ${CONDA_BLD_ARGS[@]} "$@"
+fi

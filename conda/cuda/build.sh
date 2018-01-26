@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# Install script for Anaconda environments on macOS. This will only work on mac
-# This script is not supposed to be called correctly, but should be run by:
+# Install script for Anaconda environments with CUDA on linux
+# This script is not supposed to be called directly, but should be run by:
 #
 # $ cd <path to caffe2, e.g. ~/caffe2>
 # $ conda build conda/build
 #
-# This installation uses MKL and does not use CUDA
+# This installation uses MKL and CUDA
 #
 # If you're debugging this, it may be useful to use the env that conda build is
 # using:
@@ -34,17 +34,10 @@ CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
 # want to build without MKL then you should also remove mkl from meta.yaml in
 # addition to removing the flags below
 CMAKE_ARGS+=("-DBLAS=MKL")
-CMAKE_ARGS+=("-DMKL_INCLUDE_DIR=$CONDA_PREFIX/include")
 
-# The following libraries are incompatible with macOS builds
-CMAKE_ARGS+=("-DUSE_GLOO=OFF")
-CMAKE_ARGS+=("-DUSE_MOBILE_OPENGL=OFF")
-CMAKE_ARGS+=("-DUSE_METAL=OFF")
-
-# It is rare for macs to have a GPU card with CUDA support, but if you have one
-# then remove these flags
-CMAKE_ARGS+=("-DUSE_CUDA=OFF")
-CMAKE_ARGS+=("-DUSE_NCCL=OFF")
+# Build with CUDA
+CMAKE_ARGS+=("-DUSE_CUDA=ON")
+CMAKE_ARGS+=("-DUSE_NCCL=ON")
 
 # Install under specified prefix
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
@@ -53,11 +46,7 @@ CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 mkdir -p build
 cd build
 cmake "${CMAKE_ARGS[@]}"  $CONDA_CMAKE_ARGS $PYTHON_ARGS ..
-if [ "$(uname)" == 'Darwin' ]; then
-  make "-j$(sysctl -n hw.ncpu)"
-else
-  make "-j$(nproc)"
-fi
+make "-j$(nproc)"
 
 make install/fast
 
