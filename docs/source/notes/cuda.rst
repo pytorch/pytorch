@@ -107,7 +107,7 @@ tensors, and use :meth:`~torch.cuda.memory_cached` and
 allocator. Calling :meth:`~torch.cuda.empty_cache` can release all **unused**
 cached memory from PyTorch so that those can be used by other GPU applications.
 However, the occupied GPU memory by tensors will not be freed so it can not
-increase the amount of GPU memory avaialble for PyTorch.
+increase the amount of GPU memory available for PyTorch.
 
 Best practices
 --------------

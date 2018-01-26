@@ -344,7 +344,7 @@ def empty_cache():
 
     .. note::
         :meth:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
-        memory avaialble for PyTorch. See :ref:`cuda-memory-management` for
+        memory available for PyTorch. See :ref:`cuda-memory-management` for
         more details about GPU memory management.
     """
     return torch._C._cuda_emptyCache()
