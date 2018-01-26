@@ -23,6 +23,11 @@
 
 namespace caffe2 {
 
+MemoryAllocationReporter& CPUContext::reporter() {
+  static MemoryAllocationReporter static_reporter;
+  return static_reporter;
+}
+
 uint32_t RandomNumberSeed() {
   // Originally copied from folly::randomNumberSeed (at 418ad4)
   // modified to use chrono instead of sys/time.h
