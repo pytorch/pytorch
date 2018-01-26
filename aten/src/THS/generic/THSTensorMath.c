@@ -53,7 +53,6 @@ void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
   }
 }
 
-/* floating point only, because that is what TH supports */
 /* TODO: add in-place support */
 #if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
 void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
@@ -83,6 +82,17 @@ void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
 
   THSTensor_(free)(t);
 }
+
+accreal THSTensor_(normall)(THSTensor *self, real value) {
+  THSTensor* self_coalesced = THSTensor_(newCoalesce)(self);
+  THTensor *self_coalesced_values = THSTensor_(newValues)(self_coalesced);
+  accreal result = THTensor_(normall)(self_coalesced_values, value);
+  THSTensor_(free)(self_coalesced);
+  THTensor_(free)(self_coalesced_values);
+  return result;
+}
+
+/* floating point only, because that is what TH supports */
 #endif
 
 void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {

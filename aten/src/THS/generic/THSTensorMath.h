@@ -32,6 +32,7 @@ TH_API void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTen
 
 #if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
 TH_API void THSTensor_(pow)(THSTensor *r_, THSTensor *t, real value);
+TH_API accreal THSTensor_(normall)(THSTensor *self, real value);
 #endif
 
 #endif
