@@ -495,6 +495,8 @@ def unpack_args(env, declaration):
             return '_opt'
         elif dynamic_type == 'IndexTensor':
             return '_long'
+        elif dynamic_type == 'IntegerTensor':
+            return '_int'
         elif dynamic_type == 'BoolTensor':
             return '_byte'
         else:
