@@ -79,7 +79,7 @@ class TensorDescriptor
 public:
   explicit TensorDescriptor() : Descriptor() {};
   explicit TensorDescriptor(const at::Tensor &t, int64_t pad = 0)
-    : TensorDescriptor()
+    : Descriptor()
   {
     set(t, pad);
   }
