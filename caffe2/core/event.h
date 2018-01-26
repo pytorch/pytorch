@@ -68,8 +68,8 @@ class Event {
   explicit Event(const DeviceOption& option)
       : event_(), type_(option.device_type()), option_(option) {
     CAFFE_ENFORCE_LT(type_, MaxDeviceTypes);
-    CAFFE_ENFORCE(event_creator()[type_]);
-    event_creator()[type_](option, this);
+    CAFFE_ENFORCE(event_creator_[type_]);
+    event_creator_[type_](option, this);
   }
 
   // Nothing needs to be done in the destructor, as the event creator should
@@ -84,33 +84,33 @@ class Event {
         recorder_type,
         type_,
         "You are trying to record with a wrong device type.");
-    CAFFE_ENFORCE(event_recorder()[recorder_type]);
-    event_recorder()[recorder_type](this, context, err_msg);
+    CAFFE_ENFORCE(event_recorder_[recorder_type]);
+    event_recorder_[recorder_type](this, context, err_msg);
   }
 
   void Wait(int waiter_type, void* context) const {
-    CAFFE_ENFORCE(event_waiter()[waiter_type][type_]);
-    event_waiter()[waiter_type][type_](this, context);
+    CAFFE_ENFORCE(event_waiter_[waiter_type][type_]);
+    event_waiter_[waiter_type][type_](this, context);
   }
 
   void Finish() const {
-    CAFFE_ENFORCE(event_finisher()[type_]);
-    event_finisher()[type_](this);
+    CAFFE_ENFORCE(event_finisher_[type_]);
+    event_finisher_[type_](this);
   }
 
   EventStatus Query() const {
-    CAFFE_ENFORCE(event_querier()[type_]);
-    return event_querier()[type_](this);
+    CAFFE_ENFORCE(event_querier_[type_]);
+    return event_querier_[type_](this);
   }
 
   const std::string& ErrorMessage() const {
-    CAFFE_ENFORCE(event_err_msg_getter()[type_]);
-    return event_err_msg_getter()[type_](this);
+    CAFFE_ENFORCE(event_err_msg_getter_[type_]);
+    return event_err_msg_getter_[type_](this);
   }
 
   void Reset() {
-    CAFFE_ENFORCE(event_resetter()[type_]);
-    event_resetter()[type_](this);
+    CAFFE_ENFORCE(event_resetter_[type_]);
+    event_resetter_[type_](this);
   }
 
   const DeviceOption& GetDeviceOption() const {
@@ -128,8 +128,8 @@ class Event {
   }
 
   void SetFinished(const char* err_msg = nullptr) {
-    CAFFE_ENFORCE(event_finished_setter()[type_]);
-    return event_finished_setter()[type_](this, err_msg);
+    CAFFE_ENFORCE(event_finished_setter_[type_]);
+    return event_finished_setter_[type_](this, err_msg);
   }
 
   // If parent op has succeeded, then we can run any child op;
@@ -168,20 +168,19 @@ class Event {
   // In the future we may move it to a private member.
   std::shared_ptr<void> event_;
 
-  typedef EventWaitFunction(*EWFMatrix)[MaxDeviceTypes];
-  static EventCreateFunction* event_creator();
-  static EventRecordFunction* event_recorder();
-  static EWFMatrix event_waiter();
-  static EventFinishFunction* event_finisher();
-
-  static EventQueryFunction* event_querier();
-  static EventErrorMessageFunction* event_err_msg_getter();
-  static EventSetFinishedFunction* event_finished_setter();
-  static EventResetFunction* event_resetter();
-
  private:
   int type_;
   DeviceOption option_;
+
+  static EventCreateFunction event_creator_[MaxDeviceTypes];
+  static EventRecordFunction event_recorder_[MaxDeviceTypes];
+  static EventWaitFunction event_waiter_[MaxDeviceTypes][MaxDeviceTypes];
+  static EventFinishFunction event_finisher_[MaxDeviceTypes];
+
+  static EventQueryFunction event_querier_[MaxDeviceTypes];
+  static EventErrorMessageFunction event_err_msg_getter_[MaxDeviceTypes];
+  static EventSetFinishedFunction event_finished_setter_[MaxDeviceTypes];
+  static EventResetFunction event_resetter_[MaxDeviceTypes];
 
   template <int d>
   friend struct EventCreateFunctionRegisterer;
@@ -206,7 +205,7 @@ template <int d>
 struct EventCreateFunctionRegisterer {
   explicit EventCreateFunctionRegisterer(EventCreateFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_creator()[d] = f;
+    Event::event_creator_[d] = f;
   }
 };
 #define REGISTER_EVENT_CREATE_FUNCTION(d, f)                     \
@@ -218,7 +217,7 @@ template <int d>
 struct EventRecordFunctionRegisterer {
   explicit EventRecordFunctionRegisterer(EventRecordFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_recorder()[d] = f;
+    Event::event_recorder_[d] = f;
   }
 };
 #define REGISTER_EVENT_RECORD_FUNCTION(d, f)                     \
@@ -231,7 +230,7 @@ struct EventWaitFunctionRegisterer {
   explicit EventWaitFunctionRegisterer(EventWaitFunction f) {
     static_assert(waiter_type < MaxDeviceTypes, "");
     static_assert(event_type < MaxDeviceTypes, "");
-    Event::event_waiter()[waiter_type][event_type] = f;
+    Event::event_waiter_[waiter_type][event_type] = f;
   }
 };
 #define REGISTER_EVENT_WAIT_FUNCTION(w, d, f)                         \
@@ -243,7 +242,7 @@ template <int d>
 struct EventQueryFunctionRegisterer {
   explicit EventQueryFunctionRegisterer(EventQueryFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_querier()[d] = f;
+    Event::event_querier_[d] = f;
   }
 };
 #define REGISTER_EVENT_QUERY_FUNCTION(d, f)                    \
@@ -255,7 +254,7 @@ template <int d>
 struct EventErrorMessageFunctionRegisterer {
   explicit EventErrorMessageFunctionRegisterer(EventErrorMessageFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_err_msg_getter()[d] = f;
+    Event::event_err_msg_getter_[d] = f;
   }
 };
 #define REGISTER_EVENT_ERROR_MESSAGE_FUNCTION(d, f)                     \
@@ -267,7 +266,7 @@ template <int d>
 struct EventSetFinishedFunctionRegisterer {
   explicit EventSetFinishedFunctionRegisterer(EventSetFinishedFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_finished_setter()[d] = f;
+    Event::event_finished_setter_[d] = f;
   }
 };
 #define REGISTER_EVENT_SET_FINISHED_FUNCTION(d, f)                          \
@@ -279,7 +278,7 @@ template <int d>
 struct EventFinishFunctionRegisterer {
   explicit EventFinishFunctionRegisterer(EventFinishFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_finisher()[d] = f;
+    Event::event_finisher_[d] = f;
   }
 };
 #define REGISTER_EVENT_FINISH_FUNCTION(d, f)                     \
@@ -291,7 +290,7 @@ template <int d>
 struct EventResetFunctionRegisterer {
   explicit EventResetFunctionRegisterer(EventResetFunction f) {
     static_assert(d < MaxDeviceTypes, "");
-    Event::event_resetter()[d] = f;
+    Event::event_resetter_[d] = f;
   }
 };
 #define REGISTER_EVENT_RESET_FUNCTION(d, f)                    \

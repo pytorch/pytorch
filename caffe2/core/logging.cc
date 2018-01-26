@@ -133,7 +133,7 @@ using fLB::FLAGS_logtostderr;
 
 #endif // CAFFE2_USE_GFLAGS
 
-CAFFE2_DEFINE_int(caffe2_log_level, google::GLOG_ERROR,
+CAFFE2_DEFINE_int(caffe2_log_level, google::ERROR,
                   "The minimum log level that caffe2 will output.");
 
 // Google glog's api does not have an external function that allows one to check
@@ -158,7 +158,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
   // we will transfer the caffe2_log_level setting to glog to override that.
   FLAGS_minloglevel = std::min(FLAGS_caffe2_log_level, FLAGS_minloglevel);
   // If caffe2_log_level is explicitly set, let's also turn on logtostderr.
-  if (FLAGS_caffe2_log_level < google::GLOG_ERROR) {
+  if (FLAGS_caffe2_log_level < google::ERROR) {
     FLAGS_logtostderr = 1;
   }
   // Also, transfer the caffe2_log_level verbose setting to glog.
@@ -170,7 +170,7 @@ bool InitCaffeLogging(int* argc, char** argv) {
 
 void ShowLogInfoToStderr() {
   FLAGS_logtostderr = 1;
-  FLAGS_minloglevel = std::min(FLAGS_minloglevel, google::GLOG_INFO);
+  FLAGS_minloglevel = std::min(FLAGS_minloglevel, google::INFO);
 }
 }  // namespace caffe2
 

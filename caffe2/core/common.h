@@ -123,42 +123,14 @@ private:                                                                       \
 #endif
 #endif
 
-// Defines CAFFE2_EXPORT and CAFFE2_IMPORT. On Windows, this corresponds to
-// different declarations (dllexport and dllimport). On Linux/Mac, it just
-// resolves to the same "default visibility" setting.
-#if defined(_MSC_VER)
-  #if defined(CAFFE2_BUILD_SHARED_LIBS)
-    #define CAFFE2_EXPORT __declspec(dllexport)
-    #define CAFFE2_IMPORT __declspec(dllimport)
-  #else
-    #define CAFFE2_EXPORT
-    #define CAFFE2_IMPORT
-  #endif
+#if defined(__GNUC__)
+#if __GNUC_PREREQ(4, 9)
+#define CAFFE2_EXPORT [[gnu::visibility("default")]]
 #else
-  #if defined(__GNUC__)
-    #if __GNUC_PREREQ(4, 9)
-      #define CAFFE2_EXPORT [[gnu::visibility("default")]]
-    #else
-      #define CAFFE2_EXPORT __attribute__((__visibility__("default")))
-    #endif
-  #else
-    #define CAFFE2_EXPORT
-  #endif
-  #define CAFFE2_IMPORT CAFFE2_EXPORT
+#define CAFFE2_EXPORT __attribute__((__visibility__("default")))
 #endif
-
-// CAFFE2_API is a macro that, depends on whether you are building the
-// main caffe2 library or not, resolves to either CAFFE2_EXPORT or
-// CAFFE2_IMPORT.
-//
-// This is used in e.g. Caffe2's protobuf files: when building the main library,
-// it is defined as CAFFE2_EXPORT to fix a Windows global-variable-in-dll
-// issue, and for anyone dependent on Caffe2 it will be defined as CAFFE2_IMPORT.
-
-#ifdef CAFFE2_BUILD_MAIN_LIB
-  #define CAFFE2_API CAFFE2_EXPORT
 #else
-  #define CAFFE2_API CAFFE2_IMPORT
+#define CAFFE2_EXPORT
 #endif
 
 // make_unique is a C++14 feature. If we don't have 14, we will emulate

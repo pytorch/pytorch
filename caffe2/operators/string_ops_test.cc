@@ -95,7 +95,7 @@ TEST_F(StringJoinOpTest, testString2DJoin) {
 }
 
 TEST_F(StringJoinOpTest, testFloat1DJoin) {
-  std::vector<float> input = {3.90f, 5.234f, 8.12f};
+  std::vector<float> input = {3.90, 5.234, 8.12};
 
   auto blob = caffe2::make_unique<Blob>();
   auto* tensor = blob->GetMutable<TensorCPU>();
@@ -114,8 +114,8 @@ TEST_F(StringJoinOpTest, testFloat1DJoin) {
 }
 
 TEST_F(StringJoinOpTest, testFloat2DJoin) {
-  std::vector<std::vector<float>> input = {{1.23f, 2.45f, 3.56f},
-                                           {4.67f, 5.90f, 6.32f}};
+  std::vector<std::vector<float>> input = {{1.23, 2.45, 3.56},
+                                           {4.67, 5.90, 6.32}};
 
   auto blob = caffe2::make_unique<Blob>();
   auto* tensor = blob->GetMutable<TensorCPU>();
