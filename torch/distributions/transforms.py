@@ -9,6 +9,7 @@ __all__ = [
     'BoltzmannTransform',
     'ExpTransform',
     'InverseTransform',
+    'LowerCholeskyTransform',
     'SigmoidTransform',
     'StickBreakingTransform',
     'Transform',
