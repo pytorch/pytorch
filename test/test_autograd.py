@@ -9,7 +9,7 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, wraps
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
@@ -37,6 +37,16 @@ class NoArgsClass(object):
 
 NO_ARGS = NoArgsClass()
 
+def skipIfNoScalars(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            if not torch._C._with_scalars():
+                raise unittest.SkipTest('Compiled without Scalars')
+            raise
+    return wrapper
 
 @contextlib.contextmanager
 def backward_engine(engine):
@@ -2296,7 +2306,7 @@ method_tests = [
     ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
     ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
-    ('index_fill', (S, S), (0, index_variable(2, S), variable(2)), 'variable_dim', [0]),
+    ('index_fill', (S, S), (0, index_variable(2, S), variable(2)), 'variable_dim', [0], [skipIfNoScalars]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
@@ -2308,7 +2318,7 @@ method_tests = [
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
-    ('fill_', (S, S, S), (variable(1),), 'variable'),
+    ('fill_', (S, S, S), (variable(1),), 'variable', NO_ARGS, [skipIfNoScalars]),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('ne_', (S, S, S), ((S, S, S),)),
@@ -2356,7 +2366,7 @@ method_tests = [
     ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
      'broadcast_all'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)), 'variable'),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)), 'variable', NO_ARGS, [skipIfNoScalars]),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
     ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
