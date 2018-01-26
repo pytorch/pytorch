@@ -22,11 +22,7 @@ namespace at {
   template<typename T>
   class MatrixRef {
   public:
-    typedef const T *iterator;
-    typedef const T *const_iterator;
     typedef size_t size_type;
-
-    typedef std::reverse_iterator<iterator> reverse_iterator;
 
   private:
     /// Underlying ArrayRef
@@ -51,13 +47,6 @@ namespace at {
     /// @name Simple Operations
     /// @{
 
-    // TODO: Maybe this should iterate over ArrayRef<T>, not T
-    iterator begin() const { return arr.begin(); }
-    iterator end() const { return arr.end(); }
-
-    reverse_iterator rbegin() const { return arr.rbegin(); }
-    reverse_iterator rend() const { return arr.rend(); }
-
     /// empty - Check if the matrix is empty.
     bool empty() const { return arr.empty(); }
 
@@ -76,16 +65,6 @@ namespace at {
 
     size_t numel() const {
       return arr.size();
-    }
-
-    /// front - Get the first element.
-    const T &front() const {
-      return arr.front();
-    }
-
-    /// back - Get the last element.
-    const T &back() const {
-      return arr.back();
     }
 
     /// equals - Check for element-wise equality.
@@ -116,14 +95,6 @@ namespace at {
     typename std::enable_if<std::is_same<U, T>::value, MatrixRef<T>>::type &
     operator=(std::initializer_list<U>) = delete;
 
-    /// @}
-    /// @name Expensive Operations
-    /// @{
-    std::vector<T> vec() const {
-      return arr.vec();
-    }
-
-    /// @}
   };
 
 } // end namespace at
