@@ -1426,7 +1426,7 @@ class TestDistributionShapes(TestCase):
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
                         Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
-                except NotImplementedError:
+                except (NotImplementedError, ValueError):
                     continue
 
     def test_bernoulli_shape_scalar_params(self):
@@ -1927,9 +1927,12 @@ class TestKL(TestCase):
                 dist = Dist(**param)
                 try:
                     actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                try:
+                    expected = ExponentialFamily.entropy(dist)
                 except ValueError:
                     continue
-                expected = ExponentialFamily.entropy(dist)
                 if isinstance(expected, Variable) and not isinstance(actual, Variable):
                     expected = expected.data
                 self.assertEqual(actual, expected, message='\n'.join([

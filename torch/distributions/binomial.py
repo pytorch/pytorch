@@ -1,7 +1,7 @@
 from numbers import Number
 import torch
 import math
-from torch.autograd import Variable
+from torch.autograd import Variable, variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
@@ -96,11 +96,14 @@ class Binomial(ExponentialFamily):
         values = values.expand((-1,) + self._batch_shape)
         return values
 
+    def entropy(self):
+        raise NotImplementedError
+
     @lazy_property
     def natural_params(self):
         # note that self.total_count is fixed, meaning that is effectively not a natural parameter
         V1 = Variable(torch.log(self.probs.data / (1 - self.probs.data)), requires_grad=True)
-        V2 = Variable(self.total_count)
+        V2 = variable([self.total_count])
         return (V1, V2)
 
     def log_normalizer(self):

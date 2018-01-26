@@ -71,8 +71,8 @@ class Beta(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = Variable(self.concentration1, requires_grad=True)
-        V2 = Variable(self.concentration0, requires_grad=True)
+        V1 = Variable(self.concentration1.data, requires_grad=True)
+        V2 = Variable(self.concentration0.data, requires_grad=True)
         return (V1, V2)
 
     def log_normalizer(self):
