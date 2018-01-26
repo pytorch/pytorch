@@ -20,8 +20,8 @@
 #include <thread>
 #include <array>
 
-#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include <gtest/gtest.h>
 
 CAFFE2_DECLARE_bool(caffe2_cuda_full_device_control);

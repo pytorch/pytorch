@@ -23,8 +23,9 @@
 #include <iostream>
 #include <algorithm>
 
-#include "caffe/proto/caffe.pb.h"
+#include "caffe2/core/common.h"
 #include "caffe2/core/db.h"
+#include "caffe/proto/caffe.pb.h"
 #include "caffe2/utils/cast.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/thread_pool.h"
