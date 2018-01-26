@@ -48,6 +48,12 @@
 #     tensor from the list requires grad.  If we ever support this,
 #     we'll need some alternate mechanism which is not a std::array)
 #
+#   - 'retain_variables', a bool which is true if a user has specified
+#     that saved variables should be retained in case the backwards is
+#     run again later.  This allows an optimization where we can
+#     destroy saved buffers if we know variables are not going to be retained,
+#     e.g., it is used by _cudnn_rnn
+#
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in tools/autograd/templates/Functions.cpp
 # and invoke it from here.  By the way, go read
