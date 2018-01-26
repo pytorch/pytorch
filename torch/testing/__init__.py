@@ -37,5 +37,4 @@ def make_non_contiguous(tensor):
     return input
 
 
-def randn_like(variable):
-    return torch._C._VariableFunctions.randn_like(variable)
+randn_like = torch._C._VariableFunctions.randn_like

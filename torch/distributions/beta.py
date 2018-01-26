@@ -1,7 +1,7 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
+from torch.autograd import Variable, variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
@@ -32,7 +32,7 @@ class Beta(ExponentialFamily):
 
     def __init__(self, concentration1, concentration0):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
-            concentration1_concentration0 = torch.Tensor([concentration1, concentration0])
+            concentration1_concentration0 = variable([concentration1, concentration0])
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)

@@ -76,7 +76,7 @@ static void THSTensor_(rawInit)(THSTensor *self)
   // self->flag = TH_TENSOR_REFCOUNTED;
 }
 
-static void THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size) {
+THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
   self->size = THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
 
@@ -85,7 +85,8 @@ static void THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t
   }
   self->nDimensionI = nDimI;
   self->nDimensionV = nDimV;
-  self->coalesced = 0;
+
+  return self;
 }
 
 // directly assign without cloning or retaining (internal method)
@@ -176,7 +177,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   return self;
 }
 
-THSTensor *THSTensor_(newWithSize)(THLongStorage *size)
+THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
 {
   THSTensor *self = THAlloc(sizeof(THSTensor));
   THSTensor_(rawInit)(self);
@@ -344,7 +345,6 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   i = self->size[d1];
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
-  self->coalesced = 0;
   THLongTensor_free(indices);
 }
 

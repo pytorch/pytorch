@@ -1,7 +1,7 @@
 import subprocess
+import re
 import os
 import sys
-import re
 import itertools
 from collections import defaultdict
 
@@ -397,7 +397,7 @@ def demangle(name):
             orig_name = subprocess.check_output(filt_cmd, stderr=devnull).rstrip().decode("ascii")
             orig_name = re.search('is :- \"(.*)"', orig_name).group(1) if is_win else orig_name
             return orig_name
-    except (subprocess.CalledProcessError, AttributeError):
+    except (subprocess.CalledProcessError, AttributeError, FileNotFoundError):
         return name
 
 

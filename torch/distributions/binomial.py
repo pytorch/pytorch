@@ -1,11 +1,11 @@
 from numbers import Number
 import torch
 import math
+from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 from torch.distributions.utils import clamp_probs
-from torch.autograd import Variable
 
 
 class Binomial(ExponentialFamily):

@@ -58,6 +58,26 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
   return false;
 }
 
+std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
+  bool tuple = PyTuple_Check(arg);
+  bool list = PyList_Check(arg);
+  if (tuple || list) {
+    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    std::vector<int64_t> sizes(nDim);
+    for (int i = 0; i != nDim; ++i) {
+      PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
+      if (!THPUtils_checkLong(item)) {
+        std::ostringstream oss;
+        oss << "expected int at position " << i << ", but got: " << THPUtils_typename(item);
+        throw std::runtime_error(oss.str());
+      }
+      sizes[i] = THPUtils_unpackLong(item);
+    }
+    return sizes;
+  }
+  throw std::runtime_error("Expected tuple or list");
+}
+
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result) {
   Py_ssize_t length = PyTuple_Size(args) - ignore_first;
   if (length < 1) {

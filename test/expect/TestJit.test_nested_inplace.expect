@@ -1,0 +1,4 @@
+graph(%0 : Double(2, 2)) {
+  %1 : Double(2, 2) = threshold[threshold={0}, value={0}](%0)
+  return (%1);
+}

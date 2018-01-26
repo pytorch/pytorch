@@ -239,11 +239,13 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
+#ifndef WITH_SCALARS
 static void ensure_no_aten_scalars(Tensor & data) {
   if (data.defined() && data.dim() == 0) {
     data.as_strided_({1}, {1});
   }
 }
+#endif
 
 template<typename T>
 static bool computes_grad_tmpl(T tensors) {
@@ -413,7 +415,13 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
 }
 
 Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
-  return resize_(self, the_template.sizes());
+  auto& self_ = unpack(self, "self", 0);
+  auto& the_template_ = unpack(the_template, "the_template", 1);
+  if (static_cast<Variable&>(self).requires_grad()) {
+    at::runtime_error("cannot resize variables that require grad");
+  }
+  baseType->resize_as_(self_, the_template_);
+  return self;
 }
 
 Tensor VariableType::contiguous(const Tensor & self) const {

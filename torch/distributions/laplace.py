@@ -35,9 +35,9 @@ class Laplace(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        u = self.loc.new(*shape).uniform_(_finfo(self.loc).eps - 1, 1)
+        u = self.loc.new(shape).uniform_(_finfo(self.loc).eps - 1, 1)
         # TODO: If we ever implement tensor.nextafter, below is what we want ideally.
-        # u = self.loc.new(*shape).uniform_(self.loc.nextafter(-.5, 0), .5)
+        # u = self.loc.new(shape).uniform_(self.loc.nextafter(-.5, 0), .5)
         return self.loc - self.scale * u.sign() * torch.log1p(-u.abs())
 
     def log_prob(self, value):

@@ -42,7 +42,7 @@ class DistributedDataParallel(Module):
     (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
-        This module works only with the ``gloo`` backend.
+        This module works only with the ``nccl`` and ``gloo`` backends.
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
@@ -62,6 +62,14 @@ class DistributedDataParallel(Module):
         This module doesn't work with :func:`torch.autograd.grad` (i.e. it will
         only work if gradients are to be accumulated in ``.grad`` attributes of
         parameters).
+
+    .. warning::
+        If you plan on using this module with a ``nccl`` backend or a ``gloo``
+        backend (that uses Infiniband), together with a DataLoader that uses
+        multiple workers, please change the multiprocessing start method to
+        ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
+        likely experience deadlocks if you don't change this setting.
 
     .. note::
         Parameters are never broadcast between processes. The module performs
@@ -95,12 +103,6 @@ class DistributedDataParallel(Module):
         # Sync params and buffers
         for p in self.module.state_dict().values():
             dist.broadcast(p, 0)
-
-        # Clear NCCL communicator and CUDA event cache of the default group ID,
-        # These cache will be recreated at the later call. This is currently a
-        # work-around for a potential NCCL deadlock.
-        if dist._backend == dist.dist_backend.NCCL:
-            dist._clear_group_cache()
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -182,11 +184,6 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        # Clear NCCL communicator and CUDA event cache of the default group ID,
-        # These cache will be recreated at the later call. This is currently a
-        # work-around for a potential NCCL deadlock.
-        if dist._backend == dist.dist_backend.NCCL:
-            dist._clear_group_cache()
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)

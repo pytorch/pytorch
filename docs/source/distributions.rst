@@ -109,6 +109,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Pareto
     :members:
 
+:hidden:`Poisson`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Poisson
+    :members:
+
 :hidden:`StudentT`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
