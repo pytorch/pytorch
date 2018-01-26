@@ -224,6 +224,17 @@ as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) {
       make_variable(std::move(std::get<3>(tensors))));
 }
 
+static std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> tensors) {
+  return std::make_tuple<>(
+      make_variable(std::move(std::get<0>(tensors))),
+      make_variable(std::move(std::get<1>(tensors))),
+      make_variable(std::move(std::get<2>(tensors))),
+      make_variable(std::move(std::get<3>(tensors))),
+      make_variable(std::move(std::get<4>(tensors)))
+      );
+}
+
 static std::vector<Tensor> as_variable(TensorList tl) {
   std::vector<Tensor> variables;
   for (auto& t : tl) {
