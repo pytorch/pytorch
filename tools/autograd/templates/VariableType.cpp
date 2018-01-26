@@ -112,6 +112,8 @@ Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const
   return static_cast<Variable&>(const_cast<Tensor&>(t));
 }
 
+// TODO: use templates to reduce the combinatorial explosion of unpack variants
+
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) const {
   return checked_cast(*this, t, name, pos).data();
 }
@@ -147,6 +149,20 @@ Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) co
     return Tensor();
   }
   return unpack(t, name, pos);
+}
+
+Tensor VariableType::unpack_long_opt(const Tensor & t, const char * name, int pos) const {
+  if (!t.defined()) {
+    return Tensor();
+  }
+  return unpack_long(t, name, pos);
+}
+
+Tensor VariableType::unpack_byte_opt(const Tensor & t, const char * name, int pos) const {
+  if (!t.defined()) {
+    return Tensor();
+  }
+  return unpack_byte(t, name, pos);
 }
 
 Tensor VariableType::unpack_any_opt(const Tensor & t, const char * name, int pos) const {
