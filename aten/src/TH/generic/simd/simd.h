@@ -16,8 +16,8 @@
 
 // Helper macros for initialization
 #define FUNCTION_IMPL(NAME, EXT) \
-    { .function=(void *)NAME,    \
-      .supportedSimdExt=EXT      \
+    { (void *)NAME,    \
+      EXT      \
     }
 
 #define INIT_DISPATCH_PTR(OP)    \
@@ -101,7 +101,7 @@ static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *
 {
 #if defined(_MSC_VER)
   uint32_t cpuInfo[4];
-  __cpuid(cpuInfo, *eax);
+  __cpuid((int *)cpuInfo, *eax);
   *eax = cpuInfo[0];
   *ebx = cpuInfo[1];
   *ecx = cpuInfo[2];
