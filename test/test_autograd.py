@@ -2094,7 +2094,7 @@ method_tests = [
     ('view', (), (1,), 'scalar_to_1d'),
     ('view_as', (S, S, S), (Variable(torch.rand(S * S, S), requires_grad=False),)),
     ('view_as', (), (variable(5.5),), 'scalar'),
-    ('view_as', (), (Variable(torch.rand(1,1), requires_grad=False),), 'scalar_to_dims'),
+    ('view_as', (), (Variable(torch.rand(1, 1), requires_grad=False),), 'scalar_to_dims'),
     ('expand', (S, 1, 1), (S, S, S)),
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
     ('expand', (S, 1), (S, S, S), 'new_dim'),
