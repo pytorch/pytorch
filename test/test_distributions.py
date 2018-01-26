@@ -2084,20 +2084,27 @@ class TestLazyLogitsInitialization(TestCase):
 
 class TestTransforms(TestCase):
     def setUp(self):
-        self.transforms = [
-            AbsTransform(),
-            ExpTransform(),
-            SigmoidTransform(),
-            AffineTransform(Variable(torch.Tensor(5).normal_()),
-                            Variable(torch.Tensor(5).normal_())),
-            AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
-                            Variable(torch.Tensor(4, 5).normal_())),
-            BoltzmannTransform(),
-            StickBreakingTransform(),
-            LowerCholeskyTransform(),
-        ]
-        for t in self.transforms[:]:
-            self.transforms.append(t.inv)
+        self.transforms = []
+        self.transforms_by_cache_size = {}
+        for cache_size in [0, 1]:
+            transforms = [
+                AbsTransform(cache_size=cache_size),
+                ExpTransform(cache_size=cache_size),
+                SigmoidTransform(cache_size=cache_size),
+                AffineTransform(Variable(torch.Tensor(5).normal_()),
+                                Variable(torch.Tensor(5).normal_()),
+                                cache_size=cache_size),
+                AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                                Variable(torch.Tensor(4, 5).normal_()),
+                                cache_size=cache_size),
+                BoltzmannTransform(cache_size=cache_size),
+                StickBreakingTransform(cache_size=cache_size),
+                LowerCholeskyTransform(cache_size=cache_size),
+            ]
+            for t in transforms[:]:
+                transforms.append(t.inv)
+            self.transforms += transforms
+            self.transforms_by_cache_size[cache_size] = transforms
 
     def _generate_data(self, transform):
         domain = transform.domain
@@ -2124,7 +2131,8 @@ class TestTransforms(TestCase):
             self.assertTrue(t.inv.inv is t)
 
     def test_equality(self):
-        for x, y in product(self.transforms, self.transforms):
+        transforms = self.transforms_by_cache_size[0]
+        for x, y in product(transforms, transforms):
             if x is y:
                 self.assertTrue(x == y)
                 self.assertFalse(x != y)

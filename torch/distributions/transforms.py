@@ -7,7 +7,6 @@ __all__ = [
     'AbsTransform',
     'AffineTransform',
     'BoltzmannTransform',
-    'CachedTransform',
     'ExpTransform',
     'InverseTransform',
     'SigmoidTransform',
@@ -18,26 +17,38 @@ __all__ = [
 
 class Transform(object):
     """
-    Abstract class for transformations with computable inverse log
+    Abstract class for invertable transformations with computable log
     det jacobians. They are primarily used in
     :class:`torch.distributions.TransformedDistribution`.
 
-    Derived classes should implement one or both of :meth:`__call__` or
-    :meth:`inverse` and should implement :meth:`log_abs_det_jacobian`.
-    Derived classes may store intermediate results in the `._cache` dict.
+    Caching is useful for tranforms whose inverses are either expensive or
+    numerically unstable. Note that care must be taken with memoized values
+    since the autograd graph may be reversed. For example while the following
+    works with or without caching::
+
+        y = t(x)
+        t.log_abs_det_jacobian(x, y).backward()  # x will receive gradients.
+
+    However the following will error when caching due to dependency reversal::
+
+        y = t(x)
+        z = t.inv(y)
+        grad(z.sum(), [y])  # error because z is x
+
+    Derived classes should implement one or both of :meth:`_call` or
+    :meth:`_inverse`. Derived classes that set `bijective=True` should also
+    implement :meth:`log_abs_det_jacobian`.
     """
     bijective = False
 
     def __init__(self, cache_size=0):
-        if cache_size == 0:
-            self.__call__ = self._call
-            self.inverse = self._inverse
-        elif cache_size == 1:
-            self._cached_x_y = None, None
-            self.__call__ = self._cached_call
-            self.inverse = self._cached_inverse
-        else:
-            raise NotImplementedError('cache_size must be 0 or 1')
+        if cache_size != 0:
+            if cache_size == 1:
+                self._cached_x_y = None, None
+                self.__call__ = self._cached_call
+                self.inverse = self._cached_inverse
+            else:
+                raise NotImplementedError('cache_size must be 0 or 1')
 
     @lazy_property
     def inv(self):
@@ -53,9 +64,21 @@ class Transform(object):
         # Necessary for Python2
         return not self.__eq__(other)
 
+    def __call__(self, x):
+        """
+        Computes the transform `x => y`.
+        """
+        return self._call(x)
+
+    def inverse(self, y):
+        """
+        Inverts the transform `y => x`.
+        """
+        return self._inverse(y)
+
     def _cached_call(self, x):
         """
-        Invokes the memoized transform `x => y`.
+        Computes the memoized transform `x => y`.
         """
         x_old, y_old = self._cached_x_y
         if x is x_old:
@@ -74,50 +97,24 @@ class Transform(object):
         x = self._inverse(y)
         self._cached_x_y = x, y
         return x
-    
-    def __call__(self, x):
+
+    def _call(self, x):
         """
         Abstract method to compute forward transformation.
         """
         raise NotImplementedError
 
-    def inverse(self, y):
+    def _inverse(self, y):
         """
         Abstract method to compute inverse transformation.
         """
         raise NotImplementedError
-    
+
     def log_abs_det_jacobian(self, x, y):
         """
         Computes the log det jacobian `log |dy/dx|` given input and output.
         """
         raise NotImplementedError
-
-
-class CachedTransform(Transform):
-    """
-    Abstract base class for transforms that implement one of :meth:`__call__`
-    or :meth:`backward` via by caching the latest value (i.e. an LRU(1) cache).
-
-    This class is useful for tranforms whose inverses are either expensive or
-    numerically unstable. Note that care must be taken with memoized values
-    since the autograd graph may be reversed. For example while the following
-    works::
-
-        y = t(x)
-        t.log_abs_det_jacobian(x, y).backward()  # x will receive gradients.
-
-    However the following will error due to dependency reversal::
-
-        y = t(x)
-        z = t.inv(y)
-        grad(z.sum(), [y])  # error because z is x
-
-    Derived classes should implement one or both of :meth:`_call` and
-    :meth:`_inverse`.
-    """
-    def __init__(self):
-        super(CachedTransform, self).__init__(1)
 
 
 class InverseTransform(Transform):
@@ -126,9 +123,9 @@ class InverseTransform(Transform):
     """
     __slots__ = ['inv']
 
-    def __init__(self, transform):
+    def __init__(self, transform, cache_size=0):
         self.inv = transform
-        super(InverseTransform, self).__init__(0)
+        super(InverseTransform, self).__init__(cache_size=cache_size)
 
     @constraints.dependent_property
     def domain(self):
@@ -231,8 +228,8 @@ class AffineTransform(Transform):
     codomain = constraints.real
     bijective = True
 
-    def __init__(self, loc, scale, event_dim=0):
-        super(AffineTransform, self).__init__()
+    def __init__(self, loc, scale, event_dim=0, cache_size=0):
+        super(AffineTransform, self).__init__(cache_size=cache_size)
         self.loc, self.scale = broadcast_all(loc, scale)
         self.event_dim = event_dim
 
@@ -257,7 +254,7 @@ class AffineTransform(Transform):
         return result.expand(shape)
 
 
-class BoltzmannTransform(CachedTransform):
+class BoltzmannTransform(Transform):
     """
     Transform from unconstrained space to the simplex via `y = exp(x)` then
     normalizing.
@@ -283,7 +280,7 @@ class BoltzmannTransform(CachedTransform):
         return probs.log()
 
 
-class StickBreakingTransform(CachedTransform):
+class StickBreakingTransform(Transform):
     """
     Transform from unconstrained space to the simplex of one additional
     dimension via a stick-breaking process.
