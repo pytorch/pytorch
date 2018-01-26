@@ -68,8 +68,6 @@ void THNN_(Col2Row_updateOutput)(
   THCTensor *input_n = THCTensor_(new)(state);
   THCTensor *output_n = THCTensor_(new)(state);
 
-  int width_col = (outputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
-
   for (int elt = 0; elt < batchSize; elt++) {
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, output_n, output, 0, elt);
@@ -78,7 +76,7 @@ void THNN_(Col2Row_updateOutput)(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
       nOutputPlane,
-      width_col,
+      outputWidth,
       kW,
       padW,
       sW,
