@@ -1,38 +1,40 @@
-#ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/Vol2Col.c"
+#ifndef THC_GENERIC_FILE
+#define THC_GENERIC_FILE "generic/Vol2Col.cu"
 #else
 
 static inline void THNN_(Vol2Col_shapeCheck)(
-                         THNNState *state,
-                         THTensor *input,
-                         THTensor *gradOutput,
+                         THCState *state,
+                         THCTensor *input,
+                         THCTensor *gradOutput,
                          int kT, int kH, int kW, int dT, int dH, int dW,
                          int padT, int padH, int padW, int sT, int sH, int sW) {
 
   THArgCheck(kW > 0 && kH > 0 && kT > 0, 4,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
-  THArgCheck(dW > 0 && dH > 0 && dT > 0, 7,
+  THArgCheck(dW > 0 && dH > 0 && kT > 0, 7,
              "dilation should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
+  THArgCheck(padW >= 0 && padH >= 0 && padT >=0, 10,
+             "padding should be non-negative, but got padT: %d padH: %d padW: %d", padT, padH, padW);
   THArgCheck(sW > 0 && sH > 0 && sT > 0, 13,
              "stride should be greater than zero, but got sT: %d sH: %d sW: %d", sT, sH, sW);
 
-  int ndim = THTensor_(nDimension)(input);
-  THNN_ARGCHECK(ndim == 4 || ndim == 5, 2, input,
-                "4D or 5D input tensor expected but got: %s");
+  int ndim = THCTensor_(nDimension)(state, input);
+  THCUNN_argCheck(state, ndim == 4 || ndim == 5, 2, input,
+                  "4D or 5D input tensor expected but got: %s");
 
   int dim_batch = 0;
   if (ndim == 4) {
     dim_batch = -1;
   }
-  int nInputPlane  = THTensor_(size)(input, dim_batch + 1);
-  int inputDepth   = THTensor_(size)(input, dim_batch + 2);
-  int inputHeight  = THTensor_(size)(input, dim_batch + 3);
-  int inputWidth   = THTensor_(size)(input, dim_batch + 4);
+  int nInputPlane  = THCTensor_(size)(state, input, dim_batch + 1);
+  int inputDepth   = THCTensor_(size)(state, input, dim_batch + 2);
+  int inputHeight  = THCTensor_(size)(state, input, dim_batch + 3);
+  int inputWidth   = THCTensor_(size)(state, input, dim_batch + 4);
   int outputDepth  = (inputDepth + 2 * padT - (dT * (kT - 1) + 1)) / sT + 1;
   int outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
   int outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
-  int nOutputPlane = nInputPlane * kT * kW * kH;
-  int outputLength = outputDepth * outputHeight * outputWidth;
+  int nOutputPlane = nInputPlane * kW * kH * kT;
+  int outputLength = outputHeight * outputWidth;
 
   if (outputWidth < 1 || outputHeight < 1 || outputDepth < 1) {
     THError("Given input size: (%d x %d x %d x %d). "
@@ -42,28 +44,30 @@ static inline void THNN_(Vol2Col_shapeCheck)(
 }
 
 void THNN_(Vol2Col_updateOutput)(
-           THNNState *state,
-           THTensor *input,
-           THTensor *output,
+           THCState *state,
+           THCTensor *input,
+           THCTensor *output,
            int kT, int kH, int kW,
            int dT, int dH, int dW,
            int padT, int padH, int padW,
            int sT, int sH, int sW) {
 
+  THCUNN_assertSameGPU(state, 2, input, output);
+
   THNN_(Vol2Col_shapeCheck)(state, input, NULL, kT, kH, kW, dT, dH, dW, padT, padH, padW, sT, sH, sW);
 
-  input = THTensor_(newContiguous)(input);
+  input = THCTensor_(newContiguous)(state, input);
   bool batched_input = true;
   if (input->nDimension == 4) {
     batched_input = false;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
+    THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
   }
 
-  int batchSize    = THTensor_(size)(input, 0);
-  int nInputPlane  = THTensor_(size)(input, 1);
-  int inputDepth   = THTensor_(size)(input, 2);
-  int inputHeight  = THTensor_(size)(input, 3);
-  int inputWidth   = THTensor_(size)(input, 4);
+  int batchSize    = THCTensor_(size)(state, input, 0);
+  int nInputPlane  = THCTensor_(size)(state, input, 1);
+  int inputDepth   = THCTensor_(size)(state, input, 2);
+  int inputHeight  = THCTensor_(size)(state, input, 3);
+  int inputWidth   = THCTensor_(size)(state, input, 4);
 
   int outputDepth  = (inputDepth + 2 * padT - (dT * (kT - 1) + 1)) / sT + 1;
   int outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
@@ -71,49 +75,46 @@ void THNN_(Vol2Col_updateOutput)(
   int nOutputPlane = nInputPlane * kW * kH * kT;
   int outputLength = outputDepth * outputHeight * outputWidth;
 
-  THTensor_(resize3d)(output, batchSize, nOutputPlane, outputLength);
-  THTensor_(zero)(output);
+  THCTensor_(resize3d)(state, output, batchSize, nOutputPlane, outputLength);
+  THCTensor_(zero)(state, output);
 
-  THTensor *input_n = THTensor_(new)();
-  THTensor *output_n = THTensor_(new)();
+  THCTensor *input_n = THCTensor_(new)(state);
+  THCTensor *output_n = THCTensor_(new)(state);
 
   for (int elt = 0; elt < batchSize; elt++) {
-    THTensor_(select)(input_n, input, 0, elt);
-    THTensor_(select)(output_n, output, 0, elt);
+    THCTensor_(select)(state, input_n, input, 0, elt);
+    THCTensor_(select)(state, output_n, output, 0, elt);
 
-    THNN_(vol2col)(
-      THTensor_(data)(input_n),
-      nInputPlane, inputDepth, inputHeight, inputWidth,
-      outputDepth, outputHeight, outputWidth,
-      kT, kH, kW, padT, padH, padW, sT, sH, sW,
-      dT, dH, dW, THTensor_(data)(output_n));
+    vol2col(
+      THCState_getCurrentStream(state),
+      THCTensor_(data)(state, input_n),
+      nInputPlane, inputDepth, inputHeight, inputWidth, kT, kH, kW, padT, padH, padW, sT, sH, sW,
+      dT, dH, dW, THCTensor_(data)(state, output_n));
   }
 
-  THTensor_(free)(input_n);
-  THTensor_(free)(output_n);
+  THCTensor_(free)(state, input_n);
+  THCTensor_(free)(state, output_n);
 
   if (!batched_input) {
-    THTensor_(resize2d)(output, nOutputPlane, outputLength);
+    THCTensor_(resize2d)(state, output, nOutputPlane, outputLength);
   }
-  THTensor_(free)(input);
+  THCTensor_(free)(state, input);
 }
 
 void THNN_(Vol2Col_updateGradInput)(
-           THNNState *state,
-           THTensor *gradOutput,
-           THTensor *gradInput,
+           THCState *state,
+           THCTensor *gradOutput,
+           THCTensor *gradInput,
            int inputDepth, int inputHeight, int inputWidth,
            int kT, int kH, int kW,
            int dT, int dH, int dW,
            int padT, int padH, int padW,
            int sT, int sH, int sW) {
 
-
   THNN_(Col2Vol_updateOutput)(state, gradOutput, gradInput,
                               inputDepth, inputHeight, inputWidth,
                               kT, kH, kW, dT, dH, dW,
                               padT, padH, padW, sT, sH, sW);
 }
-
 
 #endif

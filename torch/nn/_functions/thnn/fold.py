@@ -61,7 +61,7 @@ class Row2Col(Function):
 
         output = input.new()
 
-        ctx._backend.Vol2Col_updateOutput(ctx._backend.library_state,
+        ctx._backend.Row2Col_updateOutput(ctx._backend.library_state,
                                           input, output,
                                           kernel_size[0],
                                           dilation[0],
@@ -75,7 +75,7 @@ class Row2Col(Function):
 
         grad_input = grad_output.new()
 
-        ctx._backend.Vol2Col_updateGradInput(ctx._backend.library_state,
+        ctx._backend.Row2Col_updateGradInput(ctx._backend.library_state,
                                              grad_output,
                                              grad_input,
                                              ctx.input_size[0],

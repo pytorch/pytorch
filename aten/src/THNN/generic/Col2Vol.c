@@ -92,11 +92,11 @@ static inline void THNN_(Col2Vol_shapeCheck)(
                          int kT, int kH, int kW, int dT, int dH, int dW,
                          int padT, int padH, int padW, int sT, int sH, int sW) {
 
-  THArgCheck(kW > 0 && kH > 0 && kT > 0, 6,
+  THArgCheck(kW > 0 && kH > 0 && kT > 0, 7,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
-  THArgCheck(sW > 0 && sH > 0 && sT > 0, 14,
+  THArgCheck(sW > 0 && sH > 0 && sT > 0, 16,
              "stride should be greater than zero, but got sT: %d sH: %d sW: %d", sT, sH, sW);
-  THArgCheck(dW > 0 && dH > 0 && dT > 0, 9,
+  THArgCheck(dW > 0 && dH > 0 && dT > 0, 10,
              "dilation should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
 
   int ndim = THTensor_(nDimension)(input);

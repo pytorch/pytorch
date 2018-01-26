@@ -54,9 +54,9 @@ static inline void THNN_(Col2Row_shapeCheck)(
                          int kW, int dW,
                          int padW, int sW) {
 
-  THArgCheck(kW > 0, 6,
+  THArgCheck(kW > 0, 5,
              "kernel size should be greater than zero, but got kW: %d", kW);
-  THArgCheck(sW > 0, 9,
+  THArgCheck(sW > 0, 6,
              "stride should be greater than zero, but got sW: %d", sW);
   THArgCheck(dW > 0, 7,
              "dilation should be greater than zero, but got dW: %d", dW);
