@@ -29,7 +29,7 @@ class Bernoulli(ExponentialFamily):
     params = {'probs': constraints.unit_interval}
     support = constraints.boolean
     has_enumerate_support = True
-    _zero_carrier_measure = True
+    mean_carrier_measure = 0
 
     def __init__(self, probs=None, logits=None):
         if (probs is None) == (logits is None):
@@ -81,17 +81,11 @@ class Bernoulli(ExponentialFamily):
         values = values.expand((-1,) + self._batch_shape)
         return values
 
-    def natural_params(self):
-        return self._natural_params
-
     @lazy_property
-    def _natural_params(self):
-        if isinstance(self.probs, Variable):
-            V1 = Variable(torch.log(self.probs.data / (1 - self.probs.data)), requires_grad=True)
-        else:
-            V1 = Variable(torch.log(self.probs / (1 - self.probs)), requires_grad=True)
+    def natural_params(self):
+        V1 = Variable(torch.log(self.probs.data / (1 - self.probs.data)), requires_grad=True)
         return (V1, )
 
     def log_normalizer(self):
-        x, = self._natural_params
+        x, = self.natural_params
         return torch.log(1 + torch.exp(x))

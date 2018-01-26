@@ -2,13 +2,13 @@ from numbers import Number
 import torch
 import math
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 from torch.distributions.utils import clamp_probs
 from torch.autograd import Variable
 
 
-class Binomial(Distribution):
+class Binomial(ExponentialFamily):
     r"""
     Creates a Binomial distribution parameterized by `total_count` and
     either `probs` or `logits` (but not both).
@@ -33,6 +33,7 @@ class Binomial(Distribution):
     """
     params = {'probs': constraints.unit_interval}
     has_enumerate_support = True
+    mean_carrier_measure = float('nan')  # There is no closed form solution
 
     def __init__(self, total_count=1, probs=None, logits=None):
         if not isinstance(total_count, Number):
@@ -94,3 +95,14 @@ class Binomial(Distribution):
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values
+
+    @lazy_property
+    def natural_params(self):
+        # note that self.total_count is fixed, meaning that is effectively not a natural parameter
+        V1 = Variable(torch.log(self.probs.data / (1 - self.probs.data)), requires_grad=True)
+        V2 = Variable(self.total_count)
+        return (V1, V2)
+
+    def log_normalizer(self):
+        x, y = self.natural_params
+        return y * torch.log(1 + torch.exp(x))

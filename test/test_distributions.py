@@ -29,7 +29,7 @@ from itertools import product
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
-from torch.autograd import Variable, grad, gradcheck
+from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import Distribution, ExponentialFamily
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
                                  Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric,
@@ -1845,7 +1845,7 @@ class TestKL(TestCase):
                 dist = Dist(**param)
                 try:
                     actual = dist.entropy()
-                except NotImplementedError:
+                except ValueError:
                     continue
                 expected = ExponentialFamily.entropy(dist)
                 if isinstance(expected, Variable) and not isinstance(actual, Variable):

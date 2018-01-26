@@ -24,7 +24,7 @@ class Exponential(ExponentialFamily):
     params = {'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
-    _zero_carrier_measure = True
+    mean_carrier_measure = 0
 
     def __init__(self, rate):
         self.rate, = broadcast_all(rate)
@@ -42,17 +42,11 @@ class Exponential(ExponentialFamily):
     def entropy(self):
         return 1.0 - torch.log(self.rate)
 
-    def natural_params(self):
-        return self._natural_params
-
     @lazy_property
-    def _natural_params(self):
-        if isinstance(self.rate, Variable):
-            V1 = Variable(-self.rate.data, requires_grad=True)
-        else:
-            V1 = Variable(-self.rate, requires_grad=True)
+    def natural_params(self):
+        V1 = Variable(-self.rate.data, requires_grad=True)
         return (V1, )
 
     def log_normalizer(self):
-        x, = self._natural_params
+        x, = self.natural_params
         return -torch.log(-x)

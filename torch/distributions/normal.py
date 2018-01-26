@@ -28,7 +28,7 @@ class Normal(ExponentialFamily):
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
-    _zero_carrier_measure = True
+    mean_carrier_measure = 0
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -57,19 +57,12 @@ class Normal(ExponentialFamily):
     def entropy(self):
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
 
-    def natural_params(self):
-        return self._natural_params
-
     @lazy_property
-    def _natural_params(self):
-        if isinstance(self.loc, Variable):
-            V1 = Variable((self.loc / self.scale.pow(2)).data, requires_grad=True)
-            V2 = Variable(-0.5 * self.scale.pow(2).reciprocal().data, requires_grad=True)
-        else:
-            V1 = Variable(self.loc / self.scale.pow(2), requires_grad=True)
-            V2 = Variable(-0.5 * self.scale.pow(2).reciprocal(), requires_grad=True)
+    def natural_params(self):
+        V1 = Variable((self.loc / self.scale.pow(2)).data, requires_grad=True)
+        V2 = Variable(-0.5 * self.scale.pow(2).reciprocal().data, requires_grad=True)
         return (V1, V2)
 
     def log_normalizer(self):
-        x, y = self._natural_params
+        x, y = self.natural_params
         return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)

@@ -1,13 +1,14 @@
 from numbers import Number
 
 import torch
+from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
-from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all
+from torch.distributions.exp_family import ExponentialFamily
+from torch.distributions.utils import broadcast_all, lazy_property
 
 
-class Beta(Distribution):
+class Beta(ExponentialFamily):
     r"""
     Beta distribution parameterized by `concentration1` and `concentration0`.
 
@@ -27,6 +28,7 @@ class Beta(Distribution):
     params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
     support = constraints.unit_interval
     has_rsample = True
+    mean_carrier_measure = float('nan')  # There is no closed form solution
 
     def __init__(self, concentration1, concentration0):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
@@ -66,3 +68,13 @@ class Beta(Distribution):
             return torch.Tensor([result])
         else:
             return result
+
+    @lazy_property
+    def natural_params(self):
+        V1 = Variable(self.concentration1, requires_grad=True)
+        V2 = Variable(self.concentration0, requires_grad=True)
+        return (V1, V2)
+
+    def log_normalizer(self):
+        x, y = self.natural_params
+        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)

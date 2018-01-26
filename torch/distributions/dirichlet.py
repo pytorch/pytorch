@@ -4,8 +4,8 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
-from torch.distributions.utils import _finfo, broadcast_all
+from torch.distributions.exp_family import ExponentialFamily
+from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
 def _dirichlet_sample_nograd(concentration):
@@ -36,7 +36,7 @@ class _Dirichlet(Function):
         return _Dirichlet_backward(x, concentration, grad_output)
 
 
-class Dirichlet(Distribution):
+class Dirichlet(ExponentialFamily):
     r"""
     Creates a Dirichlet distribution parameterized by concentration `concentration`.
 
@@ -55,6 +55,7 @@ class Dirichlet(Distribution):
     params = {'concentration': constraints.positive}
     support = constraints.simplex
     has_rsample = True
+    mean_carrier_measure = float('nan')  # There is no closed form solution
 
     def __init__(self, concentration):
         self.concentration, = broadcast_all(concentration)
@@ -80,3 +81,12 @@ class Dirichlet(Distribution):
         return (torch.lgamma(self.concentration).sum(-1) - torch.lgamma(a0) -
                 (k - a0) * torch.digamma(a0) -
                 ((self.concentration - 1.0) * torch.digamma(self.concentration)).sum(-1))
+
+    @lazy_property
+    def natural_params(self):
+        V1 = Variable(self.concentration.data, requires_grad=True)
+        return (V1, )
+
+    def log_normalizer(self):
+        x, = self.natural_params
+        return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))

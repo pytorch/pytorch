@@ -26,7 +26,7 @@ class Pareto(ExponentialFamily):
     """
     has_rsample = True
     params = {'alpha': constraints.positive, 'scale': constraints.positive}
-    _zero_carrier_measure = True
+    mean_carrier_measure = 0
 
     def __init__(self, scale, alpha):
         self.scale, self.alpha = broadcast_all(scale, alpha)
@@ -52,21 +52,14 @@ class Pareto(ExponentialFamily):
     def entropy(self):
         return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))
 
-    def natural_params(self):
-        return self._natural_params
-
     @lazy_property
-    def _natural_params(self):
-        # note that self.scale is fixed, meaning that it is not a natural parameter
-        if isinstance(self.alpha, Variable):
-            V1 = Variable(-self.alpha.data - 1, requires_grad=True)
-            V2 = Variable(self.scale.data)
-        else:
-            V1 = Variable(-self.alpha - 1, requires_grad=True)
-            V2 = Variable(self.scale)
+    def natural_params(self):
+        # note that self.scale is fixed, meaning that it is effectively not a natural parameter
+        V1 = Variable(-self.alpha.data - 1, requires_grad=True)
+        V2 = Variable(self.scale.data)
         return (V1, V2)
 
     def log_normalizer(self):
-        x, y = self._natural_params
+        x, y = self.natural_params
         term = x + 1
         return -torch.log(-term) + term * torch.log(y)

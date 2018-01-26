@@ -34,7 +34,7 @@ class Gamma(ExponentialFamily):
     params = {'concentration': constraints.positive, 'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
-    _zero_carrier_measure = True
+    mean_carrier_measure = 0
 
     def __init__(self, concentration, rate):
         self.concentration, self.rate = broadcast_all(concentration, rate)
@@ -61,20 +61,13 @@ class Gamma(ExponentialFamily):
         return (self.concentration - torch.log(self.rate) + torch.lgamma(self.concentration) +
                 (1.0 - self.concentration) * torch.digamma(self.concentration))
 
-    def natural_params(self):
-        return self._natural_params
-
     @lazy_property
-    def _natural_params(self):
-        if isinstance(self.concentration, Variable):
-            V1 = Variable(self.concentration.data - 1, requires_grad=True)
-            V2 = Variable(-self.rate.data, requires_grad=True)
-        else:
-            V1 = Variable(self.concentration - 1, requires_grad=True)
-            V2 = Variable(-self.rate, requires_grad=True)
+    def natural_params(self):
+        V1 = Variable(self.concentration.data - 1, requires_grad=True)
+        V2 = Variable(-self.rate.data, requires_grad=True)
         return (V1, V2)
 
     def log_normalizer(self):
-        x, y = self._natural_params
+        x, y = self.natural_params
         t1 = x + 1
         return torch.lgamma(t1) + t1 * torch.log(-y.reciprocal())
