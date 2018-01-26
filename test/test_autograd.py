@@ -37,6 +37,7 @@ class NoArgsClass(object):
 
 NO_ARGS = NoArgsClass()
 
+
 def skipIfNoScalars(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -47,6 +48,7 @@ def skipIfNoScalars(fn):
                 raise unittest.SkipTest('Compiled without Scalars')
             raise
     return wrapper
+
 
 @contextlib.contextmanager
 def backward_engine(engine):
@@ -2366,7 +2368,8 @@ method_tests = [
     ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
      'broadcast_all'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)), 'variable', NO_ARGS, [skipIfNoScalars]),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)),
+     'variable', NO_ARGS, [skipIfNoScalars]),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
     ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
@@ -2378,6 +2381,7 @@ method_tests = [
     ('sort', (S, M, S), (1,), 'dim'),
     ('sort', (S, M, S), (1, True), 'dim_desc'),
     ('topk', (S, M, S), (3,)),
+    ('topk', (), (1,), 'scalar'),
     ('topk', (S, M, S), (3, 1), 'dim'),
     ('topk', (S, M, S), (3, 1, True), 'dim_desc'),
     ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort'),
@@ -2581,7 +2585,8 @@ for test in method_tests:
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                has_scalar = self_variable.dim() == 0 or any(x.dim() == 0 for x in args_variable if isinstance(x, Variable))
+                has_scalar = (self_variable.dim() == 0 or
+                              any(x.dim() == 0 for x in args_variable if isinstance(x, Variable)))
                 if not exclude_tensor_method(name, test_name) and not has_scalar:  # scalar API doesn't work on tensors
                     output_tensor = getattr(self_tensor, name)(*args_tensor)
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
