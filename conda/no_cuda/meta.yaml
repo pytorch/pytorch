@@ -5,7 +5,7 @@ package:
   version: {{ version }}
 
 source:
-  path: ..
+  path: ../..
 
 build:
   number: 0
@@ -15,29 +15,28 @@ build:
 
 requirements:
   build:
+    - cmake
     - future
     - glog
-    - numpy
-    - six
-    - python
-    - protobuf {{ protobuf }}
-    - cmake
     - lmdb
-    - snappy ==1.1.6
     - mkl-include
     - mkl
+    - numpy
+    - opencv
+    - python
+    - protobuf {{ protobuf }}
+    - six
   run:
     - future
     - glog
-    - numpy
-    - six
-    - python
-    - protobuf
     - lmdb
-    - snappy ==1.1.6
-    - future
-    - mkl-include
     - mkl
+    - mkl-include
+    - numpy
+    - opencv
+    - protobuf
+    - python
+    - six
 
 test:
   imports:
