@@ -31,9 +31,13 @@ activations, avoiding computation if the input is invalid (as in, the
 value at X{t][n] >= seqLengths[n].
 
 )DOC")
-    .Arg("forget_bias", "Bias term to add in while calculating forget gate");
+    .Arg("forget_bias", "Bias term to add in while calculating forget gate")
+    .Arg("no_sequence_lengths", "Ignore the sequence lengths input");
 REGISTER_CPU_OPERATOR(LSTMUnitGradient, LSTMUnitGradientOp<CPUContext>);
-OPERATOR_SCHEMA(LSTMUnitGradient).NumInputs(9).NumOutputs(3);
+OPERATOR_SCHEMA(LSTMUnitGradient)
+    .NumInputs(9)
+    .NumOutputs(3)
+    .Arg("no_sequence_lengths", "Ignore the sequence lengths input");
 
 class GetLSTMUnitGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
