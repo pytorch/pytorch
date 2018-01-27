@@ -44,7 +44,7 @@ class PixelShuffle(Module):
 
         else:
             self._outShape = torch.Tensor([0, 0, 0])
-        
+            
         channels = input.size(inputStartIdx) / self.upscaleFactorSquared
         inHeight = input.size(inputStartIdx + 1)
         inWidth = input.size(inputStartIdx + 2)
@@ -65,8 +65,9 @@ class PixelShuffle(Module):
         tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]))
         inputView = input.view(tmp)
 
-        self._shuffleOut.resize_(inputView.size(0), inputView.size(1), inputView.size(4),
-                                inputView.size(2), inputView.size(5), inputView.size(3))
+        self._shuffleOut.resize_(inputView.size(0), inputView.size(1),
+                                 inputView.size(4), inputView.size(2),
+                                 inputView.size(5), inputView.size(3))
         self._shuffleOut.copy_(inputView.permute(0, 1, 4, 2, 5, 3))
 
         tmp = None
@@ -85,7 +86,7 @@ class PixelShuffle(Module):
         print("output type: ", self.output.type())
         return self.output
     
-    def updateGradInput(self,input, gradOutput):
+    def updateGradInput(self, input, gradOutput):
 
         if hasattr(self, '_intermediateShape') is False:
             self._intermediateShape = None
@@ -96,8 +97,7 @@ class PixelShuffle(Module):
             self._intermediateShape = torch.Tensor(6, 0)
         if self._shuffleIn is None:
             self._shuffleIn = input.new()
-
-
+            
         batchSize = 1
         inputStartIdx = 0
         if len(input.size()) == 4:
@@ -121,13 +121,13 @@ class PixelShuffle(Module):
         tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]))
         gradOutputView = gradOutput.view(tmp)
 
-        self._shuffleIn.resize_(gradOutputView.size(0), gradOutputView.size(1), 
-                                gradOutputView.size(3), gradOutputView.size(5), 
+        self._shuffleIn.resize_(gradOutputView.size(0), gradOutputView.size(1),
+                                gradOutputView.size(3), gradOutputView.size(5),
                                 gradOutputView.size(2), gradOutputView.size(4))
         self._shuffleIn.copy_(gradOutputView.permute(0, 1, 3, 5, 2, 4))
 
         self.gradInput = self._shuffleIn.view(input.size())
-
+        
         return self.gradInput
     
     def clearState(self):
