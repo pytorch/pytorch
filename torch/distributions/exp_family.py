@@ -43,15 +43,15 @@ class ExponentialFamily(Distribution):
     def mean_carrier_measure(self):
         """
         Abstract method for expected carrier measure, which is required for computing
-        entropy
+        entropy.
         """
         raise NotImplementedError
 
     def entropy(self):
         """
-        Method to compute the entropy using Bregman divergence of the log normalizer
+        Method to compute the entropy using Bregman divergence of the log normalizer.
         """
-        result = self.mean_carrier_measure
+        result = -self.mean_carrier_measure
         nparams = [Variable(p, requires_grad=True) for p in self.natural_params]
         lg_normal = self.log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
