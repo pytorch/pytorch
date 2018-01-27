@@ -5,8 +5,6 @@ import numpy
 
 
 class PixelShuffle(Module):
-    
-    
     def __init__(self, upscaleFactor):
         super(PixelShuffle, self).__init__()
         self.upscaleFactor = upscaleFactor
@@ -36,7 +34,7 @@ class PixelShuffle(Module):
         inputStartIdx = 0
         outShapeIdx = 0
 
-        if len(input.size()) == 4 :
+        if len(input.size()) == 4:
             batched = True
             batchSize = input.size(0)
             inputStartIdx = 1
@@ -71,8 +69,8 @@ class PixelShuffle(Module):
                                 inputView.size(2), inputView.size(5), inputView.size(3))
         self._shuffleOut.copy_(inputView.permute(0, 1, 4, 2, 5, 3))
 
-        tmp=None
-        if len(input.size()) == 4 :
+        tmp = None
+        if len(input.size()) == 4:
             tmp = self._outShape.type(torch.IntTensor)
             tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3]))
         else:
@@ -123,8 +121,9 @@ class PixelShuffle(Module):
         tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]))
         gradOutputView = gradOutput.view(tmp)
 
-        self._shuffleIn.resize_(gradOutputView.size(0), gradOutputView.size(1), gradOutputView.size(3),
-                              gradOutputView.size(5), gradOutputView.size(2), gradOutputView.size(4))
+        self._shuffleIn.resize_(gradOutputView.size(0), gradOutputView.size(1), 
+                                gradOutputView.size(3), gradOutputView.size(5), 
+                                gradOutputView.size(2), gradOutputView.size(4))
         self._shuffleIn.copy_(gradOutputView.permute(0, 1, 3, 5, 2, 4))
 
         self.gradInput = self._shuffleIn.view(input.size())
