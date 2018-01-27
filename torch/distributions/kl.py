@@ -17,6 +17,7 @@ from .laplace import Laplace
 from .log_normal import LogNormal
 from .normal import Normal
 from .pareto import Pareto
+from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from torch.autograd import Variable, variable
@@ -264,6 +265,11 @@ def _kl_pareto_pareto(p, q):
     return result
 
 
+@register_kl(Poisson, Poisson)
+def _kl_poisson_poisson(p, q):
+    return p.rate * (p.rate.log() - q.rate.log()) - (p.rate - q.rate)
+
+
 @register_kl(TransformedDistribution, TransformedDistribution)
 def _kl_transformed_transformed(p, q):
     if p.transforms != q.transforms:
@@ -277,7 +283,11 @@ def _kl_uniform_uniform(p, q):
     result[(q.low > p.low) | (q.high < p.high)] = float('inf')
     return result
 
+
 # Different distributions
+@register_kl(Bernoulli, Poisson)
+def _kl_bernoulli_poisson(p, q):
+    return -p.entropy() - (p.probs * q.rate.log() - q.rate)
 
 
 @register_kl(Beta, Pareto)
@@ -496,6 +506,12 @@ def _kl_pareto_normal(p, q):
     result = t1 - t2 + (t3 + t4) / var_normal - 1
     result[p.alpha <= 2] = float('inf')
     return result
+
+
+@register_kl(Poisson, Bernoulli)
+@register_kl(Poisson, Binomial)
+def _kl_poisson_infinity(p, q):
+    return _infinite_like(p.rate)
 
 
 @register_kl(Uniform, Beta)

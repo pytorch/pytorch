@@ -3022,8 +3022,8 @@ class TestTorch(TestCase):
     def test_pstrf(self):
         def checkPsdCholesky(a, uplo, inplace):
             if inplace:
-                u = torch.Tensor(a.size())
-                piv = torch.IntTensor(a.size(0))
+                u = torch.empty_like(a)
+                piv = a.new(a.size(0)).int()
                 kwargs = {'out': (u, piv)}
             else:
                 kwargs = {}
@@ -3053,6 +3053,8 @@ class TestTorch(TestCase):
             for inplace in (True, False):
                 for uplo in (None, True, False):
                     checkPsdCholesky(a, uplo, inplace)
+                    # TODO: remove once Variable and Tensor are merged
+                    checkPsdCholesky(torch.autograd.Variable(a), uplo, inplace)
 
     def test_numel(self):
         b = torch.ByteTensor(3, 100, 100)
