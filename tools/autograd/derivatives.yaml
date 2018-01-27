@@ -39,9 +39,14 @@
 #     X-th entry
 #
 #   - 'grad_input_mask', a std::array<bool, n> (where n is the number
-#     of differentiable inputs), specifying which inputs actually
-#     require gradient.  (This is only available when multiple
+#     of differentiable inputs, prior to flattening), specifying which inputs
+#     actually require gradient.  (This is only available when multiple
 #     derivatives are being computed by a single formula.)
+#
+#     (NB: this means you can't get an accurate input mask this way for
+#     a TensorList input; you'll only ever know if zero or at least one
+#     tensor from the list requires grad.  If we ever support this,
+#     we'll need some alternate mechanism which is not a std::array)
 #
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in tools/autograd/templates/Functions.cpp
