@@ -2,6 +2,7 @@ import sys
 import math
 import threading
 import copy
+o
 
 import torch
 from torch.autograd import Variable
@@ -89,6 +90,9 @@ class DistributedDataParallel(Module):
         module: module to be parallelized
         device_ids: CUDA devices (default: all devices)
         output_device: device location of output (default: device_ids[0])
+        broadcast_buffers: flag that enables syncing (broadcasting) buffers of
+                           the module at beginning of the forward function.
+                           (default: True)
 
     Example::
 
@@ -96,7 +100,8 @@ class DistributedDataParallel(Module):
         >>> net = torch.nn.DistributedDataParallel(model)
     """
 
-    def __init__(self, module, device_ids=None, output_device=None, dim=0):
+    def __init__(self, module, device_ids=None, output_device=None, dim=0,
+                 broadcast_buffers=True):
         super(DistributedDataParallel, self).__init__()
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
@@ -106,6 +111,7 @@ class DistributedDataParallel(Module):
         self.module = module
         self.device_ids = device_ids
         self.output_device = output_device
+        self.broadcast_buffers = broadcast_buffers
 
         MB = 1024 * 1024
         # used for intra-node param sync and inter-node sync as well
@@ -130,14 +136,34 @@ class DistributedDataParallel(Module):
         else:
             self._module_copies = [self.module]
 
+        # Split parameters into type buckets so that parameter sync (broadcast)
+        # can operates on mixed parameter types. (e.g. mixed half and float)
+        self.param_type_buckets = {}
+        for device_id, module in zip(self.device_ids, self._module_copies):
+            for p in module.parameters():
+                tp = type(p.data)
+                if tp == torch.cuda.HalfTensor and \
+                        dist._backend != dist.dist_backend.NCCL:
+                    raise RuntimeError("DistributedDataParallel currently only "
+                                       "supports half precision parameters "
+                                       "with NCCL backend")
+                if tp not in self.param_type_buckets:
+                    self.param_type_buckets[tp] = \
+                        [[] for _ in range(len(self.device_ids))]
+                # Add the parameter into the type bucket
+                self.param_type_buckets[tp][device_id].append(p)
+
         # Split parameters into buckets that will coalesce reductions
-        # TODO: different types need different buckets
-        t = None
-        for p in self.module.parameters():
-            tp = type(p.data)
-            if t is not None and t is not tp:
-                raise ValueError("DistributedDataParallel requires all parameters' data to be of the same type")
-            t = tp
+        #
+        # Note that the NCCL backend currently only supports a single reduction
+        # bucket, so instead of splitting different Tensor types (half, float,
+        # double, etc) into separate buckets, which will form multipel buckets,
+        # we will split the parameters into reduction buckets regardless of
+        # the data types here.
+        #
+        # For each reductions bucket, at the reduction time, we will further
+        # split the gradients of different types into the each individual type
+        # bucket so that different types of gradients can be reduced.
 
         self.bucket_sizes = []
         self.bucket_map = {}
@@ -219,20 +245,28 @@ class DistributedDataParallel(Module):
     def _sync_params(self):
         if len(self.device_ids) > 1:
             # intra-node parameter sync
-            params = [p.data for p in self.module.parameters()]
-            result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
-            for tensors, module in zip(result[1:], self._module_copies[1:]):
-                for tensor, param in zip(tensors, module.parameters()):
-                    param.data.set_(tensor)
+            for tp in self.param_type_buckets:
+                params = [p.data for p in self.param_type_buckets[tp][0]]
+                result = broadcast_coalesced(params,
+                                             self.device_ids,
+                                             self.broadcast_bucket_size)
+                for tensors, device_id in zip(result[1:], self.device_ids[1:]):
+                    for tensor, param in zip(tensors,
+                            self.param_type_buckets[tp][device_id]):
+                        param.data.set_(tensor)
 
+        # module buffer sync
         buffers = list(self.module._all_buffers())
-        if len(buffers) > 0:
+        if self.broadcast_buffers and len(buffers) > 0:
             # cross-node buffer sync
             self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
 
             if len(self.device_ids) > 1:
                 # intra-node buffer sync
-                result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+                result = broadcast_coalesced(buffers,
+                                             self.device_ids,
+                                             self.broadcast_bucket_size)
+
                 for tensors, module in zip(result[1:], self._module_copies[1:]):
                     for tensor, buf in zip(tensors, module._all_buffers()):
                         buf.set_(tensor)
@@ -339,27 +373,53 @@ class DistributedDataParallel(Module):
         def _process_batch():
             dev_grad_batch, dev_events, job_event = queue.get()
             dev_coalesced = []
-            # Coalesce the tensors on all devices and start a local reduction
-            for dev_id, grad_batch, event, stream in zip(device_ids, dev_grad_batch, dev_events, reduction_streams):
-                with torch.cuda.device(dev_id), torch.cuda.stream(stream):
-                    stream.wait_event(event)
-                    coalesced = _flatten_dense_tensors(grad_batch)
-                    dev_coalesced.append(coalesced)
-            # Wait for all copies to complete before starting the NCCL kernel
-            for stream in reduction_streams:
-                stream.synchronize()
-            nccl.reduce(dev_coalesced, root=0, streams=nccl_streams)
+            # For bucketing gradients with different data types
+            type_buckets = {}
 
-            # From now on we're only going to work on the first device (from device_ids)
-            grad_batch = dev_grad_batch[0]
-            coalesced = dev_coalesced[0]
-            reduce_stream = reduction_streams[0]
-            with torch.cuda.stream(reduce_stream):
-                reduce_stream.wait_stream(nccl_streams[0])
-                coalesced /= dist.get_world_size()
-                dist.all_reduce(coalesced, group=group_id)
-                for grad, reduced in zip(grad_batch, _unflatten_dense_tensors(coalesced, grad_batch)):
-                    grad.copy_(reduced)
+            # Bucket the grad batch based on the data types: float, half etc
+            for dev_id, grad_batch in zip(device_ids, dev_grad_batch):
+                for grad in grad_batch:
+                    tp = type(grad)
+                    if tp not in type_buckets:
+                        type_buckets[tp] = [[] for _ in range(len(device_ids))]
+                    type_buckets[tp][dev_id].append(grad)
+
+            # Reducing for each data type if we have mixed-precision gradients
+            for tp in type_buckets:
+                tp_dev_grad_batch = type_buckets[tp]
+                # Coalesce the tensors on all devices and start a local
+                # reduction
+                for dev_id, tp_grad_batch, event, stream in zip(
+                        device_ids,
+                        tp_dev_grad_batch,
+                        dev_events,
+                        reduction_streams):
+
+                    with torch.cuda.device(dev_id), torch.cuda.stream(stream):
+                        stream.wait_event(event)
+                        coalesced = _flatten_dense_tensors(tp_grad_batch)
+                        dev_coalesced.append(coalesced)
+
+                # Wait for all copies to complete before starting the
+                # NCCL kernel
+                for stream in reduction_streams:
+                    stream.synchronize()
+                nccl.reduce(dev_coalesced, root=0, streams=nccl_streams)
+
+                # From now on we're only going to work on the
+                # first device (from device_ids)
+                tp_grad_batch = tp_dev_grad_batch[0]
+                coalesced = dev_coalesced[0]
+                reduce_stream = reduction_streams[0]
+                with torch.cuda.stream(reduce_stream):
+                    reduce_stream.wait_stream(nccl_streams[0])
+                    coalesced /= dist.get_world_size()
+                    dist.all_reduce(coalesced, group=group_id)
+                    for tp_grad, reduced in zip(
+                            tp_grad_batch,
+                            _unflatten_dense_tensors(coalesced, tp_grad_batch)):
+                        tp_grad.copy_(reduced)
+
             job_event.set()
 
         with torch.cuda.device(device_ids[0]):
