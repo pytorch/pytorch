@@ -1,6 +1,10 @@
+#include "ATen/Config.h"
 #include "ATen/Check.h"
 
 #include "ATen/ATen.h"
+
+#include <ostream>
+#include <sstream>
 
 namespace at {
 
