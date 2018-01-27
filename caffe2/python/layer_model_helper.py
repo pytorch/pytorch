@@ -74,6 +74,10 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._loss = None
         self._output_schema = None
 
+        # breakdown map; breakdown features are categorical (like dense) but not
+        # necessarily used to represent data for training
+        self._breakdown_map = None
+
         # Connect Schema to self.net. That particular instance of schmea will be
         # use for generation of the Layers accross the network and would be used
         # for connection with Readers.
@@ -493,3 +497,16 @@ class LayerModelHelper(model_helper.ModelHelper):
     # An optimizer which allows us to do NO optimization
     def NoOptim(self, *args, **kwargs):
         pass
+
+    @property
+    def breakdown_map(self):
+        return self._breakdown_map
+
+    @breakdown_map.setter
+    def breakdown_map(self, breakdown_map):
+        # TODO(xlwang): provide more rich feature information in breakdown_map;
+        # and change the assertion accordingly
+        assert isinstance(breakdown_map, dict)
+        assert all(isinstance(k, six.string_types) for k in breakdown_map)
+        assert sorted(list(breakdown_map.values())) == range(len(breakdown_map))
+        self._breakdown_map = breakdown_map
