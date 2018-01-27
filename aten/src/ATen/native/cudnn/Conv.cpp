@@ -396,10 +396,10 @@ cudnnStatus_t getWorkspaceSize(
 {
     return cudnnGetConvolutionForwardWorkspaceSize(
         args.handle,
-        args.idesc.desc,
-        args.wdesc.desc,
-        args.cdesc.desc,
-        args.odesc.desc,
+        args.idesc.desc(),
+        args.wdesc.desc(),
+        args.cdesc.desc(),
+        args.odesc.desc(),
         algo,
         sz
     );
@@ -410,10 +410,10 @@ cudnnStatus_t getWorkspaceSize(
 {
     return cudnnGetConvolutionBackwardDataWorkspaceSize(
         args.handle,
-        args.wdesc.desc,
-        args.odesc.desc,
-        args.cdesc.desc,
-        args.idesc.desc,
+        args.wdesc.desc(),
+        args.odesc.desc(),
+        args.cdesc.desc(),
+        args.idesc.desc(),
         algo,
         sz);
 }
@@ -423,10 +423,10 @@ cudnnStatus_t getWorkspaceSize(
 {
     return cudnnGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
-        args.idesc.desc,
-        args.odesc.desc,
-        args.cdesc.desc,
-        args.wdesc.desc,
+        args.idesc.desc(),
+        args.odesc.desc(),
+        args.cdesc.desc(),
+        args.wdesc.desc(),
         algo,
         sz);
 }
@@ -502,10 +502,10 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     Workspace ws(max_ws_size);
     CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
         args.handle,
-        args.idesc.desc, args.input.data_ptr(),
-        args.wdesc.desc, args.weight.data_ptr(),
-        args.cdesc.desc,
-        args.odesc.desc, args.output.data_ptr(),
+        args.idesc.desc(), args.input.data_ptr(),
+        args.wdesc.desc(), args.weight.data_ptr(),
+        args.cdesc.desc(),
+        args.odesc.desc(), args.output.data_ptr(),
         num_algos,
         &perf_count,
         perf_results.get(),
@@ -521,10 +521,10 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     cudnnConvolutionFwdPreference_t pref = CUDNN_CONVOLUTION_FWD_PREFER_FASTEST;
     CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
         args.handle,
-        args.idesc.desc,
-        args.wdesc.desc,
-        args.cdesc.desc,
-        args.odesc.desc,
+        args.idesc.desc(),
+        args.wdesc.desc(),
+        args.cdesc.desc(),
+        args.odesc.desc(),
         pref,
         0,
         algo));
@@ -536,10 +536,10 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
   {
     CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
         args.handle,
-        args.idesc.desc,
-        args.wdesc.desc,
-        args.cdesc.desc,
-        args.odesc.desc,
+        args.idesc.desc(),
+        args.wdesc.desc(),
+        args.cdesc.desc(),
+        args.odesc.desc(),
         algo,
         workspaceSize));
   }
@@ -571,10 +571,10 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
     Workspace ws(max_ws_size);
     CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
         args.handle,
-        args.wdesc.desc, args.weight.data_ptr(),
-        args.odesc.desc, args.output.data_ptr(),
-        args.cdesc.desc,
-        args.idesc.desc, args.input.data_ptr(),
+        args.wdesc.desc(), args.weight.data_ptr(),
+        args.odesc.desc(), args.output.data_ptr(),
+        args.cdesc.desc(),
+        args.idesc.desc(), args.input.data_ptr(),
         num_algos,
         &perf_count,
         perf_results.get(),
@@ -586,10 +586,10 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
   static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
     CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
         args.handle,
-        args.wdesc.desc,
-        args.odesc.desc,
-        args.cdesc.desc,
-        args.idesc.desc,
+        args.wdesc.desc(),
+        args.odesc.desc(),
+        args.cdesc.desc(),
+        args.idesc.desc(),
         CUDNN_CONVOLUTION_BWD_DATA_PREFER_FASTEST,
         0,
         algo));
@@ -601,10 +601,10 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
   {
     CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
         args.handle,
-        args.wdesc.desc,
-        args.odesc.desc,
-        args.cdesc.desc,
-        args.idesc.desc,
+        args.wdesc.desc(),
+        args.odesc.desc(),
+        args.cdesc.desc(),
+        args.idesc.desc(),
         algo,
         workspaceSize));
   }
@@ -641,10 +641,10 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 
     CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
         args.handle,
-        args.idesc.desc, args.input.data_ptr(),
-        args.odesc.desc, args.output.data_ptr(),
-        args.cdesc.desc,
-        args.wdesc.desc, args.weight.data_ptr(),
+        args.idesc.desc(), args.input.data_ptr(),
+        args.odesc.desc(), args.output.data_ptr(),
+        args.cdesc.desc(),
+        args.wdesc.desc(), args.weight.data_ptr(),
         num_algos,
         &perf_count,
         perf_results.get(),
@@ -656,10 +656,10 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
   static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
     CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
         args.handle,
-        args.idesc.desc,
-        args.odesc.desc,
-        args.cdesc.desc,
-        args.wdesc.desc,
+        args.idesc.desc(),
+        args.odesc.desc(),
+        args.cdesc.desc(),
+        args.wdesc.desc(),
         CUDNN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST,
         0,
         algo)
@@ -670,10 +670,10 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
   {
     CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
-        args.idesc.desc,
-        args.odesc.desc,
-        args.cdesc.desc,
-        args.wdesc.desc,
+        args.idesc.desc(),
+        args.odesc.desc(),
+        args.cdesc.desc(),
+        args.wdesc.desc(),
         algo,
         workspaceSize));
   }
@@ -767,8 +767,8 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
   auto dataType = getCudnnDataType(*bias);
   Constant one(dataType, 1);
 
-  CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc, bias->data_ptr(),
-                                     &one, odesc.desc, output->data_ptr()));
+  CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
+                                     &one, odesc.desc(), output->data_ptr()));
 }
 
 // The general strategy:
@@ -841,10 +841,10 @@ void raw_cudnn_convolution_forward_out(
 
   CUDNN_CHECK(cudnnConvolutionForward(
     args.handle,
-    &one, args.idesc.desc, input.data_ptr(),
-    args.wdesc.desc, weight.data_ptr(),
-    args.cdesc.desc, fwdAlg, workspace.data, workspace.size,
-    &zero, args.odesc.desc, output.data_ptr()));
+    &one, args.idesc.desc(), input.data_ptr(),
+    args.wdesc.desc(), weight.data_ptr(),
+    args.cdesc.desc(), fwdAlg, workspace.data, workspace.size,
+    &zero, args.odesc.desc(), output.data_ptr()));
 }
 
 Tensor cudnn_convolution_forward(
@@ -969,10 +969,10 @@ void raw_cudnn_convolution_backward_input_out(
 
   CUDNN_CHECK(cudnnConvolutionBackwardData(
       args.handle,
-      &one, args.wdesc.desc, weight.data_ptr(),
-      args.odesc.desc, grad_output.data_ptr(),
-      args.cdesc.desc, bwdDataAlg, workspace.data, workspace.size,
-      &zero, args.idesc.desc, grad_input.data_ptr()));
+      &one, args.wdesc.desc(), weight.data_ptr(),
+      args.odesc.desc(), grad_output.data_ptr(),
+      args.cdesc.desc(), bwdDataAlg, workspace.data, workspace.size,
+      &zero, args.idesc.desc(), grad_input.data_ptr()));
 }
 
 // Backward and transpose are algorithmically equivalent, but they
@@ -1113,10 +1113,10 @@ void raw_cudnn_convolution_backward_weight_out(
 
   CUDNN_CHECK(cudnnConvolutionBackwardFilter(
       args.handle,
-      &one, args.idesc.desc, input.data_ptr(),
-      args.odesc.desc, grad_output.data_ptr(),
-      args.cdesc.desc, bwdFilterAlg, workspace.data, workspace.size,
-      &zero, args.wdesc.desc, grad_weight.data_ptr()));
+      &one, args.idesc.desc(), input.data_ptr(),
+      args.odesc.desc(), grad_output.data_ptr(),
+      args.cdesc.desc(), bwdFilterAlg, workspace.data, workspace.size,
+      &zero, args.wdesc.desc(), grad_weight.data_ptr()));
 }
 
 Tensor cudnn_convolution_backward_weight(
@@ -1212,8 +1212,8 @@ Tensor cudnn_convolution_backward_bias(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  CUDNN_CHECK(cudnnConvolutionBackwardBias(handle, &one, odesc.desc, grad_output->data_ptr(),
-                                                   &zero, bdesc.desc, grad_bias->data_ptr()));
+  CUDNN_CHECK(cudnnConvolutionBackwardBias(handle, &one, odesc.desc(), grad_output->data_ptr(),
+                                                   &zero, bdesc.desc(), grad_bias->data_ptr()));
   return *grad_bias;
 }
 

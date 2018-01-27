@@ -62,12 +62,12 @@ std::string cudnnTypeToString(cudnnDataType_t dtype) {
 }
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
-  out << "TensorDescriptor " << static_cast<void*>(d.desc) << "\n";
+  out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
   int nbDims;
   int dimA[CUDNN_DIM_MAX];
   int strideA[CUDNN_DIM_MAX];
   cudnnDataType_t dtype;
-  cudnnGetTensorNdDescriptor(d.desc, CUDNN_DIM_MAX, &dtype, &nbDims, dimA, strideA);
+  cudnnGetTensorNdDescriptor(d.desc(), CUDNN_DIM_MAX, &dtype, &nbDims, dimA, strideA);
   out << "    type = " << cudnnTypeToString(dtype) << "\n";
   out << "    nbDims = " << nbDims << "\n";
   // Read out only nbDims of the arrays!

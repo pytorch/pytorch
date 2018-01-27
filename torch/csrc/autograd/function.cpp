@@ -12,44 +12,6 @@ namespace torch { namespace autograd {
 
 thread_local uint64_t Function::function_counter = 0;
 
-template<typename T>
-auto makeFlags(const T &inputs) -> FunctionFlags {
-  int num_inputs = inputs.size();
-  FunctionFlags f;
-  f.is_executable = false;
-  f.next_functions.resize(num_inputs);
-  if (!GradMode::is_enabled()) {
-    // TODO: avoid allocating next_functions entirely if grad_mode is disabled
-    return f;
-  }
-  int i = 0;
-  for (auto it = inputs.begin(); it != inputs.end(); ++it, ++i) {
-    auto& var = *it;
-    if (var.defined()) {
-      f.is_executable |= var.requires_grad();
-      if (var.grad_fn()) {
-        f.next_functions[i] = std::make_pair<>(var.grad_fn(), var.output_nr());
-      } else if (var.requires_grad()) {
-        f.next_functions[i] = std::make_pair<>(var.grad_accumulator(), 0);
-      }
-    }
-  }
-  return f;
-}
-
-auto Function::flags(const variable_list& inputs) -> FunctionFlags {
-  return makeFlags(inputs);
-}
-
-auto Function::flags(const std::initializer_list<Variable>& inputs) -> FunctionFlags {
-  return makeFlags(inputs);
-}
-
-auto Function::flags(at::TensorList inputs) -> FunctionFlags {
-  // TODO: Eliminate the intermediate vector allocation
-  return makeFlags(variable_list(inputs.begin(), inputs.end()));
-}
-
 auto Function::name() -> std::string {
   return std::string(typeid(*this).name());
 }

@@ -48,6 +48,7 @@ private:
   at::Tensor & unpack(const Tensor & t, const char * name, int pos) const;
   at::SparseTensor unpack(SparseTensor t, const char * name, int pos) const;
   at::Tensor & unpack_long(const Tensor & t, const char * name, int pos) const;
+  at::Tensor & unpack_int(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_byte(const Tensor & t, const char * name, int pos) const;
   at::Tensor & unpack_any(const Tensor & t, const char * name, int pos) const;
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos) const;
