@@ -59,22 +59,3 @@ class ExponentialFamily(Distribution):
         for np, g in zip(nparams, gradients):
             result -= np.data * g.data
         return result
-
-    def kl_divergence(self, dist):
-        """
-        Method to compute the KL-divergence between self and dist :math:`KL(self || dist)`
-        """
-        if not type(self) == type(dist):
-            raise ValueError("The cross KL-divergence between different exponential families cannot \
-                                be computed")
-        self_nparams = [Variable(p, requires_grad=True) for p in self.natural_params]
-        dist_nparams = dist.natural_params
-        lg_normal = self.log_normalizer(*self_nparams)
-        gradients = torch.autograd.grad(lg_normal.sum(), self_nparams, create_graph=True)
-        result = dist.log_normalizer(*dist_nparams) - lg_normal.clone().data
-        for snp, dnp, g in zip(self_nparams, dist_nparams, gradients):
-            term = (dnp - snp.data) * g.data
-            for _ in range(len(dist.event_shape)):
-                term = term.sum(-1)
-            result -= term
-        return result

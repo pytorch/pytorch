@@ -36,6 +36,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy,
                                  Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, Normal, OneHotCategorical, Multinomial,
                                  Pareto, Poisson, StudentT, Uniform, kl_divergence)
+from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.utils import _finfo, probs_to_logits
@@ -1863,7 +1864,7 @@ class TestKL(TestCase):
             if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
                 print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
                 actual = kl_divergence(p, q)
-                expected = ExponentialFamily.kl_divergence(p, q)
+                expected = _kl_expfamily_expfamily(p, q)
                 if isinstance(actual, Variable) and not isinstance(expected, Variable):
                     actual = actual.data
                 self.assertEqual(actual, expected, message='\n'.join([
