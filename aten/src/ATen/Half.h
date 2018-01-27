@@ -61,7 +61,7 @@ template<> bool overflows<Half, double>(double f);
 template<> bool overflows<Half, int64_t>(int64_t f);
 
 template<typename To, typename From>
-static inline To HalfFix(From h) {
+To HalfFix(From h) {
   return To { h.x };
 }
 } // namespace at
