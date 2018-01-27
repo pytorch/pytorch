@@ -1864,8 +1864,8 @@ class TestKL(TestCase):
                 print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
                 actual = kl_divergence(p, q)
                 expected = ExponentialFamily.kl_divergence(p, q)
-                if isinstance(expected, Variable) and not isinstance(actual, Variable):
-                    expected = expected.data
+                if isinstance(actual, Variable) and not isinstance(expected, Variable):
+                    actual = actual.data
                 self.assertEqual(actual, expected, message='\n'.join([
                     'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
                     'Expected (using Bregman Divergence) {}'.format(expected),
@@ -1930,8 +1930,8 @@ class TestKL(TestCase):
                     expected = ExponentialFamily.entropy(dist)
                 except NotImplementedError:
                     continue
-                if isinstance(expected, Variable) and not isinstance(actual, Variable):
-                    expected = expected.data
+                if isinstance(actual, Variable) and not isinstance(expected, Variable):
+                    actual = actual.data
                 self.assertEqual(actual, expected, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (Bregman Divergence) {}'.format(expected),

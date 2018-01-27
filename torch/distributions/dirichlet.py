@@ -83,9 +83,9 @@ class Dirichlet(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = Variable(self.concentration.data, requires_grad=True)
+        V1 = self.concentration.data
         return (V1, )
 
+    @property
     def log_normalizer(self):
-        x, = self.natural_params
-        return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))
+        return (lambda x: x.lgamma().sum(-1) - torch.lgamma(x.sum(-1)))

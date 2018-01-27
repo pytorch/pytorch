@@ -1,7 +1,7 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable, variable
+from torch.autograd import variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
@@ -70,10 +70,10 @@ class Beta(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = Variable(self.concentration1.data, requires_grad=True)
-        V2 = Variable(self.concentration0.data, requires_grad=True)
+        V1 = self.concentration1.data
+        V2 = self.concentration0.data
         return (V1, V2)
 
+    @property
     def log_normalizer(self):
-        x, y = self.natural_params
-        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
+        return (lambda x, y: torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y))

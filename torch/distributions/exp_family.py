@@ -34,8 +34,8 @@ class ExponentialFamily(Distribution):
 
     def log_normalizer(self):
         """
-        Abstract method for log normalizer function. Returns a Variable of shape
-        `batch_shape` based on the distribution
+        Abstract method for log normalizer function. Returns a callable lambda to compute
+        the log normalizer based on the distribution and input
         """
         raise NotImplementedError
 
@@ -52,12 +52,12 @@ class ExponentialFamily(Distribution):
         Method to compute the entropy using Bregman divergence of the log normalizer
         """
         result = self.mean_carrier_measure
-        nparams = [p for p in self.natural_params if p.requires_grad]
-        lg_normal = self.log_normalizer()
+        nparams = [Variable(p, requires_grad=True) for p in self.natural_params]
+        lg_normal = self.log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
-        result += lg_normal.clone()
+        result += lg_normal.clone().data
         for np, g in zip(nparams, gradients):
-            result -= np * g
+            result -= np.data * g.data
         return result
 
     def kl_divergence(self, dist):
@@ -67,13 +67,13 @@ class ExponentialFamily(Distribution):
         if not type(self) == type(dist):
             raise ValueError("The cross KL-divergence between different exponential families cannot \
                                 be computed")
-        self_nparams = [p for p in self.natural_params if p.requires_grad]
+        self_nparams = [Variable(p, requires_grad=True) for p in self.natural_params]
         dist_nparams = dist.natural_params
-        lg_normal = self.log_normalizer()
+        lg_normal = self.log_normalizer(*self_nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), self_nparams, create_graph=True)
-        result = dist.log_normalizer() - lg_normal.clone()
+        result = dist.log_normalizer(*dist_nparams) - lg_normal.clone().data
         for snp, dnp, g in zip(self_nparams, dist_nparams, gradients):
-            term = (dnp - snp) * g
+            term = (dnp - snp.data) * g.data
             for _ in range(len(dist.event_shape)):
                 term = term.sum(-1)
             result -= term

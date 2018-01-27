@@ -2,7 +2,6 @@ import math
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, lazy_property
@@ -59,10 +58,10 @@ class Normal(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = Variable((self.loc / self.scale.pow(2)).data, requires_grad=True)
-        V2 = Variable(-0.5 * self.scale.pow(2).reciprocal().data, requires_grad=True)
+        V1 = (self.loc / self.scale.pow(2)).data
+        V2 = -0.5 * self.scale.pow(2).reciprocal().data
         return (V1, V2)
 
+    @property
     def log_normalizer(self):
-        x, y = self.natural_params
-        return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)
+        return (lambda x, y: -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y))

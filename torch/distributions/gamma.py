@@ -63,11 +63,10 @@ class Gamma(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = Variable(self.concentration.data - 1, requires_grad=True)
-        V2 = Variable(-self.rate.data, requires_grad=True)
+        V1 = self.concentration.data - 1
+        V2 = -self.rate.data
         return (V1, V2)
 
+    @property
     def log_normalizer(self):
-        x, y = self.natural_params
-        t1 = x + 1
-        return torch.lgamma(t1) + t1 * torch.log(-y.reciprocal())
+        return (lambda x, y: torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal()))
