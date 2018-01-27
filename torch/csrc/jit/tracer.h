@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
 
@@ -60,10 +61,14 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 
 
 // Should a function which takes 'vars' as inputs be traced?
-// It sufficies for ONE variable to be tracing: any "untraced" variables
+// It suffices for ONE variable to be tracing: any "untraced" variables
 // are treated as constants.
 //
-// TODO: This code lives in the hotpath; make sure it is fast
+// NB: This code lives in the hotpath; make sure it is fast
+//
+// NB: Variable overload is not variadic because we don't actually
+// need it (in most cases if we have a variable_list it is already
+// flattened).
 inline bool isTracingVar(const Variable& var) {
   if (!var.defined() || !var.tracing_state()) return false;
   return std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive);
@@ -77,28 +82,19 @@ inline bool isTracingVar(at::ArrayRef<Variable> vars) {
   return false;
 }
 
-// NB: Don't forget to forward declare your template calls: they are going to
-// recursively call one another!
-template<typename... Args> inline bool isTracing();
-template<typename... Args> inline bool isTracing(const at::Tensor& x, Args... args);
-template<typename... Args> inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args);
-
-template<typename... Args>
-inline bool isTracing() {
-  return false;
-}
-
-template<typename... Args>
-inline bool isTracing(const at::Tensor& x, Args... args) {
-  return isTracingVar(x) || isTracing(args...);
-}
-
-template<typename... Args>
-inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args) {
-  for (const auto & x : xs) {
-    if (isTracingVar(x)) return true;
+struct IsTracing : IterArgs<IsTracing> {
+  bool out = false;
+  using IterArgs<IsTracing>::operator();
+  void operator()(const at::Tensor& var) {
+    out = out || isTracingVar(var);
   }
-  return isTracing(args...);
+  bool short_circuit() { return out; }
+};
+
+// To be called with Tensor arguments from generated code
+template<typename... Args>
+inline bool isTracing(Args&&... args) {
+  return IsTracing().apply(std::forward<Args>(args)...).out;
 }
 
 // Retrieve the tracing state which a function applied with 'vars' should

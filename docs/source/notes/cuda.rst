@@ -92,6 +92,8 @@ ensure proper synchronization.
 
 .. _CUDA stream: http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
 
+.. _cuda-memory-management:
+
 Memory management
 -----------------
 
@@ -102,9 +104,10 @@ unused memory managed by the allocator will still show as if used in
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_cached` and
 :meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` can release all unused cached
-memory from PyTorch so that those can be used by other GPU applications.
-
+allocator. Calling :meth:`~torch.cuda.empty_cache` can release all **unused**
+cached memory from PyTorch so that those can be used by other GPU applications.
+However, the occupied GPU memory by tensors will not be freed so it can not
+increase the amount of GPU memory available for PyTorch.
 
 Best practices
 --------------

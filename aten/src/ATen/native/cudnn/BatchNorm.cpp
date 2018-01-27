@@ -109,9 +109,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   if (training) {
     CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
-      idesc.desc, input->data_ptr(),
-      idesc.desc, output->data_ptr(),
-      wdesc.desc,
+      idesc.desc(), input->data_ptr(),
+      idesc.desc(), output->data_ptr(),
+      wdesc.desc(),
       weight->data_ptr(),
       bias->data_ptr(),
       exponential_average_factor,
@@ -123,9 +123,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   } else {
     CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
-      idesc.desc, input->data_ptr(),
-      idesc.desc, output->data_ptr(),
-      wdesc.desc,
+      idesc.desc(), input->data_ptr(),
+      idesc.desc(), output->data_ptr(),
+      wdesc.desc(),
       weight->data_ptr(),
       bias->data_ptr(),
       running_mean->data_ptr(),
@@ -202,10 +202,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 
   CUDNN_CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
-    idesc.desc, input->data_ptr(),
-    idesc.desc, grad_output->data_ptr(),
-    idesc.desc, grad_input_t.data_ptr(),
-    wdesc.desc, weight->data_ptr(),
+    idesc.desc(), input->data_ptr(),
+    idesc.desc(), grad_output->data_ptr(),
+    idesc.desc(), grad_input_t.data_ptr(),
+    wdesc.desc(), weight->data_ptr(),
     grad_weight_t.data_ptr(),
     grad_bias_t.data_ptr(),
     epsilon,

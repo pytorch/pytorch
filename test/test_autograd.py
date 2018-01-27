@@ -9,13 +9,13 @@ from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
 from operator import mul
-from functools import reduce
+from functools import reduce, wraps
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack
-from torch.autograd import Variable, Function
+from torch.autograd import Variable, Function, variable
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
 
@@ -36,6 +36,18 @@ class NoArgsClass(object):
     next = __next__  # Python 2 compatibility
 
 NO_ARGS = NoArgsClass()
+
+
+def skipIfNoScalars(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception:
+            if not torch._C._with_scalars():
+                raise unittest.SkipTest('Compiled without Scalars')
+            raise
+    return wrapper
 
 
 @contextlib.contextmanager
@@ -2296,6 +2308,7 @@ method_tests = [
     ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
     ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
+    ('index_fill', (S, S), (0, index_variable(2, S), variable(2)), 'variable_dim', [0], [skipIfNoScalars]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
@@ -2306,6 +2319,8 @@ method_tests = [
      'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
+    ('fill_', (S, S, S), (1,), 'number'),
+    ('fill_', (S, S, S), (variable(1),), 'variable', NO_ARGS, [skipIfNoScalars]),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('ne_', (S, S, S), ((S, S, S),)),
@@ -2353,6 +2368,8 @@ method_tests = [
     ('masked_select', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),),
      'broadcast_all'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)),
+     'variable', NO_ARGS, [skipIfNoScalars]),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), 10), 'broadcast_rhs'),
     ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
@@ -2364,6 +2381,7 @@ method_tests = [
     ('sort', (S, M, S), (1,), 'dim'),
     ('sort', (S, M, S), (1, True), 'dim_desc'),
     ('topk', (S, M, S), (3,)),
+    ('topk', (), (1,), 'scalar'),
     ('topk', (S, M, S), (3, 1), 'dim'),
     ('topk', (S, M, S), (3, 1, True), 'dim_desc'),
     ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort'),
@@ -2399,8 +2417,8 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
         elif isinstance(arg, tuple) and len(arg) == 0:
-            # FixMe: maybe use 'torch.randn()' or similar when we have scalar factories
-            var = Variable(torch.randn(1).double(), requires_grad=requires_grad)._scalar_sum()
+            var = variable(1).double().normal_()
+            var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):
             return Variable(maybe_non_contig(torch.randn(*arg).double()), requires_grad=requires_grad)
@@ -2460,8 +2478,6 @@ def exclude_tensor_method(name, test_name):
         'test_slice',
         'test_where',
         'test_where_broadcast_all',
-        'test__scalar_sum_scalar_arg',
-        'test__scalar_sum_tensor_arg',
     }
     # there are no out-of-place tensor equivalents for these
     exclude_outplace_tensor_method = {
@@ -2567,7 +2583,9 @@ for test in method_tests:
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                if not exclude_tensor_method(name, test_name):
+                has_scalar = (self_variable.dim() == 0 or
+                              any(x.dim() == 0 for x in args_variable if isinstance(x, Variable)))
+                if not exclude_tensor_method(name, test_name) and not has_scalar:  # scalar API doesn't work on tensors
                     output_tensor = getattr(self_tensor, name)(*args_tensor)
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))
