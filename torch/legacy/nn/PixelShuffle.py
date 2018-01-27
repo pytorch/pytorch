@@ -2,25 +2,25 @@ import torch
 from .Module import Module
 from torch.legacy.nn.View import View
 import numpy
-#import math
 
 class PixelShuffle(Module):
 
+    
     def __init__(self, upscaleFactor):
         super(PixelShuffle, self).__init__()
         self.upscaleFactor = upscaleFactor
         self.upscaleFactorSquared = self.upscaleFactor * self.upscaleFactor
-        self._intermediateShape=None
-        self._outShape=None
-        self._shuffleOut=None
+        self._intermediateShape = None
+        self._outShape = None
+        self._shuffleOut = None
 
     def updateOutput(self, input):
 
-        if hasattr(self, '_intermediateShape')==False:
+        if hasattr(self, '_intermediateShape') == False:
             self._intermediateShape = None
-        if hasattr(self, '_outShape')==False:
+        if hasattr(self, '_outShape') == False:
             self._outShape = None
-        if hasattr(self, '_shuffleOut')==False:
+        if hasattr(self, '_shuffleOut') == False:
             self._shuffleOut = None
 
         if self._intermediateShape is None:
@@ -30,10 +30,10 @@ class PixelShuffle(Module):
         if self._shuffleOut is None:
             self._shuffleOut = input.new()
 
-        batched=False
-        batchSize=1
-        inputStartIdx=0
-        outShapeIdx=0
+        batched = False
+        batchSize = 1
+        inputStartIdx = 0
+        outShapeIdx = 0
 
         if len(input.size()) == 4 :
             batched = True
@@ -64,7 +64,7 @@ class PixelShuffle(Module):
 
         tmp = None
         tmp = self._intermediateShape.type(torch.IntTensor)
-        tmp=torch.Size((tmp[0],tmp[1],tmp[2],tmp[3],tmp[4],tmp[5]))
+        tmp = torch.Size((tmp[0],tmp[1],tmp[2],tmp[3],tmp[4],tmp[5]))
         inputView = input.view(tmp)
 
         self._shuffleOut.resize_(inputView.size(0), inputView.size(1), inputView.size(4),
@@ -80,7 +80,6 @@ class PixelShuffle(Module):
             tmp = torch.Size((tmp[0], tmp[1], tmp[2]))
         self.output = self._shuffleOut.view(tmp)
 
-
         print("the r factor is : ", self.upscaleFactor)
         print("the input is: ", input.size())
         print("input type: ",input.type())
@@ -88,16 +87,12 @@ class PixelShuffle(Module):
         print("output type: ",self.output.type())
         return self.output
 
-
-
-
-
-
+    
     def updateGradInput(self,input, gradOutput):
 
-        if hasattr(self, '_intermediateShape')==False:
+        if hasattr(self, '_intermediateShape') == False:
             self._intermediateShape = None
-        if hasattr(self, '_shuffleIn')==False:
+        if hasattr(self, '_shuffleIn') == False:
             self._shuffleIn = None
 
         if self._intermediateShape is None:
