@@ -42,13 +42,13 @@ half convert(double value) {
   return half {raw};
 }
 
-template <> inline __half HalfFix<__half, Half>(Half h) {
+template <> __half HalfFix<__half, Half>(Half h) {
   __half_raw raw;
   raw.x = h.x;
   return __half{raw};
 }
 
-template <> inline Half HalfFix<Half, __half>(__half h) {
+template <> Half HalfFix<Half, __half>(__half h) {
   __half_raw raw(h);
   return Half{raw.x};
 }
