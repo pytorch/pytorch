@@ -365,6 +365,12 @@ def storage_to_size(obj, *attrs):
         value = getattr(obj, attr)
         setattr(obj, attr, torch.Size(value))
 
+         
+@registry_addon
+def storage_to_FP(obj, attr):
+    value = getattr(obj, attr)
+    setattr(obj, attr, value)
+   
 
 @registry_addon
 def ensure_type(obj, type_map):
@@ -424,6 +430,7 @@ decrement_positive('Sum', 'dimension')
 decrement_positive('Max', 'dimension')
 decrement_positive('Min', 'dimension')
 decrement_positive('Mean', 'dimension')
+storage_to_FP('PixelShuffle', 'upscaleFactor')
 storage_to_size('View', 'size')
 storage_to_size('DepthConcat', 'outputSize')
 storage_to_size('MixtureTable', 'size')
