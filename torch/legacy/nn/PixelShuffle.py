@@ -65,7 +65,9 @@ class PixelShuffle(Module):
         tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]))
         inputView = input.view(tmp)
 
-        self._shuffleOut.resize_(inputView.size(0), inputView.size(1), inputView.size(4), inputView.size(2), inputView.size(5), inputView.size(3))
+        self._shuffleOut.resize_(inputView.size(0), inputView.size(1),
+                                 inputView.size(4), inputView.size(2),
+                                 inputView.size(5), inputView.size(3))
         self._shuffleOut.copy_(inputView.permute(0, 1, 4, 2, 5, 3))
 
         tmp = None
@@ -119,7 +121,9 @@ class PixelShuffle(Module):
         tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]))
         gradOutputView = gradOutput.view(tmp)
 
-        self._shuffleIn.resize_(gradOutputView.size(0), gradOutputView.size(1), gradOutputView.size(3), gradOutputView.size(5), gradOutputView.size(2), gradOutputView.size(4))
+        self._shuffleIn.resize_(gradOutputView.size(0), gradOutputView.size(1),
+                                gradOutputView.size(3), gradOutputView.size(5),
+                                gradOutputView.size(2), gradOutputView.size(4))
         self._shuffleIn.copy_(gradOutputView.permute(0, 1, 3, 5, 2, 4))
 
         self.gradInput = self._shuffleIn.view(input.size())
