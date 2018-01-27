@@ -86,6 +86,5 @@ class Bernoulli(ExponentialFamily):
         V1 = torch.log(self.probs.data / (1 - self.probs.data))
         return (V1, )
 
-    @property
-    def log_normalizer(self):
-        return (lambda x: torch.log(1 + torch.exp(x)))
+    def log_normalizer(self, x):
+        return torch.log(1 + torch.exp(x))

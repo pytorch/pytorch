@@ -62,6 +62,5 @@ class Normal(ExponentialFamily):
         V2 = -0.5 * self.scale.pow(2).reciprocal().data
         return (V1, V2)
 
-    @property
-    def log_normalizer(self):
-        return (lambda x, y: -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y))
+    def log_normalizer(self, x, y):
+        return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)

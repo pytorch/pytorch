@@ -86,6 +86,5 @@ class Dirichlet(ExponentialFamily):
         V1 = self.concentration.data
         return (V1, )
 
-    @property
-    def log_normalizer(self):
-        return (lambda x: x.lgamma().sum(-1) - torch.lgamma(x.sum(-1)))
+    def log_normalizer(self, x):
+        return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))

@@ -34,8 +34,8 @@ class ExponentialFamily(Distribution):
 
     def log_normalizer(self):
         """
-        Abstract method for log normalizer function. Returns a callable lambda to compute
-        the log normalizer based on the distribution and input
+        Abstract method for log normalizer function. Returns a log normalizer based on
+        the distribution and input
         """
         raise NotImplementedError
 

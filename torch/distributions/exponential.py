@@ -46,6 +46,5 @@ class Exponential(ExponentialFamily):
         V1 = -self.rate.data
         return (V1, )
 
-    @property
-    def log_normalizer(self):
-        return (lambda x: -torch.log(-x))
+    def log_normalizer(self, x):
+        return -torch.log(-x)

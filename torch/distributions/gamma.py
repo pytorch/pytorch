@@ -67,6 +67,6 @@ class Gamma(ExponentialFamily):
         V2 = -self.rate.data
         return (V1, V2)
 
-    @property
-    def log_normalizer(self):
-        return (lambda x, y: torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal()))
+    def log_normalizer(self, x, y):
+        t1 = x + 1
+        return torch.lgamma(t1) + (t1) * torch.log(-y.reciprocal())

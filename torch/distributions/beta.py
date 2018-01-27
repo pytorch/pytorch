@@ -74,6 +74,5 @@ class Beta(ExponentialFamily):
         V2 = self.concentration0.data
         return (V1, V2)
 
-    @property
-    def log_normalizer(self):
-        return (lambda x, y: torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y))
+    def log_normalizer(self, x, y):
+        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
