@@ -166,7 +166,7 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        return (torch.tril(value) == value).min(-1).min(-1)
+        return (torch.tril(value) == value).min(-1)[0].min(-1)[0]
 
 
 class _LowerCholesky(Constraint):
@@ -174,8 +174,11 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
     def check(self, value):
-        diag_mask = torch.eye(value.size(-1))
-        return (torch.tril(value) == value).min(-1).min(-1) & (value * diag_mask > 0).min(-1).min(-1)
+        n = value.size(-1)
+        diag_mask = torch.eye(n, n, out=value.new(n, n))
+        lower_triangular = (torch.tril(value) == value).min(-1)[0].min(-1)[0]
+        positive_diagonal = (value * diag_mask > (diag_mask - 1)).min(-1)[0].min(-1)[0]
+        return lower_triangular & positive_diagonal
 
 
 # Public interface.
