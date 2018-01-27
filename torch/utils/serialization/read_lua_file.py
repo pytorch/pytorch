@@ -365,12 +365,12 @@ def storage_to_size(obj, *attrs):
         value = getattr(obj, attr)
         setattr(obj, attr, torch.Size(value))
 
-         
+
 @registry_addon
 def storage_to_FP(obj, attr):
     value = getattr(obj, attr)
     setattr(obj, attr, value)
-   
+
 
 @registry_addon
 def ensure_type(obj, type_map):
