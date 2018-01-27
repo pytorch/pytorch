@@ -3,8 +3,9 @@ from .Module import Module
 from torch.legacy.nn.View import View
 import numpy
 
-class PixelShuffle(Module):
 
+class PixelShuffle(Module):
+    
     
     def __init__(self, upscaleFactor):
         super(PixelShuffle, self).__init__()
@@ -16,15 +17,15 @@ class PixelShuffle(Module):
 
     def updateOutput(self, input):
 
-        if hasattr(self, '_intermediateShape') == False:
+        if hasattr(self, '_intermediateShape') is False:
             self._intermediateShape = None
-        if hasattr(self, '_outShape') == False:
+        if hasattr(self, '_outShape') is False:
             self._outShape = None
-        if hasattr(self, '_shuffleOut') == False:
+        if hasattr(self, '_shuffleOut') is False:
             self._shuffleOut = None
 
         if self._intermediateShape is None:
-            self._intermediateShape = torch.Tensor(6,0)
+            self._intermediateShape = torch.Tensor(6, 0)
         if self._outShape is None:
             self._outShape = torch.Tensor()
         if self._shuffleOut is None:
@@ -40,13 +41,12 @@ class PixelShuffle(Module):
             batchSize = input.size(0)
             inputStartIdx = 1
             outShapeIdx = 1
-            self._outShape = torch.Tensor([0,0, 0, 0])
+            self._outShape = torch.Tensor([0, 0, 0, 0])
             self._outShape[0] = batchSize
 
         else:
             self._outShape = torch.Tensor([0, 0, 0])
-
-        #channels = math.ceil(input.size(inputStartIdx) / self.upscaleFactorSquared) # do we neec ceil???
+        
         channels = input.size(inputStartIdx) / self.upscaleFactorSquared
         inHeight = input.size(inputStartIdx + 1)
         inWidth = input.size(inputStartIdx + 2)
@@ -64,7 +64,7 @@ class PixelShuffle(Module):
 
         tmp = None
         tmp = self._intermediateShape.type(torch.IntTensor)
-        tmp = torch.Size((tmp[0],tmp[1],tmp[2],tmp[3],tmp[4],tmp[5]))
+        tmp = torch.Size((tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5]))
         inputView = input.view(tmp)
 
         self._shuffleOut.resize_(inputView.size(0), inputView.size(1), inputView.size(4),
@@ -82,21 +82,20 @@ class PixelShuffle(Module):
 
         print("the r factor is : ", self.upscaleFactor)
         print("the input is: ", input.size())
-        print("input type: ",input.type())
+        print("input type: ", input.type())
         print("the output is: ", self.output.size())
-        print("output type: ",self.output.type())
+        print("output type: ", self.output.type())
         return self.output
-
     
     def updateGradInput(self,input, gradOutput):
 
-        if hasattr(self, '_intermediateShape') == False:
+        if hasattr(self, '_intermediateShape') is False:
             self._intermediateShape = None
-        if hasattr(self, '_shuffleIn') == False:
+        if hasattr(self, '_shuffleIn') is False:
             self._shuffleIn = None
 
         if self._intermediateShape is None:
-            self._intermediateShape = torch.Tensor(6,0)
+            self._intermediateShape = torch.Tensor(6, 0)
         if self._shuffleIn is None:
             self._shuffleIn = input.new()
 
@@ -131,9 +130,7 @@ class PixelShuffle(Module):
         self.gradInput = self._shuffleIn.view(input.size())
 
         return self.gradInput
-
-
+    
     def clearState(self):
         clear(self, '_intermediateShape', '_outShape', '_shuffleIn', '_shuffleOut')
         return super(PixelShuffle, self).clearState()
-
