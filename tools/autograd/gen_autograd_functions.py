@@ -23,12 +23,15 @@ struct ${op} : public ${superclass} {
     ${release_variables}
   }
   ${saved_variables}
+  ${saved_list_sizes}
 };
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
 variable_list ${op}::apply(const variable_list& grads) {
-  variable_list grad_inputs{${num_inputs}};
+  IndexRangeGenerator gen;
+  ${compute_index_ranges}
+  variable_list grad_inputs(gen.size());
   ${body}
   return grad_inputs;
 }
@@ -39,28 +42,24 @@ static PyTypeObject ${op}Class;
 addClass<${op}>(${op}Class, "${op}");
 """)
 
-DERIVATIVE_TENSOR = CodeTemplate("""\
-if (should_compute_output(${idx})) {
-  grad_inputs[${idx}] = ${derivative};
-}
-""")
-
 GRAD_INPUT_MASK = CodeTemplate("""\
   auto grad_input_mask = std::array<bool, ${n}>{
     ${masks}
   };\
 """)
 
-DERIVATIVE_MULTI = CodeTemplate("""\
-if (should_compute_output({ ${idxs} })) {
-${grad_input_mask}
-  std::tie(${grad_inputs}) = ${derivative};
+DERIVATIVE_SINGLE = CodeTemplate("""\
+if (should_compute_output({ ${name}_ix })) {
+  auto grad_result = ${derivative};
+  copy_range(grad_inputs, ${name}_ix, grad_result);
 }
 """)
 
-DERIVATIVE_TENSORLIST = CodeTemplate("""\
-if (should_compute_any_outputs()) {
-  grad_inputs = ${derivative};
+DERIVATIVE_MULTI = CodeTemplate("""\
+if (should_compute_output({ ${idx_ranges} })) {
+  ${grad_input_mask}
+  auto grad_result = ${derivative};
+  ${copy_ranges}
 }
 """)
 
@@ -106,7 +105,17 @@ def process_function(func):
     env = {}
     saved_variables = []
     release_variables = []
+    saved_list_sizes = []
     unpack = []
+
+    env['compute_index_ranges'] = []
+    for arg in func['args_with_gradients']:
+        if arg['type'] == 'TensorList':
+            size = '{}_size_'.format(arg['name'])
+            saved_list_sizes.append('size_t {}_size_;'.format(arg['name']))
+        else:
+            size = '1'
+        env['compute_index_ranges'].append('auto {}_ix = gen.range({});'.format(arg['name'], size))
 
     def save_arg(arg, is_output):
         name = arg['name']
@@ -126,6 +135,7 @@ def process_function(func):
         save_arg(arg, is_output=True)
     env['saved_variables'] = saved_variables
     env['release_variables'] = release_variables
+    env['saved_list_sizes'] = saved_list_sizes
 
     body = []
 
@@ -134,20 +144,22 @@ def process_function(func):
 
     def emit_derivative(derivative):
         formula = derivative['formula']
-        idxs = derivative['output_indices']
-        if idxs == ['*']:
-            return DERIVATIVE_TENSORLIST.substitute(derivative=formula)
-        elif len(idxs) == 1:
-            return DERIVATIVE_TENSOR.substitute(idx=idxs[0], derivative=formula)
+        var_names = derivative['var_names']
+        if len(var_names) == 1:
+            return DERIVATIVE_SINGLE.substitute(name=var_names[0], derivative=formula)
         else:
             if 'grad_input_mask' in formula:
-                masks = ['should_compute_output({}),'.format(i) for i in idxs]
-                grad_input_mask = GRAD_INPUT_MASK.substitute(masks=masks, n=len(idxs))
+                masks = ['should_compute_output({{ {}_ix }}),'.format(n) for n in var_names]
+                grad_input_mask = GRAD_INPUT_MASK.substitute(masks=masks, n=len(var_names))
             else:
                 grad_input_mask = ''
-            grad_inputs = ', '.join(['grad_inputs[{}]'.format(i) for i in idxs])
+            idx_ranges = ', '.join("{}_ix".format(n) for n in var_names)
+            copy_ranges = []
+            for i, n in enumerate(var_names):
+                copy_ranges.append("copy_range(grad_inputs, {}_ix, std::get<{}>(grad_result));".format(n, i))
             return DERIVATIVE_MULTI.substitute(
-                idxs=idxs, derivative=formula, grad_inputs=grad_inputs,
+                idx_ranges=idx_ranges, copy_ranges=copy_ranges,
+                derivative=formula,
                 grad_input_mask=grad_input_mask)
 
     body.extend(unpack)
