@@ -126,6 +126,11 @@ Tensor & VariableType::unpack_long(const Tensor & t, const char * name, int pos)
   return checked_cast(type, t, name, pos).data();
 }
 
+Tensor & VariableType::unpack_int(const Tensor & t, const char * name, int pos) const {
+  auto& type = *VariableImpl::getType(baseType->toScalarType(kInt));
+  return checked_cast(type, t, name, pos).data();
+}
+
 Tensor & VariableType::unpack_byte(const Tensor & t, const char * name, int pos) const {
   auto& type = *VariableImpl::getType(baseType->toScalarType(kByte));
   return checked_cast(type, t, name, pos).data();

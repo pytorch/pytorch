@@ -3536,8 +3536,6 @@
     - method
     - function
   return: argument 0,1
-  after_call:
-    THIntTensor_sub(((THPIntTensor*)$arg1)->cdata, ((THPIntTensor*)$arg1)->cdata, 1);
   arguments:
     - arg: THTensor* res1
       output: True
@@ -3550,6 +3548,9 @@
       default: U
     - arg: real tol
       default: -1
+  aten_custom_call: |
+    ${THTensor}_pstrf(res1_->tensor, res2_->tensor, self_->tensor, (upper) ? "U" : "L", tol_);
+    res2 -= 1;  // LAPACK returns 1-indexed pivots
 ]]
 [[
   name: qr
@@ -4214,7 +4215,7 @@
 ]]
 
 [[
-  name: coalesce 
+  name: coalesce
   cname: newCoalesce
   variants:
     - method
@@ -4227,14 +4228,14 @@
 ]]
 
 [[
-  name: is_coalesced 
+  name: is_coalesced
   cname: isCoalesced
   variants:
     - method
   backends:
     - SparseCPU
     - SparseCUDA
-  return: bool 
+  return: bool
   arguments:
      - THTensor* self
 ]]
