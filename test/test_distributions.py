@@ -2108,6 +2108,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.beta(Variable(torch.Tensor([0.7, 0.2, 0.4])), Variable(torch.Tensor([0.7, 0.2, 0.4])))
             ),
             (
+                Binomial(10, Variable(torch.arange(0.05, 1, 0.1))),
+                scipy.stats.binom(10 * np.ones(10,), torch.arange(0.05, 1, 0.1))
+            ),
+            (
                 Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
                 scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
             )
