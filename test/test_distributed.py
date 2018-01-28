@@ -756,7 +756,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
             except RuntimeError as e:
                 if 'recompile' in e.args[0]:
                     sys.exit(0)
-                raise RuntimeError('Error initializing process group')
+                raise
             # self.id() == e.g. '__main__.TestDistributed.test_get_rank'
             # We're retreiving a corresponding test and executing it.
             getattr(self, self.id().split(".")[2])()
