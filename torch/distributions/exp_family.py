@@ -32,7 +32,7 @@ class ExponentialFamily(Distribution):
         """
         raise NotImplementedError
 
-    def log_normalizer(self):
+    def log_normalizer(self, *natural_params):
         """
         Abstract method for log normalizer function. Returns a log normalizer based on
         the distribution and input
