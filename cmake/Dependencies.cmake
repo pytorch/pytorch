@@ -84,15 +84,14 @@ endif()
 
 # ---[ gflags
 if(USE_GFLAGS)
-  find_package(GFlags)
-  if(GFLAGS_FOUND)
+  include(cmake/public/gflags.cmake)
+  if (TARGET gflags)
     set(CAFFE2_USE_GFLAGS 1)
-    caffe2_include_directories(${GFLAGS_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${GFLAGS_LIBRARIES})
+    list(APPEND Caffe2_DEPENDENCY_LIBS gflags)
   else()
     message(WARNING
-        "gflags is not found. Caffe2 will build without gflags support but it "
-        "is strongly recommended that you install gflags. Suppress this "
+        "gflags is not found. Caffe2 will build without gflags support but "
+        "it is strongly recommended that you install gflags. Suppress this "
         "warning with -DUSE_GFLAGS=OFF")
     set(USE_GFLAGS OFF)
   endif()
