@@ -64,6 +64,8 @@ class Transform(object):
     bijective = False
 
     def __init__(self, cache_size=0):
+        self._cache_size = cache_size
+        self._inv = None
         if cache_size == 0:
             pass  # default behavior
         elif cache_size == 1:
@@ -78,10 +80,8 @@ class Transform(object):
         This should satisfy ``t.inv.inv is t``.
         """
         inv = None
-        try:
+        if self._inv is not None:
             inv = self._inv()
-        except AttributeError:
-            pass
         if inv is None:
             inv = _InverseTransform(self)
             self._inv = weakref.ref(inv)
@@ -98,10 +98,9 @@ class Transform(object):
         """
         Computes the transform `x => y`.
         """
-        try:
-            x_old, y_old = self._cached_x_y
-        except AttributeError:
+        if self._cache_size == 0:
             return self._call(x)
+        x_old, y_old = self._cached_x_y
         if x is x_old:
             return y_old
         y = self._call(x)
@@ -112,10 +111,9 @@ class Transform(object):
         """
         Inverts the transform `y => x`.
         """
-        try:
-            x_old, y_old = self._cached_x_y
-        except AttributeError:
+        if self._cache_size == 0:
             return self._inverse(y)
+        x_old, y_old = self._cached_x_y
         if y is y_old:
             return x_old
         x = self._inverse(y)
@@ -214,10 +212,8 @@ class ComposeTransform(Transform):
     @property
     def inv(self):
         inv = None
-        try:
+        if self._inv is not None:
             inv = self._inv()
-        except AttributeError:
-            pass
         if inv is None:
             inv = ComposeTransform([p.inv for p in reversed(self.parts)])
             self._inv = weakref.ref(inv)
