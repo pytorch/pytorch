@@ -2140,6 +2140,10 @@ class TestAgainstScipy(TestCase):
             (
                 Laplace(random_var, random_var),
                 scipy.stats.laplace(random_var, random_var)
+            ),
+            (
+                Normal(random_var, random_var),
+                scipy.stats.norm(random_var, random_var)
             )
         ]
 
