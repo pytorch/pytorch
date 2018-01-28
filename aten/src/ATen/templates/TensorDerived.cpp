@@ -3,10 +3,15 @@
 // for context
 #define __STDC_FORMAT_MACROS
 
+#include "ATen/Config.h"
 #include "ATen/${Tensor}.h"
 #include "ATen/${Storage}.h"
 #include "ATen/Scalar.h"
 #include "ATen/Half.h"
+
+#if AT_CUDA_ENABLED()
+$extra_cuda_headers
+#endif
 
 namespace at {
 
