@@ -112,6 +112,18 @@ if [[ "$OSTYPE" != "msys" ]]; then
     else
       echo "Skipping MPI backend tests (MPI not found)"
     fi
+
+    echo "Running distributed tests for the Nccl backend"
+    distributed_set_up
+    BACKEND=nccl WORLD_SIZE=2 $PYCMD ./test_distributed.py
+    distributed_tear_down
+
+    echo "Running distributed tests for the Nccl backend with file init_method"
+    distributed_set_up
+    BACKEND=nccl WORLD_SIZE=2 INIT_METHOD='file://'$TEMP_DIR'/shared_init_file' $PYCMD ./test_distributed.py
+    distributed_tear_down
+
+
 fi
 
 if [[ $COVERAGE -eq 1 ]]; then
