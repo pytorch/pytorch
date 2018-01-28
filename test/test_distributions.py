@@ -37,7 +37,6 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  StudentT, Uniform, constraints, kl_divergence)
-from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
