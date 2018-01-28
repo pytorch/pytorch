@@ -2142,6 +2142,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.laplace(random_var, random_var)
             ),
             (
+                Multinomial(10, random_var),
+                scipy.stats.multinomial(10, random_var/random_var.sum())
+            ),
+            (
                 Normal(random_var, random_var),
                 scipy.stats.norm(random_var, random_var)
             )
@@ -2153,7 +2157,10 @@ class TestAgainstScipy(TestCase):
 
     def test_variance(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            self.assertEqual(pytorch_dist.variance, scipy_dist.var())
+            if isinstance(pytorch_dist, Multinomial):
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()))
+            else:
+                self.assertEqual(pytorch_dist.variance, scipy_dist.var())
 
 
 if __name__ == '__main__':
