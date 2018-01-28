@@ -91,6 +91,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Laplace
     :members:
 
+:hidden:`LogNormal`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LogNormal
+    :members:
+
 :hidden:`Normal`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -121,6 +127,12 @@ Probability distributions - torch.distributions
 .. autoclass:: StudentT
     :members:
 
+:hidden:`TransformedDistribution`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: TransformedDistribution
+    :members:
+
 :hidden:`Uniform`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -135,3 +147,17 @@ Probability distributions - torch.distributions
 
 .. autofunction:: kl_divergence
 .. autofunction:: register_kl
+
+`Transforms`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.distributions.transforms
+    :members:
+    :member-order: bysource
+
+`Constraints`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.distributions.constraints
+    :members:
+    :member-order: bysource

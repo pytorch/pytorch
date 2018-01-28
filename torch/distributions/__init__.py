@@ -32,6 +32,7 @@ policy, the code for implementing REINFORCE would be as follows::
 
 from .bernoulli import Bernoulli
 from .beta import Beta
+from .transforms import *
 from .binomial import Binomial
 from .categorical import Categorical
 from .cauchy import Cauchy
@@ -45,12 +46,14 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
+from .log_normal import LogNormal
 from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
-from .studentT import StudentT
 from .poisson import Poisson
+from .studentT import StudentT
+from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 
 __all__ = [
@@ -68,6 +71,7 @@ __all__ = [
     'Geometric',
     'Gumbel',
     'Laplace',
+    'LogNormal',
     'Multinomial',
     'Normal',
     'OneHotCategorical',
@@ -75,6 +79,8 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'TransformedDistribution',
     'kl_divergence',
     'register_kl',
 ]
+__all__.extend(transforms.__all__)
