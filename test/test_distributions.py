@@ -2116,6 +2116,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.dirichlet(Variable(torch.Tensor([0.7, 0.2, 0.4])))
             ),
             (
+                Exponential(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
+                scipy.stats.expon(scale=1. / Variable(torch.Tensor([0.7, 0.2, 0.4])))
+            ),
+            (
                 Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
                 scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
             )
