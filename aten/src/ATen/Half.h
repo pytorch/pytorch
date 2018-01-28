@@ -57,7 +57,7 @@ template<> AT_API double convert(Half f);
 template<> AT_API Half convert(int64_t f);
 template<> AT_API int64_t convert(Half f);
 
-Half::operator double() {
+inline Half::operator double() {
   return convert<double, Half>(*this);
 }
 
