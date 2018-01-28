@@ -2112,6 +2112,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.binom(10 * np.ones(10,), torch.arange(0.05, 1, 0.1))
             ),
             (
+                Dirichlet(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
+                scipy.stats.dirichlet(Variable(torch.Tensor([0.7, 0.2, 0.4])))
+            ),
+            (
                 Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
                 scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
             )
@@ -2119,11 +2123,11 @@ class TestAgainstScipy(TestCase):
 
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            self.assertEqual(pytorch_dist.mean, scipy_dist.stats(moments='m'))
+            self.assertEqual(pytorch_dist.mean, scipy_dist.mean())
 
     def test_variance(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            self.assertEqual(pytorch_dist.variance, scipy_dist.stats(moments='v'))
+            self.assertEqual(pytorch_dist.variance, scipy_dist.var())
 
 
 if __name__ == '__main__':
