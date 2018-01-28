@@ -73,7 +73,7 @@ class Transform(object):
     def inv(self):
         """
         Returns the inverse :class:`Transform` of this transform.
-        This should satisfy ``t.inv.inv is t``.
+        This should satisfy ``t.inv.inv == t``.
         """
         return _InverseTransform(self)
 
