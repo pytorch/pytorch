@@ -37,6 +37,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  StudentT, Uniform, constraints, kl_divergence)
+from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
@@ -2326,6 +2327,48 @@ class TestTransforms(TestCase):
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
+
+
+class TestConstraintRegistry(TestCase):
+    def setUp(self):
+        self.constraints = [
+            constraints.real,
+            constraints.positive,
+            constraints.greater_than(variable([-10, -2, 0, 2, 10])),
+            constraints.less_than(variable([-10, -2, 0, 2, 10])),
+            constraints.unit_interval,
+            constraints.interval(variable([-4, -2, 0, 2, 4]),
+                                 variable([-3, 3, 1, 5, 5])),
+            constraints.simplex,
+            constraints.lower_cholesky,
+        ]
+
+    def test_biject_to(self):
+        for constraint in self.constraints:
+            try:
+                t = biject_to(constraint)
+            except NotImplementedError:
+                continue
+            self.assertTrue(t.bijective, "biject_to({}) is not bijective".format(constraint))
+            x = Variable(torch.Tensor(5, 5)).normal_()
+            y = t(x)
+            self.assertTrue(constraint.check(y).all(), '\n'.join([
+                "Failed to biject_to({})".format(constraint),
+                "x = {}".format(x),
+                "biject_to(...)(x) = {}".format(y),
+            ]))
+            x2 = t.inv(y)
+            self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
+
+    def test_transform_to(self):
+        for constraint in self.constraints:
+            t = transform_to(constraint)
+            x = Variable(torch.Tensor(5, 5)).normal_()
+            y = t(x)
+            self.assertTrue(constraint.check(y).all(), "Failed to transform_to({})".format(constraint))
+            x2 = t.inv(y)
+            y2 = t(x2)
+            self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
 
 if __name__ == '__main__':
