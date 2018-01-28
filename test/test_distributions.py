@@ -2228,7 +2228,7 @@ class TestTransforms(TestCase):
 
     def test_inv_inv(self):
         for t in self.transforms:
-            self.assertTrue(t.inv.inv == t)
+            self.assertTrue(t.inv.inv is t)
 
     def test_equality(self):
         transforms = self.unique_transforms

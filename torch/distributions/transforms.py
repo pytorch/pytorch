@@ -1,3 +1,5 @@
+import weakref
+
 import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
@@ -73,9 +75,17 @@ class Transform(object):
     def inv(self):
         """
         Returns the inverse :class:`Transform` of this transform.
-        This should satisfy ``t.inv.inv == t``.
+        This should satisfy ``t.inv.inv is t``.
         """
-        return _InverseTransform(self)
+        inv = None
+        try:
+            inv = self._inv()
+        except AttributeError:
+            pass
+        if inv is None:
+            inv = _InverseTransform(self)
+            self._inv = weakref.ref(inv)
+        return inv
 
     def __eq__(self, other):
         return self is other
@@ -159,7 +169,7 @@ class _InverseTransform(Transform):
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
             return False
-        return self._inv == other.inv
+        return self._inv == other._inv
 
     def __call__(self, x):
         return self._inv._inv_call(x)
@@ -203,7 +213,16 @@ class ComposeTransform(Transform):
 
     @property
     def inv(self):
-        return ComposeTransform([p.inv for p in reversed(self.parts)])
+        inv = None
+        try:
+            inv = self._inv()
+        except AttributeError:
+            pass
+        if inv is None:
+            inv = ComposeTransform([p.inv for p in reversed(self.parts)])
+            self._inv = weakref.ref(inv)
+            inv._inv = weakref.ref(self)
+        return inv
 
     def __call__(self, x):
         for part in self.parts:
