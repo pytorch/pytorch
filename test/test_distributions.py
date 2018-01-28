@@ -2156,6 +2156,10 @@ class TestAgainstScipy(TestCase):
             (
                 Poisson(random_var),
                 scipy.stats.poisson(random_var)
+            ),
+            (
+                StudentT(2+random_var, random_var, random_var),
+                scipy.stats.t(2+random_var, random_var, random_var)
             )
         ]
 
