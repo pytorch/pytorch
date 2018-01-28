@@ -2098,30 +2098,36 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
+        random_tensor = torch.Tensor([0.7, 0.2, 0.4])
+        random_var = Variable(random_tensor)
         self.distribution_pairs = [
             (
-                Bernoulli(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
-                scipy.stats.bernoulli(Variable(torch.Tensor([0.7, 0.2, 0.4])))
+                Bernoulli(random_var),
+                scipy.stats.bernoulli(random_var)
             ),
             (
-                Beta(Variable(torch.Tensor([0.7, 0.2, 0.4])), Variable(torch.Tensor([0.7, 0.2, 0.4]))),
-                scipy.stats.beta(Variable(torch.Tensor([0.7, 0.2, 0.4])), Variable(torch.Tensor([0.7, 0.2, 0.4])))
+                Beta(random_var, random_var),
+                scipy.stats.beta(random_var, random_var)
             ),
             (
-                Binomial(10, Variable(torch.arange(0.05, 1, 0.1))),
-                scipy.stats.binom(10 * np.ones(10,), torch.arange(0.05, 1, 0.1))
+                Binomial(10, random_var),
+                scipy.stats.binom(10 * np.ones(3,), random_tensor)
             ),
             (
-                Dirichlet(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
-                scipy.stats.dirichlet(Variable(torch.Tensor([0.7, 0.2, 0.4])))
+                Dirichlet(random_var),
+                scipy.stats.dirichlet(random_var)
             ),
             (
-                Exponential(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
-                scipy.stats.expon(scale=1. / Variable(torch.Tensor([0.7, 0.2, 0.4])))
+                Exponential(random_var),
+                scipy.stats.expon(scale=1. / random_var)
             ),
             (
-                Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
-                scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
+                FisherSnedecor(random_var, 4+random_var),  # var for df2<=4 is undefined
+                scipy.stats.f(random_var, 4+random_var)
+            ),
+            (
+                Geometric(random_var),
+                scipy.stats.geom(random_var, loc=-1)
             )
         ]
 

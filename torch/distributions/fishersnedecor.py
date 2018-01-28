@@ -37,6 +37,18 @@ class FisherSnedecor(Distribution):
             batch_shape = self.df1.size()
         super(FisherSnedecor, self).__init__(batch_shape)
 
+    @property
+    def mean(self):
+        df2 = self.df2.clone()
+        df2[df2 <= 2] = float('nan')
+        return df2 / (df2 - 2)
+
+    @property
+    def variance(self):
+        df2 = self.df2.clone()
+        df2[df2 <= 4] = float('nan')
+        return 2 * df2.pow(2) * (self.df1 + df2 - 2) / (self.df1 * (df2 - 2).pow(2) * (df2 - 4))
+
     def rsample(self, sample_shape=torch.Size(())):
         shape = self._extended_shape(sample_shape)
         #   X1 ~ Gamma(df1 / 2, 1 / df1), X2 ~ Gamma(df2 / 2, 1 / df2)
