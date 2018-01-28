@@ -47,17 +47,17 @@ class Transform(object):
             the latest single value is cached. Only 0 and 1 are supported.
 
     Attributes:
-        bijective (bool): Whether this transform is bijective. A transform
-            ``t`` is bijective iff ``t.inv(t(x)) == x`` and
-            ``t(t.inv(y)) == y`` for every ``x`` in the domain and ``y`` in
-            the codomain. Transforms that are not bijective should at least
-            maintain the weaker pseudoinverse properties
-            ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == y``.
         domain (:class:`~torch.distributions.constraints.Constraint`):
             The constraint representing valid inputs to this transform.
         codomain (:class:`~torch.distributions.constraints.Constraint`):
             The constraint representing valid outputs to this transform
             which are inputs to the inverse transform.
+        bijective (bool): Whether this transform is bijective. A transform
+            ``t`` is bijective iff ``t.inv(t(x)) == x`` and
+            ``t(t.inv(y)) == y`` for every ``x`` in the domain and ``y`` in
+            the codomain. Transforms that are not bijective should at least
+            maintain the weaker pseudoinverse properties
+            ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
     """
     bijective = False
 
@@ -148,10 +148,6 @@ class _InverseTransform(Transform):
         super(_InverseTransform, self).__init__()
         self.inv = transform
 
-    @property
-    def bijective(self):
-        return self.inv.bijective
-
     @constraints.dependent_property
     def domain(self):
         return self.inv.codomain
@@ -159,6 +155,10 @@ class _InverseTransform(Transform):
     @constraints.dependent_property
     def codomain(self):
         return self.inv.domain
+
+    @property
+    def bijective(self):
+        return self.inv.bijective
 
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
@@ -189,21 +189,21 @@ class ComposeTransform(Transform):
             return False
         return self.parts == other.parts
 
-    @lazy_property
-    def bijective(self):
-        return all(p.bijective for p in self.parts)
-
-    @property
+    @constraints.dependent_property
     def domain(self):
         if not self.parts:
             return constraints.real
         return self.parts[0].domain
 
-    @property
+    @constraints.dependent_property
     def codomain(self):
         if not self.parts:
             return constraints.real
         return self.parts[-1].codomain
+
+    @lazy_property
+    def bijective(self):
+        return all(p.bijective for p in self.parts)
 
     @lazy_property
     def inv(self):
@@ -339,7 +339,7 @@ class BoltzmannTransform(Transform):
     normalizing.
 
     This is not bijective and cannot be used for HMC. However this acts mostly
-    coordinate-wise (except for the final normalization), and this is
+    coordinate-wise (except for the final normalization), and thus is
     appropriate for coordinate-wise optimization algorithms.
     """
     domain = constraints.real
@@ -417,4 +417,6 @@ class LowerCholeskyTransform(Transform):
         return x.tril(-1) + x.diag().exp().diag()
 
     def _inverse(self, y):
+        if y.dim() != 2:
+            raise NotImplementedError
         return y.tril(-1) + y.diag().log().diag()
