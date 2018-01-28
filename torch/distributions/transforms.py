@@ -7,11 +7,13 @@ __all__ = [
     'AbsTransform',
     'AffineTransform',
     'BoltzmannTransform',
+    'ComposeTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
     'SigmoidTransform',
     'StickBreakingTransform',
     'Transform',
+    'identity_transform',
 ]
 
 
@@ -127,6 +129,10 @@ class _InverseTransform(Transform):
         super(_InverseTransform, self).__init__()
         self.inv = transform
 
+    @property
+    def bijective(self):
+        return self.inv.bijective
+
     @constraints.dependent_property
     def domain(self):
         return self.inv.codomain
@@ -134,10 +140,6 @@ class _InverseTransform(Transform):
     @constraints.dependent_property
     def codomain(self):
         return self.inv.domain
-
-    @property
-    def bijective(self):
-        return self.inv.bijective
 
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
@@ -149,6 +151,57 @@ class _InverseTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         return -self.inv.log_abs_det_jacobian(y, x)
+
+
+class ComposeTransform(Transform):
+    def __init__(self, parts, cache_size=0):
+        self.parts = parts
+        super(ComposeTransform, self).__init__(cache_size=cache_size)
+
+    def __eq__(self, other):
+        if not isinstance(other, ComposeTransform):
+            return False
+        return self.parts == other.parts
+
+    @lazy_property
+    def bijective(self):
+        return all(p.bijective for p in self.parts)
+
+    @property
+    def domain(self):
+        if not self.parts:
+            return constraints.real
+        return self.parts[0].domain
+
+    @property
+    def codomain(self):
+        if not self.parts:
+            return constraints.real
+        return self.parts[-1].codomain
+
+    @lazy_property
+    def inv(self):
+        inv = ComposeTransform([p.inv for p in reversed(self.parts)])
+        inv.inv = self
+        return inv
+
+    def __call__(self, x):
+        for part in self.parts:
+            x = part(x)
+        return x
+
+    def log_abs_det_jacobian(self, x, y):
+        if not self.parts:
+            return x.new([0]).expand_as(x)
+        result = 0
+        for part in self.parts:
+            y = part(x)
+            result += part.log_abs_det_jacobian(x, y)
+            x = y
+        return result
+
+
+identity_transform = ComposeTransform([])
 
 
 class ExpTransform(Transform):

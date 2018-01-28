@@ -37,13 +37,16 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  StudentT, Uniform, constraints, kl_divergence)
+from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
-                                            BoltzmannTransform, ExpTransform,
+                                            BoltzmannTransform,
+                                            ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             SigmoidTransform,
-                                            StickBreakingTransform)
+                                            StickBreakingTransform,
+                                            identity_transform)
 from torch.distributions.utils import _finfo, probs_to_logits
 
 TEST_NUMPY = True
@@ -2170,7 +2173,7 @@ class TestLazyLogitsInitialization(TestCase):
 class TestTransforms(TestCase):
     def setUp(self):
         self.transforms = []
-        self.transforms_by_cache_size = {}
+        transforms_by_cache_size = {}
         for cache_size in [0, 1]:
             transforms = [
                 AbsTransform(cache_size=cache_size),
@@ -2185,11 +2188,22 @@ class TestTransforms(TestCase):
                 BoltzmannTransform(cache_size=cache_size),
                 StickBreakingTransform(cache_size=cache_size),
                 LowerCholeskyTransform(cache_size=cache_size),
+                ComposeTransform([
+                    ExpTransform(cache_size=cache_size),
+                ]),
+                ComposeTransform([
+                    AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                                    Variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
+                    ExpTransform(cache_size=cache_size),
+                ]),
             ]
             for t in transforms[:]:
                 transforms.append(t.inv)
+            transforms.append(identity_transform)
             self.transforms += transforms
-            self.transforms_by_cache_size[cache_size] = transforms
+            if cache_size == 0:
+                self.unique_transforms = transforms[:]
 
     def _generate_data(self, transform):
         domain = transform.domain
@@ -2216,7 +2230,7 @@ class TestTransforms(TestCase):
             self.assertTrue(t.inv.inv is t)
 
     def test_equality(self):
-        transforms = self.transforms_by_cache_size[0]
+        transforms = self.unique_transforms
         for x, y in product(transforms, transforms):
             if x is y:
                 self.assertTrue(x == y)
@@ -2224,6 +2238,8 @@ class TestTransforms(TestCase):
             else:
                 self.assertFalse(x == y)
                 self.assertTrue(x != y)
+        self.assertTrue(identity_transform == identity_transform.inv)
+        self.assertFalse(identity_transform != identity_transform.inv)
 
     def test_forward_inverse_cache(self):
         for transform in self.transforms:
