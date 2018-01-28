@@ -52,10 +52,10 @@ class ExponentialFamily(Distribution):
         Method to compute the entropy using Bregman divergence of the log normalizer.
         """
         result = -self.mean_carrier_measure
-        nparams = [Variable(p, requires_grad=True) for p in self.natural_params]
+        nparams = [Variable(p.data, requires_grad=True) for p in self.natural_params]
         lg_normal = self.log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
-        result += lg_normal.clone().data
+        result += lg_normal.clone()
         for np, g in zip(nparams, gradients):
-            result -= np.data * g.data
+            result -= np * g
         return result

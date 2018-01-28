@@ -83,7 +83,7 @@ class Bernoulli(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = torch.log(self.probs.data / (1 - self.probs.data))
+        V1 = torch.log(self.probs / (1 - self.probs))
         return (V1, )
 
     def log_normalizer(self, x):

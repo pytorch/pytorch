@@ -58,8 +58,8 @@ class Normal(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = (self.loc / self.scale.pow(2)).data
-        V2 = -0.5 * self.scale.pow(2).reciprocal().data
+        V1 = (self.loc / self.scale.pow(2))
+        V2 = -0.5 * self.scale.pow(2).reciprocal()
         return (V1, V2)
 
     def log_normalizer(self, x, y):

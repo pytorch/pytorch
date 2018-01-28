@@ -63,8 +63,8 @@ class Gamma(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = self.concentration.data - 1
-        V2 = -self.rate.data
+        V1 = self.concentration - 1
+        V2 = -self.rate
         return (V1, V2)
 
     def log_normalizer(self, x, y):

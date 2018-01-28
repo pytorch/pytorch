@@ -43,7 +43,7 @@ class Exponential(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = -self.rate.data
+        V1 = -self.rate
         return (V1, )
 
     def log_normalizer(self, x):

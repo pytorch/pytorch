@@ -70,8 +70,8 @@ class Beta(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = self.concentration1.data
-        V2 = self.concentration0.data
+        V1 = self.concentration1
+        V2 = self.concentration0
         return (V1, V2)
 
     def log_normalizer(self, x, y):

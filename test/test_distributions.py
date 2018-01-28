@@ -164,8 +164,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0])),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5])),
         },
     ]),
     Example(Normal, [
@@ -221,8 +221,8 @@ EXAMPLES = [
             'high': Variable(torch.ones(1), requires_grad=True),
         },
         {
-            'low': torch.Tensor([1.0, 1.0]),
-            'high': torch.Tensor([2.0, 3.0]),
+            'low': variable([1.0, 1.0]),
+            'high': variable([2.0, 3.0]),
         },
     ]),
 ]
@@ -1865,8 +1865,8 @@ class TestKL(TestCase):
                 print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
-                if isinstance(actual, Variable) and not isinstance(expected, Variable):
-                    actual = actual.data
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
                 self.assertEqual(actual, expected, message='\n'.join([
                     'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
                     'Expected (using Bregman Divergence) {}'.format(expected),
@@ -1931,8 +1931,8 @@ class TestKL(TestCase):
                     expected = ExponentialFamily.entropy(dist)
                 except NotImplementedError:
                     continue
-                if isinstance(actual, Variable) and not isinstance(expected, Variable):
-                    actual = actual.data
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
                 self.assertEqual(actual, expected, message='\n'.join([
                     '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
                     'Expected (Bregman Divergence) {}'.format(expected),

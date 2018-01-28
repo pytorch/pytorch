@@ -83,7 +83,7 @@ class Dirichlet(ExponentialFamily):
 
     @lazy_property
     def natural_params(self):
-        V1 = self.concentration.data
+        V1 = self.concentration
         return (V1, )
 
     def log_normalizer(self, x):
