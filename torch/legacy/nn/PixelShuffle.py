@@ -1,9 +1,3 @@
-import torch
-from .Module import Module
-from torch.legacy.nn.View import View
-import numpy
-
-
 class PixelShuffle(Module):
     def __init__(self, upscaleFactor):
         super(PixelShuffle, self).__init__()
@@ -79,11 +73,6 @@ class PixelShuffle(Module):
             tmp = torch.Size((tmp[0], tmp[1], tmp[2]))
         self.output = self._shuffleOut.view(tmp)
 
-        print("the r factor is : ", self.upscaleFactor)
-        print("the input is: ", input.size())
-        print("input type: ", input.type())
-        print("the output is: ", self.output.size())
-        print("output type: ", self.output.type())
         return self.output
 
     def updateGradInput(self, input, gradOutput):
