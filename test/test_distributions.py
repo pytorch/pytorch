@@ -2132,6 +2132,10 @@ class TestAgainstScipy(TestCase):
             (
                 Geometric(random_var),
                 scipy.stats.geom(random_var, loc=-1)
+            ),
+            (
+                Gumbel(random_var, random_var),
+                scipy.stats.gumbel_r(random_var, random_var)
             )
         ]
 

@@ -1,5 +1,5 @@
 from numbers import Number
-
+import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -24,6 +24,7 @@ class Gumbel(Distribution):
     has_rsample = True
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
+    _euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -45,5 +46,17 @@ class Gumbel(Distribution):
         z = (value - self.loc) / self.scale
         return -(self.scale.log() + z + torch.exp(-z))
 
+    @property
+    def mean(self):
+        return self.loc + self.scale * self._euler_constant
+
+    @property
+    def stddev(self):
+        return math.pi * self.scale / math.sqrt(6)
+
+    @property
+    def variance(self):
+        return self.stddev.pow(2)
+
     def entropy(self):
-        return self.scale.log() + 1.57721566490153286060  # 1 + Euler Mascheroni Constant
+        return self.scale.log() + 1 + self._euler_constant
