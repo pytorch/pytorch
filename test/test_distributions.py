@@ -2126,6 +2126,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.f(random_var, 4+random_var)
             ),
             (
+                Gamma(random_var, random_var),  # var for df2<=4 is undefined
+                scipy.stats.gamma(random_var, scale=1 / random_var)
+            ),
+            (
                 Geometric(random_var),
                 scipy.stats.geom(random_var, loc=-1)
             )
