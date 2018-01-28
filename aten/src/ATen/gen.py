@@ -217,13 +217,15 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     top_env['type_ids'].append(tag + ',')
 
     if backend == 'CUDA':
-        env['th_headers'] = ['#include <THC/THC.h>',
-                             '#include <THCUNN/THCUNN.h>',
-                             '#undef THNN_',
-                             '#undef THCIndexTensor_']
-        # if density == 'Sparse':
-        env['th_headers'] += ['#include <THCS/THCS.h>',
-                              '#undef THCIndexTensor_']
+        env['th_headers'] = [
+            '#include <THC/THC.h>',
+            '#include <THCUNN/THCUNN.h>',
+            '#undef THNN_',
+            '#undef THCIndexTensor_',
+            '#include <THCS/THCS.h>',
+            '#undef THCIndexTensor_',
+        ]
+        env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.h>']
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -237,12 +239,13 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['storage_device'] = 'return storage->device;'
         env['Generator'] = 'CUDAGenerator'
     else:
-        env['th_headers'] = ['#include <TH/TH.h>',
-                             '#include <THNN/THNN.h>',
-                             '#undef THNN_']
-        # if density == 'Sparse':
-        env['th_headers'].append('#include <THS/THS.h>')
-
+        env['th_headers'] = [
+            '#include <TH/TH.h>',
+            '#include <THNN/THNN.h>',
+            '#undef THNN_',
+            '#include <THS/THS.h>',
+        ]
+        env['extra_cuda_headers'] = []
         env['THType'] = scalar_name
         env['THStorage'] = "TH{}Storage".format(scalar_name)
         env['THTensor'] = 'TH{}{}Tensor'.format(th_density_tag, scalar_name)
