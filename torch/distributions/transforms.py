@@ -71,7 +71,7 @@ class Transform(object):
         else:
             raise NotImplementedError('cache_size must be 0 or 1')
 
-    @lazy_property
+    @property
     def inv(self):
         """
         Returns the inverse :class:`Transform` of this transform.
@@ -146,30 +146,34 @@ class _InverseTransform(Transform):
     """
     def __init__(self, transform):
         super(_InverseTransform, self).__init__()
-        self.inv = transform
+        self._inv = transform
 
     @constraints.dependent_property
     def domain(self):
-        return self.inv.codomain
+        return self._inv.codomain
 
     @constraints.dependent_property
     def codomain(self):
-        return self.inv.domain
+        return self._inv.domain
 
     @property
     def bijective(self):
-        return self.inv.bijective
+        return self._inv.bijective
+
+    @property
+    def inv(self):
+        return self._inv
 
     def __eq__(self, other):
         if not isinstance(other, _InverseTransform):
             return False
-        return self.inv == other.inv
+        return self._inv == other.inv
 
     def __call__(self, x):
-        return self.inv._inv_call(x)
+        return self._inv._inv_call(x)
 
     def log_abs_det_jacobian(self, x, y):
-        return -self.inv.log_abs_det_jacobian(y, x)
+        return -self._inv.log_abs_det_jacobian(y, x)
 
 
 class ComposeTransform(Transform):
@@ -205,11 +209,9 @@ class ComposeTransform(Transform):
     def bijective(self):
         return all(p.bijective for p in self.parts)
 
-    @lazy_property
+    @property
     def inv(self):
-        inv = ComposeTransform([p.inv for p in reversed(self.parts)])
-        inv.inv = self
-        return inv
+        return ComposeTransform([p.inv for p in reversed(self.parts)])
 
     def __call__(self, x):
         for part in self.parts:
