@@ -66,10 +66,8 @@ class Transform(object):
             pass  # default behavior
         elif cache_size == 1:
             self._cached_x_y = None, None
-            self.__call__ = self._cached_call
-            self._inv_call = self._cached_inverse
         else:
-            raise NotImplementedError('cache_size must be 0 or 1')
+            raise ValueError('cache_size must be 0 or 1')
 
     @property
     def inv(self):
@@ -90,30 +88,24 @@ class Transform(object):
         """
         Computes the transform `x => y`.
         """
-        return self._call(x)
-
-    def _inv_call(self, y):
-        """
-        Inverts the transform `y => x`.
-        """
-        return self._inverse(y)
-
-    def _cached_call(self, x):
-        """
-        Computes the memoized transform `x => y`.
-        """
-        x_old, y_old = self._cached_x_y
+        try:
+            x_old, y_old = self._cached_x_y
+        except AttributeError:
+            return self._call(x)
         if x is x_old:
             return y_old
         y = self._call(x)
         self._cached_x_y = x, y
         return y
 
-    def _cached_inverse(self, y):
+    def _inv_call(self, y):
         """
-        Inverts the memoized transform `y => x`.
+        Inverts the transform `y => x`.
         """
-        x_old, y_old = self._cached_x_y
+        try:
+            x_old, y_old = self._cached_x_y
+        except AttributeError:
+            return self._inverse(y)
         if y is y_old:
             return x_old
         x = self._inverse(y)
