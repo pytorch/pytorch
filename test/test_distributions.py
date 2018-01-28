@@ -2136,6 +2136,10 @@ class TestAgainstScipy(TestCase):
             (
                 Gumbel(random_var, random_var),
                 scipy.stats.gumbel_r(random_var, random_var)
+            ),
+            (
+                Laplace(random_var, random_var),
+                scipy.stats.laplace(random_var, random_var)
             )
         ]
 
