@@ -1,22 +1,24 @@
+import math
 import warnings
 from functools import total_ordering
 
 import torch
-import math
 
-from .distribution import Distribution
 from .bernoulli import Bernoulli
-from .binomial import Binomial
 from .beta import Beta
+from .binomial import Binomial
 from .dirichlet import Dirichlet
+from .distribution import Distribution
 from .exponential import Exponential
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
+from .log_normal import LogNormal
 from .normal import Normal
 from .pareto import Pareto
 from .poisson import Poisson
+from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from torch.autograd import Variable, variable
 
@@ -266,6 +268,13 @@ def _kl_pareto_pareto(p, q):
 @register_kl(Poisson, Poisson)
 def _kl_poisson_poisson(p, q):
     return p.rate * (p.rate.log() - q.rate.log()) - (p.rate - q.rate)
+
+
+@register_kl(TransformedDistribution, TransformedDistribution)
+def _kl_transformed_transformed(p, q):
+    if p.transforms != q.transforms:
+        raise NotImplementedError
+    return kl_divergence(p.base_dist, q.base_dist)
 
 
 @register_kl(Uniform, Uniform)
