@@ -2095,5 +2095,24 @@ class TestLazyLogitsInitialization(TestCase):
                 self.assertFalse('logits' in vars(dist), msg=message)
 
 
+@unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+class TestAgainstScipy(TestCase):
+    def setUp(self):
+        self.distribution_pairs = [
+            (
+                Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
+                scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
+            )
+        ]
+
+    def test_mean(self):
+        for pytorch_dist, scipy_dist in self.distribution_pairs:
+            self.assertEqual(pytorch_dist.mean, scipy_dist.stats(moments='m'))
+
+    def test_variance(self):
+        for pytorch_dist, scipy_dist in self.distribution_pairs:
+            self.assertEqual(pytorch_dist.variance, scipy_dist.stats(moments='v'))
+
+
 if __name__ == '__main__':
     run_tests()
