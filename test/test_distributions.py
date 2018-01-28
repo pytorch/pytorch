@@ -2152,6 +2152,10 @@ class TestAgainstScipy(TestCase):
             (
                 Pareto(random_var, 2 + random_var),
                 scipy.stats.pareto(2 + random_var, scale=random_var)
+            ),
+            (
+                Poisson(random_var),
+                scipy.stats.poisson(random_var)
             )
         ]
 
