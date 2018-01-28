@@ -2158,8 +2158,12 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.poisson(random_var)
             ),
             (
-                StudentT(2+random_var, random_var, random_var),
-                scipy.stats.t(2+random_var, random_var, random_var)
+                StudentT(2 + random_var, random_var, random_var),
+                scipy.stats.t(2 + random_var, random_var, random_var)
+            ),
+            (
+                Uniform(random_var, 2 * random_var),
+                scipy.stats.uniform(random_var, random_var)
             )
         ]
 
