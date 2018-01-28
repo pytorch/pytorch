@@ -193,7 +193,7 @@ if (USE_GLOG)
   list(APPEND CAFFE2_INTERFACE_LIBS ${GLOG_LIBRARIES})
 endif()
 if (USE_GFLAGS)
-  list(APPEND CAFFE2_INTERFACE_LIBS ${GFLAGS_LIBRARIES})
+  list(APPEND CAFFE2_INTERFACE_LIBS gflags)
 endif()
 if (NOT CAFFE2_USE_CUSTOM_PROTOBUF)
   list(APPEND CAFFE2_INTERFACE_LIBS ${PROTOBUF_LIBRARIES})
@@ -231,6 +231,10 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_BINARY_DIR}/Caffe2ConfigVersion.cmake
       ${PROJECT_BINARY_DIR}/Caffe2Config.cmake
       DESTINATION share/cmake/Caffe2
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
+      DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
       FILE Caffe2Targets.cmake
