@@ -2104,6 +2104,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.bernoulli(Variable(torch.Tensor([0.7, 0.2, 0.4])))
             ),
             (
+                Beta(Variable(torch.Tensor([0.7, 0.2, 0.4])), Variable(torch.Tensor([0.7, 0.2, 0.4]))),
+                scipy.stats.beta(Variable(torch.Tensor([0.7, 0.2, 0.4])), Variable(torch.Tensor([0.7, 0.2, 0.4])))
+            ),
+            (
                 Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
                 scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
             )
