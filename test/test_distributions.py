@@ -2100,6 +2100,10 @@ class TestAgainstScipy(TestCase):
     def setUp(self):
         self.distribution_pairs = [
             (
+                Bernoulli(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
+                scipy.stats.bernoulli(Variable(torch.Tensor([0.7, 0.2, 0.4])))
+            ),
+            (
                 Geometric(Variable(torch.Tensor([0.7, 0.2, 0.4]))),
                 scipy.stats.geom(Variable(torch.Tensor([0.7, 0.2, 0.4])), loc=-1)
             )
