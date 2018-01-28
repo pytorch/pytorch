@@ -41,7 +41,6 @@ from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             BoltzmannTransform, ExpTransform,
-                                            InverseTransform,
                                             LowerCholeskyTransform,
                                             SigmoidTransform,
                                             StickBreakingTransform)

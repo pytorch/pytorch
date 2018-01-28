@@ -8,7 +8,6 @@ __all__ = [
     'AffineTransform',
     'BoltzmannTransform',
     'ExpTransform',
-    'InverseTransform',
     'LowerCholeskyTransform',
     'SigmoidTransform',
     'StickBreakingTransform',
@@ -43,20 +42,21 @@ class Transform(object):
     bijective = False
 
     def __init__(self, cache_size=0):
-        if cache_size != 0:
-            if cache_size == 1:
-                self._cached_x_y = None, None
-                self.__call__ = self._cached_call
-                self.inverse = self._cached_inverse
-            else:
-                raise NotImplementedError('cache_size must be 0 or 1')
+        if cache_size == 0:
+            pass  # default behavior
+        elif cache_size == 1:
+            self._cached_x_y = None, None
+            self.__call__ = self._cached_call
+            self._inv_call = self._cached_inverse
+        else:
+            raise NotImplementedError('cache_size must be 0 or 1')
 
     @lazy_property
     def inv(self):
         """
         Returns the inverse :class:`Transform` of this transform.
         """
-        return InverseTransform(self)
+        return _InverseTransform(self)
 
     def __eq__(self, other):
         return self is other
@@ -71,7 +71,7 @@ class Transform(object):
         """
         return self._call(x)
 
-    def inverse(self, y):
+    def _inv_call(self, y):
         """
         Inverts the transform `y => x`.
         """
@@ -118,15 +118,14 @@ class Transform(object):
         raise NotImplementedError
 
 
-class InverseTransform(Transform):
+class _InverseTransform(Transform):
     """
     Inverts a single :class:`Transform`.
+    This class is private; please instead use the ``Transform.inv`` property.
     """
-    __slots__ = ['inv']
-
-    def __init__(self, transform, cache_size=0):
+    def __init__(self, transform):
+        super(_InverseTransform, self).__init__()
         self.inv = transform
-        super(InverseTransform, self).__init__(cache_size=cache_size)
 
     @constraints.dependent_property
     def domain(self):
@@ -141,15 +140,12 @@ class InverseTransform(Transform):
         return self.inv.bijective
 
     def __eq__(self, other):
-        if not isinstance(other, InverseTransform):
+        if not isinstance(other, _InverseTransform):
             return False
         return self.inv == other.inv
 
-    def _call(self, x):
-        return self.inv.inverse(x)
-
-    def _inverse(self, y):
-        return self.inv.__call__(y)
+    def __call__(self, x):
+        return self.inv._inv_call(x)
 
     def log_abs_det_jacobian(self, x, y):
         return -self.inv.log_abs_det_jacobian(y, x)

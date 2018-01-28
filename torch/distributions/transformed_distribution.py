@@ -73,7 +73,7 @@ class TransformedDistribution(Distribution):
         log_prob = 0.0
         y = value
         for transform in reversed(self.transforms):
-            x = transform.inverse(y)
+            x = transform.inv(y)
             log_prob -= transform.log_abs_det_jacobian(x, y)
             y = x
         log_prob += self.base_dist.log_prob(y)
