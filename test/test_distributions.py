@@ -2189,7 +2189,9 @@ class TestTransforms(TestCase):
                 StickBreakingTransform(cache_size=cache_size),
                 LowerCholeskyTransform(cache_size=cache_size),
                 ComposeTransform([
-                    ExpTransform(cache_size=cache_size),
+                    AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                                    Variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
                 ]),
                 ComposeTransform([
                     AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
@@ -2238,6 +2240,7 @@ class TestTransforms(TestCase):
             else:
                 self.assertFalse(x == y)
                 self.assertTrue(x != y)
+
         self.assertTrue(identity_transform == identity_transform.inv)
         self.assertFalse(identity_transform != identity_transform.inv)
 

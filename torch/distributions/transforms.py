@@ -1,4 +1,5 @@
 import torch
+from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all, lazy_property
 from torch.nn.functional import sigmoid
@@ -40,6 +41,23 @@ class Transform(object):
     Derived classes should implement one or both of :meth:`_call` or
     :meth:`_inverse`. Derived classes that set `bijective=True` should also
     implement :meth:`log_abs_det_jacobian`.
+
+    Args:
+        cache_size (int): Size of cache. If zero, no caching is done. If one,
+            the latest single value is cached. Only 0 and 1 are supported.
+
+    Attributes:
+        bijective (bool): Whether this transform is bijective. A transform
+            ``t`` is bijective iff ``t.inv(t(x)) == x`` and
+            ``t(t.inv(y)) == y`` for every ``x`` in the domain and ``y`` in
+            the codomain. Transforms that are not bijective should at least
+            maintain the weaker pseudoinverse properties
+            ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == y``.
+        domain (:class:`~torch.distributions.constraints.Constraint`):
+            The constraint representing valid inputs to this transform.
+        codomain (:class:`~torch.distributions.constraints.Constraint`):
+            The constraint representing valid outputs to this transform
+            which are inputs to the inverse transform.
     """
     bijective = False
 
@@ -57,6 +75,7 @@ class Transform(object):
     def inv(self):
         """
         Returns the inverse :class:`Transform` of this transform.
+        This should satisfy ``t.inv.inv is t``.
         """
         return _InverseTransform(self)
 
@@ -154,9 +173,16 @@ class _InverseTransform(Transform):
 
 
 class ComposeTransform(Transform):
-    def __init__(self, parts, cache_size=0):
+    """
+    Composes multiple transforms in a chain.
+    The transforms being composed are responsible for caching.
+
+    Args:
+        parts (list of :class:`Transform`): A list of transforms to compose.
+    """
+    def __init__(self, parts):
+        super(ComposeTransform, self).__init__()
         self.parts = parts
-        super(ComposeTransform, self).__init__(cache_size=cache_size)
 
     def __eq__(self, other):
         if not isinstance(other, ComposeTransform):
@@ -286,7 +312,10 @@ class AffineTransform(Transform):
     def __eq__(self, other):
         if not isinstance(other, AffineTransform):
             return False
-        return self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
+        result = self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
+        if isinstance(result, Variable):
+            result = result.data.view(-1)[0]
+        return result
 
     def _call(self, x):
         return self.loc + self.scale * x
