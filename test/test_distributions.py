@@ -2216,6 +2216,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.laplace(random_var, random_var)
             ),
             (
+                LogNormal(random_var, random_var),
+                scipy.stats.lognorm(s=random_var, scale=random_var.exp())
+            ),
+            (
                 Multinomial(10, random_var),
                 scipy.stats.multinomial(10, random_var / random_var.sum())
             ),
