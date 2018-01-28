@@ -2122,8 +2122,8 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.expon(scale=1. / random_var)
             ),
             (
-                FisherSnedecor(random_var, 4+random_var),  # var for df2<=4 is undefined
-                scipy.stats.f(random_var, 4+random_var)
+                FisherSnedecor(random_var, 4 + random_var),  # var for df2<=4 is undefined
+                scipy.stats.f(random_var, 4 + random_var)
             ),
             (
                 Gamma(random_var, random_var),  # var for df2<=4 is undefined
@@ -2143,24 +2143,28 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 Multinomial(10, random_var),
-                scipy.stats.multinomial(10, random_var/random_var.sum())
+                scipy.stats.multinomial(10, random_var / random_var.sum())
             ),
             (
                 Normal(random_var, random_var),
                 scipy.stats.norm(random_var, random_var)
+            ),
+            (
+                Pareto(random_var, 2 + random_var),
+                scipy.stats.pareto(2 + random_var, scale=random_var)
             )
         ]
 
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            self.assertEqual(pytorch_dist.mean, scipy_dist.mean())
+            self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True)
 
     def test_variance(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Multinomial):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()))
             else:
-                self.assertEqual(pytorch_dist.variance, scipy_dist.var())
+                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True)
 
 
 if __name__ == '__main__':
