@@ -1,4 +1,4 @@
-#include "ATen/Scalar.h"
+#include "ATen/Half.h"
 
 #include <TH/TH.h>
 
@@ -30,10 +30,6 @@ template<> AT_API Half convert(int64_t f) {
 }
 template<> AT_API int64_t convert(Half f) {
   return static_cast<int64_t>(convert<double,Half>(f));
-}
-
-Half::operator double() {
-  return convert<double, Half>(*this);
 }
 
 template<> bool overflows<Half, double>(double f) {

@@ -57,6 +57,10 @@ template<> AT_API double convert(Half f);
 template<> AT_API Half convert(int64_t f);
 template<> AT_API int64_t convert(Half f);
 
+Half::operator double() {
+  return convert<double, Half>(*this);
+}
+
 template<> bool overflows<Half, double>(double f);
 template<> bool overflows<Half, int64_t>(int64_t f);
 
