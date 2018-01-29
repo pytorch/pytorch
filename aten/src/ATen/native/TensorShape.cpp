@@ -69,6 +69,35 @@ Tensor permute(const Tensor& self, IntList dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
+Tensor repeat(const Tensor& self, IntList repeats) {
+  if (repeats.size() < (size_t)self.dim()) {
+    runtime_error("Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+  }
+
+  // Add new leading dimensions to the tensor if the
+  // number of target dimensions is larger than the
+  // number of source dimensions.
+  int64_t num_new_dimensions = repeats.size() - self.dim();
+  std::vector<int64_t> padded_size(num_new_dimensions, 1);
+  padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
+  std::vector<int64_t> target_size(repeats.size());
+  for(size_t idx = 0; idx < repeats.size(); ++idx) {
+    target_size[idx] = padded_size[idx] * repeats[idx];
+  }
+
+  Tensor xtensor = self.expand(padded_size);
+
+  Tensor result = self.type().tensor(target_size);
+  Tensor urtensor = result.type().alias(result);
+  for (int64_t i = 0; i < xtensor.dim(); ++i) {
+    urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i));
+  }
+
+  urtensor.copy_(xtensor.expand_as(urtensor));
+
+  return result;
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
@@ -240,7 +269,7 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
   std::vector<int64_t> sizes(tensor.sizes());
   std::vector<int64_t> strides(tensor.strides());
-  int64_t new_stride = dim >= tensor.dim() - 1 ? 1 : sizes[dim] * strides[dim];
+  int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
   sizes.insert(sizes.begin() + dim, 1);
   strides.insert(strides.begin() + dim, new_stride);
 

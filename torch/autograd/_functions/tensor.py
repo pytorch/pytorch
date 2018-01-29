@@ -47,24 +47,3 @@ class Resize(Function):
     def backward(ctx, grad_output):
         assert grad_output.numel() == ctx.numel
         return grad_output.contiguous().view(ctx.input_sizes), None
-
-
-class Repeat(Function):
-
-    @staticmethod
-    def forward(ctx, input, repeats):
-        ctx.repeats = repeats
-        ctx.input_dims = input.dim()
-        return torch._utils._repeat(input, repeats)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_input = grad_output
-        num_unsqueezed = grad_output.dim() - ctx.input_dims
-        for _ in range(num_unsqueezed):
-            grad_input = grad_input.sum(0, keepdim=False)
-        for dim, repeat in enumerate(ctx.repeats[num_unsqueezed:]):
-            if repeat == 1:
-                continue
-            grad_input = sum(grad_input.chunk(repeat, dim))
-        return grad_input, None

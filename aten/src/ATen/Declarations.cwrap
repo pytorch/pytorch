@@ -220,13 +220,14 @@
 ]]
 [[
   name: t
+  cname: newTranspose
+  cpu_half: True
+  aten_sparse: True
   variants:
     - method
     - function
   auto_gpu: False
   return: THTensor*
-  cname: newTranspose
-  aten_sparse: True
   before_call: |
     if (self.is_sparse) {
       int64_t nDimI = arg_self->nDimensionI;
@@ -2220,6 +2221,15 @@
         - arg: THTensor* self
           broadcast: exponent fallback
         - THTensor* exponent
+]]
+[[
+  name: pow
+  types:
+    - floating_point
+  variants:
+    - function
+  return: argument 0
+  options:
     - cname: tpow
       arguments:
         - arg: THTensor* result
@@ -2888,7 +2898,7 @@
       output: True
     - long n
     - arg: long m
-      default: 1
+      default: -1
 ]]
 [[
   name: diag
@@ -3536,8 +3546,6 @@
     - method
     - function
   return: argument 0,1
-  after_call:
-    THIntTensor_sub(((THPIntTensor*)$arg1)->cdata, ((THPIntTensor*)$arg1)->cdata, 1);
   arguments:
     - arg: THTensor* res1
       output: True
@@ -3550,6 +3558,9 @@
       default: U
     - arg: real tol
       default: -1
+  aten_custom_call: |
+    ${THTensor}_pstrf(res1_->tensor, res2_->tensor, self_->tensor, (upper) ? "U" : "L", tol_);
+    res2 -= 1;  // LAPACK returns 1-indexed pivots
 ]]
 [[
   name: qr
@@ -3989,6 +4000,24 @@
         - THTensor* self
 ]]
 [[
+  name: _dirichlet_grad
+  types:
+    - floating_point
+  backends:
+    - CPU
+  return: argument 0
+  variants:
+    - function
+  options:
+    - cname: dirichlet_grad
+      arguments:
+        - arg: THTensor* output
+          output: True
+        - THTensor* x
+        - THTensor* alpha
+        - THTensor* total
+]]
+[[
   name: tensor
   return: THTensor*
   cpu_half: True
@@ -4061,6 +4090,7 @@
 [[
   name: as_strided
   variants: [method,function]
+  cpu_half: True
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -4081,6 +4111,7 @@
 [[
   name: as_strided_
   variants: [method,function]
+  cpu_half: True
   return: argument 0
   arguments:
     - THTensor* self
@@ -4214,7 +4245,7 @@
 ]]
 
 [[
-  name: coalesce 
+  name: coalesce
   cname: newCoalesce
   variants:
     - method
@@ -4227,14 +4258,14 @@
 ]]
 
 [[
-  name: is_coalesced 
+  name: is_coalesced
   cname: isCoalesced
   variants:
     - method
   backends:
     - SparseCPU
     - SparseCUDA
-  return: bool 
+  return: bool
   arguments:
      - THTensor* self
 ]]
