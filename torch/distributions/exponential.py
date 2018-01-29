@@ -26,7 +26,11 @@ class Exponential(Distribution):
 
     @property
     def mean(self):
-        return self.rate.pow(-1)
+        return self.rate.reciprocal()
+
+    @property
+    def stddev(self):
+        return self.rate.reciprocal()
 
     @property
     def variance(self):

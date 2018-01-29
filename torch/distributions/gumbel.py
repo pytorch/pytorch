@@ -52,11 +52,11 @@ class Gumbel(Distribution):
 
     @property
     def stddev(self):
-        return math.pi * self.scale / math.sqrt(6)
+        return (math.pi / math.sqrt(6)) * self.scale
 
     @property
     def variance(self):
         return self.stddev.pow(2)
 
     def entropy(self):
-        return self.scale.log() + 1 + self._euler_constant
+        return self.scale.log() + (1 + self._euler_constant)

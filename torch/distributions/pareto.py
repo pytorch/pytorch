@@ -38,7 +38,7 @@ class Pareto(Distribution):
     def mean(self):
         # mean is inf for alpha <= 1
         a = self.alpha.clone().clamp(min=1)
-        return a * self. scale / (a - 1)
+        return a * self.scale / (a - 1)
 
     @property
     def variance(self):

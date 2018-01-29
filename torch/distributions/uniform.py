@@ -33,6 +33,10 @@ class Uniform(Distribution):
         return (self.high + self.low) / 2
 
     @property
+    def stddev(self):
+        return (self.high - self.low) / 12**0.5
+
+    @property
     def variance(self):
         return (self.high - self.low).pow(2) / 12
 

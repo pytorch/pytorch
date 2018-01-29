@@ -905,6 +905,7 @@ class TestDistributions(TestCase):
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         scale_1d = torch.randn(1).abs()
         alpha_1d = torch.randn(1).abs()
+        self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).mean, float('inf'), allow_inf=True)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
         self.assertEqual(Pareto(scale, alpha).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample_n(1).size(), (1, 1))
@@ -2172,89 +2173,94 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        random_tensor = torch.Tensor([0.7, 0.2, 0.4])
-        random_var = Variable(random_tensor)
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        positive_var = Variable(torch.Tensor(20,).normal_()).exp()
+        positive_var2 = Variable(torch.Tensor(20,).normal_()).exp()
+        random_var = Variable(torch.Tensor(20,).normal_())
+        random_tensor = torch.Tensor(20,).normal_()
+        simplex_tensor = random_tensor.exp() / random_tensor.exp().sum()
         self.distribution_pairs = [
             (
-                Bernoulli(random_var),
-                scipy.stats.bernoulli(random_var)
+                Bernoulli(simplex_tensor),
+                scipy.stats.bernoulli(simplex_tensor)
             ),
             (
-                Beta(random_var, random_var),
-                scipy.stats.beta(random_var, random_var)
+                Beta(positive_var, positive_var2),
+                scipy.stats.beta(positive_var, positive_var2)
             ),
             (
-                Binomial(10, random_var),
-                scipy.stats.binom(10 * np.ones(3,), random_tensor)
+                Binomial(10, simplex_tensor),
+                scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor)
             ),
             (
-                Dirichlet(random_var),
-                scipy.stats.dirichlet(random_var)
+                Dirichlet(positive_var),
+                scipy.stats.dirichlet(positive_var)
             ),
             (
-                Exponential(random_var),
-                scipy.stats.expon(scale=1. / random_var)
+                Exponential(positive_var),
+                scipy.stats.expon(scale=1. / positive_var)
             ),
             (
-                FisherSnedecor(random_var, 4 + random_var),  # var for df2<=4 is undefined
-                scipy.stats.f(random_var, 4 + random_var)
+                FisherSnedecor(positive_var, 4 + positive_var2),  # var for df2<=4 is undefined
+                scipy.stats.f(positive_var, 4 + positive_var2)
             ),
             (
-                Gamma(random_var, random_var),  # var for df2<=4 is undefined
-                scipy.stats.gamma(random_var, scale=1 / random_var)
+                Gamma(positive_var, positive_var2),
+                scipy.stats.gamma(positive_var, scale=1 / positive_var2)
             ),
             (
-                Geometric(random_var),
-                scipy.stats.geom(random_var, loc=-1)
+                Geometric(simplex_tensor * 0.9 + 0.1),
+                scipy.stats.geom(simplex_tensor * 0.9 + 0.1, loc=-1)
             ),
             (
-                Gumbel(random_var, random_var),
-                scipy.stats.gumbel_r(random_var, random_var)
+                Gumbel(random_var, positive_var2),
+                scipy.stats.gumbel_r(random_var, positive_var2)
             ),
             (
-                Laplace(random_var, random_var),
-                scipy.stats.laplace(random_var, random_var)
+                Laplace(random_var, positive_var2),
+                scipy.stats.laplace(random_var, positive_var2)
             ),
             (
-                LogNormal(random_var, random_var),
-                scipy.stats.lognorm(s=random_var, scale=random_var.exp())
+                # Tests fail 1e-5 threshold if scale > 3
+                LogNormal(random_var, positive_var.clamp(max=3)),
+                scipy.stats.lognorm(s=positive_var.clamp(max=3), scale=random_var.exp())
             ),
             (
-                Multinomial(10, random_var),
-                scipy.stats.multinomial(10, random_var / random_var.sum())
+                Multinomial(10, simplex_tensor),
+                scipy.stats.multinomial(10, simplex_tensor)
             ),
             (
-                Normal(random_var, random_var),
-                scipy.stats.norm(random_var, random_var)
+                Normal(random_var, positive_var2),
+                scipy.stats.norm(random_var, positive_var2)
             ),
             (
-                Pareto(random_var, 2 + random_var),
-                scipy.stats.pareto(2 + random_var, scale=random_var)
+                Pareto(positive_var, 2 + positive_var2),
+                scipy.stats.pareto(2 + positive_var2, scale=positive_var)
             ),
             (
-                Poisson(random_var),
-                scipy.stats.poisson(random_var)
+                Poisson(positive_var),
+                scipy.stats.poisson(positive_var)
             ),
             (
-                StudentT(2 + random_var, random_var, random_var),
-                scipy.stats.t(2 + random_var, random_var, random_var)
+                StudentT(2 + positive_var, random_var, positive_var2),
+                scipy.stats.t(2 + positive_var, random_var, positive_var2)
             ),
             (
-                Uniform(random_var, 2 * random_var),
-                scipy.stats.uniform(random_var, random_var)
+                Uniform(random_var, random_var + positive_var),
+                scipy.stats.uniform(random_var, positive_var)
             )
         ]
 
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True)
+            self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
     def test_variance(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Multinomial):
-                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()))
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
             else:
-                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True)
+                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
 
 
 class TestTransforms(TestCase):
