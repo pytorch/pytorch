@@ -562,6 +562,9 @@
 - name: squeeze(Tensor self, int64_t dim)
   self: unsqueeze_to(grad, dim, self.sizes())
 
+- name: squeeze(Tensor self, IntList dims)
+  self: maybe_unsqueeze(grad, dims, self)
+
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)
 
@@ -628,6 +631,9 @@
 
 - name: unsqueeze(Tensor self, int64_t dim)
   self: grad.squeeze(dim)
+
+- name: unsqueeze(Tensor self, IntList dims)
+  self: grad.squeeze(dims)
 
 - name: var(Tensor self, bool unbiased)
   self: var_backward(grad, self, unbiased)

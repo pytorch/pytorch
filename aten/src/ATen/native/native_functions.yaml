@@ -274,7 +274,11 @@
 
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
 
+- func: squeeze(Tensor self, IntList dims) -> Tensor
+
 - func: squeeze_(Tensor self) -> Tensor
+
+- func: squeeze_(Tensor self, IntList dims) -> Tensor
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
 
@@ -295,7 +299,11 @@
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
 
+- func: unsqueeze(Tensor self, IntList dims) -> Tensor
+
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: unsqueeze_(Tensor self, IntList dims) -> Tensor
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
 

@@ -2360,9 +2360,12 @@ method_tests = [
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
     ('squeeze', (1,), (0,), '1d_dim0', [0]),
+    ('squeeze', (S, 1, S, 1), (dont_convert([1, 3]),), 'multi'),
+    ('squeeze', (S, 1, S, 1), (dont_convert([1, 2]),), 'multi_not_1'),
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
+    ('unsqueeze', (S, S, S), (dont_convert([0, 1]),), 'multi'),
     ('chunk', (S, S, S), (2,)),
     ('chunk', (S, S, S), (S, 1), 'dim', [1]),
     ('split', (S, S, S), (2,)),
@@ -2490,6 +2493,12 @@ def exclude_tensor_method(name, test_name):
         'test_clamp_min',
         'test_clamp_max',
         'test_slice',
+        'test_squeeze_multi',
+        'test_squeeze_multi_neg0',
+        'test_squeeze_multi_not_1',
+        'test_squeeze_multi_not_1_neg0',
+        'test_unsqueeze_multi',
+        'test_unsqueeze_multi_neg0',
         'test_where',
         'test_where_broadcast_all',
     }
@@ -2570,6 +2579,13 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
         test_case.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
         test_case.assertTrue(self_variable.size() == self_variable.grad.size())
 
+
+def _create_copy(x):
+    if x is None or isinstance(x, dont_convert):
+        return x
+    return x + 0
+
+
 for test in method_tests:
     name, self_size, args = test[:3]
     basic_test_name = 'test_' + name
@@ -2641,11 +2657,11 @@ for test in method_tests:
                         if not isinstance(output_variable, tuple):
                             output_variable = (output_variable,)
                         inplace_self_variable = deepcopy(self_variable)
-                        inplace_self_variable_copy = tuple(i + 0 if i is not None else None
-                                                           for i in (inplace_self_variable,))
+                        inplace_self_variable_copy = tuple(
+                            [_create_copy(inplace_self_variable)])
                         inplace_args_variable = deepcopy(args_variable)
-                        inplace_args_variable_copy = tuple(i + 0 if i is not None else None
-                                                           for i in inplace_args_variable)
+                        inplace_args_variable_copy = tuple(
+                            map(_create_copy, inplace_args_variable))
 
                         inplace_output_variable = (
                             getattr(inplace_self_variable_copy[0], inplace_name)(*inplace_args_variable_copy))

@@ -370,6 +370,22 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   return self;
 }
 
+Tensor maybe_unsqueeze(const Tensor & self, IntList dims, const Tensor & input) {
+  if (input.sizes().size() > 1) {
+    std::vector<int64_t> filtered_dims;
+    for (int64_t dim : dims) {
+      // Have to use input before squeezing.
+      if (input.size(dim) == 1) {
+        filtered_dims.push_back(dim);
+      }
+    }
+    if (!filtered_dims.empty()) {
+      return self.unsqueeze(filtered_dims);
+    }
+  }
+  return self;
+}
+
 variable_list cat_tensors_backward(const Tensor & grad, const std::vector<int64_t> &sizes, int64_t dim) {
   variable_list grad_inputs(sizes.size());
   int64_t accumulate = 0;

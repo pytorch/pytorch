@@ -1,3 +1,5 @@
+#include <vector>
+
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
@@ -219,12 +221,21 @@ inferSqueezeGeometry(const Tensor &tensor) {
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
-inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
+inferSqueezeGeometry(const Tensor& tensor, const IntList& dim_list) {
+  if (tensor.dim() == 0) {
+    throw std::runtime_error("cannot squeeze tensor without dimensions");
+  }
+
+  std::vector<bool> squeeze_mask(tensor.dim());
+  for (size_t i = 0; i < dim_list.size(); ++i) {
+    const int64_t d = maybe_wrap_dim(dim_list[i], tensor.dim());
+    if (tensor.sizes()[d] == 1) squeeze_mask[d] = true;
+  }
+
   std::vector<int64_t> sizes;
   std::vector<int64_t> strides;
-
   for(int64_t d = 0; d < tensor.dim(); d++) {
-    if(d != dim || tensor.sizes()[dim] != 1) {
+    if (!squeeze_mask[d]) {
       sizes.push_back(tensor.sizes()[d]);
       strides.push_back(tensor.strides()[d]);
     }
@@ -233,17 +244,41 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
-inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
+inferUnsqueezeGeometry(const Tensor& tensor, const IntList& dims) {
   if (tensor.numel() == 0) {
     throw std::runtime_error("cannot unsqueeze empty tensor");
   }
 
-  std::vector<int64_t> sizes(tensor.sizes());
-  std::vector<int64_t> strides(tensor.strides());
-  int64_t new_stride = dim >= tensor.dim() - 1 ? 1 : sizes[dim] * strides[dim];
-  sizes.insert(sizes.begin() + dim, 1);
-  strides.insert(strides.begin() + dim, new_stride);
+  // Note the dims could refer to positions outside the dimensionality of the
+  // tensor. E.g., for a tensor of shape {2, 2} dims={2, 3, 4} is valid.
+  // In general, the behavior of unsqueeze is defined by behavior of squeeze
+  // in a sense, that t.unsqeeze(dims).squeeze(dims) must end up in t for all
+  // possible dims.
+  std::vector<bool> unsqueeze_mask(dims.size() + tensor.dim());
+  for (size_t i = 0; i < dims.size(); ++i) {
+    const uint64_t dim = maybe_wrap_dim(dims[i], unsqueeze_mask.size());
+    if (unsqueeze_mask[dim]) {
+      throw std::runtime_error("unsqueeze dims must be unique");
+    }
+    unsqueeze_mask[dim] = true;
+  }
 
+  std::vector<int64_t> sizes, strides;
+  sizes.reserve(unsqueeze_mask.size());
+  strides.reserve(unsqueeze_mask.size());
+  for (size_t i = 0, read_index = 0; i < unsqueeze_mask.size(); ++i) {
+    if (unsqueeze_mask[i]) {
+      sizes.push_back(1);
+      strides.push_back(read_index >= static_cast<size_t>(tensor.dim())
+                            ? 1
+                            : tensor.sizes()[read_index] *
+                                  tensor.strides()[read_index]);
+    } else {
+      sizes.push_back(tensor.sizes()[read_index]);
+      strides.push_back(tensor.strides()[read_index]);
+      ++read_index;
+    }
+  }
   return std::make_tuple(sizes, strides);
 }
 
@@ -252,15 +287,18 @@ Tensor squeeze(const Tensor& self) {
   return self.as_strided(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor squeeze(const Tensor& self, int64_t dim) {
-  int64_t dims = self.dim();
-  dim = maybe_wrap_dim(dim, dims);
-
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided(self.sizes().vec(), self.strides().vec());
-  }
-  auto g = inferSqueezeGeometry(self, dim);
+Tensor squeeze(const Tensor& self, IntList dims) {
+  if (self.dim() == 0) return self;
+  auto g = inferSqueezeGeometry(self, dims);
   return self.as_strided(std::get<0>(g), std::get<1>(g));
+}
+
+Tensor squeeze(const Tensor& self, int64_t dim) {
+  return at::native::squeeze(self, IntList(&dim, 1));
+}
+
+Tensor & squeeze_(Tensor& self, int64_t dim) {
+  return at::native::squeeze_(self, IntList(&dim, 1));
 }
 
 Tensor & squeeze_(Tensor& self) {
@@ -268,35 +306,33 @@ Tensor & squeeze_(Tensor& self) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
-Tensor & squeeze_(Tensor& self, int64_t dim) {
-  int64_t dims = self.dim();
-  dim = maybe_wrap_dim(dim, self.dim());
-
-  if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided_(self.sizes().vec(), self.strides().vec());
-  }
-  auto g = inferSqueezeGeometry(self, dim);
+Tensor & squeeze_(Tensor& self, IntList dims) {
+  if (self.dim() == 0) return self;
+  auto g = inferSqueezeGeometry(self, dims);
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
-  dim = maybe_wrap_dim(dim, self.dim() + 1);
-
-  auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided(std::get<0>(g), std::get<1>(g));
+  return at::native::unsqueeze(self, IntList(&dim, 1));
 }
 
 Tensor & unsqueeze_(Tensor& self, int64_t dim) {
-  dim = maybe_wrap_dim(dim, self.dim() + 1);
-
-  auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return at::native::unsqueeze_(self, IntList(&dim, 1));
 }
 
+Tensor unsqueeze(const Tensor& self, IntList dims) {
+  auto g = inferUnsqueezeGeometry(self, dims);
+  return self.as_strided(std::get<0>(g), std::get<1>(g));
+}
+
+Tensor & unsqueeze_(Tensor& self, IntList dims) {
+  auto g = inferUnsqueezeGeometry(self, dims);
+  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+}
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }
 
-}
-}
+}  // namespace native
+}  // namespace at

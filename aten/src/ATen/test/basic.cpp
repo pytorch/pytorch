@@ -144,16 +144,166 @@ static void test(Type & type) {
 
   {
     std::cout << "squeeze:" << std::endl;
-    Tensor a = type.rand({2, 1});
-    std::cout << a << std::endl;
-    Tensor b = squeeze(a);
-    ASSERT(b.dim() == 1);
-    std::cout << b << std::endl;
-    a = type.rand({1});
-    std::cout << a << std::endl;
-    b = squeeze(a);
-    //TODO 0-dim squeeze
-    std::cout << b << std::endl;
+
+    {
+      const Tensor a = type.rand({2, 1});
+      std::cout << a << std::endl;
+      const Tensor b = squeeze(a);
+      ASSERT(b.dim() == 1);
+      std::cout << b << std::endl;
+    }
+    {
+      const Tensor a = type.rand({2, 1, 2, 1});
+      std::cout << a << std::endl;
+      const Tensor b = squeeze(a, 2);
+      ASSERT(b.dim() == 4);
+      std::cout << b << std::endl;
+    }
+    {
+      const Tensor a = type.rand({1});
+      std::cout << a << std::endl;
+      const Tensor b = squeeze(a);
+      //TODO 0-dim squeeze
+      std::cout << b << std::endl;
+    }
+  }
+
+  {
+    std::cout << "squeeze list:" << std::endl;
+    const Tensor a = type.rand({2, 1, 1});
+    std::cout << "a: " << a << std::endl;
+    {
+      Tensor b = squeeze(a, {1});
+      std::cout << "a.squeze({1}): " << b << std::endl;
+      ASSERT(b.dim() == 2);
+    }
+    {
+      Tensor b = squeeze(a, {1, 2});
+      std::cout << "a.squeze({1, 2}): " << b << std::endl;
+      ASSERT(b.dim() == 1);
+    }
+    {
+      Tensor b = squeeze(a, {1, 0});
+      std::cout << "a.squeze({1, 0}): " << b << std::endl;
+      ASSERT(b.dim() == 2);
+    }
+    {
+      Tensor b = squeeze(a, {1, -1});
+      std::cout << "a.squeze({1, -1}): " << b << std::endl;
+      ASSERT(b.dim() == 1);
+    }
+    {
+      Tensor b = squeeze(a, {});
+      std::cout << "a.squeze({}): " << b << std::endl;
+      ASSERT(b.dim() == 3);
+    }
+  }
+
+  {
+    std::cout << "squeeze list in place:" << std::endl;
+    Tensor a = type.rand({2, 1, 1});
+    std::cout << "a: " << a << std::endl;
+    a.squeeze_({1, 2});
+    std::cout << "a.squeeze_({1, 2}): " << a << std::endl;
+    ASSERT(a.dim() == 1);
+  }
+
+  {
+    std::cout << "unsqueeze:" << std::endl;
+    const Tensor a = type.rand({2, 3});
+    std::cout << "a: " << a << std::endl;
+    {
+      Tensor b = unsqueeze(a, 1);
+      std::cout << "a.unsqueeze(1): " << b << std::endl;
+      ASSERT(b.dim() == 3);
+      ASSERT(b.sizes()[0] == 2);
+      ASSERT(b.sizes()[1] == 1);
+      ASSERT(b.sizes()[2] == 3);
+      ASSERT_EQUAL(a, squeeze(b, 1));
+    }
+    {
+      Tensor b = unsqueeze(a, -2);
+      std::cout << "a.unsqueeze(-2): " << b << std::endl;
+      ASSERT(b.dim() == 3);
+      ASSERT(b.sizes()[0] == 2);
+      ASSERT(b.sizes()[1] == 1);
+      ASSERT(b.sizes()[2] == 3);
+      ASSERT_EQUAL(a, squeeze(b, -2));
+    }
+  }
+
+  {
+    std::cout << "unsqueeze list:" << std::endl;
+    const Tensor a = type.rand({2, 3, 4});
+    std::cout << "a: " << a << std::endl;
+    {
+      const int64_t dims = 1;
+      Tensor b = unsqueeze(a, dims);
+      std::cout << "a.unsqueeze({1}): " << b << std::endl;
+      ASSERT(b.dim() == 4);
+      ASSERT(b.sizes()[0] == 2);
+      ASSERT(b.sizes()[1] == 1);
+      ASSERT(b.sizes()[2] == 3);
+      ASSERT(b.sizes()[3] == 4);
+      ASSERT_EQUAL(a, squeeze(b, dims));
+    }
+    {
+      const int64_t dims[] = {1};
+      Tensor b = unsqueeze(a, dims);
+      std::cout << "a.unsqueeze({1}): " << b << std::endl;
+      ASSERT(b.dim() == 4);
+      ASSERT(b.sizes()[0] == 2);
+      ASSERT(b.sizes()[1] == 1);
+      ASSERT(b.sizes()[2] == 3);
+      ASSERT(b.sizes()[3] == 4);
+      ASSERT_EQUAL(a, squeeze(b, dims));
+    }
+    {
+      const int64_t dims[] = {1, 2};
+      Tensor b = unsqueeze(a, dims);
+      std::cout << "a.unsqueeze({1, 2}): " << b << std::endl;
+      ASSERT(b.dim() == 5);
+      ASSERT(b.sizes()[0] == 2);
+      ASSERT(b.sizes()[1] == 1);
+      ASSERT(b.sizes()[2] == 1);
+      ASSERT(b.sizes()[3] == 3);
+      ASSERT(b.sizes()[4] == 4);
+      ASSERT_EQUAL(a, squeeze(b, dims));
+    }
+    {
+      const int64_t dims[] = {-2, -1};
+      Tensor b = unsqueeze(a, dims);
+      std::cout << "a.unsqueeze({-2, -1}): " << b << std::endl;
+      ASSERT(b.dim() == 5);
+      ASSERT(b.sizes()[0] == 2);
+      ASSERT(b.sizes()[1] == 3);
+      ASSERT(b.sizes()[2] == 4);
+      ASSERT(b.sizes()[3] == 1);
+      ASSERT(b.sizes()[4] == 1);
+      ASSERT_EQUAL(a, squeeze(b, dims));
+    }
+    {
+      IntList dims({});
+      Tensor b = unsqueeze(a, dims);
+      std::cout << "a.unsqueeze({}): " << b << std::endl;
+      ASSERT(b.dim() == 3);
+      ASSERT_EQUAL(a, squeeze(b, dims));
+    }
+  }
+
+  {
+    std::cout << "unsqueeze list in place:" << std::endl;
+    Tensor a = type.rand({2, 3, 4});
+    std::cout << "a: " << a << std::endl;
+    const int64_t dims[] = {3, 4};
+    a.unsqueeze_(dims);
+    std::cout << "a.unsqueze_({3, 4}): " << a << std::endl;
+    ASSERT(a.dim() == 5);
+    ASSERT(a.sizes()[0] == 2);
+    ASSERT(a.sizes()[1] == 3);
+    ASSERT(a.sizes()[2] == 4);
+    ASSERT(a.sizes()[3] == 1);
+    ASSERT(a.sizes()[4] == 1);
   }
 
   {
