@@ -99,11 +99,10 @@ endif()
 
 # ---[ Google-glog
 if(USE_GLOG)
-  find_package(Glog)
-  if(GLOG_FOUND)
+  include(cmake/public/glog.cmake)
+  if (TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
-    caffe2_include_directories(${GLOG_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${GLOG_LIBRARIES})
+    list(APPEND Caffe2_DEPENDENCY_LIBS glog::glog)
   else()
     message(WARNING
         "glog is not found. Caffe2 will build without glog support but it is "
@@ -112,6 +111,7 @@ if(USE_GLOG)
     set(USE_GLOG OFF)
   endif()
 endif()
+
 
 # ---[ Googletest and benchmark
 if(BUILD_TEST)

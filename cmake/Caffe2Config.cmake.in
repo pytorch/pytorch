@@ -24,6 +24,20 @@ if (@USE_GFLAGS@)
   endif()
 endif()
 
+# Depending on whether Caffe2 uses glog during compile time or
+# not, invoke glog.
+if (@USE_GLOG@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake")
+  if (NOT TARGET glog::glog)
+    message(FATAL_ERROR
+        "Your installed Caffe2 version uses glog but the glog library "
+        "cannot be found. Did you accidentally remove it, or have you set "
+        "the right CMAKE_PREFIX_PATH and/or GFLAGS_ROOT_DIR? If you do not "
+        "have glog, you will need to install glog and set the library "
+        "path accordingly.")
+  endif()
+endif()
+
 # import targets
 include ("${CMAKE_CURRENT_LIST_DIR}/Caffe2Targets.cmake")
 
