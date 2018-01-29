@@ -94,14 +94,14 @@ std::shared_ptr<${op}> grad_fn;
 """)
 
 SETUP_DERIVATIVE = CodeTemplate("""\
-if (compute_requires_grad({ ${args_with_derivatives} })) {
+if (compute_requires_grad( ${args_with_derivatives} )) {
   ${setup}
 }
 """)
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
 grad_fn = std::make_shared<${op}>(${op_ctor});
-grad_fn->next_functions = compute_next_functions({ ${args_with_derivatives} });
+grad_fn->next_functions = compute_next_functions( ${args_with_derivatives} );
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
@@ -238,6 +238,9 @@ def emit_body(declaration):
         setup.extend(ASSIGN_GRAD_FN.substitute(env).split('\n'))
         if func is not None:
             setup.extend(save_variables(func['saved_inputs'], False))
+            for arg in func['args_with_gradients']:
+                if arg['type'] == 'TensorList':
+                    setup.append("grad_fn->{}_size_ = {}.size();".format(arg['name'], arg['name']))
 
         body = []
         body.extend(emit_check_no_requires_grad(differentiable_inputs, args_with_derivatives))
@@ -495,6 +498,8 @@ def unpack_args(env, declaration):
             return '_opt'
         elif dynamic_type == 'IndexTensor':
             return '_long'
+        elif dynamic_type == 'IntegerTensor':
+            return '_int'
         elif dynamic_type == 'BoolTensor':
             return '_byte'
         else:

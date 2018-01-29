@@ -1,13 +1,20 @@
 #pragma once
 
-#include <memory>
-#include <mutex>
 #include "ATen/ATenGeneral.h"
 #include "ATen/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
 
+#include <memory>
+#include <mutex>
+#include <cstdint>
+
+// Forwarde declare these CUDA types here to avoid including CUDA headers in
+// ATen headers, which would make ATen always require CUDA to build.
 struct THCState;
+struct CUstream_st;
+typedef struct CUstream_st *cudaStream_t;
+struct cudaDeviceProp;
 
 namespace at {
 
@@ -45,10 +52,10 @@ public:
     });
     return thc_state;
   }
-#if AT_CUDA_ENABLED()
+
   cudaStream_t getCurrentCUDAStream() const;
-  struct cudaDeviceProp* getCurrentDeviceProperties() const;
-#endif
+  cudaDeviceProp* getCurrentDeviceProperties() const;
+
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about
   // whether or not CuDNN is actually usable.  Use cudnn_is_acceptable

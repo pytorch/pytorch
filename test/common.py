@@ -378,6 +378,8 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
+        # assertRegexpMatches renamed assertRegex in 3.2
+        assertRegex = unittest.TestCase.assertRegexpMatches
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 

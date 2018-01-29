@@ -31,14 +31,23 @@ from random import shuffle
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck, variable
-from torch.distributions import Distribution, ExponentialFamily
-from torch.distributions import (Bernoulli, Beta, Binomial, Categorical, Cauchy, Chi2,
-                                 Dirichlet, Exponential, FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, Laplace, Normal, OneHotCategorical, Multinomial,
-                                 Pareto, Poisson, StudentT, Uniform, kl_divergence)
+from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
+                                 Cauchy, Chi2, Dirichlet, Distribution,
+                                 Exponential, ExponentialFamily, 
+                                 FisherSnedecor, Gamma, Geometric,
+                                 Gumbel, Laplace, LogNormal, Multinomial,
+                                 Normal, OneHotCategorical, Pareto, Poisson,
+                                 StudentT, Uniform, constraints, kl_divergence)
 from torch.distributions.kl import _kl_expfamily_expfamily
-from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.constraints import Constraint, is_dependent
+from torch.distributions.dirichlet import _Dirichlet_backward
+from torch.distributions.transforms import (AbsTransform, AffineTransform,
+                                            BoltzmannTransform,
+                                            ComposeTransform, ExpTransform,
+                                            LowerCholeskyTransform,
+                                            SigmoidTransform,
+                                            StickBreakingTransform,
+                                            identity_transform)
 from torch.distributions.utils import _finfo, probs_to_logits
 
 TEST_NUMPY = True
@@ -166,6 +175,20 @@ EXAMPLES = [
         {
             'loc': Variable(torch.Tensor([1.0, 0.0])),
             'scale': Variable(torch.Tensor([1e-5, 1e-5])),
+        },
+    ]),
+    Example(LogNormal, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'loc': torch.Tensor([1.0, 0.0]),
+            'scale': torch.Tensor([1e-5, 1e-5]),
         },
     ]),
     Example(Normal, [
@@ -666,6 +689,51 @@ class TestDistributions(TestCase):
         self.assertEqual(scale.grad, eps)
         loc.grad.zero_()
         scale.grad.zero_()
+
+    def test_lognormal(self):
+        mean = Variable(torch.randn(5, 5), requires_grad=True)
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        mean_1d = Variable(torch.randn(1), requires_grad=True)
+        std_1d = Variable(torch.randn(1), requires_grad=True)
+        mean_delta = torch.Tensor([1.0, 0.0])
+        std_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(LogNormal(mean, std).sample().size(), (5, 5))
+        self.assertEqual(LogNormal(mean, std).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(LogNormal(mean_1d, std_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(LogNormal(mean_1d, std_1d).sample().size(), (1,))
+        self.assertEqual(LogNormal(0.2, .6).sample_n(1).size(), (1,))
+        self.assertEqual(LogNormal(-0.7, 50.0).sample_n(1).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        set_rng_seed(1)
+        self.assertEqual(LogNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[math.exp(1), 1.0], [math.exp(1), 1.0]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(LogNormal, (mean, std))
+        self._gradcheck_log_prob(LogNormal, (mean, 1.0))
+        self._gradcheck_log_prob(LogNormal, (0.0, std))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lognormal_logprob(self):
+        mean = Variable(torch.randn(5, 1), requires_grad=True)
+        std = Variable(torch.randn(5, 1).abs(), requires_grad=True)
+
+        def ref_log_prob(idx, x, log_prob):
+            m = mean.data.view(-1)[idx]
+            s = std.data.view(-1)[idx]
+            expected = scipy.stats.lognorm(s=s, scale=math.exp(m)).logpdf(x)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(LogNormal(mean, std), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lognormal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            self._check_sampler_sampler(LogNormal(mean, std),
+                                        scipy.stats.lognorm(scale=math.exp(mean), s=std),
+                                        'LogNormal(loc={}, scale={})'.format(mean, std))
 
     def test_normal(self):
         loc = Variable(torch.randn(5, 5), requires_grad=True)
@@ -1422,7 +1490,7 @@ class TestDistributionShapes(TestCase):
                 dist = Dist(**param)
                 try:
                     actual_shape = dist.entropy().size()
-                    expected_shape = dist._batch_shape if dist._batch_shape else torch.Size(SCALAR_SHAPE)
+                    expected_shape = dist.batch_shape if dist.batch_shape else torch.Size(SCALAR_SHAPE)
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
                         Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
@@ -1719,7 +1787,7 @@ class TestKL(TestCase):
             def __init__(self, probs):
                 super(Binomial30, self).__init__(30, probs)
 
-        # These are pairs of distributions with 4 x 4 paramters as specified.
+        # These are pairs of distributions with 4 x 4 parameters as specified.
         # The first of the pair e.g. bernoulli[0] varies column-wise and the second
         # e.g. bernoulli[1] varies row-wise; that way we test all param pairs.
         bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
@@ -1730,8 +1798,10 @@ class TestKL(TestCase):
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
+        lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
+        poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
@@ -1752,6 +1822,7 @@ class TestKL(TestCase):
         self.samples_per_batch = int(1e04)
         self.finite_examples = [
             (bernoulli, bernoulli),
+            (bernoulli, poisson),
             (beta, beta),
             (beta, chi2),
             (beta, exponential),
@@ -1776,12 +1847,14 @@ class TestKL(TestCase):
             (gumbel, gumbel),
             (gumbel, normal),
             (laplace, laplace),
+            (lognormal, lognormal),
             (laplace, normal),
             (normal, gumbel),
             (normal, normal),
             (pareto, chi2),
             (pareto, exponential),
             (pareto, gamma),
+            (poisson, poisson),
             (uniform_within_unit, beta),
             (uniform_positive, chi2),
             (uniform_positive, exponential),
@@ -1829,6 +1902,8 @@ class TestKL(TestCase):
             (Pareto(2, 1), Gamma(3, 4)),
             (Pareto(1, 2), Normal(-3, 4)),
             (Pareto(1, 2), Pareto(3, 4)),
+            (Poisson(2), Bernoulli(0.5)),
+            (Poisson(2.3), Binomial(10, 0.2)),
             (Uniform(-1, 1), Beta(2, 2)),
             (Uniform(0, 2), Beta(3, 4)),
             (Uniform(-1, 2), Beta(3, 4)),
@@ -2133,6 +2208,165 @@ class TestLazyLogitsInitialization(TestCase):
                 self.assertFalse('logits' in vars(dist), msg=message)
                 batch_shape, event_shape = dist.batch_shape, dist.event_shape
                 self.assertFalse('logits' in vars(dist), msg=message)
+
+
+class TestTransforms(TestCase):
+    def setUp(self):
+        self.transforms = []
+        transforms_by_cache_size = {}
+        for cache_size in [0, 1]:
+            transforms = [
+                AbsTransform(cache_size=cache_size),
+                ExpTransform(cache_size=cache_size),
+                SigmoidTransform(cache_size=cache_size),
+                AffineTransform(Variable(torch.Tensor(5).normal_()),
+                                Variable(torch.Tensor(5).normal_()),
+                                cache_size=cache_size),
+                AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                                Variable(torch.Tensor(4, 5).normal_()),
+                                cache_size=cache_size),
+                BoltzmannTransform(cache_size=cache_size),
+                StickBreakingTransform(cache_size=cache_size),
+                LowerCholeskyTransform(cache_size=cache_size),
+                ComposeTransform([
+                    AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                                    Variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
+                ]),
+                ComposeTransform([
+                    AffineTransform(Variable(torch.Tensor(4, 5).normal_()),
+                                    Variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
+                    ExpTransform(cache_size=cache_size),
+                ]),
+            ]
+            for t in transforms[:]:
+                transforms.append(t.inv)
+            transforms.append(identity_transform)
+            self.transforms += transforms
+            if cache_size == 0:
+                self.unique_transforms = transforms[:]
+
+    def _generate_data(self, transform):
+        domain = transform.domain
+        codomain = transform.codomain
+        x = torch.Tensor(4, 5)
+        if domain is constraints.lower_cholesky or codomain is constraints.lower_cholesky:
+            x = torch.Tensor(6, 6)
+            x = x.normal_()
+            return x
+        elif domain is constraints.real:
+            return x.normal_()
+        elif domain is constraints.positive:
+            return x.normal_().exp()
+        elif domain is constraints.unit_interval:
+            return x.uniform_()
+        elif domain is constraints.simplex:
+            x = x.normal_().exp()
+            x /= x.sum(-1, True)
+            return x
+        raise ValueError('Unsupported domain: {}'.format(domain))
+
+    def test_inv_inv(self):
+        for t in self.transforms:
+            self.assertTrue(t.inv.inv is t)
+
+    def test_equality(self):
+        transforms = self.unique_transforms
+        for x, y in product(transforms, transforms):
+            if x is y:
+                self.assertTrue(x == y)
+                self.assertFalse(x != y)
+            else:
+                self.assertFalse(x == y)
+                self.assertTrue(x != y)
+
+        self.assertTrue(identity_transform == identity_transform.inv)
+        self.assertFalse(identity_transform != identity_transform.inv)
+
+    def test_forward_inverse_cache(self):
+        for transform in self.transforms:
+            x = Variable(self._generate_data(transform), requires_grad=True)
+            try:
+                y = transform(x)
+            except NotImplementedError:
+                continue
+            x2 = transform.inv(y)  # should be implemented at least by caching
+            y2 = transform(x2)  # should be implemented at least by caching
+            if transform.bijective:
+                # verify function inverse
+                self.assertEqual(x2, x, message='\n'.join([
+                    '{} t.inv(t(-)) error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
+                ]))
+            else:
+                # verify weaker function pseudo-inverse
+                self.assertEqual(y2, y, message='\n'.join([
+                    '{} t(t.inv(t(-))) error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
+                    'y2 = t(x2) = {}'.format(y2),
+                ]))
+
+    def test_forward_inverse_no_cache(self):
+        for transform in self.transforms:
+            x = Variable(self._generate_data(transform), requires_grad=True)
+            try:
+                y = transform(x)
+                x2 = transform.inv(y.clone())  # bypass cache
+                y2 = transform(x2)
+            except NotImplementedError:
+                continue
+            if transform.bijective:
+                # verify function inverse
+                self.assertEqual(x2, x, message='\n'.join([
+                    '{} t.inv(t(-)) error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
+                ]))
+            else:
+                # verify weaker function pseudo-inverse
+                self.assertEqual(y2, y, message='\n'.join([
+                    '{} t(t.inv(t(-))) error'.format(transform),
+                    'x = {}'.format(x),
+                    'y = t(x) = {}'.format(y),
+                    'x2 = t.inv(y) = {}'.format(x2),
+                    'y2 = t(x2) = {}'.format(y2),
+                ]))
+
+    def test_univariate_forward_jacobian(self):
+        for transform in self.transforms:
+            x = Variable(self._generate_data(transform), requires_grad=True)
+            try:
+                y = transform(x)
+                actual = transform.log_abs_det_jacobian(x, y)
+            except NotImplementedError:
+                continue
+            expected = torch.abs(grad([y.sum()], [x])[0]).log()
+            self.assertEqual(actual, expected, message='\n'.join([
+                'Bad {}.log_abs_det_jacobian() disagrees with ()'.format(transform),
+                'Expected: {}'.format(expected),
+                'Actual: {}'.format(actual),
+            ]))
+
+    def test_univariate_inverse_jacobian(self):
+        for transform in self.transforms:
+            y = Variable(self._generate_data(transform.inv), requires_grad=True)
+            try:
+                x = transform.inv(y)
+                actual = transform.log_abs_det_jacobian(x, y)
+            except NotImplementedError:
+                continue
+            expected = -torch.abs(grad([x.sum()], [y])[0]).log()
+            self.assertEqual(actual, expected, message='\n'.join([
+                '{}.log_abs_det_jacobian() disagrees with .inv()'.format(transform),
+                'Expected: {}'.format(expected),
+                'Actual: {}'.format(actual),
+            ]))
 
 
 if __name__ == '__main__':
