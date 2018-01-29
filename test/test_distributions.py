@@ -33,7 +33,7 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
-                                 Exponential, ExponentialFamily, 
+                                 Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
