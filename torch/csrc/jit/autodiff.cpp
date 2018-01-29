@@ -10,11 +10,17 @@ namespace torch { namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-Value* addAndPutAfter(Value *a, Value *b, Node *node) {
-  Graph *graph = node->owningGraph();
+// Creates a node for a + b and puts it after the given node.
+// If node is a null pointer, appends that node at the end of the node list.
+Value* addValues(Value *a, Value *b, Node *node = nullptr) {
+  Graph *graph = a->node()->owningGraph();
   Node *add_node = graph->create(kadd, {a, b})
                         ->t_(kalpha, at::Scalar(1).toTensor());
-  add_node->insertAfter(node);
+  if (node) {
+    add_node->insertAfter(node);
+  } else {
+    graph->appendNode(add_node);
+  }
   Value *add_output = add_node->output();
   add_output->setType(a->typeOption());
   return add_output;
@@ -121,21 +127,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   };
   const auto set_grad = [&](Value *x, Value *dx) {
     if (Value * prev_grad = grad_map[x]) {
-      // NB: unique() gives us correct topological ordering within values created inside
-      // this function. This is necessary, because not every gradientForNode produces new
-      // values (e.g. for add). Consider this graph (%_ is a value that doesn't require grad):
-      //   %1 = add(%_, %0)
-      //   %2 = mul(%1, %0)
-      //   %3 = add(%2, %_)
-      // Now, assume that vjp of %3 is %d3 (I won't be using SSA anymore for simplicity):
-      //   %d2  = %d3
-      //   %d1  = mul(%d2, %0)
-      //   %d0  = mul(%d2, %1)
-      //   %d0 += %d1           <- %d1 was created *before* previous value of %d0,
-      //                           so inserting after dx (== %d1) node will violate
-      //                           topological order.
-      Node * later_node = dx->unique() > prev_grad->unique() ? dx->node() : prev_grad->node();
-      Value * new_grad = addAndPutAfter(prev_grad, dx, later_node);
+      Value * new_grad = addValues(prev_grad, dx);
       grad_map[x] = new_grad;
     } else {
       grad_map[x] = dx;
@@ -314,7 +306,7 @@ static void lambdaLiftReverse(Graph& graph,
     // This is quite weird because we can't first make a sum and then replace all uses
     // of tmp_vjp_prev (that would replace its use in the sum too!), so we create an
     // incorrect sum that doesn't use prev vjp, replace uses, and fix the sum.
-    Value * new_vjp = addAndPutAfter(tmp_vjp_in, tmp_vjp_in, tmp_vjp_prev->node());
+    Value * new_vjp = addValues(tmp_vjp_in, tmp_vjp_in, tmp_vjp_prev->node());
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
     grad_desc.df_input_vjps.emplace_back(i);
