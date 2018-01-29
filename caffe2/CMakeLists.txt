@@ -99,6 +99,7 @@ add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJ
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
 target_compile_options(caffe2 INTERFACE "-std=c++11")
+target_compile_options(caffe2 PRIVATE "-DCAFFE2_BUILD_MAIN_LIB")
 install(TARGETS caffe2 EXPORT Caffe2Targets DESTINATION lib)
 caffe_add_linker_flag(caffe2 Caffe2_CPU_LINK)
 list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2 Caffe2_PROTO)
@@ -124,13 +125,22 @@ if(USE_CUDA)
   # one cannot use PUBLIC/PRIVATE/INTERFACE for the target anymore. This
   # hack adds the PRIVATE keywords to CUDA_LIBRARIES so we can deal with
   # it.
+
+  #set(__tmp ${CUDA_LIBRARIES})
+  #set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
+  #CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
+  #set(CUDA_LIBRARIES ${__tmp})
+
+  # Note: the above misses transitive cuda dependencies, as we have not
+  # sorted out the interface library for cuda related libs. As a result,
+  # we will first put all CUDA_LIBRARIES as the dependency.
   set(__tmp ${CUDA_LIBRARIES})
-  set(CUDA_LIBRARIES PRIVATE ${CUDA_LIBRARIES})
+  set(CUDA_LIBRARIES PUBLIC ${CUDA_LIBRARIES})
   CUDA_ADD_LIBRARY(caffe2_gpu ${Caffe2_GPU_SRCS})
   set(CUDA_LIBRARIES ${__tmp})
+
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
-  target_compile_options(caffe2 INTERFACE "-std=c++11")
   list(APPEND Caffe2_MAIN_LIBS_ORDER caffe2_gpu)
   add_dependencies(caffe2_gpu Caffe2_PROTO)
   if (BUILD_SHARED_LIBS)

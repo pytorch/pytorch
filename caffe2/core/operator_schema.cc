@@ -247,8 +247,7 @@ OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
       });
 }
 
-OpSchema& OpSchema::CostInferenceFunction(
-    CostInferenceFunctionType&& function) {
+OpSchema& OpSchema::CostInferenceFunction(CostInferenceFunctionType function) {
   cost_inference_function_ =
       caffe2::make_unique<CostInferenceFunctionType>(function);
   return *this;
@@ -271,10 +270,10 @@ OpSchema::Arg(const char* name, const char* description, bool required) {
   return *this;
 }
 
-#define DEFINE_STANDARG_ARG(name, str)                     \
-  const char* OpSchema::Arg_##name = #str;                 \
-  OpSchema& OpSchema::Arg##name(const char* description) { \
-    return Arg(#str, description, true);                   \
+#define DEFINE_STANDARG_ARG(name, str)                                \
+  CAFFE2_API const char* OpSchema::Arg_##name = #str;                 \
+  CAFFE2_API OpSchema& OpSchema::Arg##name(const char* description) { \
+    return Arg(#str, description, true);                              \
   }
 
 DEFINE_STANDARG_ARG(IsTest, is_test)

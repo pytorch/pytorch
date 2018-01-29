@@ -188,7 +188,7 @@ class TypeMeta {
    * is generated during run-time. Do NOT serialize the id for storage.
    */
   template <typename T>
-  CAFFE2_EXPORT static CaffeTypeId Id();
+  CAFFE2_API static CaffeTypeId Id();
 
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
@@ -308,6 +308,23 @@ class TypeMeta {
  *
  * NOTE: the macro needs to be invoked in ::caffe2 namespace
  */
+// Implementation note: in MSVC, we will need to prepend the CAFFE2_EXPORT
+// keyword in order to get things compiled properly. in Linux, gcc seems to
+// create attribute ignored error for explicit template instantiations, see
+//   http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2017/p0537r0.html
+//   https://gcc.gnu.org/bugzilla/show_bug.cgi?id=51930
+// and as a result, we define these two macros slightly differently.
+
+#ifdef _MSC_VER
+#define CAFFE_KNOWN_TYPE(T)                            \
+  template <>                                          \
+  CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {        \
+    static bool type_id_bit[1];                        \
+    static TypeNameRegisterer<T> registerer(           \
+        reinterpret_cast<CaffeTypeId>(type_id_bit));   \
+    return reinterpret_cast<CaffeTypeId>(type_id_bit); \
+  }
+#else // _MSC_VER
 #define CAFFE_KNOWN_TYPE(T)                            \
   template <>                                          \
   CaffeTypeId TypeMeta::Id<T>() {                      \
@@ -316,6 +333,7 @@ class TypeMeta {
         reinterpret_cast<CaffeTypeId>(type_id_bit));   \
     return reinterpret_cast<CaffeTypeId>(type_id_bit); \
   }
+#endif
 
 } // namespace caffe2
 

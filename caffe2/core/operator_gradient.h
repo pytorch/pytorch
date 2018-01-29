@@ -36,10 +36,10 @@ struct GradientWrapper {
   string values_;
 
   inline bool IsDense() const {
-    return dense_.size();
+    return (dense_.size() != 0);
   }
   inline bool IsSparse() const {
-    return (indices_.size() || values_.size());
+    return (indices_.size() != 0 || values_.size() != 0);
   }
   inline bool IsEmpty() const {
     return (!IsDense() && !IsSparse());

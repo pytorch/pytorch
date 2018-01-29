@@ -34,10 +34,10 @@ std::string my_to_string<std::string>(const std::string& value) {
 
 template <typename T>
 void expect_stderr_contains(const std::vector<T>& values) {
-  auto stderr = testing::internal::GetCapturedStderr();
+  std::string captured_stderr = testing::internal::GetCapturedStderr();
   for (const auto& value : values) {
     std::string stringValue = my_to_string(value);
-    EXPECT_TRUE(stderr.find(stringValue) != std::string::npos);
+    EXPECT_TRUE(captured_stderr.find(stringValue) != std::string::npos);
   }
 }
 
@@ -47,7 +47,9 @@ void printTensorAndCheck(const std::vector<T>& values) {
   CPUContext cpuContext;
 
   Tensor<CPUContext> tensor(
-      std::vector<TIndex>{values.size()}, values, &cpuContext);
+      std::vector<TIndex>{static_cast<TIndex>(values.size())},
+      values,
+      &cpuContext);
 
   SmartTensorPrinter::PrintTensor(tensor);
   expect_stderr_contains(values);

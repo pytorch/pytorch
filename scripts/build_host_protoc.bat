@@ -9,6 +9,7 @@
 :: binary at build_host_protoc/bin/protoc.exe.
 
 @echo off
+setlocal
 
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
@@ -23,9 +24,9 @@ cd %CAFFE2_ROOT%\build_host_protoc
 
 if NOT DEFINED CMAKE_GENERATOR (
   if DEFINED APPVEYOR_BUILD_WORKER_IMAGE (
-  	if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (
+    if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2017" (
       set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
-  	) else if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" (
+    ) else if "%APPVEYOR_BUILD_WORKER_IMAGE%" == "Visual Studio 2015" (
       set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
     ) else (
       echo "You made a programming error: unknown APPVEYOR_BUILD_WORKER_IMAGE:"
@@ -33,8 +34,10 @@ if NOT DEFINED CMAKE_GENERATOR (
       exit /b
     )
   ) else (
-  	:: In default we use win64 VS 2017.
-  	set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
+    :: In default we use win64 VS 2015.
+    :: Main reason is that currently, cuda 9 does not support VS 2017 newest
+    :: version. To use cuda you will have to use 2015.
+    set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
   )
 )
 
@@ -56,9 +59,11 @@ cmake --build . --config %CMAKE_BUILD_TYPE% --target INSTALL || goto :label_erro
 
 echo "protobuf built successfully"
 cd %ORIGINAL_DIR%
+endlocal
 exit /b 0
 
 :label_error
 echo "protobuf building failed"
 cd %ORIGINAL_DIR%
+endlocal
 exit /b 1

@@ -15,12 +15,13 @@
  */
 
 #include "caffe2/core/common_gpu.h"
-#include "caffe2/core/asan.h"
 
 #include <atomic>
 #include <cstdlib>
 #include <sstream>
 
+#include "caffe2/core/asan.h"
+#include "caffe2/core/common.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
 
@@ -328,12 +329,11 @@ const char* curandGetErrorString(curandStatus_t error) {
 
 // Turn on the flag g_caffe2_has_cuda_linked to true for HasCudaRuntime()
 // function.
-extern bool g_caffe2_has_cuda_linked;
 namespace {
 class CudaRuntimeFlagFlipper {
  public:
   CudaRuntimeFlagFlipper() {
-    g_caffe2_has_cuda_linked = true;
+    internal::SetCudaRuntimeFlag();
   }
 };
 static CudaRuntimeFlagFlipper g_flipper;

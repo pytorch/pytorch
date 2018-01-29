@@ -141,7 +141,7 @@ class CUDAContext final {
 
   ~CUDAContext() {
     if (curand_generator_) {
-      CURAND_ENFORCE(curandDestroyGenerator(curand_generator_));
+      CURAND_CHECK(curandDestroyGenerator(curand_generator_));
     }
     FinishDeviceComputation();
   }

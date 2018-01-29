@@ -70,7 +70,15 @@ typedef struct CAFFE2_ALIGNED(2) __f16 { uint16_t x; } float16;
 
 // Helpers to avoid using typeinfo with -rtti
 template <typename T>
-bool fp16_type() {
+inline bool fp16_type();
+// explicit instantation for float16 defined in types.cc.
+template <>
+inline bool fp16_type<float16>() {
+  return true;
+}
+// The rest.
+template <typename T>
+inline bool fp16_type() {
   return false;
 }
 

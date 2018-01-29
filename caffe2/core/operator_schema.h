@@ -199,14 +199,17 @@ class OpSchema {
   /**
    * @brief Register the Cost inference function.
    */
-  OpSchema& CostInferenceFunction(CostInferenceFunctionType&& function);
+  OpSchema& CostInferenceFunction(CostInferenceFunctionType function);
 
-#ifdef _MSC_VER
+#if 0 // def _MSC_VER
   /**
    * @brief Register the Cost inference function via a pointer.
    */
-  inline OpSchema& CostInferenceFunction(
-      struct Cost(*func)(const OperatorDef&, const vector<TensorShape>&)) {
+  template <typename T,
+            typename = std::enable_if<
+                std::is_same<CostInferenceFunctionType&&, T>:value
+                >:type>
+  inline OpSchema& CostInferenceFunction(T func) {
     // Note: This is here in order to resolve an MSVC compiler issue: it
     // does not automatically convert a function pointer to a std::function,
     // and needs an explicit conversion.
@@ -217,6 +220,7 @@ class OpSchema {
   bool HasCostInferenceFunction() const {
     return !!cost_inference_function_;
   }
+
   inline struct Cost InferCost(
       const OperatorDef& def,
       const vector<TensorShape>& input_tensor_shape) const {
@@ -253,9 +257,9 @@ class OpSchema {
   OpSchema&
   Arg(const char* name, const char* description, bool required = false);
 
-#define DECLARE_STANDARD_ARG(name, str) \
-  static const char* Arg_##name;        \
-  OpSchema& Arg##name(const char* description);
+#define DECLARE_STANDARD_ARG(name, str)     \
+  CAFFE2_API static const char* Arg_##name; \
+  CAFFE2_API OpSchema& Arg##name(const char* description);
 
   DECLARE_STANDARD_ARG(IsTest, is_test)
 
