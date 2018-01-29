@@ -2263,12 +2263,14 @@ class TestAgainstScipy(TestCase):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
-    def test_variance(self):
+    def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Multinomial):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
             else:
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
 
 
 class TestTransforms(TestCase):
