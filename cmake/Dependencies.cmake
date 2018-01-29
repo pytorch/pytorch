@@ -124,6 +124,10 @@ if(BUILD_TEST)
   set(INSTALL_GTEST OFF)
   # We currently don't need gmock right now.
   set(BUILD_GMOCK OFF)
+  # For Windows, we will check the runtime used is correctly passed in.
+  if (NOT CAFFE2_USE_MSVC_STATIC_RUNTIME)
+    set(gtest_force_shared_crt ON)
+  endif()
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/googletest)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/googletest/googletest/include)
 

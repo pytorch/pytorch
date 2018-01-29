@@ -5,6 +5,7 @@
 :: This script shows how one can build a Caffe2 binary for windows.
 
 @echo off
+setlocal
 
 SET ORIGINAL_DIR=%cd%
 SET CAFFE2_ROOT=%~dp0%..
@@ -29,8 +30,10 @@ if NOT DEFINED CMAKE_GENERATOR (
       exit /b
     )
   ) else (
-    :: In default we use win64 VS 2017.
-    set CMAKE_GENERATOR="Visual Studio 15 2017 Win64"
+    :: In default we use win64 VS 2015.
+    :: Main reason is that currently, cuda 9 does not support VS 2017 newest
+    :: version. To use cuda you will have to use 2015.
+    set CMAKE_GENERATOR="Visual Studio 14 2015 Win64"
   )
 )
 
@@ -49,10 +52,10 @@ cmake .. ^
   -G%CMAKE_GENERATOR% ^
   -DCMAKE_VERBOSE_MAKEFILE=1 ^
   -DBUILD_TEST=OFF ^
-  -DBUILD_SHARED_LIBS=OFF ^
   -DCMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE% ^
   -DUSE_CUDA=%USE_CUDA% ^
   -DUSE_NNPACK=OFF ^
+  -DUSE_CUB=OFF ^
   -DUSE_GLOG=OFF ^
   -DUSE_GFLAGS=OFF ^
   -DUSE_LMDB=OFF ^
@@ -69,9 +72,11 @@ cmake --build . --config %CMAKE_BUILD_TYPE% || goto :label_error
 
 echo "Caffe2 built successfully"
 cd %ORIGINAL_DIR%
+endlocal
 exit /b 0
 
 :label_error
 echo "Caffe2 building failed"
 cd %ORIGINAL_DIR%
+endlocal
 exit /b 1

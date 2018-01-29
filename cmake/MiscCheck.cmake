@@ -108,29 +108,55 @@ cmake_pop_check_state()
 if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
   add_compile_options(
       ##########################################
+      # Protobuf related. Cannot remove.
+      # This is directly copied from
+      #     https://github.com/google/protobuf/blob/master/cmake/README.md
+      ##########################################
+      /wd4018 # 'expression' : signed/unsigned mismatch
+      /wd4065 # (3): switch with default but no case.
+      /wd4146 # unary minus operator applied to unsigned type, result still unsigned
+      /wd4244 # Conversion from 'type1' to 'type2', possible loss of data.
+      /wd4251 # 'identifier' : class 'type' needs to have dll-interface to be used by clients of class 'type2'
+      /wd4267 # Conversion from 'size_t' to 'type', possible loss of data.
+      /wd4305 # 'identifier' : truncation from 'type1' to 'type2'
+      /wd4355 # 'this' : used in base member initializer list
+      /wd4506 # (1): no definition for inline function. Protobuf related.
+      /wd4661 # No suitable definition provided for explicit template instantiation request
+      /wd4800 # 'type' : forcing value to bool 'true' or 'false' (performance warning)
+      /wd4996 # 'function': was declared deprecated
+      ##########################################
       # Third party related. Cannot remove.
       ##########################################
-      /wd4065 # (3): switch with default but no case. Protobuf related.
+      /wd4141 # (1): inline used twice. google benchmark related.
       /wd4503 # (1): decorated name length exceeded, name was truncated.
               #      Eigen related.
-      /wd4506 # (1): no definition for inline function. Protobuf related.
-      /wd4554 # (3)： check operator precedence for possible error.
+      /wd4554 # (3): check operator precedence for possible error.
               # Eigen related.
+      /wd4805 # (1): Unsafe mix of types in gtest/gtest.h. Gtest related.
       ##########################################
-      # These are directly Caffe2 related.
+      # These are directly Caffe2 related. However, several are covered by
+      # protobuf now. We leave them here for documentation purposes only.
       ##########################################
-      /wd4018 # (3): Signed/unsigned mismatch. We've used it in many places of
-              #      the code and it would be hard to correct all.
-      /wd4244 # (2/3/4): Possible loss of precision. Various cases where we
-              #      implicitly cast TIndex to int etc. Need further cleaning.
-      /wd4267 # (3): Conversion of size_t to smaller type. Same reason as 4244.
-      /wd4996 # (3): Use of deprecated POSIX functions. Since we develop
-              #      mainly on Linux, this is ignored.
+      #/wd4018 # (3): Signed/unsigned mismatch. We've used it in many places
+      #        #      of the code and it would be hard to correct all.
+      #/wd4244 # (2/3/4): Possible loss of precision. Various cases where we
+      #        #      implicitly cast TIndex to int etc. Need cleaning.
+      #/wd4267 # (3): Conversion of size_t to smaller type. Same as 4244.
+      #/wd4996 # (3): Use of deprecated POSIX functions. Since we develop
+      #        #      mainly on Linux, this is ignored.
+      /wd4273 # (1): inconsistent dll linkage. This is related to the 
+              #      caffe2 FLAGS_* definition using dllimport in header and
+              #      dllexport in cc file. The strategy is copied from gflags.
   )
   
   # Exception handing for compiler warining C4530, see
   # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
   add_definitions("/EHsc")
+
+  set(CMAKE_SHARED_LINKER_FLAGS
+      "${CMAKE_SHARED_LINKER_FLAGS} /ignore:4049 /ignore:4217")
+  set(CMAKE_EXE_LINKER_FLAGS
+      "${CMAKE_EXE_LINKER_FLAGS} /ignore:4049 /ignore:4217")
 endif()
 
 # ---[ If we are building on ios, or building with opengl support, we will

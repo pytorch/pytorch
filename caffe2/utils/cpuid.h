@@ -22,11 +22,13 @@
 #include <intrin.h>
 #endif
 
+#include "caffe2/core/common.h"
+
 namespace caffe2 {
 
 class CpuId;
 
-const CpuId& GetCpuId();
+CAFFE2_API const CpuId& GetCpuId();
 
 ///////////////////////////////////////////////////////////////////////////////
 // Implementation of CpuId that is borrowed from folly.
@@ -148,10 +150,10 @@ class CpuId {
 #undef X
 
  private:
-  static uint32_t f1c_;
-  static uint32_t f1d_;
-  static uint32_t f7b_;
-  static uint32_t f7c_;
+  CAFFE2_API static uint32_t f1c_;
+  CAFFE2_API static uint32_t f1d_;
+  CAFFE2_API static uint32_t f7b_;
+  CAFFE2_API static uint32_t f7c_;
 };
 
 } // namespace caffe2

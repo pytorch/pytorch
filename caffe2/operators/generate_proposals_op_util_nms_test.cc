@@ -8,7 +8,7 @@ TEST(UtilsNMSTest, TestNMS) {
   Eigen::ArrayXXf input(5, 5);
   input << 10, 10, 50, 60, 0.5, 11, 12, 48, 60, 0.7, 8, 9, 40, 50, 0.6, 100,
       100, 150, 140, 0.9, 99, 110, 155, 139, 0.8;
-  std::vector<float> input_thresh{0.1, 0.3, 0.5, 0.8, 0.9};
+  std::vector<float> input_thresh{0.1f, 0.3f, 0.5f, 0.8f, 0.9f};
   // ground truth generated based on detection.caffe2/lib/nms/py_cpu_nms.py
   std::vector<std::vector<int>> output_gt{
       {3, 1}, {3, 1}, {3, 1}, {3, 4, 1, 2}, {3, 4, 1, 2, 0}};
@@ -61,7 +61,7 @@ TEST(UtilsNMSTest, TestSoftNMS) {
   const auto& scores = input.col(4);
 
   vector<int> method{1, 1, 2, 2};
-  vector<float> overlap_thresh{0.1, 0.3, 0.1, 0.3};
+  vector<float> overlap_thresh{0.1f, 0.3f, 0.1f, 0.3f};
 
   // Ground truth generated based on
   //   detectron/lib/utils/cython_nms.pyx

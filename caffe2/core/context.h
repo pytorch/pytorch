@@ -171,7 +171,7 @@ class CPUContext final {
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
   int random_seed_{1701};
   std::unique_ptr<rand_gen_type> random_generator_;
-  static MemoryAllocationReporter reporter_;
+  CAFFE2_API static MemoryAllocationReporter reporter_;
 
  private:
   static void ReportAndDelete(void* ptr) {
