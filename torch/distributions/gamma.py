@@ -10,8 +10,8 @@ from torch.distributions.utils import _finfo, broadcast_all
 
 def _standard_gamma(concentration):
     if not isinstance(concentration, Variable):
-        return torch._C._standard_gamma(concentration)
-    return concentration._standard_gamma()
+        return torch._C._VariableFunctions.standard_gamma(Variable(concentration)).data
+    return torch._C._VariableFunctions.standard_gamma(concentration)
 
 
 class Gamma(Distribution):

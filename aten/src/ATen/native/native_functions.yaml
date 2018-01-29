@@ -318,3 +318,9 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+
+- func: standard_gamma(Tensor self, Generator* generator=nullptr) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _s_gamma_cpu
+    CUDA: _s_gamma_cuda
