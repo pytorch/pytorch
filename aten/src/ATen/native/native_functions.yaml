@@ -45,7 +45,7 @@
 
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
 
-- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+- func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
@@ -188,8 +188,10 @@
   variants: function
 
 - func: expand(Tensor self, IntList size) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
@@ -232,6 +234,7 @@
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pin_memory(Tensor self) -> Tensor
 
