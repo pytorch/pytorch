@@ -188,10 +188,10 @@
   variants: function
 
 - func: expand(Tensor self, IntList size) -> Tensor
-  variants: method
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
-  variants: method
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
@@ -234,7 +234,7 @@
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
-  variants: method
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pin_memory(Tensor self) -> Tensor
 
