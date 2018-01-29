@@ -9,6 +9,9 @@ namespace at {
 namespace native {
 
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
+  if (self.dim() == 0) {
+    throw std::runtime_error("chunk expects at least a 1-dimensional tensor");
+  }
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
   return self.split(split_size, dim);
@@ -154,6 +157,9 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
+  if (self.dim() == 0) {
+    throw std::runtime_error("split expects at least a 1-dimensional tensor");
+  }
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;
   std::vector<Tensor> splits(num_splits);

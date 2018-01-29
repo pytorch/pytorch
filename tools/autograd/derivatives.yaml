@@ -378,7 +378,7 @@
   other: grad.clone().masked_fill_(self > other, 0)
 
 - name: mean(Tensor self, int64_t dim, bool keepdim)
-  self: sum_backward(grad, self.sizes(), dim, keepdim) / self.size(dim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self)
   self: grad.expand(self.sizes()) / self.numel()
