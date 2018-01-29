@@ -2906,7 +2906,7 @@
     if (self_->isScalar()) {
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
-    ${THTensor}_diag(result_->tensor, self_->tensor, diagonal);
+    ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
     result_->maybeScalar(self_->isScalar());
 ]]
 [[
