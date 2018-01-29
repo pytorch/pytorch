@@ -432,6 +432,7 @@ namespace {
                 ));
 
           AT_ASSERT(nb_dims <= min_dim, "cudnnGetFilterNdDescriptor failed nb_dims (%d) <= min_dim (%d)", nb_dims, min_dim);
+          filter_dim_a = filter_dim_a.slice(0, 0, nb_dims);
           auto elem_size = dataSize(rnn.datatype);
           auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
           AT_ASSERT(offset_bytes % elem_size == 0, "offset_bytes `mod` elem_size != 0 (%d %% %d)", offset_bytes, elem_size);
