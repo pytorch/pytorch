@@ -3,6 +3,7 @@
 #include "caffe2/core/net.h"
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/observers/operator_attaching_net_observer.h"
 
 namespace caffe2 {
 
@@ -24,10 +25,15 @@ class RunCountOperatorObserver final : public ObserverBase<OperatorBase> {
   RunCountNetObserver* netObserver_;
 };
 
-class RunCountNetObserver final : public ObserverBase<NetBase> {
+class RunCountNetObserver final : public OperatorAttachingNetObserver<
+                                      RunCountOperatorObserver,
+                                      RunCountNetObserver> {
  public:
   explicit RunCountNetObserver(NetBase* subject_)
-      : ObserverBase<NetBase>(subject_), cnt_(0) {}
+      : OperatorAttachingNetObserver<
+            RunCountOperatorObserver,
+            RunCountNetObserver>(subject_, this),
+        cnt_(0) {}
   ~RunCountNetObserver() {}
 
   std::string debugInfo() override;
