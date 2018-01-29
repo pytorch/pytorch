@@ -24,7 +24,7 @@ def scatter(inputs, target_gpus, dim=0):
     else:
         return [inputs for targets in target_gpus]
 
-    
+
 def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     r"""Scatter with support for kwargs dictionary"""
     inputs = scatter(inputs, target_gpus, dim) if inputs else []
