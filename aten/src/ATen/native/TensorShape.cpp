@@ -240,7 +240,7 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
   std::vector<int64_t> sizes(tensor.sizes());
   std::vector<int64_t> strides(tensor.strides());
-  int64_t new_stride = dim >= tensor.dim() - 1 ? 1 : sizes[dim] * strides[dim];
+  int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
   sizes.insert(sizes.begin() + dim, 1);
   strides.insert(strides.begin() + dim, new_stride);
 
