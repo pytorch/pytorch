@@ -10,8 +10,8 @@ def scatter(inputs, target_gpus, dim=0):
     references to objects that are not variables. Does not
     support Tensors.
     """
-    scatter_map = lambda data : Scatter.apply(target_gpus, None, dim, data)
-
+    def scatter_map(data):
+        return Scatter.apply(target_gpus, None, dim, data)
     if isinstance(inputs, Variable):
         return scatter_map(inputs)
     assert not torch.is_tensor(inputs), "Tensors not supported in scatter."
@@ -24,6 +24,7 @@ def scatter(inputs, target_gpus, dim=0):
     else:
         return [inputs for targets in target_gpus]
 
+    
 def scatter_kwargs(inputs, kwargs, target_gpus, dim=0):
     r"""Scatter with support for kwargs dictionary"""
     inputs = scatter(inputs, target_gpus, dim) if inputs else []
