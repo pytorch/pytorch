@@ -25,14 +25,14 @@ class ExponentialFamily(Distribution):
     """
 
     @property
-    def natural_params(self):
+    def _natural_params(self):
         """
         Abstract method for natural parameters. Returns a tuple of Variables based
         on the distribution
         """
         raise NotImplementedError
 
-    def log_normalizer(self, *natural_params):
+    def _log_normalizer(self, *natural_params):
         """
         Abstract method for log normalizer function. Returns a log normalizer based on
         the distribution and input
@@ -40,7 +40,7 @@ class ExponentialFamily(Distribution):
         raise NotImplementedError
 
     @property
-    def mean_carrier_measure(self):
+    def _mean_carrier_measure(self):
         """
         Abstract method for expected carrier measure, which is required for computing
         entropy.
@@ -51,9 +51,9 @@ class ExponentialFamily(Distribution):
         """
         Method to compute the entropy using Bregman divergence of the log normalizer.
         """
-        result = -self.mean_carrier_measure
-        nparams = [Variable(p.data, requires_grad=True) for p in self.natural_params]
-        lg_normal = self.log_normalizer(*nparams)
+        result = -self._mean_carrier_measure
+        nparams = [Variable(p.data, requires_grad=True) for p in self._natural_params]
+        lg_normal = self._log_normalizer(*nparams)
         gradients = torch.autograd.grad(lg_normal.sum(), nparams, create_graph=True)
         result += lg_normal.clone()
         for np, g in zip(nparams, gradients):

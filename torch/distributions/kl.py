@@ -213,11 +213,11 @@ def _kl_expfamily_expfamily(p, q):
     if not type(p) == type(q):
         raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
                             be computed")
-    p_nparams = [Variable(np.data, requires_grad=True) for np in p.natural_params]
-    q_nparams = q.natural_params
-    lg_normal = p.log_normalizer(*p_nparams)
+    p_nparams = [Variable(np.data, requires_grad=True) for np in p._natural_params]
+    q_nparams = q._natural_params
+    lg_normal = p._log_normalizer(*p_nparams)
     gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
-    result = q.log_normalizer(*q_nparams) - lg_normal.clone()
+    result = q._log_normalizer(*q_nparams) - lg_normal.clone()
     for pnp, qnp, g in zip(p_nparams, q_nparams, gradients):
         term = (qnp - pnp) * g
         for _ in range(len(q.event_shape)):

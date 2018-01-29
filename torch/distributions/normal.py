@@ -4,7 +4,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all
 
 
 class Normal(ExponentialFamily):
@@ -27,7 +27,7 @@ class Normal(ExponentialFamily):
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
-    mean_carrier_measure = 0
+    _mean_carrier_measure = 0
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -56,11 +56,9 @@ class Normal(ExponentialFamily):
     def entropy(self):
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
 
-    @lazy_property
-    def natural_params(self):
-        V1 = (self.loc / self.scale.pow(2))
-        V2 = -0.5 * self.scale.pow(2).reciprocal()
-        return (V1, V2)
+    @property
+    def _natural_params(self):
+        return (self.loc / self.scale.pow(2), -0.5 * self.scale.pow(2).reciprocal())
 
-    def log_normalizer(self, x, y):
+    def _log_normalizer(self, x, y):
         return -0.25 * x.pow(2) / y + 0.5 * torch.log(-math.pi / y)

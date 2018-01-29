@@ -5,7 +5,7 @@ from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import _finfo, broadcast_all, lazy_property
+from torch.distributions.utils import _finfo, broadcast_all
 
 
 def _dirichlet_sample_nograd(concentration):
@@ -81,10 +81,9 @@ class Dirichlet(ExponentialFamily):
                 (k - a0) * torch.digamma(a0) -
                 ((self.concentration - 1.0) * torch.digamma(self.concentration)).sum(-1))
 
-    @lazy_property
-    def natural_params(self):
-        V1 = self.concentration
-        return (V1, )
+    @property
+    def _natural_params(self):
+        return (self.concentration, )
 
-    def log_normalizer(self, x):
+    def _log_normalizer(self, x):
         return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))

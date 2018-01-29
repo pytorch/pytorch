@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all
 
 
 class Exponential(ExponentialFamily):
@@ -23,7 +23,7 @@ class Exponential(ExponentialFamily):
     params = {'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
-    mean_carrier_measure = 0
+    _mean_carrier_measure = 0
 
     def __init__(self, rate):
         self.rate, = broadcast_all(rate)
@@ -41,10 +41,9 @@ class Exponential(ExponentialFamily):
     def entropy(self):
         return 1.0 - torch.log(self.rate)
 
-    @lazy_property
-    def natural_params(self):
-        V1 = -self.rate
-        return (V1, )
+    @property
+    def _natural_params(self):
+        return (-self.rate, )
 
-    def log_normalizer(self, x):
+    def _log_normalizer(self, x):
         return -torch.log(-x)

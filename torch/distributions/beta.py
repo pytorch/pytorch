@@ -5,7 +5,7 @@ from torch.autograd import variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
 from torch.distributions.exp_family import ExponentialFamily
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import broadcast_all
 
 
 class Beta(ExponentialFamily):
@@ -68,11 +68,9 @@ class Beta(ExponentialFamily):
         else:
             return result
 
-    @lazy_property
-    def natural_params(self):
-        V1 = self.concentration1
-        V2 = self.concentration0
-        return (V1, V2)
+    @property
+    def _natural_params(self):
+        return (self.concentration1, self.concentration0)
 
-    def log_normalizer(self, x, y):
+    def _log_normalizer(self, x, y):
         return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
