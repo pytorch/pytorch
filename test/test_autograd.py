@@ -2386,11 +2386,12 @@ method_tests = [
     ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), (M, M))),
     ('masked_scatter', (M, M), (Variable(torch.ByteTensor(M,).bernoulli_(), requires_grad=False), (M, M)),
      'broadcast_rhs'),
-    ('resize', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
+    ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
     ('resize_', (), (dont_convert(()),), 'scalar', NO_ARGS, [skipIfNoScalars]),
     ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
     ('resize_as_', (), (variable(5),), 'scalar'),
     ('resize_as_', (), (Variable(torch.randn((1, 1, 1)), requires_grad=False),), 'scalar_to_dims'),
+    ('resize_as_', (S, S, S), (Variable(torch.randn((S * S, S)), requires_grad=False),)),
     ('sort', (S, M, S), NO_ARGS),
     ('sort', (S, M, S), (1,), 'dim'),
     ('sort', (S, M, S), (1, True), 'dim_desc'),
@@ -2500,8 +2501,6 @@ def exclude_tensor_method(name, test_name):
         'index_fill',
         'masked_fill',
         'masked_scatter',
-        'resize',
-        'resize_as',
         'scatter',
         'scatter_add',
         'det',
@@ -2634,8 +2633,7 @@ for test in method_tests:
                     inplace_name = name + '_'
                     # can't broadcast inplace to left hand side
                     skip_inplace = ('broadcast_lhs' in test_name or
-                                    'broadcast_all' in test_name or
-                                    test_name.startswith('test_resize'))
+                                    'broadcast_all' in test_name)
                     if hasattr(Variable(torch.ones(1)), inplace_name) and not skip_inplace:
                         output_variable = getattr(self_variable, name)(*args_variable)
                         if not isinstance(output_variable, tuple):
