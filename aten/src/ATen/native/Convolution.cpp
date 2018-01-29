@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 
+#include "ATen/Config.h"
 #if AT_CUDNN_ENABLED()
 #include "THC/THC.h"
 #include "ATen/cudnn/cudnn-wrapper.h"

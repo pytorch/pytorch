@@ -8,10 +8,9 @@ import functools
 import collections
 import re
 import sys
-import traceback
 import threading
+import traceback
 from torch._six import string_classes, int_classes
-
 
 if sys.version_info[0] == 2:
     import Queue as queue
@@ -19,16 +18,16 @@ else:
     import queue
 
 
-_use_shared_memory = False
-"""Whether to use shared memory in default_collate"""
-
-
 class ExceptionWrapper(object):
-    "Wraps an exception plus traceback to communicate across threads"
+    r"Wraps an exception plus traceback to communicate across threads"
 
     def __init__(self, exc_info):
         self.exc_type = exc_info[0]
         self.exc_msg = "".join(traceback.format_exception(*exc_info))
+
+
+_use_shared_memory = False
+"""Whether to use shared memory in default_collate"""
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -157,7 +156,11 @@ handler needs to be set for all DataLoaders in a process."""
 
 
 def _set_SIGCHLD_handler():
-    if sys.platform == 'win32':  # Windows doesn't support SIGCHLD handler
+    # Windows doesn't support SIGCHLD handler
+    if sys.platform == 'win32':
+        return
+    # can't set signal in child threads
+    if not isinstance(threading.current_thread(), threading._MainThread):
         return
     global _SIGCHLD_handler_set
     if _SIGCHLD_handler_set:
@@ -212,10 +215,15 @@ class DataLoaderIter(object):
 
             if self.pin_memory or self.timeout > 0:
                 self.data_queue = queue.Queue()
+                if self.pin_memory:
+                    maybe_device_id = torch.cuda.current_device()
+                else:
+                    # do not initialize cuda context if not necessary
+                    maybe_device_id = None
                 self.worker_manager_thread = threading.Thread(
                     target=_worker_manager_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          torch.cuda.current_device()))
+                          maybe_device_id))
                 self.worker_manager_thread.daemon = True
                 self.worker_manager_thread.start()
             else:
@@ -239,7 +247,7 @@ class DataLoaderIter(object):
     def _get_batch(self):
         if self.timeout > 0:
             try:
-                return self.data_queue.get(True, self.timeout)
+                return self.data_queue.get(timeout=self.timeout)
             except queue.Empty:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self.timeout))
         else:
@@ -302,17 +310,20 @@ class DataLoaderIter(object):
         raise NotImplementedError("DataLoaderIterator cannot be pickled")
 
     def _shutdown_workers(self):
-        if not self.shutdown:
-            self.shutdown = True
-            self.done_event.set()
-            # if worker_manager_thread is waiting to put
-            while not self.data_queue.empty():
-                self.data_queue.get()
-            for _ in self.workers:
-                self.index_queue.put(None)
-            # done_event should be sufficient to exit worker_manager_thread, but
-            # be safe here and put another None
-            self.worker_result_queue.put(None)
+        try:
+            if not self.shutdown:
+                self.shutdown = True
+                self.done_event.set()
+                # if worker_manager_thread is waiting to put
+                while not self.data_queue.empty():
+                    self.data_queue.get()
+                for _ in self.workers:
+                    self.index_queue.put(None)
+                # done_event should be sufficient to exit worker_manager_thread,
+                # but be safe here and put another None
+                self.worker_result_queue.put(None)
+        finally:
+            # removes pids no matter what
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
@@ -351,8 +362,8 @@ class DataLoader(object):
         timeout (numeric, optional): if positive, the timeout value for collecting a batch
             from workers. Should always be non-negative. (default: 0)
         worker_init_fn (callable, optional): If not None, this will be called on each
-            worker subprocess with the worker id as input, after seeding and before data
-            loading. (default: None)
+            worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
+            input, after seeding and before data loading. (default: None)
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated

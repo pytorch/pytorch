@@ -28,13 +28,15 @@ def load_derivatives(path, declarations):
     return autograd_functions
 
 
-def create_autograd_function(name, derivatives, num_inputs, signature):
+# How do you feel about pasting declaration inside autograd function...
+def create_autograd_function(name, derivatives, args_with_gradients, signature, declaration):
     op = to_camel_case(name) + 'Backward'
     op = op.replace('ForwardBackward', 'Backward')
     return {
         'name': name,
         'op': op,
-        'num_inputs': num_inputs,
+        'declaration': declaration,
+        'args_with_gradients': args_with_gradients,
         'signature': signature,
         'derivatives': derivatives,
         'saved_inputs': all_saved_variables(derivatives, 'saved_inputs'),
@@ -42,7 +44,7 @@ def create_autograd_function(name, derivatives, num_inputs, signature):
     }
 
 
-def create_derivative(declaration, formula, output_indices, var_names):
+def create_derivative(declaration, formula, var_names):
     def transform_return(r):
         # In-place functions take in and return self. Call the modified version
         # "output" so that it can be referred to in derivative definitions.
@@ -66,7 +68,6 @@ def create_derivative(declaration, formula, output_indices, var_names):
 
     return {
         'formula': formula,
-        'output_indices': output_indices,
         'saved_inputs': saved_inputs,
         'saved_outputs': saved_outputs,
         'var_names': var_names,
@@ -147,46 +148,29 @@ def process_definition(defn, declarations_by_signature):
                                "see #4567.".format(defn_name))
 
     def set_up_derivatives(defn_name, defn, declaration):
-        # First, let us determine the set of inputs for which gradients
-        # were specified in declarations.  We'll use this in layout
-        # computation.
-        args_with_gradients = set()
+        # Determine the set of inputs which have gradients
+        args_with_gradients_set = set()
         for raw_names in defn:
-            args_with_gradients |= set(split_names(raw_names))
+            args_with_gradients_set |= set(split_names(raw_names))
 
-        # Next, let us compute the layout of the grad_inputs we will
-        # return.  In general this is not in one-to-one correspondence
-        # with the inputs, because some will not have gradients, and we
-        # will not bother allocating an undefined tensor for them.
-        num_inputs = 0  # number of grad_inputs to return
-        arg_name_to_output_index = {}
+        # Next, let us determine the list of inputs in order.
+        args_with_gradients = []
         for arg in declaration['arguments']:
-            if arg['name'] not in args_with_gradients:
+            if arg['name'] not in args_with_gradients_set:
                 continue
-            if arg['type'] == 'TensorList':
-                num_inputs = ''
-                output_index = '*'  # variable length thing
-            else:
-                output_index = num_inputs  # the current index
-                num_inputs += 1
-            arg_name_to_output_index[arg['name']] = output_index
+            args_with_gradients.append(arg)
 
-        # Finally, let us set up the derivative information
+        # Set up the derivative information
         derivatives = []
         for raw_names in sorted(defn.keys()):
             formula = defn[raw_names]
             names = split_names(raw_names)
-            output_indices = []
-            args = []
-            for name in names:
-                output_indices.append(arg_name_to_output_index[name])
-                args.append(name)
-            derivatives.append(create_derivative(declaration, formula, output_indices, args))
+            derivatives.append(create_derivative(declaration, formula, names))
 
         # Test to see if the use of 'grads' makes sense.
         check_grad_usage(defn_name, declaration, derivatives)
 
-        return derivatives, num_inputs
+        return derivatives, args_with_gradients
 
     def unzip(xs):
         return zip(*xs)
@@ -225,8 +209,8 @@ def process_definition(defn, declarations_by_signature):
                                'Declarations.yaml ({})'
                                .format(i, defn_name, x, y))
 
-    derivatives, num_inputs = set_up_derivatives(defn_name, defn, canonical)
-    return create_autograd_function(defn_name, derivatives, num_inputs, signature)
+    derivatives, args_with_gradients = set_up_derivatives(defn_name, defn, canonical)
+    return create_autograd_function(defn_name, derivatives, args_with_gradients, signature, canonical)
 
 
 def ensure_unique_names(autograd_functions):
