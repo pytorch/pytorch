@@ -270,10 +270,12 @@ class Variable(_C._VariableBase):
             return super(Variable, self).btrifact(pivot=pivot)
 
     def resize(self, *sizes):
+        warnings.warn("non-inplace resize is deprecated")
         from ._functions import Resize
         return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
+        warnings.warn("non-inplace resize_as is deprecated")
         from ._functions import Resize
         return Resize.apply(self, variable.size())
 
