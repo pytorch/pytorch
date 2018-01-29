@@ -2912,6 +2912,12 @@
     - THTensor* self
     - arg: long diagonal
       default: 0
+  aten_custom_call: |
+    if (self_->isScalar()) {
+      throw std::runtime_error("Input must be 1-d or 2-d");
+    }
+    ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
+    result_->maybeScalar(self_->isScalar());
 ]]
 [[
   name: addmm

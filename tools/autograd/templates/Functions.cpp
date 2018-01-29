@@ -69,6 +69,11 @@ Tensor maybe_multiply(const Tensor & t, const Scalar & s) {
   }
 }
 
+int64_t _safe_size(IntList sizes, int64_t dim) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  return sizes.size() != 0 ? sizes[dim] : 1;
+}
+
 Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_, const Tensor & norm) {
   double p = p_.toDouble();
   Tensor self_scaled;
@@ -94,7 +99,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
 
 Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
 #ifdef WITH_SCALARS
-  if (!keepdim) {
+  if (!keepdim && self.dim() != 0) {
 #else
   if (!keepdim && self.dim() > 1) {
 #endif
@@ -131,9 +136,9 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
 
 Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
 #ifdef WITH_SCALARS
-  if (!keepdim) {
+  if (!keepdim && sizes.size() > 0) {
 #else
-   if (!keepdim && sizes.size() > 1) {
+  if (!keepdim && sizes.size() > 1) {
 #endif
     return grad.unsqueeze(dim).expand(sizes);
   } else {
@@ -172,6 +177,9 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 // product:                      [b * c, a * c, a * b]
 // and this is safe under input with 0s.
 Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& result) {
+  if (input.dim() == 0) {
+    return grad;
+  }
   Tensor zero_idx = (input == 0).nonzero();
   if (zero_idx.numel() == 0) {
     return (grad * result) / input;
@@ -183,6 +191,9 @@ Tensor prod_backward(const Tensor& grad, const Tensor& input, const Tensor& resu
 }
 
 Tensor prod_backward(Tensor grad, const Tensor& input, Tensor result, int64_t dim, bool keepdim) {
+  if (input.dim() == 0) {
+    return grad;
+  }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   if (!keepdim && input.dim() != 1) {
     grad = grad.unsqueeze(dim);
@@ -283,6 +294,9 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     dy_j / dx_k = 0, which is done right after the assert.
   */
 
+  if (input.dim() == 0) {
+    return grad;
+  }
   dim = at::maybe_wrap_dim(dim, input.sizes().size());
   int64_t dim_size = input.size(dim);
   if (dim_size == 1) {
@@ -328,6 +342,9 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {
+  if (x.dim() == 0) {
+    return x;
+  }
   auto ret = at::cumsum(-x, dim);
   auto ret_sum = ret.narrow(dim, ret.size(dim) - 1, 1).clone();
   ret -= ret_sum.expand(ret.sizes());
@@ -361,7 +378,9 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
 Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
 #ifdef WITH_SCALARS
-  if (sizes[dim] == 1) {
+  // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
+  // unsqueezing in the backward.
+  if (sizes.size() > 0 && sizes[dim] == 1) {
 #else
   if (sizes[dim] == 1 && sizes.size() != 1) {
 #endif
@@ -517,6 +536,9 @@ Tensor var_backward(const Tensor & grad, const Tensor & self, bool unbiased) {
 }
 
 Tensor var_backward(Tensor grad, const Tensor & self, int64_t dim, bool unbiased, bool keepdim) {
+  if (self.dim() == 0) {
+    return var_backward(grad, self, unbiased);
+  }
   if (!keepdim && self.dim() > 1) {
     grad = grad.unsqueeze(dim);
   }
