@@ -666,6 +666,8 @@ class TestDistributions(TestCase):
         scale = Variable(torch.ones(5, 5), requires_grad=True)
         loc_1d = Variable(torch.zeros(1), requires_grad=True)
         scale_1d = Variable(torch.ones(1), requires_grad=True)
+        self.assertRaises(NotImplementedError, lambda: Cauchy(loc, scale).mean)
+        self.assertRaises(NotImplementedError, lambda: Cauchy(loc, scale).variance)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
         self.assertEqual(Cauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
@@ -906,6 +908,7 @@ class TestDistributions(TestCase):
         scale_1d = torch.randn(1).abs()
         alpha_1d = torch.randn(1).abs()
         self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).mean, float('inf'), allow_inf=True)
+        self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).variance, float('inf'), allow_inf=True)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
         self.assertEqual(Pareto(scale, alpha).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample_n(1).size(), (1, 1))
@@ -964,6 +967,8 @@ class TestDistributions(TestCase):
         df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         df1_1d = torch.randn(1).abs()
         df2_1d = torch.randn(1).abs()
+        assert FisherSnedecor(1, 2).mean != FisherSnedecor(1, 2).mean  # test for nan
+        assert FisherSnedecor(1, 4).variance != FisherSnedecor(1, 4).variance  # test for nan
         self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
         self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
@@ -1015,9 +1020,12 @@ class TestDistributions(TestCase):
                                         'Chi2(df={})'.format(df))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_studentT_shape(self):
+    def test_studentT(self):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         df_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
+        assert StudentT(1).mean != StudentT(1).mean  # test for nan
+        assert StudentT(1).variance != StudentT(1).variance  # test for nan
+        self.assertEqual(StudentT(2).variance, float('inf'), allow_inf=True)
         self.assertEqual(StudentT(df).sample().size(), (2, 3))
         self.assertEqual(StudentT(df).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(StudentT(df_1d).sample_n(1).size(), (1, 1))

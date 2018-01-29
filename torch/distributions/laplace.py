@@ -34,7 +34,7 @@ class Laplace(Distribution):
 
     @property
     def stddev(self):
-        return self.scale * 2 ** 0.5
+        return (2 ** 0.5) * self.scale
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
