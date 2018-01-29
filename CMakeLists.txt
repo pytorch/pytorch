@@ -190,7 +190,7 @@ endif()
 # as well, so we mark them as INTERFACE transitive dependency.
 set(CAFFE2_INTERFACE_LIBS)
 if (USE_GLOG)
-  list(APPEND CAFFE2_INTERFACE_LIBS ${GLOG_LIBRARIES})
+  list(APPEND CAFFE2_INTERFACE_LIBS glog::glog)
 endif()
 if (USE_GFLAGS)
   list(APPEND CAFFE2_INTERFACE_LIBS gflags)
@@ -233,6 +233,7 @@ if (BUILD_SHARED_LIBS)
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)
   install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
