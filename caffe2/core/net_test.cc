@@ -222,47 +222,6 @@ TEST(NetTest, ChainingForLinearModel) {
   checkChainingAndRun(spec, {{0, {0, 1}}});
 }
 
-TEST(NetTest, ChainingForDifferentDevices) {
-  const auto spec = R"DOC(
-        name: "example"
-        type: "dag"
-        external_input: "in"
-        op {
-          input: "in"
-          output: "hidden"
-          type: "NetTestDummy"
-        }
-        op {
-          input: "hidden"
-          output: "out"
-          type: "NetTestDummy"
-          device_option {
-            device_type: 1
-          }
-        }
-        op {
-          input: "out"
-          output: "out2"
-          type: "NetTestDummy"
-          device_option {
-            device_type: 1
-          }
-        }
-        op {
-          input: "out2"
-          output: "out3"
-          type: "NetTestDummy"
-          device_option {
-            device_type: 1
-            cuda_gpu_id: 1
-          }
-        }
-)DOC";
-  if (HasCudaRuntime()) {
-    checkChainingAndRun(spec, {{0, {0, 1, 2}}, {3, {3}}});
-  }
-}
-
 TEST(NetTest, ChainingForFork) {
   const auto spec = R"DOC(
         name: "example"
