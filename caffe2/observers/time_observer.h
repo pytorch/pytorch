@@ -24,20 +24,17 @@
 #include "caffe2/core/observer.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
+#include "caffe2/observers/operator_attaching_net_observer.h"
 
 namespace caffe2 {
 
-template <class T>
-class TimeObserverBase : public ObserverBase<T> {
+class TimeObserver;
+class TimeCounter {
  public:
-  explicit TimeObserverBase<T>(T* subject) : ObserverBase<T>(subject) {}
+  explicit TimeCounter() {}
   inline float average_time() const {
     return total_time_ / iterations_;
   }
-  ~TimeObserverBase() {}
-
-  void Start() override;
-  void Stop() override;
 
  protected:
   Timer timer_;
@@ -46,30 +43,35 @@ class TimeObserverBase : public ObserverBase<T> {
   int iterations_ = 0;
 };
 
-template <class T>
-class TimeObserver final : public TimeObserverBase<T> {
+class TimeOperatorObserver final : public TimeCounter,
+                                   public ObserverBase<OperatorBase> {
  public:
-  explicit TimeObserver<T>(T* subject) : TimeObserverBase<T>(subject) {}
-};
-
-template <>
-class TimeObserver<OperatorBase> final : public TimeObserverBase<OperatorBase> {
- public:
-  explicit TimeObserver<OperatorBase>(OperatorBase* subject)
-      : TimeObserverBase<OperatorBase>(subject) {}
+  explicit TimeOperatorObserver(OperatorBase* subject) = delete;
+  explicit TimeOperatorObserver(
+      OperatorBase* subject,
+      TimeObserver* /* unused */)
+      : ObserverBase<OperatorBase>(subject) {}
 
   std::unique_ptr<ObserverBase<OperatorBase>> copy(
       OperatorBase* subject) override {
     return std::unique_ptr<ObserverBase<OperatorBase>>(
-        new TimeObserver<OperatorBase>(subject));
+        new TimeOperatorObserver(subject, nullptr));
   }
+
+ private:
+  void Start() override;
+  void Stop() override;
 };
 
-template <>
-class TimeObserver<NetBase> final : public TimeObserverBase<NetBase> {
+class TimeObserver final
+    : public TimeCounter,
+      public OperatorAttachingNetObserver<TimeOperatorObserver, TimeObserver> {
  public:
-  explicit TimeObserver<NetBase>(NetBase* subject)
-      : TimeObserverBase<NetBase>(subject) {}
+  explicit TimeObserver(NetBase* subject)
+      : OperatorAttachingNetObserver<TimeOperatorObserver, TimeObserver>(
+            subject,
+            this) {}
+
   float average_time_children() const {
     float sum = 0.0f;
     for (const auto* observer : operator_observers_) {
@@ -78,20 +80,9 @@ class TimeObserver<NetBase> final : public TimeObserverBase<NetBase> {
     return sum / subject_->GetOperators().size();
   }
 
-  void Start() override {
-    for (auto* op : subject_->GetOperators()) {
-      const auto* observer = op->AttachObserver(
-          caffe2::make_unique<TimeObserver<OperatorBase>>(op));
-      CAFFE_ENFORCE(observer != nullptr);
-      operator_observers_.push_back(
-          dynamic_cast_if_rtti<const TimeObserver<OperatorBase>*>(observer));
-    }
-    start_time_ = timer_.MilliSeconds();
-    ++iterations_;
-  }
-
  private:
-  vector<const TimeObserver<OperatorBase>*> operator_observers_;
+  void Start() override;
+  void Stop() override;
 };
 
 } // namespace caffe2

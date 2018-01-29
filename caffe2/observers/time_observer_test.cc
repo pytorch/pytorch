@@ -67,17 +67,16 @@ unique_ptr<NetBase> CreateNetTestHelper(Workspace* ws) {
 
   return CreateNet(net_def, ws);
 }
-}
+} // namespace
 
 TEST(TimeObserverTest, Test3Seconds) {
   Workspace ws;
   ws.CreateBlob("in");
   NetDef net_def;
   unique_ptr<NetBase> net(CreateNetTestHelper(&ws));
-  unique_ptr<TimeObserver<NetBase>> net_ob =
-      make_unique<TimeObserver<NetBase>>(net.get());
-  const auto* ob = dynamic_cast_if_rtti<const TimeObserver<NetBase>*>(
-      net->AttachObserver(std::move(net_ob)));
+  auto net_ob = caffe2::make_unique<TimeObserver>(net.get());
+  const auto* ob = net_ob.get();
+  net->AttachObserver(std::move(net_ob));
   net->Run();
   CAFFE_ENFORCE(ob);
   LOG(INFO) << "av time children: " << ob->average_time_children();
@@ -87,4 +86,4 @@ TEST(TimeObserverTest, Test3Seconds) {
   CAFFE_ENFORCE(ob->average_time() > 6000);
   CAFFE_ENFORCE(ob->average_time() < 6500);
 }
-}
+} // namespace caffe2

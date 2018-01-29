@@ -266,7 +266,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "average_time",
           [](ObserverBase<NetBase>* ob) {
-            auto* cast_ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(ob);
+            auto* cast_ob = dynamic_cast_if_rtti<TimeObserver*>(ob);
             CAFFE_ENFORCE(
                 cast_ob, "Observer does not implement this function.");
             return cast_ob->average_time();
@@ -274,7 +274,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "average_time_children",
           [](ObserverBase<NetBase>* ob) {
-            auto* cast_ob = dynamic_cast_if_rtti<TimeObserver<NetBase>*>(ob);
+            auto* cast_ob = dynamic_cast_if_rtti<TimeObserver*>(ob);
             CAFFE_ENFORCE(
                 cast_ob, "Observer does not implement this function.");
             return cast_ob->average_time_children();
@@ -884,13 +884,12 @@ void addGlobalMethods(py::module& m) {
         NetBase* net = gWorkspace->GetNet(net_name);
         const Observable<NetBase>::Observer* observer = nullptr;
 
-#define REGISTER_PYTHON_EXPOSED_OBSERVER(ob_type)        \
-  {                                                      \
-    if (observer_type.compare(#ob_type) == 0) {          \
-      unique_ptr<ob_type<NetBase>> net_ob =              \
-          make_unique<ob_type<NetBase>>(net);            \
-      observer = net->AttachObserver(std::move(net_ob)); \
-    }                                                    \
+#define REGISTER_PYTHON_EXPOSED_OBSERVER(ob_type)             \
+  {                                                           \
+    if (observer_type.compare(#ob_type) == 0) {               \
+      unique_ptr<ob_type> net_ob = make_unique<ob_type>(net); \
+      observer = net->AttachObserver(std::move(net_ob));      \
+    }                                                         \
   }
 
         REGISTER_PYTHON_EXPOSED_OBSERVER(TimeObserver);
