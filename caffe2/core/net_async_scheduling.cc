@@ -21,32 +21,12 @@ CAFFE2_DEFINE_bool(
     false,
     "Always schedule child chains from parent chain");
 
-CAFFE2_DEFINE_int(
-    caffe2_net_async_polling_threads_num,
-    1,
-    "Number of polling threads in async_scheduling executor");
-
 namespace caffe2 {
 
 AsyncSchedulingNet::AsyncSchedulingNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
     : AsyncNetBase(net_def, ws), running_(false) {
-  pending_tasks_.reserve(FLAGS_caffe2_net_async_polling_threads_num);
-  for (auto thread_num = 0;
-       thread_num < FLAGS_caffe2_net_async_polling_threads_num;
-       ++thread_num) {
-    pending_tasks_.push_back(caffe2::make_unique<SimpleQueue<int>>());
-  }
-
-  polling_threads_.reserve(FLAGS_caffe2_net_async_polling_threads_num);
-  for (auto thread_num = 0;
-       thread_num < FLAGS_caffe2_net_async_polling_threads_num;
-       ++thread_num) {
-    polling_threads_.push_back(
-        std::thread(&AsyncSchedulingNet::pollAndSchedule, this, thread_num));
-  }
-
   reset();
 }
 
@@ -54,7 +34,6 @@ void AsyncSchedulingNet::reset() {
   processed_tasks_num_ = 0;
   cleanup_ = false;
   success_ = true;
-  next_polling_thread_counter_ = 0;
 
   for (auto task_id = 0; task_id < tasksNum(); ++task_id) {
     auto& task_ops = chains_[task_id];
@@ -90,9 +69,10 @@ void AsyncSchedulingNet::schedule(int task_id) {
             canSchedule(child_id)) {
           schedule(child_id);
         } else {
-          auto polling_thread_id = next_polling_thread_counter_++;
-          polling_thread_id %= FLAGS_caffe2_net_async_polling_threads_num;
-          pending_tasks_[polling_thread_id]->Push(child_id);
+          const auto& device_option = event(child_id).GetDeviceOption();
+          pool(device_option)
+              ->run(std::bind(
+                  &AsyncSchedulingNet::pollAndSchedule, this, child_id));
         }
       }
     }
@@ -133,15 +113,14 @@ void AsyncSchedulingNet::schedule(int task_id) {
   });
 }
 
-void AsyncSchedulingNet::pollAndSchedule(int thread_id) {
-  int task_id;
-  while (pending_tasks_[thread_id]->Pop(&task_id)) {
-    if (canSchedule(task_id) || cleanup_) {
-      // force schedule the rest of the tasks if cleanup is started
-      schedule(task_id);
-    } else {
-      pending_tasks_[thread_id]->Push(task_id);
-    }
+void AsyncSchedulingNet::pollAndSchedule(int task_id) {
+  if (canSchedule(task_id) || cleanup_) {
+    // force schedule the rest of the tasks if cleanup is started
+    schedule(task_id);
+  } else {
+    const auto& device_option = event(task_id).GetDeviceOption();
+    pool(device_option)
+        ->run(std::bind(&AsyncSchedulingNet::pollAndSchedule, this, task_id));
   }
 }
 
@@ -177,14 +156,7 @@ bool AsyncSchedulingNet::DoRunAsync() {
   return true;
 }
 
-AsyncSchedulingNet::~AsyncSchedulingNet() {
-  for (auto& task_queue : pending_tasks_) {
-    task_queue->NoMoreJobs();
-  }
-  for (auto& polling_thread : polling_threads_) {
-    polling_thread.join();
-  }
-}
+AsyncSchedulingNet::~AsyncSchedulingNet() {}
 
 REGISTER_NET(async_scheduling, AsyncSchedulingNet);
 
