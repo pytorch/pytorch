@@ -257,14 +257,6 @@ class Variable(_C._VariableBase):
     def view_as(self, tensor):
         return self.view(tensor.size())
 
-    def repeat(self, *repeats):
-        from ._functions import Repeat
-        if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
-            repeats = repeats[0]
-        else:
-            repeats = torch.Size(repeats)
-        return Repeat.apply(self, repeats)
-
     def btrifact(self, info=None, pivot=True):
         if info is not None:
             warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "

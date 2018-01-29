@@ -429,6 +429,33 @@ Tensor renorm_backward(const Tensor & grad, const Tensor & self, Scalar p, int64
   return at::where(mask, grad, grad_norm);
 }
 
+Tensor sum_tensorlist(TensorList tl) {
+  if (tl.size() == 0) {
+    throw std::runtime_error("Can't sum tensorlist of size 0");
+  }
+  Tensor sum = tl[0];
+  for(size_t i = 1; i < tl.size(); ++i) {
+    sum = sum + tl[i];
+  }
+  return sum;
+}
+
+Tensor repeat_backward(Tensor grad, int64_t input_dims, IntList repeats) {
+  int64_t num_unsqueezed = grad.dim() - input_dims;
+  for (int64_t i = 0; i < num_unsqueezed; ++i) {
+    grad = grad.sum(0, false);
+  }
+  for (size_t j = num_unsqueezed; j < repeats.size(); ++j) {
+    int64_t repeat = repeats[j];
+    if (repeat == 1) {
+      continue;
+    }
+    int64_t dim = j - num_unsqueezed;
+    grad = sum_tensorlist(grad.chunk(repeat, dim));
+  }
+  return grad;
+}
+
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = zeros_like(input);
 #ifdef WITH_SCALARS
