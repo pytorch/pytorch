@@ -23,6 +23,7 @@ change. This file contains two types of randomized tests:
 """
 
 import math
+import numbers
 import unittest
 from collections import namedtuple
 from itertools import product
@@ -232,6 +233,24 @@ EXAMPLES = [
         {
             'rate': 0.2,
         }
+    ]),
+    Example(TransformedDistribution, [
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': [],
+        },
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': ExpTransform(),
+        },
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': [AffineTransform(Variable(torch.randn(1)), Variable(torch.randn(1))),
+                           ExpTransform()],
+        },
     ]),
     Example(Uniform, [
         {
@@ -1982,7 +2001,7 @@ class TestConstraints(TestCase):
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 for name, value in param.items():
-                    if not (torch.is_tensor(value) or isinstance(value, Variable)):
+                    if isinstance(value, numbers.Number):
                         value = torch.Tensor([value])
                     if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
