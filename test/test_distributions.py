@@ -2340,21 +2340,41 @@ class TestTransforms(TestCase):
         self.assertEqual(ComposeTransform([transform0, transform2]).event_dim, 2)
         self.assertEqual(ComposeTransform([transform1, transform2]).event_dim, 2)
 
-    def test_transform_distribution_shapes(self):
+    def test_transformed_distribution_shapes(self):
         transform0 = ExpTransform()
         transform1 = BoltzmannTransform()
         transform2 = LowerCholeskyTransform()
         base_dist0 = Normal(Variable(torch.zeros(4, 4)), Variable(torch.ones(4, 4)))
         base_dist1 = Dirichlet(Variable(torch.ones(4, 4)))
-
-        self.assertEqual(base_dist0.event_shape, ())
-        self.assertEqual(base_dist1.event_shape, (4,))
-        self.assertEqual(TransformedDistribution(base_dist0, transform0).event_shape, ())
-        self.assertEqual(TransformedDistribution(base_dist0, transform1).event_shape, (4,))
-        self.assertEqual(TransformedDistribution(base_dist0, transform2).event_shape, (4, 4))
-        self.assertEqual(TransformedDistribution(base_dist1, transform0).event_shape, (4,))
-        self.assertEqual(TransformedDistribution(base_dist1, transform1).event_shape, (4,))
-        self.assertEqual(TransformedDistribution(base_dist1, transform2).event_shape, (4, 4))
+        examples = [
+            ((4, 4), (), base_dist0),
+            ((4,), (4,), base_dist1),
+            ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
+        ]
+        for batch_shape, event_shape, dist in examples:
+            self.assertEqual(dist.batch_shape, batch_shape)
+            self.assertEqual(dist.event_shape, event_shape)
+            x = dist.rsample()
+            try:
+                dist.log_prob(x)  # this should not crash
+            except NotImplementedError:
+                continue
 
 
 if __name__ == '__main__':
