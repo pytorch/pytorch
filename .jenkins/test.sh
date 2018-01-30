@@ -39,6 +39,7 @@ echo "ENTERED_USER_LAND"
 echo "Testing pytorch"
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
+echo "Ninja version: $(ninja --version)"
 time test/run_test.sh
 
 pushd vision
