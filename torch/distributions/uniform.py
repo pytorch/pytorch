@@ -28,6 +28,18 @@ class Uniform(Distribution):
     params = {'low': constraints.dependent, 'high': constraints.dependent}
     has_rsample = True
 
+    @property
+    def mean(self):
+        return (self.high + self.low) / 2
+
+    @property
+    def stddev(self):
+        return (self.high - self.low) / 12**0.5
+
+    @property
+    def variance(self):
+        return (self.high - self.low).pow(2) / 12
+
     def __init__(self, low, high):
         self.low, self.high = broadcast_all(low, high)
         if isinstance(low, Number) and isinstance(high, Number):

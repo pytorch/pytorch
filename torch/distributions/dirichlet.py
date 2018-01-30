@@ -74,6 +74,15 @@ class Dirichlet(Distribution):
                 torch.lgamma(self.concentration.sum(-1)) -
                 torch.lgamma(self.concentration).sum(-1))
 
+    @property
+    def mean(self):
+        return self.concentration / self.concentration.sum(-1)
+
+    @property
+    def variance(self):
+        con0 = self.concentration.sum(-1)
+        return self.concentration * (con0 - self.concentration) / (con0.pow(2) * (con0 + 1))
+
     def entropy(self):
         k = self.concentration.size(-1)
         a0 = self.concentration.sum(-1)

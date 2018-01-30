@@ -477,9 +477,11 @@ def emit_body(declaration):
         # requires that the counter is incremented before it is called
         body.extend(emit_increment_version())
         body.append(emit_history())
+    # post_record_trace must appear before save_outputs so that saved outputs
+    # have their tracing state saved (that is setup by recordTrace)
+    body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
-    body.append(post_record_trace)
     body.append('return {};'.format(get_return_value()))
     return body
 

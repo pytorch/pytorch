@@ -545,7 +545,7 @@ void testADFormulas() {
 
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
-    auto grad_spec = differentiate(graph);
+    auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
 
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
@@ -582,7 +582,7 @@ void testDifferentiate(std::ostream & out) {
   auto c = a * b * a + b;
   graph->registerOutput(c.value());
 
-  auto grad_spec = differentiate(graph);
+  auto grad_spec = differentiate(graph, {true, true});
   std::vector<Capture> expected_captures = {
     {Capture::Kind::Input, 0},
     {Capture::Kind::Input, 1},
@@ -597,6 +597,37 @@ void testDifferentiate(std::ostream & out) {
   out << "testDifferentiate\n";
   out << *grad_spec.f;
   out << *grad_spec.df;
+  out << "\n";
+}
+
+void testDifferentiateWithRequiresGrad(std::ostream & out) {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+
+  // Build up a fake graph
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto d = b * b + b;
+  auto e = (d + a) * a + b;
+  graph->registerOutput(d.value());
+  graph->registerOutput(e.value());
+
+  auto grad_spec = differentiate(graph, {true, false});
+  std::vector<Capture> expected_captures = {
+    {Capture::Kind::Input, 0},
+    {Capture::Kind::Output, 2},
+  };
+  std::vector<std::size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
+  std::vector<std::size_t> expected_output_vjps = {0};    // only a requires grad
+  JIT_ASSERT(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
+  JIT_ASSERT(grad_spec.df_input_captures == expected_captures);
+  JIT_ASSERT(grad_spec.df_input_vjps == expected_input_vjps);
+  JIT_ASSERT(grad_spec.df_output_vjps == expected_output_vjps);
+  out << "testDifferentiateWithRequiresGrad\n";
+  out << *grad_spec.f;
+  out << *grad_spec.df;
+  out << "\n";
 }
 
 void testCreateAutodiffSubgraphs(std::ostream & out) {
@@ -706,6 +737,7 @@ std::string runJITCPPTests() {
   std::stringstream out;
   testCreateAutodiffSubgraphs(out);
   testDifferentiate(out);
+  testDifferentiateWithRequiresGrad(out);
   testADFormulas();
   interpTest();
   interpStageTest();

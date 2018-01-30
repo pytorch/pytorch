@@ -378,7 +378,7 @@
   other: grad.clone().masked_fill_(self > other, 0)
 
 - name: mean(Tensor self, int64_t dim, bool keepdim)
-  self: sum_backward(grad, self.sizes(), dim, keepdim) / self.size(dim)
+  self: sum_backward(grad, self.sizes(), dim, keepdim) / _safe_size(self.sizes(), dim)
 
 - name: mean(Tensor self)
   self: grad.expand(self.sizes()) / self.numel()
@@ -514,6 +514,9 @@
 
 - name: renorm(Tensor self, Scalar p, int64_t dim, Scalar maxnorm)
   self: renorm_backward(grad, self, p, dim, maxnorm)
+
+- name: repeat(Tensor self, IntList repeats)
+  self: repeat_backward(grad, self.dim(), repeats)
 
 - name: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale)
   input: RoiPooling2d_backward(input, rois, pooledHeight, pooledWidth, spatialScale, grad, result1)

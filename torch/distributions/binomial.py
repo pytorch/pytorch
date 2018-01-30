@@ -4,7 +4,6 @@ import math
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
-from torch.distributions.utils import clamp_probs
 from torch.autograd import Variable
 
 
@@ -60,6 +59,14 @@ class Binomial(Distribution):
     @constraints.dependent_property
     def support(self):
         return constraints.integer_interval(0, self.total_count)
+
+    @property
+    def mean(self):
+        return self.total_count * self.probs
+
+    @property
+    def variance(self):
+        return self.total_count * self.probs * (1 - self.probs)
 
     @lazy_property
     def logits(self):

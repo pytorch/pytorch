@@ -49,6 +49,14 @@ class Bernoulli(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
+    @property
+    def mean(self):
+        return self.probs
+
+    @property
+    def variance(self):
+        return self.probs * (1 - self.probs)
+
     @lazy_property
     def logits(self):
         return probs_to_logits(self.probs, is_binary=True)

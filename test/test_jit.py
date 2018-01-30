@@ -290,7 +290,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_fuse(trace)
         self.assertExpectedTrace(trace)
 
-    @unittest.skipIf(IS_WINDOWS, "Mysteriously fails on Windows")
     def test_arg_configurations(self):
         """Different arg configurations should trigger different traces"""
         x = Variable(torch.FloatTensor(4, 4).uniform_())
@@ -731,7 +730,6 @@ class TestJit(TestCase):
         del z
         check(False, True)
 
-    @unittest.skipIf(IS_WINDOWS, "Mysteriously fails on Windows")
     def test_multiuse_fn(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         w = Variable(torch.randn(2, 2), requires_grad=True)
@@ -748,7 +746,6 @@ class TestJit(TestCase):
 
         torch.jit.verify(cell, (x, w), devices=[])
 
-    @unittest.skipIf(IS_WINDOWS, "Mysteriously fails on Windows")
     def test_output_unflatten(self):
         """Check that outputs of traced functions retain the original structure and nesting"""
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -1151,6 +1148,16 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
+
+    def test_saved_output(self):
+        x = Variable(torch.randn(4, 4), requires_grad=True)
+
+        @torch.jit.compile(nderivs=1)
+        def fn(x):
+            return x.sigmoid()
+
+        fn(x).sum().backward()
+        self.assertExpected(str(fn.graph_for(x)))
 
     def test_shared_param(self):
 
