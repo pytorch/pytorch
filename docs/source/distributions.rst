@@ -97,6 +97,12 @@ Probability distributions - torch.distributions
 .. autoclass:: LogNormal
     :members:
 
+:hidden:`MultivariateNormal`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: MultivariateNormal
+    :members:
+
 :hidden:`Normal`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
