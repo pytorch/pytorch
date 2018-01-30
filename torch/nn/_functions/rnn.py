@@ -344,15 +344,6 @@ class CudnnRNN(NestedIOFunction):
 
 def RNN(*args, **kwargs):
 
-    # Hack for the tracer that allows us to represent RNNs as single
-    # nodes and export them to ONNX in this form
-    # Check the first argument explicitly to reduce the overhead of creating
-    # the lambda
-    #import torch.onnx.symbolic
-
-    #@torch.onnx.symbolic_override_first_arg_based(
-    #    torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
-    #)
     def forward(input, *fargs, **fkwargs):
         if cudnn.is_acceptable(input.data):
             func = CudnnRNN(*args, **kwargs)
