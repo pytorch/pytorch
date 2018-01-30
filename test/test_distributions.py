@@ -36,7 +36,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
-                                 StudentT, Uniform, constraints, kl_divergence)
+                                 StudentT, TransformedDistribution, Uniform,
+                                 constraints, kl_divergence)
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
@@ -2326,6 +2327,34 @@ class TestTransforms(TestCase):
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
+
+    def test_transform_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = BoltzmannTransform()
+        transform2 = LowerCholeskyTransform()
+
+        self.assertEqual(transform0.event_dim, 0)
+        self.assertEqual(transform1.event_dim, 1)
+        self.assertEqual(transform2.event_dim, 2)
+        self.assertEqual(ComposeTransform([transform0, transform1]).event_dim, 1)
+        self.assertEqual(ComposeTransform([transform0, transform2]).event_dim, 2)
+        self.assertEqual(ComposeTransform([transform1, transform2]).event_dim, 2)
+
+    def test_transform_distribution_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = BoltzmannTransform()
+        transform2 = LowerCholeskyTransform()
+        base_dist0 = Normal(Variable(torch.zeros(4, 4)), Variable(torch.ones(4, 4)))
+        base_dist1 = Dirichlet(Variable(torch.ones(4, 4)))
+
+        self.assertEqual(base_dist0.event_shape, ())
+        self.assertEqual(base_dist1.event_shape, (4,))
+        self.assertEqual(TransformedDistribution(base_dist0, transform0).event_shape, ())
+        self.assertEqual(TransformedDistribution(base_dist0, transform1).event_shape, (4,))
+        self.assertEqual(TransformedDistribution(base_dist0, transform2).event_shape, (4, 4))
+        self.assertEqual(TransformedDistribution(base_dist1, transform0).event_shape, (4,))
+        self.assertEqual(TransformedDistribution(base_dist1, transform1).event_shape, (4,))
+        self.assertEqual(TransformedDistribution(base_dist1, transform2).event_shape, (4, 4))
 
 
 if __name__ == '__main__':

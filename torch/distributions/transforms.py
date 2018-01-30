@@ -220,7 +220,7 @@ class ComposeTransform(Transform):
 
     @lazy_property
     def event_dim(self):
-        return max([0] + [p.event_dim for p in self.parts])
+        return max(p.event_dim for p in self.parts) if self.parts else 0
 
     @property
     def inv(self):
