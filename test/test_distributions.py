@@ -2181,7 +2181,6 @@ class TestLazyLogitsInitialization(TestCase):
 @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
 class TestAgainstScipy(TestCase):
     def setUp(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         positive_var = Variable(torch.Tensor(20,).normal_()).exp()
         positive_var2 = Variable(torch.Tensor(20,).normal_()).exp()
         random_var = Variable(torch.Tensor(20,).normal_())
@@ -2217,8 +2216,8 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.gamma(positive_var, scale=1 / positive_var2)
             ),
             (
-                Geometric(simplex_tensor * 0.9 + 0.1),
-                scipy.stats.geom(simplex_tensor * 0.9 + 0.1, loc=-1)
+                Geometric(simplex_tensor),
+                scipy.stats.geom(simplex_tensor, loc=-1)
             ),
             (
                 Gumbel(random_var, positive_var2),
