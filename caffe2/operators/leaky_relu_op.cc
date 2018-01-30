@@ -55,7 +55,7 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(LeakyRelu)
     .NumInputs(1)
     .NumOutputs(1)
-    .Arg("alpha", "Coefficient of leakage")
+    .Arg("alpha", "Coefficient of leakage, default value is 0.01")
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(PointwiseCostInference<2>)
     .IdenticalTypeAndShape()
