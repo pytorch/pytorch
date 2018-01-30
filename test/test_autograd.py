@@ -2056,19 +2056,25 @@ method_tests = [
     ('add', (S, S), ((S, S, S),), 'broadcast_lhs'),
     ('add', (S, 1, S), ((M, S),), 'broadcast_all'),
     ('add', (S, S, S), (3.14,), 'constant'),
+    ('add', (), (3.14,), 'scalar_constant'),
     ('__radd__', (S, S, S), (3.14,), 'constant'),
+    ('__radd__', (), (3.14,), 'scalar_constant'),
     ('sub', (S, S, S), ((S, S, S),)),
     ('sub', (S, S, S), ((S, S),), 'broadcast_rhs'),
     ('sub', (S, S), ((S, S, S),), 'broadcast_lhs'),
     ('sub', (S, 1, S), ((M, S),), 'broadcast_all'),
     ('sub', (S, S, S), (3.14,), 'constant'),
+    ('sub', (), (3.14,), 'scalar_constant'),
     ('__rsub__', (S, S, S), (3.14,), 'constant'),
+    ('__rsub__', (), (3.14,), 'scalar_constant'),
     ('mul', (S, S, S), ((S, S, S),)),
     ('mul', (S, S, S), ((S, S),), 'broadcast_rhs'),
     ('mul', (S, S), ((S, S, S),), 'broadcast_lhs'),
     ('mul', (S, 1, S), ((M, S),), 'broadcast_all'),
     ('mul', (S, S, S), (3.14,), 'constant'),
+    ('mul', (), (3.14,), 'scalar_constant'),
     ('__rmul__', (S, S, S), (3.14,), 'constant'),
+    ('__rmul__', (), (3.14,), 'scalar_constant'),
     ('div', (S, S, S), (torch.rand(S, S, S) + 0.1,)),
     ('div', (S, S, S), (torch.rand(S, S) + 0.1,), 'broadcast_rhs'),
     ('div', (S, S), (torch.rand(S, S, S) + 0.1,), 'broadcast_lhs'),
@@ -2100,42 +2106,65 @@ method_tests = [
     ('expand', (S, 1), (S, S, S), 'new_dim'),
     ('expand', (1,), (S, S, S), '1_element'),
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
+    ('expand', (), (dont_convert(()),), 'scalar_to_scalar', NO_ARGS, [skipIfNoScalars]),
+    ('expand', (), (1, 3, 2), 'scalar_to_dims'),
     ('exp', (S, S, S), NO_ARGS),
+    ('exp', (), NO_ARGS, 'scalar'),
     ('expm1', (S, S, S), NO_ARGS),
+    ('expm1', (), NO_ARGS, 'scalar'),
     ('erf', torch.rand(S, S, S), NO_ARGS),
     ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
     ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS),
     ('log1p', torch.rand(S, S, S), NO_ARGS),
     ('tanh', (S, S, S), NO_ARGS),
+    ('tanh', (), NO_ARGS, 'scalar'),
     ('sigmoid', (S, S, S), NO_ARGS),
+    ('sigmoid', (), NO_ARGS, 'scalar'),
     ('sinh', (S, S, S), NO_ARGS),
+    ('sinh', (), NO_ARGS, 'scalar'),
     ('cosh', (S, S, S), NO_ARGS),
+    ('cosh', (), NO_ARGS, 'scalar'),
     ('abs', (S, S, S), NO_ARGS),
+    ('abs', (), NO_ARGS, 'scalar'),
     ('clamp', (S, S, S), (0, 1)),
     ('clamp', (S, S, S), (None, 0.5), 'min'),
     ('clamp', (S, S, S), (0.5, None), 'max'),
+    ('clamp', (), (0, 1), 'scalar'),
+    ('clamp', (), (None, 0.5), 'min_scalar'),
+    ('clamp', (), (0.5, None), 'max_scalar'),
     ('sqrt', torch.rand(S, S, S) + 5e-4, NO_ARGS),
     ('sin', (S, S, S), NO_ARGS),
+    ('sin', (), NO_ARGS, 'scalar'),
     ('cos', (S, S, S), NO_ARGS),
+    ('cos', (), NO_ARGS, 'scalar'),
     ('tan', torch.randn(S, S, S).clamp(-1, 1), NO_ARGS),
     ('asin', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
     ('acos', torch.randn(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
     ('atan', (S, S, S), NO_ARGS),
+    ('atan', (), NO_ARGS, 'scalar'),
     ('atan2', (S, S, S), ((S, S, S),)),
     ('reciprocal', torch.rand(S, S, S) + 0.1, NO_ARGS),
     ('round', (S, S, S), NO_ARGS),
+    ('round', (), NO_ARGS, 'scalar'),
     ('sign', (S, S, S), NO_ARGS),
+    ('sign', (), NO_ARGS, 'scalar'),
     ('trunc', (S, S, S), NO_ARGS),
+    ('trunc', (), NO_ARGS, 'scalar'),
     ('floor', (S, S, S), NO_ARGS),
+    ('floor', (), NO_ARGS, 'scalar'),
     ('ceil', (S, S, S), NO_ARGS),
+    ('ceil', (), NO_ARGS, 'scalar'),
     ('rsqrt', torch.rand(S, S, S) + 1e-2, NO_ARGS),
     ('frac', (S, S, S), NO_ARGS),
+    ('frac', (), NO_ARGS, 'scalar'),
     ('fmod', (S, S, S), (1.5,)),
+    ('fmod', (), (1.5,), 'scalar'),
     ('fmod', (S, S, S), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor'),
     ('fmod', (S,), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_lhs'),
     ('fmod', (S, S, S), (Variable(torch.rand(S) + 1.5, requires_grad=False),), 'tensor_broadcast_rhs'),
     ('fmod', (S, 1, S), (Variable(torch.rand(S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_all'),
     ('remainder', (S, S, S), (1.5,)),
+    ('remainder', (), (1.5,), 'scalar'),
     ('remainder', (S, S, S), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor'),
     ('remainder', (S,), (Variable(torch.rand(S, S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_lhs'),
     ('remainder', (S, 1, S), (Variable(torch.rand(S, S) + 1.5, requires_grad=False),), 'tensor_broadcast_all'),
@@ -2146,8 +2175,9 @@ method_tests = [
     ('max', (S, S, S), NO_ARGS),
     ('max', (S, S, S), (1,), 'dim', [0]),
     ('max', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('max', (S,), (0,), 'dim_1d', [0]),
-    ('max', (S,), (0, True,), 'keepdim_dim_1d', [0]),
+    ('max', (), NO_ARGS, 'scalar'),
+    ('max', (), (0,), 'scalar_dim', [0]),
+    ('max', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('max', (S, S, S), ((S, S, S),), 'elementwise'),
     ('max', (S, S, S), ((S,),), 'elementwise_broadcast_rhs'),
     ('max', (S,), ((S, S, S),), 'elementwise_broadcast_lhs'),
@@ -2155,8 +2185,9 @@ method_tests = [
     ('min', (S, S, S), NO_ARGS),
     ('min', (S, S, S), (1,), 'dim', [0]),
     ('min', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('min', (S,), (0,), 'dim_1d', [0]),
-    ('min', (S,), (0, True,), 'keepdim_dim_1d', [0]),
+    ('min', (), NO_ARGS, 'scalar'),
+    ('min', (), (0,), 'scalar_dim', [0]),
+    ('min', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('min', (S, S, S), ((S, S, S),), 'elementwise'),
     ('min', (S, S, S), ((S,),), 'elementwise_broadcast_rhs'),
     ('min', (S,), ((S, S, S),), 'elementwise_broadcast_lhs'),
@@ -2164,8 +2195,9 @@ method_tests = [
     ('mean', (S, S, S), NO_ARGS),
     ('mean', (S, S, S), (1,), 'dim', [0]),
     ('mean', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('mean', (S,), (0,), 'dim_1d', [0]),
-    ('mean', (S,), (0, True), 'keepdimdim_1d', [0]),
+    ('mean', (), NO_ARGS, 'scalar'),
+    ('mean', (), (0,), 'scalar_dim', [0]),
+    ('mean', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('kthvalue', (S, S, S), (2,)),
     ('kthvalue', (), (1,), 'scalar'),
     ('kthvalue', (S, S, S), (2, 1,), 'dim', [1]),
@@ -2177,23 +2209,27 @@ method_tests = [
     ('median', (S, S, S), NO_ARGS),
     ('median', (S, S, S), (1,), 'dim', [0]),
     ('median', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('median', (S,), (0,), 'dim_1d', [0]),
-    ('median', (S,), (0, True,), 'keepdim_dim_1d', [0]),
+    ('median', (), NO_ARGS, 'scalar'),
+    ('median', (), (0,), 'scalar_dim', [0]),
+    ('median', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('mode', (S, S, S), NO_ARGS),
     ('mode', (S, S, S), (1,), 'dim', [0]),
     ('mode', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('mode', (S,), (0,), 'dim_1d', [0]),
-    ('mode', (S,), (0, True,), 'keepdim_dim_1d', [0]),
+    ('mode', (), NO_ARGS, 'scalar'),
+    ('mode', (), (0,), 'scalar_dim', [0]),
+    ('mode', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('sum', (S, S, S), NO_ARGS),
     ('sum', (S, S, S), (1,), 'dim', [0]),
     ('sum', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('sum', (S,), (0,), 'dim_1d', [0]),
-    ('sum', (S,), (0, True), 'keepdim_1d', [0]),
+    ('sum', (), NO_ARGS, 'scalar'),
+    ('sum', (), (0,), 'scalar_dim', [0]),
+    ('sum', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('prod', (S, S, S), NO_ARGS),
     ('prod', (S, S, S), (1,), 'dim', [0]),
     ('prod', (S, S, S), (1, True,), 'keepdim_dim', [0]),
-    ('prod', (S,), (0,), 'dim_1d', [0]),
-    ('prod', (S,), (0, True), 'keepdim_1d', [0]),
+    ('prod', (), NO_ARGS, 'scalar'),
+    ('prod', (), (0,), 'scalar_dim', [0]),
+    ('prod', (), (0, True,), 'scalar_keepdim_dim', [0]),
     ('prod', prod_zeros(S, [0, 1]), NO_ARGS, 'zerodims2'),
     ('prod', prod_zeros(S, [0, 2]), NO_ARGS, 'zerodims1'),
     ('prod', prod_zeros(S, [1, 2]), NO_ARGS, 'zerodims0'),
@@ -2204,6 +2240,9 @@ method_tests = [
     ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', [0]),
     ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', [0]),
     ('prod', prod_single_zero(S), NO_ARGS, 'single_zero'),
+    ('prod', (variable(0, requires_grad=True)), NO_ARGS, 'scalar_zero'),
+    ('prod', (variable(0, requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
+    ('prod', (variable(0, requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
     ('var', (S, S, S), NO_ARGS),
     ('var', (S, S, S), (1,), 'dim', [0]),
     ('var', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
@@ -2217,14 +2256,16 @@ method_tests = [
     ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
     ('repeat', (S,), (2,), 'single_number'),
+    ('repeat', (), (2, 3), 'scalar'),
     ('repeat', (2, 2), (3, 2)),
     ('repeat', (2, 2), (1, 3, 1, 2), 'unsqueeze'),
-    ('cumsum', (S, S, S), (1,), 'dim0', [0]),
+    ('cumsum', (S, S, S), (0,), 'dim0', [0]),
     ('cumsum', (S, S, S), (1,), 'dim1', [0]),
-    ('cumsum', (S,), (0,), '1d', [0]),
+    ('cumsum', (), (0,), 'dim0_scalar', [0]),
     ('cumprod', (S, S, S), (0,)),
     ('cumprod', (S, S, S), (1,), 'dim1', [0]),
-    ('cumprod', (S,), (0,), '1d'),
+    ('cumprod', (), (0,), 'scalar'),
+    ('cumprod', (variable(0, requires_grad=True)), (0,), 'scalar_zeros'),
     ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim2', [0]),
     ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', [0]),
     ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', [0]),
@@ -2276,6 +2317,7 @@ method_tests = [
     ('addcdiv', (S, S), (0.5, (S, 1), (1, S)), 'scale_broadcast_rhs'),
     ('addcdiv', (1,), (0.5, (S, S, 1), (1, S)), 'scale_broadcast_all'),
     ('zero_', (S, S, S), NO_ARGS),
+    ('zero_', (), NO_ARGS, 'scalar'),
     ('norm', (S, S), (2,)),
     ('norm', (S, S), (0,), '0'),
     ('norm', (S, S), (0.5,), '0_5'),
@@ -2291,11 +2333,12 @@ method_tests = [
     ('norm', (S, S, S), (2, 1, True), 'keepdim_2_dim', [1]),
     ('norm', (S, S, S), (3, 1, True), 'keepdim_3_dim', [1]),
     ('norm', torch.rand(S, S, S) + 5e-2, (1.5, 1, True), 'keepdim_1_5_dim', [1]),
-    ('norm', (S,), (2, 0), '2_dim_1d', [1]),
-    ('norm', (S,), (3, 0), '3_dim_1d', [1]),
-    ('norm', (S,), (2, 0, True), 'keepdim_2_dim_1d', [1]),
-    ('norm', (S,), (3, 0, True), 'keepdim_3_dim_1d', [1]),
+    ('norm', (), (2, 0), '2_dim_scalar', [1]),
+    ('norm', (), (3, 0), '3_dim_scalar', [1]),
+    ('norm', (), (2, 0, True), 'keepdim_2_dim_scalar', [1]),
+    ('norm', (), (3, 0, True), 'keepdim_3_dim_scalar', [1]),
     ('clone', (S, M, S), NO_ARGS),
+    ('clone', (), NO_ARGS, 'scalar'),
     ('dist', (S, S, S), ((S, S, S),)),
     ('dist', (S, S, S), ((S,),), 'broadcast_rhs'),
     ('dist', (S,), ((S, S, S),), 'broadcast_lhs'),
@@ -2331,6 +2374,7 @@ method_tests = [
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
+    ('fill_', (), (1,), 'number_scalar'),
     ('fill_', (S, S, S), (variable(1),), 'variable', NO_ARGS, [skipIfNoScalars]),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
@@ -2348,8 +2392,14 @@ method_tests = [
     ('ne_', (S, S, S), (0,), 'pyscalar'),
     ('gt_', (S, S, S), (0,), 'pyscalar'),
     ('ge_', (S, S, S), (0,), 'pyscalar'),
-    ('lt_', (S, S, S), (0,), 'pyscalar'),
     ('le_', (S, S, S), (0,), 'pyscalar'),
+    ('lt_', (), (0,), 'pyscalar'),
+    ('eq_', (), (0,), 'pyscalar_scalar'),
+    ('ne_', (), (0,), 'pyscalar_scalar'),
+    ('gt_', (), (0,), 'pyscalar_scalar'),
+    ('ge_', (), (0,), 'pyscalar_scalar'),
+    ('lt_', (), (0,), 'pyscalar_scalar'),
+    ('le_', (), (0,), 'pyscalar_scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
@@ -2359,10 +2409,11 @@ method_tests = [
     ('squeeze', (1, 1, 1, 1), NO_ARGS, 'input_sizes_are_ones'),
     ('squeeze', (S, 1, S, 1), (1,), '1_dim', [0]),
     ('squeeze', (S, 1, S, 1), (2,), 'not_1_dim', [0]),
-    ('squeeze', (1,), (0,), '1d_dim0', [0]),
+    ('squeeze', (), (0,), 'scalar', [0]),
     ('unsqueeze', (S, S, S), (0,), 'first', [0]),
     ('unsqueeze', (S, S, S), (1,), 'middle', [0]),
     ('unsqueeze', (S, S, S), (3,), 'last', [0]),
+    ('unsqueeze', (), (0,), 'scalar', [0]),
     ('chunk', (S, S, S), (2,)),
     ('chunk', (S, S, S), (S, 1), 'dim', [1]),
     ('split', (S, S, S), (2,)),
@@ -2395,11 +2446,17 @@ method_tests = [
     ('sort', (S, M, S), NO_ARGS),
     ('sort', (S, M, S), (1,), 'dim'),
     ('sort', (S, M, S), (1, True), 'dim_desc'),
+    ('sort', (), NO_ARGS, 'scalar'),
+    ('sort', (), (0,), 'dim_scalar'),
+    ('sort', (), (0, True), 'dim_desc_scalar'),
     ('topk', (S, M, S), (3,)),
-    ('topk', (), (1,), 'scalar'),
     ('topk', (S, M, S), (3, 1), 'dim', [1]),
     ('topk', (S, M, S), (3, 1, True), 'dim_desc', [1]),
     ('topk', (S, M, S), (3, 1, True, True), 'dim_desc_sort', [1]),
+    ('topk', (), (1,), 'scalar'),
+    ('topk', (), (1, 0), 'dim_sclar', [1]),
+    ('topk', (), (1, 0, True), 'dim_desc_scalar', [1]),
+    ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', [1]),
     ('take', (S, S, S), (Variable(torch.LongTensor([[-3, 2], [20, 2]])),)),
     ('where', (M, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False), (M, M))),
     ('where', (M, 1, M), (Variable(mask_not_all_zeros((M, M)), requires_grad=False), (M, M, 1)), 'broadcast_all'),
@@ -2490,6 +2547,8 @@ def exclude_tensor_method(name, test_name):
     exclude_all_tensor_method_by_test_name = {
         'test_clamp_min',
         'test_clamp_max',
+        'test_clamp_min_scalar',
+        'test_clamp_max_scalar',
         'test_slice',
         'test_where',
         'test_where_broadcast_all',
@@ -2550,10 +2609,21 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
 
 
+def has_scalars(output, args):
+    def ensure_tuple(y):
+        return y if isinstance(y, tuple) else (y,)
+
+    # include _with_scalars so we can easily find and remove this
+    all_tuple = args + ensure_tuple(output)
+    return torch._C._with_scalars() and any(x.dim() == 0 for x in all_tuple if isinstance(x, Variable))
+
+
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
                           f_args_variable, f_args_tensor):
     output_variable = apply_fn(*f_args_variable)
-    if not exclude_tensor_method(name, test_name):
+
+    # tensor API currently doesn't have scalars
+    if not exclude_tensor_method(name, test_name) and not has_scalars(output_variable, f_args_variable):
         output_tensor = apply_fn(*f_args_tensor)
         if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
             output_tensor = torch.DoubleTensor((output_tensor,))
@@ -2566,8 +2636,8 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
     self_variable = f_args_variable[0]
     if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
         output_variable.backward(randn_like(output_variable))
-        test_case.assertTrue(type(self_variable.data) == type(self_variable.grad.data))
-        test_case.assertTrue(self_variable.size() == self_variable.grad.size())
+        test_case.assertEqual(type(self_variable.data), type(self_variable.grad.data))
+        test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 for test in method_tests:
     name, self_size, args = test[:3]
@@ -2592,13 +2662,15 @@ for test in method_tests:
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
                 self_variable = create_input((self_size,), requires_grad=not is_inplace)[0]
+                # need to record this because methods can change the szie (e.g. unsqueeze)
+                self_is_scalar = torch._C._with_scalars() and self_variable.dim() == 0
                 args_variable = create_input(args, requires_grad=not is_inplace)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                has_scalar = (self_variable.dim() == 0 or
-                              any(x.dim() == 0 for x in args_variable if isinstance(x, Variable)))
-                if not exclude_tensor_method(name, test_name) and not has_scalar:  # scalar API doesn't work on tensors
+                # scalar API doesn't work on tensors
+                has_scalar = has_scalars(output_variable, args_variable) or self_is_scalar
+                if not exclude_tensor_method(name, test_name) and not has_scalar:
                     output_tensor = getattr(self_tensor, name)(*args_tensor)
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))
