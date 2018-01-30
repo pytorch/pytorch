@@ -4,14 +4,14 @@
 import re
 from collections import OrderedDict
 from code_template import CodeTemplate
-from typing import Any, Dict, List, Generic, Optional, Set, Tuple, Union, \
-    TypeVar
 
 try:
+    from typing import Any, Dict, List, Generic, Optional, Set, Tuple, \
+        Union, TypeVar
     from mypy_extensions import TypedDict
-    MYPY_EXTENSIONS = True
+    TYPE_HINTS = True
 except ImportError:
-    MYPY_EXTENSIONS = False
+    TYPE_HINTS = False
 
 import sys
 if sys.version_info[0] == 3:
@@ -271,13 +271,9 @@ HEADER_CONSTANT_REPLACEMENTS = [
     ('__last_dim', '-1'),
 ]
 
-T = TypeVar('T')
-U = TypeVar('U')
 
-
-class nested_dict(Generic[T, U]):
+class nested_dict(object):
     def __init__(self, base, parent):
-        # type: (T, U) -> None
         self.base, self.parent = base, parent
 
     def __getitem__(self, x):
@@ -286,7 +282,7 @@ class nested_dict(Generic[T, U]):
             return r
         return self.parent[x]
 
-if MYPY_EXTENSIONS:
+if TYPE_HINTS:
     Environment = TypedDict('Environment', {
         'ScalarName': str,
         'THTensor': str,
