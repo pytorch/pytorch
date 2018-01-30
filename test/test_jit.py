@@ -1151,6 +1151,7 @@ class TestJit(TestCase):
 
     def test_saved_output(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
+
         @torch.jit.compile(nderivs=1)
         def fn(x):
             return x.sigmoid()
