@@ -293,14 +293,18 @@ if TYPE_HINTS:
     })
 
     TopEnvironment = TypedDict('TopEnvironment', {
+        'type_registrations': List[str],
+        'type_headers': List[str],
         'type_method_declarations': List[str],
         'type_method_definitions': List[str],
-        'native_function_declarations': List[str],
+        'type_method_inline_definitions': List[str],
         'tensor_method_declarations': List[str],
         'tensor_method_definitions': List[str],
         'function_declarations': List[str],
         'function_definitions': List[str],
-    }, total=False)
+        'type_ids': List[str],
+        'native_function_declarations': List[str],
+    })
 
     # A Declarations.cwrap formal argument
     # type can contain THTensor* types
