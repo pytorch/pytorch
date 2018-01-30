@@ -50,7 +50,7 @@ struct VariableType final : public at::Type {
 
 private:
   // checks that t is actually a Variable
-  static Variable & checked_cast(const Tensor & t, const char * name, int pos);
+  static Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
   static at::Tensor & unpack(const Tensor & t, const char * name, int pos);
   static at::SparseTensor unpack(SparseTensor t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
