@@ -141,6 +141,8 @@ struct TensorInfo {
     return at::IntList(spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {
+    if(!defined())
+      return nullptr;
     return std::make_shared<TensorType>(type(), device(), sizes(), strides());
   }
 private:

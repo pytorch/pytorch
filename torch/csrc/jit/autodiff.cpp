@@ -77,7 +77,6 @@ static value_set findAllRequiresGradNodes(
 
 static Value* allocZerosLike(Value *v) {
   static const Symbol constant_sym = "constant"_sym;
-  static const Symbol is_zero_sym  = "is_zero"_sym;
   static const Symbol value_sym    = "value"_sym;
   JIT_EXPECTM(v->hasType(), "can't allocate zero gradient for a value without a type");
   Graph *graph = v->owningGraph();
@@ -88,9 +87,21 @@ static Value* allocZerosLike(Value *v) {
   auto zeros = at_type.zeros({1}).expand(type->sizes());
   Node *constant = graph->create(constant_sym)
                         ->t_(value_sym, zeros)
-                        ->i_(is_zero_sym, 1);
+                        ->i_(kis_zero, 1);
   graph->appendNode(constant);
   return constant->output();
+}
+
+// any vjp input may be undefined, and we need to potentially replace it
+// with a zero tensor of the right size if required.
+// this function inserts a guard into the graph that does this replacement.
+// ReplaceIfUndef(dv,c) replaces dv with c if dv is undef.
+// v is set to be a zero tensor with the size of v.
+// During Graph specialization these guards will get removed when
+// 'dv' is known to be undef, and the zeros will be propagated if possible.
+static Value* createUndefGuardLike(Value * dv, Value * v) {
+  Graph* graph = dv->owningGraph();
+  return graph->appendNode(graph->create(kReplaceIfUndef, {dv, allocZerosLike(v)}))->output();
 }
 
 struct ReverseDetails {
@@ -139,6 +150,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
     Value * output = outputs[i];
     if (!requires_grad(output)) continue;
     Value * output_grad = graph.addInput()->setType(output->typeOption());
+    output_grad = createUndefGuardLike(output_grad, output);
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -302,6 +314,7 @@ static void lambdaLiftReverse(Graph& graph,
     // Add VJP inputs only for intermediates that actually required grad.
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
     Value * tmp_vjp_in = graph.addInput()->setType(tmp->typeOption());
+    tmp_vjp_in = createUndefGuardLike(tmp_vjp_in, tmp);
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
     // This is quite weird because we can't first make a sum and then replace all uses
     // of tmp_vjp_prev (that would replace its use in the sum too!), so we create an

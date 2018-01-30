@@ -1,3 +1,5 @@
+#include "Python.h"
+#include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/autodiff.h"
@@ -5,90 +7,55 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/common_subexpression_elimination.h"
+#include "torch/csrc/jit/passes/peephole.h"
+#include "torch/csrc/jit/passes/graph_fuser.h"
+#include "torch/csrc/jit/passes/inplace_check.h"
+#include "torch/csrc/jit/passes/batch_mm.h"
+
 #include "torch/csrc/autograd/function.h"
 
 #include <unordered_map>
 
 namespace torch { namespace jit {
 
-// input captures, output captures, temporary captures
-
-/*
-// how to run a single optimized execution
-// optimized executions unwrap/re-wrap tensors as described in the Gradient struct.
-class Plan {
-  Code code;
-  Gradient? gradient;
-  variable_list run(variable_list inputs) {
-    tensors = unwrap_variables(inputs);
-    outputs = code.run(tensors);
-    output_vars = wrap_in_nograd_variables(outputs)
-    if(!gradient) {
-      return output_vars;
-    }
-    grad_fn = GradientFunction(gradient);
-    for(x : gradient.gradient_inputs) {
-      output_vars[x].requires_grad = true
-      output_vars[x].grad_fn = grad_fn;
-      output_vars[x].output_nr = grad_fn.num_inputs++;
-    }
-    for(x : gradient.outputs) {
-      grad_fn.next_functions.push_back(inputs[x].grad_fn, inputs[x].output_nr)
-      // NOTE: it would be great if edge_type was struct InputPort { Gradient grad_fn; int offset; }
-      // and Variable also had an InputPort instead of grad_fn+output_nr.
-      // then this would just be:
-      // grad_fn.next_functions.push_back(inputs[x].input_port);
-    }
-    // capture needs to be separate from the grad_fn constructor since
-    // it captures some of the output vars whose gradients point to grad_fn itself.
-    grad_fn.capture(inputs, outputs_vars);
-    // remove the last gradient.num_temporary_outputs from output_vars, they are not used outside
-    return output_vars.shorten_by(gradient.num_temporary_outputs);
-    // note: those temporary vars were capture by the gradient, so if we take _its_ gradient
-    // it is possible they are used.
-  }
-};
-
-
-class GradientFunction : autograd::Function {
-  GradientFunction(Gradient grad)
-  : grad(grad) {}
-  variable_list run(variable_list inputs) {
-    return grad.graph_exe.run(captures+inputs); //concern 2: costly concat, captures can be really big
-  }
-  void capture(variable_list inputs, variable_list outputs) {
-    for(c : grad.captures) {
-      captures.push_back(c.kind == Input ? inputs[c.index] : outputs[c.index]);
-    }
-  }
-  Gradient grad;
-  saved_variable_list captures; //what is saved variable in c++
-};
-
-*/
+namespace {
 
 using tensor_list = std::vector<at::Tensor>;
 using variable_tensor_list = tensor_list;
-
-struct ExecutionPlan;
-struct GraphExecutor;
+using Variable = autograd::Variable;
+using autograd::variable_list;
 
 struct ExecutionPlanAutogradFunction : public autograd::Function {
-  ExecutionPlanAutogradFunction(std::shared_ptr<GraphExecutor> graph)
+  ExecutionPlanAutogradFunction(GraphExecutor graph)
   : graph(std::move(graph)) {}
-  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override;
+  virtual variable_list apply(const variable_list& inputs) override {
+    // TODO: stupid copies here to convert to/from tensor_list
+    // TODO: things are not moved correctly
+    variable_tensor_list all_inputs;
+    all_inputs.reserve(captures.size() + inputs.size());
+    for(auto & sv : captures) {
+      all_inputs.push_back(sv.unpack(this->shared_from_this()));
+    }
+    all_inputs.insert(all_inputs.end(), inputs.begin(), inputs.end());
+    auto tensors = graph.run(std::move(all_inputs));
+    return autograd::variable_list(tensors.begin(), tensors.end());
+  }
 private:
   friend struct ExecutionPlan;
-  std::shared_ptr<GraphExecutor> graph;
+  GraphExecutor graph;
   std::vector<autograd::SavedVariable> captures;
 };
 
 
 struct ExecutionPlan {
   ExecutionPlan(std::shared_ptr<Graph> & graph)
-  : f(graph) {}
+  : f(graph) {
+    std::cout << "creating plan for: " << *graph << "\n";
+  }
   ExecutionPlan(std::shared_ptr<Graph> & graph, Gradient grad)
-  : f(graph), grad(std::move(grad)) {}
+  : f(graph), grad(std::move(grad)), grad_executor(grad.df) {}
 
   variable_tensor_list run(variable_tensor_list inputs) {
     if(grad) {
@@ -133,7 +100,7 @@ private:
   }
 
   variable_tensor_list runWithGrad(variable_tensor_list inputs) {
-    auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor, 0);
+    auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor);
     // hook up the outputs of df to the gradient functions of the inputs that require
     // gradients
     for(auto idx : grad.df_output_vjps) {
@@ -171,35 +138,34 @@ private:
     outputs.erase(outputs.begin() + grad.f_real_outputs, outputs.end());
     return outputs;
   }
-  friend struct ExecutionPlanAutogradFunction;
   Code f;
-
   // description of gradient as a graph
   Gradient grad; // if(grad) is false when this is unused
   // executor for df, including code caches
-  std::shared_ptr<GraphExecutor> grad_executor;
+  GraphExecutor grad_executor;
 };
+
+} // anonymous namespace
 
 // a Graph can be created via tracing, or via a language-based frontend
 // GraphExecutor runs it. It can run the same graph on many different sizes
 // and different requires_grad states, and handles specializations for each situation.
 // GraphExecutor is completely unaware of tracing or module parameters to keep the
 // tracing concerns separated.
-struct GraphExecutor {
+struct GraphExecutorImpl {
 
   // we dynamically expect this list of at::Tensor to be Variables.
   // TODO: make these arguments safe.
-  using variable_tensor_list = tensor_list;
-  using Variable = autograd::Variable;
-  GraphExecutor(std::shared_ptr<Graph> graph, bool symbolically_differentiable)
+  GraphExecutorImpl(std::shared_ptr<Graph> graph, bool symbolically_differentiable)
   : graph(std::move(graph))
   , symbolically_differentiable(symbolically_differentiable) {}
-  GraphExecutor(std::shared_ptr<Graph> graph)
-  : symbolically_differentiable(isDifferentiable(*graph)) {}
+  GraphExecutorImpl(std::shared_ptr<Graph> graph)
+  : graph(std::move(graph))
+  , symbolically_differentiable(isDifferentiable(*this->graph)) {}
 
   // entry point where execution begins
   variable_tensor_list run(variable_tensor_list inputs) {
-
+    std::cout << "GE Run\n";
     // this is the fallback pathway
     if(!symbolically_differentiable && gradientIsPossible(inputs)) {
       auto & fb = getOrCreateAutogradFallback();
@@ -244,18 +210,29 @@ private:
       value_map[input] = new_g->addInput()->copyMetadata(input);
     }
     for(auto node : g.nodes()) {
-      auto new_node = new_g->createClone(node, [&](Value* v) {
+      auto new_node = new_g->appendNode(new_g->createClone(node, [&](Value* v) {
         return value_map.at(v);
-      });
+      }));
       for(size_t i = 0; i < node->outputs().size(); ++i) {
         value_map[node->outputs()[i]] = new_node->outputs()[i];
         new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
       }
     }
+    for(auto output : g.outputs()) {
+      new_g->registerOutput(value_map.at(output));
+    }
     return new_g;
   }
-  void optimize(Graph & graph, bool graphMustSupportVariables) {
-    //TODO
+  void optimize(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
+    // Now, we have a complete trace. Compile it.
+    EliminateDeadCode(graph);
+    CheckInplace(graph);
+    EliminateCommonSubexpression(graph);
+    if (!graphMustSupportVariables) {
+      PeepholeOptimize(graph);
+      BatchMM(graph);
+      FuseGraph(graph);
+    }
   }
   Code & getOrCreateAutogradFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);
@@ -264,7 +241,7 @@ private:
     }
     auto graph_ = copy(*graph);
     CreateAutodiffSubgraphs(*graph_);
-    optimize(*graph_, /*graphMustSupportVariables=*/true);
+    optimize(graph_, /*graphMustSupportVariables=*/true);
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
@@ -289,26 +266,74 @@ private:
     }
     return false;
   }
-  void SpecializeToSpec(Graph & g, const ArgumentSpec & spec) {
-    PropagateInputShapes(g, spec);
-    for(size_t i = 0; i < spec.size(); ++i) {
-      if(!spec.tensorInfo(i).defined()) {
-        
+
+
+  // remove ReplaceIfUndef(v, replacement) nodes that consume inputs with 'v' if
+  // the input is defined, and 'replacement' if it is not.
+  void specializeUndef(Graph & g, const ArgumentSpec & spec) {
+    for(size_t i = 0; i < spec.size(); i++) {
+      std::vector<Value*> to_replace;
+      // do not edit in place, since it invalides uses iterator
+      for(auto u : g.inputs()[i]->uses()) {
+        if(u.user->kind() == kReplaceIfUndef) {
+          to_replace.push_back(u.user->output());
+        }
+      }
+      for(auto v : to_replace) {
+        int idx = spec.tensorInfo(i).defined() ? 0 : 1;
+        v->replaceAllUsesWith(v->node()->inputs()[idx]);
+        v->node()->destroy();
       }
     }
   }
+  bool isZero(Node * n) {
+    return n->kind() == kConstant &&
+      n->hasAttribute(kis_zero) &&
+      n->i(kis_zero);
+  }
+  // a + 0 -> a
+  // 0 + a -> a
+  void propagateZeros(Graph & g) {
+    for(auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
+      if(it->kind() == kadd && at::Scalar(it->t(kalpha)).toDouble() == 1.0) {
+        if(isZero(it->inputs()[0]->node())) {
+          it->output()->replaceAllUsesWith(it->inputs()[1]);
+          it.destroyCurrent();
+        } else if(isZero(it->inputs()[1]->node())) {
+          it->output()->replaceAllUsesWith(it->inputs()[0]);
+          it.destroyCurrent();
+        }
+      }
+    }
+  }
+  void SpecializeToSpec(Graph & g, const ArgumentSpec & spec) {
+    // clean up replaceIfUndef nodes
+    specializeUndef(g, spec);
+    // clean up additions resulting from nodes that were in fact undefined
+    propagateZeros(g);
+
+    // calculate all input shapes
+    PropagateInputShapes(g, spec);
+  }
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
+    std::cout << "graph: " << *graph << "\n";
     auto graph_ = copy(*graph);
+    std::cout << "graph: " << *graph_ << "\n";
     SpecializeToSpec(*graph_, spec);
+    std::cout << "graph: " << *graph_ << "\n";
     if(!gradientIsPossible(spec)) {
-      optimize(*graph_, /*graphMustSupportVariables=*/false);
+      optimize(graph_, /*graphMustSupportVariables=*/false);
+      std::cout << "graph: " << *graph_ << "\n";
       return ExecutionPlan(graph_);
     }
     JIT_ASSERT(symbolically_differentiable);
     // TODO: add in requires_grad flags when PR is merged
-    Gradient gradient = differentiate(graph_);
+    std::vector<bool> requires_grads;
+    for(size_t i = 0; i < spec.size(); i++)
+      requires_grads.push_back(spec.tensorInfo(i).requires_grad());
+    Gradient gradient = differentiate(graph_, requires_grads);
     graph_ = gradient.f;
-    optimize(*graph_, /*graphMustSupportVariables=*/false);
+    optimize(graph_, /*graphMustSupportVariables=*/false);
     return ExecutionPlan(graph_, std::move(gradient));
   }
   // the unoptimized starting graph
@@ -338,39 +363,14 @@ private:
   std::mutex compile_mutex;
 };
 
-autograd::variable_list
-ExecutionPlanAutogradFunction::apply(const autograd::variable_list& inputs) {
-  // TODO: stupid copies here to convert to/from tensor_list
-  auto tensors = graph->run(variable_tensor_list(inputs.begin(), inputs.end()));
-  return autograd::variable_list(tensors.begin(), tensors.end());
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
+: pImpl(new GraphExecutorImpl(std::move(graph))) {}
+
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool symbolically_differentiable)
+: pImpl(new GraphExecutorImpl(std::move(graph), symbolically_differentiable)) {}
+
+std::vector<at::Tensor> GraphExecutor::run(std::vector<at::Tensor> inputs) {
+  return pImpl->run(std::move(inputs));
 }
 
 }}
-
-/*
-
-class GraphExecutor {
-
-
-  void optimize(Graph graph, bool graphMustSupportVariables) {
-    propagate_undef(graph); // remove all compute related to known undefined nodes, needed because a lot of temporaries on single-backward
-                            // will have undefined grads since the variables were never used
-    <standard optimization passes>
-    if(!graphMustSupportVariables) {
-      // some optimizations, like fusion groups, are not valid if we need to run
-      // variables through the graph. Others like rewriting tensor ops into
-      // simpler tensor ops, are safe.
-      // once we know that something is not going to be used to run variables, then
-      // we can perform the unsafe ones.
-      perform_fusion(graph);
-    }
-  }
-
-};
-
-
-
-
-
-
-*/

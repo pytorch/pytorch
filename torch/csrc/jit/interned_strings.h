@@ -124,7 +124,9 @@ _(tan) \
 _(trunc) \
 _(zeros) \
 _(exponent) \
-_(device)
+_(device) \
+_(ReplaceIfUndef) \
+_(is_zero)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \

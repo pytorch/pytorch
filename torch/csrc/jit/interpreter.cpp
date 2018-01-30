@@ -218,6 +218,21 @@ Operation getOperation(jit::Node *node) {
     return [](const list_of_retainable & inputs, list_of_retainable & outputs) {
       outputs.push_back(toRetainableSteal(at::Tensor()));
     };
+  IR_ELSEIF(ReplaceIfUndef)
+    return [](const list_of_retainable & inputs, list_of_retainable & outputs) {
+      auto result = inputs[0];
+      //TODO: refcounting stuff here is ugly but TensorTemporary is not
+      //present. Consider whether we
+      // 1. expose tensor temporary here
+      // 2. keep as it
+      // 3. remove all of this retainable stuff anyway since the new
+      // execution paths do not need handle types.
+      if(result == at::UndefinedTensor::singleton()) {
+        result = inputs[1];
+      }
+      result->retain();
+      outputs.push_back(result);
+    };
   IR_ELSE()
     return getTensorOp(node).op;
   IR_END()
