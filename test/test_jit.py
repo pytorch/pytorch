@@ -1149,6 +1149,16 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
 
+    def test_saved_output(self):
+        x = Variable(torch.randn(4, 4), requires_grad=True)
+
+        @torch.jit.compile(nderivs=1)
+        def fn(x):
+            return x.sigmoid()
+
+        fn(x).sum().backward()
+        self.assertExpected(str(fn.graph_for(x)))
+
     def test_shared_param(self):
 
         class MyModule(torch.nn.Module):
