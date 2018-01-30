@@ -155,7 +155,7 @@ std::vector<at::Type*> VariableType::allTypes() {
   return res;
 }
 
-Variable & VariableType::checked_cast(const Tensor & t, const char * name, int pos) {
+Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
     runtime_error("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
         pos, name);
@@ -168,11 +168,11 @@ Variable & VariableType::checked_cast(const Tensor & t, const char * name, int p
 }
 
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast(t, name, pos).data();
+  return checked_cast_variable(t, name, pos).data();
 }
 
 SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) {
-  return SparseTensor(checked_cast(t.tref, name, pos).data());
+  return SparseTensor(checked_cast_variable(t.tref, name, pos).data());
 }
 
 Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
