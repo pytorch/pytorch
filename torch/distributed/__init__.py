@@ -386,7 +386,7 @@ def all_gather_multigpu(output_tensor_lists,
             contain correctly-sized tensors on each GPU to be used for output of
             the collective.
 
-            e.g. output_tensor_lists[i] contrains the all_gather
+            e.g. output_tensor_lists[i] contains the all_gather
             result that resides on the GPU of input_tensor_list[i].
 
             Note that each element of output_tensor_lists[i] has the size of
