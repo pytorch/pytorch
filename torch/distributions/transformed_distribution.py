@@ -7,11 +7,11 @@ from torch.distributions.distribution import Distribution
 class TransformedDistribution(Distribution):
     r"""
     Extension of the Distribution class, which applies a sequence of Transforms
-    to a base distribution.  Let f be the composition of transforms applied,
+    to a base distribution.  Let f be the composition of transforms applied::
 
         X ~ BaseDistribution
         Y = f(X) ~ TransformedDistribution(BaseDistribution, f)
-        log p(Y) = log p(X) + log det (dX/dY)
+        log p(Y) = log p(X) + log |det (dX/dY)|
     """
     def __init__(self, base_distribution, transforms):
         self.base_dist = base_distribution
