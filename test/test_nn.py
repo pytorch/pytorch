@@ -1490,7 +1490,8 @@ class TestNN(NNTestCase):
         self.assertAlmostEqual(torch.abs(mean.data - IN.running_mean).mean(), 0, delta=1e-5)
         self.assertAlmostEqual(torch.abs(var.data.mean(1) - IN.running_var).mean(), 0, delta=1e-5)
 
-        # in eval mode, adding X * std to input should make output has mean X
+        # in eval mode, adding X * std to a channel in input should make the
+        # corresponding channel in output have mean X
         IN.eval()
         delta = (IN.running_var.sqrt() * torch.arange(c).type(type)).view(-1, *[1 for _ in range(2, input.dim())])
         output = IN(input_var + Variable(delta))
@@ -1552,6 +1553,48 @@ class TestNN(NNTestCase):
 
         input = torch.Tensor(b, c, h, w, d).uniform_()
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, torch.cuda.FloatTensor)
+
+    def _test_LayerNorm_general(self, type):
+        for i in range(2, 6):
+            shape = torch.LongTensor(i).random_(3, 6).tolist()
+            x = Variable(type(*shape).uniform_(0, 10))
+            normalized_ndim = random.randint(1, i - 1)  # inclusive
+            normalized_shape = shape[-normalized_ndim:]
+            unnormalized_shape = shape[:-normalized_ndim]
+
+            ln = nn.LayerNorm(normalized_shape, eps=0).type(type)
+            ln.weight.data.fill_(1)
+            ln.bias.data.fill_(0)
+            output = ln(x)
+            out_reshaped = output.view(*(unnormalized_shape + [-1]))
+            mean = out_reshaped.mean(-1)
+            var = out_reshaped.var(-1, unbiased=False)
+            self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
+
+            scale, bias = torch.FloatTensor(2).uniform_(0.2, 2).tolist()
+            ln.weight.data.fill_(scale)
+            ln.bias.data.fill_(bias)
+            output = ln(x)
+            out_reshaped = output.view(*(unnormalized_shape + [-1]))
+            mean = out_reshaped.mean(-1)
+            var = out_reshaped.var(-1, unbiased=False)
+            self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=1e-5)
+
+            ln = nn.LayerNorm(normalized_shape, momentum=1, eps=0,
+                              elementwise_affine=False, track_running_stats=True).type(type)
+            output_ref = ln(x).data.clone()
+            ln.eval()
+            output_new = ln(x + ln.running_var.sqrt()[0] * scale).data
+            self.assertAlmostEqual((output_new - output_ref).mean(), scale, delta=1e-5)
+
+    def test_LayerNorm_general(self):
+        self._test_LayerNorm_general(torch.FloatTensor)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_LayerNorm_general_cuda(self):
+        self._test_LayerNorm_general(torch.cuda.FloatTensor)
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
@@ -5187,6 +5230,54 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='tracking_stats',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3, 0.3),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_elementwise_affine',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3, 0.3, False),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_no_elementwise_affine',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([5], 1e-3, 0.3, True, True),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_elementwise_affine_tracking_stats',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([2, 2, 5], 1e-3, 0.3),
+        input_size=(4, 2, 2, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_elementwise_affine',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([2, 2, 5], 1e-3, 0.3, False),
+        input_size=(4, 2, 2, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_no_elementwise_affine',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=([2, 2, 5], 1e-3, 0.3, True, True),
+        input_size=(4, 2, 2, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_elementwise_affine_tracking_stats',
     ),
     dict(
         module_name='Conv1d',
