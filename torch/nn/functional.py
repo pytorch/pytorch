@@ -1189,8 +1189,16 @@ def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
         b, c = input.size(0), input.size(1)
 
         # Repeat stored stats and affine transform params
-        running_mean = saved_running_mean.repeat(b)
-        running_var = saved_running_var.repeat(b)
+        if saved_running_mean is not None:
+          running_mean = saved_running_mean.repeat(b)
+        if saved_running_var is not None:
+          running_var = saved_running_var.repeat(b)
+
+        if affine:
+            weight = weight.repeat(b)
+            bias = bias.repeat(b)
+        else:
+            weight, bias = None, None
 
         # Apply instance norm
         input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
@@ -1215,9 +1223,13 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         size = list(input.size())
         if reduce(mul, size[2:], size[0]) == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+    if running_mean is not None:
+        running_mean = Variable(running_mean)
+    if running_var is not None:
+        running_var = Variable(running_var)
     return torch._C._VariableFunctions.batch_norm(
-        input, weight, bias,
-        Variable(running_mean), Variable(running_var), training, momentum, eps, torch.backends.cudnn.enabled
+        input, weight, bias, running_mean, running_var,
+        training, momentum, eps, torch.backends.cudnn.enabled
     )
 
 
