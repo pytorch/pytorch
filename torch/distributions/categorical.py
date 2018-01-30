@@ -70,11 +70,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return torch.Tensor([float('nan')]).expand(self._extended_shape())
+        return self.probs.new([float('nan')]).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return torch.Tensor([float('nan')]).expand(self._extended_shape())
+        return self.probs.new([float('nan')]).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)

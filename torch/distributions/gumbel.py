@@ -5,6 +5,8 @@ from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import _finfo, broadcast_all
 
+euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
+
 
 class Gumbel(Distribution):
     r"""
@@ -24,7 +26,6 @@ class Gumbel(Distribution):
     has_rsample = True
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
-    _euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
@@ -48,7 +49,7 @@ class Gumbel(Distribution):
 
     @property
     def mean(self):
-        return self.loc + self.scale * self._euler_constant
+        return self.loc + self.scale * euler_constant
 
     @property
     def stddev(self):
@@ -59,4 +60,4 @@ class Gumbel(Distribution):
         return self.stddev.pow(2)
 
     def entropy(self):
-        return self.scale.log() + (1 + self._euler_constant)
+        return self.scale.log() + (1 + euler_constant)

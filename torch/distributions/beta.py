@@ -44,9 +44,9 @@ class Beta(Distribution):
 
     @property
     def variance(self):
+        total = self.concentration1 + self.concentration0
         return (self.concentration1 * self.concentration0 /
-                ((self.concentration1 + self.concentration0).pow(2) *
-                 (self.concentration1 + self.concentration0 + 1)))
+                (total.pow(2) * (total + 1)))
 
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
