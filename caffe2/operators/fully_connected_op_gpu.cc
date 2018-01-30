@@ -171,7 +171,7 @@ template <>
 bool FullyConnectedOp<
     CUDAContext,
     TensorCoreEngine,
-    false /* don't transpose weight */>::RunOnCUDADevice() {
+    false /* don't transpose weight */>::RunOnDevice() {
   return RunFullyConnectedOpOnCUDADevice(false /* float16_compute */, this);
 }
 
