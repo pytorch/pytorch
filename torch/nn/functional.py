@@ -1171,54 +1171,12 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
     return ret
 
 
-def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
-                  training=False, momentum=0.1, eps=1e-5, affine=False):
-    """Applies instance normalization over an input. The implementation is
-    based on batch_norm, in which we do reshape, batchnorm, and reshape again.
-
-    See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
-    :class:`~torch.nn.InstanceNorm3d` for details.
-    """
-    import torch
-    import torch.onnx.symbolic
-
-    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
-    def _instance_norm(input, weight=None, bias=None, saved_running_mean=None,
-                       saved_running_var=None, training=False, momentum=0.1,
-                       eps=1e-5, affine=False):
-        b, c = input.size(0), input.size(1)
-
-        # Repeat stored stats and affine transform params
-        if saved_running_mean is not None:
-          running_mean = saved_running_mean.repeat(b)
-        if saved_running_var is not None:
-          running_var = saved_running_var.repeat(b)
-
-        if affine:
-            weight = weight.repeat(b)
-            bias = bias.repeat(b)
-        else:
-            weight, bias = None, None
-
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = batch_norm(
-            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
-            training=training, momentum=momentum, eps=eps)
-
-        # Reshape back
-        saved_running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        saved_running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
-    return _instance_norm(input, weight=weight, bias=bias, saved_running_mean=saved_running_mean,
-                          saved_running_var=saved_running_var, training=training,
-                          momentum=momentum, eps=eps, affine=affine)
-
-
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
+    """Applies Batch Normalization for each channel across a batch of data.
+
+    See :class:`~torch.nn.BatchNorm2d` (or the 1d and 3d variants) for details.
+    """
     if training:
         size = list(input.size())
         if reduce(mul, size[2:], size[0]) == 1:
@@ -1231,6 +1189,106 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
     )
+
+
+def instance_norm(input, running_mean, running_var, weight=None, bias=None,
+                  use_input_stats=True, momentum=0.1, eps=1e-5):
+    """Applies Instance Normalization for each channel in each data sample in a
+    batch.
+
+    See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
+    :class:`~torch.nn.InstanceNorm3d` for details.
+    """
+    if not use_input_stats and (running_mean is None or running_var is None):
+        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
+
+    import torch.onnx.symbolic
+
+    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
+    def _instance_norm(input, running_mean, running_var, weight, bias,
+                       use_input_stats, momentum, eps):
+        b, c = input.size(0), input.size(1)
+
+        # Repeat stored stats and affine transform params if necessary
+        if running_mean is not None:
+            running_mean_orig = running_mean
+            running_mean = running_mean_orig.repeat(b)
+        if running_var is not None:
+            running_var_orig = running_var
+            running_var = running_var_orig.repeat(b)
+        if weight is not None:
+            weight = weight.repeat(b)
+        if bias is not None:
+            bias = bias.repeat(b)
+
+        # Apply instance norm
+        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
+
+        out = batch_norm(
+            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
+            training=use_input_stats, momentum=momentum, eps=eps)
+
+        # Reshape back
+        if running_mean is not None:
+            running_mean_orig.copy_(running_mean.view(b, c).mean(0, keepdim=False))
+        if running_var is not None:
+            running_var_orig.copy_(running_var.view(b, c).mean(0, keepdim=False))
+
+        return out.view(b, c, *input.size()[2:])
+    return _instance_norm(input, running_mean, running_var, weight, bias,
+                          use_input_stats, momentum, eps)
+
+
+def layer_norm(input, normalized_shape, running_mean, running_var,
+               weight=None, bias=None, use_input_stats=True,
+               momentum=0.1, eps=1e-5):
+    """Applies Layer Normalization for last certain number of dimensions.
+
+    See :class:`~torch.nn.LayerNorm` for details.
+    """
+    if not use_input_stats and (running_mean is None or running_var is None):
+        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
+
+    normalized_ndim = len(normalized_shape)
+    input_shape = input.size()
+
+    if input_shape[-normalized_ndim:] != torch.Size(normalized_shape):
+        raise ValueError('Expected input with shape [*, {}], but got {} input'
+                         .format(', '.join(normalized_shape), list(input_shape)))
+
+    n = reduce(mul, input_shape[:-normalized_ndim], 1)
+
+    # Repeat stored stats if necessary
+    if running_mean is not None:
+        running_mean_orig = running_mean
+        running_mean = running_mean_orig.repeat(n)
+    if running_var is not None:
+        running_var_orig = running_var
+        running_var = running_var_orig.repeat(n)
+
+    # Apply layer norm
+    input_reshaped = input.contiguous().view(1, n, -1)
+
+    out = batch_norm(
+        input_reshaped, running_mean, running_var, None, None,
+        use_input_stats, momentum, eps)
+
+    # Copy back
+    if running_mean is not None:
+        running_mean_orig.fill_(running_mean.mean())
+    if running_var is not None:
+        running_var_orig.fill_(running_var.mean())
+
+    out = out.view(*input_shape)
+
+    if weight is not None and bias is not None:
+        return torch.addcmul(bias, 1, out, weight)
+    elif weight is not None:
+        return torch.mul(out, weight)
+    elif bias is not None:
+        return torch.add(out, bias)
+    else:
+        return out
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):

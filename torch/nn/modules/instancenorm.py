@@ -14,16 +14,13 @@ class _InstanceNorm(_BatchNorm):
     def forward(self, input):
         self._check_input_dim(input)
 
-        training = self.training or not self.track_running_stats
-        return F.instance_norm(input, weight=weight, bias=bias,
-                               saved_running_mean=self.running_mean,
-                               saved_running_var=self.running_var,
-                               training=training, momentum=self.momentum,
-                               eps=self.eps, affine=self.affine)
+        return F.instance_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training or not self.track_running_stats, self.momentum, self.eps)
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Batch Normalization over a 3d input (a mini-batch of 2d inputs)
+    r"""Applies Instance Normalization over a 3d input (a mini-batch of 2d inputs)
     as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
@@ -86,7 +83,7 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Batch Normalization over a 4d input (a mini-batch of 3d inputs)
+    r"""Applies Instance Normalization over a 4d input (a mini-batch of 3d inputs)
     as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
@@ -149,7 +146,7 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Batch Normalization over a 5d input (a mini-batch of 4d inputs)
+    r"""Applies Instance Normalization over a 5d input (a mini-batch of 4d inputs)
     as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 

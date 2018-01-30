@@ -135,10 +135,6 @@ class LayerNorm(Module):
                  elementwise_affine=True, track_running_stats=False):
         super(LayerNorm, self).__init__()
         self.normalized_shape = torch.Size(normalized_shape)
-        normalized_numel = 1
-        for l in normalized_shape:
-            normalized_numel *= l
-        self.normalized_numel = normalized_numel
         self.eps = eps
         self.momentum = momentum
         self.elementwise_affine = elementwise_affine
@@ -165,40 +161,11 @@ class LayerNorm(Module):
             self.weight.data.uniform_()
             self.bias.data.zero_()
 
-    def _check_input_dim(self, input):
-        if input.size()[-len(self.normalized_shape):] != self.normalized_shape:
-            raise ValueError('expected input with shape [*, {}], but got {} input'
-                             .format(', '.join(self.normalized_shape), list(input.size())))
-
     def forward(self, input):
-        self._check_input_dim(input)
-
-        n = input.numel() / self.normalized_numel
-
-        # Repeat stored stats if necessary
-        if self.track_running_stats:
-            running_mean = self.running_mean.repeat(n)
-            running_var = self.running_var.repeat(n)
-        else:
-            running_mean = running_var = None
-
-        # Apply layer norm
-        input_reshaped = input.view(1, n, -1)
-
-        out = F.batch_norm(
-            input_reshaped, running_mean, running_var, None, None,
-            self.training or not self.track_running_stats, self.momentum, self.eps)
-
-        # Reshape back
-        if self.track_running_stats:
-            self.running_mean.fill_(running_mean.mean())
-            self.running_var.fill_(running_var.mean())
-        out = out.view(*input.size())
-
-        if self.elementwise_affine:
-            return torch.addcmul(self.bias, 1, out, self.weight)
-        else:
-            return out
+        return F.layer_norm(
+            input, self.normalized_shape, self.running_mean, self.running_var,
+            self.weight, self.bias, self.training or not self.track_running_stats,
+            self.momentum, self.eps)
 
     def __repr__(self):
         return ('{name}({normalized_shape}, eps={eps}, momentum={momentum},'
