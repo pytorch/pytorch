@@ -88,7 +88,6 @@ echo "Running Python tests.."
   --ignore caffe2/python/test/executor_test.py \
   --ignore caffe2/python/operator_test/matmul_op_test.py \
   --ignore caffe2/python/operator_test/pack_ops_test.py \
-  --ignore caffe2/python/operator_test/rnn_cell_test.py \
   --ignore caffe2/python/mkl/mkl_sbn_speed_test.py \
   caffe2/python/ \
   ${EXTRA_TESTS[@]}
