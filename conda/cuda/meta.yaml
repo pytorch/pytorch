@@ -18,6 +18,7 @@ requirements:
     - cmake
     - future
     - glog
+    - gflags
     - lmdb
     - mkl-include
     - mkl
@@ -29,6 +30,7 @@ requirements:
   run:
     - future
     - glog
+    - gflags
     - lmdb
     - mkl
     - mkl-include
