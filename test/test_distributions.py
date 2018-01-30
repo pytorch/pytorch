@@ -70,7 +70,7 @@ def pairwise(Dist, *params):
     return Dist(*params1), Dist(*params2)
 
 
-def is_nan(tensor):
+def is_all_nan(tensor):
     """
     Checks if all entries of a tensor is nan.
     """
@@ -522,8 +522,8 @@ class TestDistributions(TestCase):
 
     def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
-        assert is_nan(Categorical(p).mean)
-        assert is_nan(Categorical(p).variance)
+        self.assertTrue(is_all_nan(Categorical(p).mean))
+        self.assertTrue(is_all_nan(Categorical(p).variance))
         self.assertEqual(Categorical(p).sample().size(), SCALAR_SHAPE)
         self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
@@ -538,8 +538,8 @@ class TestDistributions(TestCase):
         s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
         self.assertEqual(Categorical(p).mean.size(), (2,))
         self.assertEqual(Categorical(p).variance.size(), (2,))
-        assert is_nan(Categorical(p).mean)
-        assert is_nan(Categorical(p).variance)
+        self.assertTrue(is_all_nan(Categorical(p).mean))
+        self.assertTrue(is_all_nan(Categorical(p).variance))
         self.assertEqual(Categorical(p).sample().size(), (2,))
         self.assertEqual(Categorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2))
         self.assertEqual(Categorical(p).sample_n(6).size(), (6, 2))
@@ -679,7 +679,7 @@ class TestDistributions(TestCase):
         scale = Variable(torch.ones(5, 5), requires_grad=True)
         loc_1d = Variable(torch.zeros(1), requires_grad=True)
         scale_1d = Variable(torch.ones(1), requires_grad=True)
-        assert is_nan(Cauchy(loc_1d, scale_1d).mean)
+        self.assertTrue(is_all_nan(Cauchy(loc_1d, scale_1d).mean))
         self.assertEqual(Cauchy(loc_1d, scale_1d).variance, float('inf'), allow_inf=True)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
         self.assertEqual(Cauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
@@ -980,8 +980,8 @@ class TestDistributions(TestCase):
         df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         df1_1d = torch.randn(1).abs()
         df2_1d = torch.randn(1).abs()
-        assert is_nan(FisherSnedecor(1, 2).mean)
-        assert is_nan(FisherSnedecor(1, 4).variance)
+        self.assertTrue(is_all_nan(FisherSnedecor(1, 2).mean))
+        self.assertTrue(is_all_nan(FisherSnedecor(1, 4).variance))
         self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
         self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
@@ -1036,8 +1036,8 @@ class TestDistributions(TestCase):
     def test_studentT(self):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         df_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
-        assert is_nan(StudentT(1).mean)
-        assert is_nan(StudentT(1).variance)
+        self.assertTrue(is_all_nan(StudentT(1).mean))
+        self.assertTrue(is_all_nan(StudentT(1).variance))
         self.assertEqual(StudentT(2).variance, float('inf'), allow_inf=True)
         self.assertEqual(StudentT(df).sample().size(), (2, 3))
         self.assertEqual(StudentT(df).sample_n(5).size(), (5, 2, 3))
