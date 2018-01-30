@@ -14,7 +14,7 @@ from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
-from common import TestCase, run_tests, skipIfNoLapack
+from common import TestCase, run_tests, skipIfNoLapack, suppress_warnings
 from torch.autograd import Variable, Function, variable
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -986,6 +986,7 @@ class TestAutograd(TestCase):
         r = MyFunction.apply(x * x)
         (r * x).sum().backward()
 
+    @suppress_warnings
     def test_resize(self):
         x = Variable(torch.ones(2, 3))
         self.assertTrue(x.resize(3, 2).size() == (3, 2))
