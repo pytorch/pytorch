@@ -666,8 +666,8 @@ class TestDistributions(TestCase):
         scale = Variable(torch.ones(5, 5), requires_grad=True)
         loc_1d = Variable(torch.zeros(1), requires_grad=True)
         scale_1d = Variable(torch.ones(1), requires_grad=True)
-        self.assertRaises(NotImplementedError, lambda: Cauchy(loc, scale).mean)
-        self.assertRaises(NotImplementedError, lambda: Cauchy(loc, scale).variance)
+        assert Cauchy(loc_1d, scale_1d).mean != Cauchy(loc_1d, scale_1d).mean  # test for nan
+        self.assertEqual(Cauchy(loc_1d, scale_1d).variance, float('inf'), allow_inf=True)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
         self.assertEqual(Cauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
