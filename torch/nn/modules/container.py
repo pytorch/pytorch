@@ -1,6 +1,4 @@
-from collections import OrderedDict, Iterable
-import string
-import torch
+from collections import OrderedDict
 import warnings
 from .module import Module
 
@@ -61,6 +59,9 @@ class Sequential(Module):
             for i in range(idx):
                 next(it)
             return next(it)
+
+    def __setitem__(self, idx, module):
+        return setattr(self, str(idx), module)
 
     def __len__(self):
         return len(self._modules)
