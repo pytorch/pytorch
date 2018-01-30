@@ -33,7 +33,6 @@ THGenerator* THGenerator_new()
 THGenerator* THGenerator_copy(THGenerator *self, THGenerator *from)
 {
     THGeneratorState_copy(&self->gen_state, &from->gen_state);
-    new (&self->mutex) std::mutex();
     return self;
 }
 

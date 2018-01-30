@@ -440,6 +440,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
 #if defined(TH_REAL_IS_BYTE)
 void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self)
 {
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   static const size_t size = sizeof(THGeneratorState);
   THGeneratorState *rng_state;
   THTensor_(resize1d)(self, size);
@@ -451,6 +452,7 @@ void THTensor_(getRNGState)(THGenerator *_generator, THTensor *self)
 
 void THTensor_(setRNGState)(THGenerator *_generator, THTensor *self)
 {
+  std::lock_guard<std::mutex> lock(_generator->mutex);
   static const size_t size = sizeof(THGeneratorState);
   THGeneratorState *rng_state;
   THArgCheck(THTensor_(nElement)(self) == size, 1, "RNG state is wrong size");
