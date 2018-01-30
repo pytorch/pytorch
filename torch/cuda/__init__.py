@@ -348,8 +348,8 @@ def empty_cache():
         memory available for PyTorch. See :ref:`cuda-memory-management` for
         more details about GPU memory management.
     """
-    _lazy_init()
-    return torch._C._cuda_emptyCache()
+    if _initialized:
+        torch._C._cuda_emptyCache()
 
 
 def memory_allocated(device=None):
