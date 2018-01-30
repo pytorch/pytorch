@@ -96,6 +96,7 @@ static PyMethodDef torch_functions[] = {
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"variable", (PyCFunction)THPVariable_variable, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"spmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };

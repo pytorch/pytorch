@@ -161,11 +161,20 @@ def gen_py_nn_functions(out, declarations):
 
 
 def gen_py_torch_functions(out, declarations):
+    def is_namespace_or_type_function(declaration):
+        # True if function is on the at namespace or only on the type object.
+        # This includes things like at::add and Type::randperm, but excludes
+        # methods which are on both the Tensor and the Type.
+        if 'namespace' in declaration['method_of']:
+            return True
+        if 'Tensor' in declaration['method_of']:
+            return False
+        return 'Type' in declaration['method_of']
+
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
-                ('namespace' in declaration['method_of'] or
-                 'Type' in declaration['method_of']))
+                is_namespace_or_type_function(declaration))
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
@@ -347,6 +356,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         elif dtype_formal_name:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
             env['dispatch_call'] = '{}.{}'.format(dtype_formal_name, declaration['name'])
+        elif declaration['name'] == 'randperm':
+            env['dispatch_call'] = 'long_type().{}'.format(declaration['name'])
         else:
             env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'

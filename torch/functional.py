@@ -160,7 +160,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = torch.eye(sz).type_as(LU_data).unsqueeze(0).repeat(nBatch, 1, 1)
         for i in range(nBatch):
             for j in range(sz):
-                k = LU_pivots[i, j] - 1
+                k = int(LU_pivots[i, j] - 1)
                 t = P[i, :, j].clone()
                 P[i, :, j] = P[i, :, k]
                 P[i, :, k] = t

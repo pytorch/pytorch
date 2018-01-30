@@ -1,9 +1,17 @@
 #include <Python.h>
 #include <structmember.h>
+#include <ATen/ATen.h>
 
 #include <stdbool.h>
 #include <TH/TH.h>
 #include "THP.h"
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/utils/tensor_types.h"
+
+using namespace at;
+using namespace torch;
 
 PyObject *THPGeneratorClass = NULL;
 
@@ -56,23 +64,29 @@ static PyObject * THPGenerator_pynew(PyTypeObject *type, PyObject *args, PyObjec
 
 static PyObject * THPGenerator_getState(THPGenerator *self)
 {
+  using namespace torch::autograd;
   HANDLE_TH_ERRORS
   THGenerator *generator = THPGenerator_TH_CData(self);
-  THPByteTensorPtr res((THPByteTensor *)THPByteTensor_NewEmpty());
-  if (!res) return NULL;
-  THByteTensor_getRNGState(generator, res->cdata);
-  return (PyObject *)res.release();
+  auto tensor = VariableType::getType(CPU(kByte))->tensor();
+  THByteTensor_getRNGState(generator, (THByteTensor*)tensor.unsafeGetTH(false));
+  return THPVariable_Wrap(std::move(tensor));
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPGenerator_setState(THPGenerator *self, PyObject *_new_state)
 {
+  using namespace torch::autograd;
   HANDLE_TH_ERRORS
+  if (!THPVariable_Check(_new_state)) {
+    throw TypeError("expected a torch.ByteTensor, but got %s", Py_TYPE(_new_state)->tp_name);
+  }
+  auto& tensor = ((THPVariable*)_new_state)->cdata.data();
+  if (tensor.type() != CPU(kByte)) {
+    auto type_name = torch::utils::type_to_string(tensor.type());
+    throw TypeError("expected a torch.ByteTensor, but got %s", type_name.c_str());
+  }
   THGenerator *generator = THPGenerator_TH_CData(self);
-  THPUtils_assert(THPByteTensor_Check(_new_state), "set_state expects a "
-          "torch.ByteTensor, but got %s", THPUtils_typename(_new_state));
-  THByteTensor *new_state = ((THPByteTensor*)_new_state)->cdata;
-  THByteTensor_setRNGState(generator, new_state);
+  THByteTensor_setRNGState(generator, (THByteTensor*)tensor.unsafeGetTH(false));
   Py_INCREF(self);
   return (PyObject*)self;
   END_HANDLE_TH_ERRORS
