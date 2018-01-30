@@ -33,6 +33,14 @@ class Poisson(Distribution):
     params = {'rate': constraints.positive}
     support = constraints.nonnegative_integer
 
+    @property
+    def mean(self):
+        return self.rate
+
+    @property
+    def variance(self):
+        return self.rate
+
     def __init__(self, rate):
         self.rate, = broadcast_all(rate)
         if isinstance(rate, Number):
