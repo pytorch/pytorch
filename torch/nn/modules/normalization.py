@@ -11,7 +11,6 @@ class LocalResponseNorm(Module):
     Applies normalization across channels.
 
     .. math::
-
         b_{c} = a_{c}\left(k + \frac{\alpha}{n}
         \sum_{c'=\max(0, c-n/2)}^{\min(N-1,c+n/2)}a_{c'}^2\right)^{-\beta}
 
@@ -24,7 +23,7 @@ class LocalResponseNorm(Module):
     Shape:
         - Input: :math:`(N, C, ...)`
         - Output: :math:`(N, C, ...)` (same shape as input)
-    Examples::
+    Examples:
         >>> lrn = nn.LocalResponseNorm(2)
         >>> signal_2d = autograd.Variable(torch.randn(32, 5, 24, 24))
         >>> signal_4d = autograd.Variable(torch.randn(16, 5, 7, 7, 7, 7))
