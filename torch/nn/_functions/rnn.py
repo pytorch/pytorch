@@ -352,13 +352,16 @@ def RNN(*args, **kwargs):
 
         # Hack for the tracer that allows us to represent RNNs as single
         # nodes and export them to ONNX in this form
-        # It can be also used as a decorator at the higher level
         # Check the first argument explicitly to reduce the overhead of creating
-        # the lambda
+        # the lambda. We need special handling here because the forward()
+        # function gets reconstructed each and every time when RNN() is invoked
+        # and we don't want to pay the cost of decorator invocation
         import torch
         if torch._C._jit_is_tracing(input):
             import torch.onnx.symbolic
-            func = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)(func)
+            decorator = torch.onnx.symbolic_override_first_arg_based(
+                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+            func = decorator(func)
 
         return func(input, *fargs, **fkwargs)
 
