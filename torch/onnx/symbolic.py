@@ -550,8 +550,6 @@ def Elman_RNN_symbolic_builder(
         nonlinearity, input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
     if batch_first:
         return _unimplemented("RNN", "batch_first")
-    if dropout:
-        return _unimplemented("RNN", "dropout")
     if bidirectional:
         return _unimplemented("RNN", "bidirectional")
 
@@ -582,8 +580,6 @@ def Elman_RNN_symbolic_builder(
 def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
     if batch_first:
         return _unimplemented("LSTM", "batch_first")
-    if dropout:
-        return _unimplemented("LSTM", "dropout")
     if bidirectional:
         return _unimplemented("LSTM", "bidirectional")
 
@@ -618,8 +614,6 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
 def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropout, bidirectional, **kwargs):
     if batch_first:
         return _unimplemented("GRU", "batch_first")
-    if dropout:
-        return _unimplemented("GRU", "dropout")
     if bidirectional:
         return _unimplemented("GRU", "bidirectional")
 
