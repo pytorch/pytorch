@@ -2457,7 +2457,7 @@ method_tests = [
     ('lt_', (), (0,), 'pyscalar_scalar'),
     ('le_', (), (0,), 'pyscalar_scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
-    ('permute', (), (dont_convert(()),), 'scalar'),
+    ('permute', (), (dont_convert(()),), 'scalar', NO_ARGS, [skipIfNoScalars]),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
