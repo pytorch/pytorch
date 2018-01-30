@@ -87,6 +87,14 @@ struct TensorType : public Type {
     return withSizesStrides(sizes, contiguousStridesOf(sizes));
   }
 
+  TypePtr transpose(int dim1, int dim2) {
+    auto t_sizes = sizes_;
+    auto t_strides = strides_;
+    std::swap(t_sizes[dim1], t_sizes[dim2]);
+    std::swap(t_strides[dim1], t_strides[dim2]);
+    return std::make_shared<TensorType>(scalar_type_, device_, t_sizes, t_strides);
+  }
+
   TypePtr contiguous() const {
     auto t = std::make_shared<TensorType>(*this);
     t->strides_ = contiguousStridesOf(sizes_);

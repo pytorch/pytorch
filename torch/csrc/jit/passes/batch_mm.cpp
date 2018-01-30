@@ -43,6 +43,14 @@ namespace torch { namespace jit {
 // |  L1  |  L2  | |  O   |
 // |      |      | |      |
 // +------+------+ +------+
+//
+// What's more, we can take advantage of the transpose property:
+//
+// \sum_{i=0}^n (A_i B_i)^T = (\sum_{i=0}^n A_i B_i)^T
+//
+// to additionally support the case, where leaves are not only MMs,
+// but MM - Transpose paths (basically we can lift the transpose to happen
+// after batching).
 
 // Note [Further optimizations]
 // It would be straightforward to extend the TreeToken class to also detect if all
@@ -82,10 +90,11 @@ static std::array<int64_t, 2> as_array(at::IntList sizes) {
 // and build a larger tree.
 struct TreeToken {
   uint64_t tree_size = 0; // NOTE: measured in number of leaves i.e. mm ops
-  std::array<int64_t, 2> lhs_sizes;
-  std::array<int64_t, 2> rhs_sizes;
+  std::array<int64_t, 2> lhs_sizes; // NOTE: if transposed is True, these sizes are of inputs
+  std::array<int64_t, 2> rhs_sizes; //       to the transpose (and not MM).
   Node *node = nullptr;
   bool is_root = false;
+  bool transposed = false;
 
   static TreeToken fromMM(Node *mm) {
     TreeToken token;
@@ -99,7 +108,17 @@ struct TreeToken {
     return token;
   }
 
-  static TreeToken unify(Node *add, TreeToken& l, TreeToken& r) {
+  static TreeToken transpose(Node *transpose, TreeToken& i) {
+    if (!i.is_root)
+      return {};
+    TreeToken token = i;
+    token.transposed = true;
+    token.node = transpose;
+    i.is_root = false;
+    return token;
+  }
+
+  static TreeToken add(Node *add, TreeToken& l, TreeToken& r) {
     TreeToken token;
     // See Note [Overlapping trees]
     if (&l == &r || !l.is_root || !r.is_root)
@@ -110,11 +129,14 @@ struct TreeToken {
       return token;
     if (l.rhs_sizes != r.rhs_sizes)
       return token;
+    if (l.transposed != r.transposed)
+      return token;
     token.tree_size = l.tree_size + r.tree_size;
     token.lhs_sizes = l.lhs_sizes;
     token.rhs_sizes = l.rhs_sizes;
     token.node = add;
     token.is_root = true;
+    token.transposed = l.transposed;
     l.is_root = r.is_root = false; // Reserve the subtrees, so they can't be used again.
     return token;
   }
@@ -132,8 +154,8 @@ struct TreeToken {
       if (n->kind() == mm_kind) {
         matmuls.push_back(n);
       } else {
-        queue.push_back(n->inputs()[0]->node());
-        queue.push_back(n->inputs()[1]->node());
+        for (Value * i : n->inputs())
+          queue.push_back(i->node());
       }
     }
     return matmuls;
@@ -142,16 +164,28 @@ struct TreeToken {
 
 void BatchMM(std::shared_ptr<Graph>& graph) {
   enum class Side { LHS, RHS };
-  static const Symbol mm_kind = "mm"_sym;
+  static const Symbol mm_kind  = "mm"_sym;
+  static const Symbol t_kind   = "t"_sym;
   static const Symbol add_kind = "add"_sym;
   static const Symbol cat_kind = "cat"_sym;
-  static const Symbol dim_sym = "dim"_sym;
+  static const Symbol dim_sym  = "dim"_sym;
 
   // Look for trees in the graph
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : graph->nodes()) {
+    auto outputs = node->outputs();
+    if (outputs.size() != 1 || outputs[0]->uses().size() != 1) continue;
     if (node->kind() == mm_kind) {
       tokens[node] = TreeToken::fromMM(node);
+    } else if (node->kind() == t_kind) {
+      auto input = node->inputs()[0];
+      // Transpose can only follow mm tokens.
+      if (input->node()->kind() != mm_kind) continue;
+      auto token_it = tokens.find(input->node());
+      if (token_it != tokens.end() && input->uses().size() == 1) {
+        if (auto token = TreeToken::transpose(node, token_it->second))
+          tokens[node] = token;
+      }
     } else if (node->kind() == add_kind) {
       // NOTE: x + 2 is add[other={2}](%x)
       if (node->inputs().size() != 2) continue;
@@ -167,7 +201,7 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
       // we need to compute a transitive closure and actually check the dependencies.
       if (lhs_it != tokens.end() && rhs_it != tokens.end() &&
           lhs->output()->uses().size() == 1 && rhs->output()->uses().size() == 1) {
-        if (auto token = TreeToken::unify(node, lhs_it->second, rhs_it->second))
+        if (auto token = TreeToken::add(node, lhs_it->second, rhs_it->second))
           tokens[node] = token;
       }
     }
@@ -199,7 +233,14 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     Node *batch_mm = graph->create(mm_kind, {lhs_batch, rhs_batch});
     batch_mm->output()->setType(type->asShared());
     batch_mm->insertBefore(root.node);
-    root.node->output()->replaceAllUsesWith(batch_mm->output());
+    Value *new_output = batch_mm->output();
+    if (root.transposed) {
+      Node *batch_t = graph->create(t_kind, {new_output});
+      batch_t->insertAfter(batch_mm);
+      batch_t->output()->setType(new_output->type()->expect<TensorType>()->transpose(0, 1));
+      new_output = batch_t->output();
+    }
+    root.node->output()->replaceAllUsesWith(new_output);
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.
   }
   EliminateDeadCode(graph);
