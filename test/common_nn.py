@@ -334,7 +334,7 @@ def _multilabelmarginloss_reference(input, target, is_target):
         if (target_index < 0):
             break
 
-        for j in range (0, target.size()[0]):
+        for j in range(0, target.size()[0]):
             if not is_target[j]:
                 z = 1 - input[target_index] + input[j]
                 if z > 0:
@@ -359,10 +359,10 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
             output[i] = _multilabelmarginloss_reference(input[i], target[i], is_target[i])
 
     if reduce and size_average:
-        return output.mean()/dim
+        return output.mean() / dim
     elif reduce:
-        return output.sum()/dim
-    return output/dim
+        return output.sum() / dim
+    return output / dim
 
 
 loss_reference_fns = {
