@@ -28,13 +28,13 @@ REGISTER_CPU_OPERATOR(
     FullyConnectedOp<
         CPUContext,
         DefaultEngine,
-        false /* don't tranpose weight */>);
+        false /* don't transpose weight */>);
 REGISTER_CPU_OPERATOR(
     FCTransposedGradient,
     FullyConnectedGradientOp<
         CPUContext,
         DefaultEngine,
-        false /* don't tranpose weight */>);
+        false /* don't transpose weight */>);
 
 namespace {
 std::vector<TensorShape> FCShapeInference(

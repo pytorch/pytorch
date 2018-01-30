@@ -27,16 +27,7 @@ import numpy as np
 
 
 class TestFcOperator(hu.HypothesisTestCase):
-
-    @settings(max_examples=50)
-    @given(n=st.integers(1, 5),
-           m=st.integers(0, 5),
-           k=st.integers(1, 5),
-           multi_dim=st.sampled_from([True, False]),
-           dtype=st.sampled_from([np.float32, np.float16]),
-           engine=st.sampled_from(['', 'TENSORCORE']),
-           **hu.gcs)
-    def test_fc(self, n, m, k, multi_dim, dtype, engine, gc, dc):
+    def _run_test(self, n, m, k, transposed, multi_dim, dtype, engine, gc, dc):
         if dtype == np.float16:
             # fp16 only supported with CUDA
             assume(gc.device_type == caffe2_pb2.CUDA)
@@ -52,16 +43,25 @@ class TestFcOperator(hu.HypothesisTestCase):
 
         X = np.random.rand(m, k).astype(dtype) - 0.5
         if multi_dim:
-            W = np.random.rand(n, k, 1, 1).astype(dtype) - 0.5
+            if transposed:
+                W = np.random.rand(k, n, 1, 1).astype(dtype) - 0.5
+            else:
+                W = np.random.rand(n, k, 1, 1).astype(dtype) - 0.5
         else:
-            W = np.random.rand(n, k).astype(dtype) - 0.5
+            if transposed:
+                W = np.random.rand(k, n).astype(dtype) - 0.5
+            else:
+                W = np.random.rand(n, k).astype(dtype) - 0.5
         b = np.random.rand(n).astype(dtype) - 0.5
 
         def fc_op(X, W, b):
             return [np.dot(X, W.reshape(n, k).transpose()) + b.reshape(n)]
 
+        def fc_tranposed_op(X, W, b):
+            return [np.dot(X, W.reshape(k, n)) + b.reshape(n)]
+
         op = core.CreateOperator(
-            'FC',
+            'FCTransposed' if transposed else 'FC',
             ['X', 'W', 'b'],
             'out',
             engine=engine,
@@ -78,7 +78,7 @@ class TestFcOperator(hu.HypothesisTestCase):
             device_option=gc,
             op=op,
             inputs=[X, W, b],
-            reference=fc_op,
+            reference=fc_tranposed_op if transposed else fc_op,
         )
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X, W, b], [0])
@@ -90,44 +90,28 @@ class TestFcOperator(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, [X, W, b], i, [0],
                                       threshold=threshold, stepsize=stepsize)
 
+    @settings(max_examples=50)
+    @given(n=st.integers(1, 5),
+           m=st.integers(0, 5),
+           k=st.integers(1, 5),
+           multi_dim=st.sampled_from([True, False]),
+           dtype=st.sampled_from([np.float32, np.float16]),
+           engine=st.sampled_from(['', 'TENSORCORE']),
+           **hu.gcs)
+    def test_fc(self, **kwargs):
+        self._run_test(transposed=False, **kwargs)
 
     @settings(max_examples=50)
     @given(n=st.integers(1, 5),
            m=st.integers(0, 5),
            k=st.integers(1, 5),
            multi_dim=st.sampled_from([True, False]),
-           **hu.gcs_cpu_only)
-    def test_fc_transposed(self, n, m, k, multi_dim, gc, dc):
-        X = np.random.rand(m, k).astype(np.float32) - 0.5
-        if multi_dim:
-            W = np.random.rand(k, n, 1, 1).astype(np.float32) - 0.5
-        else:
-            W = np.random.rand(n, k).astype(np.float32).T - 0.5
-        b = np.random.rand(n).astype(np.float32) - 0.5
+           dtype=st.sampled_from([np.float32, np.float16]),
+           engine=st.sampled_from(['', 'TENSORCORE']),
+           **hu.gcs)
+    def test_fc_transposed(self, **kwargs):
+        self._run_test(transposed=True, **kwargs)
 
-        def fc_op(X, W, b):
-            return [np.dot(X, W.reshape(k, n)) + b.reshape(n)]
-
-        op = core.CreateOperator(
-            'FCTransposed',
-            ['X', 'W', 'b'],
-            'out',
-        )
-
-        # Check against numpy reference
-        self.assertReferenceChecks(
-            device_option=hu.cpu_do,
-            op=op,
-            inputs=[X, W, b],
-            reference=fc_op,
-        )
-
-        # Gradient checks
-        threshold = 0.005
-        stepsize = 0.05
-        for i in range(3):
-            self.assertGradientChecks(gc, op, [X, W, b], i, [0],
-                                      threshold=threshold, stepsize=stepsize)
 
 if __name__ == "__main__":
     import unittest
