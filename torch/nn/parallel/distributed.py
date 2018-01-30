@@ -2,7 +2,6 @@ import sys
 import math
 import threading
 import copy
-o
 
 import torch
 from torch.autograd import Variable
@@ -139,7 +138,7 @@ class DistributedDataParallel(Module):
         # Split parameters into type buckets so that parameter sync (broadcast)
         # can operates on mixed parameter types. (e.g. mixed half and float)
         self.param_type_buckets = {}
-        for device_id, module in zip(self.device_ids, self._module_copies):
+        for device_idx, module in enumerate(self._module_copies):
             for p in module.parameters():
                 tp = type(p.data)
                 if tp == torch.cuda.HalfTensor and \
@@ -151,7 +150,7 @@ class DistributedDataParallel(Module):
                     self.param_type_buckets[tp] = \
                         [[] for _ in range(len(self.device_ids))]
                 # Add the parameter into the type bucket
-                self.param_type_buckets[tp][device_id].append(p)
+                self.param_type_buckets[tp][device_idx].append(p)
 
         # Split parameters into buckets that will coalesce reductions
         #
@@ -377,12 +376,12 @@ class DistributedDataParallel(Module):
             type_buckets = {}
 
             # Bucket the grad batch based on the data types: float, half etc
-            for dev_id, grad_batch in zip(device_ids, dev_grad_batch):
+            for dev_idx, grad_batch in enumerate(dev_grad_batch):
                 for grad in grad_batch:
                     tp = type(grad)
                     if tp not in type_buckets:
                         type_buckets[tp] = [[] for _ in range(len(device_ids))]
-                    type_buckets[tp][dev_id].append(grad)
+                    type_buckets[tp][dev_idx].append(grad)
 
             # Reducing for each data type if we have mixed-precision gradients
             for tp in type_buckets:
