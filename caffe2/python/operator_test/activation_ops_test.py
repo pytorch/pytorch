@@ -119,6 +119,27 @@ class TestActivations(hu.HypothesisTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X], [0])
 
+    @given(X=hu.tensor(),
+           inplace=st.booleans(),
+           **hu.gcs)
+    def test_leaky_relu_default(self, X, inplace, gc, dc):
+        # go away from the origin point to avoid kink problems
+        X += 0.04 * np.sign(X)
+        X[X == 0.0] += 0.04
+
+        def leaky_relu_ref(X):
+            Y = X.copy()
+            neg_indices = X <= 0
+            Y[neg_indices] = Y[neg_indices] * 0.01
+            return (Y,)
+
+        op = core.CreateOperator(
+            "LeakyRelu",
+            ["X"], ["Y" if not inplace else "X"])
+        self.assertReferenceChecks(gc, op, [X], leaky_relu_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X], [0])
+
 
 if __name__ == "__main__":
     import unittest
