@@ -1,7 +1,8 @@
 import torch
 from torch.distributions import constraints
-from torch.distributions.transforms import Transform
 from torch.distributions.distribution import Distribution
+from torch.distributions.transforms import Transform
+from torch.distributions.utils import _sum_rightmost
 
 
 class TransformedDistribution(Distribution):
@@ -74,13 +75,9 @@ class TransformedDistribution(Distribution):
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)
-            term = transform.log_abs_det_jacobian(x, y)
-            for _ in range(event_dim - transform.event_dim):
-                term = term.sum(-1)
-            log_prob -= term
+            log_prob -= _sum_rightmost(transform.log_abs_det_jacobian(x, y),
+                                       event_dim - transform.event_dim)
             y = x
-        term = self.base_dist.log_prob(y)
-        for _ in range(event_dim - len(self.base_dist.event_shape)):
-            term = term.sum(-1)
-        log_prob += term
+        log_prob += _sum_rightmost(self.base_dist.log_prob(y),
+                                   event_dim - len(self.base_dist.event_shape))
         return log_prob

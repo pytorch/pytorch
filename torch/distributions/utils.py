@@ -100,6 +100,19 @@ def broadcast_all(*values):
     return values
 
 
+def _sum_rightmost(value, dim):
+    """
+    Sum out ``dim`` many rightmost dimensions of a given tensor.
+
+    Args:
+        value (Tensor or Variable): A tensor of ``.dim()`` at least ``dim``.
+        dim (int): The number of rightmost dims to sum out.
+    """
+    if dim == 0:
+        return value
+    return value.contiguous().view(value.shape[:-dim] + (-1,)).sum(-1)
+
+
 def softmax(tensor):
     """
     Wrapper around softmax to make it work with both Tensors and Variables.

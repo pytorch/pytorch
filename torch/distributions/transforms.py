@@ -3,7 +3,8 @@ import weakref
 import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import (_sum_rightmost, broadcast_all,
+                                       lazy_property)
 from torch.nn.functional import sigmoid
 
 __all__ = [
@@ -244,10 +245,8 @@ class ComposeTransform(Transform):
         result = 0
         for part in self.parts:
             y = part(x)
-            term = part.log_abs_det_jacobian(x, y)
-            for _ in range(self.event_dim - part.event_dim):
-                term = term.sum(-1)
-            result += term
+            result += _sum_rightmost(part.log_abs_det_jacobian(x, y),
+                                     self.event_dim - part.event_dim)
             x = y
         return result
 
