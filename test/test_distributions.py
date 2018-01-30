@@ -515,6 +515,8 @@ class TestDistributions(TestCase):
 
     def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        assert Categorical(p).mean != Categorical(p).mean  # test for nan
+        assert Categorical(p).variance != Categorical(p).variance  # test for nan
         self.assertEqual(Categorical(p).sample().size(), SCALAR_SHAPE)
         self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
@@ -527,6 +529,10 @@ class TestDistributions(TestCase):
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
         s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        self.assertEqual(Categorical(p).mean.size(), (2,))
+        self.assertEqual(Categorical(p).variance.size(), (2,))
+        assert all(Categorical(p).mean != Categorical(p).mean)  # test for nan
+        assert all(Categorical(p).variance != Categorical(p).variance)  # test for nan
         self.assertEqual(Categorical(p).sample().size(), (2,))
         self.assertEqual(Categorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2))
         self.assertEqual(Categorical(p).sample_n(6).size(), (6, 2))
