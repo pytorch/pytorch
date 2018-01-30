@@ -1155,7 +1155,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
-    """Applies local response normalization over an input signal composed of
+    """Applies Local Response Normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
 
@@ -1177,6 +1177,35 @@ def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
         div = div.view(sizes)
     div = div.mul(alpha).add(k).pow(beta)
     return input / div
+
+
+def layer_norm(input, weight=None, bias=None, eps=1e-5):
+    """Applies Layer Normalization over a 2D input that is seen as a mini-batch
+    of 1D inputs.
+
+    See :class:`~torch.nn.LayerNorm` for details.
+    """
+    if input is not None and input.dim() != 2:
+        raise ValueError("Expected 2D tensor as input, got {}D tensor instead.".format(input.dim()))
+
+    mean = input.mean(1, keepdim=True)
+    # Prevent NaN gradients when sample std is 0 by using alternative standard deviation calculation
+    std = ((input - mean).pow(2).sum(1, keepdim=True).div(input.size(1) - 1) + eps).sqrt()
+    output = (input - mean) / std
+
+    # Resize weights and biases to match dims
+    if weight is not None:
+        if input.size(1) != weight.nelement():
+            raise RuntimeError('Expected {} features as input, got {} features instead.'
+                               .format(weight.nelement(), input.size(1)))
+        output = weight * output
+    if bias is not None:
+        if input.size(1) != bias.nelement():
+            raise RuntimeError('Expected {} features as input, got {} features instead.'
+                               .format(bias.nelement(), input.size(1)))
+        output = output + bias
+
+    return output
 
 
 # loss

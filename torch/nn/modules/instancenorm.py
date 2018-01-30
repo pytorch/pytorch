@@ -1,5 +1,8 @@
+import torch
+from .module import Module
 from .batchnorm import _BatchNorm
 from .. import functional as F
+from torch.nn.parameter import Parameter
 
 
 class _InstanceNorm(_BatchNorm):
@@ -43,12 +46,75 @@ class _InstanceNorm(_BatchNorm):
         self._use_running_stats = mode
 
 
-class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 3d input that is seen as a mini-batch.
+class LayerNorm(Module):
+    r"""Applies Layer Normalization over a 2D input that is seen
+    as a mini-batch of 1D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
+
+    The mean and standard deviation are calculated for each object in a
+    mini-batch (over `num_features`). Gamma and beta are
+    optional learnable parameter vectors of size C (where C is the input size).
+
+    Args:
+        num_features: num_features from an expected input of size
+            `batch_size x num_features`. Specified only if learnable parameters
+            are desired. Default: None
+        eps: a value added to the denominator for numerical stability.
+            Default: 1e-5
+
+    Shape:
+        - Input: :math:`(N, C)`
+        - Output: :math:`(N, C)` (same shape as input)
+
+    Examples:
+        >>> # Without Learnable Parameters
+        >>> m = nn.LayerNorm()
+        >>> # With Learnable Parameters
+        >>> m = nn.LayerNorm(100)
+        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> output = m(input)
+    """
+
+    def __init__(self, num_features=None, eps=1e-5):
+        super(LayerNorm, self).__init__()
+        self.num_features = num_features
+        self.affine = num_features is not None
+        self.eps = eps
+        if self.affine:
+            self.weight = Parameter(torch.Tensor(num_features))
+            self.bias = Parameter(torch.Tensor(num_features))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.affine:
+            self.weight.data.fill_(1)
+            self.bias.data.zero_()
+
+    def forward(self, input):
+        return F.layer_norm(input, weight=self.weight, bias=self.bias,
+                            eps=self.eps)
+
+    def __repr__(self):
+        if self.affine:
+            return ('{name}({num_features}, eps={eps})'
+                    .format(name=self.__class__.__name__, **self.__dict__))
+        else:
+            return ('{name}(eps={eps})'
+                    .format(name=self.__class__.__name__, **self.__dict__))
+
+
+class InstanceNorm1d(_InstanceNorm):
+    r"""Applies Instance Normalization over a 3D input that is seen as a mini-batch.
+
+    .. math::
+
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
@@ -90,11 +156,11 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Instance Normalization over a 4D input that is seen as a mini-batch of 3D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
@@ -136,11 +202,11 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Instance Normalization over a 5D input that is seen as a mini-batch of 4D inputs.
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \gamma * \frac{x - \mu_x}{\sigma_x + \epsilon} + \beta
 
     The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
     Gamma and beta are learnable parameter vectors

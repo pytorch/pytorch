@@ -3379,6 +3379,20 @@ class TestNN(NNTestCase):
         self.assertEqual(res1, res2)
         self.assertEqual(grad1, grad2)
 
+    def test_layernorm_raises_error_if_weight_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.layer_norm(input, weight=Parameter(torch.rand(size)))
+
+    def test_layernorm_raises_error_if_bias_is_not_same_size_as_input(self):
+        input = Variable(torch.rand(2, 10))
+        wrong_sizes = [9, 11]
+        for size in wrong_sizes:
+            with self.assertRaises(RuntimeError):
+                F.layer_norm(input, bias=Parameter(torch.rand(size)))
+
     def test_pairwise_distance(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
         input2 = Variable(torch.randn(4, 4), requires_grad=True)
@@ -4654,6 +4668,18 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='not_affine',
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=(10,),
+        input_size=(4, 10),
+        desc='affine'
+    ),
+    dict(
+        module_name='LayerNorm',
+        constructor_args=(None,),
+        input_size=(4, 10),
+        desc='no_affine'
     ),
     dict(
         module_name='Conv1d',

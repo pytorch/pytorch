@@ -4,7 +4,7 @@ from .. import functional as F
 
 class LocalResponseNorm(Module):
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
-        r"""Applies local response normalization over an input signal composed
+        r"""Applies Local Response Normalization over an input signal composed
         of several input planes, where channels occupy the second dimension.
         Applies normalization across channels.
 
