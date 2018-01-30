@@ -2241,6 +2241,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.norm(random_var, positive_var2)
             ),
             (
+                OneHotCategorical(simplex_tensor),
+                scipy.stats.multinomial(1, simplex_tensor)
+            ),
+            (
                 Pareto(positive_var, 2 + positive_var2),
                 scipy.stats.pareto(2 + positive_var2, scale=positive_var)
             ),
@@ -2264,7 +2268,7 @@ class TestAgainstScipy(TestCase):
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, Multinomial):
+            if isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
             else:
