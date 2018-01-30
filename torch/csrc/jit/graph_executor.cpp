@@ -5,24 +5,179 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/autograd/function.h"
 
 #include <unordered_map>
 
 namespace torch { namespace jit {
 
+// input captures, output captures, temporary captures
 
-struct Gradient {
-};
-struct ExecutionPlan {
-  using variable_list = autograd::variable_list;
+/*
+// how to run a single optimized execution
+// optimized executions unwrap/re-wrap tensors as described in the Gradient struct.
+class Plan {
+  Code code;
+  Gradient? gradient;
   variable_list run(variable_list inputs) {
-    //TODO
+    tensors = unwrap_variables(inputs);
+    outputs = code.run(tensors);
+    output_vars = wrap_in_nograd_variables(outputs)
+    if(!gradient) {
+      return output_vars;
+    }
+    grad_fn = GradientFunction(gradient);
+    for(x : gradient.gradient_inputs) {
+      output_vars[x].requires_grad = true
+      output_vars[x].grad_fn = grad_fn;
+      output_vars[x].output_nr = grad_fn.num_inputs++;
+    }
+    for(x : gradient.outputs) {
+      grad_fn.next_functions.push_back(inputs[x].grad_fn, inputs[x].output_nr)
+      // NOTE: it would be great if edge_type was struct InputPort { Gradient grad_fn; int offset; }
+      // and Variable also had an InputPort instead of grad_fn+output_nr.
+      // then this would just be:
+      // grad_fn.next_functions.push_back(inputs[x].input_port);
+    }
+    // capture needs to be separate from the grad_fn constructor since
+    // it captures some of the output vars whose gradients point to grad_fn itself.
+    grad_fn.capture(inputs, outputs_vars);
+    // remove the last gradient.num_temporary_outputs from output_vars, they are not used outside
+    return output_vars.shorten_by(gradient.num_temporary_outputs);
+    // note: those temporary vars were capture by the gradient, so if we take _its_ gradient
+    // it is possible they are used.
   }
-  ExecutionPlan(std::shared_ptr<Graph> & graph, std::unique_ptr<Gradient> grad)
-  : f(graph), grad(std::move(grad)) {}
+};
+
+
+class GradientFunction : autograd::Function {
+  GradientFunction(Gradient grad)
+  : grad(grad) {}
+  variable_list run(variable_list inputs) {
+    return grad.graph_exe.run(captures+inputs); //concern 2: costly concat, captures can be really big
+  }
+  void capture(variable_list inputs, variable_list outputs) {
+    for(c : grad.captures) {
+      captures.push_back(c.kind == Input ? inputs[c.index] : outputs[c.index]);
+    }
+  }
+  Gradient grad;
+  saved_variable_list captures; //what is saved variable in c++
+};
+
+*/
+
+using tensor_list = std::vector<at::Tensor>;
+using variable_tensor_list = tensor_list;
+
+struct ExecutionPlan;
+struct GraphExecutor;
+
+struct ExecutionPlanAutogradFunction : public autograd::Function {
+  ExecutionPlanAutogradFunction(std::shared_ptr<GraphExecutor> graph)
+  : graph(std::move(graph)) {}
+  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override;
 private:
+  friend struct ExecutionPlan;
+  std::shared_ptr<GraphExecutor> graph;
+  std::vector<autograd::SavedVariable> captures;
+};
+
+
+struct ExecutionPlan {
+  ExecutionPlan(std::shared_ptr<Graph> & graph)
+  : f(graph) {}
+  ExecutionPlan(std::shared_ptr<Graph> & graph, Gradient grad)
+  : f(graph), grad(std::move(grad)) {}
+
+  variable_tensor_list run(variable_tensor_list inputs) {
+    if(grad) {
+      return runWithGrad(std::move(inputs));
+    }
+    unwrapVariables(inputs);
+    tensor_list outputs;
+    InterpreterState(f).runOneStage(std::move(inputs), outputs);
+    wrapTensors(outputs);
+    return outputs;
+  }
+private:
+  void unwrapVariables(tensor_list & list) {
+    for(auto & v : list) {
+      v = autograd::Variable(v).data();
+    }
+  }
+  void wrapTensors(tensor_list & list) {
+    for(auto & v : list) {
+      v = autograd::make_variable(v);
+    }
+  }
+  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) {
+    auto & capture_desc = grad.df_input_captures;
+    size_t N = capture_desc.size();
+    for(size_t i = 0; i < N; ++i) {
+      if(capture_desc[i].kind == Capture::Kind::Input) {
+        size_t offset = capture_desc[i].offset;
+        grad_fn.captures[i] = autograd::SavedVariable(autograd::Variable(inputs[offset]), false);
+      }
+    }
+  }
+  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & outputs) {
+    auto & capture_desc = grad.df_input_captures;
+    size_t N = capture_desc.size();
+    for(size_t i = 0; i < N; ++i) {
+      if(capture_desc[i].kind == Capture::Kind::Output) {
+        size_t offset = capture_desc[i].offset;
+        grad_fn.captures[i] = autograd::SavedVariable(autograd::Variable(outputs[offset]), true);
+      }
+    }
+  }
+
+  variable_tensor_list runWithGrad(variable_tensor_list inputs) {
+    auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor, 0);
+    // hook up the outputs of df to the gradient functions of the inputs that require
+    // gradients
+    for(auto idx : grad.df_output_vjps) {
+      autograd::Variable v(inputs[idx]);
+      // TODO: this kinda stuff is _way_ to low level to the public API of variable.
+      // Why do I have to care here whether v has a grad_fn or grad accumulator?
+      // Why do I have to care here about output_nr? I just want to say
+      // grad_fn->setOutputTo(i, v.input_port());
+      grad_fn->next_functions.emplace_back(v.grad_fn() ? v.grad_fn() : v.grad_accumulator(), v.output_nr());
+    }
+    captureInputs(*grad_fn, inputs);
+
+    unwrapVariables(inputs);
+    tensor_list outputs;
+    InterpreterState(f).runOneStage(std::move(inputs), outputs);
+    wrapTensors(outputs);
+    // hookup the gradients for the output tensors that require gradients
+    // to the inputs to our gradient function df
+    // XXX - if any output is the same tensor multiple times, views have to be
+    // setup here. We need to refactor autograd until it is safe for
+    // tensors to be constructed without all the viewing infrastructure.
+    for(auto idx : grad.df_input_vjps) {
+      autograd::Variable o(outputs[idx]);
+      auto impl = o.get();
+      // Note: we have to set this up in place, or we have to
+      // throw away and reallocate variables that were already created in
+      // wrapTensors. We should add an API for this.
+      impl->_grad_fn = grad_fn;
+      impl->output_nr = grad_fn->num_inputs++;
+      impl->_requires_grad = true;
+    }
+    captureOutputs(*grad_fn, outputs);
+    // drop the temporary outputs so that we return the same number of
+    // outputs as if we were not also calculating gradient
+    outputs.erase(outputs.begin() + grad.f_real_outputs, outputs.end());
+    return outputs;
+  }
+  friend struct ExecutionPlanAutogradFunction;
   Code f;
-  std::unique_ptr<Gradient> grad;
+
+  // description of gradient as a graph
+  Gradient grad; // if(grad) is false when this is unused
+  // executor for df, including code caches
+  std::shared_ptr<GraphExecutor> grad_executor;
 };
 
 // a Graph can be created via tracing, or via a language-based frontend
@@ -31,8 +186,11 @@ private:
 // GraphExecutor is completely unaware of tracing or module parameters to keep the
 // tracing concerns separated.
 struct GraphExecutor {
-  using variable_list = autograd::variable_list;
-  using tensor_list = std::vector<at::Tensor>;
+
+  // we dynamically expect this list of at::Tensor to be Variables.
+  // TODO: make these arguments safe.
+  using variable_tensor_list = tensor_list;
+  using Variable = autograd::Variable;
   GraphExecutor(std::shared_ptr<Graph> graph, bool symbolically_differentiable)
   : graph(std::move(graph))
   , symbolically_differentiable(symbolically_differentiable) {}
@@ -40,16 +198,16 @@ struct GraphExecutor {
   : symbolically_differentiable(isDifferentiable(*graph)) {}
 
   // entry point where execution begins
-  variable_list run(variable_list inputs) {
+  variable_tensor_list run(variable_tensor_list inputs) {
 
     // this is the fallback pathway
     if(!symbolically_differentiable && gradientIsPossible(inputs)) {
       auto & fb = getOrCreateAutogradFallback();
       InterpreterState state(fb);
       tensor_list outputs;
-      state.runOneStage(toTensorList(std::move(inputs)), outputs);
+      state.runOneStage(std::move(inputs), outputs);
       // note: we never unwrapped inputs, because we want autograd to record the trace
-      return toVariableList(std::move(outputs));
+      return outputs;
     }
 
     // either we can symbolically differentiate, or we do not need a gradient.
@@ -60,20 +218,13 @@ struct GraphExecutor {
   }
 
 private:
-  // TODO: sort out variable_list tensor_list bs
-  static tensor_list toTensorList(variable_list inputs) {
-    return tensor_list(inputs.begin(), inputs.end());
-  }
-  static variable_list toVariableList(tensor_list inputs) {
-    return variable_list(inputs.begin(), inputs.end());
-  }
 
-  static bool gradientIsPossible(const variable_list & inputs) {
+  static bool gradientIsPossible(const variable_tensor_list & inputs) {
     if (!autograd::GradMode::is_enabled()) {
       return false;
     }
     for (const auto & tensor : inputs) {
-      if(tensor.defined() && tensor.requires_grad())
+      if(tensor.defined() && Variable(tensor).requires_grad())
         return true;
     }
     return false;
@@ -117,7 +268,7 @@ private:
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
-  ExecutionPlan & getOrCompile(const variable_list & inputs) {
+  ExecutionPlan & getOrCompile(const variable_tensor_list & inputs) {
     // outside lock guard, to minimize the time holding the lock on the fast path
     // ArgumentSpec even computes its hashCode here.
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
@@ -138,15 +289,25 @@ private:
     }
     return false;
   }
+  void SpecializeToSpec(Graph & g, const ArgumentSpec & spec) {
+    PropagateInputShapes(g, spec);
+    for(size_t i = 0; i < spec.size(); ++i) {
+      if(!spec.tensorInfo(i).defined()) {
+        
+      }
+    }
+  }
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
     auto graph_ = copy(*graph);
-    PropagateInputShapes(*graph_, spec);
+    SpecializeToSpec(*graph_, spec);
     if(!gradientIsPossible(spec)) {
       optimize(*graph_, /*graphMustSupportVariables=*/false);
-      return ExecutionPlan(graph_, nullptr);
+      return ExecutionPlan(graph_);
     }
     JIT_ASSERT(symbolically_differentiable);
-    std::unique_ptr<Gradient> gradient = nullptr;
+    // TODO: add in requires_grad flags when PR is merged
+    Gradient gradient = differentiate(graph_);
+    graph_ = gradient.f;
     optimize(*graph_, /*graphMustSupportVariables=*/false);
     return ExecutionPlan(graph_, std::move(gradient));
   }
@@ -177,24 +338,18 @@ private:
   std::mutex compile_mutex;
 };
 
+autograd::variable_list
+ExecutionPlanAutogradFunction::apply(const autograd::variable_list& inputs) {
+  // TODO: stupid copies here to convert to/from tensor_list
+  auto tensors = graph->run(variable_tensor_list(inputs.begin(), inputs.end()));
+  return autograd::variable_list(tensors.begin(), tensors.end());
+}
+
 }}
+
 /*
 
 class GraphExecutor {
-
-  Plan compileSpec(spec) {
-    graph_ = copy(graph); // make a copy for the specialization
-    specialize_to(spec);
-    if(!spec.gradientIsPossible()) {
-      // we do not need to compute a gradient
-      optimize(graph_, spec, graphMustSupportVaribales=false)
-      return Plan(Code(graph), gradient=None)
-    }
-    assert(symbolically_differentiable);
-    gradient = get_symblic_gradient(graph_);
-    optimize(graph_, graphMustSupportVariables=false)
-    return Plan(Code(graph_), gradient)
-  }
 
 
   void optimize(Graph graph, bool graphMustSupportVariables) {
@@ -211,181 +366,11 @@ class GraphExecutor {
     }
   }
 
-
-  // PR exists
-  // propagate the types and shapes describe in spec across the entire graph
-  void type_shape_propagate(graph, spec) {
-    // <fake it by making up fake tensors, running the op, and throwing away the result>
-    // incrementally add real shape/type propagation by implementing the expensive
-    // ops (matmult, conv, etc.) first
-  }
-
-  // make a graph specific to the sizes/strides/defined-ness, etc. in spec
-  void specialze_to(Graph graph, Spec spec) {
-    type_shape_propagate(graph, spec);
-  }
-
-  // PR exists
-  Gradient get_symbolic_gradient(graph_) {
-    // original graph y0,y1,m,y2 = f(x0,x1,n,x2) // assume m and n are requires_grad=False
-
-    // modified original graph y0,y1,m,y2,t0,t1 = f(x0,x1,n,x2)
-    // t0, t1, ... are all the temporaries needed to compute the gradient
-    // gradient graph may require some of the inputs of f as well.
-    // gradient graph  [dx0, dx1, dx2] = f'(x0,x2,t0,t1,dy0, dy1, dy2, dt0, dt1)
-    // note: dt0 and dt1 will be undefined _unless_ there is a double backward, in which case,
-    // since f' uses t0 and t1, the double backward will produce gradients for them
-
-    // implementation in two stages:
-    // stage1: insert_symbolic_gradient(graph_), which works in the original graph adding the gradient expressions
-    // stage2: split_off_stage1_graph which will figure out what is required as temporaries, creating new outputs for them if needed.
-    // and creating a gradient_graph object.
-    return Gradient(gradient_graph, <metadata as described above about how to hook up the gradient in Gradient object>);
-  }
-
 };
 
 
-// Definition of Spec
-// CONCERN 1: the key is huuuuuuge: with some graphs having the entire
-// set of parameters as inputs each time!
-// we have similar keys today, but it still worries me.
-// mitigation: we only use specs for symbolically differentiable ops, so maybe in practice what is checked is smaller
-// PR Exists
-class Spec {
-  TensorInfo tensors;
-  bool gradientIsPossible() {
-    <any TensorInfo has requires_grad>
-  }
-};
-
-// PR Exists
-class TensorInfo {
-  ScalarType type;
-  int device;
-  list[int] sizes;
-  list[int] strides; //fusion groups needs this
-  bool defined;
-  bool requires_grad; // true if its a variable, and nograd is not set on this execution, and the variable itself requires grad
-};
-
-class Code; // already implemented, this is the 'bytecode' that the interpreter can run
-
-// holds everything needed to define the gradient when Plan is run
-
-// This is a purely symbolic representation of the Gradient
-// (it has a GraphExecutor because we need somewhere to put the
-// code cache for the executor.)  Morally, Gradient has a Graph
-// (and we cache the GraphExecutor somewhere.)
-class Gradient {
-  GraphExecutor gradient_exe; // definition of f', the gradient of f
-
-  // meta-data describing how the gradient function is hooked up in the autograd
-
-  // INPUTS
-  // one for each input to f', these are
-  // descriptions of where the inputs of f' come from, the first set of inputs
-  // are always captured from the inputs/outputs of f  (temporaries in f get promoted to outputs if needed)
-  list<Capture> captured_inputs;
-  // the remaining inputs are inputs to the grad_fn object
-  // each integer specifies an output of f whose gradient (grad_fn, output_nr) gets hooked up to the next input in the grad_fn
-  list<int> gradient_fn_inputs;
 
 
-  // OUTPUTS
-  // one for each output of f'
-  // which routes the gradients produced to the input_port of the n'th input
-  // This is not in 1-1 correspondence with inputs because not all inputs require grad
-  list<int> outputs;
 
-  int num_temporary_outputs; // outputs we created from f that were not originally there
-
-  // EXAMPLE, m does not require grad, n is determined to not require grad either (e.g. because it only depends on m)
-  // y, n, t = f(x, m)
-
-  // f':
-  // in this case x, t and y were required temporaries and gradients for y ant t are required
-  // dx = f'(x, t, y, dy, dt) // no dm  or dn because they do not require gradient
-
-  // captured_inputs = {I0, O2, O1}
-  //                    x   t   y
-  // gradient_fn_inputs = {0, 2}
-  //                       dy dt
-  // i.e. connect grad_fn of y and t variables produced by f, with y's output_nr = 0 and t's output_nr = 1
-
-  // outputs = {0}
-  //            dx
-  // i.e. connect next_function[0] of grad_fn to x's (grad_fn, output_nr).
-  // num_temporary_outputs = 1; (t was produced for backward)
-};
-
-class Capture {
-  enum {Input, Output} kind;
-  int index;
-};
-
-
-class GradientFunction : autograd::Function {
-  GradientFunction(Gradient grad)
-  : grad(grad) {}
-  variable_list run(variable_list inputs) {
-    return grad.graph_exe.run(captures+inputs); //concern 2: costly concat, captures can be really big
-  }
-  void capture(variable_list inputs, variable_list outputs) {
-    for(c : grad.captures) {
-      captures.push_back(c.kind == Input ? inputs[c.index] : outputs[c.index]);
-    }
-  }
-  Gradient grad;
-  saved_variable_list captures; //what is saved variable in c++
-};
-
-// how to run a single optimized execution
-// optimized executions unwrap/re-wrap tensors as described in the Gradient struct.
-class Plan {
-  Code code;
-  Gradient? gradient;
-  variable_list run(variable_list inputs) {
-    tensors = unwrap_variables(inputs);
-    outputs = code.run(tensors);
-    output_vars = wrap_in_nograd_variables(outputs)
-    if(!gradient) {
-      return output_vars;
-    }
-    grad_fn = GradientFunction(gradient);
-    for(x : gradient.gradient_inputs) {
-      output_vars[x].requires_grad = true
-      output_vars[x].grad_fn = grad_fn;
-      output_vars[x].output_nr = grad_fn.num_inputs++;
-    }
-    for(x : gradient.outputs) {
-      grad_fn.next_functions.push_back(inputs[x].grad_fn, inputs[x].output_nr)
-      // NOTE: it would be great if edge_type was struct InputPort { Gradient grad_fn; int offset; }
-      // and Variable also had an InputPort instead of grad_fn+output_nr.
-      // then this would just be:
-      // grad_fn.next_functions.push_back(inputs[x].input_port);
-    }
-    // capture needs to be separate from the grad_fn constructor since
-    // it captures some of the output vars whose gradients point to grad_fn itself.
-    grad_fn.capture(inputs, outputs_vars);
-    // remove the last gradient.num_temporary_outputs from output_vars, they are not used outside
-    return output_vars.shorten_by(gradient.num_temporary_outputs);
-    // note: those temporary vars were capture by the gradient, so if we take _its_ gradient
-    // it is possible they are used.
-  }
-};
-
-
-// concern 1 mitigations:
-// any graph executor that is running a gradient can assume variables will be the same size
-// and not put that in the key since the sizes of grad_x is determined by x.
-// However, grad/defined/strides may all be valid to change and we technically have to check.
-
-// concern 2 mitigations
-// in the unlikely event that these concats are costly, we can use a
-// 'rope'-like structure (https://en.wikipedia.org/wiki/Rope_(data_structure))
-// to avoid actually performing the concat.
-// however, we almost always iterate this list at least once, so it is not clear
-// that avoiding the concat is worthwhile anyway.
 
 */

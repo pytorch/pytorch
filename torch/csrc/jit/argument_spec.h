@@ -36,7 +36,9 @@ static_assert(sizeof(TensorInfoPOD) == sizeof(int64_t),
 struct TensorInfo;
 
 struct ArgumentSpec {
-  ArgumentSpec(bool with_grad, ArrayRef<autograd::Variable> tensors)
+  // note: tensors must always be variables
+  // TODO: enforce this with consistency in how we pass list of tensors/variables around
+  ArgumentSpec(bool with_grad, ArrayRef<autograd::Tensor> tensors)
   :  hash_code(0), ntensors(tensors.size()) {
     int all_dims = 0;
     for(size_t i = 0; i < ntensors; i++) {
@@ -56,7 +58,7 @@ struct ArgumentSpec {
       if(t.defined()) {
         pod.type = static_cast<unsigned int>(t.type().scalarType());
         pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
-        pod.requires_grad = with_grad && t.requires_grad();
+        pod.requires_grad = with_grad && autograd::Variable(t).requires_grad();
         total_dims += t.ndimension();
         auto sizes = t.sizes();
         std::copy(sizes.begin(),sizes.end(), next_dim);
