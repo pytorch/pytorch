@@ -6,14 +6,14 @@ from torch.distributions.distribution import Distribution
 
 class TransformedDistribution(Distribution):
     r"""
-    Extension of the Distribution class, which applies a sequence of Transforms to a base distribution.
-    Let f be the composition of transforms applied,
-    X ~ BaseDistribution
-    Y = f(X) ~ TransformedDistribution(BaseDistribution, f)
-    log p(Y) = log p(X) + log det (dX/dY)
+    Extension of the Distribution class, which applies a sequence of Transforms
+    to a base distribution.  Let f be the composition of transforms applied,
+
+        X ~ BaseDistribution
+        Y = f(X) ~ TransformedDistribution(BaseDistribution, f)
+        log p(Y) = log p(X) + log det (dX/dY)
     """
-    def __init__(self, base_distribution, transforms=[], *args, **kwargs):
-        super(TransformedDistribution, self).__init__(*args, **kwargs)
+    def __init__(self, base_distribution, transforms):
         self.base_dist = base_distribution
         if isinstance(transforms, Transform):
             self.transforms = [transforms, ]
@@ -21,6 +21,13 @@ class TransformedDistribution(Distribution):
             if not all(isinstance(t, Transform) for t in transforms):
                 raise ValueError("transforms must be a Transform or a list of Transforms")
             self.transforms = transforms
+        else:
+            raise ValueError("transforms must be a Transform or list, but was {}".format(transforms))
+        shape = self.base_dist.batch_shape + self.base_dist.event_shape
+        event_dim = max([len(self.base_dist.event_shape)] + [t.event_dim for t in self.transforms])
+        batch_shape = shape[:len(shape) - event_dim]
+        event_shape = shape[len(shape) - event_dim:]
+        super(TransformedDistribution, self).__init__(batch_shape, event_shape)
 
     @constraints.dependent_property
     def params(self):
@@ -33,14 +40,6 @@ class TransformedDistribution(Distribution):
     @property
     def has_rsample(self):
         return self.base_dist.has_rsample
-
-    @property
-    def batch_shape(self):
-        return self.base_dist.batch_shape
-
-    @property
-    def event_shape(self):
-        return self.base_dist.event_shape
 
     def sample(self, sample_shape=torch.Size()):
         """
@@ -70,11 +69,18 @@ class TransformedDistribution(Distribution):
         Scores the sample by inverting the transform(s) and computing the score using the score
         of the base distribution and the log abs det jacobian
         """
+        event_dim = len(self.event_shape)
         log_prob = 0.0
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)
-            log_prob -= transform.log_abs_det_jacobian(x, y)
+            term = transform.log_abs_det_jacobian(x, y)
+            for _ in range(event_dim - transform.event_dim):
+                term = term.sum(-1)
+            log_prob -= term
             y = x
-        log_prob += self.base_dist.log_prob(y)
+        term = self.base_dist.log_prob(y)
+        for _ in range(event_dim - len(self.base_dist.event_shape)):
+            term = term.sum(-1)
+        log_prob += term
         return log_prob

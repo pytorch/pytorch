@@ -60,8 +60,13 @@ class Transform(object):
             the codomain. Transforms that are not bijective should at least
             maintain the weaker pseudoinverse properties
             ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
+        event_dim (int): Number of dimensions in the transform ``event_shape``.
+            This should be 0 for pointwise transforms, 1 for transforms that
+            act jointly on vectors, 2 for transforms that act jointly on
+            matrices, etc.
     """
     bijective = False
+    event_dim = 0
 
     def __init__(self, cache_size=0):
         self._cache_size = cache_size
@@ -161,6 +166,10 @@ class _InverseTransform(Transform):
         return self._inv.bijective
 
     @property
+    def event_dim(self):
+        return self._inv.event_dim
+
+    @property
     def inv(self):
         return self._inv
 
@@ -209,6 +218,10 @@ class ComposeTransform(Transform):
     def bijective(self):
         return all(p.bijective for p in self.parts)
 
+    @lazy_property
+    def event_dim(self):
+        return max([0] + [p.event_dim for p in self.parts])
+
     @property
     def inv(self):
         inv = None
@@ -231,7 +244,10 @@ class ComposeTransform(Transform):
         result = 0
         for part in self.parts:
             y = part(x)
-            result += part.log_abs_det_jacobian(x, y)
+            term = part.log_abs_det_jacobian(x, y)
+            for _ in range(self.event_dim - part.event_dim):
+                term = term.sum(-1)
+            result += term
             x = y
         return result
 
@@ -353,6 +369,7 @@ class BoltzmannTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.simplex
+    event_dim = 1
 
     def __eq__(self, other):
         return isinstance(other, BoltzmannTransform)
@@ -384,6 +401,7 @@ class StickBreakingTransform(Transform):
     domain = constraints.real
     codomain = constraints.simplex
     bijective = True
+    event_dim = 1
 
     def __eq__(self, other):
         return isinstance(other, StickBreakingTransform)
@@ -416,6 +434,7 @@ class LowerCholeskyTransform(Transform):
     """
     domain = constraints.real
     codomain = constraints.lower_cholesky
+    event_dim = 2
 
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
