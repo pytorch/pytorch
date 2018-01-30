@@ -49,6 +49,10 @@ class Geometric(Distribution):
     def mean(self):
         return 1. / self.probs - 1.
 
+    @property
+    def variance(self):
+        return (1. / self.probs - 1.) / self.probs
+
     @lazy_property
     def logits(self):
         return probs_to_logits(self.probs, is_binary=True)
