@@ -2047,15 +2047,18 @@ def uniform_scalar(offset=0, requires_grad=False):
     v.requires_grad = requires_grad
     return v
 
+
 def uniform_scalar_clamp(amin, amax, requires_grad=False):
     v = variable(0).uniform_(0, 1).clamp(amin, amax)
     v.requires_grad = requires_grad
     return v
 
+
 def bernoulli_scalar(requires_grad=False):
     v = variable(0).byte().bernoulli_()
     v.requires_grad = requires_grad
     return v
+
 
 class dont_convert(tuple):
     pass
@@ -2730,6 +2733,7 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
                                            gen_non_contig_grad_outputs=True))
     else:
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
+
 
 def has_scalars(output, args):
     def ensure_tuple(y):
