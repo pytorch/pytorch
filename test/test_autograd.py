@@ -983,6 +983,52 @@ class TestAutograd(TestCase):
         r = MyFunction.apply(x * x)
         (r * x).sum().backward()
 
+    def test_return_duplicate(self):
+        class DoubleDuplicate(Function):
+            @staticmethod
+            def forward(ctx, x):
+                output = x * 2
+                return output, output
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2 + grad2 * 2
+
+        def fn(x):
+            a, b = DoubleDuplicate.apply(x)
+            self.assertIs(a, b)
+            return a + b
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        gradcheck(fn, [x])
+        gradgradcheck(fn, [x])
+
+    def test_return_duplicate_inplace(self):
+        class DoubleInplace(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(x)
+                return x, x
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2 + grad2 * 2
+
+        def inplace_fn(x):
+            a, b = DoubleInplace.apply(x.clone())
+            self.assertIs(a, b)
+            return a + b
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        gradcheck(inplace_fn, [x])
+        gradgradcheck(inplace_fn, [x])
+
+        # Can't modify leaf variables in-place
+        self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x))
+        # Functions which modify views in-place must return only one output
+        self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x.clone()[0]))
+
     @suppress_warnings
     def test_resize(self):
         x = Variable(torch.ones(2, 3))
