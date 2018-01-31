@@ -10,16 +10,19 @@ def scatter(inputs, target_gpus, dim=0):
     references to objects that are not variables. Does not
     support Tensors.
     """
+    def scatter_var(obj):
+        return Scatter.apply(target_gpus, None, dim, obj)
+
     def scatter_map(obj):
         if isinstance(obj, Variable):
-            return Scatter.apply(target_gpus, None, dim, obj)
+            return scatter_var(obj)
         assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple) and len(obj) > 0:
-            return list(zip(*map(scatter_map, obj)))
+            return list(zip(*map(scatter_var, obj)))
         if isinstance(obj, list) and len(obj) > 0:
-            return list(map(list, zip(*map(scatter_map, obj))))
+            return list(map(list, zip(*map(scatter_var, obj))))
         if isinstance(obj, dict) and len(obj) > 0:
-            return list(map(type(obj), zip(*map(scatter_map, obj.items()))))
+            return list(map(type(obj), zip(*map(scatter_var, obj.items()))))
         return [obj for targets in target_gpus]
 
     return scatter_map(inputs)
@@ -43,11 +46,17 @@ def gather(outputs, target_device, dim=0):
     Gathers variables from different GPUs on a specified device
       (-1 means the CPU).
     """
+    def gather_vars(outputs):
+        return Gather.apply(target_device, dim, *outputs)
+
     def gather_map(outputs):
         out = outputs[0]
         if isinstance(out, Variable):
-            return Gather.apply(target_device, dim, *outputs)
+            return gather_vars(outputs)
         if out is None:
             return None
-        return type(out)(map(gather_map, zip(*outputs)))
+        # Assuming outputs is a iterable of iterables and not
+        # an iterable of iterables of iterables (or more)
+        return type(out)(map(gather_vars, zip(*outputs)))
+
     return gather_map(outputs)
