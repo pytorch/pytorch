@@ -85,18 +85,18 @@ void AsyncPollingNet::schedule(int task_id) {
     // for CUDA events we need to insert CUDA event synchronization to ensure
     // that async CUDA computations are executed in correct order
     asyncWait(task_id, stream_id, parents(task_id));
-    bool result;
-    if (FLAGS_caffe2_dag_net_collect_stats) {
-      Timer run_time;
-      result = run(task_id, stream_id);
-      CAFFE_EVENT(
-          stats_[device_option.device_type()],
-          task_run_time_us,
-          run_time.MicroSeconds());
-    } else {
-      result = run(task_id, stream_id);
-    }
-    if (!result) {
+    try {
+      if (FLAGS_caffe2_dag_net_collect_stats) {
+        Timer run_time;
+        run(task_id, stream_id);
+        CAFFE_EVENT(
+            stats_[device_option.device_type()],
+            task_run_time_us,
+            run_time.MicroSeconds());
+      } else {
+        run(task_id, stream_id);
+      }
+    } catch (const std::exception&) {
       has_chain_failed_ = true;
     }
   });

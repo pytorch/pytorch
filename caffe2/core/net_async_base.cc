@@ -216,34 +216,26 @@ void AsyncNetBase::asyncWait(
   first_op->WaitEvents(events, stream_id);
 }
 
-bool AsyncNetBase::run(int task_id, int stream_id) {
-  bool failed = false;
+void AsyncNetBase::run(int task_id, int stream_id) {
   std::string err_msg;
   for (auto& op_id : chains_[task_id]) {
     auto& op = operators_[op_id];
     try {
-      if (!op->RunAsync(stream_id)) {
-        failed = true;
-        err_msg = "Failed to execute task: op " +
-            (op->has_debug_def() ? op->type() : " unknown");
-        break;
-      }
+      CAFFE_ENFORCE(op->RunAsync(stream_id), "Failed to execute an op");
     } catch (const std::exception& e) {
-      failed = true;
-      err_msg = e.what();
-      break;
+      CAFFE_THROW(
+          std::string(e.what()) + ",  op " +
+          (op->has_debug_def() ? op->type() : " unknown"));
     } catch (...) {
-      failed = true;
-      err_msg = "Failed to execute task: unknown error";
-      break;
+      CAFFE_THROW(
+          "Failed to execute task: unknown error,  op " +
+          (op->has_debug_def() ? op->type() : " unknown"));
     }
   }
 
-  if (!failed && FLAGS_caffe2_net_async_finish_chain) {
+  if (FLAGS_caffe2_net_async_finish_chain) {
     operators_[chains_[task_id].back()]->event().Finish();
   }
-
-  return !failed;
 }
 
 void AsyncNetBase::finishTasks(const std::unordered_set<int>& task_ids) {
