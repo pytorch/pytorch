@@ -16,6 +16,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 
 using namespace at;
 using namespace torch::autograd;
@@ -280,7 +281,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   Tensor tensor = torch::createTensor(data);
   if (&self->cdata.data().type() != &tensor.type()) {
     // we change the type of var.data so we must change the type of var
-    auto newType = VariableImpl::getType(tensor);
+    auto newType = VariableType::getType(tensor);
     self->cdata.get()->*get(TensorImpl_Type()) = newType;
   }
   self->cdata.data() = tensor;
