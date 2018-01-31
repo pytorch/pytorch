@@ -8,6 +8,8 @@
 
 #if CUDNN_VERSION < 7000
 
+#include <curand_kernel.h>
+
 /*
 Note [cuDNN dropout descriptor initialization]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -224,7 +226,7 @@ inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
   if (states == nullptr) return CUDNN_STATUS_INVALID_VALUE;
   if (stateSizeInBytes == 0) return CUDNN_STATUS_INVALID_VALUE;
   dropoutDesc->dropout = dropout;
-  dropoutDesc->nstates = stateSizeInBytes;
+  dropoutDesc->nstates = (int)stateSizeInBytes/sizeof(curandState_t);
   dropoutDesc->states = states;
   return CUDNN_STATUS_SUCCESS;
 }
