@@ -244,8 +244,8 @@ EXAMPLES = [
             'high': Variable(torch.ones(1), requires_grad=True),
         },
         {
-            'low': variable([1.0, 1.0]),
-            'high': variable([2.0, 3.0]),
+            'low': Variable(torch.Tensor([1.0, 1.0]), requires_grad=True),
+            'high': Variable(torch.Tensor([2.0, 3.0]), requires_grad=True),
         },
     ]),
 ]
@@ -1494,7 +1494,7 @@ class TestDistributionShapes(TestCase):
                     message = '{} example {}/{}, shape mismatch. expected {}, actual {}'.format(
                         Dist.__name__, i + 1, len(params), expected_shape, actual_shape)
                     self.assertEqual(actual_shape, expected_shape, message=message)
-                except (NotImplementedError, ValueError):
+                except NotImplementedError:
                     continue
 
     def test_bernoulli_shape_scalar_params(self):
