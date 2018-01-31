@@ -9,7 +9,8 @@
 #include <functional>
 #include <nvfunctional>
 
-#include "ATen/native/Distributions.cuh"
+#include "ATen/SharedDist.cu"
+#include "ATen/native/Distributions.cpp"
 
 #include <TH/THAtomic.h>
 
