@@ -193,7 +193,7 @@ namespace {
   // # Packed input (batch_sizes is non-empty)
   //
   //  input_size
-  // +------+                    \
+  // +------+                    +
   // | A    |                    |
   // | E    | mini_batch =       |
   // | G    | batch_sizes[0] = 3 |
@@ -204,7 +204,7 @@ namespace {
   // | C    | batch_sizes[2] = 1 |
   // +------+                    |
   // | D    | batch_sizes[3] = 1 |
-  // +------+                    /
+  // +------+                    +
   //
   //              (seq_length = 4)
   //
