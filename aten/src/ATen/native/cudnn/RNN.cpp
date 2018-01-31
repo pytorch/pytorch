@@ -599,8 +599,12 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  AT_ASSERT(hx.is_contiguous(), "hx.is_contiguous()");
-  AT_ASSERT(!cx.defined() || cx.is_contiguous(), "!cx or cx.is_contiguous()");
+  if (!hx.is_contiguous()) {
+    throw std::runtime_error("rnn: hx is not contiguous");
+  }
+  if (cx.defined() && !cx.is_contiguous()) {
+    throw std::runtime_error("rnn: cx is not contiguous");
+  }
 
   auto x = input.contiguous();
   auto output = input.type().tensor(output_size);
@@ -740,8 +744,12 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_grad(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
   auto output_size = _output_size(fn.rnn, fn.tensors);
 
-  AT_ASSERT(hx.is_contiguous(), "hx.is_contiguous()");
-  AT_ASSERT(!cx.defined() || cx.is_contiguous(), "!cx or cx.is_contiguous()");
+  if (!hx.is_contiguous()) {
+    throw std::runtime_error("rnn: hx is not contiguous");
+  }
+  if (cx.defined() && !cx.is_contiguous()) {
+    throw std::runtime_error("rnn: cx is not contiguous");
+  }
 
   auto x = input.contiguous();
   auto dy = grad_output.contiguous();
@@ -889,8 +897,12 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   // TODO: the above were the only checks in rnn.py, but it doesn't seem
   // like these checks are enough
 
-  AT_ASSERT(hx.is_contiguous(), "hx.is_contiguous()");
-  AT_ASSERT(!cx.defined() || cx.is_contiguous(), "!cx or cx.is_contiguous()");
+  if (!hx.is_contiguous()) {
+    throw std::runtime_error("rnn: hx is not contiguous");
+  }
+  if (cx.defined() && !cx.is_contiguous()) {
+    throw std::runtime_error("rnn: cx is not contiguous");
+  }
 
   auto x = input.contiguous();
   const auto& y = output;
