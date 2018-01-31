@@ -13,6 +13,10 @@ class TransformedDistribution(Distribution):
         X ~ BaseDistribution
         Y = f(X) ~ TransformedDistribution(BaseDistribution, f)
         log p(Y) = log p(X) + log |det (dX/dY)|
+
+    Note that the ``.event_shape`` of a :class:`TransformedDistribution` is the
+    maximum shape of its base distribution and its transforms, since transforms
+    can introduce correlations among events.
     """
     def __init__(self, base_distribution, transforms):
         self.base_dist = base_distribution

@@ -61,10 +61,10 @@ class Transform(object):
             the codomain. Transforms that are not bijective should at least
             maintain the weaker pseudoinverse properties
             ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
-        event_dim (int): Number of dimensions in the transform ``event_shape``.
-            This should be 0 for pointwise transforms, 1 for transforms that
-            act jointly on vectors, 2 for transforms that act jointly on
-            matrices, etc.
+        event_dim (int): Number of dimensions that are correlated together in
+            the transform ``event_shape``. This should be 0 for pointwise
+            transforms, 1 for transforms that act jointly on vectors, 2 for
+            transforms that act jointly on matrices, etc.
     """
     bijective = False
     event_dim = 0
