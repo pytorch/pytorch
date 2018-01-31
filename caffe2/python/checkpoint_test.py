@@ -315,3 +315,33 @@ class TestCheckpoint(TestCase):
                                        ws.fetch_blob("output")))
         self.assertTrue(np.array_equal(expected_result,
                                        ws.fetch_blob("download_result")))
+
+    def test_reuse_checkpoint_manager(self):
+        """
+        A simple test that ensures we can reuse a MultiNodeCheckpointManager
+        object.
+        """
+        try:
+            tmpdir = tempfile.mkdtemp()
+            ws = workspace.C.Workspace()
+            session = LocalSession(ws)
+            checkpoint = MultiNodeCheckpointManager(tmpdir, 'minidb')
+
+            with Job() as job:
+                outputs = build_pipeline(node_id=0)
+            output_fetcher = Task(step=core.Net('empty'), outputs=outputs)
+            compiled_job = job.compile(LocalSession)
+
+            def fetch_total(session):
+                session.run(output_fetcher)
+                return output_fetcher.outputs()[0].fetch()
+
+            num_epochs = JobRunner(compiled_job, checkpoint)(session)
+            for initial_epoch in range(1, num_epochs + 1):
+                JobRunner(
+                    compiled_job,
+                    checkpoint, resume_from_epoch=initial_epoch)(session)
+                self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
+
+        finally:
+            shutil.rmtree(tmpdir)

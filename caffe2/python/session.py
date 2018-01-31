@@ -157,6 +157,7 @@ class Session(object):
                 need to pass a list of special nets to setup the master.
         """
         assert self.is_open(), 'Session is closed.'
+        assert runnable is not None, 'Got a none runnable.'
         self._run_compiled(self.compile(runnable, workspace_type,
                                         setup_net_list).obj)
 
