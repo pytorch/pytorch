@@ -24,6 +24,18 @@ class Exponential(Distribution):
     support = constraints.positive
     has_rsample = True
 
+    @property
+    def mean(self):
+        return self.rate.reciprocal()
+
+    @property
+    def stddev(self):
+        return self.rate.reciprocal()
+
+    @property
+    def variance(self):
+        return self.rate.pow(-2)
+
     def __init__(self, rate):
         self.rate, = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()

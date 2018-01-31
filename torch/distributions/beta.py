@@ -38,6 +38,16 @@ class Beta(Distribution):
         self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape)
 
+    @property
+    def mean(self):
+        return self.concentration1 / (self.concentration1 + self.concentration0)
+
+    @property
+    def variance(self):
+        total = self.concentration1 + self.concentration0
+        return (self.concentration1 * self.concentration0 /
+                (total.pow(2) * (total + 1)))
+
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
         if isinstance(value, Number):
