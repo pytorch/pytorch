@@ -8,11 +8,12 @@ The following constraints are implemented:
 - ``constraints.interval(lower_bound, upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
-- ``constraints.lower_triangular``
 - ``constraints.nonnegative_integer``
 - ``constraints.positive``
+- ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.real``
+- ``constraints.real_vector``
 - ``constraints.simplex``
 - ``constraints.unit_interval``
 """
@@ -224,7 +225,7 @@ class _RealVector(Constraint):
     but additionally reduces across the `event_shape` dimension.
     """
     def check(self, value):
-        return (value == value).min(-1)[0]
+        return (value == value).min(-1)[0]  # False for NANs.
 
 
 # Public interface.
