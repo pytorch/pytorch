@@ -69,11 +69,13 @@ namespace {
       dropout_state = dropout_state_;
     }
     DropoutDescriptor descriptor(cudnnHandle_t handle) const {
-      // NB: dropout_seed passed dummy 0, because it isn't actually used
-      // when dropout_state is defined.
       auto dropout_p = train ? dropout : 0;
       DropoutDescriptor dropout_desc;
-      dropout_desc.set(handle, dropout_p, dropout_state, 0);
+      if (dropout_p == 0) {
+        dropout_desc.set_no_dropout(handle);
+      } else {
+        dropout_desc.set(handle, dropout_p, dropout_state);
+      }
       return dropout_desc;
     }
   };
@@ -124,7 +126,7 @@ namespace {
 
     RNNDescriptor descriptor(cudnnHandle_t handle) const {
       DropoutDescriptor dropout_desc;
-      dropout_desc.set(handle, 0, {}, 0);
+      dropout_desc.set_no_dropout(handle);
       return descriptor(handle, std::move(dropout_desc));
     }
   };

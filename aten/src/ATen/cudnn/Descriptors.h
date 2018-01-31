@@ -92,6 +92,10 @@ struct DescriptorDeleter {
 // if it's cudnnTensorDescriptor_t it points to cudnnTensorStruct),
 // the constructor and the destructor.  Subclasses are responsible
 // for defining a set() function to actually set the descriptor.
+//
+// Descriptors default construct to a nullptr, and have a descriptor
+// initialized the first time you call set() or any other initializing
+// function.
 template <typename T, cudnnStatus_t (*ctor)(T**), cudnnStatus_t (*dtor)(T*)>
 class Descriptor
 {
@@ -203,6 +207,7 @@ struct SpatialTransformerDescriptor
 
 #if CUDNN_VERSION < 7000
 
+// See Note [cuDNN dropout descriptor initialization]
 inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
     cudnnDropoutDescriptor_t dropoutDesc,
     cudnnHandle_t handle,
@@ -228,32 +233,35 @@ struct DropoutDescriptor
 {
   at::Tensor state;
 
-  // This is expensive, avoid calling me!
-  void expensiveSet(cudnnHandle_t handle, float dropout, long long int seed) {
-    void *state_ptr = nullptr;
-    size_t state_size = 0;
-    if (dropout > 0) {
-      size_t dropout_state_size;
-      CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &dropout_state_size));
-      state = at::CUDA(kByte).tensor({static_cast<int64_t>(dropout_state_size)});
-      state_ptr = state.data_ptr();
-      state_size = state.size(0);
-    }
-    CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, seed));
+  // Initialize a dropout descriptor's RNG state.
+  // WARNING: This function is very expensive, avoid calling this function!
+  void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed) {
+    AT_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    size_t state_size;
+    CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
+    state = at::CUDA(kByte).tensor({static_cast<int64_t>(state_size)});
+    CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
-  // I'm cheap! Call me!
+  // Restore a dropout descriptor given a dropout probability and existing RNG state.
   // See Note [cuDNN dropout descriptor initialization]
-  void set(cudnnHandle_t handle, float dropout, at::Tensor state_, long long int seed) {
-    if (dropout > 0) {
-      state = state_;
-      void *state_ptr = state.data_ptr();
-      size_t state_size = state.size(0);
-      CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, seed));
-    } else {
-      // Empirically, expensiveSet is cheap when dropout is 0
-      expensiveSet(handle, dropout, seed);
-    }
+  void set(cudnnHandle_t handle, float dropout, at::Tensor state_) {
+    AT_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
+    state = state_;
+    void *state_ptr = state.data_ptr();
+    size_t state_size = state.size(0);
+    // NB: The seed doesn't actually matter, so we give a dummy value
+    CUDNN_CHECK(cudnnRestoreDropoutDescriptor(mut_desc(), handle, dropout, state_ptr, state_size, 0 /* seed */));
+  }
+
+  // Restore a dropout descriptor corresponding to no dropout
+  // See Note [cuDNN dropout descriptor initialization]
+  void set_no_dropout(cudnnHandle_t handle) {
+    // NB: seed doesn't matter when dropout = 0, because no random number
+    // initialization actually takes place when there is no dropout.
+    // NB: Empirically, cudnnSetDropoutDescriptor is cheap when
+    // dropoot == 0
+    CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, 0 /* dropout */, nullptr, 0 /* state_size */, 0 /* seed */));
   }
 };
 
