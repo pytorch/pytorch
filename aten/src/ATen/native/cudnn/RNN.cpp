@@ -169,12 +169,77 @@ namespace {
     return descriptors;
   }
 
+  // The best way to understand the meaning of the values stored in
+  // this struct is to consider each of the possible ways our
+  // input can be structured.
+  //
+  // Suppose you want to run RNN on the following variable
+  // length inputs:
+  //
+  //    ABCD
+  //    EF
+  //    G
+  //
+  // (Let _ be padding when we have non-packed representations.)
+  //
+  // # Packed input (batch_sizes is non-empty)
+  //
+  //  vocab_size
+  // +------+                    \
+  // | A    |                    |
+  // | E    |                    |
+  // | G    | batch_sizes[0] = 3 |
+  // +------+                    |
+  // | B    |                    | batch_sizes_sum = 7
+  // | F    | batch_sizes[1] = 2 |
+  // +------+                    |
+  // | C    | batch_sizes[2] = 1 |
+  // +------+                    |
+  // | D    | batch_sizes[3] = 1 |
+  // +------+                    /
+  //
+  //              (seq_length = 4)
+  //
+  //    input.size() = batch_sizes_sum x vocab_size
+  //
+  // # Unpacked input (batch_first = false)
+  //
+  //  batch_size = 3
+  // +-------+
+  // | A E G |
+  // | B F _ | seq_length = 4
+  // | C _ _ |
+  // | D _ _ |
+  // +-------+
+  //    ...    vocab_size
+  // +-------+
+  //
+  //    input.size() = seq_length x batch_size x vocab_size
+  //
+  // # Unpacked input (batch_first = true)
+  //
+  //  seq_length = 4
+  // +---------+
+  // | A B C D |
+  // | E F _ _ | batch_size = 3
+  // | G _ _ _ |
+  // +---------+
+  //     ...     vocab_size
+  // +---------+
+  //
+  //    input.size() = batch_size x seq_length x vocab_size
+  //
   struct TensorDescriptorListParams {
     IntList batch_sizes;
     int64_t seq_length;
     int64_t mini_batch;
-    int64_t inner_size;  // previously known as "input_size"
-    int64_t outer_size;  // only valid when !is_input_packed
+    // This used to be called input_size (which is generic and accurate),
+    // but we don't call it that anymore to avoid ambiguity with input.size()
+    // (which is an IntList).  This is not necessarily the vocabulary, but this
+    // is pretty accurate for word language models.
+    int64_t vocab_size;
+    // Only valid when !is_input_packed
+    int64_t batch_sizes_sum; // == sum(batch_sizes)
 
     bool is_input_packed() const {
       return batch_sizes.size() != 0;
@@ -187,8 +252,8 @@ namespace {
         mini_batch = batch_sizes[0];
         // NB: When input is packed, the mini_batch size is NOT the size
         // of the outer dimension
-        outer_size = input_size[0];
-        inner_size = input_size[1];
+        batch_sizes_sum = input_size[0];
+        vocab_size = input_size[1];
       } else {
         if (batch_first) {
           seq_length = input_size[1];
@@ -197,7 +262,10 @@ namespace {
           seq_length = input_size[0];
           mini_batch = input_size[1];
         }
-        inner_size = input_size[2];
+        vocab_size = input_size[2];
+        // TODO: Actually, would this make ASAN's job harder catching
+        // an uninitialized access?
+        batch_sizes_sum = -1; // something bogus in case we access it
       }
     }
 
@@ -371,6 +439,8 @@ namespace {
             std::initializer_list<int64_t> size = {
               *filter_dim_a[0].data<int>() * num_linear_layers / 2,
               *filter_dim_a[2].data<int>()};
+            // Generate a new parameter tensor which is a view into the
+            // weight_buf.
             Tensor param = weight_buf.type().tensor().set_(*weight_buf.storage(), offset, size);
             params.emplace_back(std::move(param));
             layer_params_count++;
@@ -406,9 +476,9 @@ namespace {
 
   std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
     if (tensors.is_input_packed()) {
-      return {tensors.outer_size, tensors.inner_size};
+      return {tensors.batch_sizes_sum, tensors.vocab_size};
     } else {
-      return {tensors.seq_length, tensors.mini_batch, tensors.inner_size};
+      return {tensors.seq_length, tensors.mini_batch, tensors.vocab_size};
     }
   }
 
@@ -418,7 +488,7 @@ namespace {
 
   std::vector<int64_t> _output_size(const RNNDescriptorParams& rnn, const TensorDescriptorListParams& tensors) {
     if (tensors.is_input_packed()) {
-      return {tensors.outer_size, rnn.hidden_size * rnn.num_directions()};
+      return {tensors.batch_sizes_sum, rnn.hidden_size * rnn.num_directions()};
     } else {
       return {tensors.seq_length, tensors.mini_batch, rnn.hidden_size * rnn.num_directions()};
     }
@@ -448,9 +518,6 @@ Tensor _cudnn_rnn_flatten_weight(
   rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, getCudnnDataType(any_param));
 
   auto handle = getCudnnHandle();
-  // NB: So, I am pretty sure that get_parameters() does not rely in any way
-  // on the dropout descriptor.  So we fake up a dummy one instead of try
-  // to actually make one legitimately.
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
   // TODO: allocation here is goofy
