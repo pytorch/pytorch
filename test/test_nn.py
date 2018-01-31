@@ -2149,7 +2149,7 @@ class TestNN(NNTestCase):
 
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
-        self.assertRaises(RuntimeError, lambda: c(None))
+        self.assertRaises(TypeError, lambda: c(None))
 
     def test_Conv2d_backward_twice(self):
         input = Variable(torch.randn(2, 3, 5, 5))

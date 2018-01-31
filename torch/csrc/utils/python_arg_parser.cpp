@@ -223,27 +223,14 @@ std::string FunctionSignature::toString() const {
 }
 
 [[noreturn]]
-void type_error(const char *format, ...) {
-  static const size_t ERROR_BUF_SIZE = 1024;
-  char error_buf[ERROR_BUF_SIZE];
-
-  va_list fmt_args;
-  va_start(fmt_args, format);
-  vsnprintf(error_buf, ERROR_BUF_SIZE, format, fmt_args);
-  va_end(fmt_args);
-
-  throw type_exception(error_buf);
-}
-
-[[noreturn]]
 static void extra_args(const FunctionSignature& signature, ssize_t nargs) {
   auto max_pos_args = signature.max_pos_args;
   auto min_args = signature.min_args;
   if (min_args != max_pos_args) {
-    type_error("%s() takes from %d to %d positional arguments but %d were given",
+    throw TypeError("%s() takes from %d to %d positional arguments but %d were given",
         signature.name.c_str(), min_args, max_pos_args, nargs);
   }
-  type_error("%s() takes %d positional argument%s but %d %s given",
+  throw TypeError("%s() takes %d positional argument%s but %d %s given",
       signature.name.c_str(),
       max_pos_args, max_pos_args == 1 ? "" : "s",
       nargs, nargs == 1 ? "was" : "were");
@@ -265,7 +252,7 @@ static void missing_args(const FunctionSignature& signature, int idx) {
     }
   }
 
-  type_error("%s() missing %d required positional argument%s: %s",
+  throw TypeError("%s() missing %d required positional argument%s: %s",
       signature.name.c_str(),
       num_missing,
       num_missing == 1 ? "s" : "",
@@ -293,23 +280,23 @@ static void extra_kwargs(FunctionSignature& signature, PyObject* kwargs, ssize_t
 
   while (PyDict_Next(kwargs, &pos, &key, &value)) {
     if (!THPUtils_checkString(key)) {
-      type_error("keywords must be strings");
+      throw TypeError("keywords must be strings");
     }
 
     auto param_idx = find_param(signature, key);
     if (param_idx < 0) {
-      type_error("%s() got an unexpected keyword argument '%s'",
+      throw TypeError("%s() got an unexpected keyword argument '%s'",
           signature.name.c_str(), THPUtils_unpackString(key).c_str());
     }
 
     if (param_idx < num_pos_args) {
-      type_error("%s() got multiple values for argument '%s'",
+      throw TypeError("%s() got multiple values for argument '%s'",
           signature.name.c_str(), THPUtils_unpackString(key).c_str());
     }
   }
 
   // this should never be hit
-  type_error("invalid keyword arguments");
+  throw TypeError("invalid keyword arguments");
 }
 
 bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
@@ -364,12 +351,12 @@ bool FunctionSignature::parse(PyObject* args, PyObject* kwargs, PyObject* dst[],
     } else if (raise_exception) {
       if (is_kwd) {
         // foo(): argument 'other' must be str, not int
-        type_error("%s(): argument '%s' must be %s, not %s",
+        throw TypeError("%s(): argument '%s' must be %s, not %s",
             name.c_str(), param.name.c_str(), param.type_name().c_str(),
             Py_TYPE(obj)->tp_name);
       } else {
         // foo(): argument 'other' (position 2) must be str, not int
-        type_error("%s(): argument '%s' (position %d) must be %s, not %s",
+        throw TypeError("%s(): argument '%s' (position %d) must be %s, not %s",
             name.c_str(), param.name.c_str(), arg_pos + 1,
             param.type_name().c_str(), Py_TYPE(obj)->tp_name);
       }
@@ -453,7 +440,7 @@ void PythonArgParser::print_error(PyObject* args, PyObject* kwargs, PyObject* pa
   }
 
   auto msg = torch::format_invalid_args(args, kwargs, function_name + "()", options);
-  type_error("%s", msg.c_str());
+  throw TypeError("%s", msg.c_str());
 }
 
 
