@@ -57,7 +57,7 @@ class AsyncNetBase : public NetBase {
       int task_id,
       int stream_id,
       const std::vector<int>& wait_task_ids) const;
-  bool run(int task_id, int stream_id);
+  void run(int task_id, int stream_id);
   int stream(int task_id);
   std::shared_ptr<TaskThreadPool> pool(const DeviceOption& device_option);
 

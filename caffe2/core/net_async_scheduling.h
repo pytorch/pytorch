@@ -36,7 +36,7 @@ class AsyncSchedulingNet : public AsyncNetBase {
   void pollAndSchedule(int task_id);
   void schedule(int task_id);
   void reset();
-  void finishRun();
+  virtual void finishRun();
   int updateParentCount(int child_id);
 
   std::mutex running_mutex_;
@@ -48,6 +48,8 @@ class AsyncSchedulingNet : public AsyncNetBase {
   std::atomic<bool> cleanup_;
 
   std::atomic<int> processed_tasks_num_;
+  std::mutex exception_mutex_;
+  std::vector<std::string> exception_messages_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncSchedulingNet);
 };

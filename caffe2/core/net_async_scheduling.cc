@@ -40,6 +40,7 @@ void AsyncSchedulingNet::reset() {
     auto& task_op_node = operator_nodes_[task_ops.front()];
     task_op_node.runtime_parent_count_ = parents(task_id).size();
   }
+  exception_messages_.clear();
 }
 
 void AsyncSchedulingNet::Wait() {
@@ -55,7 +56,11 @@ void AsyncSchedulingNet::schedule(int task_id) {
     if (success_) {
       int stream_id = stream(task_id);
       asyncWait(task_id, stream_id, parents(task_id));
-      if (!run(task_id, stream_id)) {
+      try {
+        run(task_id, stream_id);
+      } catch (const std::exception& e) {
+        std::unique_lock<std::mutex> lock(exception_mutex_);
+        exception_messages_.push_back(e.what());
         success_ = false;
       }
     }
