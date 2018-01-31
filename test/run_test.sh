@@ -72,7 +72,7 @@ if [[ "$OSTYPE" != "msys" ]]; then
   cd cpp_extensions
   $PYCMD setup.py install --root ./install
   cd ..
-  PYTHONPATH="$PWD/$(find cpp_extensions/install -name site-packages):$PYTHONPATH" \
+  PYTHONPATH="$PWD/$(find cpp_extensions/install -name '*-packages'):$PYTHONPATH" \
     $PYCMD test_cpp_extensions.py $@
   echo "Removing cpp_extensions/install"
   rm -rf cpp_extensions/install
