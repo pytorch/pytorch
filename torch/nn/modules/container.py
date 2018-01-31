@@ -39,6 +39,12 @@ class Sequential(Module):
                   ('conv2', nn.Conv2d(20,64,5)),
                   ('relu2', nn.ReLU())
                 ]))
+
+        # Example of accessing modules in Sequential
+        # Specify the module by index
+        model[1] = nn.Sigmoid()
+        # Specify the module by name if initialized with OrderedDict
+        model.relu1 = nn.LeakyReLU()
     """
 
     def __init__(self, *args):
