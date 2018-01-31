@@ -59,10 +59,12 @@ void PropagateShapeOnNode(Node * node) {
     // to get a quick and dirty propagation
     case kneg: {
       node->output()->setType(types[0]->contiguous());
-
     } break;
     case kReplaceIfUndef: {
       node->output()->setType(types[0]->shared_from_this());
+    } break;
+    case kConstant: {
+      node->output()->inferTypeFrom(node->t(kvalue));
     } break;
     default: {
 

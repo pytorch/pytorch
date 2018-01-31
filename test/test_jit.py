@@ -1179,6 +1179,29 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedTrace(trace)
 
+    def test_ge(self):
+        def foo(a, b):
+            return a * b + b
+        V = Variable
+        a, b = V(torch.rand(1)), V(torch.rand(1))
+        ge = torch._C.GraphExecutor(foo, (a, b))
+        a, b = V(torch.rand(1), requires_grad=True), V(torch.rand(1), requires_grad=True)
+        r, = ge(a, b)
+        da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
+        # print(da, db)
+        l2 = (da * db + db * db)
+        g2result = torch.autograd.grad(l2, [da, db])
+        # print(g2result)
+
+        r = foo(a, b)
+        da2, db2 = torch.autograd.grad(r + 3, [a, b], create_graph=True)
+        print(da, da2)
+        print(db, db2)
+        l3 = (da2 * db2 + db2 * db2)
+        g2result2 = torch.autograd.grad(l3, [da2, db2])
+        print("1", g2result)
+        print("2", g2result2)
+
 
 if __name__ == '__main__':
     run_tests()

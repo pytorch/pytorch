@@ -230,6 +230,7 @@ inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(std::vector
       n->inferTypeFrom(buffer);
     }
   }
+  std::cout << *state->graph << "\n";
   // TODO: this might not work with the way we handle buffers
   state->var_flags[0].first = detail::getVarFlags(inputs);
   state->active = true;

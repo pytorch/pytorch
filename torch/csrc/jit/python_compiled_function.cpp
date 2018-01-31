@@ -269,14 +269,6 @@ CompiledFunction::TraceForKey* getTraceFor(CompiledFunction& fn,
 
 } // anonymous namespace
 
-static py::tuple tuple_tail(const py::tuple & tup) {
-  py::tuple r(tup.size() - 1);
-  for(std::size_t i = 1; i < tup.size(); i++) {
-    r[i-1] = tup[i];
-  }
-  return r;
-}
-
 void initCompilerMixin(PyObject *module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<CompiledFunction>(m, "CompiledFunction", py::dynamic_attr())

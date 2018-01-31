@@ -28,7 +28,7 @@ Value* addValues(Value *a, Value *b, Node *node = nullptr) {
 
 
 std::unordered_set<Symbol> differentiable_kinds = {
-  kadd, ksub, kmul,
+  kadd, ksub, kmul, kConstant, kReplaceIfUndef,
 };
 
 bool isDifferentiable(Node * n) {
@@ -45,6 +45,10 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads[0], -grads[0]};
       case kmul:
         return {grads[0] * inputs[1], grads[0] * inputs[0]};
+      case kConstant:
+        return {};
+      case kReplaceIfUndef:
+        return {grads[0], grads[0]};
     }
     throw std::runtime_error(std::string("don't support differentiation of `") +
                             node->kind().toString() + "`");
