@@ -39,7 +39,17 @@ echo "ENTERED_USER_LAND"
 echo "Testing pytorch"
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
+
+# JIT C++ extensions require ninja.
+git clone https://github.com/ninja-build/ninja --quiet
+pushd ninja
+python ./configure.py --bootstrap
+export PATH="$PWD:$PATH"
+popd
+
 time test/run_test.sh
+
+rm -rf ninja
 
 pushd vision
 time python setup.py install
