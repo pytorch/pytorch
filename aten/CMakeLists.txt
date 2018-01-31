@@ -364,11 +364,15 @@ include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
   ${CMAKE_CURRENT_BINARY_DIR}/src/THS
   ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
+  # complex
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/THZ
+  ${CMAKE_CURRENT_BINARY_DIR}/src/THZ
 
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src)
 add_subdirectory(src/THNN)
 add_subdirectory(src/THS)
+add_subdirectory(src/THZ)
 
 if(NO_CUDA)
   message("disabling CUDA because NO_CUDA is set")
