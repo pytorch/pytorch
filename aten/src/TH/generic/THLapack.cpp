@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THLapack.c"
+#define TH_GENERIC_FILE "generic/THLapack.cpp"
 #else
 
 
