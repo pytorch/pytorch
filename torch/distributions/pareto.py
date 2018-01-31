@@ -34,6 +34,18 @@ class Pareto(Distribution):
             batch_shape = self.scale.size()
         super(Pareto, self).__init__(batch_shape)
 
+    @property
+    def mean(self):
+        # mean is inf for alpha <= 1
+        a = self.alpha.clone().clamp(min=1)
+        return a * self.scale / (a - 1)
+
+    @property
+    def variance(self):
+        # var is inf for alpha <= 2
+        a = self.alpha.clone().clamp(min=2)
+        return self.scale.pow(2) * a / ((a - 1).pow(2) * (a - 2))
+
     @constraints.dependent_property
     def support(self):
         return constraints.greater_than(self.scale)

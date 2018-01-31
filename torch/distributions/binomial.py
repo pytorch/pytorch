@@ -61,6 +61,14 @@ class Binomial(Distribution):
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 
+    @property
+    def mean(self):
+        return self.total_count * self.probs
+
+    @property
+    def variance(self):
+        return self.total_count * self.probs * (1 - self.probs)
+
     @lazy_property
     def logits(self):
         return probs_to_logits(self.probs, is_binary=True)

@@ -215,10 +215,10 @@ class device(object):
     def __enter__(self):
         if self.idx is -1:
             return
-        _lazy_init()
         self.prev_idx = torch._C._cuda_getDevice()
         if self.prev_idx != self.idx:
             torch._C._cuda_setDevice(self.idx)
+        _lazy_init()
 
     def __exit__(self, *args):
         if self.prev_idx != self.idx:
@@ -308,7 +308,6 @@ def stream(stream):
 def device_count():
     """Returns the number of GPUs available."""
     if is_available():
-        _lazy_init()
         return torch._C._cuda_getDeviceCount()
     else:
         return 0
@@ -334,6 +333,7 @@ def current_stream():
 
 def current_blas_handle():
     r"""Returns cublasHandle_t pointer to current cuBLAS handle"""
+    _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
 
@@ -347,7 +347,8 @@ def empty_cache():
         memory available for PyTorch. See :ref:`cuda-memory-management` for
         more details about GPU memory management.
     """
-    return torch._C._cuda_emptyCache()
+    if _initialized:
+        torch._C._cuda_emptyCache()
 
 
 def memory_allocated(device=None):
@@ -372,7 +373,7 @@ def memory_allocated(device=None):
 
 
 def max_memory_allocated(device=None):
-    r"""Returns the maxium GPU memory usage by tensors in bytes for a given
+    r"""Returns the maximum GPU memory usage by tensors in bytes for a given
     device.
 
     Arguments:
