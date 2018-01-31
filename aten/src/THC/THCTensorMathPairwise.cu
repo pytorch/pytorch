@@ -375,8 +375,8 @@ struct TensorTriOp {
   TensorTriOp(T *start_, int64_t stride0_, int64_t stride1_, int64_t k_)
     : start(start_), stride0(stride0_), stride1(stride1_), k(k_) {}
 
-  __device__ __forceinline__ int mask(T *in) {
-    ptrdiff_t n = in - start;
+  __device__ __forceinline__ int mask(T *out) {
+    ptrdiff_t n = out - start;
     int64_t row, col;
     if (stride0 > stride1)
     {
@@ -393,7 +393,7 @@ struct TensorTriOp {
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = mask(in) ? *in : ScalarConvert<int, T>::to(0);
+    *out = mask(out) ? *in : ScalarConvert<int, T>::to(0);
   }
 
   __device__ __forceinline__ void operator()(T* v) {
