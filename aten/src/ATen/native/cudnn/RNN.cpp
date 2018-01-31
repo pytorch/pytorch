@@ -137,6 +137,14 @@ namespace {
       return rnn_desc;
     }
 
+    // In some cases, a use of RNNDescriptor does not rely on the
+    // DropoutDescriptor.  In this case, we fake up a no-dropout
+    // descriptor to make the RNN descriptor initialization go through.
+    // This is used by _cudnn_rnn_flatten_weight, which needs an
+    // RNNDescriptor for get_parameters(), but does not actually need
+    // a fully initialized dropout descriptor.  This lets us avoid
+    // having to pass the dropout state to flatten, which has no business
+    // knowing what the dropout state is.
     RNNDescriptor descriptor(cudnnHandle_t handle) const {
       DropoutDescriptor dropout_desc;
       dropout_desc.set_no_dropout(handle);
