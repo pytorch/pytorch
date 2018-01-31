@@ -656,7 +656,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   Tensor reserve;
   // NB: Previously, the test was for fn.requires_grad, but we don't have
   // this information.  Use 'train' as a proxy.
-  if (fn.dropout.train) {
+  if (fn_train) {
     size_t reserve_size;
     CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
           handle,
@@ -761,7 +761,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_grad(
   auto dhx = hx.type().tensor(hidden_size);
   auto dcx = cx.defined() ? cx.type().tensor(hidden_size) : hx.type().tensor(); // Boooh
 
-  if (!fn.dropout.train) {
+  if (!fn_train) {
     throw std::runtime_error("backward_grad can only be called in training mode");
   }
   if (!input.sizes().equals(input_size)) {
@@ -881,7 +881,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto input_size = _input_size(fn.tensors);
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
-  if (!fn.dropout.train) {
+  if (!fn_train) {
     throw std::runtime_error("backward_grad can only be called in training mode");
   }
   if (!input.sizes().equals(input_size)) {
