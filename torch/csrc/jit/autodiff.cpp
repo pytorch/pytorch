@@ -75,9 +75,7 @@ static value_set findAllRequiresGradNodes(
   return requires_grad_set;
 }
 
-static Value* allocZerosLike(Value *v) {
-  static const Symbol constant_sym = "constant"_sym;
-  static const Symbol value_sym    = "value"_sym;
+static Value* createZerosLike(Value *v) {
   JIT_EXPECTM(v->hasType(), "can't allocate zero gradient for a value without a type");
   Graph *graph = v->owningGraph();
   auto type = v->type()->expect<TensorType>();
@@ -85,8 +83,7 @@ static Value* allocZerosLike(Value *v) {
 
   auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
   auto zeros = at_type.zeros({1}).expand(type->sizes());
-  Node *constant = graph->create(constant_sym)
-                        ->t_(value_sym, zeros)
+  Node *constant = graph->createConstant(zeros)
                         ->i_(kis_zero, 1);
   graph->appendNode(constant);
   return constant->output();
@@ -99,9 +96,10 @@ static Value* allocZerosLike(Value *v) {
 // v is set to be a zero tensor with the size of v.
 // During Graph specialization these guards will get removed when
 // 'dv' is known to be undef, and the zeros will be propagated if possible.
-static Value* createUndefGuardLike(Value * dv, Value * v) {
+static Value* createUndefGuard(Value * dv, Value * alternative) {
   Graph* graph = dv->owningGraph();
-  return graph->appendNode(graph->create(kReplaceIfUndef, {dv, allocZerosLike(v)}))->output();
+  Node * n = graph->create(kReplaceIfUndef, {dv, alternative});
+  return graph->appendNode(n)->output();
 }
 
 struct ReverseDetails {
@@ -132,7 +130,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   const auto get_grad = [&](Value* v) -> Value* {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
-      std::tie(it, std::ignore) = grad_map.emplace(v, allocZerosLike(v));
+      std::tie(it, std::ignore) = grad_map.emplace(v, createZerosLike(v));
     }
     return it->second;
   };
@@ -150,7 +148,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
     Value * output = outputs[i];
     if (!requires_grad(output)) continue;
     Value * output_grad = graph.addInput()->setType(output->typeOption());
-    output_grad = createUndefGuardLike(output_grad, output);
+    output_grad = createUndefGuard(output_grad, createZerosLike(output));
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -314,8 +312,13 @@ static void lambdaLiftReverse(Graph& graph,
     // Add VJP inputs only for intermediates that actually required grad.
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
     Value * tmp_vjp_in = graph.addInput()->setType(tmp->typeOption());
-    tmp_vjp_in = createUndefGuardLike(tmp_vjp_in, tmp);
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
+    auto zeroes = createZerosLike(tmp);
+    tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
+    // make sure createUndefGuard happens before the addition but inside stage 1
+    zeroes->node()->moveBefore(tmp_vjp_prev->node());
+    tmp_vjp_in->node()->moveBefore(tmp_vjp_prev->node());
+
     // This is quite weird because we can't first make a sum and then replace all uses
     // of tmp_vjp_prev (that would replace its use in the sum too!), so we create an
     // incorrect sum that doesn't use prev vjp, replace uses, and fix the sum.
