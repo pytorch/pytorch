@@ -21,11 +21,6 @@
 #include <malloc/malloc.h>
 #endif
 
-#ifdef TH_BLAS_MKL
-extern void mkl_set_num_threads(int);
-extern int mkl_get_max_threads(void);
-#endif
-
 /* Torch Error Handling */
 static void defaultErrorHandlerFunction(const char *msg, void *data)
 {
@@ -307,10 +302,6 @@ void THSetNumThreads(int num_threads)
 #ifdef _OPENMP
   omp_set_num_threads(num_threads);
 #endif
-#ifdef TH_BLAS_MKL
-  mkl_set_num_threads(num_threads);
-#endif
-
 }
 
 int THGetNumThreads(void)
@@ -330,6 +321,10 @@ int THGetNumCores(void)
   return 1;
 #endif
 }
+
+#ifdef TH_BLAS_MKL
+extern int mkl_get_max_threads(void);
+#endif
 
 TH_API void THInferNumThreads(void)
 {
