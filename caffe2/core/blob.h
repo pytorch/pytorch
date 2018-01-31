@@ -89,9 +89,12 @@ class Blob {
    */
   template <class T>
   const T& Get() const {
-    CAFFE_ENFORCE(IsType<T>(),
+    CAFFE_ENFORCE(
+        IsType<T>(),
         "wrong type for the Blob instance. Blob contains ",
-        meta_.name(), " while caller expects ", TypeMeta::Name<T>());
+        meta_.name(),
+        " while caller expects ",
+        TypeMeta::TypeName<T>());
     return *static_cast<const T*>(pointer_);
   }
 
@@ -117,7 +120,7 @@ class Blob {
       return static_cast<T*>(pointer_);
     } else {
       if (is_new_object) *is_new_object = true;
-      VLOG(1) << "Create new mutable object " << TypeMeta::Name<T>();
+      VLOG(1) << "Create new mutable object " << TypeMeta::TypeName<T>();
       return Reset<T>(new T());
     }
   }

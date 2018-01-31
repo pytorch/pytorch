@@ -506,7 +506,7 @@ class Tensor {
     CAFFE_ENFORCE_WITH_CALLER(
         IsType<T>(),
         "Tensor type mismatch, caller expects elements to be ",
-        TypeMeta::Name<T>(),
+        TypeMeta::TypeName<T>(),
         " while tensor contains ",
         meta_.name());
     return static_cast<T*>(data_.get());

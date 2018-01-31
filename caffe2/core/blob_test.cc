@@ -1024,5 +1024,22 @@ TEST(QTensor, QTensorSizingTest) {
   EXPECT_EQ(qtensor.nbytes(), 12);
   EXPECT_EQ(qtensor.size(), 30);
 }
+
+TEST(BlobTest, CastingMessage) {
+  Blob b;
+  b.GetMutable<BlobTestFoo>();
+  b.Get<BlobTestFoo>();
+  try {
+    b.Get<BlobTestBar>();
+    FAIL() << "Should have thrown";
+  } catch (const EnforceNotMet& e) {
+    string msg = e.what();
+    msg = msg.substr(0, msg.find('\n'));
+    LOG(INFO) << msg;
+    EXPECT_NE(msg.find("BlobTestFoo"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("BlobTestBar"), std::string::npos) << msg;
+  }
+}
+
 } // namespace
 } // namespace caffe2
