@@ -23,6 +23,7 @@ change. This file contains two types of randomized tests:
 """
 
 import math
+import numbers
 import unittest
 from collections import namedtuple
 from itertools import product
@@ -37,7 +38,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
-                                 StudentT, Uniform, constraints, kl_divergence)
+                                 StudentT, TransformedDistribution, Uniform,
+                                 constraints, kl_divergence)
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
@@ -241,6 +243,24 @@ EXAMPLES = [
         {
             'rate': 0.2,
         }
+    ]),
+    Example(TransformedDistribution, [
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': [],
+        },
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': ExpTransform(),
+        },
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': [AffineTransform(Variable(torch.randn(1)), Variable(torch.randn(1))),
+                           ExpTransform()],
+        },
     ]),
     Example(Uniform, [
         {
@@ -2045,7 +2065,7 @@ class TestConstraints(TestCase):
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 for name, value in param.items():
-                    if not (torch.is_tensor(value) or isinstance(value, Variable)):
+                    if isinstance(value, numbers.Number):
                         value = torch.Tensor([value])
                     if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
@@ -2488,6 +2508,54 @@ class TestTransforms(TestCase):
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
+
+    def test_transform_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = BoltzmannTransform()
+        transform2 = LowerCholeskyTransform()
+
+        self.assertEqual(transform0.event_dim, 0)
+        self.assertEqual(transform1.event_dim, 1)
+        self.assertEqual(transform2.event_dim, 2)
+        self.assertEqual(ComposeTransform([transform0, transform1]).event_dim, 1)
+        self.assertEqual(ComposeTransform([transform0, transform2]).event_dim, 2)
+        self.assertEqual(ComposeTransform([transform1, transform2]).event_dim, 2)
+
+    def test_transformed_distribution_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = BoltzmannTransform()
+        transform2 = LowerCholeskyTransform()
+        base_dist0 = Normal(Variable(torch.zeros(4, 4)), Variable(torch.ones(4, 4)))
+        base_dist1 = Dirichlet(Variable(torch.ones(4, 4)))
+        examples = [
+            ((4, 4), (), base_dist0),
+            ((4,), (4,), base_dist1),
+            ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
+        ]
+        for batch_shape, event_shape, dist in examples:
+            self.assertEqual(dist.batch_shape, batch_shape)
+            self.assertEqual(dist.event_shape, event_shape)
+            x = dist.rsample()
+            try:
+                dist.log_prob(x)  # this should not crash
+            except NotImplementedError:
+                continue
 
 
 class TestConstraintRegistry(TestCase):
