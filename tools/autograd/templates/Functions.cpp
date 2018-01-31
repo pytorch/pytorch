@@ -352,6 +352,10 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
   return ret;
 }
 
+Tensor squeeze_if(const Tensor &self, bool squeeze) {
+  return squeeze ? self.squeeze() : self;
+}
+
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   auto result = self;
 

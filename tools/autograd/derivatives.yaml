@@ -276,8 +276,8 @@
   self: not_implemented("geqrf")
 
 - name: ger(Tensor self, Tensor vec2)
-  self: grad.mv(vec2)
-  vec2: grad.t().mv(self)
+  self: squeeze_if(grad.mv(vec2), self.dim() == 0)
+  vec2: squeeze_if(grad.t().mv(self), vec2.dim() == 0)
 
 - name: gesv(Tensor self, Tensor A)
   self: std::get<0>(gesv(grad, A.t()))
@@ -415,7 +415,7 @@
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
-  vec: self.t().mv(grad)
+  vec: squeeze_if(self.t().mv(grad), vec.dim() == 0)
 
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
