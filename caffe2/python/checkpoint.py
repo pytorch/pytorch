@@ -364,7 +364,7 @@ class MultiNodeCheckpointManager(object):
     ):
         if self._node_managers is not None:
             assert [node for node, _ in self._node_managers] == nodes
-            return
+            return TaskGroup(WorkspaceType.GLOBAL)
         self._node_managers = []
         self._path_prefix = path_prefix
         self._path_type = path_type
