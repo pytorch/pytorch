@@ -12,7 +12,7 @@ __all__ = [
 
 def make_non_contiguous(tensor):
     if tensor.numel() <= 1:  # can't make non-contiguous
-        return tensor.new(tensor.size())
+        return tensor.clone()
     osize = list(tensor.size())
 
     # randomly inflate a few dimensions in osize
