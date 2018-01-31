@@ -89,7 +89,7 @@ def handle_outputs_taken_as_arguments(options):
                 arg.get('default', '') in {None, 'NULL', 'nullptr'})
 
     def should_generate_out_variant(option):
-        if 'function' in option['variants']:
+        if 'function' in option['variants'] and option['mode'] != 'native':
             # don't generate _out variants for in-place functions
             return re.search('(^__i|[^_]_$)', option['api_name']) is None
         return False
