@@ -1,5 +1,5 @@
 #ifndef THCS_GENERIC_FILE
-#define THCS_GENERIC_FILE "generic/THCSTensor.c"
+#define THCS_GENERIC_FILE "generic/THCSTensor.cpp"
 #else
 
 /******************************************************************************
@@ -79,7 +79,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 
 THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
-  self->size = THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
+  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
 
   for (int64_t d = 0; d < nDimI + nDimV; d++) {
     self->size[d] = size[d];
@@ -125,7 +125,7 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
 /* Empty init */
 THCSTensor *THCSTensor_(new)(THCState *state)
 {
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   return self;
 }
@@ -140,7 +140,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 {  // If sizes are not given, it is inferred as max index of each dim.
   int64_t nDimI, nDimV;
 
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
 
   nDimI = THCIndexTensor_(size)(state, indices, 0);
@@ -180,7 +180,7 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
 
 THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size, THLongStorage *_ignored)
 {
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   THCSTensor_(rawResize)(state, self, size->size, 0, size->data);
 
@@ -191,7 +191,7 @@ THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
   int64_t size[1] = {size0};
 
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   THCSTensor_(rawResize)(state, self, 1, 0, size);
 
@@ -202,7 +202,7 @@ THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t s
 {
   int64_t size[2] = {size0, size1};
 
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   THCSTensor_(rawResize)(state, self, 2, 0, size);
 
@@ -213,7 +213,7 @@ THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t s
 {
   int64_t size[3] = {size0, size1, size2};
 
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   THCSTensor_(rawResize)(state, self, 3, 0, size);
 
@@ -224,7 +224,7 @@ THCSTensor *THCSTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t s
 {
   int64_t size[4] = {size0, size1, size2, size3};
 
-  THCSTensor *self = THAlloc(sizeof(THCSTensor));
+  THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
   THCSTensor_(rawResize)(state, self, 4, 0, size);
 

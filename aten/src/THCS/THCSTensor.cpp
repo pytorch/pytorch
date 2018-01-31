@@ -1,4 +1,4 @@
 #include "THCSTensor.h"
 
-#include "generic/THCSTensor.c"
+#include "generic/THCSTensor.cpp"
 #include "THCSGenerateAllTypes.h"
