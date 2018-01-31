@@ -203,11 +203,8 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
 
 // Assumed that saved tensor lists are never inplace outputs
 static std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
-  std::vector<SavedVariable> r;
-  for (const auto& tensor : tensors) {
-    r.emplace_back(tensor, false /* is output */);
-  }
-  return r;
+  return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
+      return SavedVariable{tensor, false /* is output */}; });
 }
 
 static Tensor as_variable(Tensor tensor) {
