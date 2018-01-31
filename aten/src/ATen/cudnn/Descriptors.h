@@ -287,13 +287,8 @@ struct RNNDescriptor
           CUDNN_RNN_ALGO_STANDARD,
           datatype));
 #if CUDNN_VERSION >= 7000 && CUDA_VERSION >= 9000
-    // TODO: This code should live as a utility somewhere in ATen.
-    // Please don't copy paste me!
-    int device;
-    CUDA_CHECK(cudaGetDevice(&device));
-    cudaDeviceProp prop;
-    CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
-    if (prop.major >= 7) {
+    cudaDeviceProp* prop = globalContext().getCurrentDeviceProperties();
+    if (prop->major >= 7) {
       if (datatype == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       } else {
