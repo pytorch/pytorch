@@ -101,6 +101,26 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    def cdf(self, value):
+        """
+        Returns the cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor or Variable):
+        """
+        raise NotImplementedError
+
+    def icdf(self, value):
+        """
+        Returns the inverse cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor or Variable):
+        """
+        raise NotImplementedError
+
     def enumerate_support(self):
         """
         Returns tensor containing all values supported by a discrete
