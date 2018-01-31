@@ -31,22 +31,24 @@
 #     'grad' (this case is special-cased in our code generation).
 #
 #   - Any of the input arguments, tensor or non-tensor, including
-#     argument names tha only appear in Declarations.cwrap, e.g. 'output'.
+#     argument names that only appear in Declarations.cwrap, e.g. 'output'.
 #
 #   - 'result', representing the result of evaluating the forward
 #     expression for ATen native function declarations. If the forward
 #     expression outputs a tuple, use 'resultX' instead to access the
 #     X-th entry
 #
-#   - 'grad_input_mask', a std::array<bool, n> (where n is the number
-#     of differentiable inputs, prior to flattening), specifying which inputs
-#     actually require gradient.  (This is only available when multiple
-#     derivatives are being computed by a single formula.)
+#   - 'grad_input_mask', a std::array<bool, n>, specifies which input
+#     gradients are actually needed.  For example, in the entry
+#     `input0, input1: foo(grad_input_mask)`, `grad_input_mask` is a size
+#     two array, where `grad_input_mask[0]` is true if `input0` requires
+#     grad, and `grad_input_mask[1]` is true if `input1` requires grad.
 #
-#     (NB: this means you can't get an accurate input mask this way for
-#     a TensorList input; you'll only ever know if zero or at least one
-#     tensor from the list requires grad.  If we ever support this,
-#     we'll need some alternate mechanism which is not a std::array)
+#     (NB: if your function computes gradient for a list of tensors,
+#     the `grad_input_mask` will only have a single entry for the list
+#     specifying if either zero or at least one tensor from the list requires
+#     grad.  If we want to support more fine-grained signalling,
+#     we'll need some alternate variable which is not a std::array)
 #
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in tools/autograd/templates/Functions.cpp
