@@ -28,6 +28,7 @@
 
 #include "torch/csrc/THP.h"
 #include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/DynamicTypes.h"
@@ -42,13 +43,6 @@ enum class ParameterType {
 struct FunctionParameter;
 struct FunctionSignature;
 struct PythonArgs;
-
-struct type_exception : public std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
-
-[[noreturn]]
-void type_error(const char *format, ...);
 
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts);
@@ -142,7 +136,7 @@ inline at::Tensor PythonArgs::tensor(int i) {
     // a test for Py_None here; instead, you need to mark the argument
     // as *allowing none*; you can do this by writing 'Tensor?' instead
     // of 'Tensor' in the ATen metadata.
-    type_error("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
+    throw TypeError("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
 }
@@ -168,7 +162,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      type_error("expected Variable as element %d in argument %d, but got %s",
+      throw TypeError("expected Variable as element %d in argument %d, but got %s",
                  idx, i, THPUtils_typename(args[i]));
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -184,12 +178,12 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
   auto tuple = PyTuple_Check(arg);
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   if (size != N) {
-    type_error("expected tuple of %d elements but got %d", N, (int)size);
+    throw TypeError("expected tuple of %d elements but got %d", N, (int)size);
   }
   for (int idx = 0; idx < size; idx++) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
-      type_error("expected Variable as element %d in argument %d, but got %s",
+      throw TypeError("expected Variable as element %d in argument %d, but got %s",
                  idx, i, THPUtils_typename(args[i]));
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
@@ -216,7 +210,7 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
     try {
       res[idx] = THPUtils_unpackLong(obj);
     } catch (std::runtime_error &e) {
-      type_error("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
+      throw TypeError("%s(): argument '%s' must be %s, but found element of type %s at pos %d",
           signature.name.c_str(), signature.params[i].name.c_str(),
           signature.params[i].type_name().c_str(), Py_TYPE(obj)->tp_name, idx + 1);
     }
@@ -258,7 +252,7 @@ inline bool PythonArgs::isNone(int i) {
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
   if (!THPGenerator_Check(args[i])) {
-    type_error("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
+    throw TypeError("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
   }
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }

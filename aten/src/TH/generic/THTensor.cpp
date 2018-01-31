@@ -1,5 +1,5 @@
 #ifndef TH_GENERIC_FILE
-#define TH_GENERIC_FILE "generic/THTensor.c"
+#define TH_GENERIC_FILE "generic/THTensor.cpp"
 #else
 
 /**** access methods ****/
@@ -72,7 +72,7 @@ static void THTensor_(rawInit)(THTensor *self);
 /* Empty init */
 THTensor *THTensor_(new)(void)
 {
-  THTensor *self = THAlloc(sizeof(THTensor));
+  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
   THTensor_(rawInit)(self);
   return self;
 }
@@ -80,7 +80,7 @@ THTensor *THTensor_(new)(void)
 /* Pointer-copy init */
 THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
-  THTensor *self = THAlloc(sizeof(THTensor));
+  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
   THTensor_(rawInit)(self);
   THTensor_(setStorageNd)(self,
                           tensor->storage,
@@ -94,7 +94,7 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 /* Storage init */
 THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, THLongStorage *size, THLongStorage *stride)
 {
-  THTensor *self = THAlloc(sizeof(THTensor));
+  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
   if(size && stride)
     THArgCheck(size->size == stride->size, 4, "inconsistent size");
 
@@ -141,7 +141,7 @@ THTensor *THTensor_(newWithStorage4d)(THStorage *storage, ptrdiff_t storageOffse
   int64_t size[4] = {size0, size1, size2, size3};
   int64_t stride[4] = {stride0, stride1, stride2, stride3};
 
-  THTensor *self = THAlloc(sizeof(THTensor));
+  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
   THTensor_(rawInit)(self);
   THTensor_(setStorageNd)(self, storage, storageOffset, 4, size, stride);
 
@@ -172,7 +172,7 @@ THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, 
 {
   int64_t size[4] = {size0, size1, size2, size3};
 
-  THTensor *self = THAlloc(sizeof(THTensor));
+  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
   THTensor_(rawInit)(self);
   THTensor_(resizeNd)(self, 4, size, NULL);
 
@@ -369,8 +369,8 @@ void THTensor_(expandNd)(THTensor **rets, THTensor **ops, int count) {
     THArgCheck(THTensor_(nDimension)(ops[i]) > 0, i, "can't expand empty tensor %d", i);
   }
 
-  int64_t **op_sizes = THAlloc(sizeof(int64_t*) * count);
-  int64_t *op_dims = THAlloc(sizeof(int64_t) * count);
+  int64_t **op_sizes = (int64_t **)THAlloc(sizeof(int64_t*) * count);
+  int64_t *op_dims = (int64_t *)THAlloc(sizeof(int64_t) * count);
 
   for (int i = 0; i < count; ++i) {
     op_sizes[i] = ops[i]->size;
@@ -554,8 +554,8 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
 
   THTensor_(set)(self, src);
 
-  newSize = THAlloc(sizeof(int64_t)*(self->nDimension+1));
-  newStride = THAlloc(sizeof(int64_t)*(self->nDimension+1));
+  newSize = (int64_t *)THAlloc(sizeof(int64_t)*(self->nDimension+1));
+  newStride = (int64_t *)THAlloc(sizeof(int64_t)*(self->nDimension+1));
 
   newSize[self->nDimension] = size;
   newStride[self->nDimension] = self->stride[dimension];
@@ -870,8 +870,8 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
   {
     if(nDimension != self->nDimension)
     {
-      self->size = THRealloc(self->size, sizeof(int64_t)*nDimension);
-      self->stride = THRealloc(self->stride, sizeof(int64_t)*nDimension);
+      self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*nDimension);
+      self->stride = (int64_t *)THRealloc(self->stride, sizeof(int64_t)*nDimension);
       self->nDimension = nDimension;
     }
 

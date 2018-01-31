@@ -23,6 +23,7 @@ change. This file contains two types of randomized tests:
 """
 
 import math
+import numbers
 import unittest
 from collections import namedtuple
 from itertools import product
@@ -36,7 +37,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Exponential, FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
-                                 StudentT, Uniform, constraints, kl_divergence)
+                                 StudentT, TransformedDistribution, Uniform,
+                                 constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -240,6 +242,24 @@ EXAMPLES = [
             'rate': 0.2,
         }
     ]),
+    Example(TransformedDistribution, [
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': [],
+        },
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': ExpTransform(),
+        },
+        {
+            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
+                                        Variable(torch.randn(2, 3), requires_grad=True)),
+            'transforms': [AffineTransform(Variable(torch.randn(1)), Variable(torch.randn(1))),
+                           ExpTransform()],
+        },
+    ]),
     Example(Uniform, [
         {
             'low': Variable(torch.zeros(5, 5), requires_grad=True),
@@ -364,9 +384,9 @@ class TestDistributions(TestCase):
         p = variable([0.7, 0.2, 0.4], requires_grad=True)
         r = variable(0.3, requires_grad=True)
         s = 0.3
-        self.assertEqual(Bernoulli(p).sample_n(8).size(), (8, 3))
+        self.assertEqual(Bernoulli(p).sample((8,)).size(), (8, 3))
         self.assertTrue(isinstance(Bernoulli(p).sample().data, torch.Tensor))
-        self.assertEqual(Bernoulli(r).sample_n(8).size(), (8,) + SCALAR_SHAPE)
+        self.assertEqual(Bernoulli(r).sample((8,)).size(), (8,) + SCALAR_SHAPE)
         self.assertEqual(Bernoulli(r).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Bernoulli(r).sample((3, 2)).size(), (3, 2,) + SCALAR_SHAPE)
         self.assertEqual(Bernoulli(s).sample().size(), SCALAR_SHAPE)
@@ -398,18 +418,18 @@ class TestDistributions(TestCase):
         self.assertEqual(Bernoulli(p).sample().size(), (2, 3, 5))
         self.assertEqual(Bernoulli(p).sample(sample_shape=(2, 5)).size(),
                          (2, 5, 2, 3, 5))
-        self.assertEqual(Bernoulli(p).sample_n(2).size(), (2, 2, 3, 5))
+        self.assertEqual(Bernoulli(p).sample((2,)).size(), (2, 2, 3, 5))
 
     def test_geometric(self):
         p = variable([0.7, 0.2, 0.4], requires_grad=True)
         r = variable(0.3, requires_grad=True)
         s = 0.3
-        self.assertEqual(Geometric(p).sample_n(8).size(), (8, 3))
+        self.assertEqual(Geometric(p).sample((8,)).size(), (8, 3))
         self.assertEqual(Geometric(1).sample(), 0)
         self.assertEqual(Geometric(1).log_prob(variable(1)), -float('inf'), allow_inf=True)
         self.assertEqual(Geometric(1).log_prob(variable(0)), 0)
         self.assertTrue(isinstance(Geometric(p).sample().data, torch.Tensor))
-        self.assertEqual(Geometric(r).sample_n(8).size(), (8,) + SCALAR_SHAPE)
+        self.assertEqual(Geometric(r).sample((8,)).size(), (8,) + SCALAR_SHAPE)
         self.assertEqual(Geometric(r).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Geometric(r).sample((3, 2)).size(), (3, 2) + SCALAR_SHAPE)
         self.assertEqual(Geometric(s).sample().size(), SCALAR_SHAPE)
@@ -479,7 +499,7 @@ class TestDistributions(TestCase):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
         self.assertEqual(Multinomial(total_count, p).sample().size(), (3,))
         self.assertEqual(Multinomial(total_count, p).sample((2, 2)).size(), (2, 2, 3))
-        self.assertEqual(Multinomial(total_count, p).sample_n(1).size(), (1, 3))
+        self.assertEqual(Multinomial(total_count, p).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Multinomial(10, p).rsample)
@@ -508,7 +528,7 @@ class TestDistributions(TestCase):
         s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
         self.assertEqual(Multinomial(total_count, p).sample().size(), (2, 3))
         self.assertEqual(Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
-        self.assertEqual(Multinomial(total_count, p).sample_n(6).size(), (6, 2, 3))
+        self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
         set_rng_seed(0)
         self._gradcheck_log_prob(lambda p: Multinomial(total_count, p), [p])
         p.grad.zero_()
@@ -528,7 +548,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Categorical(p).sample().size(), SCALAR_SHAPE)
         self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
-        self.assertEqual(Categorical(p).sample_n(1).size(), (1,))
+        self.assertEqual(Categorical(p).sample((1,)).size(), (1,))
         self._gradcheck_log_prob(Categorical, (p,))
         self.assertRaises(NotImplementedError, Categorical(p).rsample)
 
@@ -543,7 +563,7 @@ class TestDistributions(TestCase):
         self.assertTrue(is_all_nan(Categorical(p).variance))
         self.assertEqual(Categorical(p).sample().size(), (2,))
         self.assertEqual(Categorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2))
-        self.assertEqual(Categorical(p).sample_n(6).size(), (6, 2))
+        self.assertEqual(Categorical(p).sample((6,)).size(), (6, 2))
         self._gradcheck_log_prob(Categorical, (p,))
 
         # sample check for extreme value of probs
@@ -574,7 +594,7 @@ class TestDistributions(TestCase):
         self.assertEqual(OneHotCategorical(p).sample().size(), (3,))
         self.assertTrue(isinstance(OneHotCategorical(p).sample().data, torch.Tensor))
         self.assertEqual(OneHotCategorical(p).sample((2, 2)).size(), (2, 2, 3))
-        self.assertEqual(OneHotCategorical(p).sample_n(1).size(), (1, 3))
+        self.assertEqual(OneHotCategorical(p).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(OneHotCategorical, (p,))
         self.assertRaises(NotImplementedError, OneHotCategorical(p).rsample)
 
@@ -585,7 +605,7 @@ class TestDistributions(TestCase):
         s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (2, 3))
         self.assertEqual(OneHotCategorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
-        self.assertEqual(OneHotCategorical(p).sample_n(6).size(), (6, 2, 3))
+        self.assertEqual(OneHotCategorical(p).sample((6,)).size(), (6, 2, 3))
         self._gradcheck_log_prob(OneHotCategorical, (p,))
 
         dist = OneHotCategorical(p)
@@ -603,10 +623,10 @@ class TestDistributions(TestCase):
         rate = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         rate_1d = Variable(torch.randn(1).abs(), requires_grad=True)
         self.assertEqual(Poisson(rate).sample().size(), (2, 3))
-        self.assertEqual(Poisson(rate).sample_n(7).size(), (7, 2, 3))
+        self.assertEqual(Poisson(rate).sample((7,)).size(), (7, 2, 3))
         self.assertEqual(Poisson(rate_1d).sample().size(), (1,))
-        self.assertEqual(Poisson(rate_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Poisson(2.0).sample_n(2).size(), (2,))
+        self.assertEqual(Poisson(rate_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Poisson(2.0).sample((2,)).size(), (2,))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_poisson_log_prob(self):
@@ -648,10 +668,10 @@ class TestDistributions(TestCase):
         low_1d = Variable(torch.zeros(1), requires_grad=True)
         high_1d = Variable(torch.ones(1) * 3, requires_grad=True)
         self.assertEqual(Uniform(low, high).sample().size(), (5, 5))
-        self.assertEqual(Uniform(low, high).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Uniform(low, high).sample((7,)).size(), (7, 5, 5))
         self.assertEqual(Uniform(low_1d, high_1d).sample().size(), (1,))
-        self.assertEqual(Uniform(low_1d, high_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Uniform(0.0, 1.0).sample_n(1).size(), (1,))
+        self.assertEqual(Uniform(low_1d, high_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Uniform(0.0, 1.0).sample((1,)).size(), (1,))
 
         # Check log_prob computation when value outside range
         uniform = Uniform(low_1d, high_1d)
@@ -683,10 +703,10 @@ class TestDistributions(TestCase):
         self.assertTrue(is_all_nan(Cauchy(loc_1d, scale_1d).mean))
         self.assertEqual(Cauchy(loc_1d, scale_1d).variance, float('inf'), allow_inf=True)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
-        self.assertEqual(Cauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
+        self.assertEqual(Cauchy(loc, scale).sample((7,)).size(), (7, 5, 5))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
-        self.assertEqual(Cauchy(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
-        self.assertEqual(Cauchy(0.0, 1.0).sample_n(1).size(), (1,))
+        self.assertEqual(Cauchy(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(Cauchy(0.0, 1.0).sample((1,)).size(), (1,))
 
         set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (loc, scale))
@@ -711,11 +731,11 @@ class TestDistributions(TestCase):
         mean_delta = torch.Tensor([1.0, 0.0])
         std_delta = torch.Tensor([1e-5, 1e-5])
         self.assertEqual(LogNormal(mean, std).sample().size(), (5, 5))
-        self.assertEqual(LogNormal(mean, std).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(LogNormal(mean_1d, std_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(LogNormal(mean, std).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(LogNormal(mean_1d, std_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(LogNormal(mean_1d, std_1d).sample().size(), (1,))
-        self.assertEqual(LogNormal(0.2, .6).sample_n(1).size(), (1,))
-        self.assertEqual(LogNormal(-0.7, 50.0).sample_n(1).size(), (1,))
+        self.assertEqual(LogNormal(0.2, .6).sample((1,)).size(), (1,))
+        self.assertEqual(LogNormal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -756,11 +776,11 @@ class TestDistributions(TestCase):
         loc_delta = torch.Tensor([1.0, 0.0])
         scale_delta = torch.Tensor([1e-5, 1e-5])
         self.assertEqual(Normal(loc, scale).sample().size(), (5, 5))
-        self.assertEqual(Normal(loc, scale).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Normal(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Normal(loc, scale).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(Normal(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Normal(loc_1d, scale_1d).sample().size(), (1,))
-        self.assertEqual(Normal(0.2, .6).sample_n(1).size(), (1,))
-        self.assertEqual(Normal(-0.7, 50.0).sample_n(1).size(), (1,))
+        self.assertEqual(Normal(0.2, .6).sample((1,)).size(), (1,))
+        self.assertEqual(Normal(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(1)
@@ -843,11 +863,11 @@ class TestDistributions(TestCase):
         loc_delta = torch.Tensor([1.0, 0.0])
         scale_delta = torch.Tensor([1e-5, 1e-5])
         self.assertEqual(Laplace(loc, scale).sample().size(), (5, 5))
-        self.assertEqual(Laplace(loc, scale).sample_n(7).size(), (7, 5, 5))
-        self.assertEqual(Laplace(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Laplace(loc, scale).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(Laplace(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Laplace(loc_1d, scale_1d).sample().size(), (1,))
-        self.assertEqual(Laplace(0.2, .6).sample_n(1).size(), (1,))
-        self.assertEqual(Laplace(-0.7, 50.0).sample_n(1).size(), (1,))
+        self.assertEqual(Laplace(0.2, .6).sample((1,)).size(), (1,))
+        self.assertEqual(Laplace(-0.7, 50.0).sample((1,)).size(), (1,))
 
         # sample check for extreme value of mean, std
         set_rng_seed(0)
@@ -893,11 +913,11 @@ class TestDistributions(TestCase):
         alpha_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
         beta_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
         self.assertEqual(Gamma(alpha, beta).sample().size(), (2, 3))
-        self.assertEqual(Gamma(alpha, beta).sample_n(5).size(), (5, 2, 3))
-        self.assertEqual(Gamma(alpha_1d, beta_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Gamma(alpha, beta).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Gamma(alpha_1d, beta_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Gamma(alpha_1d, beta_1d).sample().size(), (1,))
         self.assertEqual(Gamma(0.5, 0.5).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(Gamma(0.5, 0.5).sample_n(1).size(), (1,))
+        self.assertEqual(Gamma(0.5, 0.5).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
             a = alpha.data.view(-1)[idx]
@@ -924,11 +944,11 @@ class TestDistributions(TestCase):
         self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).mean, float('inf'), allow_inf=True)
         self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).variance, float('inf'), allow_inf=True)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
-        self.assertEqual(Pareto(scale, alpha).sample_n(5).size(), (5, 2, 3))
-        self.assertEqual(Pareto(scale_1d, alpha_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Pareto(scale, alpha).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Pareto(scale_1d, alpha_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample().size(), (1,))
         self.assertEqual(Pareto(1.0, 1.0).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(Pareto(1.0, 1.0).sample_n(1).size(), (1,))
+        self.assertEqual(Pareto(1.0, 1.0).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
             s = scale.data.view(-1)[idx]
@@ -953,11 +973,11 @@ class TestDistributions(TestCase):
         loc_1d = torch.randn(1)
         scale_1d = torch.randn(1).abs()
         self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
-        self.assertEqual(Gumbel(loc, scale).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(Gumbel(loc, scale).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
-        self.assertEqual(Gumbel(loc_1d, scale_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Gumbel(loc_1d, scale_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Gumbel(1.0, 1.0).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(Gumbel(1.0, 1.0).sample_n(1).size(), (1,))
+        self.assertEqual(Gumbel(1.0, 1.0).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
             l = loc.data.view(-1)[idx]
@@ -984,11 +1004,11 @@ class TestDistributions(TestCase):
         self.assertTrue(is_all_nan(FisherSnedecor(1, 2).mean))
         self.assertTrue(is_all_nan(FisherSnedecor(1, 4).variance))
         self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
-        self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
+        self.assertEqual(FisherSnedecor(df1, df2).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
-        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(FisherSnedecor(1.0, 1.0).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(FisherSnedecor(1.0, 1.0).sample_n(1).size(), (1,))
+        self.assertEqual(FisherSnedecor(1.0, 1.0).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
             f1 = df1.data.view(-1)[idx]
@@ -1011,12 +1031,12 @@ class TestDistributions(TestCase):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         df_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
         self.assertEqual(Chi2(df).sample().size(), (2, 3))
-        self.assertEqual(Chi2(df).sample_n(5).size(), (5, 2, 3))
-        self.assertEqual(Chi2(df_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(Chi2(df).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(Chi2(df_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Chi2(df_1d).sample().size(), (1,))
         self.assertEqual(Chi2(variable(0.5, requires_grad=True)).sample().size(), SCALAR_SHAPE)
         self.assertEqual(Chi2(0.5).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(Chi2(0.5).sample_n(1).size(), (1,))
+        self.assertEqual(Chi2(0.5).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
             d = df.data.view(-1)[idx]
@@ -1041,12 +1061,12 @@ class TestDistributions(TestCase):
         self.assertTrue(is_all_nan(StudentT(1).variance))
         self.assertEqual(StudentT(2).variance, float('inf'), allow_inf=True)
         self.assertEqual(StudentT(df).sample().size(), (2, 3))
-        self.assertEqual(StudentT(df).sample_n(5).size(), (5, 2, 3))
-        self.assertEqual(StudentT(df_1d).sample_n(1).size(), (1, 1))
+        self.assertEqual(StudentT(df).sample((5,)).size(), (5, 2, 3))
+        self.assertEqual(StudentT(df_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(StudentT(df_1d).sample().size(), (1,))
         self.assertEqual(StudentT(variable(0.5, requires_grad=True)).sample().size(), SCALAR_SHAPE)
         self.assertEqual(StudentT(0.5).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(StudentT(0.5).sample_n(1).size(), (1,))
+        self.assertEqual(StudentT(0.5).sample((1,)).size(), (1,))
 
         def ref_log_prob(idx, x, log_prob):
             d = df.data.view(-1)[idx]
@@ -2004,7 +2024,7 @@ class TestConstraints(TestCase):
             for i, param in enumerate(params):
                 dist = Dist(**param)
                 for name, value in param.items():
-                    if not (torch.is_tensor(value) or isinstance(value, Variable)):
+                    if isinstance(value, numbers.Number):
                         value = torch.Tensor([value])
                     if Dist in (Categorical, OneHotCategorical, Multinomial) and name == 'probs':
                         # These distributions accept positive probs, but elsewhere we
@@ -2469,6 +2489,54 @@ class TestTransforms(TestCase):
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
+
+    def test_transform_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = BoltzmannTransform()
+        transform2 = LowerCholeskyTransform()
+
+        self.assertEqual(transform0.event_dim, 0)
+        self.assertEqual(transform1.event_dim, 1)
+        self.assertEqual(transform2.event_dim, 2)
+        self.assertEqual(ComposeTransform([transform0, transform1]).event_dim, 1)
+        self.assertEqual(ComposeTransform([transform0, transform2]).event_dim, 2)
+        self.assertEqual(ComposeTransform([transform1, transform2]).event_dim, 2)
+
+    def test_transformed_distribution_shapes(self):
+        transform0 = ExpTransform()
+        transform1 = BoltzmannTransform()
+        transform2 = LowerCholeskyTransform()
+        base_dist0 = Normal(Variable(torch.zeros(4, 4)), Variable(torch.ones(4, 4)))
+        base_dist1 = Dirichlet(Variable(torch.ones(4, 4)))
+        examples = [
+            ((4, 4), (), base_dist0),
+            ((4,), (4,), base_dist1),
+            ((4, 4), (), TransformedDistribution(base_dist0, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist0, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist0, [transform2, transform1])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform0, transform1])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform0, transform2])),
+            ((4,), (4,), TransformedDistribution(base_dist1, [transform1, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
+            ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
+        ]
+        for batch_shape, event_shape, dist in examples:
+            self.assertEqual(dist.batch_shape, batch_shape)
+            self.assertEqual(dist.event_shape, event_shape)
+            x = dist.rsample()
+            try:
+                dist.log_prob(x)  # this should not crash
+            except NotImplementedError:
+                continue
 
 
 class TestConstraintRegistry(TestCase):

@@ -13,11 +13,12 @@
 /* Creates (unseeded) new generator*/
 static THGenerator* THGenerator_newUnseeded()
 {
-  THGenerator *self = THAlloc(sizeof(THGenerator));
+  THGenerator *self = (THGenerator *)THAlloc(sizeof(THGenerator));
   memset(self, 0, sizeof(THGenerator));
-  self->left = 1;
-  self->seeded = 0;
-  self->normal_is_valid = 0;
+  self->gen_state.left = 1;
+  self->gen_state.seeded = 0;
+  self->gen_state.normal_is_valid = 0;
+  new (&self->mutex) std::mutex();
   return self;
 }
 
@@ -31,22 +32,29 @@ THGenerator* THGenerator_new()
 
 THGenerator* THGenerator_copy(THGenerator *self, THGenerator *from)
 {
-    memcpy(self, from, sizeof(THGenerator));
+    THGeneratorState_copy(&self->gen_state, &from->gen_state);
     return self;
 }
 
 void THGenerator_free(THGenerator *self)
 {
+  self->mutex.~mutex();
   THFree(self);
 }
 
-int THGenerator_isValid(THGenerator *_generator)
+int THGeneratorState_isValid(THGeneratorState *_gen_state)
 {
-  if ((_generator->seeded == 1) &&
-    (_generator->left > 0 && _generator->left <= n) && (_generator->next <= n))
+  if ((_gen_state->seeded == 1) &&
+    (_gen_state->left > 0 && _gen_state->left <= n) && (_gen_state->next <= n))
     return 1;
 
   return 0;
+}
+
+THGeneratorState* THGeneratorState_copy(THGeneratorState *self, THGeneratorState *from)
+{
+  memcpy(self, from, sizeof(THGeneratorState));
+  return self;
 }
 
 #ifndef _WIN32
@@ -146,33 +154,33 @@ void THRandom_manualSeed(THGenerator *_generator, uint64_t the_seed_)
   THGenerator_copy(_generator, blank);
   THGenerator_free(blank);
 
-  _generator->the_initial_seed = the_seed_;
-  _generator->state[0] = _generator->the_initial_seed & 0xffffffffUL;
+  _generator->gen_state.the_initial_seed = the_seed_;
+  _generator->gen_state.state[0] = _generator->gen_state.the_initial_seed & 0xffffffffUL;
   for(j = 1; j < n; j++)
   {
-    _generator->state[j] = (1812433253UL * (_generator->state[j-1] ^ (_generator->state[j-1] >> 30)) + j);
+    _generator->gen_state.state[j] = (1812433253UL * (_generator->gen_state.state[j-1] ^ (_generator->gen_state.state[j-1] >> 30)) + j);
     /* See Knuth TAOCP Vol2. 3rd Ed. P.106 for multiplier. */
     /* In the previous versions, mSBs of the seed affect   */
     /* only mSBs of the array state[].                        */
     /* 2002/01/09 modified by makoto matsumoto             */
-    _generator->state[j] &= 0xffffffffUL;  /* for >32 bit machines */
+    _generator->gen_state.state[j] &= 0xffffffffUL;  /* for >32 bit machines */
   }
-  _generator->left = 1;
-  _generator->seeded = 1;
+  _generator->gen_state.left = 1;
+  _generator->gen_state.seeded = 1;
 }
 
 uint64_t THRandom_initialSeed(THGenerator *_generator)
 {
-  return _generator->the_initial_seed;
+  return _generator->gen_state.the_initial_seed;
 }
 
 void THRandom_nextState(THGenerator *_generator)
 {
-  uint64_t *p = _generator->state;
+  uint64_t *p = _generator->gen_state.state;
   int j;
 
-  _generator->left = n;
-  _generator->next = 0;
+  _generator->gen_state.left = n;
+  _generator->gen_state.next = 0;
 
   for(j = n-m+1; --j; p++)
     *p = p[m] ^ TWIST(p[0], p[1]);
@@ -180,7 +188,7 @@ void THRandom_nextState(THGenerator *_generator)
   for(j = m; --j; p++)
     *p = p[m-n] ^ TWIST(p[0], p[1]);
 
-  *p = p[m-n] ^ TWIST(p[0], _generator->state[0]);
+  *p = p[m-n] ^ TWIST(p[0], _generator->gen_state.state[0]);
 }
 
 // TODO: this only returns 32-bits of randomness but as a uint64_t. This is
@@ -190,9 +198,9 @@ uint64_t THRandom_random(THGenerator *_generator)
 {
   uint64_t y;
 
-  if (--(_generator->left) == 0)
+  if (--(_generator->gen_state.left) == 0)
     THRandom_nextState(_generator);
-  y = *(_generator->state + (_generator->next)++);
+  y = *(_generator->gen_state.state + (_generator->gen_state.next)++);
 
   /* Tempering */
   y ^= (y >> 11);
@@ -260,20 +268,20 @@ double THRandom_normal(THGenerator *_generator, double mean, double stdv)
   THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
 
   /* This is known as the Box-Muller method */
-  if(!_generator->normal_is_valid)
+  if(!_generator->gen_state.normal_is_valid)
   {
-    _generator->normal_x = uniform_double(_generator);
-    _generator->normal_y = uniform_double(_generator);
-    _generator->normal_rho = sqrt(-2. * log(1.0-_generator->normal_y));
-    _generator->normal_is_valid = 1;
+    _generator->gen_state.normal_x = uniform_double(_generator);
+    _generator->gen_state.normal_y = uniform_double(_generator);
+    _generator->gen_state.normal_rho = sqrt(-2. * log(1.0-_generator->gen_state.normal_y));
+    _generator->gen_state.normal_is_valid = 1;
   }
   else
-    _generator->normal_is_valid = 0;
+    _generator->gen_state.normal_is_valid = 0;
 
-  if(_generator->normal_is_valid)
-    return _generator->normal_rho*cos(2.*M_PI*_generator->normal_x)*stdv+mean;
+  if(_generator->gen_state.normal_is_valid)
+    return _generator->gen_state.normal_rho*cos(2.*M_PI*_generator->gen_state.normal_x)*stdv+mean;
   else
-    return _generator->normal_rho*sin(2.*M_PI*_generator->normal_x)*stdv+mean;
+    return _generator->gen_state.normal_rho*sin(2.*M_PI*_generator->gen_state.normal_x)*stdv+mean;
 }
 
 double THRandom_exponential(THGenerator *_generator, double lambda)
