@@ -191,6 +191,36 @@ def conv_tbc(input, weight, bias, pad=0):
     return input.conv_tbc(weight, bias, pad)
 
 
+def indexed_conv(input, indices, weight, bias=None):
+    r"""Applies a convolution operator over a (minibatch x in_channels x iW) input tensor,
+    where neighborhood relationships between elements are explicitly provided via an
+    `indices` tensor of size iW x kW.
+    See :class:`~torch.nn.IndexedConv` for details and output shape.
+
+    Args:
+        input: input tensor of shape (minibatch x in_channels x iW)
+        indices: index tensor of shape (iW x kW), having on each row the indices of
+                 neighbors of each element of the input; a -1 indicates
+                 the absence of a neighbor, which is handled a zero-padding
+        weight: filters of shape (out_channels x in_channels x kW)
+        bias: optional bias of shape (out_channels). Default: None
+
+    Examples::
+
+        >>> filters = autograd.Variable(torch.randn(5, 16, 3))
+        >>> indices = (10 * torch.rand(50, 3)).type(torch.LongTensor)
+        >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
+        >>> F.indexed_conv(inputs, indices, filters)
+    """
+    if input is not None and input.dim() != 3:
+        raise ValueError("Expected 3D tensor as input, got {}D tensor instead.".format(input.dim()))
+
+    if indices is not None and indices.dim() != 2:
+        raise ValueError("Expected 2D tensor as indices, got {}D tensor instead.".format(indices.dim()))
+
+    return _functions.thnn.IndexedConv.apply(input, indices, weight, bias)
+
+
 # Pooling
 def avg_pool1d(input, kernel_size, stride=None, padding=0,
                ceil_mode=False, count_include_pad=True):

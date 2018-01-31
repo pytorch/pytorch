@@ -202,6 +202,34 @@ TH_API void THNN_(Col2Im_updateGradInput)(
           int padH, int padW,
           int sH, int sW);
 
+TH_API void THNN_(IndexedConvolution_updateOutput)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *output,            // [OUT] IndexedConvolution output
+          THTensor *weight,            // convolution weights
+          THTensor *bias,              // [OPTIONAL] convolution bias
+          THIndexTensor *indices,      // index tensor describing index of neighbors of each input element
+          THTensor *columns,           // tensor where results of idx2col are stored
+          THTensor *ones);             // tensor of ones
+TH_API void THNN_(IndexedConvolution_updateGradInput)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *gradOutput,        // gradient w.r.t. output
+          THTensor *gradInput,         // [OUT] gradient w.r.t. input
+          THTensor *weight,            // convolution weights
+          THIndexTensor *indices,      // index tensor describing index of neighbors of each input elements
+          THTensor *gradColumns);      // gradient w.r.t. idx2col tensor output
+TH_API void THNN_(IndexedConvolution_accGradParameters)(
+          THNNState *state,            // library's state
+          THTensor *input,             // input tensor
+          THTensor *gradOutput,        // gradient w.r.t. output
+          THTensor *gradWeight,        // [OUT] gradient w.r.t. convolution weights
+          THTensor *gradBias,          // [OUT] gradient w.r.t. convolution bias
+          THIndexTensor *indices,      // index tensor describing index of neighbors of each input element
+          THTensor *columns,           // tensor where results of idx2col are stored
+          THTensor *ones,              // tensor of ones
+          accreal scale_);             // scale for use in matrix multiplication
+
 TH_API void THNN_(L1Cost_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
