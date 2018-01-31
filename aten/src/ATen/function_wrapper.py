@@ -437,18 +437,18 @@ def is_real_argument_to_wrapper(argument):
         argument['type'] != 'argument'
 
 
-def is_mutable_formal_argument(argument, option):
-    # type: (THFormal, FunctionOption) -> bool
-    return argument.get('output') or option['inplace'] and argument['name'] == 'self'
+def is_mutable_formal_argument(argument, in_place):
+    # type: (THFormal, bool) -> bool
+    return argument.get('output') or in_place and argument['name'] == 'self'
 
 
-def to_return_type(arg, option):
-    # type: (THFormal, FunctionOption) -> ReturnType
+def to_return_type(arg, in_place):
+    # type: (THFormal, bool) -> ReturnType
     t = arg['type']
     rt = TYPE_RETURN.get(t, t)
     if rt == 'Tensor' and not arg.get('allocate'):
         rt = rt + ' &'
-        if not is_mutable_formal_argument(arg, option):
+        if not is_mutable_formal_argument(arg, in_place):
             rt = 'const ' + rt
     return {
         'name': arg['name'],
@@ -482,7 +482,7 @@ def create_generic(top_env, declarations):
     def translate_formal(argument, option):
         # type: (THFormal, FunctionOption) -> AtFormal
         type_str = TYPE_FORMAL_GENERIC.get(argument['type'], argument['type'])
-        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option):
+        if type_str == 'Tensor &' and not is_mutable_formal_argument(argument, option['inplace']):
             type_str = 'const ' + type_str
         translated = {
             'name': argument['name'],
@@ -559,9 +559,9 @@ def create_generic(top_env, declarations):
             argument_indices = ret['arguments']
             if len(argument_indices) == 1:
                 the_arg = option['arguments'][argument_indices[0]]
-                return [to_return_type(the_arg, option)]
+                return [to_return_type(the_arg, option['inplace'])]
             else:
-                return [to_return_type(option['arguments'][idx], option)
+                return [to_return_type(option['arguments'][idx], option['inplace'])
                         for idx in argument_indices]
         elif ret['kind'] == 'type':
             return [{
@@ -958,8 +958,40 @@ def create_generic(top_env, declarations):
     return output_declarations
 
 
+if TYPE_HINTS:
+    CImpl = TypedDict('CImpl', {
+        'cname': str,
+        'arguments': List[THFormal],
+    })
+
+    Declaration = TypedDict('Declaration', {
+        'skip': bool,
+        'arguments': List[THFormal],
+        'formals_list': List[AtFormal],
+        'backend_type_pairs': List[Tuple[str, str]],
+        'inplace': bool,
+        'sparse': bool,
+        'zero_dim_tensor_only': bool,
+        'when_sparse_dispatch': str,
+        'type_definition_body': List[str],
+        'type_method_definition_dispatch': str,
+        'native_type_method_dispatch': str,
+        'mode': str,
+        'scalar_check': str,
+        'aten_custom_call': str,
+        'cname': str,
+        'condition': str,
+        'return': ReturnDecl,
+        'cimpls': List[CImpl],
+    })
+
+    DeclarationWithOptions = TypedDict('DeclarationWithOptions', {
+        'options': List[Declaration],
+    })
+
+
 def create_derived(backend_type_env, declarations):
-    # type: (Environment, List[FunctionOption]) -> Tuple[List[str], List[str]]
+    # type: (Environment, List[DeclarationWithOptions]) -> Tuple[List[str], List[str]]
     type_object_declarations = []
     type_object_definitions = []
 
@@ -987,7 +1019,7 @@ def create_derived(backend_type_env, declarations):
         return 'if_true' in argument and isinstance(argument['if_true'], string_type)
 
     def get_argument(argument, option):
-        # type: (THFormal, FunctionOption) -> str
+        # type: (THFormal, Declaration) -> str
         if replace_with_null(argument):
             return 'NULL'
         elif requires_checked_cast(argument):
@@ -1022,12 +1054,12 @@ def create_derived(backend_type_env, declarations):
             return argument['name']
 
     def drop_argument(argument, option):
-        # type: (THFormal, FunctionOption) -> bool
+        # type: (THFormal, Declaration) -> bool
         return 'CUDA' in backend_type_env['Backend'] and (
             option['mode'] == 'TH' and argument['type'] == 'THGenerator*')
 
     def get_arguments(arguments, option):
-        # type: (List[THFormal], FunctionOption) -> List[str]
+        # type: (List[THFormal], Declaration) -> List[str]
         return [get_argument(argument, option)
                 for argument in arguments if not drop_argument(argument, option)]
 
@@ -1042,11 +1074,11 @@ def create_derived(backend_type_env, declarations):
         return False
 
     def get_zero_dim_dispatch_when_scalar(option):
-        # type: (FunctionOption) -> str
+        # type: (Declaration) -> str
         return option.get('zero_dim_dispatch_when_scalar', False)  # type: ignore
 
     def handle_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
+        # type: (Environment, Declaration) -> List[str]
         zero_dim_dispatch = get_zero_dim_dispatch_when_scalar(option)
         if not zero_dim_dispatch:
             return []
@@ -1056,7 +1088,7 @@ def create_derived(backend_type_env, declarations):
         return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
     def handle_only_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
+        # type: (Environment, Declaration) -> List[str]
         if option.get('zero_dim_tensor_only', False):
             check_name = get_zero_dim_dispatch_when_scalar(option)
             return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
@@ -1064,7 +1096,7 @@ def create_derived(backend_type_env, declarations):
             return None
 
     def handle_sparse(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
+        # type: (Environment, Declaration) -> List[str]
         if 'when_sparse_dispatch' not in option or 'Sparse' in backend_type_env['Backend']:
             return []
         check_name = option['when_sparse_dispatch']
@@ -1101,13 +1133,15 @@ def create_derived(backend_type_env, declarations):
             return "{}.resize_({{ {} }});".format(arg['name'], ','.join(dims))
 
     def handle_call(env, option, cimpl):
-        # type: (Environment, FunctionOption, FunctionOption) -> str
+        # type: (Environment, Declaration, Union[Declaration, CImpl]) -> str
         is_nn = option['mode'] == 'NN'
-        actuals = get_arguments(cimpl['arguments'], option)
+        # The type of the following is List[THFormal] but mypy is bad with Union types
+        args = cimpl['arguments']  # type: Any
+        actuals = get_arguments(args, option)
         if is_cuda or is_nn:
             actuals = ['context->thc_state'] + actuals
 
-        cname = cimpl['cname']
+        cname = cimpl['cname']  # type: Any
         if option.get('sparse', False):
             if is_cuda:
                 cname = 'THCS' + env['ScalarName'] + "Tensor_" + cname
@@ -1124,7 +1158,7 @@ def create_derived(backend_type_env, declarations):
         return call
 
     def emit_body(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
+        # type: (Environment, Declaration) -> List[str]
         body = []  # type: List[str]
         body += handle_sparse(env, option)
         body += handle_zero_dim(env, option)
@@ -1240,7 +1274,7 @@ def create_derived(backend_type_env, declarations):
 
         # cimpls, if it exists, contains the underlying C function names and
         # arguments. Otherwise use option
-        cimpls = option.get('cimpls', [option])
+        cimpls = option.get('cimpls', [option])  # type: ignore
         calls = [handle_call(env, option, cimpl) for cimpl in cimpls]
 
         ret = option['return']
@@ -1273,7 +1307,7 @@ def create_derived(backend_type_env, declarations):
                 arg = arguments[0]
                 body.append("return {};".format(arg['name']))
             else:
-                types = [to_return_type(arg, option)['type']
+                types = [to_return_type(arg, option['inplace'])['type']
                          for arg in arguments]
                 # TODO: check for move semantics...
                 names = [arg['name'] for arg in arguments]
@@ -1313,7 +1347,7 @@ def create_derived(backend_type_env, declarations):
         return body
 
     def process_option(option):
-        # type: (FunctionOption) -> None
+        # type: (Declaration) -> None
         pair = (backend_type_env['Backend'],
                 backend_type_env['ScalarName'])
         if pair in option['backend_type_pairs']:
@@ -1326,7 +1360,7 @@ def create_derived(backend_type_env, declarations):
                 TYPE_DERIVED_DEFINITION.substitute(env))
 
     def process_native(option):
-        # type: (FunctionOption) -> None
+        # type: (Declaration) -> None
         dispatch = option['type_method_definition_dispatch']
         env = nested_dict(option, backend_type_env)
 
