@@ -2048,8 +2048,8 @@ def uniform_scalar(offset=0, requires_grad=False):
     return v
 
 
-def uniform_scalar_clamp(amin, amax, requires_grad=False):
-    v = variable(0).uniform_(0, 1).clamp(amin, amax)
+def normal_scalar_clamp(amin, amax, requires_grad=False):
+    v = variable(0).normal_().clamp(amin, amax)
     v.requires_grad = requires_grad
     return v
 
@@ -2152,7 +2152,7 @@ method_tests = [
     ('erf', torch.rand(S, S, S), NO_ARGS),
     ('erf', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
     ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
-    ('erfinv', uniform_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
+    ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
     ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS),
     ('log', uniform_scalar(1e-2, requires_grad=True), NO_ARGS, 'scalar'),
     ('log1p', torch.rand(S, S, S), NO_ARGS),
