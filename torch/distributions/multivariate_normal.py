@@ -20,23 +20,23 @@ def _get_batch_shape(bmat, bvec):
 
 
 def _batch_mv(bmat, bvec):
-    """
-    Performs a batched matrix-vector product, with an arbitrary batch shape.
-    """
-    batch_shape = bvec.shape[:-1]
-    event_dim = bvec.shape[-1]
-    bmat = bmat.expand(batch_shape + (event_dim, event_dim))
-    if batch_shape != bmat.shape[:-2]:
-        raise ValueError("Batch shapes do not match: matrix {}, vector {}".format(bmat.shape, bvec.shape))
-    bvec = bvec.unsqueeze(-1)
+    r"""
+    Performs a batched matrix-vector product, with compatible but different batch shapes.
 
-    # to conform with `torch.bmm` interface, should have `.dim() == 3`
-    if bvec.dim() == 2:
-        bvec.unsqueeze(0)
-    # flatten batch dimensions
-    bvec = bvec.contiguous().view((-1, event_dim, 1))
-    bmat = bmat.contiguous().view((-1, event_dim, event_dim)).expand((bvec.shape[0], -1, -1))
-    return torch.bmm(bmat, bvec).squeeze(-1).view(batch_shape + (event_dim,))
+    This function takes as input `bmat`, containing :math:`n \times n` matrices, and
+    `bvec`, containing length :math:`n` vectors.
+
+    Both `bmat` and `bvec` may have any number of leading dimensions, which correspond
+    to a batch shape. They are not necessarily assumed to have the same batch shape,
+    just ones which can be broadcasted.
+    """
+    n = bvec.size(-1)
+    batch_shape = _get_batch_shape(bmat, bvec)
+
+    # to conform with `torch.bmm` interface, both bmat and bvec should have `.dim() == 3`
+    bmat = bmat.expand(batch_shape + (n, n)).contiguous().view((-1, n, n))
+    bvec = bvec.unsqueeze(-1).expand(batch_shape + (n, 1)).contiguous().view((-1, n, 1))
+    return torch.bmm(bmat, bvec).squeeze(-1).view(batch_shape + (n,))
 
 
 def _batch_potrf_lower(bmat):
