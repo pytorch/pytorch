@@ -97,8 +97,18 @@ class Descriptor
 {
 public:
   // TODO: Figure out why const-correctness doesn't work here
+
+  // Use desc() to access the underlying descriptor pointer in
+  // a read-only fashion.  Most client code should use this.
+  // If the descriptor was never initialized, this will return
+  // nullptr.
   T* desc() const { return desc_.get(); }
   T* desc() { return desc_.get(); }
+
+  // Use mut_desc() to access the underlying desciptor pointer
+  // if you intend to modify what it points to (e.g., using
+  // cudnnSetFooDescriptor).  This will ensure that the descriptor
+  // is initialized.  Code in this file will use this function.
   T* mut_desc() { init(); return desc_.get(); }
 protected:
   void init() {
