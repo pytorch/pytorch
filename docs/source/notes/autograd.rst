@@ -57,38 +57,6 @@ will also require them.
     # Optimize only the classifier
     optimizer = optim.SGD(model.fc.parameters(), lr=1e-2, momentum=0.9)
 
-``volatile``
-~~~~~~~~~~~~
-
-Volatile is recommended for purely inference mode, when you're sure you won't
-be even calling `.backward()`. It's more efficient than any other autograd
-setting - it will use the absolute minimal amount of memory to evaluate the
-model. ``volatile`` also determines that ``requires_grad is False``.
-
-Volatile differs from :ref:`excluding-requires_grad` in how the flag propagates.
-If there's even a single volatile input to an operation, its output is also
-going to be volatile. Volatility spreads across the graph much easier than
-non-requiring gradient - you only need a **single** volatile leaf to have a
-volatile output, while you need **all** leaves to not require gradient to
-have an output that doesn't require gradient. Using volatile flag you don't
-need to change any settings of your model parameters to use it for
-inference. It's enough to create a volatile input, and this will ensure that
-no intermediate states are saved.
-
-.. code::
-
-    >>> regular_input = Variable(torch.randn(1, 3, 227, 227))
-    >>> volatile_input = Variable(torch.randn(1, 3, 227, 227), volatile=True)
-    >>> model = torchvision.models.resnet18(pretrained=True)
-    >>> model(regular_input).requires_grad
-    True
-    >>> model(volatile_input).requires_grad
-    False
-    >>> model(volatile_input).volatile
-    True
-    >>> model(volatile_input).grad_fn is None
-    True
-
 How autograd encodes the history
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
