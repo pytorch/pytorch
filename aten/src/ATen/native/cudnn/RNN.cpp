@@ -149,13 +149,13 @@ namespace {
   std::vector<TensorDescriptor> rnn_descriptor_sequence(const Tensor& tensor, IntList batch_sizes) {
     std::vector<TensorDescriptor> descriptors(batch_sizes.size());
     size_t i = 0;
+    // To be mutated in the loop
+    std::vector<int64_t> batch_tensor_size(tensor.sizes());
     for (auto batch_size : batch_sizes) {
-      // NB: The narrow is solely to adjust the batch size; to do it
-      // accurately we would have to adjust the start index as well,
-      // but the pointer location isn't actually used so we can skip it.
-      // NB: cuDNN RNN API has an undocumented requirement that all
-      // tensors have dimension 5.
-      descriptors[i].set(tensor.narrow(0, 0, batch_size), 5);
+      batch_tensor_size[0] = batch_size;
+      // NB: cuDNN RNN API does not support 2d descriptors, so we
+      // must pad it out to 3d.
+      descriptors[i].set(getCudnnDataType(tensor), batch_tensor_size, tensor.strides(), 3);
       i++;
     }
     return descriptors;

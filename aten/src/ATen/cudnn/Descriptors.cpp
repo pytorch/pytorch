@@ -23,8 +23,13 @@ inline cudnnDataType_t getDataType(const at::Tensor& t) {
 
 } // anonymous namespace
 
-void TensorDescriptor::set(const at::Tensor &t, int64_t pad) {
-  auto dim = t.ndimension();
+
+void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
+  set(getDataType(t), t.sizes(), t.strides(), pad);
+}
+
+void TensorDescriptor::set(cudnnDataType_t datatype, IntList t_sizes, IntList t_strides, size_t pad) {
+  size_t dim = t_sizes.size();
   if (dim > CUDNN_DIM_MAX || pad > CUDNN_DIM_MAX)
 #define _STR(X) #X
 #define STR(X) _STR(X)
@@ -33,16 +38,15 @@ void TensorDescriptor::set(const at::Tensor &t, int64_t pad) {
 #undef STR
   int size[CUDNN_DIM_MAX];
   int stride[CUDNN_DIM_MAX];
-  for (int i = 0; i < dim; ++i) {
-    size[i] = (int) t.size(i);
-    stride[i] = (int) t.stride(i);
+  for (size_t i = 0; i < dim; ++i) {
+    size[i] = static_cast<int>(t_sizes[i]);
+    stride[i] = static_cast<int>(t_strides[i]);
   }
-  for (int i = dim; i < pad; ++i) {
+  for (size_t i = dim; i < pad; ++i) {
     size[i] = 1;
     stride[i] = 1;
   }
-  dim = std::max(dim, pad);
-  set(getDataType(t), (int) dim, size, stride);
+  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride);
 }
 
 std::string cudnnTypeToString(cudnnDataType_t dtype) {
