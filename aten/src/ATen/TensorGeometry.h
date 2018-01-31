@@ -12,7 +12,7 @@ struct AT_API TensorGeometry {
     : sizes_(sizes)
     , strides_(sizes.size())
     , storage_offset_(0) {
-      int64_t dim = 0;
+      int64_t dim = sizes.size();
       int64_t expected_stride = 1;
       for (int64_t i = dim - 1; i >= 0; i--) {
         strides_[i] = expected_stride;
