@@ -110,7 +110,11 @@ namespace {
           mode = CUDNN_GRU;
           break;
         default:
-          throw std::runtime_error("unrecognized mode"); // TODO
+        {
+          std::ostringstream oss;
+          oss << "unrecognized cuDNN RNN mode " << fn_mode;
+          throw std::runtime_error(oss.str());
+        }
       }
     }
 
