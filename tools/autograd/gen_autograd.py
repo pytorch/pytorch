@@ -30,6 +30,12 @@ HARDCODED_DIFFERENTIABLE_OUTPUTS = {
     # differentiable, and 2 is not.  Then you would write:
     # 'foo': (0, 1),
     '_cudnn_rnn': (0, 1, 2),
+    # _cudnn_rnn outputs:
+    #   0 => output
+    #   1 => hy
+    #   2 => cy
+    #   3 => reserve
+    #   4 => weight_buf
 }
 
 
