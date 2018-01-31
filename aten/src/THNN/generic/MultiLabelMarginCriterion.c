@@ -88,7 +88,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     sum /= dim;
     if (sizeAverage)
       sum /= nframe;
-    THTensor_(set1d)(output, 0, sum);
+    THTensor_fastSet1d(output, 0, sum);
 
     THTensor_(free)(input);
     THIndexTensor_(free)(target);
@@ -128,7 +128,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
 
     sum /= dim;
-    THTensor_(set1d)(output, t, sum);
+    THTensor_fastSet1d(output, t, sum);
 
     input_data += dim;
     target_data += dim;
@@ -193,6 +193,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   isTarget_data = THTensor_(data)(isTarget);
 
   THTensor_(resizeAs)(gradInput, input);
+  gradInput = THTensor_(newContiguous)(gradInput);
   THTensor_(zero)(gradInput);
   gradInput_data = THTensor_(data)(gradInput);
 
@@ -226,7 +227,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     isTarget_data += dim;
     gradInput_data += dim;
   }
-  gradInput_data -= nframe*dim;
+  gradInput_data = THTensor_(data)(gradInput);
 
   if (reduce)
   {
@@ -239,7 +240,6 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   else
   {
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, nframe);
-    gradOutput = THTensor_(newContiguous)(gradOutput);
     for (t = 0; t < nframe; t++)
     {
       for (d = 0; d < dim; d++)
@@ -252,7 +252,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   THTensor_(free)(input);
   THIndexTensor_(free)(target);
   THTensor_(free)(isTarget);
-  THTensor_(free)(gradOutput);
+  THTensor_(free)(gradInput);
 }
 
 #endif

@@ -322,41 +322,34 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
-def _multilabelmarginloss_reference(input, target, is_target):
-    sum = 0
-    for i in range(0, target.size()[0]):
-        target_index = target[i]
-        if (target_index < 0):
+def _multilabelmarginloss_reference(input, target):
+    targets = []
+    for target_index in target:
+        if target_index < 0:
             break
-        is_target[target_index] = 1
-    for i in range(0, target.size()[0]):
-        target_index = target[i]
-        if (target_index < 0):
-            break
+        targets.append(target_index)
 
-        for j in range(0, target.size()[0]):
-            if not is_target[j]:
-                z = 1 - input[target_index] + input[j]
-                if z > 0:
-                    sum += z
+    sum = 0
+    for target_index in targets:
+        for i in range(0, len(input)):
+            if i not in targets:
+                sum += max(0, 1 - input[target_index] + input[i])
 
     return sum
 
 
 def multilabelmarginloss_reference(input, target, size_average=True, reduce=True):
-    is_target = torch.LongTensor(input.size()).zero_()
-
     if input.dim() == 1:
         n = 1
-        dim = input.size()[0]
-        output = torch.Tensor(n).zero_()
-        output[0] = _multilabelmarginloss_reference(input, target, is_target)
+        dim = input.size(0)
+        output = torch.zeros(n)
+        output[0] = _multilabelmarginloss_reference(input, target)
     else:
-        n = input.size()[0]
-        dim = input.size()[1]
-        output = torch.Tensor(n).zero_()
+        n = input.size(0)
+        dim = input.size(1)
+        output = torch.zeros(n)
         for i in range(0, n):
-            output[i] = _multilabelmarginloss_reference(input[i], target[i], is_target[i])
+            output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
     if reduce and size_average:
         return output.mean() / dim

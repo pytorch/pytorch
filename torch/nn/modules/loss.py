@@ -562,7 +562,8 @@ class MultiLabelMarginLoss(_Loss):
 
     `y` and `x` must have the same size.
 
-    The criterion only considers the first non-negative `y[j]` targets.
+    The criterion only considers a contiguous block of non-negative targets that
+    starts at the front.
 
     This allows for different samples to have variable amounts of target classes
 
@@ -577,11 +578,10 @@ class MultiLabelMarginLoss(_Loss):
             size_average. Default: True
 
     Shape:
-        - Input: :math:`(N)` or :math:`(N, *)` where `*` means, any number of additional
-          dimensions
-        - Target: :math:`(N)` or :math:`(N, *)`, same shape as the input
-        - Output: scalar. If `reduce` is False, then `(N)` or `(N, *)`, same shape as
-          input.
+        - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
+          is the number of classes.
+        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Output: scalar. If `reduce` is False, then `(N)`.
     """
     def __init__(self, size_average=True, reduce=True):
         super(MultiLabelMarginLoss, self).__init__(size_average)
