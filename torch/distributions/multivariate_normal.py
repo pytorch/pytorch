@@ -75,9 +75,10 @@ class MultivariateNormal(Distribution):
 
     The multivariate normal distribution can be parameterized either
     in terms of a positive definite covariance matrix :math:`\mathbf{\Sigma}`
-    or a lower-triangular matrix :math:`\mathbf{L}` such that
-    :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top` as obtained via e.g.
-    Cholesky decomposition of the covariance.
+    or a lower-triangular matrix :math:`\mathbf{L}` with positive-valued
+    diagonal entries, such that
+    :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`. This triangular matrix
+    can be obtained via e.g. Cholesky decomposition of the covariance.
 
     Example:
 
@@ -90,10 +91,15 @@ class MultivariateNormal(Distribution):
     Args:
         loc (Tensor or Variable): mean of the distribution
         covariance_matrix (Tensor or Variable): positive-definite covariance matrix
-        scale_tril (Tensor or Variable): lower-triangular factor of covariance
+        scale_tril (Tensor or Variable): lower-triangular factor of covariance, with positive-valued diagonal
 
     Note:
         Only one of `covariance_matrix` or `scale_tril` can be specified.
+
+        Using `scale_tril` will be more efficient: all computations internally
+        are based on `scale_tril`. If `covariance_matrix` is passed instead,
+        this is only used to compute the corresponding lower triangular
+        matrices.
     """
     params = {'loc': constraints.real_vector,
               'covariance_matrix': constraints.positive_definite,
