@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -ex
+
 # Required environment variables:
 #   $JOB_NAME
 #   $PYTHON_VERSION
