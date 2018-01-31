@@ -906,6 +906,23 @@ class TestDistributions(TestCase):
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multivariate_normal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = Variable(torch.randn(3), requires_grad=True)
+        tmp = torch.randn(3, 10)
+        cov = Variable(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = Variable(torch.potrf(cov.data, upper=False), requires_grad=True)
+
+        self._check_sampler_sampler(MultivariateNormal(mean, cov),
+                                    scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
+                                    'MultivariateNormal(loc={}, cov={})'.format(mean, cov),
+                                    multivariate=True)
+        self._check_sampler_sampler(MultivariateNormal(mean, scale_tril=scale_tril),
+                                    scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
+                                    'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
+                                    multivariate=True)
+
     def test_exponential(self):
         rate = Variable(torch.randn(5, 5).abs(), requires_grad=True)
         rate_1d = Variable(torch.randn(1).abs(), requires_grad=True)
