@@ -116,6 +116,8 @@ def load(name,
         The loaded PyTorch extension as a Python module.
     '''
 
+    verify_ninja_availability()
+
     # Allows sources to be a single path or a list of paths.
     if isinstance(sources, str):
         sources = [sources]
@@ -138,6 +140,14 @@ def load(name,
     if verbose:
         print('Loading extension module {}...'.format(name))
     return _import_module_from_library(name, build_directory)
+
+
+def verify_ninja_availability():
+    with open(os.devnull, 'wb') as devnull:
+        try:
+            subprocess.check_call('ninja --version'.split(), stdout=devnull)
+        except OSError:
+            raise RuntimeError("Ninja is required to load C++ extensions")
 
 
 def _get_build_directory(name, verbose):
@@ -183,64 +193,60 @@ def _import_module_from_library(module_name, path):
 
 def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
                       extra_include_paths):
-    try:
-        import ninja
-    except ImportError:
-        raise RuntimeError("Ninja is required to load C++ extensions. "
-                           "Install it with 'pip install ninja'.")
+    # Version 1.3 is required for the `deps` directive.
+    config = ['ninja_required_version = 1.3']
+    config.append('cxx = {}'.format(os.environ.get('CXX', 'c++')))
+
+    # Turn into absolute paths so we can emit them into the ninja build
+    # file wherever it is.
+    sources = [os.path.abspath(file) for file in sources]
+    includes = [os.path.abspath(file) for file in extra_include_paths]
+
+    # include_paths() gives us the location of torch/torch.h
+    includes += include_paths()
+    # sysconfig.get_paths()['include'] gives us the location of Python.h
+    includes.append(sysconfig.get_paths()['include'])
+
+    cflags = ['-fPIC', '-std=c++11']
+    cflags += ['-I{}'.format(include) for include in includes]
+    cflags += extra_cflags
+    flags = ['cflags = {}'.format(' '.join(cflags))]
+
+    ldflags = ['-shared'] + extra_ldflags
+    # The darwin linker needs explicit consent to ignore unresolved symbols
+    if sys.platform == 'darwin':
+        ldflags.append('-undefined dynamic_lookup')
+    flags.append('ldflags = {}'.format(' '.join(ldflags)))
+
+    # See https://ninja-build.org/build.ninja.html for reference.
+    compile_rule = ['rule compile']
+    compile_rule.append(
+        '  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out')
+    compile_rule.append('  depfile = $out.d')
+    compile_rule.append('  deps = gcc')
+    compile_rule.append('')
+
+    link_rule = ['rule link']
+    link_rule.append('  command = $cxx $ldflags $in -o $out')
+
+    # Emit one build rule per source to enable incremental build.
+    object_files = []
+    build = []
+    for source_file in sources:
+        # '/path/to/file.cpp' -> 'file'
+        file_name = os.path.splitext(os.path.basename(source_file))[0]
+        target = '{}.o'.format(file_name)
+        object_files.append(target)
+        build.append('build {}: compile {}'.format(target, source_file))
+
+    library_target = '{}.so'.format(name)
+    link = ['build {}: link {}'.format(library_target, ' '.join(object_files))]
+
+    default = ['default {}'.format(library_target)]
+
+    # 'Blocks' should be separated by newlines, for visual benefit.
+    blocks = [config, flags, compile_rule, link_rule, build, link, default]
     with open(path, 'w') as build_file:
-        writer = ninja.Writer(build_file)
-        # Version 1.3 is required for the `deps` directive.
-        writer.variable('ninja_required_version', '1.3')
-        writer.variable('cxx', os.environ.get('CXX', 'c++'))
-        writer.newline()
-
-        # Turn into absolute paths so we can emit them into the ninja build
-        # file wherever it is.
-        sources = [os.path.abspath(file) for file in sources]
-        includes = [os.path.abspath(file) for file in extra_include_paths]
-
-        # include_paths() gives us the location of torch/torch.h
-        includes += include_paths()
-        # sysconfig.get_paths()['include'] gives us the location of Python.h
-        includes.append(sysconfig.get_paths()['include'])
-
-        cflags = ['-fPIC', '-std=c++11']
-        cflags += ['-I{}'.format(include) for include in includes]
-        cflags += extra_cflags
-        writer.variable('cflags', ' '.join(cflags))
-
-        ldflags = ['-shared'] + extra_ldflags
-        # The darwin linker needs explicit consent to ignore unresolved symbols
-        if sys.platform == 'darwin':
-            ldflags.append('-undefined dynamic_lookup')
-        writer.variable('ldflags', ' '.join(ldflags))
-        writer.newline()
-
-        # See https://ninja-build.org/build.ninja.html for reference.
-        writer.rule(
-            'compile',
-            command='$cxx -MMD -MF $out.d $cflags -c $in -o $out',
-            depfile='$out.d',
-            deps='gcc')
-        writer.newline()
-
-        writer.rule('link', command='$cxx $ldflags $in -o $out')
-        writer.newline()
-
-        # Emit one build rule per source to enable incremental build.
-        object_files = []
-        for source_file in sources:
-            # '/path/to/file.cpp' -> 'file'
-            file_name = os.path.splitext(os.path.basename(source_file))[0]
-            target = '{}.o'.format(file_name)
-            object_files.append(target)
-            writer.build(outputs=target, rule='compile', inputs=source_file)
-        writer.newline()
-
-        library_target = '{}.so'.format(name)
-        writer.build(outputs=library_target, rule='link', inputs=object_files)
-        writer.newline()
-
-        writer.default(library_target)
-        writer.close()
+        for block in blocks:
+            lines = '\n'.join(block)
+            build_file.write('{}\n\n'.format(lines))
