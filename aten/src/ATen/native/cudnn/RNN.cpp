@@ -529,8 +529,9 @@ Tensor _cudnn_rnn_flatten_weight(
   auto handle = getCudnnHandle();
   RNNDescriptor rnn_desc = rnn.descriptor(handle);
 
-  // TODO: allocation here is goofy
-  TensorDescriptor x_desc(any_param.type().tensor({1, input_size}), 5);
+  TensorGeometry x_geom({1, input_size});
+  TensorDescriptor x_desc;
+  x_desc.set(getCudnnDataType(any_param), x_geom.sizes(), x_geom.strides(), 5);
 
   auto num_weights = get_num_weights(handle, rnn_desc, x_desc, rnn.datatype);
   auto weight_buf = any_param.type().tensor(num_weights).zero_();
