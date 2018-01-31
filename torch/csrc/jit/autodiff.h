@@ -80,7 +80,7 @@ struct Gradient {
   //   - Interpret df
   //   - Wrap outputs of df into Variables (that don't require grad)
 };
-Gradient differentiate(std::shared_ptr<Graph>& graph);
+Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& requires_grad);
 
 // can we take a derivative of this node symbolically?
 bool isDifferentiable(Node * n);

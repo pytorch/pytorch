@@ -36,6 +36,14 @@ class Gamma(ExponentialFamily):
     has_rsample = True
     _mean_carrier_measure = 0
 
+    @property
+    def mean(self):
+        return self.concentration / self.rate
+
+    @property
+    def variance(self):
+        return self.concentration / self.rate.pow(2)
+
     def __init__(self, concentration, rate):
         self.concentration, self.rate = broadcast_all(concentration, rate)
         if isinstance(concentration, Number) and isinstance(rate, Number):

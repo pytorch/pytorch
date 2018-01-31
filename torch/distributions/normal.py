@@ -29,6 +29,18 @@ class Normal(ExponentialFamily):
     has_rsample = True
     _mean_carrier_measure = 0
 
+    @property
+    def mean(self):
+        return self.loc
+
+    @property
+    def stddev(self):
+        return self.scale
+
+    @property
+    def variance(self):
+        return self.stddev.pow(2)
+
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):

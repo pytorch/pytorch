@@ -39,6 +39,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  StudentT, Uniform, constraints, kl_divergence)
 from torch.distributions.kl import _kl_expfamily_expfamily
+from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
@@ -70,6 +71,13 @@ def pairwise(Dist, *params):
     params1 = [variable([p] * len(p)) for p in params]
     params2 = [p.transpose(0, 1) for p in params1]
     return Dist(*params1), Dist(*params2)
+
+
+def is_all_nan(tensor):
+    """
+    Checks if all entries of a tensor is nan.
+    """
+    return (tensor != tensor).all()
 
 
 # Register all distributions for generic tests.
@@ -518,6 +526,8 @@ class TestDistributions(TestCase):
 
     def test_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        self.assertTrue(is_all_nan(Categorical(p).mean))
+        self.assertTrue(is_all_nan(Categorical(p).variance))
         self.assertEqual(Categorical(p).sample().size(), SCALAR_SHAPE)
         self.assertTrue(isinstance(Categorical(p).sample().data, torch.LongTensor))
         self.assertEqual(Categorical(p).sample((2, 2)).size(), (2, 2))
@@ -530,6 +540,10 @@ class TestDistributions(TestCase):
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
         p = Variable(torch.Tensor(probabilities), requires_grad=True)
         s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        self.assertEqual(Categorical(p).mean.size(), (2,))
+        self.assertEqual(Categorical(p).variance.size(), (2,))
+        self.assertTrue(is_all_nan(Categorical(p).mean))
+        self.assertTrue(is_all_nan(Categorical(p).variance))
         self.assertEqual(Categorical(p).sample().size(), (2,))
         self.assertEqual(Categorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2))
         self.assertEqual(Categorical(p).sample_n(6).size(), (6, 2))
@@ -669,6 +683,8 @@ class TestDistributions(TestCase):
         scale = Variable(torch.ones(5, 5), requires_grad=True)
         loc_1d = Variable(torch.zeros(1), requires_grad=True)
         scale_1d = Variable(torch.ones(1), requires_grad=True)
+        self.assertTrue(is_all_nan(Cauchy(loc_1d, scale_1d).mean))
+        self.assertEqual(Cauchy(loc_1d, scale_1d).variance, float('inf'), allow_inf=True)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
         self.assertEqual(Cauchy(loc, scale).sample_n(7).size(), (7, 5, 5))
         self.assertEqual(Cauchy(loc_1d, scale_1d).sample().size(), (1,))
@@ -908,6 +924,8 @@ class TestDistributions(TestCase):
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         scale_1d = torch.randn(1).abs()
         alpha_1d = torch.randn(1).abs()
+        self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).mean, float('inf'), allow_inf=True)
+        self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).variance, float('inf'), allow_inf=True)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
         self.assertEqual(Pareto(scale, alpha).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample_n(1).size(), (1, 1))
@@ -966,6 +984,8 @@ class TestDistributions(TestCase):
         df2 = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         df1_1d = torch.randn(1).abs()
         df2_1d = torch.randn(1).abs()
+        self.assertTrue(is_all_nan(FisherSnedecor(1, 2).mean))
+        self.assertTrue(is_all_nan(FisherSnedecor(1, 4).variance))
         self.assertEqual(FisherSnedecor(df1, df2).sample().size(), (2, 3))
         self.assertEqual(FisherSnedecor(df1, df2).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(FisherSnedecor(df1_1d, df2_1d).sample().size(), (1,))
@@ -1017,9 +1037,12 @@ class TestDistributions(TestCase):
                                         'Chi2(df={})'.format(df))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
-    def test_studentT_shape(self):
+    def test_studentT(self):
         df = Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)
         df_1d = Variable(torch.exp(torch.randn(1)), requires_grad=True)
+        self.assertTrue(is_all_nan(StudentT(1).mean))
+        self.assertTrue(is_all_nan(StudentT(1).variance))
+        self.assertEqual(StudentT(2).variance, float('inf'), allow_inf=True)
         self.assertEqual(StudentT(df).sample().size(), (2, 3))
         self.assertEqual(StudentT(df).sample_n(5).size(), (5, 2, 3))
         self.assertEqual(StudentT(df_1d).sample_n(1).size(), (1, 1))
@@ -2210,6 +2233,104 @@ class TestLazyLogitsInitialization(TestCase):
                 self.assertFalse('logits' in vars(dist), msg=message)
 
 
+@unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+class TestAgainstScipy(TestCase):
+    def setUp(self):
+        positive_var = Variable(torch.Tensor(20,).normal_()).exp()
+        positive_var2 = Variable(torch.Tensor(20,).normal_()).exp()
+        random_var = Variable(torch.Tensor(20,).normal_())
+        random_tensor = torch.Tensor(20,).normal_()
+        simplex_tensor = random_tensor.exp() / random_tensor.exp().sum()
+        self.distribution_pairs = [
+            (
+                Bernoulli(simplex_tensor),
+                scipy.stats.bernoulli(simplex_tensor)
+            ),
+            (
+                Beta(positive_var, positive_var2),
+                scipy.stats.beta(positive_var, positive_var2)
+            ),
+            (
+                Binomial(10, simplex_tensor),
+                scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor)
+            ),
+            (
+                Dirichlet(positive_var),
+                scipy.stats.dirichlet(positive_var)
+            ),
+            (
+                Exponential(positive_var),
+                scipy.stats.expon(scale=1. / positive_var)
+            ),
+            (
+                FisherSnedecor(positive_var, 4 + positive_var2),  # var for df2<=4 is undefined
+                scipy.stats.f(positive_var, 4 + positive_var2)
+            ),
+            (
+                Gamma(positive_var, positive_var2),
+                scipy.stats.gamma(positive_var, scale=1 / positive_var2)
+            ),
+            (
+                Geometric(simplex_tensor),
+                scipy.stats.geom(simplex_tensor, loc=-1)
+            ),
+            (
+                Gumbel(random_var, positive_var2),
+                scipy.stats.gumbel_r(random_var, positive_var2)
+            ),
+            (
+                Laplace(random_var, positive_var2),
+                scipy.stats.laplace(random_var, positive_var2)
+            ),
+            (
+                # Tests fail 1e-5 threshold if scale > 3
+                LogNormal(random_var, positive_var.clamp(max=3)),
+                scipy.stats.lognorm(s=positive_var.clamp(max=3), scale=random_var.exp())
+            ),
+            (
+                Multinomial(10, simplex_tensor),
+                scipy.stats.multinomial(10, simplex_tensor)
+            ),
+            (
+                Normal(random_var, positive_var2),
+                scipy.stats.norm(random_var, positive_var2)
+            ),
+            (
+                OneHotCategorical(simplex_tensor),
+                scipy.stats.multinomial(1, simplex_tensor)
+            ),
+            (
+                Pareto(positive_var, 2 + positive_var2),
+                scipy.stats.pareto(2 + positive_var2, scale=positive_var)
+            ),
+            (
+                Poisson(positive_var),
+                scipy.stats.poisson(positive_var)
+            ),
+            (
+                StudentT(2 + positive_var, random_var, positive_var2),
+                scipy.stats.t(2 + positive_var, random_var, positive_var2)
+            ),
+            (
+                Uniform(random_var, random_var + positive_var),
+                scipy.stats.uniform(random_var, positive_var)
+            )
+        ]
+
+    def test_mean(self):
+        for pytorch_dist, scipy_dist in self.distribution_pairs:
+            self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
+
+    def test_variance_stddev(self):
+        for pytorch_dist, scipy_dist in self.distribution_pairs:
+            if isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
+            else:
+                self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
+
+
 class TestTransforms(TestCase):
     def setUp(self):
         self.transforms = []
@@ -2367,6 +2488,48 @@ class TestTransforms(TestCase):
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
+
+
+class TestConstraintRegistry(TestCase):
+    def setUp(self):
+        self.constraints = [
+            constraints.real,
+            constraints.positive,
+            constraints.greater_than(variable([-10, -2, 0, 2, 10])),
+            constraints.less_than(variable([-10, -2, 0, 2, 10])),
+            constraints.unit_interval,
+            constraints.interval(variable([-4, -2, 0, 2, 4]),
+                                 variable([-3, 3, 1, 5, 5])),
+            constraints.simplex,
+            constraints.lower_cholesky,
+        ]
+
+    def test_biject_to(self):
+        for constraint in self.constraints:
+            try:
+                t = biject_to(constraint)
+            except NotImplementedError:
+                continue
+            self.assertTrue(t.bijective, "biject_to({}) is not bijective".format(constraint))
+            x = Variable(torch.Tensor(5, 5)).normal_()
+            y = t(x)
+            self.assertTrue(constraint.check(y).all(), '\n'.join([
+                "Failed to biject_to({})".format(constraint),
+                "x = {}".format(x),
+                "biject_to(...)(x) = {}".format(y),
+            ]))
+            x2 = t.inv(y)
+            self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
+
+    def test_transform_to(self):
+        for constraint in self.constraints:
+            t = transform_to(constraint)
+            x = Variable(torch.Tensor(5, 5)).normal_()
+            y = t(x)
+            self.assertTrue(constraint.check(y).all(), "Failed to transform_to({})".format(constraint))
+            x2 = t.inv(y)
+            y2 = t(x2)
+            self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
 
 if __name__ == '__main__':
