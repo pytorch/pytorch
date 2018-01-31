@@ -118,6 +118,15 @@ namespace {
       bidirectional = fn_bidirectional ? CUDNN_BIDIRECTIONAL : CUDNN_UNIDIRECTIONAL;
     }
 
+    void set(int64_t mode, int64_t hidden_size, int64_t num_layers, bool bidirectional, cudnnDataType_t datatype) {
+      this->set_mode(mode);
+      this->hidden_size = hidden_size;
+      this->num_layers = num_layers;
+      this->set_bidirectional(bidirectional);
+      this->datatype = datatype;
+    }
+
+
     RNNDescriptor descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       RNNDescriptor rnn_desc;
       rnn_desc.set(handle, hidden_size, num_layers, std::move(dropout_desc), input_mode, bidirectional, mode, datatype);
@@ -432,11 +441,7 @@ Tensor _cudnn_rnn_flatten_weight(
   auto any_param = weight_arr[0];
 
   RNNDescriptorParams rnn;
-  rnn.set_mode(fn_mode);
-  rnn.hidden_size = fn_hidden_size;
-  rnn.num_layers = fn_num_layers;
-  rnn.set_bidirectional(fn_bidirectional);
-  rnn.datatype = getCudnnDataType(any_param);
+  rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, getCudnnDataType(any_param));
 
   auto handle = getCudnnHandle();
   // NB: So, I am pretty sure that get_parameters() does not rely in any way
@@ -492,11 +497,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   auto weight_buf = weight_buf_r;
 
   RNNParams fn;
-  fn.rnn.set_mode(fn_mode);
-  fn.rnn.hidden_size = fn_hidden_size;
-  fn.rnn.num_layers = fn_num_layers;
-  fn.rnn.set_bidirectional(fn_bidirectional);
-  fn.rnn.datatype = getCudnnDataType(input);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, getCudnnDataType(input));
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -634,11 +635,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_grad(
   auto output = output_r;
 
   RNNParams fn;
-  fn.rnn.set_mode(fn_mode);
-  fn.rnn.hidden_size = fn_hidden_size;
-  fn.rnn.num_layers = fn_num_layers;
-  fn.rnn.set_bidirectional(fn_bidirectional);
-  fn.rnn.datatype = getCudnnDataType(input);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, getCudnnDataType(input));
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
@@ -774,11 +771,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto output = output_r;
 
   RNNParams fn;
-  fn.rnn.set_mode(fn_mode);
-  fn.rnn.hidden_size = fn_hidden_size;
-  fn.rnn.num_layers = fn_num_layers;
-  fn.rnn.set_bidirectional(fn_bidirectional);
-  fn.rnn.datatype = getCudnnDataType(input);
+  fn.rnn.set(fn_mode, fn_hidden_size, fn_num_layers, fn_bidirectional, getCudnnDataType(input));
   fn.dropout.set(fn_train, fn_dropout, fn_dropout_state);
   fn.tensors.set(input.sizes(), fn_batch_sizes, batch_first);
 
