@@ -215,7 +215,10 @@ inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
     void *states,
     size_t stateSizeInBytes,
     unsigned long long seed) {
-  // Try to accurately simulate cuDNN's behavior, for our cuDNN 6 friends
+  // Try to accurately simulate cuDNN's behavior, for our cuDNN 6 friends.
+  // This is not entirely accurate but is good enough to catch some API
+  // uses which would not be compatible in cuDNN 7.  Feel free to fix
+  // this if you notice something is wrong.
   if (states == nullptr) return CUDNN_STATUS_INVALID_VALUE;
   if (stateSizeInBytes == 0) return CUDNN_STATUS_INVALID_VALUE;
   dropoutDesc->dropout = dropout;
