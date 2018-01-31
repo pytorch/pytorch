@@ -1814,9 +1814,9 @@ class TestKL(TestCase):
         binomial30 = pairwise(Binomial30, [0.1, 0.2, 0.6, 0.9])
         beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         categorical = pairwise(Categorical, [[0.4, 0.3, 0.3],
-                                            [0.2, 0.7, 0.1],
-                                            [0.33, 0.33, 0.34],
-                                            [0.2, 0.2, 0.6]])
+                                             [0.2, 0.7, 0.1],
+                                             [0.33, 0.33, 0.34],
+                                             [0.2, 0.2, 0.6]])
         chi2 = pairwise(Chi2, [1.0, 2.0, 2.5, 5.0])
         dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
                                          [0.5, 0.4, 0.1],
@@ -1829,9 +1829,9 @@ class TestKL(TestCase):
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
-                                                        [0.2, 0.7, 0.1],
-                                                        [0.33, 0.33, 0.34],
-                                                        [0.2, 0.2, 0.6]])
+                                                         [0.2, 0.7, 0.1],
+                                                         [0.33, 0.33, 0.34],
+                                                         [0.2, 0.2, 0.6]])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
         poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
