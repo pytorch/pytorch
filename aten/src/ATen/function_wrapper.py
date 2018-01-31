@@ -446,13 +446,20 @@ def create_generic(top_env, declarations):
         # 2) in the broadcast_dims case, this is the broadcasted argument (e.g. "self") followed by the sizes
         #    it is broadcasted to (as an initializer list), so e.g. the specification
         #    "mat1.dim0,mat2.dim1" gets transformed to "self, {mat1.size(0),mat2.size(1)}"
+        #    if the specification has '.scalar' at the end, return 1 for the size if the tensor is a scalar.
         if not broadcast_dims:
             broadcast_actuals = [broadcast_arg['name']] + broadcast_arg['broadcast'].split()[0].split(",")
         else:
             broadcast_dims_spec = broadcast_arg['broadcast'].split()[1].split(':')[1].split(',')
             # generate size call for each dimension
+            broadcast_names = [x.split('.')[0] for x in broadcast_dims_spec]
             broadcast_dims = ([x.split('.')[0] + '.size(' + x.split('.')[1].replace('dim', '') + ')'
                               for x in broadcast_dims_spec])
+            # FIXME: implement using native functions with _out support
+            broadcast_scalar = ([len(x.split('.')) == 3 and x.split('.')[2] == 'scalar'
+                                for x in broadcast_dims_spec])
+            broadcast_dims = [dim if not scalar else name + '.dim() == 0 ? 1 : ' + dim
+                              for scalar, name, dim in zip(broadcast_scalar, broadcast_names, broadcast_dims)]
             broadcast_dims_init_list = '{' + ','.join(broadcast_dims) + '}'
             broadcast_actuals = [broadcast_arg['name'], broadcast_dims_init_list]
 
