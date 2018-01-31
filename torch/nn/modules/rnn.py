@@ -1,6 +1,7 @@
 import math
 import torch
 import warnings
+import itertools
 
 from .module import Module
 from ..parameter import Parameter
@@ -78,7 +79,7 @@ class RNNBase(Module):
         with torch.cuda.device_of(any_param):
             import torch.backends.cudnn.rnn as rnn
 
-            weight_arr = [w for ws in self.all_weights for w in ws]
+            weight_arr = list(itertools.chain.from_iterable(self.all_weights))
             weight_stride0 = len(self.all_weights[0])
 
             # NB: This is a temporary hack while we still don't have Tensor

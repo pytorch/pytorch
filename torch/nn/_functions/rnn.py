@@ -3,6 +3,7 @@ from torch.autograd import NestedIOFunction, Variable
 import torch.backends.cudnn as cudnn
 from .. import functional as F
 from .thnn import rnnFusedPointwise as fusedBackend
+import itertools
 
 try:
     import torch.backends.cudnn.rnn
@@ -273,10 +274,8 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
         handle = cudnn.get_handle()
         dropout_desc = cudnn.rnn.init_dropout_descriptor(handle, dropout, train, dropout_seed, dropout_state)
 
-        weight_arr = [w for ws in weight for w in ws]
+        weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])
-        for ws in weight:
-            assert len(ws) == weight_stride0
 
         output, hy, cy, reserve, new_weight_buf = torch._C._VariableFunctions._cudnn_rnn(
             input, weight_arr, weight_stride0,
