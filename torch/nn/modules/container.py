@@ -39,12 +39,6 @@ class Sequential(Module):
                   ('conv2', nn.Conv2d(20,64,5)),
                   ('relu2', nn.ReLU())
                 ]))
-
-        # Example of accessing modules in Sequential
-        # Specify the module by index
-        model[1] = nn.Sigmoid()
-        # Specify the module by name if initialized with OrderedDict
-        model.relu1 = nn.LeakyReLU()
     """
 
     def __init__(self, *args):
@@ -59,7 +53,7 @@ class Sequential(Module):
     def _get_item_by_idx(self, iterator, idx):
         """Get the idx-th item of the iterator"""
         size = len(self)
-        if not (-size <= idx < size):
+        if not -size <= idx < size:
             raise IndexError('index {} is out of range'.format(idx))
         idx %= size
         return next(islice(iterator, idx, None))
@@ -68,7 +62,7 @@ class Sequential(Module):
         if isinstance(idx, slice):
             return Sequential(OrderedDict(list(self._modules.items())[idx]))
         else:
-            return self._get_item_by_idx(self._modules.items(), idx)
+            return self._get_item_by_idx(self._modules.values(), idx)
 
     def __setitem__(self, idx, module):
         key = self._get_item_by_idx(self._modules.keys(), idx)
