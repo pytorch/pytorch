@@ -52,11 +52,7 @@ def _batch_diag(bmat):
     """
     Returns the diagonals of a batch of square matrices.
     """
-    n = bmat.size(-1)
-    dims = torch.arange(n, out=bmat.new(n)).long()
-    if isinstance(dims, Variable):
-        dims = dims.data  # TODO: why can't this index with a Variable?
-    return bmat[..., dims, dims]
+    return bmat.contiguous().view(bmat.shape[:-2] + (-1,))[..., ::bmat.size(-1) + 1]
 
 
 def _batch_mahalanobis(L, x):
