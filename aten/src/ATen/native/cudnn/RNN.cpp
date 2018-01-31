@@ -184,18 +184,18 @@ namespace {
   // Suppose you want to run RNN on the following variable
   // length inputs:
   //
-  //    ABCD
-  //    EF
-  //    G
+  //    Sequence 1: ABCD
+  //    Sequence 2: EF
+  //    Sequence 3: G
   //
   // (Let _ be padding when we have non-packed representations.)
   //
   // # Packed input (batch_sizes is non-empty)
   //
-  //  vocab_size
+  //  input_size
   // +------+                    \
   // | A    |                    |
-  // | E    |                    |
+  // | E    | mini_batch =       |
   // | G    | batch_sizes[0] = 3 |
   // +------+                    |
   // | B    |                    | batch_sizes_sum = 7
@@ -208,44 +208,44 @@ namespace {
   //
   //              (seq_length = 4)
   //
-  //    input.size() = batch_sizes_sum x vocab_size
+  //    input.size() = batch_sizes_sum x input_size
   //
   // # Unpacked input (batch_first = false)
   //
-  //  batch_size = 3
+  //  mini_batch = 3
   // +-------+
   // | A E G |
   // | B F _ | seq_length = 4
   // | C _ _ |
   // | D _ _ |
   // +-------+
-  //    ...    vocab_size
+  //    ...    input_size
   // +-------+
   //
-  //    input.size() = seq_length x batch_size x vocab_size
+  //    input.size() = seq_length x mini_batch x input_size
   //
   // # Unpacked input (batch_first = true)
   //
   //  seq_length = 4
   // +---------+
   // | A B C D |
-  // | E F _ _ | batch_size = 3
+  // | E F _ _ | mini_batch = 3
   // | G _ _ _ |
   // +---------+
-  //     ...     vocab_size
+  //     ...     input_size
   // +---------+
   //
-  //    input.size() = batch_size x seq_length x vocab_size
+  //    input.size() = mini_batch x seq_length x input_size
   //
   struct TensorDescriptorListParams {
     IntList batch_sizes;
     int64_t seq_length;
     int64_t mini_batch;
-    // This used to be called input_size (which is generic and accurate),
-    // but we don't call it that anymore to avoid ambiguity with input.size()
-    // (which is an IntList).  This is not necessarily the vocabulary, but this
-    // is pretty accurate for word language models.
-    int64_t vocab_size;
+    // NB: this is not input.size(), which is an IntList; instead, this
+    // size of the inner-most dimension.  In NL applications, this is usually
+    // the size of the embedding.  You can also think of this as the size
+    // of the "channel" dimension (at risk of confusing vision researchers :)
+    int64_t input_size;
     // Only valid when !is_input_packed
     int64_t batch_sizes_sum; // == sum(batch_sizes)
 
@@ -253,24 +253,24 @@ namespace {
       return batch_sizes.size() != 0;
     }
 
-    void set(IntList input_size, IntList batch_sizes_, bool batch_first) {
+    void set(IntList input_sizes, IntList batch_sizes_, bool batch_first) {
       batch_sizes = batch_sizes_;
       if (is_input_packed()) {
         seq_length = batch_sizes.size();
         mini_batch = batch_sizes[0];
         // NB: When input is packed, the mini_batch size is NOT the size
         // of the outer dimension
-        batch_sizes_sum = input_size[0];
-        vocab_size = input_size[1];
+        batch_sizes_sum = input_sizes[0];
+        input_size = input_sizes[1];
       } else {
         if (batch_first) {
-          seq_length = input_size[1];
-          mini_batch = input_size[0];
+          seq_length = input_sizes[1];
+          mini_batch = input_sizes[0];
         } else {
-          seq_length = input_size[0];
-          mini_batch = input_size[1];
+          seq_length = input_sizes[0];
+          mini_batch = input_sizes[1];
         }
-        vocab_size = input_size[2];
+        input_size = input_sizes[2];
         // TODO: Actually, would this make ASAN's job harder catching
         // an uninitialized access?
         batch_sizes_sum = -1; // something bogus in case we access it
@@ -484,9 +484,9 @@ namespace {
 
   std::vector<int64_t> _input_size(const TensorDescriptorListParams& tensors) {
     if (tensors.is_input_packed()) {
-      return {tensors.batch_sizes_sum, tensors.vocab_size};
+      return {tensors.batch_sizes_sum, tensors.input_size};
     } else {
-      return {tensors.seq_length, tensors.mini_batch, tensors.vocab_size};
+      return {tensors.seq_length, tensors.mini_batch, tensors.input_size};
     }
   }
 
