@@ -3,33 +3,12 @@
 
 #include "THGeneral.h"
 
-#include <mutex>
-
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
 
-typedef struct THGeneratorState {
-  /* The initial seed. */
-  uint64_t the_initial_seed;
-  int left;  /* = 1; */
-  int seeded; /* = 0; */
-  uint64_t next;
-  uint64_t state[_MERSENNE_STATE_N]; /* the array for the state vector  */
+typedef struct THGenerator THGenerator;
 
-  /********************************/
-
-  /* For normal distribution */
-  double normal_x;
-  double normal_y;
-  double normal_rho;
-  int normal_is_valid; /* = 0; */
-} THGeneratorState;
-
-/* A THGenerator contains all the state required for a single random number stream */
-typedef struct THGenerator {
-  std::mutex mutex; /* mutex for using this generator */
-  THGeneratorState gen_state;
-} THGenerator;
+typedef struct THGeneratorState THGeneratorState;
 
 #define torch_Generator "torch.Generator"
 
