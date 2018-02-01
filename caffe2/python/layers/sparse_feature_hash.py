@@ -98,5 +98,5 @@ class SparseFeatureHash(ModelLayer):
             )
         else:
             net.Mod(
-                input_blob, output_blob, divisor=self.modulo
+                input_blob, output_blob, divisor=self.modulo, sign_follow_divisor=True
             )
