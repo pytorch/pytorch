@@ -21,6 +21,7 @@ from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
+from .utils import _sum_rightmost
 from torch.autograd import Variable, variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
@@ -223,9 +224,7 @@ def _kl_expfamily_expfamily(p, q):
     result = q._log_normalizer(*q_nparams) - lg_normal.clone()
     for pnp, qnp, g in zip(p_nparams, q_nparams, gradients):
         term = (qnp - pnp) * g
-        for _ in range(len(q.event_shape)):
-            term = term.sum(-1)
-        result -= term
+        result -= _sum_rightmost(term, len(q.event_shape))
     return result
 
 
