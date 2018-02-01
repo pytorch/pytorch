@@ -55,6 +55,13 @@ endfunction()
 #
 if (WIN32)
   find_package(Protobuf NO_MODULE)
+  if(Protobuf_FOUND OR PROTOBUF_FOUND)
+    set(PROTOBUF_LIBRARIES protobuf::libprotobuf)
+    get_target_property(_protobuf_include_dir protobuf::libprotobuf
+                        INTERFACE_INCLUDE_DIRECTORIES)
+    set(PROTOBUF_INCLUDE_DIRS ${_protobuf_include_dir})
+    add_definitions(-DPROTOBUF_USE_DLLS)
+  endif()
 elseif (ANDROID OR IOS)
   custom_protobuf_find()
   # Unfortunately, new protobuf does not support libprotoc and protoc
