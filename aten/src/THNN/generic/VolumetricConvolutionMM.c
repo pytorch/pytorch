@@ -237,9 +237,9 @@ static void THNN_(unfolded_acc_vol)(
 }
 
 /*
-  Modified from the version of CUDA implementation, the loop iterations is larger than that one.
-  The large loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
-  The more simpler code is below:
+  Modified from the version of CUDA implementation, but the loop iterations is larger than that one.
+  The larger loop could lower the proportion of openmp overhead. And the inner part in loop is simpler.
+  The naive code is below:
 
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
@@ -269,7 +269,7 @@ static void THNN_(unfolded_acc_vol)(
   }
 
   However, there are 6 quotient and 6 module operations which are very time-consuming. So we choose relatively
-  more complex but efficient pattern.
+  more complex but more efficient pattern.
 */
 static void THNN_(unfolded_copy_vol)(
           THTensor *finput,
