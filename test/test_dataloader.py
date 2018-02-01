@@ -312,7 +312,6 @@ class TestDataLoader(TestCase):
         next(loader2_it)
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
-    @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
