@@ -210,9 +210,15 @@ void printAttributes(std::ostream & out, const Node * n) {
   out << "]";
 }
 
-std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const Node*> * groups) {
+static std::ostream & indent(std::ostream & out, size_t level) {
+  for(size_t i = 0; i < level; ++i)
+    out << "  ";
+  return out;
+}
+
+std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::vector<const Node*> * groups) {
   auto outputs = n->outputs();
-  out << const_value_list_with_types(outputs);
+  indent(out, level) << const_value_list_with_types(outputs);
   out << " = ";
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
@@ -250,11 +256,20 @@ std::ostream& printNode(std::ostream & out, const Node * n, std::vector<const No
     out << ", ";
     out << "scope: " << scopeName << "\n";
   }
+  for(size_t i = 0; i < n->blocks().size(); ++i) {
+    auto b = n->blocks()[i];
+    indent(out, level + 1) << "block" << i << "(" << const_value_list_with_types(b->inputs(), false) << ") {\n";
+    for(auto n : b->nodes()) {
+      printNode(out, level + 2, n, groups);
+    }
+    indent(out, level + 2) << "-> (" << b->outputs() << ")\n";
+    indent(out, level + 1) << "}\n";
+  }
   return out;
 }
 
 std::ostream& operator<<(std::ostream & out, const Node & n) {
-  return printNode(out, &n, nullptr);
+  return printNode(out, 0, &n, nullptr);
 }
 
 std::ostream& operator<<(std::ostream & out, const Graph & g) {
@@ -266,8 +281,7 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
       out << "  ---------------- stage " << n->stage() << " ----------------\n";
       prev_stage = n->stage();
     }
-    out << "  ";
-    printNode(out, n, &groups);
+    printNode(out, 1, n, &groups);
   }
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
@@ -413,88 +427,129 @@ void Graph::lint() const {
   // - uniques in all_nodes are unique
   // - every use will occur later in the topsort
 
-  std::unordered_set<const Value*> in_scope;
-  std::unordered_set<const Node*> node_in_scope;
-  std::unordered_set<size_t> seen_uniques;
-  std::unordered_map<const Node*, int64_t> anticipated_uses;
-  auto check_value = [&](const Value* v) {
-    auto b = in_scope.insert(v);
-    JIT_ASSERT(b.second);  // insertion took place
-    auto b2 = seen_uniques.insert(v->unique());
-    JIT_ASSERT(b2.second);  // insertion took place
-    JIT_ASSERT(v->unique() < next_unique_);
-
-    for (auto use : v->uses()) {
-      JIT_ASSERT(node_in_scope.count(use.user) == 0);
-      JIT_ASSERT(all_nodes.count(use.user) == 1);
-      anticipated_uses[use.user]++;  // int default constructs to 0
+  struct LintScope {
+    LintScope() {}
+    LintScope(std::unique_ptr<LintScope> parent)
+    : parent(std::move(parent)) {}
+    bool contains(const Value * v) {
+      return values.count(v) > 0 || (parent && parent->contains(v));
     }
+    bool contains(const Node * n) {
+      return nodes.count(n) > 0 || (parent && parent->contains(n));
+    }
+    void insert(const Value * v) {
+      JIT_ASSERT(!contains(v));
+      values.insert(v);
+    }
+    void insert(const Node * n) {
+      JIT_ASSERT(!contains(n));
+      nodes.insert(n);
+    }
+    std::unique_ptr<LintScope> parent;
+  private:
+    std::unordered_set<const Value*> values;
+    std::unordered_set<const Node*> nodes;
   };
-  auto check_node = [&](const Node* n) {
-    for (auto input : n->inputs_) {
-      if (in_scope.count(input) != 1) {
-        JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+  // Struct enables mutual recursion in linting methods.
+  // Putting it inside Graph::lint enables access to private Graph members
+  struct LintImpl {
+    LintImpl(const Graph & g)
+    : g(g)
+    , scope(new LintScope())
+    , all_nodes_set(ALL_OF(g.all_nodes)) {} // NB: all_nodes is *unordered*
+    const Graph & g;
+    std::unique_ptr<LintScope> scope;
+    std::unordered_set<size_t> seen_uniques;
+    std::unordered_map<const Node*, int64_t> anticipated_uses;
+    node_set all_nodes_set;
+    node_set sum_set;
+
+    void check_value(const Value* v) {
+      scope->insert(v);
+      auto b2 = seen_uniques.insert(v->unique());
+      JIT_ASSERT(b2.second);  // insertion took place
+      JIT_ASSERT(v->unique() < g.next_unique_);
+
+      for (auto use : v->uses()) {
+        JIT_ASSERT(!scope->contains(use.user));
+        JIT_ASSERT(g.all_nodes.count(use.user) == 1);
+        anticipated_uses[use.user]++;  // int default constructs to 0
       }
     }
-    JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
-    anticipated_uses[n] = -1;  // we saw the anticipated user!
-    auto node_inserted = node_in_scope.insert(n);
-    JIT_ASSERT(node_inserted.second);  // insertion took place
-    size_t i = 0;
-    for(auto o : n->outputs()) {
-      JIT_ASSERT(o->node() == n);
-      JIT_ASSERT(i++ == o->offset_);
-      check_value(o);
+    void check_node(const Node* n) {
+      for (auto input : n->inputs_) {
+        if (!scope->contains(input)) {
+          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+        }
+      }
+      JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
+      anticipated_uses[n] = -1;  // we saw the anticipated user!
+      scope->insert(n);
+      for(auto block : n->blocks()) {
+        std::unique_ptr<LintScope> new_scope(new LintScope(std::move(scope)));
+        scope = std::move(new_scope);
+        check_block(block);
+        scope = std::move(scope->parent);
+      }
+      size_t i = 0;
+      for(auto o : n->outputs()) {
+        JIT_ASSERT(o->node() == n);
+        JIT_ASSERT(i++ == o->offset_);
+        check_value(o);
+      }
+      n->lint();
     }
-    n->lint();
+    void check_block(const Block *b) {
+      for (auto input : b->inputs()) {
+        check_value(input);
+        JIT_ASSERT(input->node()->kind_ == kParam);
+      }
+
+      for (auto n : b->nodes()) {
+        JIT_ASSERT(n->kind_ != kParam);
+        JIT_ASSERT(n->kind_ != kReturn);
+        check_node(n);
+      }
+
+      JIT_ASSERT(b->output_->kind() == kReturn);
+      check_node(b->output_);
+
+      // all_nodes
+      // - inputs_, output_ and nodes_ are all included in all_nodes
+      // - all_nodes does not contain dead nodes??? (likely to be temporarily
+      // suspended).  Weaker: all_nodes contains all inputs and returns
+      // - only one return node???
+
+      node_set nodes_set(ALL_OF(b->nodes()));
+      node_set inputs_set {b->input_};
+      node_set output_set {b->output_};
+      // TODO: Make a more type safe std::includes wrapper which disallows use on
+      // non-ordered containers
+      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
+      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
+      JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
+
+      sum_set.insert(ALL_OF(nodes_set));
+      sum_set.insert(ALL_OF(inputs_set));
+      sum_set.insert(ALL_OF(output_set));
+    }
+    void check_graph() {
+      node_set all_nodes_set(ALL_OF(g.all_nodes)); // NB: all_nodes is *unordered*
+
+      check_block(g.block_);
+      for (auto kv : anticipated_uses) {
+        JIT_ASSERT(kv.second == -1);
+      }
+      // graph->stage() should be equal to max(node.stage for node in graph->nodes())
+      if (g.nodes().begin() == g.nodes().end()) {
+        JIT_ASSERT(g.stage() == 0);
+      } else {
+        JIT_ASSERT(g.stage() == g.nodes().rbegin()->stage());
+      }
+      JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
+    }
   };
-
-  for (auto input : inputs()) {
-    check_value(input);
-    JIT_ASSERT(input->node()->kind_ == kParam);
-  }
-
-  for (auto n : nodes()) {
-    JIT_ASSERT(n->kind_ != kParam);
-    JIT_ASSERT(n->kind_ != kReturn);
-    check_node(n);
-  }
-
-  JIT_ASSERT(output_->kind() == kReturn);
-  check_node(output_);
-
-  for (auto kv : anticipated_uses) {
-    JIT_ASSERT(kv.second == -1);
-  }
-
-  // all_nodes
-  // - inputs_, output_ and nodes_ are all included in all_nodes
-  // - all_nodes does not contain dead nodes??? (likely to be temporarily
-  // suspended).  Weaker: all_nodes contains all inputs and returns
-  // - only one return node???
-
-  node_set all_nodes_set(ALL_OF(all_nodes)); // NB: all_nodes is *unordered*
-  node_set nodes_set(ALL_OF(nodes()));
-  node_set inputs_set {input_};
-  node_set output_set{output_};
-  // TODO: Make a more type safe std::includes wrapper which disallows use on
-  // non-ordered containers
-  JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(nodes_set)));
-  JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(inputs_set)));
-  JIT_ASSERT(std::includes(ALL_OF(all_nodes_set), ALL_OF(output_set)));
-
-  node_set sum_set;
-  sum_set.insert(ALL_OF(nodes_set));
-  sum_set.insert(ALL_OF(inputs_set));
-  sum_set.insert(ALL_OF(output_set));
-  JIT_ASSERT(std::includes(ALL_OF(sum_set), ALL_OF(all_nodes_set)));
-
-  // graph->stage() should be equal to max(node.stage for node in graph->nodes())
-  if (begin() == end()) {
-    JIT_ASSERT(stage() == 0);
-  } else {
-    JIT_ASSERT(stage() == rbegin()->stage());
-  }
+  LintImpl(*this).check_graph();
 }
 
 void Graph::dump() const {

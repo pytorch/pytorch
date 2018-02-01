@@ -767,9 +767,36 @@ void testGraphExecutor() {
   JIT_ASSERT(almostEqual(Variable(outputs[1]).data(), r1));
 }
 
+void testBlocks(std::ostream & out) {
+  Graph g;
+  auto a = Var::asNewInput(g, "a");
+  auto b = Var::asNewInput(g, "b");
+  auto c = a + b;
+  auto r = g.appendNode(g.create("If"_sym, {Var::asNewInput(g, "c").value()}));
+  auto then_block = r->addBlock();
+  auto else_block = r->addBlock();
+  auto t = c + c;
+  auto tn = t.value()->node();
+  // TODO: we need to make symbolic variable insert-location aware
+  // as once we have blocks the insert location is frequently not the end of
+  tn->moveBefore(then_block->return_node());
+  then_block->registerOutput(t.value());
+  auto  d = b + c;
+  auto dn = d.value()->node();
+  dn->moveBefore(else_block->return_node());
+  else_block->registerOutput(d.value());
+  g.registerOutput(r->output());
+  g.lint();
+  out << "testBlocks\n" << g << "\n";
+  r->eraseBlock(1);
+  out << g << "\n";
+  g.lint();
+}
+
 std::string runJITCPPTests() {
   std::stringstream out;
   testGraphExecutor();
+  testBlocks(out);
   testCreateAutodiffSubgraphs(out);
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);

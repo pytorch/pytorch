@@ -1,3 +1,32 @@
+testBlocks
+graph(%a : UNKNOWN_TYPE
+      %b : UNKNOWN_TYPE
+      %c : UNKNOWN_TYPE) {
+  %2 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
+  %4 : UNKNOWN_TYPE = If(%c)
+    block0() {
+      %5 : UNKNOWN_TYPE = add[alpha={1}](%2, %2)
+      -> (%5)
+    }
+    block1() {
+      %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
+      -> (%6)
+    }
+  return (%4);
+}
+
+graph(%a : UNKNOWN_TYPE
+      %b : UNKNOWN_TYPE
+      %c : UNKNOWN_TYPE) {
+  %2 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
+  %4 : UNKNOWN_TYPE = If(%c)
+    block0() {
+      %5 : UNKNOWN_TYPE = add[alpha={1}](%2, %2)
+      -> (%5)
+    }
+  return (%4);
+}
+
 testCreateAutodiffSubgraphs
 graph(%0 : UNKNOWN_TYPE
       %1 : UNKNOWN_TYPE
