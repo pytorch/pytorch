@@ -32,16 +32,16 @@
 	path = third_party/gloo
 	url = https://github.com/facebookincubator/gloo
 [submodule "third_party/NNPACK_deps/pthreadpool"]
-	path = third_party/NNPACK_deps/pthreadpool
+	path = third_party/pthreadpool
 	url = https://github.com/Maratyszcza/pthreadpool.git
 [submodule "third_party/NNPACK_deps/FXdiv"]
-	path = third_party/NNPACK_deps/FXdiv
+	path = third_party/FXdiv
 	url = https://github.com/Maratyszcza/FXdiv.git
 [submodule "third_party/NNPACK_deps/FP16"]
-	path = third_party/NNPACK_deps/FP16
+	path = third_party/FP16
 	url = https://github.com/Maratyszcza/FP16.git
 [submodule "third_party/NNPACK_deps/psimd"]
-	path = third_party/NNPACK_deps/psimd
+	path = third_party/psimd
 	url = https://github.com/Maratyszcza/psimd.git
 [submodule "third_party/aten"]
 	path = third_party/aten
@@ -49,3 +49,6 @@
 [submodule "third_party/zstd"]
 	path = third_party/zstd
 	url = https://github.com/facebook/zstd.git
+[submodule "third-party/cpuinfo"]
+	path = third_party/cpuinfo
+	url = https://github.com/Maratyszcza/cpuinfo.git
