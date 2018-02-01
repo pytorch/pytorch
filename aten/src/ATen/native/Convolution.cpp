@@ -382,7 +382,7 @@ at::Tensor _convolution(
         outputs[g] = at::_convolution_nogroup(
             input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
       }
-      output = cat(outputs, 1);
+      output = at::cat(outputs, 1);
     }
   }
 

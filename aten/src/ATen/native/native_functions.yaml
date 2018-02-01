@@ -47,6 +47,12 @@
 
 - func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
 
+- func: cat(TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
