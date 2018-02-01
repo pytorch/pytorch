@@ -225,6 +225,11 @@ inline cudnnStatus_t cudnnRestoreDropoutDescriptor(
   // this if you notice something is wrong.
   if (states == nullptr) return CUDNN_STATUS_INVALID_VALUE;
   if (stateSizeInBytes == 0) return CUDNN_STATUS_INVALID_VALUE;
+  size_t expectedStateSizeInBytes;
+  // State size will differ depending on size of GPU
+  auto ret = cudnnDropoutGetStatesSize(handle, &expectedStateSizeInBytes);
+  if (ret != CUDNN_STATUS_SUCCESS) return ret;
+  if (expectedStateSizeInBytes != stateSizeInBytes) return CUDNN_STATUS_INVALID_VALUE;
   dropoutDesc->dropout = dropout;
   dropoutDesc->nstates = (int)stateSizeInBytes/sizeof(curandState_t);
   dropoutDesc->states = states;
