@@ -87,10 +87,10 @@ size_t VariableType::elementSizeInBytes() const {
   return baseType->elementSizeInBytes();
 }
 Type & VariableType::toBackend(Backend b) const {
-  return *getType(baseType->toBackend(b));
+  return *VariableImpl::getType(baseType->toBackend(b));
 }
 Type & VariableType::toScalarType(ScalarType s) const {
-  return *getType(baseType->toScalarType(s));
+  return *VariableImpl::getType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
   throw std::runtime_error("VariableType::ID() not implemented");
@@ -100,103 +100,103 @@ const char * VariableType::typeString() {
   return "VariableType";
 }
 
-struct VariableTypeRegistry {
-  static constexpr int MaxTypes = static_cast<int>(at::TypeID::NumOptions);
-
-  VariableTypeRegistry();
-
-  std::vector<VariableType> types_vec;
-  at::Type* types[MaxTypes];
-};
-
-VariableTypeRegistry::VariableTypeRegistry() {
-  auto& context = at::globalContext();
-  types_vec.reserve(MaxTypes);
-  memset(types, 0, sizeof(VariableType) * MaxTypes);
-  for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto baseType = context.type_registry[p][s].get();
-      if (baseType && baseType->backend() != Backend::Undefined) {
-        auto id = static_cast<int>(baseType->ID());
-        types_vec.emplace_back(&context, baseType);
-        types[id] = &types_vec.back();
-      }
-    }
+Variable & VariableType::checked_cast(const Type & type, const Tensor & t, const char * name, int pos) {
+  if(!t.defined()) {
+    runtime_error("Expected a Tensor of type %s but found an undefined Tensor for argument #%d '%s'",
+        type.toString(), pos, name);
   }
-}
-
-static VariableTypeRegistry registry;
-
-bool VariableType::isVariableType(const at::Type& type) {
-  // Since all VariableTypes are allocated contiguously in types_vec, we can
-  // just check that the pointer is inside the correct range.
-  ptrdiff_t offset = (char*)&type - (char*)registry.types_vec.data();
-  ptrdiff_t extent = VariableTypeRegistry::MaxTypes * sizeof(VariableType);
-  return offset >= 0 && offset < extent;
-}
-
-at::Type* VariableType::getType(const at::Type& baseType) {
-  return registry.types[static_cast<int>(baseType.ID())];
-}
-
-at::Type* VariableType::getType(const at::Tensor& tensor) {
-  if (!tensor.defined()) {
-    throw std::runtime_error("tensor is undefined");
-  }
-  return getType(tensor.type());
-}
-
-std::vector<at::Type*> VariableType::allTypes() {
-  std::vector<Type*> res;
-  res.reserve(registry.types_vec.size());
-  for (auto& type : registry.types_vec) {
-    res.push_back(&type);
-  }
-  return res;
-}
-
-Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
-  if (!t.defined()) {
-    runtime_error("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
-        pos, name);
-  }
-  if (!isVariableType(t.type())) {
-    runtime_error("Expected object of type Variable but found type %s for argument #%d '%s'",
-        t.type().toString(), pos, name);
+  if (&t.type() != &type && &t.type() != &type.toBackend(toSparse(t.type().backend()))) {
+    runtime_error("Expected object of type %s but found type %s for argument #%d '%s'",
+        type.toString(), t.type().toString(), pos, name);
   }
   return static_cast<Variable&>(const_cast<Tensor&>(t));
 }
 
-Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
-  return checked_cast_variable(t, name, pos).data();
+Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) const {
+  return checked_cast(*this, t, name, pos).data();
 }
 
-SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) {
-  return SparseTensor(checked_cast_variable(t.tref, name, pos).data());
+SparseTensor VariableType::unpack(SparseTensor t, const char * name, int pos) const {
+  auto backend = is_cuda() ? kSparseCUDA : kSparseCPU;
+  return SparseTensor(checked_cast(this->toBackend(backend), t.tref, name, pos).data());
 }
 
-Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) {
+Tensor & VariableType::unpack_long(const Tensor & t, const char * name, int pos) const {
+  auto& type = *VariableImpl::getType(baseType->toScalarType(kLong));
+  return checked_cast(type, t, name, pos).data();
+}
+
+Tensor & VariableType::unpack_int(const Tensor & t, const char * name, int pos) const {
+  auto& type = *VariableImpl::getType(baseType->toScalarType(kInt));
+  return checked_cast(type, t, name, pos).data();
+}
+
+Tensor & VariableType::unpack_byte(const Tensor & t, const char * name, int pos) const {
+  auto& type = *VariableImpl::getType(baseType->toScalarType(kByte));
+  return checked_cast(type, t, name, pos).data();
+}
+
+Tensor & VariableType::unpack_any(const Tensor & t, const char * name, int pos) const {
+  if (!t.defined()) {
+    runtime_error("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
+        pos, name);
+  }
+  auto scalarType = t.type().scalarType();
+  auto backend = t.type().backend();
+  auto& type = *VariableImpl::getType(baseType->toScalarType(scalarType).toBackend(backend));
+  return checked_cast(type, t, name, pos).data();
+}
+
+Tensor VariableType::unpack_opt(const Tensor & t, const char * name, int pos) const {
   if (!t.defined()) {
     return Tensor();
   }
   return unpack(t, name, pos);
 }
 
-std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) {
+Tensor VariableType::unpack_any_opt(const Tensor & t, const char * name, int pos) const {
+  if (!t.defined()) {
+    return Tensor();
+  }
+  return unpack_any(t, name, pos);
+}
+
+std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name, int pos) const {
   std::vector<at::Tensor> ret(tl.size());
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      runtime_error("Expected a Tensor of type Variable but found an undefined Tensor at position #%d "
+      runtime_error("Expected a Tensor of type %s but found an undefined Tensor at position #%d "
                     "for iterable argument #%d '%s'",
+                    toString(), i, pos, name);
+    }
+    if (&t.type() == this) {
+      ret[i] = static_cast<const Variable&>(t).data();
+    } else {
+      runtime_error("Expected object of type %s but found type %s at position #%d "
+                    "for iterable argument #%d '%s'",
+                    toString(),t.type().toString(), i, pos, name);
+    }
+  }
+  return ret;
+}
+
+std::vector<at::Tensor> VariableType::unpack_idxs(at::TensorList tl, const char *name, int pos) const {
+  auto& longType = *VariableImpl::getType(baseType->toScalarType(kLong));
+  auto& byteType = *VariableImpl::getType(baseType->toScalarType(kByte));
+  std::vector<at::Tensor> ret(tl.size());
+  for (size_t i = 0; i < tl.size(); ++i) {
+    const auto &t = tl[i];
+    if (!t.defined()) {
+      continue;
+    } else if (!(t.type() == longType || t.type() == byteType)) {
+      runtime_error("Expected object of type %s or %s but found type %s at position #%d "
+                    "for iterable argument #%d '%s'",
+                    longType.toString(), byteType.toString(), t.type().toString(),
                     i, pos, name);
+    } else  {
+      ret[i] = static_cast<const Variable&>(t).data();
     }
-    if (!isVariableType(t.type())) {
-      runtime_error("Expected object of type Variable but found type %s at position #%d "
-                    "for iterable argument #%d '%s'",
-                    t.type().toString(), i, pos, name);
-    }
-    ret[i] = static_cast<const Variable&>(t).data();
   }
   return ret;
 }
@@ -380,7 +380,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) co
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
-  auto& src_ = unpack(src, "src", 1);
+  auto& src_ = unpack_any(src, "src", 1);
   check_inplace(self);
   std::shared_ptr<CopyBackwards> grad_fn;
   auto requires_grad = compute_requires_grad(self, src);

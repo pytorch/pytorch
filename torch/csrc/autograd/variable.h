@@ -96,6 +96,11 @@ public:
   virtual std::unique_ptr<at::Storage> storage() override;
   static const char * typeString();
 
+  // Get the VariableType for a base Tensor type
+  static at::Type* getType(const at::Type& baseType);
+  static at::Type* getType(const at::Tensor& tensor);
+  static std::vector<at::Type*> allTypes();
+
 public:
   std::shared_ptr<Function> get_grad_accumulator();
   virtual std::shared_ptr<Function>& get_grad_fn() { return _grad_fn; }

@@ -3,7 +3,7 @@
 #include <sstream>
 #include <unordered_map>
 
-#include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/Exceptions.h"
 
 using namespace at;
@@ -30,7 +30,7 @@ at::Type& type_from_string(const std::string& str) {
   static std::once_flag once;
   static std::unordered_map<std::string, Type*> map;
   std::call_once(once, []() {
-    for (auto type : autograd::VariableType::allTypes()) {
+    for (auto type : autograd::VariableImpl::allTypes()) {
       map.emplace(type_to_string(*type), type);
     }
   });
