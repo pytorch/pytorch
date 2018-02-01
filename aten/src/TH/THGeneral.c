@@ -22,8 +22,10 @@
 #endif
 
 #ifdef TH_BLAS_MKL
-extern void mkl_set_num_threads(int);
-extern int mkl_get_max_threads(void);
+// this is the C prototype, while mkl_set_num_threads is the fortran prototype
+extern void MKL_Set_Num_Threads(int);
+// this is the C prototype, while mkl_get_max_threads is the fortran prototype
+extern int  MKL_Get_Max_Threads(void);
 #endif
 
 /* Torch Error Handling */
@@ -308,7 +310,7 @@ void THSetNumThreads(int num_threads)
   omp_set_num_threads(num_threads);
 #endif
 #ifdef TH_BLAS_MKL
-  mkl_set_num_threads(num_threads);
+  MKL_Set_Num_Threads(num_threads);
 #endif
 
 }
@@ -338,7 +340,7 @@ TH_API void THInferNumThreads(void)
   // Otherwise, MKL and our OpenMP-enabled functions will keep changing the
   // size of the OpenMP thread pool, resulting in worse performance (and memory
   // leaks in GCC 5.4)
-  omp_set_num_threads(mkl_get_max_threads());
+  omp_set_num_threads(MKL_Get_Max_Threads());
 #endif
 }
 
