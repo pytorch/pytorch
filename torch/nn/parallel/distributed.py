@@ -101,8 +101,17 @@ class DistributedDataParallel(Module):
         self.output_device = output_device
 
         # Sync params and buffers
-        for p in self.module.state_dict().values():
-            dist.broadcast(p, 0)
+        # Here we will coalesce all the parameters and buffers in one big flat
+        # tensor and broadcast them out in one shot for performance reasons,
+        # even though this function is only called one time.
+        module_states = list(self.module.state_dict().values())
+        if len(module_states) > 0:
+            flat_states = _flatten_dense_tensors(module_states)
+            dist.broadcast(flat_states, 0)
+            for state, synced in zip(module_states,
+                                     _unflatten_dense_tensors(flat_states,
+                                                              module_states)):
+                state.copy_(synced)
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
