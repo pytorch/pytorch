@@ -34,6 +34,10 @@ bool ModOp<CPUContext>::DoRunWithType() {
 
   for (auto i = 0; i < N; i++) {
     output_ptr[i] = data_ptr[i] % divisor_;
+    if (output_ptr[i] && sign_follow_divisor_ &&
+        (std::signbit(output_ptr[i]) != std::signbit(divisor_))) {
+      output_ptr[i] += divisor_;
+    }
   }
   return true;
 }
@@ -45,6 +49,10 @@ OPERATOR_SCHEMA(Mod)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("divisor", "The divisor of the modulo operation. Must >= 1")
+    .Arg(
+        "sign_follow_divisor",
+        "The sign of output follows Dividend if set to `false`. \
+          Otherwise follows Divisor")
     .IdenticalTypeAndShape()
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(

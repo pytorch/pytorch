@@ -29,8 +29,10 @@ class ModOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   ModOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    divisor_ = OperatorBase::GetSingleArgument<int64_t>("divisor", -1);
-    CAFFE_ENFORCE_GE(divisor_, 1, "divisor must be given with value >= 1");
+    divisor_ = OperatorBase::GetSingleArgument<int64_t>("divisor", 0);
+    CAFFE_ENFORCE_NE(divisor_, 0, "divisor must not be 0");
+    sign_follow_divisor_ =
+        OperatorBase::GetSingleArgument<bool>("sign_follow_divisor", false);
   }
 
   bool RunOnDevice() override {
@@ -45,6 +47,7 @@ class ModOp final : public Operator<Context> {
 
  private:
   int64_t divisor_;
+  bool sign_follow_divisor_;
 };
 
 } // namespace caffe2
