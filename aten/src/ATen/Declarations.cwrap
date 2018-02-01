@@ -4162,7 +4162,7 @@
 ]]
 
 [[
-  name: cat
+  name: _cat
   cname: catArray
   variants: [function]
   return: self

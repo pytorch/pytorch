@@ -1966,6 +1966,13 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_cat_scalars(self):
+        from torch.autograd import variable
+        x = variable(0)
+        y = variable(1)
+        self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
