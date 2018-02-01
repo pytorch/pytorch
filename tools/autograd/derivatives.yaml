@@ -102,12 +102,12 @@
   mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
 
-- name: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
+- name: _addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat: grad.ger(vec) * alpha
   vec: mat.t().mv(grad) * alpha
 
-- name: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta, Scalar alpha)
+- name: _addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   vec1: grad.mv(vec2) * alpha
   vec2: grad.t().mv(vec1) * alpha

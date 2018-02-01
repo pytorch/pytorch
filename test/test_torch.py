@@ -165,6 +165,19 @@ class TestTorch(TestCase):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_linear_algebra_scalar_raises(self):
+        from torch.autograd import Variable, variable
+        m = Variable(torch.randn(5, 5))
+        v = Variable(torch.randn(5))
+        s = variable(7)
+        self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
+        self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
+        self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
+        self.assertRaises(RuntimeError, lambda: torch.ger(s, v))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
+
     def _testMath(self, torchfn, mathfn):
         size = (10, 5)
         # contiguous
