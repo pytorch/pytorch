@@ -170,7 +170,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
     grad_desc.df_input_vjps.push_back(i);
   }
 
-  for (auto it = graph.rbegin(), end = graph.rend(); it != end; ++it) {
+  for (auto it = graph.nodes().rbegin(), end = graph.nodes().rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
     if (std::none_of(inputs.begin(), inputs.end(), requires_grad)) continue;

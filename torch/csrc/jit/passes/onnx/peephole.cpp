@@ -79,8 +79,7 @@ bool fusibleExpandTo(at::IntList from, at::IntList to) {
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
+  for(auto n : graph->nodes()) {
 
     // Can't fuse into nodes that don't support broadcasting
     if (!isBroadcasting(n)) continue;
@@ -120,8 +119,7 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 }
 
 void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
+  for(auto n : graph->nodes()) {
 
     if (n->kind() == kTranspose && n->input()->node()->kind() == kTranspose) {
       auto origInput = n->input();
@@ -136,9 +134,8 @@ void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
 }
 
 void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
-
+  for(auto it = graph->nodes().begin(), end = graph->nodes().end(); it != end; ++it) {
+    auto n = *it;
     if (n->kind() == kTranspose) {
       if (isNopTranspose(n->is(kperm))) {
         n->replaceAllUsesWith(n->input()->node());
@@ -152,8 +149,7 @@ void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
 void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
   static const std::vector<int64_t> simpleTransPerm({1,0});
 
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
+  for(auto n : graph->nodes()) {
 
     if (n->kind() == kGemm) {
       for (size_t i : {0,1}) {

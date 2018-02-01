@@ -16,7 +16,6 @@ struct SymbolicVariable {
   void addAsOutput() {
     v->owningGraph()->registerOutput(v);
   }
-
   static std::vector<SymbolicVariable> create(Symbol kind, ArrayRef<SymbolicVariable> inputs,
                                  int num_outputs = 1,
                                  Node** created_node = nullptr,
