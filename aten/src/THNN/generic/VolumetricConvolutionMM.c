@@ -130,13 +130,13 @@ static void THNN_(unfolded_acc_vol)(
           int pT,
           int pW,
           int pH,
-          long nInputPlane,
-          long inputDepth,
-          long inputWidth,
-          long inputHeight,
-          long outputDepth,
-          long outputWidth,
-          long outputHeight)
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
@@ -283,13 +283,13 @@ static void THNN_(unfolded_copy_vol)(
           int pT,
           int pW,
           int pH,
-          long nInputPlane,
-          long inputDepth,
-          long inputWidth,
-          long inputHeight,
-          long outputDepth,
-          long outputWidth,
-          long outputHeight)
+          int64_t nInputPlane,
+          int64_t inputDepth,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputDepth,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
