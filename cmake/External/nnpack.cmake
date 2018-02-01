@@ -58,6 +58,14 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
   set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
     CACHE PATH "Confu-style dependencies binary directory")
 
+  # Directories for NNPACK dependencies submoduled in Caffe2
+  set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+  set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fp16" CACHE STRING "FP16 source directory")
+  set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fxdiv" CACHE STRING "FXdiv source directory")
+  set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
+  set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
+  set(GOOGLETEST_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/googletest" CACHE STRING "Google Test source directory")
+
   if(NOT TARGET nnpack)
     set(NNPACK_BUILD_TESTS OFF CACHE BOOL "")
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
