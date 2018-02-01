@@ -100,18 +100,20 @@ class DistributedDataParallel(Module):
         self.device_ids = device_ids
         self.output_device = output_device
 
+        MB = 1024 * 1024
+        # used for intra-node param sync and inter-node sync as well
+        self.broadcast_bucket_size = 10 * MB
+
         # Sync params and buffers
-        # Here we will coalesce all the parameters and buffers in one big flat
-        # tensor and broadcast them out in one shot for performance reasons,
-        # even though this function is only called one time.
+        # Here we will coalesce all the parameters and buffers in several big
+        # flat tensors and broadcast them out to reduce the number of broadcasts
+        # as well as improve performance, even though this function is
+        # only called one time.
         module_states = list(self.module.state_dict().values())
+
         if len(module_states) > 0:
-            flat_states = _flatten_dense_tensors(module_states)
-            dist.broadcast(flat_states, 0)
-            for state, synced in zip(module_states,
-                                     _unflatten_dense_tensors(flat_states,
-                                                              module_states)):
-                state.copy_(synced)
+            self._dist_broadcast_coalesced(module_states,
+                                           self.broadcast_bucket_size)
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -137,8 +139,6 @@ class DistributedDataParallel(Module):
 
         self.bucket_sizes = []
         self.bucket_map = {}
-        MB = 1024 * 1024
-        self.broadcast_bucket_size = 10 * MB  # used for param sync before forward
         # Currently NCCL backend only supports single reduction thread/bucket
         if dist._backend == dist.dist_backend.NCCL:
             bucket_bytes_cap = float('inf')
@@ -197,6 +197,34 @@ class DistributedDataParallel(Module):
         for module in self._module_copies[1:]:
             module.train(mode)
 
+    def _dist_broadcast_coalesced(self, tensors, buffer_size):
+        """
+        Broadcast a sequence of tensors to the default group from rank 0.
+        Small tensors are first coalesced into a buffer to reduce the number of
+        broadcasts.
+
+        tensors (sequence): tensors to broadcast. Each tensor needs to be on the
+                            same GPU.
+        buffer_size (int): maximum size of the buffer for coalescing
+        """
+        tensors_bucket = []
+        # To init the first bucket right away
+        cur_bucket_size = buffer_size
+        for tensor in tensors:
+            if cur_bucket_size >= buffer_size:
+                tensors_bucket.append([])
+                cur_bucket_size = 0
+            tensors_bucket[-1].append(tensor)
+            cur_bucket_size += tensor.numel() * tensor.element_size()
+
+        for tensors in tensors_bucket:
+            flat_tensors = _flatten_dense_tensors(tensors)
+            dist.broadcast(flat_tensors, 0)
+            for tensor, synced in zip(tensors,
+                                      _unflatten_dense_tensors(flat_tensors,
+                                                               tensors)):
+                tensor.copy_(synced)
+
     def _sync_params(self):
         if len(self.device_ids) > 1:
             # intra-node parameter sync
@@ -209,10 +237,7 @@ class DistributedDataParallel(Module):
         buffers = list(self.module._all_buffers())
         if len(buffers) > 0:
             # cross-node buffer sync
-            flat_buffers = _flatten_dense_tensors(buffers)
-            dist.broadcast(flat_buffers, 0)
-            for buf, synced in zip(buffers, _unflatten_dense_tensors(flat_buffers, buffers)):
-                buf.copy_(synced)
+            self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
 
             if len(self.device_ids) > 1:
                 # intra-node buffer sync
