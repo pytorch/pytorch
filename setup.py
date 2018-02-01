@@ -349,17 +349,11 @@ class install(setuptools.command.install.install):
         if not self.skip_build:
             self.run_command('build_deps')
 
-        # Copy include directories necessary to compile C++ extensions.
-        def copy_and_overwrite(src, dst):
-            print('copying {} -> {}'.format(src, dst))
-            if os.path.exists(dst):
-                shutil.rmtree(dst)
-            shutil.copytree(src, dst)
-
-        copy_and_overwrite('torch/csrc', 'torch/lib/include/torch/csrc/')
-        copy_and_overwrite('torch/lib/pybind11/include/pybind11/',
-                           'torch/lib/include/pybind11')
-        shutil.copy2('torch/torch.h', 'torch/lib/include/torch/torch.h')
+        # Copy headers necessary to compile C++ extensions.
+        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
+        self.copy_tree('torch/lib/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
+        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
 
         setuptools.command.install.install.run(self)
 
