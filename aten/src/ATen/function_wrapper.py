@@ -646,7 +646,7 @@ def create_generic(top_env, declarations):
             # can't actually return a TensorList (since it's a reference object)
             actual_return_type = {'TensorList': 'std::vector<Tensor>'}.get(t, t)
 
-            if actual_return_type == 'Tensor' and option['inplace']:
+            if actual_return_type == 'Tensor' and (option['inplace'] or option['api_name'].endswith('_out')):
                 # follow normal ATen convention of returning Tensor & for inplace functions.
                 actual_return_type = 'Tensor &'
 

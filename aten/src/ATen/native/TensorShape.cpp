@@ -172,19 +172,29 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
+  std::vector<Tensor> inputs(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    inputs[i] = tensors[i].unsqueeze(dim);
+  }
+  return inputs;
+}
+
 Tensor stack(TensorList tensors, int64_t dim) {
   if (tensors.size() == 0) {
     throw std::runtime_error("stack expects a non-empty TensorList");
   }
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-
-  std::vector<Tensor> inputs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    inputs[i] = tensors[i].unsqueeze(dim);
-  }
-  return at::cat(inputs, dim);
+  return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
+Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
+  if (tensors.size() == 0) {
+    throw std::runtime_error("stack expects a non-empty TensorList");
+  }
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+}
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t ndimI = self._indices().size(0);
