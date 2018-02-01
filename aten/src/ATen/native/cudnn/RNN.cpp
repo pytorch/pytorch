@@ -840,7 +840,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     dx = dx.transpose_(0, 1);
   }
 
-  return std::make_tuple(dx, dhx, dcx); // TODO
+  return std::make_tuple(dx, dhx, dcx);
 }
 
 // NB: This MUST BE CALLED AFTER _cudnn_rnn_backward_input.
