@@ -112,7 +112,7 @@ struct VariableTypeRegistry {
 VariableTypeRegistry::VariableTypeRegistry() {
   auto& context = at::globalContext();
   types_vec.reserve(MaxTypes);
-  memset(types, 0, sizeof(VariableType) * MaxTypes);
+  memset(types, 0, MaxTypes * sizeof(at::Type*));
   for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
       auto baseType = context.type_registry[p][s].get();
