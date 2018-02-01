@@ -1840,7 +1840,7 @@ class TestKL(TestCase):
         uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
-        # Instead, we test with precision = 0.2 and only test with higher precision locally
+        # Instead, we test with precision = 0.1 and only test with higher precision locally
         # when adding a new KL implementation.
         # The following pairs are not tested due to very high variance of the monte carlo
         # estimator; their implementations have been reviewed with extra care:
