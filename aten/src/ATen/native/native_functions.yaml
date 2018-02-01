@@ -286,6 +286,9 @@
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: stack_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
 - func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool return_onesided=true, Tensor window={}, int64_t pad_end=0) -> Tensor
   python_default_init:
     fft_size: frame_length
