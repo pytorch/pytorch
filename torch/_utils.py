@@ -1,9 +1,10 @@
 import torch
 import importlib
+import warnings
 from collections import defaultdict
 
 
-def _type(self, new_type=None, non_blocking=False):
+def _type(self, new_type=None, non_blocking=False, **kwargs):
     """Returns the type if `new_type` is not provided, else casts this object to
     the specified type.
 
@@ -16,7 +17,14 @@ def _type(self, new_type=None, non_blocking=False):
             and destination is on the GPU or vice versa, the copy is performed
             asynchronously with respect to the host. Otherwise, the argument
             has no effect.
+        **kwargs: For compatibility, may contain the key ``async`` in place of
+            the ``non_blocking`` argument.
     """
+    if kwargs:
+        if len(kwargs) != 1 or 'async' not in kwargs:
+            raise ValueError("kwargs may only contain the key 'async'")
+        non_blocking = kwargs['async']
+        warnings.warn("'async' is deprecated; use 'non_blocking'")
     if new_type is None:
         return self.__module__ + '.' + self.__class__.__name__
 
@@ -38,7 +46,7 @@ def _type(self, new_type=None, non_blocking=False):
     return new_type(self.size()).copy_(self, non_blocking)
 
 
-def _cuda(self, device=None, non_blocking=False):
+def _cuda(self, device=None, non_blocking=False, **kwargs):
     """Returns a copy of this object in CUDA memory.
 
     If this object is already in CUDA memory and on the correct device, then
@@ -49,7 +57,14 @@ def _cuda(self, device=None, non_blocking=False):
         non_blocking (bool): If ``True`` and the source is in pinned memory,
             the copy will be asynchronous with respect to the host. Otherwise,
             the argument has no effect.
+        **kwargs: For compatibility, may contain the key ``async`` in place of
+            the ``non_blocking`` argument.
     """
+    if kwargs:
+        if len(kwargs) != 1 or 'async' not in kwargs:
+            raise ValueError("kwargs may only contain the key 'async'")
+        non_blocking = kwargs['async']
+        warnings.warn("'async' is deprecated; use 'non_blocking'")
     if self.is_cuda:
         if device is None:
             device = torch.cuda.current_device()
