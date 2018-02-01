@@ -339,7 +339,7 @@ different device.
 
 Args:
     src (Tensor): the source tensor to copy from
-    non_blocking (bool): if ``True`` and this copy is between CPU and GPU, 
+    non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect.
     broadcast (bool): if ``True``, :attr:`src` will be broadcast to the shape of
