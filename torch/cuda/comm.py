@@ -156,7 +156,7 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
     outputs = []
     for device, chunk, stream in zip(devices, chunks, streams):
         with torch.cuda.device(device), torch.cuda.stream(stream):
-            outputs.append(chunk.cuda(device, async=True))
+            outputs.append(chunk.cuda(device, non_blocking=True))
     return tuple(outputs)
 
 

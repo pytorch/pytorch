@@ -1058,7 +1058,7 @@ class TestCuda(TestCase):
         self.assertTrue(user_stream.query())
         # copy 10 MB tensor from CPU-GPU which should take some time
         tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(async=True)
+        tensor2 = tensor1.cuda(non_blocking=True)
         self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
@@ -1106,7 +1106,7 @@ class TestCuda(TestCase):
         # Performs the CPU->GPU copy in a background stream
         def perform_copy():
             with torch.cuda.stream(stream):
-                tmp = t.cuda(async=True)
+                tmp = t.cuda(non_blocking=True)
                 ptr[0] = tmp.data_ptr()
             torch.cuda.current_stream().wait_stream(stream)
             tmp.record_stream(torch.cuda.current_stream())
@@ -1145,7 +1145,7 @@ class TestCuda(TestCase):
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
         torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-        gpu_tensor.copy_(t, async=True)
+        gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
@@ -1164,14 +1164,14 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(1):
             torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-            gpu_tensor1.copy_(t, async=True)
+            gpu_tensor1.copy_(t, non_blocking=True)
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
 
         with torch.cuda.device(0):
-            gpu_tensor0.copy_(t, async=True)
+            gpu_tensor0.copy_(t, non_blocking=True)
 
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)

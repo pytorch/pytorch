@@ -3,7 +3,7 @@ import importlib
 from collections import defaultdict
 
 
-def _type(self, new_type=None, async=False):
+def _type(self, new_type=None, non_blocking=False):
     """Returns the type if `new_type` is not provided, else casts this object to
     the specified type.
 
@@ -12,10 +12,10 @@ def _type(self, new_type=None, async=False):
 
     Args:
         new_type (type or string): The desired type
-        async (bool): If ``True``, and the source is in pinned memory and
-                      destination is on the GPU or vice versa, the copy is
-                      performed asynchronously with respect to the host.
-                      Otherwise, the argument has no effect.
+        non_blocking (bool): If ``True``, and the source is in pinned memory
+            and destination is on the GPU or vice versa, the copy is performed
+            asynchronously with respect to the host. Otherwise, the argument
+            has no effect.
     """
     if new_type is None:
         return self.__module__ + '.' + self.__class__.__name__
@@ -29,16 +29,16 @@ def _type(self, new_type=None, async=False):
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
         new_module_name = new_type.__module__.replace('.sparse', '')
         new_values_type_name = new_module_name + '.' + new_type.__name__
-        new_values = self._values().type(new_values_type_name, async)
+        new_values = self._values().type(new_values_type_name, non_blocking)
         new_indices_type_name = new_module_name + '.LongTensor'
-        new_indices = self._indices().type(new_indices_type_name, async)
+        new_indices = self._indices().type(new_indices_type_name, non_blocking)
         return new_type(new_indices, new_values, self.size())
     if new_type.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
-    return new_type(self.size()).copy_(self, async)
+    return new_type(self.size()).copy_(self, non_blocking)
 
 
-def _cuda(self, device=None, async=False):
+def _cuda(self, device=None, non_blocking=False):
     """Returns a copy of this object in CUDA memory.
 
     If this object is already in CUDA memory and on the correct device, then
@@ -46,9 +46,9 @@ def _cuda(self, device=None, async=False):
 
     Args:
         device (int): The destination GPU id. Defaults to the current device.
-        async (bool): If ``True`` and the source is in pinned memory, the copy will
-                      be asynchronous with respect to the host. Otherwise, the
-                      argument has no effect.
+        non_blocking (bool): If ``True`` and the source is in pinned memory,
+            the copy will be asynchronous with respect to the host. Otherwise,
+            the argument has no effect.
     """
     if self.is_cuda:
         if device is None:
@@ -61,12 +61,12 @@ def _cuda(self, device=None, async=False):
     with torch.cuda.device(device):
         if self.is_sparse:
             new_type = getattr(torch.cuda.sparse, self.__class__.__name__)
-            indices = self._indices().cuda(device, async)
-            values = self._values().cuda(device, async)
+            indices = self._indices().cuda(device, non_blocking)
+            values = self._values().cuda(device, non_blocking)
             return new_type(indices, values, self.size())
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
-            return new_type(self.size()).copy_(self, async)
+            return new_type(self.size()).copy_(self, non_blocking)
 
 
 def _rebuild_tensor(storage, storage_offset, size, stride):
