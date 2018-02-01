@@ -7,10 +7,10 @@ in one of the `cpp` files in this directory.
 Like all ATen methods/functions, native functions are made available
 from both ATen's C++ and Python APIs.  In C++, they are made available
 either as methods on `Tensor` (`t.mymeth()`) and functions in the ATen
-namespace (`at::myfunc()`).  In PyTorch, they are made available
-as methods on `torch._C._VariableBase` (which is inherited by `Variable`)
-or `torch._C._FunctionBase` (and subsequently rebound to the Python module
-that will make the function publically visible).  At the moment, only
+namespace (`at::myfunc()`).  In PyTorch, they are made available as
+methods on `Variable` or as functions on `torch._C._FunctionBase`
+(it is the user's responsibility to re-exporting these functions in
+a more user-facing module.)  At the moment, only
 functions which ingest `Variable` are made available; to use a function
 with non-differentiable tensors, wrap your tensors with `Variable` before
 passing them in.
