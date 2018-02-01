@@ -12,7 +12,7 @@ static void check_cat_no_zero_dim(TensorList tensors) {
   for(size_t i = 0; i < tensors.size(); ++i) {
     auto& t = tensors[i];
     if (t.dim() == 0) {
-      runtime_error("zero-dimensional tensors cannot be concatenated");
+      runtime_error("zero-dimensional tensor (at position %zu) cannot be concatenated", i);
     }
   }
 }
