@@ -1199,6 +1199,8 @@ class TestJit(TestCase):
 
     def checkGraphExecutor(self, func, reference_tensors, input_tensors=None, optimize=True, drop=None):
         def allSum(vs):
+            # drop allows us to remove some values from ever being used
+            # to test unused outputs
             if drop is not None:
                 vs = vs[:-drop]
             # we don't want all the grad for all the outputs to be the same
@@ -1211,7 +1213,7 @@ class TestJit(TestCase):
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
 
-        create_ge = torch._C.GraphExecutor if optimize else torch._jit_reference_executor
+        create_ge = torch._C.GraphExecutor if optimize else torch._C._jit_reference_executor
         ge = create_ge(func, [Variable(t) for t in input_tensors])
 
         # test no gradients case
@@ -1252,26 +1254,44 @@ class TestJit(TestCase):
         self.assertEqual(grads, grads_ge)
         self.assertEqual(grads2, grads2_ge)
 
-    def test_ge2(self):
+    def run_ge_tests(self, optimize, use_cuda):
+        def rand(*args):
+            t = torch.rand(*args).float()
+            if use_cuda:
+                t = t.cuda()
+            return t
         self.checkGraphExecutor(lambda a, b: a * b + b,
-                                [torch.rand(1), torch.rand(1)], [torch.rand(2, 3), torch.rand(2, 3)])
+                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)],
+                                optimize=optimize)
         # trivial identity
         self.checkGraphExecutor(lambda a, b: (
-            b, a), [torch.rand(1), torch.rand(1)])
+            b, a), [rand(1), rand(1)], optimize=optimize)
 
         def foo(a):
             t = a * a
             return t * t, 4 * t
-        self.checkGraphExecutor(foo, [torch.rand(1)])
+        self.checkGraphExecutor(foo, [rand(1)], optimize=optimize)
         # unused input
         self.checkGraphExecutor(
-            lambda a, b: a * a, [torch.rand(1), torch.rand(1)])
+            lambda a, b: a * a, [rand(1), rand(1)], optimize=optimize)
         # test outputs that do not get used in grad
-        self.checkGraphExecutor(foo, [torch.rand(1)], drop=1)
+        self.checkGraphExecutor(foo, [rand(1)], drop=1, optimize=optimize)
         # test autograd fallback
         self.checkGraphExecutor(lambda a, b: a * b /
-                                (a - b) + b, [torch.rand(1), torch.rand(1)])
+                                (a - 2 * b) + b, [rand(1), rand(1)],
+                                optimize=optimize)
 
+    def test_ge_unoptimized(self):
+        self.run_ge_tests(False, False)
+
+    def test_ge_optimized(self):
+        self.run_ge_tests(True, False)
+
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_ge_cuda(self):
+        self.run_ge_tests(True, True)
+
+    # more manual test of graph executor that can be used as a scratchpad
     def test_ge(self):
         def foo(a, b):
             return a * b / (a - b) + b
@@ -1282,19 +1302,17 @@ class TestJit(TestCase):
             torch.rand(1), requires_grad=True)
         r, = ge(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
-        # print(da, db)
+
         l2 = (da * db + db * db)
         g2result = torch.autograd.grad(l2, [da, db])
-        # print(g2result)
 
         r = foo(a, b)
         da2, db2 = torch.autograd.grad(r + 3, [a, b], create_graph=True)
-        print(da, da2)
-        print(db, db2)
+        self.assertEqual(da, da2)
+        self.assertEqual(db, db2)
         l3 = (da2 * db2 + db2 * db2)
         g2result2 = torch.autograd.grad(l3, [da2, db2])
-        print("1", g2result)
-        print("2", g2result2)
+        self.assertEqual(g2result, g2result2)
 
 
 if __name__ == '__main__':
