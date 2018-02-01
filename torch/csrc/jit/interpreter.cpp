@@ -236,9 +236,11 @@ Operation getOperation(jit::Node *node) {
       //TODO: refcounting stuff here is ugly but TensorTemporary is not
       //present. Consider whether we
       // 1. expose tensor temporary here
-      // 2. keep as it
+      // 2. keep as is
       // 3. remove all of this retainable stuff anyway since the new
       // execution paths do not need handle types.
+      // Note that list_of_retainable is painful because it is yet another
+      // list of pointers that require needless copies.
       if(result == at::UndefinedTensor::singleton()) {
         result = inputs[1];
       }

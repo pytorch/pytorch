@@ -35,6 +35,9 @@ void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
   return F(state->graph);
 }
 
+// This is a temporary constructor so that we can write python tests of
+// the executor. It does not have most of the functionality of CompiledFunction
+// such as being able to hold parameters...
 GraphExecutor createExecutorByTracing(bool optimize, py::function func, std::vector<tracer::TraceInput> inputs) {
   auto enter_info = tracer::enter(std::move(inputs), 1);
   py::tuple py_inputs(enter_info.second.size());
@@ -95,6 +98,7 @@ void initJITBindings(PyObject *module) {
      // TODO: fix conversions to be sane and make sure this works.
      return std::vector<autograd::Variable>(outputs.begin(), outputs.end());
    });
+  // hook so we can temporarily get to the non-optimizing version of GraphExecutor
   m.def("_jit_reference_executor", [](py::function func, std::vector<tracer::TraceInput> inputs) {
     return createExecutorByTracing(false, func, inputs);
   });

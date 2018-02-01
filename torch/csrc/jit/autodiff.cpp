@@ -111,7 +111,6 @@ static Value* createZerosLike(Value *v) {
 // with a zero tensor of the right size if required.
 // this function inserts a guard into the graph that does this replacement.
 // ReplaceIfUndef(dv,c) replaces dv with c if dv is undef.
-// v is set to be a zero tensor with the size of v.
 // During Graph specialization these guards will get removed when
 // 'dv' is known to be undef, and the zeros will be propagated if possible.
 static Value* createUndefGuard(Value * dv, Value * alternative) {
