@@ -52,7 +52,7 @@ private:
 struct ExecutionPlan {
   ExecutionPlan(std::shared_ptr<Graph> & graph)
   : f(graph) {
-    std::cout << "...creating plan for: " << *graph << "\n";
+    //std::cout << "...creating plan for: " << *graph << "\n";
   }
   ExecutionPlan(std::shared_ptr<Graph> & graph, Gradient grad)
   : f(graph), grad(std::move(grad)), grad_executor(this->grad.df) {}
@@ -61,7 +61,7 @@ struct ExecutionPlan {
     if(grad) {
       return runWithGrad(std::move(inputs));
     }
-    std::cout << "...running execution plan (no grad)\n";
+    //std::cout << "...running execution plan (no grad)\n";
     unwrapVariables(inputs);
     tensor_list outputs;
     InterpreterState(f).runOneStage(std::move(inputs), outputs);
@@ -71,7 +71,7 @@ struct ExecutionPlan {
 private:
   void unwrapVariables(tensor_list & list) {
     for(auto & v : list) {
-      v = autograd::Variable(v).data();
+      v = v.defined() ? autograd::Variable(v).data() : at::Tensor();
     }
   }
   void wrapTensors(tensor_list & list) {
@@ -158,18 +158,20 @@ struct GraphExecutorImpl {
 
   // we dynamically expect this list of at::Tensor to be Variables.
   // TODO: make these arguments safe.
-  GraphExecutorImpl(std::shared_ptr<Graph> graph, bool symbolically_differentiable)
+  GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable)
   : graph(std::move(graph))
+  , optimize(optimize)
   , symbolically_differentiable(symbolically_differentiable) {}
-  GraphExecutorImpl(std::shared_ptr<Graph> graph)
+  GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
   : graph(std::move(graph))
+  , optimize(optimize)
   , symbolically_differentiable(isDifferentiable(*this->graph)) {}
 
   // entry point where execution begins
   variable_tensor_list run(variable_tensor_list inputs) {
     std::cout << "GraphExecutor::run\n";
     // this is the fallback pathway
-    if(!symbolically_differentiable && gradientIsPossible(inputs)) {
+    if(!optimize || (!symbolically_differentiable && gradientIsPossible(inputs))) {
       auto & fb = getOrCreateAutogradFallback();
       std::cout << "...running Autograd fallback\n";
       InterpreterState state(fb);
@@ -228,7 +230,7 @@ private:
     }
     return new_g;
   }
-  void optimize(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
+  void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
     // Now, we have a complete trace. Compile it.
     EliminateDeadCode(graph);
     CheckInplace(graph);
@@ -246,10 +248,12 @@ private:
     }
     std::cout << "...creating AutogradFallback\n";
     auto graph_ = copy(*graph);
-    std::cout << "...creating Autodiff subgraphs\n";
-    CreateAutodiffSubgraphs(*graph_);
-    std::cout << "...optimizing\n";
-    optimize(graph_, /*graphMustSupportVariables=*/true);
+    if(optimize) {
+      std::cout << "...creating Autodiff subgraphs\n";
+      CreateAutodiffSubgraphs(*graph_);
+      std::cout << "...optimizing\n";
+      runOptimization(graph_, /*graphMustSupportVariables=*/true);
+    }
     std::cout << "...generating intepreter code\n";
     autograd_fallback = Code(graph_);
     return autograd_fallback;
@@ -295,20 +299,15 @@ private:
       }
     }
   }
-  bool isZero(Node * n) {
-    return n->kind() == kConstant &&
-      n->hasAttribute(kis_zero) &&
-      n->i(kis_zero);
-  }
   // a + 0 -> a
   // 0 + a -> a
   void propagateZeros(Graph & g) {
     for(auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
       if(it->kind() == kadd && at::Scalar(it->t(kalpha)).toDouble() == 1.0) {
-        if(isZero(it->inputs()[0]->node())) {
+        if(isZero(it->inputs()[0])) {
           it->output()->replaceAllUsesWith(it->inputs()[1]);
           it.destroyCurrent();
-        } else if(isZero(it->inputs()[1]->node())) {
+        } else if(isZero(it->inputs()[1])) {
           it->output()->replaceAllUsesWith(it->inputs()[0]);
           it.destroyCurrent();
         }
@@ -326,13 +325,13 @@ private:
     PropagateInputShapes(*g, spec);
   }
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
-    std::cout << "...compilingSpec " << spec << " for graph: " << *graph << "\n";
+    std::cout << "...compilingSpec " << spec << "\n"; // for graph: " << *graph << "\n";
     auto graph_ = copy(*graph);
     SpecializeToSpec(graph_, spec);
-    std::cout << "...specialized graph: " << *graph_ << "\n";
+    // std::cout << "...specialized graph: " << *graph_ << "\n";
     if(!gradientIsPossible(spec)) {
       std::cout << "...optimizing\n";
-      optimize(graph_, /*graphMustSupportVariables=*/false);
+      runOptimization(graph_, /*graphMustSupportVariables=*/false);
       return ExecutionPlan(graph_);
     }
     JIT_ASSERT(symbolically_differentiable);
@@ -344,12 +343,18 @@ private:
     Gradient gradient = differentiate(graph_, requires_grads);
     graph_ = gradient.f;
     std::cout << "...optimizing graph\n";
-    optimize(graph_, /*graphMustSupportVariables=*/false);
+    runOptimization(graph_, /*graphMustSupportVariables=*/false);
     return ExecutionPlan(graph_, std::move(gradient));
   }
   // the unoptimized starting graph
   // this is never mutated
   std::shared_ptr<Graph> graph;
+
+  // true - do everything we can to make this graph run fast
+  // false - do not modifiy the graph at all and just use the interpreter
+  // to run the graph. Useful for debugging correctness issues in the implementation
+  bool optimize;
+
   // GraphExecutor optimizes more aggresively when we _know_ the graph will be
   // symbolically differentiable.
   bool symbolically_differentiable;
@@ -374,11 +379,11 @@ private:
   std::mutex compile_mutex;
 };
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph)
-: pImpl(new GraphExecutorImpl(std::move(graph))) {}
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
+: pImpl(new GraphExecutorImpl(std::move(graph), optimize)) {}
 
-GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool symbolically_differentiable)
-: pImpl(new GraphExecutorImpl(std::move(graph), symbolically_differentiable)) {}
+GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable)
+: pImpl(new GraphExecutorImpl(std::move(graph), optimize, symbolically_differentiable)) {}
 
 std::vector<at::Tensor> GraphExecutor::run(std::vector<at::Tensor> inputs) {
   return pImpl->run(std::move(inputs));

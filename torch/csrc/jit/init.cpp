@@ -35,7 +35,7 @@ void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
   return F(state->graph);
 }
 
-GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::TraceInput> inputs) {
+GraphExecutor createExecutorByTracing(bool optimize, py::function func, std::vector<tracer::TraceInput> inputs) {
   auto enter_info = tracer::enter(std::move(inputs), 1);
   py::tuple py_inputs(enter_info.second.size());
   for(size_t i = 0; i < enter_info.second.size(); ++i) {
@@ -53,7 +53,7 @@ GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::Tra
   }
   tracer::exit(outputs);
   auto graph = enter_info.first->graph;
-  return GraphExecutor(std::move(graph));
+  return GraphExecutor(std::move(graph), optimize);
 }
 
 } // anonymous namespace
@@ -85,7 +85,7 @@ void initJITBindings(PyObject *module) {
 
    py::class_<GraphExecutor>(m,"GraphExecutor")
    .def(py::init([](py::function func, std::vector<tracer::TraceInput> inputs){
-     return createExecutorByTracing(func, std::move(inputs));
+     return createExecutorByTracing(true, func, std::move(inputs));
    }))
    .def("__call__",[](py::args args) {
      auto ge = py::cast<GraphExecutor&>(args[0]);
@@ -95,7 +95,9 @@ void initJITBindings(PyObject *module) {
      // TODO: fix conversions to be sane and make sure this works.
      return std::vector<autograd::Variable>(outputs.begin(), outputs.end());
    });
-
+  m.def("_jit_reference_executor", [](py::function func, std::vector<tracer::TraceInput> inputs) {
+    return createExecutorByTracing(false, func, inputs);
+  });
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
   python::initCompilerMixin(module);

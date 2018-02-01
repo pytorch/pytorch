@@ -35,20 +35,34 @@ bool isDifferentiable(Node * n) {
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
+
+
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = node->inputs();
     switch(node->kind()) {
       case kadd:
-        return {grads[0], grads[0]};
+        // o = a - alpha*other
+        if(inputs.size() == 1)
+          return { grads.at(0) };
+          // o = a + alpha*b
+        return {grads.at(0), grads.at(0) * at::Scalar(node->t(kalpha)) };
       case ksub:
-        return {grads[0], -grads[0]};
+        // o = a - alpha*other
+        if(inputs.size() == 1)
+          return {grads.at(0)};
+        // o = a - alpha*b
+        return {grads.at(0), -grads.at(0) * at::Scalar(node->t(kalpha))};
       case kmul:
-        return {grads[0] * inputs[1], grads[0] * inputs[0]};
+        // o = a * other
+        if(inputs.size() == 1)
+          return {grads.at(0) * at::Scalar(node->t(kother))};
+        // o = a * b
+        return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
       case kConstant:
         return {};
       case kReplaceIfUndef:
-        return {grads[0], grads[0]};
+        return {grads.at(0), grads.at(0)};
     }
     throw std::runtime_error(std::string("don't support differentiation of `") +
                             node->kind().toString() + "`");
@@ -216,6 +230,45 @@ static std::shared_ptr<Graph> splitOffStage(
   return graph_clone;
 }
 
+bool isZero(Value * v) {
+  auto n = v->node();
+  return n->kind() == kConstant &&
+    n->hasAttribute(kis_zero) &&
+    n->i(kis_zero);
+}
+
+// In the case where an input is routed to an output
+// return the (possibly undefined) input rather than
+// the value guarded by replaceIfUndef
+// this ensures that we do not produce a 0 tensor
+// when the autograd would produce None
+// graph(a) {
+//   b = replaceIfUndef(a,0);
+//   c = b + b
+//   return c, b; // will replace 'b' with 'a'
+// }
+// Also replace any known-to-be-zero outputs with Undef
+// for the same reason
+
+static void passthroughUndefs(std::shared_ptr<Graph> graph) {
+  bool changed = false;
+  for(size_t i = 0; i < graph->outputs().size(); i++) {
+      Value * v = graph->outputs()[i];
+      if(v->node()->kind() == kReplaceIfUndef) {
+        graph->return_node()->replaceInput(i, v->node()->inputs()[0]);
+        changed = true;
+      } else if(isZero(v)) {
+        auto undef = graph->appendNode(graph->createUndefined());
+        graph->return_node()->replaceInput(i, undef->output());
+        changed = true;
+      }
+  }
+  // handle cases where replaceIfUndef or constants has become dead
+  if(changed)
+    EliminateDeadCode(graph);
+
+}
+
 // Takes a graph returned from `addReverseInline` and splits it into two graphs
 // (one for each stage). All intermediates needed in the second stage are added to
 // outputs of the first graph, and taken as inputs in the second one. For a more
@@ -348,6 +401,7 @@ static void lambdaLiftReverse(Graph& graph,
   // Finally, we can split the graph into two parts.
   grad_desc.f  = splitOffStage(graph, 0, primal_inputs, primal_outputs);
   grad_desc.df = splitOffStage(graph, 1, reverse_inputs, reverse_outputs);
+  passthroughUndefs(grad_desc.df);
 }
 
 Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
@@ -357,6 +411,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
               "differentiate will mutate and destroy the graph, so it requires "
               "graph.use_count() == 1");
   std::swap(_graph, graph);
+  graph->lint();
   // XXX: Take care when handling outputs - they can be duplicated!
   Gradient grad_desc;
   // Fills in df_input_vjps and df_output_vjps

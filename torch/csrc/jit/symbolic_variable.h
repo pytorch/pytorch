@@ -37,8 +37,23 @@ struct SymbolicVariable {
       }
       return out;
   }
+  static bool isScalarValue(at::Scalar s, double v) {
+    if(s.isFloatingPoint()) {
+      return v == s.toDouble();
+    } else {
+      return v == (double) s.toLong();
+    }
+  }
   SymbolicVariable operator*(SymbolicVariable rhs) const {
     return create(kmul, {*this, rhs})[0].typeLike(*this);
+  }
+  SymbolicVariable operator*(at::Scalar rhs) const {
+    if(isScalarValue(rhs, 1))
+      return *this;
+    Node * n;
+    auto r = create(kmul, {*this}, 1, &n)[0];
+    n->t_(kother, rhs.toTensor());
+    return r;
   }
   SymbolicVariable operator+(SymbolicVariable rhs) const {
     Node * n;

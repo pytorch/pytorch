@@ -66,6 +66,9 @@ void PropagateShapeOnNode(Node * node) {
     case kConstant: {
       node->output()->inferTypeFrom(node->t(kvalue));
     } break;
+    case kUndefined: {
+      node->output()->setType(nullptr);
+    } break;
     default: {
 
       auto op = getTensorOp(node);

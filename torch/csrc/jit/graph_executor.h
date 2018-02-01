@@ -8,8 +8,8 @@ namespace torch { namespace jit {
 struct GraphExecutorImpl;
 struct GraphExecutor {
   GraphExecutor() {}
-  GraphExecutor(std::shared_ptr<Graph> graph);
-  GraphExecutor(std::shared_ptr<Graph> graph, bool symbolically_differentiable);
+  GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
+  GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);
   std::vector<at::Tensor> run(std::vector<at::Tensor> inputs);
   operator bool() const {
     return pImpl != nullptr;

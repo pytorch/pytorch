@@ -206,9 +206,11 @@ class TestJit(TestCase):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
         cx = Variable(torch.randn(3, 20).float().cuda())
-        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
+        # Just to allocate weights with correct sizes
+        module = nn.LSTMCell(10, 20).float().cuda()
 
-        trace, _ = torch.jit.trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
+        trace, _ = torch.jit.trace(
+            LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         torch._C._jit_pass_lint(trace)
@@ -228,7 +230,8 @@ class TestJit(TestCase):
         input = rand_v(3, 10)
         hx = rand_v(3, 20)
         cx = rand_v(3, 20)
-        module = to_type(nn.LSTMCell(10, 20))  # Just to allocate weights with correct sizes
+        # Just to allocate weights with correct sizes
+        module = to_type(nn.LSTMCell(10, 20))
 
         CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCell)
 
@@ -252,7 +255,8 @@ class TestJit(TestCase):
         input = Variable(torch.randn(3, 10).float().cuda())
         hx = Variable(torch.randn(3, 20).float().cuda())
         cx = Variable(torch.randn(3, 20).float().cuda())
-        module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
+        # Just to allocate weights with correct sizes
+        module = nn.LSTMCell(10, 20).float().cuda()
 
         CompiledLSTMCell = torch.jit.compile(nderivs=0)(LSTMCellC)
 
@@ -385,8 +389,10 @@ class TestJit(TestCase):
     @unittest.skipIf(not RUN_CUDA_MULTI_GPU, "needs non-zero device")
     def test_compile_fuse_last_device(self):
         max_device = torch.cuda.device_count() - 1
-        x = Variable(torch.Tensor([0.4]), requires_grad=True).float().cuda(max_device)
-        y = Variable(torch.Tensor([0.7]), requires_grad=True).float().cuda(max_device)
+        x = Variable(torch.Tensor([0.4]),
+                     requires_grad=True).float().cuda(max_device)
+        y = Variable(torch.Tensor([0.7]),
+                     requires_grad=True).float().cuda(max_device)
 
         @torch.jit.compile(nderivs=0)
         def doit(x, y):
@@ -544,7 +550,8 @@ class TestJit(TestCase):
 
         x = Variable(torch.Tensor([0]), requires_grad=True)
         trace, inputs = torch._C._tracer_enter((x,), 0)
-        self.assertRaisesRegex(RuntimeError, "MyLegacyFn", lambda: MyLegacyFn()(*inputs))
+        self.assertRaisesRegex(RuntimeError, "MyLegacyFn",
+                               lambda: MyLegacyFn()(*inputs))
         torch._C._tracer_exit(inputs)
 
     def test_inplace_transplant(self):
@@ -634,7 +641,8 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
 
         # Run first backward
-        grad, = torch.autograd.grad(z, x, Variable(torch.ones(2, 2), requires_grad=True), create_graph=True)
+        grad, = torch.autograd.grad(z, x, Variable(
+            torch.ones(2, 2), requires_grad=True), create_graph=True)
         torch._C._jit_pass_lint(trace)
 
         # Run second backward
@@ -661,7 +669,8 @@ class TestJit(TestCase):
         torch._C._jit_pass_lint(trace)
 
         # Run first backward
-        grad, = torch.autograd.grad(z, x, Variable(torch.ones(3, 3), requires_grad=True), create_graph=True)
+        grad, = torch.autograd.grad(z, x, Variable(
+            torch.ones(3, 3), requires_grad=True), create_graph=True)
         torch._C._jit_pass_lint(trace)
 
         # Run dead code elimination to remove unused trace nodes
@@ -906,10 +915,12 @@ class TestJit(TestCase):
 
     def test_non_decorator_use_fails(self):
         MyLSTM = torch.jit.compile(nn.LSTM)
-        self.assertRaisesRegex(TypeError, "class decorator", lambda: MyLSTM(2, 2))
+        self.assertRaisesRegex(
+            TypeError, "class decorator", lambda: MyLSTM(2, 2))
 
     def test_conv(self):
-        x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
+        x = Variable(torch.randn(20, 16, 50, 40).fill_(
+            1.0), requires_grad=True)
         trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpectedTrace(trace)
 
@@ -937,21 +948,23 @@ class TestJit(TestCase):
         self.assertEqual(r1, r2)
 
     def test_unused_input(self):
-            @torch.jit.compile(nderivs=1)
-            def fn(a, b, c):
-                return a + b
+        @torch.jit.compile(nderivs=1)
+        def fn(a, b, c):
+            return a + b
 
-            a, b, c = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(3)]
+        a, b, c = [Variable(torch.randn(2, 2), requires_grad=True)
+                   for _ in range(3)]
+        fn(a, b, c).sum().backward()
+        with self.assertCompiled(fn):
             fn(a, b, c).sum().backward()
-            with self.assertCompiled(fn):
-                fn(a, b, c).sum().backward()
 
     def test_repeated_input(self):
         @torch.jit.compile(nderivs=1)
         def fn(a, b):
             return a + b
 
-        a, b = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(2)]
+        a, b = [Variable(torch.randn(2, 2), requires_grad=True)
+                for _ in range(2)]
         fn(a, a).sum().backward()
         with self.assertCompiled(fn):
             fn(a, a).sum().backward()
@@ -965,30 +978,32 @@ class TestJit(TestCase):
             z = a + b
             return z, z
 
-        a, b = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(2)]
+        a, b = [Variable(torch.randn(2, 2), requires_grad=True)
+                for _ in range(2)]
         sum(fn(a, b)).sum().backward()
         with self.assertCompiled(fn):
             sum(fn(a, b)).sum().backward()
         self.assertExpected(str(fn.graph_for(a, b)))
 
     def test_re_enter(self):
-            @torch.jit.compile(nderivs=1)
-            def fn(a, b):
-                return a + b
+        @torch.jit.compile(nderivs=1)
+        def fn(a, b):
+            return a + b
 
-            @torch.jit.compile(nderivs=1)
-            def fn2(a, b, c):
-                    return fn(a, b) + c
+        @torch.jit.compile(nderivs=1)
+        def fn2(a, b, c):
+            return fn(a, b) + c
 
-            a, b, c = [Variable(torch.randn(2, 2), requires_grad=True) for _ in range(3)]
+        a, b, c = [Variable(torch.randn(2, 2), requires_grad=True)
+                   for _ in range(3)]
 
+        fn(a, b).sum().backward()
+        with self.assertCompiled(fn):
             fn(a, b).sum().backward()
-            with self.assertCompiled(fn):
-                fn(a, b).sum().backward()
 
+        fn2(a, b, c).sum().backward()
+        with self.assertCompiled(fn2):
             fn2(a, b, c).sum().backward()
-            with self.assertCompiled(fn2):
-                fn2(a, b, c).sum().backward()
 
     def test_mini_wlm(self):
         """Exercise null-edge pruning in the tracer."""
@@ -1097,7 +1112,8 @@ class TestJit(TestCase):
     @skipIfNoTorchVision
     def test_alexnet(self):
         return
-        x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
+        x = Variable(torch.randn(10, 3, 224, 224).fill_(
+            1.0), requires_grad=True)
         trace, _ = torch.jit.trace(torchvision.models.AlexNet(), x)
         self.assertExpectedTrace(trace)
         # NB: Purposely NOT testing protobuf export here
@@ -1170,22 +1186,100 @@ class TestJit(TestCase):
                 return x * self.a + self.b
 
         m = MyModule()
-        trace, _ = torch.jit.trace(m, (Variable(torch.randn(2, 2)),), nderivs=0)
+        trace, _ = torch.jit.trace(
+            m, (Variable(torch.randn(2, 2)),), nderivs=0)
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
 
     def test_nested_inplace(self):
         x = Variable(torch.randn(2, 2))
-        trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        trace, _ = torch.jit.trace(lambda x: F.threshold(
+            x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedTrace(trace)
+
+    def checkGraphExecutor(self, func, reference_tensors, input_tensors=None, optimize=True, drop=None):
+        def allSum(vs):
+            if drop is not None:
+                vs = vs[:-drop]
+            # we don't want all the grad for all the outputs to be the same
+            # so we multiply each by a constant
+            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
+        if input_tensors is None:
+            input_tensors = reference_tensors
+
+        nograd_inputs = [Variable(t) for t in reference_tensors]
+        recording_inputs = [Variable(t, requires_grad=True)
+                            for t in reference_tensors]
+
+        create_ge = torch._C.GraphExecutor if optimize else torch._jit_reference_executor
+        ge = create_ge(func, [Variable(t) for t in input_tensors])
+
+        # test no gradients case
+
+        outputs = func(*nograd_inputs)
+        outputs_ge = ge(*nograd_inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+        # test single grad case
+
+        outputs = func(*recording_inputs)
+        grads = torch.autograd.grad(allSum(outputs), recording_inputs)
+
+        outputs_ge = ge(*recording_inputs)
+        grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs)
+        self.assertEqual(outputs, outputs_ge)
+        self.assertEqual(grads, grads_ge)
+
+        # test the grad grad case
+
+        outputs = func(*recording_inputs)
+        l1 = allSum(outputs)
+        grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
+        l2 = (allSum(grads) * l1)
+        grads2 = torch.autograd.grad(l2, recording_inputs)
+
+        recording_inputs = [Variable(t, requires_grad=True)
+                            for t in reference_tensors]
+
+        outputs_ge = ge(*recording_inputs)
+        l1_ge = allSum(outputs_ge)
+        grads_ge = torch.autograd.grad(
+            l1_ge, recording_inputs, create_graph=True)
+        l2_ge = (allSum(grads_ge) * l1_ge)
+        grads2_ge = torch.autograd.grad(l2_ge, recording_inputs)
+
+        self.assertEqual(outputs, outputs_ge)
+        self.assertEqual(grads, grads_ge)
+        self.assertEqual(grads2, grads2_ge)
+
+    def test_ge2(self):
+        self.checkGraphExecutor(lambda a, b: a * b + b,
+                                [torch.rand(1), torch.rand(1)], [torch.rand(2, 3), torch.rand(2, 3)])
+        # trivial identity
+        self.checkGraphExecutor(lambda a, b: (
+            b, a), [torch.rand(1), torch.rand(1)])
+
+        def foo(a):
+            t = a * a
+            return t * t, 4 * t
+        self.checkGraphExecutor(foo, [torch.rand(1)])
+        # unused input
+        self.checkGraphExecutor(
+            lambda a, b: a * a, [torch.rand(1), torch.rand(1)])
+        # test outputs that do not get used in grad
+        self.checkGraphExecutor(foo, [torch.rand(1)], drop=1)
+        # test autograd fallback
+        self.checkGraphExecutor(lambda a, b: a * b /
+                                (a - b) + b, [torch.rand(1), torch.rand(1)])
 
     def test_ge(self):
         def foo(a, b):
-            return a * b + b
+            return a * b / (a - b) + b
         V = Variable
         a, b = V(torch.rand(1)), V(torch.rand(1))
         ge = torch._C.GraphExecutor(foo, (a, b))
-        a, b = V(torch.rand(1), requires_grad=True), V(torch.rand(1), requires_grad=True)
+        a, b = V(torch.rand(1), requires_grad=True), V(
+            torch.rand(1), requires_grad=True)
         r, = ge(a, b)
         da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
         # print(da, db)

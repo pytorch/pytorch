@@ -126,7 +126,8 @@ _(zeros) \
 _(exponent) \
 _(device) \
 _(ReplaceIfUndef) \
-_(is_zero)
+_(is_zero) \
+_(GraphExecutor)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \
