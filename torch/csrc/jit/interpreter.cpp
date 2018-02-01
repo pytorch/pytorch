@@ -483,8 +483,8 @@ struct InterpreterStateImpl {
   void runOneStage(
     const std::vector<at::Tensor> & inputs,
     std::vector<at::Tensor> & outputs) {
-      std::cout << "running stage: " << current_stage << " of " << function->stages.size() << "\n";
-      std::cout << *function->graph << "\n";
+      // std::cout << "running stage: " << current_stage << " of " << function->stages.size() << "\n";
+      // std::cout << *function->graph << "\n";
       JIT_ASSERT(current_stage < function->stages.size());
       auto & stage = function->stages[current_stage++];
       JIT_ASSERT((int)inputs.size() == stage.inputs.size);
