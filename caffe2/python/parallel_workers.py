@@ -154,7 +154,8 @@ class WorkerCoordinator(object):
 
     def init(self, global_coordinator):
         if self._init_fun and not self._started:
-            self._init_fun(self, global_coordinator)
+            data_coordinator = self
+            self._init_fun(data_coordinator, global_coordinator)
 
     def _start(self):
         if self._started:
@@ -218,8 +219,11 @@ class GlobalWorkerCoordinator(object):
         return self._worker_ids
 
     def start(self):
+        # run init and start in separate for loop to
+        # ensure init happens serially before threads are spawn.
         for c in self._coordinators:
             c.init(self)
+        for c in self._coordinators:
             c._start()
 
     def stop(self):
