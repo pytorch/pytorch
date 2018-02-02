@@ -2812,9 +2812,9 @@
     - real max
 ]]
 [[
-  name: dot
+  name: _dot
   backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
-
+  cname: dot
   variants:
     - method
     - function
