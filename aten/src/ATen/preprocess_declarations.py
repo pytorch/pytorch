@@ -192,8 +192,11 @@ def discover_sparse_tensor_operations(declaration):
                     if not exclude(arg)]
         return '#'.join(elements)
 
-    name = declaration['name']
-    if name == 'add' or name == 'add_':
+    # Determine if any options have the 'sparse: True' flag
+    sparse_options = [option
+                      for option in declaration['options']
+                      if option.get('sparse', False)]
+    if len(sparse_options) > 0:
         signature_to_option = {signature(option): option
                                for option in declaration['options']}
 
