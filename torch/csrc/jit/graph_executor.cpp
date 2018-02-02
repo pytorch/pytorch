@@ -23,7 +23,6 @@ namespace torch { namespace jit {
 namespace {
 
 using tensor_list = std::vector<at::Tensor>;
-using variable_tensor_list = tensor_list;
 using Variable = autograd::Variable;
 using autograd::variable_list;
 
@@ -66,26 +65,26 @@ struct ExecutionPlan {
     if(grad) {
       return runWithGrad(std::move(inputs));
     }
-    unwrapVariables(inputs);
     // TODO: intepreter needs to accept moved inputs
     // and delete incrementally
     tensor_list outputs;
-    InterpreterState(f).runOneStage(std::move(inputs), outputs);
-    wrapTensors(outputs);
-    return outputs;
+    InterpreterState(f).runOneStage(unwrapVariables(std::move(inputs)), outputs);
+    return wrapTensors(std::move(outputs));
   }
 private:
   // inplace to avoid allocations
-  void unwrapVariables(tensor_list & list) {
+  tensor_list unwrapVariables(variable_tensor_list && list) {
     for(auto & v : list) {
       v = v.defined() ? static_cast<Variable&>(v).data() : at::Tensor();
     }
+    return std::move(list);
   }
   // inplace to avoid allocations
-  void wrapTensors(tensor_list & list) {
+  variable_tensor_list wrapTensors(tensor_list && list) {
     for(auto & v : list) {
       v = autograd::make_variable(v);
     }
+    return variable_tensor_list(std::move(list));
   }
   // TODO: both captureInputs/captureOutputs have to iterate over the entire
   // capture list because the list is not sorted with inputs before outputs.
@@ -112,7 +111,7 @@ private:
     }
   }
 
-  variable_tensor_list runWithGrad(variable_tensor_list inputs) {
+  variable_tensor_list runWithGrad(variable_tensor_list&& inputs) {
     auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor, grad.df_input_captures.size());
     // hook up the outputs of df to the gradient functions of the inputs that require
     // gradients
@@ -126,10 +125,10 @@ private:
     }
     captureInputs(*grad_fn, inputs);
 
-    unwrapVariables(inputs);
-    tensor_list outputs;
-    InterpreterState(f).runOneStage(std::move(inputs), outputs);
-    wrapTensors(outputs);
+    tensor_list outputs_;
+    InterpreterState(f).runOneStage(unwrapVariables(std::move(inputs)), outputs_);
+    variable_tensor_list outputs = wrapTensors(std::move(outputs_));
+    
     // hookup the gradients for the output tensors that require gradients
     // to the inputs to our gradient function df
     // TODO - XXX - if any output is the same tensor multiple times, views have to be
@@ -188,7 +187,7 @@ struct GraphExecutorImpl {
       tensor_list outputs;
       state.runOneStage(std::move(inputs), outputs);
       // note: we never unwrapped inputs, because we want autograd to record the trace
-      return outputs;
+      return variable_tensor_list(std::move(outputs));
     }
 
     // either we can symbolically differentiate, or we do not need a gradient.
@@ -386,7 +385,7 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable)
 : pImpl(new GraphExecutorImpl(std::move(graph), optimize, symbolically_differentiable)) {}
 
-std::vector<at::Tensor> GraphExecutor::run(std::vector<at::Tensor> inputs) {
+variable_tensor_list GraphExecutor::run(variable_tensor_list && inputs) {
   return pImpl->run(std::move(inputs));
 }
 

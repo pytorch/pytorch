@@ -252,7 +252,7 @@ Operation getOperation(jit::Node *node) {
     return [=](const list_of_retainable & inputs, list_of_retainable & outputs) mutable {
       autograd::profiler::RecordFunction record("GraphExecutor");
       tensor_list tinputs = unsafeToTensorListShare(inputs);
-      tensor_list toutputs = executor.run(tinputs);
+      variable_tensor_list toutputs = executor.run(variable_tensor_list(std::move(tinputs)));
       moveToListOfRetainables(std::move(toutputs), outputs);
     };
   IR_ELSE()

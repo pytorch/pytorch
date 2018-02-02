@@ -2,6 +2,7 @@
 
 #include <memory>
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/variable_tensor_list.h"
 
 namespace torch { namespace jit {
 
@@ -10,7 +11,7 @@ struct GraphExecutor {
   GraphExecutor() {}
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);
-  std::vector<at::Tensor> run(std::vector<at::Tensor> inputs);
+  variable_tensor_list run(variable_tensor_list && inputs);
   operator bool() const {
     return pImpl != nullptr;
   }

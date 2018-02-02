@@ -1195,8 +1195,7 @@ class TestJit(TestCase):
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
 
-        create_ge = torch._C.GraphExecutor if optimize else torch._C._jit_reference_executor
-        ge = create_ge(func, [Variable(t) for t in input_tensors])
+        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], optimize)
 
         # test no gradients case
 

@@ -38,7 +38,7 @@ void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
 // This is a temporary constructor so that we can write python tests of
 // the executor. It does not have most of the functionality of CompiledFunction
 // such as being able to hold parameters...
-GraphExecutor createExecutorByTracing(bool optimize, py::function func, std::vector<tracer::TraceInput> inputs) {
+GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::TraceInput> inputs, bool optimize) {
   auto enter_info = tracer::enter(std::move(inputs), 1);
   py::tuple py_inputs(enter_info.second.size());
   for(size_t i = 0; i < enter_info.second.size(); ++i) {
@@ -62,8 +62,8 @@ GraphExecutor createExecutorByTracing(bool optimize, py::function func, std::vec
 // we cannot use the default py:cast<autograd::Variable> because it currently
 // unwraps the data tensor in the conversion process
 // TODO: replace with bs type
-std::vector<at::Tensor> createVariableTensorList(py::tuple tuple) {
-  std::vector<at::Tensor> result;
+variable_tensor_list createVariableTensorList(py::tuple tuple) {
+  variable_tensor_list result;
   result.reserve(tuple.size());
   for(auto e : tuple) {
     result.push_back(py::cast<autograd::Variable>(e));
@@ -99,9 +99,9 @@ void initJITBindings(PyObject *module) {
    });
 
    py::class_<GraphExecutor>(m,"GraphExecutor")
-   .def(py::init([](py::function func, std::vector<tracer::TraceInput> inputs){
-     return createExecutorByTracing(true, func, std::move(inputs));
-   }))
+   .def(py::init([](py::function func, std::vector<tracer::TraceInput> inputs, bool optimize){
+     return createExecutorByTracing(func, std::move(inputs), optimize);
+   }), py::arg("func"), py::arg("inputs"), py::arg("optimize") = true)
    .def("__call__",[](GraphExecutor & ge, py::args args) {
      auto inputs = createVariableTensorList(args);
      auto outputs = ge.run(std::move(inputs));
@@ -109,10 +109,6 @@ void initJITBindings(PyObject *module) {
      // TODO: fix conversions to be sane and make sure this works.
      return std::vector<autograd::Variable>(outputs.begin(), outputs.end());
    });
-  // hook so we can temporarily get to the non-optimizing version of GraphExecutor
-  m.def("_jit_reference_executor", [](py::function func, std::vector<tracer::TraceInput> inputs) {
-    return createExecutorByTracing(false, func, inputs);
-  });
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
   python::initCompilerMixin(module);

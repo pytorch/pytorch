@@ -3,6 +3,7 @@
 #include <vector>
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/variable_tensor_list.h"
 
 namespace torch { namespace jit {
 
@@ -37,8 +38,7 @@ struct TensorInfo;
 
 struct ArgumentSpec {
   // note: tensors must always be variables
-  // TODO: enforce this with consistency in how we pass list of tensors/variables around
-  ArgumentSpec(bool with_grad, ArrayRef<autograd::Tensor> tensors)
+  ArgumentSpec(bool with_grad, const variable_tensor_list & tensors)
   :  hash_code(0), ntensors(tensors.size()) {
     int all_dims = 0;
     for(size_t i = 0; i < ntensors; i++) {
