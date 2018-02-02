@@ -1150,7 +1150,9 @@ def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    import torch, torch.onnx.symbolic
+    import torch
+    import torch.onnx.symbolic
+
     @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
     def _instance_norm(input, weight=None, bias=None, saved_running_mean=None,
                        saved_running_var=None, training=False, momentum=0.1,
@@ -1174,8 +1176,8 @@ def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
 
         return out.view(b, c, *input.size()[2:])
     return _instance_norm(input, weight=weight, bias=bias, saved_running_mean=saved_running_mean,
-                                        saved_running_var=saved_running_mean, training=training,
-                                        momentum=momentum, eps=eps, affine=affine)
+                          saved_running_var=saved_running_var, training=training,
+                          momentum=momentum, eps=eps, affine=affine)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,

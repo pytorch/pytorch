@@ -17,9 +17,11 @@ class _InstanceNorm(_BatchNorm):
             bias = self.bias.repeat(b)
 
         training = not self._use_running_stats
-        return F.instance_norm(input, weight, bias, self.running_mean, self.running_var,
-                                       training=training, momentum=self.momentum, eps=self.eps,
-                                       affine=self.affine)
+        return F.instance_norm(input, weight=weight, bias=bias,
+                               saved_running_mean=self.running_mean,
+                               saved_running_var=self.running_var,
+                               training=training, momentum=self.momentum,
+                               eps=self.eps, affine=self.affine)
 
     def use_running_stats(self, mode=True):
         r"""Set using running statistics or instance statistics.
