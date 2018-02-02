@@ -1,4 +1,4 @@
-from collections import OrderedDict, Iterable
+from collections import OrderedDict
 import functools
 
 import torch
@@ -89,8 +89,12 @@ class Module(object):
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
-
-        self._buffers[name] = tensor
+        elif not tensor is None and not torch.is_tensor(tensor):
+            raise TypeError("cannot assign '{}' object to buffer '{}' "
+                            "(torch Tensor or None required)"
+                            .format(torch.typename(tensor), name))
+        else:
+            self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
         """Adds a parameter to the module.
