@@ -20,11 +20,7 @@ def _type(self, new_type=None, non_blocking=False, **kwargs):
         **kwargs: For compatibility, may contain the key ``async`` in place of
             the ``non_blocking`` argument.
     """
-    if kwargs:
-        if len(kwargs) != 1 or 'async' not in kwargs:
-            raise ValueError("kwargs may only contain the key 'async'")
-        non_blocking = kwargs['async']
-        warnings.warn("'async' is deprecated; use 'non_blocking'")
+    non_blocking = _get_async_or_non_blocking('type', non_blocking, kwargs)
     if new_type is None:
         return self.__module__ + '.' + self.__class__.__name__
 
@@ -60,11 +56,7 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
         **kwargs: For compatibility, may contain the key ``async`` in place of
             the ``non_blocking`` argument.
     """
-    if kwargs:
-        if len(kwargs) != 1 or 'async' not in kwargs:
-            raise ValueError("kwargs may only contain the key 'async'")
-        non_blocking = kwargs['async']
-        warnings.warn("'async' is deprecated; use 'non_blocking'")
+    non_blocking = _get_async_or_non_blocking('cuda', non_blocking, kwargs)
     if self.is_cuda:
         if device is None:
             device = torch.cuda.current_device()
@@ -82,6 +74,17 @@ def _cuda(self, device=None, non_blocking=False, **kwargs):
         else:
             new_type = getattr(torch.cuda, self.__class__.__name__)
             return new_type(self.size()).copy_(self, non_blocking)
+
+
+def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
+    if not kwargs:
+        return non_blocking
+    if len(kwargs) != 1 or 'async' not in kwargs:
+        message = "{}() got an unexpected keyword argument '{}'"
+        argument = list(kwargs.keys()).pop()
+        raise TypeError(message.format(function_name, argument))
+    warnings.warn("'async' is deprecated; use 'non_blocking'")
+    return kwargs['async']
 
 
 def _rebuild_tensor(storage, storage_offset, size, stride):
