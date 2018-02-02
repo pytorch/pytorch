@@ -58,7 +58,7 @@ struct ArgumentSpec {
       if(t.defined()) {
         pod.type = static_cast<unsigned int>(t.type().scalarType());
         pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
-        pod.requires_grad = with_grad && autograd::Variable(t).requires_grad();
+        pod.requires_grad = with_grad && static_cast<const autograd::Variable&>(t).requires_grad();
         total_dims += t.ndimension();
         auto sizes = t.sizes();
         std::copy(sizes.begin(),sizes.end(), next_dim);

@@ -59,6 +59,18 @@ GraphExecutor createExecutorByTracing(bool optimize, py::function func, std::vec
   return GraphExecutor(std::move(graph), optimize);
 }
 
+// we cannot use the default py:cast<autograd::Variable> because it currently
+// unwraps the data tensor in the conversion process
+// TODO: replace with bs type
+std::vector<at::Tensor> createVariableTensorList(py::tuple tuple) {
+  std::vector<at::Tensor> result;
+  result.reserve(tuple.size());
+  for(auto e : tuple) {
+    result.push_back(py::cast<autograd::Variable>(e));
+  }
+  return result;
+}
+
 } // anonymous namespace
 
 extern std::string runJITCPPTests();
@@ -90,9 +102,8 @@ void initJITBindings(PyObject *module) {
    .def(py::init([](py::function func, std::vector<tracer::TraceInput> inputs){
      return createExecutorByTracing(true, func, std::move(inputs));
    }))
-   .def("__call__",[](py::args args) {
-     auto ge = py::cast<GraphExecutor&>(args[0]);
-     auto inputs = py::cast<std::vector<at::Tensor>>(tuple_tail(args));
+   .def("__call__",[](GraphExecutor & ge, py::args args) {
+     auto inputs = createVariableTensorList(args);
      auto outputs = ge.run(std::move(inputs));
      // if we don't tell pybind these are variables it chokes on the conversion.
      // TODO: fix conversions to be sane and make sure this works.

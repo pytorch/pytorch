@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <sstream>
 #include <typeinfo>
-#include "Assert.h"
+#include "ATenAssert.h"
 
 namespace at {
 

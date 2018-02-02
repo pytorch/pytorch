@@ -17,7 +17,7 @@
 #include <assert.h>
 #include <array>
 #include <vector>
-#include "Assert.h"
+#include "ATenAssert.h"
 
 namespace at {
   /// ArrayRef - Represent a constant reference to an array (0 or more elements

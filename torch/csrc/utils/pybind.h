@@ -21,7 +21,7 @@ public:
   bool load(handle src, bool) {
     PyObject* obj = src.ptr();
     if (THPVariable_Check(obj)) {
-      value = ((THPVariable*)obj)->cdata;
+      value = ((THPVariable*)obj)->cdata.data();
       return true;
     }
     try {

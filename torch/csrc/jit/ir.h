@@ -833,6 +833,7 @@ public:
   }
 
   friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  std::shared_ptr<Graph> copy();
 
 private:
 

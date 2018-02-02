@@ -78,7 +78,7 @@ private:
   // inplace to avoid allocations
   void unwrapVariables(tensor_list & list) {
     for(auto & v : list) {
-      v = v.defined() ? autograd::Variable(v).data() : at::Tensor();
+      v = v.defined() ? static_cast<Variable&>(v).data() : at::Tensor();
     }
   }
   // inplace to avoid allocations
@@ -97,7 +97,7 @@ private:
     for(size_t i = 0; i < N; ++i) {
       if(capture_desc[i].kind == Capture::Kind::Input) {
         size_t offset = capture_desc[i].offset;
-        grad_fn.captures[i] = autograd::SavedVariable(autograd::Variable(inputs[offset]), false);
+        grad_fn.captures[i] = autograd::SavedVariable(static_cast<Variable&>(inputs[offset]), false);
       }
     }
   }
@@ -107,7 +107,7 @@ private:
     for(size_t i = 0; i < N; ++i) {
       if(capture_desc[i].kind == Capture::Kind::Output) {
         size_t offset = capture_desc[i].offset;
-        grad_fn.captures[i] = autograd::SavedVariable(autograd::Variable(outputs[offset]), true);
+        grad_fn.captures[i] = autograd::SavedVariable(static_cast<Variable&>(outputs[offset]), true);
       }
     }
   }
@@ -117,7 +117,7 @@ private:
     // hook up the outputs of df to the gradient functions of the inputs that require
     // gradients
     for(auto idx : grad.df_output_vjps) {
-      autograd::Variable v(inputs[idx]);
+      auto & v = static_cast<Variable&>(inputs[idx]);
       // TODO: this kinda stuff is _way_ to low level to the public API of variable.
       // Why do I have to care here whether v has a grad_fn or grad accumulator?
       // Why do I have to care here about output_nr? I just want to say
@@ -138,7 +138,7 @@ private:
     // this is currently intentionally not done here so we can get an idea of our
     // perf before introducing overhead for correctness
     for(auto idx : grad.df_input_vjps) {
-      autograd::Variable o(outputs[idx]);
+      auto & o = static_cast<Variable&>(outputs[idx]);
       auto impl = o.get();
       // Note: we have to set this up in place, or we have to
       // throw away and reallocate variables that were already created in
@@ -182,7 +182,7 @@ struct GraphExecutorImpl {
   // entry point where execution begins
   variable_tensor_list run(variable_tensor_list inputs) {
     // this is the fallback pathway, when we cannot differentiate
-    if(!optimize || (!symbolically_differentiable && gradientIsPossible(inputs))) {
+    if(!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
       auto & fb = getOrCreateAutogradFallback();
       InterpreterState state(fb);
       tensor_list outputs;
@@ -200,12 +200,12 @@ struct GraphExecutorImpl {
 
 private:
 
-  static bool gradientIsPossible(const variable_tensor_list & inputs) {
+  static bool needsGradient(const variable_tensor_list & inputs) {
     if (!autograd::GradMode::is_enabled()) {
       return false;
     }
     for (const auto & tensor : inputs) {
-      if(tensor.defined() && Variable(tensor).requires_grad())
+      if(tensor.defined() && static_cast<const Variable&>(tensor).requires_grad())
         return true;
     }
     return false;
@@ -218,35 +218,26 @@ private:
     return true;
   }
 
-  static std::shared_ptr<Graph> copy(Graph & g) {
-    auto new_g = std::make_shared<Graph>();
-    std::unordered_map<Value*, Value*> value_map;
-    for(auto input : g.inputs()) {
-      value_map[input] = new_g->addInput()->copyMetadata(input);
-    }
-    for(auto node : g.nodes()) {
-      auto new_node = new_g->appendNode(new_g->createClone(node, [&](Value* v) {
-        return value_map.at(v);
-      }));
-      for(size_t i = 0; i < node->outputs().size(); ++i) {
-        value_map[node->outputs()[i]] = new_node->outputs()[i];
-        new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
-      }
-    }
-    for(auto output : g.outputs()) {
-      new_g->registerOutput(value_map.at(output));
-    }
-    return new_g;
-  }
-
   void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
+
+    // these optimizations must run in the presence of variables
+    // and when shape information is not statically known.
+
     EliminateDeadCode(graph);
     CheckInplace(graph);
     EliminateCommonSubexpression(graph);
+
     if (!graphMustSupportVariables) {
       // These optimizations can introduce operators like FusionGroup that
       // do not work on variables
+
+      // They also may assume that concrete sizes/strides are availiable
+
+      //TODO: create peephole optimizations that are safe to run
+      // when we are using variables, and when we do not know sizes.
       PeepholeOptimize(graph);
+      // TODO: remove mandatory size checking in BatchMM, otherwise
+      // it works fine on variables.
       BatchMM(graph);
       FuseGraph(graph);
     }
@@ -256,7 +247,7 @@ private:
     if(autograd_fallback) {
       return autograd_fallback;
     }
-    auto graph_ = copy(*graph);
+    auto graph_ = graph->copy();
     if(optimize) {
       CreateAutodiffSubgraphs(*graph_);
       runOptimization(graph_, /*graphMustSupportVariables=*/true);
@@ -278,7 +269,7 @@ private:
       return r.first->second;
     }
   }
-  bool gradientIsPossible(const ArgumentSpec & spec) {
+  bool needsGradient(const ArgumentSpec & spec) {
     for(size_t i = 0; i < spec.size(); ++i) {
       if(spec.tensorInfo(i).requires_grad())
         return true;
@@ -322,7 +313,12 @@ private:
       }
     }
   }
-  void SpecializeToSpec(std::shared_ptr<Graph> g, const ArgumentSpec & spec) {
+  void specializeToSpec(std::shared_ptr<Graph> g, const ArgumentSpec & spec) {
+
+    // The following passes are specialized to clean up after autograd
+    // decisions to insert/remove undefs nodes and to work before
+    // we propagate input shapes.
+
     // clean up replaceIfUndef nodes
     specializeUndef(*g, spec);
     // clean up additions resulting from nodes that were in fact undefined
@@ -333,9 +329,9 @@ private:
     PropagateInputShapes(*g, spec);
   }
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
-    auto graph_ = copy(*graph);
-    SpecializeToSpec(graph_, spec);
-    if(!gradientIsPossible(spec)) {
+    auto graph_ = graph->copy();
+    specializeToSpec(graph_, spec);
+    if(!needsGradient(spec)) {
       runOptimization(graph_, /*graphMustSupportVariables=*/false);
       return ExecutionPlan(graph_);
     }

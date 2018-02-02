@@ -520,4 +520,25 @@ void PythonOp::cloneFrom(Node * other_) {
   }
 }
 
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  std::unordered_map<Value*, Value*> value_map;
+  for(auto input : inputs()) {
+    value_map[input] = new_g->addInput()->copyMetadata(input);
+  }
+  for(auto node : nodes()) {
+    auto new_node = new_g->appendNode(new_g->createClone(node, [&](Value* v) {
+      return value_map.at(v);
+    }));
+    for(size_t i = 0; i < node->outputs().size(); ++i) {
+      value_map[node->outputs()[i]] = new_node->outputs()[i];
+      new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
+    }
+  }
+  for(auto output : outputs()) {
+    new_g->registerOutput(value_map.at(output));
+  }
+  return new_g;
+}
+
 }}
