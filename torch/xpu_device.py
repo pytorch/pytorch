@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Abstracted processing device
 
@@ -9,9 +8,6 @@ import ubelt as ub
 import warnings
 import torch
 import six
-
-
-__all__ = ['XPU']
 
 
 class XPU(ub.NiceRepr):
@@ -41,6 +37,22 @@ class XPU(ub.NiceRepr):
         xpu.mode = None
         xpu._device = None
 
+        if item == 'cpu' or item is None:
+            item = None
+        elif isinstance(item, six.string_types):
+            item = item.lower()
+            item = item.replace('cpu', '')
+            item = item.replace('gpu', '')
+            item = item.replace('cuda', '')
+            if ',' in item:
+                item = list(map(int, ','.split(item)))
+            if item == '':
+                item = 0
+            if item == 'none':
+                item = None
+            else:
+                item = int(item)
+
         if check:
             if not XPU.exists(item):
                 raise ValueError('XPU {} does not exist.'.format(item))
@@ -56,6 +68,8 @@ class XPU(ub.NiceRepr):
             if not xpu.devices:
                 raise IndexError('empty device list')
             xpu.main_device = xpu.devices[0]
+        else:
+            raise TypeError(xpu)
 
         if xpu.main_device is not None:
             xpu._device = torch.cuda.device(xpu.main_device)
@@ -70,7 +84,7 @@ class XPU(ub.NiceRepr):
         """
         if item is None:
             return True
-        if isinstance(item, int):
+        elif isinstance(item, int):
             if item < 0:
                 raise ValueError('gpu num must be positive not {}'.format(item))
             return item < torch.cuda.device_count()
@@ -87,25 +101,13 @@ class XPU(ub.NiceRepr):
         Args:
             item : special string, int, list, or None
         """
-        if item == 'auto':
+        if isinstance(item, XPU):
+            return item
+        elif item == 'auto':
             return XPU.from_auto(**kwargs)
         elif item == 'argv':
             return XPU.from_argv(**kwargs)
-        if item == 'cpu' or item is None:
-            return XPU(None)
-        elif isinstance(item, six.string_types):
-            item = item.lower()
-            item = item.replace('cpu', '')
-            item = item.replace('gpu', '')
-            item = item.replace('cuda', '')
-            if ',' in item:
-                item = list(map(int, ','.split(item)))
-            if item == '':
-                item = 0
-            if item == 'none':
-                item = None
-            else:
-                item = int(item)
+        else:
             return XPU(item)
 
     @classmethod
@@ -115,7 +117,7 @@ class XPU(ub.NiceRepr):
         """
         n_available = torch.cuda.device_count()
         gpu_num = find_unused_gpu(min_memory=min_memory)
-        if gpu_num >= n_available:
+        if gpu_num is None or gpu_num >= n_available:
             gpu_num = None
         xpu = XPU(gpu_num)
         return xpu
@@ -438,8 +440,7 @@ class XPUUnitTests(object):
 if __name__ == '__main__':
     r"""
     CommandLine:
-        python -m clab.xpu_device all
+        python -m torch.xpu_device all
     """
     import xdoctest
     xdoctest.doctest_module(__file__)
-
