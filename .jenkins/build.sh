@@ -51,4 +51,10 @@ if [[ "$JOB_NAME" != *cuda* ]]; then
    time tools/run_aten_tests.sh
 fi
 
+# Test C FFI plugins
+pip install cffi
+git clone https://github.com/pytorch/extension-ffi.git
+cd extension-ffi/script
+python build.py
+
 echo "EXITED_USER_LAND"
