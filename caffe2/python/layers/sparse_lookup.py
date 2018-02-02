@@ -63,7 +63,7 @@ class SparseLookup(ModelLayer):
 
     def __init__(self, model, input_record, inner_shape, reducer,
                  weight_init=None, weight_optim=None,
-                 name='sparse_lookup', **kwargs):
+                 name='sparse_lookup', regularizer=None, **kwargs):
 
         super(SparseLookup, self).__init__(model, name, input_record, **kwargs)
 
@@ -111,7 +111,9 @@ class SparseLookup(ModelLayer):
             optimizer=weight_optim,
             ps_param=LayerPsParam(
                 sparse_key=sparse_key,
-                average_length=avg_length))
+                average_length=avg_length),
+            regularizer=regularizer
+        )
 
         self.scale_bias_init = ('ConstantFill', {'value': 0.0})
 
@@ -119,7 +121,8 @@ class SparseLookup(ModelLayer):
             param_name='scale_bias',
             shape=[],
             initializer=self.scale_bias_init,
-            optimizer=model.NoOptim)
+            optimizer=model.NoOptim,
+        )
 
         self.output_schema = schema.Scalar(
             (np.float32, inner_shape),
