@@ -33,7 +33,7 @@ struct UndefinedType final : public Type {
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool async) const override;
+  virtual Tensor & s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const override;
 };
 
 } // namespace at
