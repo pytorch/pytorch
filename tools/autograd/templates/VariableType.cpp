@@ -376,7 +376,7 @@ static bool isFloatingPoint(ScalarType s) {
   return s == kFloat || s == kDouble || s == kHalf;
 }
 
-Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) const {
+Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   // TODO: once copy is exposed in Declarations.yaml we may be able to bind
   // it automatically
   auto& self_ = unpack(self, "self", 0);
@@ -392,7 +392,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool async) co
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
-  baseType->s_copy_(self_, src_, async);
+  baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
   rebase_history(self, std::move(grad_fn));
   return self;

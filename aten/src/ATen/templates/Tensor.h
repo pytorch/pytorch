@@ -71,7 +71,7 @@ struct Tensor : public detail::TensorBase {
     return pImpl->storage();
   }
   inline Tensor toType(const Type & t) const;
-  inline Tensor & copy_(const Tensor & src, bool async=false);
+  inline Tensor & copy_(const Tensor & src, bool non_blocking=false);
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
