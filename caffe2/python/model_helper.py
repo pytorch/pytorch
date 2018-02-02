@@ -29,6 +29,7 @@ from caffe2.python.optimizer_context import (
     OptimizerContext,
     DEFAULT_OPTIM,
 )
+from caffe2.python.regularizer_context import RegularizerContext
 
 from future.utils import viewitems, viewkeys
 from itertools import chain
@@ -234,6 +235,9 @@ class ModelHelper(object):
                 param_info.optimizer = optim_context.get_optimizer(tag)
         if not param_info.optimizer and optim_context.has_optimizer(DEFAULT_OPTIM):
             param_info.optimizer = optim_context.get_optimizer(DEFAULT_OPTIM)
+
+        reg_context = RegularizerContext.current()
+        param_info.regularizer = reg_context
 
         self._parameters_info[param_name] = param_info
         # Add param to legacy structs as well, so all other functions for
