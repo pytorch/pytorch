@@ -138,13 +138,11 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
     if (threadIdx.x == 0) {
       gradInput_k[target_idx] += ScalarConvert<Acctype, Dtype>::to(totalSum);
     }
-    __syncthreads();
   }
 
   for (int d = threadIdx.x; d < dim; d += blockDim.x) {
     gradInput_k[d] *= *gradOutput_k;
   }
-  __syncthreads();
 }
 
 #include "generic/MultiLabelMarginCriterion.cu"

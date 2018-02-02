@@ -568,14 +568,14 @@ class MultiLabelMarginLoss(_Loss):
     This allows for different samples to have variable amounts of target classes
 
     Args:
-        size_average (bool, optional): By default, the losses are averaged
-            over observations for each minibatch. However, if the field
-            size_average is set to ``False``, the losses are instead summed for
-            each minibatch. Default: ``True``
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per batch element instead and ignores
-            size_average. Default: True
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
     Shape:
         - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
