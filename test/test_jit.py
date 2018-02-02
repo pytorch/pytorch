@@ -1265,9 +1265,11 @@ class TestJit(TestCase):
     def test_ge_unoptimized(self):
         self.run_ge_tests(False, False)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_ge_optimized(self):
         self.run_ge_tests(True, False)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "requires CUDA")
     def test_ge_cuda(self):
         self.run_ge_tests(True, True)
