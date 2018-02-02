@@ -55,7 +55,7 @@ Tensor det(const Tensor& self) {
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
-  if (t.dim() == 0) {
+  if (t.dim() != 1) {
     runtime_error("%s: Expected 1-D argument %s, but got %d-D", fn, arg, t.dim());
   }
 }
