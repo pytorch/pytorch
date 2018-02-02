@@ -422,7 +422,7 @@ at::Tensor _convolution_nogroup(
           stride, padding, output_padding, dilation);
     } else if (dim == 5) {
       return at::thnn_conv_transpose3d(
-        input, weight, bias,
+        input, weight, kernel_size, bias,
         stride, padding, output_padding, dilation);
       }
   } else {  /* Not transposed */

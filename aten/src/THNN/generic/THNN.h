@@ -1406,6 +1406,7 @@ TH_API void THNN_(VolumetricFullConvolution_updateOutput)(
           THTensor *bias,           // [OPTIONAL] gradBias tensor (nOutputPlane)
           THTensor *finput,         // [OUT] internal columns buffer
           THTensor *fgradInput,     // [OUT] internal ones buffer
+          int kT, int kW, int kH,   // kenerl size
           int dT, int dW, int dH,   // stride of the convolution
           int pT, int pW, int pH,   // padding
           int aT, int aW, int aH);  // extra output adjustment
@@ -1417,6 +1418,7 @@ TH_API void THNN_(VolumetricFullConvolution_updateGradInput)(
           THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
           THTensor *finput,         // internal columns buffer
           THTensor *fgradInput,     // internal ones buffer
+          int kT, int kW, int kH,   // kenerl size
           int dT, int dW, int dH,   // stride
           int pT, int pW, int pH,   // padding
           int aT, int aW, int aH);  // extra output adjustment
@@ -1428,6 +1430,7 @@ TH_API void THNN_(VolumetricFullConvolution_accGradParameters)(
           THTensor *gradBias,       // [OPTIONAL] gradBias tensor (nOutputPlane)
           THTensor *finput,         // internal columns buffer
           THTensor *fgradInput,     // internal ones buffer
+          int kT, int kW, int kH,   // kenerl size
           int dT, int dW, int dH,   // stride
           int pT, int pW, int pH,   // padding
           int aT, int aW, int aH,   // extra output adjustment
@@ -1480,6 +1483,7 @@ TH_API void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
           THTensor *bias,           // [OPTIONAL] gradBias tensor (nOutputPlane)
           THTensor *finput,         // [OUT] internal columns buffer
           THTensor *fgradInput,     // [OUT] internal ones buffer
+          int kT, int kW, int kH,   // kernel size
           int dT, int dW, int dH,   // stride of the convolution
           int pT, int pW, int pH,   // padding
           int dilationT, int dilationW, int dilationH,
@@ -1492,6 +1496,7 @@ TH_API void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
           THTensor *weight,         // weight tensor (nInputPlane x nOutputPlane x kT x kH x kW)
           THTensor *finput,         // internal columns buffer
           THTensor *fgradInput,     // internal ones buffer
+          int kT, int kW, int kH,   // kernel size
           int dT, int dW, int dH,   // stride
           int pT, int pW, int pH,   // padding
           int dilationT, int dilationW, int dilationH,
@@ -1505,6 +1510,7 @@ TH_API void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
           THTensor *gradBias,       // [OPTIONAL] gradBias tensor (nOutputPlane)
           THTensor *finput,         // internal columns buffer
           THTensor *fgradInput,     // internal ones buffer
+          int kT, int kW, int kH,   // kernel size
           int dT, int dW, int dH,   // stride
           int pT, int pW, int pH,   // padding
           int dilationT, int dilationW, int dilationH,

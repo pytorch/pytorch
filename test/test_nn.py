@@ -3652,7 +3652,7 @@ class TestNN(NNTestCase):
 
         x = Variable(tensor.new(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
         x.data.normal_()
-        weight = Variable(tensor.new(chan_out, chan_in // groups, kern, kern), requires_grad=True)
+        weight = Variable(tensor.new(chan_out, chan_in // groups, kern, kern), requires_grad=not no_weight)
         weight.data.normal_()
         if use_bias:
             bias = Variable(tensor.new(chan_out), requires_grad=True)
@@ -3661,31 +3661,20 @@ class TestNN(NNTestCase):
             bias = None
 
         def func(*inputs):
-            if no_weight:
-                lweight = weight
-                if use_bias:
-                    lx, lbias = inputs
-                else:
-                    lx, = inputs
-                    lbias = None
+            if use_bias:
+                lx, lweight, lbias = inputs
             else:
-                if use_bias:
-                    lx, lweight, lbias = inputs
-                else:
-                    lx, lweight = inputs
-                    lbias = None
+                lx, lweight = inputs
+                lbias = None
             # We disable cudnn during forward to avoid finite difference imprecision issues
             with cudnn.flags(enabled=False):
                 out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
-        if no_weight:
-            inputs = (x, bias)
+        if use_bias:
+            inputs = x, weight, bias
         else:
-            inputs = (x, weight, bias)
-
-        if not use_bias:
-            inputs = inputs[:-1]
+            inputs = x, weight
 
         dummy_out = func(*inputs)
         grad_y = Variable(tensor.new(dummy_out.size()), requires_grad=True)
@@ -3698,21 +3687,21 @@ class TestNN(NNTestCase):
         for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
-                no_weight = False
-                result = self.run_conv_double_back_test(kern, stride,
-                                                        padding, chan_in, chan_out,
-                                                        batch_size, inp_size, dilation,
-                                                        no_weight)
-                self.assertTrue(result,
-                                "Conv double backward test failed with parameters:" +
-                                "\nkern: " + str(kern) +
-                                "\nstride: " + str(stride) +
-                                "\npadding: " + str(padding) +
-                                "\nchan_in: " + str(chan_in) +
-                                "\nchan_out: " + str(chan_out) +
-                                "\nbatch_size: " + str(batch_size) +
-                                "\ninp_size: " + str(inp_size) +
-                                "\ndilation: " + str(dilation))
+                for no_weight in (True, False):
+                    result = self.run_conv_double_back_test(kern, stride,
+                                                            padding, chan_in, chan_out,
+                                                            batch_size, inp_size, dilation,
+                                                            no_weight)
+                    self.assertTrue(result,
+                                    "Conv double backward test failed with parameters:" +
+                                    "\nkern: " + str(kern) +
+                                    "\nstride: " + str(stride) +
+                                    "\npadding: " + str(padding) +
+                                    "\nchan_in: " + str(chan_in) +
+                                    "\nchan_out: " + str(chan_out) +
+                                    "\nbatch_size: " + str(batch_size) +
+                                    "\ninp_size: " + str(inp_size) +
+                                    "\ndilation: " + str(dilation))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
