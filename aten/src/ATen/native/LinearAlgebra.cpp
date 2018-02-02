@@ -113,6 +113,7 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
   return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+}
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   if (self.dim() != 1) {
