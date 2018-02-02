@@ -54,6 +54,16 @@ Tensor det(const Tensor& self) {
   return std::get<0>(self._det_with_svd());
 }
 
+Tensor dot(const Tensor& self, const Tensor& tensor) {
+  if (self.dim() != 1) {
+    runtime_error("Expected argument self to have 1 dimension, but has %d", self.dim());
+  }
+  if (tensor.dim() != 1) {
+    runtime_error("Expected argument tensor to have 1 dimension, but has %d", tensor.dim());
+  }
+  return self._dot(tensor);
+}
+
 static Tensor maybeSqueeze(const Tensor & tensor, int64_t dim_tensor1, int64_t dim_tensor2) {
   if (dim_tensor1 == 1) {
     return tensor.squeeze(-2);

@@ -137,6 +137,8 @@
 - func: det(Tensor self) -> Tensor
 - func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
 
+- func: dot(Tensor self, Tensor tensor) -> Tensor
+
 - func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor
   variants: function
 
