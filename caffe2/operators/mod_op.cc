@@ -35,7 +35,7 @@ bool ModOp<CPUContext>::DoRunWithType() {
   for (auto i = 0; i < N; i++) {
     output_ptr[i] = data_ptr[i] % divisor_;
     if (output_ptr[i] && sign_follow_divisor_ &&
-        (std::signbit(output_ptr[i]) != std::signbit(divisor_))) {
+        ((output_ptr[i] > 0) != (divisor_ > 0))) {
       output_ptr[i] += divisor_;
     }
   }
