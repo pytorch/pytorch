@@ -1,12 +1,14 @@
 #include "Python.h"
 #include "function.h"
 
-#include <string>
-
 #include "variable.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/functions/special.h"
+
+#include <string>
+#include <cstdint>
+#include <vector>
 
 namespace torch { namespace autograd {
 
