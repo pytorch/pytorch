@@ -68,14 +68,6 @@ DONT_REQUIRE_DERIVATIVE = {
     '__lshift__', '__or__', '__rshift__', '__xor__',
 }
 
-# These functions use `unpack_any` instead of `unpack`. They don't check the
-# concrete type of arguments. Eventually all VariableType functions should only
-# check that arguments are Variables.
-USE_UNPACK_ANY = {
-    'sparse_coo_tensor', 'cudnn_batch_norm', 'cudnn_batch_norm_forward',
-    'cudnn_batch_norm_backward',
-}
-
 METHOD_DECLARATION = CodeTemplate("""\
 virtual ${return_type} ${method_prefix_derived}${api_name}(${formals}) const override;
 """)
@@ -487,25 +479,8 @@ def emit_body(declaration):
 
 
 def unpack_args(env, declaration):
-    use_unpack_any = declaration['name'] in USE_UNPACK_ANY
-
     def requires_unpack(arg):
         return 'Tensor' in arg['dynamic_type']
-
-    def get_suffix(dynamic_type, is_nullable):
-        if use_unpack_any:
-            return '_any' if not is_nullable else '_any_opt'
-        elif is_nullable:
-            assert dynamic_type == 'Tensor'
-            return '_opt'
-        elif dynamic_type == 'IndexTensor':
-            return '_long'
-        elif dynamic_type == 'IntegerTensor':
-            return '_int'
-        elif dynamic_type == 'BoolTensor':
-            return '_byte'
-        else:
-            return ''
 
     body = []
     unpacked_args = []
@@ -517,10 +492,7 @@ def unpack_args(env, declaration):
         dynamic_type = arg['dynamic_type']
         is_nullable = arg.get('is_nullable', False)
         ref = (not is_nullable) and dynamic_type not in ['TensorList', 'SparseTensor']
-        suffix = get_suffix(dynamic_type, is_nullable)
-        if dynamic_type == 'TensorList' and declaration['name'] == 'index':
-            # TODO: specify this in Declarations.yaml somehow
-            suffix = '_idxs'
+        suffix = '_opt' if is_nullable else ''
 
         body.append(UNPACK_TENSOR.substitute(
             arg_name=arg['name'],

@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THTensorRandom.cpp"
 #else
 
+#include "THGenerator.h"
+
 void THTensor_(random)(THTensor *self, THGenerator *_generator)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);

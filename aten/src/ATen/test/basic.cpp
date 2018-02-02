@@ -36,8 +36,8 @@ static void test(Type & type) {
     ASSERT(24 == (b+b).sum().toCDouble());
     std::cout << b.numel() << std::endl;
     ASSERT(12 == b.numel());
-    std::cout << b.dot(b) << std::endl;
-    ASSERT(b.dot(b).toCDouble() == 12);
+    std::cout << b.view(-1).dot(b.view(-1)) << std::endl;
+    ASSERT(b.view(-1).dot(b.view(-1)).toCDouble() == 12);
   }
 
   {

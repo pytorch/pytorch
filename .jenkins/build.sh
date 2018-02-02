@@ -51,4 +51,13 @@ if [[ "$JOB_NAME" != *cuda* ]]; then
    time tools/run_aten_tests.sh
 fi
 
+# Test C FFI plugins
+# cffi install doesn't work for Python 3.7
+if [[ "$JOB_NAME" != *pynightly* ]]; then
+   pip install cffi
+   git clone https://github.com/pytorch/extension-ffi.git
+   cd extension-ffi/script
+   python build.py
+fi
+
 echo "EXITED_USER_LAND"

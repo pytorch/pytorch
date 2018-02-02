@@ -113,6 +113,15 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
   check_1d(vec1, "vec1", "addr");
   check_1d(vec2, "vec2", "addr");
   return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+
+Tensor dot(const Tensor& self, const Tensor& tensor) {
+  if (self.dim() != 1) {
+    runtime_error("Expected argument self to have 1 dimension, but has %d", self.dim());
+  }
+  if (tensor.dim() != 1) {
+    runtime_error("Expected argument tensor to have 1 dimension, but has %d", tensor.dim());
+  }
+  return self._dot(tensor);
 }
 
 static Tensor maybeSqueeze(const Tensor & tensor, int64_t dim_tensor1, int64_t dim_tensor2) {

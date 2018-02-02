@@ -8,6 +8,25 @@
 namespace at {
 namespace native {
 
+static void check_cat_no_zero_dim(TensorList tensors) {
+  for(size_t i = 0; i < tensors.size(); ++i) {
+    auto& t = tensors[i];
+    if (t.dim() == 0) {
+      runtime_error("zero-dimensional tensor (at position %zu) cannot be concatenated", i);
+    }
+  }
+}
+
+Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  return at::_cat_out(result, tensors, dim);
+}
+
+Tensor cat(TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  return at::_cat(tensors, dim);
+}
+
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   if (self.dim() == 0) {
     throw std::runtime_error("chunk expects at least a 1-dimensional tensor");
