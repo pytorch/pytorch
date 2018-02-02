@@ -66,7 +66,7 @@ struct ExecutionPlan {
   ExecutionPlan(std::shared_ptr<Graph> & graph, Gradient grad)
   : f(graph), grad(std::move(grad)), grad_executor(this->grad.df) {}
 
-  variable_tensor_list run(variable_tensor_list inputs) {
+  variable_tensor_list run(variable_tensor_list inputs) const {
     if(grad) {
       return runWithGrad(std::move(inputs));
     }
@@ -78,14 +78,14 @@ struct ExecutionPlan {
   }
 private:
   // inplace to avoid allocations
-  tensor_list unwrapVariables(variable_tensor_list && list) {
+  tensor_list unwrapVariables(variable_tensor_list && list) const {
     for(auto & v : list) {
       v = v.defined() ? static_cast<Variable&>(v).data() : at::Tensor();
     }
     return std::move(list);
   }
   // inplace to avoid allocations
-  variable_tensor_list wrapTensors(tensor_list && list) {
+  variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
       v = autograd::make_variable(v);
     }
@@ -96,7 +96,7 @@ private:
   // We cannot capture both, because we actually destroy our input lists (to release references)
   // before we get the outputs list.
   // Capture (save) inputs that would be required to subsequently run backwards
-  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) {
+  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) const {
     auto & capture_desc = grad.df_input_captures;
     size_t N = capture_desc.size();
     for(size_t i = 0; i < N; ++i) {
@@ -106,7 +106,7 @@ private:
       }
     }
   }
-  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & outputs) {
+  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & outputs) const {
     auto & capture_desc = grad.df_input_captures;
     size_t N = capture_desc.size();
     for(size_t i = 0; i < N; ++i) {
@@ -117,7 +117,7 @@ private:
     }
   }
 
-  variable_tensor_list runWithGrad(variable_tensor_list&& inputs) {
+  variable_tensor_list runWithGrad(variable_tensor_list&& inputs) const {
     auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor, grad.df_input_captures.size());
     // hook up the outputs of df to the gradient functions of the inputs that require
     // gradients
@@ -247,7 +247,7 @@ private:
       FuseGraph(graph);
     }
   }
-  Code & getOrCreateAutogradFallback() {
+  const Code & getOrCreateAutogradFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);
     if(autograd_fallback) {
       return autograd_fallback;
@@ -260,7 +260,7 @@ private:
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
-  ExecutionPlan & getOrCompile(const variable_tensor_list & inputs) {
+  const ExecutionPlan & getOrCompile(const variable_tensor_list & inputs) {
     // outside lock guard, to minimize the time holding the lock on the fast path
     // ArgumentSpec even computes its hashCode here.
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
