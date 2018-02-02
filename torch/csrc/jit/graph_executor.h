@@ -10,6 +10,7 @@ struct GraphExecutorImpl;
 struct GraphExecutor {
   GraphExecutor() {}
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize = true);
+  // note: if not specified, symbolically_differentiable is computed from the graph.
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);
   variable_tensor_list run(variable_tensor_list && inputs);
   operator bool() const {

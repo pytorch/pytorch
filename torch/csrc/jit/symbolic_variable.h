@@ -37,18 +37,19 @@ struct SymbolicVariable {
       }
       return out;
   }
-  static bool isOne(at::Scalar s) {
+  static bool isConstInt(at::Scalar s, int32_t i) {
+    // int32_t is safely convertible to both double and int64_t
     if(s.isFloatingPoint()) {
-      return 1.0 == s.toDouble();
+      return (double) i == s.toDouble();
     } else {
-      return 1.0 == (double) s.toLong();
+      return (int64_t) i == s.toLong();
     }
   }
   SymbolicVariable operator*(SymbolicVariable rhs) const {
     return create(kmul, {*this, rhs})[0].typeLike(*this);
   }
   SymbolicVariable operator*(at::Scalar rhs) const {
-    if(isOne(rhs))
+    if(isConstInt(rhs, 1))
       return *this;
     Node * n;
     auto r = create(kmul, {*this}, 1, &n)[0];

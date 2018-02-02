@@ -547,7 +547,7 @@ struct InterpreterStateImpl {
   }
   size_t current_stage = 0;
   std::shared_ptr<CodeImpl> function; // keep function alive
-  // these are just copies of function to prevent indirections in intepreter
+  // these are just copies of function to prevent indirections in interpreter
   int * int_data;
   const std::vector<bool> & bool_data;
 

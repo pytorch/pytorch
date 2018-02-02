@@ -26,12 +26,17 @@ using tensor_list = std::vector<at::Tensor>;
 using Variable = autograd::Variable;
 using autograd::variable_list;
 
+// this type is in ExecutionPlan to run its Gradient if it is
+// specified. It has a list of inputs captured by ExecutionPlan that
+// it concats with inputs to form the full set of inputs to graph.
+// see struct Gradient for a description of how the derivative graph
+// is constructed and what variables are captured.
 struct ExecutionPlanAutogradFunction : public autograd::Function {
   ExecutionPlanAutogradFunction(GraphExecutor graph, size_t capture_size)
   : graph(std::move(graph)), captures(capture_size) {}
   virtual variable_list apply(const variable_list& inputs) override {
     // TODO: expensive copies here to convert to/from tensor_list
-    // TODO: becuse inputs is passed by const reference there is no
+    // TODO: because inputs is passed by const reference there is no
     // way to release tensors incrementally as this runs
     variable_tensor_list all_inputs;
     all_inputs.reserve(captures.size() + inputs.size());
@@ -65,7 +70,7 @@ struct ExecutionPlan {
     if(grad) {
       return runWithGrad(std::move(inputs));
     }
-    // TODO: intepreter needs to accept moved inputs
+    // TODO: interpreter needs to accept moved inputs
     // and delete incrementally
     tensor_list outputs;
     InterpreterState(f).runOneStage(unwrapVariables(std::move(inputs)), outputs);
@@ -90,6 +95,7 @@ private:
   // capture list because the list is not sorted with inputs before outputs.
   // We cannot capture both, because we actually destroy our input lists (to release references)
   // before we get the outputs list.
+  // Capture (save) inputs that would be required to subsequently run backwards
   void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) {
     auto & capture_desc = grad.df_input_captures;
     size_t N = capture_desc.size();
@@ -128,7 +134,7 @@ private:
     tensor_list outputs_;
     InterpreterState(f).runOneStage(unwrapVariables(std::move(inputs)), outputs_);
     variable_tensor_list outputs = wrapTensors(std::move(outputs_));
-    
+
     // hookup the gradients for the output tensors that require gradients
     // to the inputs to our gradient function df
     // TODO - XXX - if any output is the same tensor multiple times, views have to be
@@ -279,10 +285,12 @@ private:
 
   // remove ReplaceIfUndef(v, replacement) nodes that consume inputs with 'v' if
   // the input is defined, and 'replacement' if it is not.
+  // Note: this is a very limited pass. It looks at undefined inputs,
+  // and cleans up ReplaceIfUndef nodes inserted by autodiff.
   void specializeUndef(Graph & g, const ArgumentSpec & spec) {
     for(size_t i = 0; i < spec.size(); i++) {
       std::vector<Value*> to_replace;
-      // do not edit in place, since it invalides uses iterator
+      // do not edit in place, since it invalidates uses iterator
       for(auto u : g.inputs()[i]->uses()) {
         if(u.user->kind() == kReplaceIfUndef) {
           to_replace.push_back(u.user->output());

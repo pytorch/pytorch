@@ -61,6 +61,9 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(types[0]->contiguous());
     } break;
     case kReplaceIfUndef: {
+      // If types[0] has a type, then it is not defined, and the type will
+      // get set to types[0] because that will be the value propagated.
+      // If its type is not defined, then unification is an undefined type.
       node->output()->setType(types[0]->shared_from_this());
     } break;
     case kConstant: {
