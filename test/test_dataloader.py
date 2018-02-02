@@ -16,7 +16,7 @@ from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
+JOIN_TIMEOUT = 18.0 if IS_WINDOWS else 7.5
 
 
 class TestDatasetRandomSplit(TestCase):
