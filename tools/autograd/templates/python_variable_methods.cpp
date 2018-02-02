@@ -201,7 +201,8 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "copy_(Tensor other, bool non_blocking=False)"
+    "copy_(Tensor other, bool non_blocking=False)",
+    "copy_(Tensor other, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
@@ -501,7 +502,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "type(PyObject* new_type=None, bool non_blocking=False)"
+    "type(PyObject* new_type=None, bool non_blocking=False)",
+    "type(PyObject* new_type=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
