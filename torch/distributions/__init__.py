@@ -55,6 +55,8 @@ from .pareto import Pareto
 from .poisson import Poisson
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
+from .truncated_distribution import TruncatedDistribution
+from .truncated_normal import TruncatedNormal
 from .uniform import Uniform
 
 __all__ = [
@@ -79,8 +81,10 @@ __all__ = [
     'Pareto',
     'StudentT',
     'Poisson',
+    'TruncatedNormal',
     'Uniform',
     'TransformedDistribution',
+    'TruncatedDistribution',
     'biject_to',
     'kl_divergence',
     'register_kl',
