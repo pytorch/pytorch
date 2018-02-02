@@ -1,4 +1,5 @@
 import torch
+import torch.utils.cpp_extension
 import torch_test_cpp_extensions as cpp_extension
 
 import common
@@ -17,6 +18,21 @@ class TestCppExtension(common.TestCase):
         expected = mm.get().mm(weights)
         result = mm.forward(weights)
         self.assertEqual(expected, result)
+
+    def test_jit_compile_extension(self):
+        module = torch.utils.cpp_extension.load(
+            name='jit_extension',
+            sources=[
+                'cpp_extensions/jit_extension.cpp',
+                'cpp_extensions/jit_extension2.cpp'
+            ],
+            extra_include_paths=['cpp_extensions'],
+            extra_cflags=['-g'],
+            verbose=True)
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        z = module.tanh_add(x, y)
+        self.assertEqual(z, x.tanh() + y.tanh())
 
 
 if __name__ == '__main__':
