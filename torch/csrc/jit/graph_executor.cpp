@@ -338,6 +338,7 @@ private:
     JIT_ASSERT(symbolically_differentiable);
 
     std::vector<bool> requires_grads;
+    requires_grads.reserve(spec.size());
     for(size_t i = 0; i < spec.size(); i++)
       requires_grads.push_back(spec.tensorInfo(i).requires_grad());
 

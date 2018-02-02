@@ -37,18 +37,18 @@ struct SymbolicVariable {
       }
       return out;
   }
-  static bool isScalarValue(at::Scalar s, double v) {
+  static bool isOne(at::Scalar s) {
     if(s.isFloatingPoint()) {
-      return v == s.toDouble();
+      return 1.0 == s.toDouble();
     } else {
-      return v == (double) s.toLong();
+      return 1.0 == (double) s.toLong();
     }
   }
   SymbolicVariable operator*(SymbolicVariable rhs) const {
     return create(kmul, {*this, rhs})[0].typeLike(*this);
   }
   SymbolicVariable operator*(at::Scalar rhs) const {
-    if(isScalarValue(rhs, 1))
+    if(isOne(rhs))
       return *this;
     Node * n;
     auto r = create(kmul, {*this}, 1, &n)[0];

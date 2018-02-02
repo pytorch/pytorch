@@ -400,7 +400,6 @@ static void lambdaLiftReverse(Graph& graph,
   // Finally, we can split the graph into two parts.
   grad_desc.f  = splitOffStage(graph, 0, primal_inputs, primal_outputs);
   grad_desc.df = splitOffStage(graph, 1, reverse_inputs, reverse_outputs);
-  passthroughUndefs(grad_desc.df);
 }
 
 Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
@@ -410,7 +409,6 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
               "differentiate will mutate and destroy the graph, so it requires "
               "graph.use_count() == 1");
   std::swap(_graph, graph);
-  graph->lint();
   // XXX: Take care when handling outputs - they can be duplicated!
   Gradient grad_desc;
   // Fills in df_input_vjps and df_output_vjps
@@ -422,6 +420,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(*graph, rev_info, grad_desc);
+  passthroughUndefs(grad_desc.df);
   return grad_desc;
 }
 
