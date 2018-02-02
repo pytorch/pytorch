@@ -2309,6 +2309,28 @@ class TestAgainstScipy(TestCase):
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
 
+    def test_cdf(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for pytorch_dist, scipy_dist in self.distribution_pairs:
+            samples = pytorch_dist.sample((5,))
+            try:
+                self.assertEqual(pytorch_dist.cdf(samples),
+                                 scipy_dist.cdf(samples),
+                                 message=pytorch_dist)
+            except NotImplementedError:
+                pass
+
+    def test_icdf(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for pytorch_dist, scipy_dist in self.distribution_pairs:
+            samples = Variable(torch.rand((5,) + pytorch_dist.batch_shape))
+            try:
+                self.assertEqual(pytorch_dist.icdf(samples),
+                                 scipy_dist.ppf(samples),
+                                 message=pytorch_dist)
+            except NotImplementedError:
+                pass
+
 
 class TestTransforms(TestCase):
     def setUp(self):
