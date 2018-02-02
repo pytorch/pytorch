@@ -473,6 +473,9 @@ namespace {
     for (size_t i = 0; i < params_from.size(0); i++) {
       auto layer_params_from = params_from[i];
       auto layer_params_to = params_to[i];
+      // NOTE: these lists have all weights before all biases, so if the layer
+      // doesn't use biases, iteration will terminate once layer_params_from ends
+      // and ignore them.
       for (auto a = layer_params_from.begin(), b = layer_params_to.begin();
            a != layer_params_from.end() && b != layer_params_to.end();
            ++a, ++b) {
