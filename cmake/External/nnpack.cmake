@@ -60,8 +60,8 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
 
   # Directories for NNPACK dependencies submoduled in Caffe2
   set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
-  set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fp16" CACHE STRING "FP16 source directory")
-  set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/fxdiv" CACHE STRING "FXdiv source directory")
+  set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
+  set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
   set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
   set(PTHREADPOOL_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/pthreadpool" CACHE STRING "pthreadpool source directory")
   set(GOOGLETEST_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/googletest" CACHE STRING "Google Test source directory")
@@ -71,6 +71,7 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     set(NNPACK_BUILD_BENCHMARKS OFF CACHE BOOL "")
     set(NNPACK_LIBRARY_TYPE "static" CACHE STRING "")
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
+    set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory(
       "${NNPACK_PREFIX}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}")
@@ -78,13 +79,14 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
     set_property(TARGET pthreadpool PROPERTY POSITION_INDEPENDENT_CODE ON)
+    set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
   endif()
 
   set(NNPACK_FOUND TRUE)
   set(NNPACK_INCLUDE_DIRS
     $<TARGET_PROPERTY:nnpack,INCLUDE_DIRECTORIES>
     $<TARGET_PROPERTY:pthreadpool,INCLUDE_DIRECTORIES>)
-  set(NNPACK_LIBRARIES $<TARGET_FILE:nnpack>)
+  set(NNPACK_LIBRARIES $<TARGET_FILE:nnpack> $<TARGET_FILE:cpuinfo>)
   return()
 endif()
 
