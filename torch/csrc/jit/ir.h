@@ -719,6 +719,7 @@ private:
     p->setStage(std::numeric_limits<size_t>::max());
     return p;
   }
+  void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 
   // get rid of all nodes
   // destroys in reverse order so that uses internal to this block
@@ -882,7 +883,9 @@ public:
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
-  Node * createClone(Node * n, std::function<Value*(Value*)> value_map) {
+  // if copy_blocks is false, it will not recursively clone the nested blocks
+  // this node contains.
+  Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true) {
     //n can be from a different graph
     Node * r = n->allocNewInstance(this);
     for(auto o : n->outputs()) {
@@ -892,10 +895,11 @@ public:
     for(auto i : n->inputs()) {
       r->addInput(value_map(i));
     }
-    // it is not clear whether createClone should copy the blocks
-    // or if it should allow the caller to do it
-    // so for now we disallow it until we have an example where we need it
-    JIT_ASSERTM(n->blocks().size() == 0, "NYI - createClone with Blocks");
+    if(copy_blocks) {
+      for(auto b : n->blocks()) {
+        r->addBlock()->cloneFrom(b, value_map);
+      }
+    }
     return r;
   }
 

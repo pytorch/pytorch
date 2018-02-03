@@ -784,13 +784,19 @@ void testBlocks(std::ostream & out) {
   auto  d = b + c;
   auto dn = d.value()->node();
   dn->moveBefore(else_block->return_node());
+  auto e = d + c;
+  auto en = e.value()->node();
+  en->moveAfter(dn);
   else_block->registerOutput(d.value());
   g.registerOutput(r->output());
   g.lint();
   out << "testBlocks\n" << g << "\n";
-  r->eraseBlock(1);
+  r->eraseBlock(0);
   out << g << "\n";
   g.lint();
+  // test recursive copy of blocks works
+  auto g2 = g.copy();
+  out << *g2 << "\n";
 }
 
 std::string runJITCPPTests() {
