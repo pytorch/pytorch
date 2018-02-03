@@ -7,6 +7,7 @@ import torch
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
+from .categorical import Categorical
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
@@ -16,6 +17,7 @@ from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .normal import Normal
+from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
@@ -163,7 +165,11 @@ _euler_gamma = 0.57721566490153286060
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):
     t1 = p.probs * (p.probs / q.probs).log()
+    t1[q.probs == 0] = float('inf')
+    t1[p.probs == 0] = 0
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
+    t2[q.probs == 1] = float('inf')
+    t2[p.probs == 1] = 0
     return t1 + t2
 
 
@@ -189,6 +195,14 @@ def _kl_binomial_binomial(p, q):
         return p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
     else:
         raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
+
+
+@register_kl(Categorical, Categorical)
+def _kl_categorical_categorical(p, q):
+    t = p.probs * (p.logits - q.logits)
+    t[q.probs == 0] = float('inf')
+    t[p.probs == 0] = 0
+    return t.sum(-1)
 
 
 @register_kl(Dirichlet, Dirichlet)
@@ -251,6 +265,11 @@ def _kl_normal_normal(p, q):
     var_ratio = (p.scale / q.scale).pow(2)
     t1 = ((p.loc - q.loc) / q.scale).pow(2)
     return 0.5 * (var_ratio + t1 - 1 - var_ratio.log())
+
+
+@register_kl(OneHotCategorical, OneHotCategorical)
+def _kl_onehotcategorical_onehotcategorical(p, q):
+    return _kl_categorical_categorical(p._categorical, q._categorical)
 
 
 @register_kl(Pareto, Pareto)
