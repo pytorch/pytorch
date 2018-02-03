@@ -284,9 +284,9 @@ OPERATOR_SCHEMA(GenerateProposals)
     .NumOutputs(2)
     .SetDoc(R"DOC(
 Generate bounding box proposals for Faster RCNN. The propoasls are generated for
-  a list of images based on image score 'score', bounding box regression result
-  'deltas' as well as predefined bounding box shapes 'anchors'. Greedy
-  non-maximum suppression is applied to generate the final bounding boxes.
+a list of images based on image score 'score', bounding box regression result
+'deltas' as well as predefined bounding box shapes 'anchors'. Greedy
+non-maximum suppression is applied to generate the final bounding boxes.
 )DOC")
     .Arg("spatial_scale", "(float) spatial scale")
     .Arg("pre_nms_topN", "(int) RPN_PRE_NMS_TOP_N")

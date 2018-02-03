@@ -79,41 +79,42 @@ Given a series of mask and values, reconstruct values together according
 to masks.
 
 A comprehensive example:
-mask1   = True, False, True, False, False
-values1 = 1.0, 3.0
-mask2   = False, True, False, False, False
-values2 = 2.0
-mask3   = False, False, False, True, True
-values3 = 4.0, 5.0
+  mask1   = True, False, True, False, False
+  values1 = 1.0, 3.0
+  mask2   = False, True, False, False, False
+  values2 = 2.0
+  mask3   = False, False, False, True, True
+  values3 = 4.0, 5.0
 
 Reconstruct by:
-output = net.BooleanUnmask([mask1, values1, mask2, values2, mask3, values3], ["output"])
+  output = net.BooleanUnmask([mask1, values1, mask2, values2, mask3, values3], ["output"])
 
 We get:
-output = 1.0, 2.0, 3.0, 4.0, 5.0
+  output = 1.0, 2.0, 3.0, 4.0, 5.0
 
 Note that for all mask positions, there must be at least one True. If for a
 field there are multiple True's, we will accept the first value. For example:
 
+
 Example 1:
-mask1   = True, False
-values1 = 1.0
-mask2   = False, False
-values2 =
+  mask1   = True, False
+  values1 = 1.0
+  mask2   = False, False
+  values2 =
 
 This is not allowed:
-output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
+  output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
 
 Example 2:
-mask1   = True, False
-values1 = 1.0
-mask2   = True, True
-values2 = 2.0, 2.0
+  mask1   = True, False
+  values1 = 1.0
+  mask2   = True, True
+  values2 = 2.0, 2.0
 
-output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
+  output = net.BooleanUnmask([mask1, values1, mask2, values2], ["output"])
 
 We get:
-output = 1.0, 2.0
+  output = 1.0, 2.0
 )DOC")
     .Output(0, "unmasked_data", "The final reconstructed unmasked data");
 

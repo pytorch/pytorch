@@ -153,27 +153,30 @@ Collect the last N rows from input data. The purpose is to keep track of data
 accross batches, so for example suppose the LastNWindowCollector is called
 successively with the following input data
 
-[1,2,3,4]
-[5,6,7]
-[8,9,10,11]
+  [1, 2, 3, 4]
+  [5, 6, 7]
+  [8, 9, 10, 11]
 
 And the number of items is set to 6, then the output after the 3rd call
 will contain the following elements:
-[6,7,8,9,10,11]
+
+  [6, 7, 8, 9, 10, 11]
 
 No guarantee is made on the ordering of elements in input. So a valid value for
 output could have been
-[11,10,9,8,7,6]
+
+  [11, 10, 9, 8, 7, 6]
 
 Also, this method works for any order tensor, treating the first dimension as
 input rows and keeping the last N rows seen as input. So for instance:
 
-[[1,2],[2,3],[3,4],[4,5]]
-[[5,6],[6,7],[7,8]]
-[[8,9],[9,10],[10,11],[11,12]]
+  [[1, 2], [2, 3], [3, 4], [4, 5]]
+  [[5, 6], [6, 7], [7, 8]]
+  [[8, 9], [9, 10], [10, 11], [11, 12]]
 
 A possible output would be
-[[6,7],[7,8],[8,9],[9,10],[10,11],[11,12]]
+
+  [[6, 7], [7, 8], [8, 9], [9, 10], [10, 11], [11, 12]]
 
 This is not thread safe unless a mutex is given.
 )DOC")

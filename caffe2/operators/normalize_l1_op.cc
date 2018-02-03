@@ -50,7 +50,7 @@ OPERATOR_SCHEMA(NormalizeL1)
     .NumOutputs(1)
     .Arg("axis", "axis to normalize")
     .SetDoc(R"DOC(
-  Given a matrix, apply L1-normalization along the specified axis.
-  )DOC");
+Given a matrix, apply L1-normalization along the specified axis.
+)DOC");
 
 } // namespace caffe2

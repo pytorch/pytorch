@@ -128,11 +128,11 @@ Carries out instance normalization as described in the paper
 https://arxiv.org/abs/1607.08022. Depending on the mode it is being run,
 there are multiple cases for the number of outputs, which we list below:
 
-* Output case #1: output
-* Output case #2: output, saved_mean
-  - don't use, doesn't make sense but won't crash
-* Output case #3: output, saved_mean, saved_inv_stdev
-  - Makes sense for training only
+  * Output case #1: output
+  * Output case #2: output, saved_mean
+    - don't use, doesn't make sense but won't crash
+  * Output case #3: output, saved_mean, saved_inv_stdev
+    - Makes sense for training only
 
 For training mode, type 3 is faster in the sense that for the backward
 pass, it is able to reuse the saved mean and inv_stdev in the gradient

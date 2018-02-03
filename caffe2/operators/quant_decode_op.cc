@@ -35,11 +35,17 @@ OPERATOR_SCHEMA(QuantDecode)
 Decode inputs using codebook. This is a general LUT operator that returns
 tensors with values from codebook (input 0) based on given indices in
 codes (input 1 ~ n).
+
+
 Example:
+
+
 Input:
   codebook = [1.5, 2.5, 3.5]
   codes_0 = [0, 1, 1, 2]
   codes_1 = [2, 0, 0]
+
+
 Output:
   decoded_0 = [1.5, 2.5, 2.5, 3.5]
   decoded_1 = [3.5, 1.5, 1.5]

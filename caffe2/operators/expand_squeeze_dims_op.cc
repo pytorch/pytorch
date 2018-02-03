@@ -81,7 +81,7 @@ OPERATOR_SCHEMA(Squeeze)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 Remove single-dimensional entries from the shape of a tensor.
-Takes a  parameter `dims` with a list of dimension to squeeze.
+Takes a parameter `dims` with a list of dimension to squeeze.
 If the same blob is provided in input and output, the operation is copy-free.
 This is the exact inverse operation of ExpandDims given the same `dims` arg.
 )DOC")

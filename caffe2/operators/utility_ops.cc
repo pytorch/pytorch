@@ -517,14 +517,11 @@ and maps can be supported without special cases. If you need lengths tensor for
  OUTPUT, use `Gather`.
 
 Example:
-```
-ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-LENGTHS = [0, 2, 3, 1, 4]
-INDICES = [0, 2, 4]
+  ITEMS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  LENGTHS = [0, 2, 3, 1, 4]
+  INDICES = [0, 2, 4]
 
-OUTPUT = [2, 3, 4, 6, 7, 8, 9]
-```
-
+  OUTPUT = [2, 3, 4, 6, 7, 8, 9]
 )DOC")
     .Input(0, "ITEMS", "items tensor")
     .Input(1, "LENGTHS", "lengths tensor")
@@ -667,8 +664,7 @@ The operator:
 - computes the total size of the coalesced blob by summing the input sizes
 - allocates the coalesced output blob as the total size
 - copies the input vectors into the coalesced blob, at the correct offset.
-- aliases each Output(i) to- point into the coalesced blob, at the
-  corresponding offset for Input(i).
+- aliases each Output(i) to- point into the coalesced blob, at the corresponding offset for Input(i).
 
 This is 'unsafe' as the output vectors are aliased, so use with
 caution.
@@ -686,9 +682,9 @@ Therefore, sparse gradient can be back propagated to Operators that consume
 dense gradients only (e.g., FCGradient).
 
 The operator's behaviors:
+
 - In forward, simply pass in place or copy input to the output.
-- In backward, if the gradient passed-in is sparse gradient, change it to
-  dense gradient in linear time; otherwise, simply pass the dense gradient.
+- In backward, if the gradient passed-in is sparse gradient, change it to dense gradient in linear time; otherwise, simply pass the dense gradient.
 )DOC")
     .Input(0, "input", "Input tensors.")
     .Output(0, "output", "Output tensor. Same dimension as inputs.");

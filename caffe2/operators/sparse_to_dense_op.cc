@@ -39,10 +39,8 @@ representation.
 
 After running this op:
 
-```
-output[indices[i], :] += values[i]  # sum over all indices[i] equal to the index
-output[j, ...] = 0 if j not in indices
-```
+  output[indices[i], :] += values[i]  # sum over all indices[i] equal to the index
+  output[j, ...] = 0 if j not in indices
 )DOC")
     .Input(0, "indices", "1-D int32/int64 tensor of concatenated ids of data")
     .Input(

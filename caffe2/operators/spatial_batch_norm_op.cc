@@ -214,9 +214,13 @@ Carries out spatial batch normalization as described in the paper
 https://arxiv.org/abs/1502.03167 . Depending on the mode it is being run,
 there are multiple cases for the number of outputs, which we list below:
 
-Output case #1: Y, mean, var, saved_mean, saved_var
-                (training mode)
-Output case #2: Y (test mode)
+
+Output case #1:
+  Y, mean, var, saved_mean, saved_var (training mode)
+
+
+Output case #2:
+  Y (test mode)
 )DOC")
     .ArgIsTest(
         "If set to nonzero, run spatial batch normalization in test mode.")

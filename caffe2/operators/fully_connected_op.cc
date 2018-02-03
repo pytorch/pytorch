@@ -78,26 +78,25 @@ OPERATOR_SCHEMA(FC)
     .NumOutputs(1)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .SetDoc(R"DOC(
-    Computes the result of passing an input vector X into a fully
-    connected layer with 2D weight matrix W and 1D bias vector b. That is,
-    the layer computes Y = X * W^T + b, where X has size (M x K),
-    W has size (N x K), b has size (N), and Y has size (M x N),
-    where M is often the batch size.
+Computes the result of passing an input vector X into a fully
+connected layer with 2D weight matrix W and 1D bias vector b. That is,
+the layer computes Y = X * W^T + b, where X has size (M x K),
+W has size (N x K), b has size (N), and Y has size (M x N),
+where M is often the batch size.
 
 
-    NOTE: X does not need to explicitly be a 2D vector; rather, it will be
-    coerced into one. For an arbitrary n-dimensional tensor
-    X \in [a_0, a_1, ...,a_{k-1}, a_k, ..., a_{n-1}] where a_i \in N+ and k is
-    the axis provided, then X will be coerced into a 2-dimensional tensor with
-    dimensions [a_0 * ... * a_{k-1}, a_k * ... * a_{n-1}]. For the default
-    case where axis=1, this means the X tensor will be coerced into a 2D tensor
-    of dimensions [a_0, a_1 * ... * a_{n-1}], where a_0 is often the batch size.
-    In this situation, we must have a_0 = M and a_1 * ... * a_{n-1} = K.
-    Lastly, even though b is a 1D vector of size N, it is copied/resized to
-    be size (M x N) implicitly and added to each vector in the batch.
-    Each of these dimensions must be matched correctly, or else the operator
-    will throw errors.
-
+NOTE: X does not need to explicitly be a 2D vector; rather, it will be
+coerced into one. For an arbitrary n-dimensional tensor
+X \in [a_0, a_1, ...,a_{k-1}, a_k, ..., a_{n-1}] where a_i \in N+ and k is
+the axis provided, then X will be coerced into a 2-dimensional tensor with
+dimensions [a_0 * ... * a_{k-1}, a_k * ... * a_{n-1}]. For the default
+case where axis=1, this means the X tensor will be coerced into a 2D tensor
+of dimensions [a_0, a_1 * ... * a_{n-1}], where a_0 is often the batch size.
+In this situation, we must have a_0 = M and a_1 * ... * a_{n-1} = K.
+Lastly, even though b is a 1D vector of size N, it is copied/resized to
+be size (M x N) implicitly and added to each vector in the batch.
+Each of these dimensions must be matched correctly, or else the operator
+will throw errors.
 )DOC")
     .Arg(
         "axis",

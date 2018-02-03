@@ -180,7 +180,8 @@ REGISTER_CPU_OPERATOR(SegmentOneHot, SegmentOneHotOp);
 OPERATOR_SCHEMA(BatchBucketOneHot)
     .NumInputs(3)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Input is a matrix tensor. Its first dimension is the batch
+    .SetDoc(R"DOC(
+Input is a matrix tensor. Its first dimension is the batch
 size. For each column, bucketize it based on the boundary values and then do
 one hot encoding. The `lengths` specifies the number of boundary values for each
 column. The final number of buckets is this number plus 1. This would also be
@@ -189,10 +190,10 @@ Note that each bucket is right-inclusive. That is, given boundary values
 [b1, b2, b3], the buckets are defined as (-int, b1], (b1, b2], (b2, b3], (b3, inf).
 For example
 
-If data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
-and boundaries = [0.1, 2.5, 1, 3.1, 4.5], then
+  If data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
+  and boundaries = [0.1, 2.5, 1, 3.1, 4.5], then
 
-output = [[0, 1, 0, 0, 1, 0, 0], [0, 0, 1, 1, 0, 0, 0], [0, 1, 0, 0, 0, 0, 1]]
+  output = [[0, 1, 0, 0, 1, 0, 0], [0, 0, 1, 1, 0, 0, 0], [0, 1, 0, 0, 0, 0, 1]]
 
 )DOC")
     .Input(0, "data", "input tensor matrix")
@@ -207,16 +208,16 @@ output = [[0, 1, 0, 0, 1, 0, 0], [0, 0, 1, 1, 0, 0, 0], [0, 1, 0, 0, 0, 0, 1]]
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Input is a matrix tensor. Its first dimension is the batch
+    .SetDoc(R"DOC(
+Input is a matrix tensor. Its first dimension is the batch
 size. Expand each column of it using one hot encoding. The `lengths` specifies
 the size of each column after encoding, and the `values` is the dictionary value
 of one-hot encoding for each column. For example
 
-If data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
-and values = [2, 4, 1, 3, 5], then
+  If data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
+  and values = [2, 4, 1, 3, 5], then
 
-output = [[1, 0, 0, 1, 0], [0, 1, 1, 0, 0], [1, 0, 0, 0, 1]]
-
+  output = [[1, 0, 0, 1, 0], [0, 1, 1, 0, 0], [1, 0, 0, 0, 1]]
 )DOC")
     .Input(0, "data", "input tensor matrix")
     .Input(1, "lengths", "the size is the same as the width of the `data`")

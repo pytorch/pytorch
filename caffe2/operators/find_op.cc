@@ -29,12 +29,13 @@ OPERATOR_SCHEMA(Find)
         "query_indices",
         "Indices of the needles in index or 'missing value'")
     .Arg("missing_value", "Placeholder for items that are not found")
-    .SetDoc(R"DOC(Finds elements of second input from first input,
-                outputting the last (max) index for each query.
-                If query not find, inserts missing_value.
-                See IndexGet() for a version that modifies the index when
-                values are not found.
-            )DOC");
+    .SetDoc(R"DOC(
+Finds elements of second input from first input,
+outputting the last (max) index for each query.
+If query not find, inserts missing_value.
+See IndexGet() for a version that modifies the index when
+values are not found.
+)DOC");
 
 REGISTER_CPU_OPERATOR(Find, FindOp<CPUContext>)
 

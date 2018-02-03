@@ -27,36 +27,38 @@ Learning rate is a decreasing function of time. With low learning rates the
 improvements will be linear. With high learning rates they will start to look
 more exponential. Learning rate is controlled by the following arguments:
 
-#### Required
 
-* `iterations`
-* `base_lr`: base learning rate
-* `policy`: this controls how the learning rate is applied, options are:
-  * `fixed`
-  * `step`: uses `stepsize`, `gamma`
-  * `exp`: uses `gamma`
-  * `inv`: uses `gamma`, `power`
-  * `linearWarmup`: uses `start_multiplier`, `num_iter`
-  * `constantWarmup`: uses `multiplier`, `num_iter`
-  * `alter`: uses  `active_first`, `active_period`, `inactive_period`
-  * `hill`: uses those in both `linearWarmup` and `inv`, plus `end_multiplier`
+Required:
+  `iterations`
+  `base_lr`: base learning rate
+  `policy`: this controls how the learning rate is applied, options are:
+    `fixed`
+    `step`: uses `stepsize`, `gamma`
+    `exp`: uses `gamma`
+    `inv`: uses `gamma`, `power`
+    `linearWarmup`: uses `start_multiplier`, `num_iter`
+    `constantWarmup`: uses `multiplier`, `num_iter`
+    `alter`: uses  `active_first`, `active_period`, `inactive_period`
+    `hill`: uses those in both `linearWarmup` and `inv`, plus `end_multiplier`
 
 
-### Optional:
-* `stepsize`: defaults to 0
-* `gamma`: defaults to 0
-* `power`: defaults to 0
-* `num_iter`: defaults to 0
-* `start_multiplier`: defaults to 0
-* `multiplier`: defaults to 0.5
+Optional:
+  `stepsize`: defaults to 0
+  `gamma`: defaults to 0
+  `power`: defaults to 0
+  `num_iter`: defaults to 0
+  `start_multiplier`: defaults to 0
+  `multiplier`: defaults to 0.5
 
 
 Usage:
-train_net.LearningRate(*iterations*, "*label*", base_lr=*float*,
-                            policy="policy_name", stepsize=*int*, gamma=*float*)
+  train_net.LearningRate(*iterations*, "*label*", base_lr=*float*,
+                         policy="policy_name", stepsize=*int*, gamma=*float*)
+
+
 Example usage:
-train_net.LearningRate(200, "LR", base_lr=-0.1,
-                            policy="step", stepsize=20, gamma=0.9)
+  train_net.LearningRate(200, "LR", base_lr=-0.1,
+                         policy="step", stepsize=20, gamma=0.9)
 )DOC")
     .Arg("base_lr", "(float, required) base learning rate")
     .Arg("policy", "(float, default 1.0) strategy for gamma enforcement")

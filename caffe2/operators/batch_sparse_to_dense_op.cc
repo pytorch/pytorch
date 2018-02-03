@@ -115,20 +115,22 @@ A sparse matrix is represented by `lengths` vector, `indices` vector,
 and `values` vector. Each element in `lengths` vector (lengths[`i`]) represents
 the number of indices in this batch (batch `i`).
 With in each batch, `indices` should not have duplicate number.
+
 For example, with input:
-```
-lengths = [2,3,1]
-indices = [0, 1, 2, 3, 4, 5]
-values =  [6, 7, 8, 9, 10, 11]
-dense_dim = 6
-default_value = 0
-```
-After running this op:
-```
-output = [[6, 7, 0, 0, 0,  0],
-          [0, 0, 8, 9, 10, 0],
-          [0, 0, 0, 0, 0, 11]]
-```
+
+  lengths = [2, 3, 1]
+  indices = [0, 1, 2, 3, 4, 5]
+  values =  [6, 7, 8, 9, 10, 11]
+  dense_dim = 6
+  default_value = 0
+
+The output is:
+
+  output = [[6, 7, 0, 0, 0,  0],
+            [0, 0, 8, 9, 10, 0],
+            [0, 0, 0, 0, 0, 11]]
+
+after running this operator.
 )DOC")
     .Input(
         0,
@@ -168,29 +170,29 @@ OPERATOR_SCHEMA(BatchDenseToSparse)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 This Op is a inverse of BatchSparseToDenseOp.
-Basically, given a `lengths` vector, a `indices` vecotr,
+Basically, given a `lengths` vector, a `indices` vector,
 and a dense matrix `dense`, output `value` vector so that, along with
-`lengths` vector and `indices` vecotr, forms a sparse representation
-of the dense matrix
+`lengths` vector and `indices` vector, forms a sparse representation
+of the dense matrix.
 
 A sparse matrix is represented by `lengths` vector, `indices` vector,
 and `values` vector. Each element in `lengths` vector (lengths[`i`]) represents
 the number of indices in this batch (batch `i`).
 With in each batch, `indices` should not have duplicate number.
 
-Example:
-input:
-```
-lengths = [2,3,1]
-indices = [0, 1, 2, 3, 4, 5]
-output = [[6, 7, 0, 0, 0,  0],
-          [0, 0, 8, 9, 10, 0],
-          [0, 0, 0, 0, 0, 11]]
-```
-After running this op:
-```
-values =  [6, 7, 8, 9, 10, 11]
-```
+For example, with input:
+
+  lengths = [2, 3, 1]
+  indices = [0, 1, 2, 3, 4, 5]
+  output = [[6, 7, 0, 0, 0,  0],
+            [0, 0, 8, 9, 10, 0],
+            [0, 0, 0, 0, 0, 11]]
+
+The output is:
+
+  values = [6, 7, 8, 9, 10, 11]
+
+after running this operator.
 )DOC")
     .Input(
         0,
