@@ -10,6 +10,7 @@ graph(%a : UNKNOWN_TYPE
     }
     block1() {
       %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
+      %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %2)
       -> (%6)
     }
   return (%4);
@@ -21,7 +22,21 @@ graph(%a : UNKNOWN_TYPE
   %2 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
   %4 : UNKNOWN_TYPE = If(%c)
     block0() {
-      %5 : UNKNOWN_TYPE = add[alpha={1}](%2, %2)
+      %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
+      %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %2)
+      -> (%6)
+    }
+  return (%4);
+}
+
+graph(%a : UNKNOWN_TYPE
+      %b : UNKNOWN_TYPE
+      %c : UNKNOWN_TYPE) {
+  %3 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
+  %4 : UNKNOWN_TYPE = If(%c)
+    block0() {
+      %5 : UNKNOWN_TYPE = add[alpha={1}](%b, %3)
+      %6 : UNKNOWN_TYPE = add[alpha={1}](%5, %3)
       -> (%5)
     }
   return (%4);

@@ -575,24 +575,36 @@ void PythonOp::cloneFrom(Node * other_) {
   }
 }
 
-std::shared_ptr<Graph> Graph::copy() {
-  auto new_g = std::make_shared<Graph>();
-  std::unordered_map<Value*, Value*> value_map;
-  for(auto input : inputs()) {
-    value_map[input] = new_g->addInput()->copyMetadata(input);
+void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
+  std::unordered_map<Value*, Value*> local_map;
+  auto env = [&](Value * v) {
+    auto it = local_map.find(v);
+    if(it != local_map.end())
+      return it->second;
+    return outer_map(v);
+  };
+  for(auto input : src->inputs()) {
+    local_map[input] = this->addInput()->copyMetadata(input);
   }
-  for(auto node : nodes()) {
-    auto new_node = new_g->appendNode(new_g->createClone(node, [&](Value* v) {
-      return value_map.at(v);
-    }));
+  auto graph = owningGraph();
+  for(auto node : src->nodes()) {
+    auto new_node = this->appendNode(graph->createClone(node, env));
     for(size_t i = 0; i < node->outputs().size(); ++i) {
-      value_map[node->outputs()[i]] = new_node->outputs()[i];
+      local_map[node->outputs()[i]] = new_node->outputs()[i];
       new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
     }
   }
-  for(auto output : outputs()) {
-    new_g->registerOutput(value_map.at(output));
+  for(auto output : src->outputs()) {
+    this->registerOutput(env(output));
   }
+}
+
+std::shared_ptr<Graph> Graph::copy() {
+  auto new_g = std::make_shared<Graph>();
+  auto env = [](Value *) -> Value* {
+    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+  };
+  new_g->block()->cloneFrom(this->block(), env);
   return new_g;
 }
 
