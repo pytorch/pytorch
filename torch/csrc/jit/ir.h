@@ -760,6 +760,9 @@ private:
   Scope * current_scope_;
 
   Block* const block_;
+  // when insertNode() is called, the node is inserted before this node
+  // by default this is set to append to the top level block
+  Node* insert_before_;
 
 public:
 
@@ -768,7 +771,8 @@ public:
   , new_node_stage_(0)
   , scope_root_(scope_root)
   , current_scope_(scope_root_.get())
-  , block_(new Block(this, nullptr)) {}
+  , block_(new Block(this, nullptr))
+  , insert_before_(return_node()) {}
 
   Graph()
   : Graph( std::make_shared<Scope>()) {}
@@ -814,11 +818,6 @@ public:
       throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
     }
     current_scope_ = scope;
-  }
-  ResourceGuard set_current_scope_temporary(Scope* scope) {
-    auto prev_scope = current_scope_;
-    this->set_current_scope(scope);
-    return ResourceGuard([prev_scope, this]() { this->current_scope_ = prev_scope; });
   }
   std::shared_ptr<Scope> scope_root() {
     return scope_root_;
@@ -911,6 +910,28 @@ public:
     return block_->prependNode(n);
   }
 
+  // insert before insert_before_ node
+  // initialized to insert at the end of the top level block
+  // can be changed with setInsertPoint()
+  Node * insertNode(Node * n) {
+    JIT_ASSERT(insert_before_->inBlockList() && "insert point node is no longer in a block list");
+    return n->insertBefore(insert_before_);
+  }
+  // set where nodes are inserted to append to the end of this block
+  void setInsertPoint(Block * b) {
+    JIT_ASSERT(b->owningGraph() == this);
+    insert_before_ = b->return_node();
+  }
+  // set where nodes are inserted to insert _before_ this node
+  // for implementation simplicity we only support inserting before a node for now
+  void setInsertPoint(Node * n) {
+    JIT_ASSERT(n->owningGraph() == this && n->inBlockList());
+    insert_before_ = n;
+  }
+  Node * insertPoint() {
+    return insert_before_;
+  }
+
   // the top level block
   Block * block() {
     return block_;
@@ -962,6 +983,32 @@ private:
     delete *it;
     all_blocks.erase(it);
   }
+};
+
+struct WithInsertPoint : public ResourceGuard {
+  WithInsertPoint(Graph & g, Node * n)
+  : ResourceGuard([this] {
+    prev->owningGraph()->setInsertPoint(prev);
+  })
+  , prev(g.insertPoint()) {
+    g.setInsertPoint(n);
+  }
+  WithInsertPoint(Graph & g, Block * b)
+  : WithInsertPoint(g, b->return_node()) {}
+private:
+  Node * prev;
+};
+
+struct WithCurrentScope : public ResourceGuard {
+  WithCurrentScope(Graph & g, Scope* scope)
+  : ResourceGuard([&g, this]() {
+    g.set_current_scope(prev_scope);
+  })
+  , prev_scope(g.current_scope()) {
+    g.set_current_scope(scope);
+  }
+private:
+  Scope * prev_scope;
 };
 
 inline Value::Value(Node * node_, size_t offset_)

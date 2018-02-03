@@ -775,20 +775,18 @@ void testBlocks(std::ostream & out) {
   auto r = g.appendNode(g.create("If"_sym, {Var::asNewInput(g, "c").value()}));
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
-  auto t = c + c;
-  auto tn = t.value()->node();
-  // TODO: we need to make symbolic variable insert-location aware
-  // as once we have blocks the insert location is frequently not the end of
-  tn->moveBefore(then_block->return_node());
-  then_block->registerOutput(t.value());
-  auto  d = b + c;
-  auto dn = d.value()->node();
-  dn->moveBefore(else_block->return_node());
-  auto e = d + c;
-  auto en = e.value()->node();
-  en->moveAfter(dn);
-  else_block->registerOutput(d.value());
-  g.registerOutput(r->output());
+  {
+    WithInsertPoint guard(g, then_block);
+    auto t = c + c;
+    then_block->registerOutput(t.value());
+  }
+  {
+    WithInsertPoint guard(g, else_block);
+    auto  d = b + c;
+    auto e = d + c;
+    else_block->registerOutput(e.value());
+  }
+  g.registerOutput((Var(r->output()) + c).value());
   g.lint();
   out << "testBlocks\n" << g << "\n";
   r->eraseBlock(0);

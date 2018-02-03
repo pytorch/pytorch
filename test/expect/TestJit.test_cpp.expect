@@ -11,9 +11,10 @@ graph(%a : UNKNOWN_TYPE
     block1() {
       %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
       %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %2)
-      -> (%6)
+      -> (%7)
     }
-  return (%4);
+  %8 : UNKNOWN_TYPE = add[alpha={1}](%4, %2)
+  return (%8);
 }
 
 graph(%a : UNKNOWN_TYPE
@@ -24,9 +25,10 @@ graph(%a : UNKNOWN_TYPE
     block0() {
       %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
       %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %2)
-      -> (%6)
+      -> (%7)
     }
-  return (%4);
+  %8 : UNKNOWN_TYPE = add[alpha={1}](%4, %2)
+  return (%8);
 }
 
 graph(%a : UNKNOWN_TYPE
@@ -37,9 +39,10 @@ graph(%a : UNKNOWN_TYPE
     block0() {
       %5 : UNKNOWN_TYPE = add[alpha={1}](%b, %3)
       %6 : UNKNOWN_TYPE = add[alpha={1}](%5, %3)
-      -> (%5)
+      -> (%6)
     }
-  return (%4);
+  %7 : UNKNOWN_TYPE = add[alpha={1}](%4, %3)
+  return (%7);
 }
 
 testCreateAutodiffSubgraphs

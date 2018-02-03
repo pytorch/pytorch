@@ -23,7 +23,7 @@ struct SymbolicVariable {
       if(g == nullptr) {
         g = inputs.at(0).value()->owningGraph();
       }
-      Node * n = g->appendNode(g->create(kind, num_outputs));
+      Node * n = g->insertNode(g->create(kind, num_outputs));
       for(auto i : inputs) {
         n->addInput(i.value());
       }
