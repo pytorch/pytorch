@@ -1833,26 +1833,34 @@ class TestKL(TestCase):
         bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
         binomial30 = pairwise(Binomial30, [0.1, 0.2, 0.6, 0.9])
         beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
+        categorical = pairwise(Categorical, [[0.4, 0.3, 0.3],
+                                             [0.2, 0.7, 0.1],
+                                             [0.33, 0.33, 0.34],
+                                             [0.2, 0.2, 0.6]])
         chi2 = pairwise(Chi2, [1.0, 2.0, 2.5, 5.0])
+        dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
+                                         [0.5, 0.4, 0.1],
+                                         [0.33, 0.33, 0.34],
+                                         [0.2, 0.2, 0.4]])
         exponential = pairwise(Exponential, [1.0, 2.5, 5.0, 10.0])
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
+                                                         [0.2, 0.7, 0.1],
+                                                         [0.33, 0.33, 0.34],
+                                                         [0.2, 0.2, 0.6]])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
         poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
         uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
-        dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
-                                         [0.5, 0.4, 0.1],
-                                         [0.33, 0.33, 0.34],
-                                         [0.2, 0.2, 0.4]])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
-        # Instead, we test with precision = 0.2 and only test with higher precision locally
+        # Instead, we test with precision = 0.1 and only test with higher precision locally
         # when adding a new KL implementation.
         # The following pairs are not tested due to very high variance of the monte carlo
         # estimator; their implementations have been reviewed with extra care:
@@ -1869,6 +1877,7 @@ class TestKL(TestCase):
             (beta, gamma),
             (beta, normal),
             (binomial30, binomial30),
+            (categorical, categorical),
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
@@ -1891,7 +1900,9 @@ class TestKL(TestCase):
             (laplace, normal),
             (normal, gumbel),
             (normal, normal),
+            (onehotcategorical, onehotcategorical),
             (pareto, chi2),
+            (pareto, pareto),
             (pareto, exponential),
             (pareto, gamma),
             (poisson, poisson),
@@ -1905,6 +1916,9 @@ class TestKL(TestCase):
         ]
 
         self.infinite_examples = [
+            (Bernoulli(0), Bernoulli(1)),
+            (Bernoulli(1), Bernoulli(0)),
+            (Categorical(variable([0.9, 0.1])), Categorical(variable([1, 0]))),
             (Beta(1, 2), Uniform(0.25, 1)),
             (Beta(1, 2), Uniform(0, 0.75)),
             (Beta(1, 2), Uniform(0.25, 0.75)),
@@ -1978,6 +1992,11 @@ class TestKL(TestCase):
         for p, q in self.infinite_examples:
             self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
+
+    def test_kl_edgecases(self):
+        self.assertEqual(kl_divergence(Bernoulli(0), Bernoulli(0)), 0)
+        self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0)
+        self.assertEqual(kl_divergence(Categorical(variable([0, 1])), Categorical(variable([0, 1]))), 0)
 
     def test_kl_shape(self):
         for Dist, params in EXAMPLES:
