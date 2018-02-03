@@ -3,6 +3,7 @@
 #include <vector>
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/variable_tensor_list.h"
 
 namespace torch { namespace jit {
 
@@ -36,7 +37,8 @@ static_assert(sizeof(TensorInfoPOD) == sizeof(int64_t),
 struct TensorInfo;
 
 struct ArgumentSpec {
-  ArgumentSpec(bool with_grad, ArrayRef<autograd::Variable> tensors)
+  // note: tensors must always be variables
+  ArgumentSpec(bool with_grad, const variable_tensor_list & tensors)
   :  hash_code(0), ntensors(tensors.size()) {
     int all_dims = 0;
     for(size_t i = 0; i < ntensors; i++) {
@@ -56,7 +58,7 @@ struct ArgumentSpec {
       if(t.defined()) {
         pod.type = static_cast<unsigned int>(t.type().scalarType());
         pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
-        pod.requires_grad = with_grad && t.requires_grad();
+        pod.requires_grad = with_grad && static_cast<const autograd::Variable&>(t).requires_grad();
         total_dims += t.ndimension();
         auto sizes = t.sizes();
         std::copy(sizes.begin(),sizes.end(), next_dim);
@@ -139,6 +141,8 @@ struct TensorInfo {
     return at::IntList(spec.sizes_strides() + sizes_strides_offset(i) + ndim, ndim);
   }
   operator TypePtr() const {
+    if(!defined())
+      return nullptr;
     return std::make_shared<TensorType>(type(), device(), sizes(), strides());
   }
 private:

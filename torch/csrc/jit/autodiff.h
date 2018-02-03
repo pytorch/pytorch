@@ -38,6 +38,9 @@ using value_list = std::vector<Value*>;
 //                    y  t    // with y's output_nr = 0 and t's output_nr = 1
 //   df_output_vjps = {0}     // i.e. connect next_function[0] of grad_fn to x's (grad_fn, output_nr).
 struct Gradient {
+  operator bool() const {
+    return df != nullptr;
+  }
   std::shared_ptr<Graph> f;
   std::shared_ptr<Graph> df;
 
@@ -84,5 +87,6 @@ Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& r
 
 // can we take a derivative of this node symbolically?
 bool isDifferentiable(Node * n);
+bool isZero(Value * v);
 
 }}

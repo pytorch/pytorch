@@ -10,6 +10,7 @@
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/graph_executor.h"
 
 namespace py = pybind11;
 
@@ -184,6 +185,22 @@ Operation createEvalOperation(CppOp * op) {
 }
 
 using tensor_list = std::vector<at::Tensor>;
+
+tensor_list unsafeToTensorListShare(const list_of_retainable & inputs) {
+  tensor_list tinputs;
+  tinputs.reserve(inputs.size());
+  for(auto & i : inputs) {
+    tinputs.push_back(unsafeToTensorShare(i));
+  }
+  return tinputs;
+}
+void moveToListOfRetainables(tensor_list toutputs, list_of_retainable & outputs) {
+  for(auto & o : toutputs) {
+    outputs.push_back(toRetainableSteal(std::move(o)));
+  }
+}
+
+
 // Returns a function implementing functionality of a given node,
 // or nullptr if it's a no-op for autograd.
 Operation getOperation(jit::Node *node) {
@@ -199,15 +216,10 @@ Operation getOperation(jit::Node *node) {
     auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
     return [fusion_fn](const list_of_retainable & inputs, list_of_retainable & outputs) {
       autograd::profiler::RecordFunction record("FusionGroup");
-      tensor_list tinputs, toutputs;
-      tinputs.reserve(inputs.size());
-      for(auto & i : inputs) {
-        tinputs.push_back(unsafeToTensorShare(i));
-      }
+      tensor_list tinputs = unsafeToTensorListShare(inputs);
+      tensor_list toutputs;
       fusion_fn->launch(tinputs, toutputs);
-      for(auto & o : toutputs) {
-        outputs.push_back(toRetainableSteal(std::move(o)));
-      }
+      moveToListOfRetainables(std::move(toutputs), outputs);
     };
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
@@ -217,6 +229,31 @@ Operation getOperation(jit::Node *node) {
   IR_ELSEIF(Undefined)
     return [](const list_of_retainable & inputs, list_of_retainable & outputs) {
       outputs.push_back(toRetainableSteal(at::Tensor()));
+    };
+  IR_ELSEIF(ReplaceIfUndef)
+    return [](const list_of_retainable & inputs, list_of_retainable & outputs) {
+      auto result = inputs[0];
+      //TODO: refcounting stuff here is ugly but TensorTemporary is not
+      //present. Consider whether we
+      // 1. expose tensor temporary here
+      // 2. keep as is
+      // 3. remove all of this retainable stuff anyway since the new
+      // execution paths do not need handle types.
+      // Note that list_of_retainable is painful because it is yet another
+      // list of pointers that require needless copies.
+      if(result == at::UndefinedTensor::singleton()) {
+        result = inputs[1];
+      }
+      result->retain();
+      outputs.push_back(result);
+    };
+  IR_ELSEIF(GraphExecutor)
+    GraphExecutor executor(value->g(kSubgraph));
+    return [=](const list_of_retainable & inputs, list_of_retainable & outputs) mutable {
+      autograd::profiler::RecordFunction record("GraphExecutor");
+      tensor_list tinputs = unsafeToTensorListShare(inputs);
+      variable_tensor_list toutputs = executor.run(variable_tensor_list(std::move(tinputs)));
+      moveToListOfRetainables(std::move(toutputs), outputs);
     };
   IR_ELSE()
     return getTensorOp(node).op;
@@ -447,6 +484,7 @@ struct InterpreterStateImpl {
     const std::vector<at::Tensor> & inputs,
     std::vector<at::Tensor> & outputs) {
       // std::cout << "running stage: " << current_stage << " of " << function->stages.size() << "\n";
+      // std::cout << *function->graph << "\n";
       JIT_ASSERT(current_stage < function->stages.size());
       auto & stage = function->stages[current_stage++];
       JIT_ASSERT((int)inputs.size() == stage.inputs.size);
@@ -509,7 +547,7 @@ struct InterpreterStateImpl {
   }
   size_t current_stage = 0;
   std::shared_ptr<CodeImpl> function; // keep function alive
-  // these are just copies of function to prevent indirections in intepreter
+  // these are just copies of function to prevent indirections in interpreter
   int * int_data;
   const std::vector<bool> & bool_data;
 

@@ -20,6 +20,8 @@
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
+#include "torch/csrc/jit/graph_executor.h"
+
 #include <vector>
 #include <iostream>
 
@@ -663,18 +665,26 @@ bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
     isEqual(ti.strides(), v.strides());
 }
 
+// work around the fact that variable_tensor_list doesn't duplicate all
+// of std::vector's constructors.
+// most constructors are never used in the implementation, just in our tests.
+variable_tensor_list createVarList(std::vector<at::Tensor> && list) {
+  return variable_tensor_list(std::move(list));
+}
+
 void argumentSpecTest() {
   auto & CF = at::CPU(at::kFloat);
   auto & CD = at::CPU(at::kDouble);
   auto & GF = at::CUDA(at::kFloat);
   auto & GD = at::CUDA(at::kDouble);
 
-  autograd::variable_list list =  { var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()};
+  auto list =  createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+
   // make sure we have some non-standard strides
   list[1].transpose_(0, 1);
 
   // same list but different backing values
-  autograd::variable_list list2 = { var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()};
+  auto list2 = createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
   list2[1].transpose_(0, 1);
 
 
@@ -722,7 +732,7 @@ void shapeAnalysisTest() {
   auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
 
   auto g = build_lstm();
-  ArgumentSpec spec(false, {v(input), v(hx), v(cx), v(w_ih), v(w_hh) });
+  ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
@@ -733,8 +743,33 @@ void shapeAnalysisTest() {
 
 }
 
+void testGraphExecutor() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2*input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
+  auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+  auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+  std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
+  auto g = build_lstm();
+  GraphExecutor executor(g);
+  auto outputs = executor.run(variable_tensor_list(std::move(inputs)));
+  at::Tensor r0, r1;
+  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
+  JIT_ASSERT(almostEqual(Variable(outputs[0]).data(), r0));
+  JIT_ASSERT(almostEqual(Variable(outputs[1]).data(), r1));
+}
+
 std::string runJITCPPTests() {
   std::stringstream out;
+  testGraphExecutor();
   testCreateAutodiffSubgraphs(out);
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);

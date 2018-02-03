@@ -1179,6 +1179,124 @@ class TestJit(TestCase):
         trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedTrace(trace)
 
+    def checkGraphExecutor(self, func, reference_tensors, input_tensors=None, optimize=True, drop=None):
+        def allSum(vs):
+            # drop allows us to remove some values from ever being used
+            # to test unused outputs
+            if drop is not None:
+                vs = vs[:-drop]
+            # we don't want all the grad for all the outputs to be the same
+            # so we multiply each by a constant
+            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
+        if input_tensors is None:
+            input_tensors = reference_tensors
+
+        nograd_inputs = [Variable(t) for t in reference_tensors]
+        recording_inputs = [Variable(t, requires_grad=True)
+                            for t in reference_tensors]
+
+        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], optimize)
+
+        # test no gradients case
+
+        outputs = func(*nograd_inputs)
+        outputs_ge = ge(*nograd_inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+        # test single grad case
+
+        outputs = func(*recording_inputs)
+        grads = torch.autograd.grad(allSum(outputs), recording_inputs)
+
+        outputs_ge = ge(*recording_inputs)
+        grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs)
+        self.assertEqual(outputs, outputs_ge)
+        self.assertEqual(grads, grads_ge)
+
+        # test the grad grad case
+
+        outputs = func(*recording_inputs)
+        l1 = allSum(outputs)
+        grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
+        l2 = (allSum(grads) * l1)
+        grads2 = torch.autograd.grad(l2, recording_inputs)
+
+        recording_inputs = [Variable(t, requires_grad=True)
+                            for t in reference_tensors]
+
+        outputs_ge = ge(*recording_inputs)
+        l1_ge = allSum(outputs_ge)
+        grads_ge = torch.autograd.grad(
+            l1_ge, recording_inputs, create_graph=True)
+        l2_ge = (allSum(grads_ge) * l1_ge)
+        grads2_ge = torch.autograd.grad(l2_ge, recording_inputs)
+
+        self.assertEqual(outputs, outputs_ge)
+        self.assertEqual(grads, grads_ge)
+        self.assertEqual(grads2, grads2_ge)
+
+    def run_ge_tests(self, optimize, use_cuda):
+        def rand(*args):
+            t = torch.rand(*args).float()
+            if use_cuda:
+                t = t.cuda()
+            return t
+        self.checkGraphExecutor(lambda a, b: a * b + b,
+                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)],
+                                optimize=optimize)
+        # trivial identity
+        self.checkGraphExecutor(lambda a, b: (
+            b, a), [rand(1), rand(1)], optimize=optimize)
+
+        def foo(a):
+            t = a * a
+            return t * t, 4 * t
+        self.checkGraphExecutor(foo, [rand(1)], optimize=optimize)
+        # unused input
+        self.checkGraphExecutor(
+            lambda a, b: a * a, [rand(1), rand(1)], optimize=optimize)
+        # test outputs that do not get used in grad
+        self.checkGraphExecutor(foo, [rand(1)], drop=1, optimize=optimize)
+        # test autograd fallback
+        self.checkGraphExecutor(lambda a, b: a * b /
+                                (a - 2 * b) + b, [rand(1), rand(1)],
+                                optimize=optimize)
+
+    def test_ge_unoptimized(self):
+        self.run_ge_tests(False, False)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    def test_ge_optimized(self):
+        self.run_ge_tests(True, False)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_ge_cuda(self):
+        self.run_ge_tests(True, True)
+
+    # more manual test of graph executor that can be used as a scratchpad
+    def test_ge(self):
+        def foo(a, b):
+            return a * b / (a - b) + b
+        V = Variable
+        a, b = V(torch.rand(1)), V(torch.rand(1))
+        ge = torch._C.GraphExecutor(foo, (a, b))
+        a, b = V(torch.rand(1), requires_grad=True), V(
+            torch.rand(1), requires_grad=True)
+        r, = ge(a, b)
+        da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
+
+        l2 = (da * db + db * db)
+        g2result = torch.autograd.grad(l2, [da, db])
+
+        r = foo(a, b)
+        da2, db2 = torch.autograd.grad(r + 3, [a, b], create_graph=True)
+        self.assertEqual(da, da2)
+        self.assertEqual(db, db2)
+        l3 = (da2 * db2 + db2 * db2)
+        g2result2 = torch.autograd.grad(l3, [da2, db2])
+        self.assertEqual(g2result, g2result2)
+
 
 if __name__ == '__main__':
     run_tests()
