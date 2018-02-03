@@ -76,11 +76,11 @@ OPERATOR_SCHEMA(LpNorm)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-  Given one input float tensor X, and produces one output float tensor
-  of the Lp norm of tensor X, computed as Lp(x) = sum over |x^p|,
-  in which p is either 1 or 2(currently only supports l1 and l2 norm),
-  determined by the argument p.
-  )DOC")
+Given one input float tensor X, and produces one output float tensor
+of the Lp norm of tensor X, computed as Lp(x) = sum over |x^p|,
+in which p is either 1 or 2(currently only supports l1 and l2 norm),
+determined by the argument p.
+)DOC")
     .Input(0, "X", "1D input tensor")
     .Output(0, "Z", "1D output tensor")
     .Arg("p", "Order of the norm in p-norm");
@@ -89,11 +89,11 @@ OPERATOR_SCHEMA(LpNormGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-  Given one input float tensor X, derivative dout, and produces one output
-  float tensor dX. dX is the derivative of the Lp norm of tensor X, computed as
-  dx = d(sum over |x^p|)/dx, in which p is either 1 or 2(currently only
-  supports l1 and l2 norm) determined by the argument p.
-  )DOC")
+Given one input float tensor X, derivative dout, and produces one output
+float tensor dX. dX is the derivative of the Lp norm of tensor X, computed as
+dx = d(sum over |x^p|)/dx, in which p is either 1 or 2(currently only
+supports l1 and l2 norm) determined by the argument p.
+)DOC")
     .Input(0, "X", "1D input tensor")
     .Input(1, "dout", "1D input tensor")
     .Output(0, "dx", "1D output tensor")

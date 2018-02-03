@@ -138,9 +138,10 @@ OPERATOR_SCHEMA(ReduceFrontSum)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("num_reduce_dims", "Number of dimensions to reduce")
-    .SetDoc(
-        R"DOC("Reduces the input tensor along the first dimension of the input
-                 tensor by applying 'Sum')DOC")
+    .SetDoc(R"DOC(
+Reduces the input tensor along the first dimension of the input
+tensor by applying 'Sum'
+)DOC")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
@@ -151,9 +152,10 @@ OPERATOR_SCHEMA(ReduceBackSum)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("num_reduce_dims", "Number of dimensions to reduce")
-    .SetDoc(
-        R"DOC("Reduces the input tensor along the last dimension of the
-              input tensor by applying 'Sum')DOC")
+    .SetDoc(R"DOC(
+Reduces the input tensor along the last dimension of the
+input tensor by applying 'Sum'
+)DOC")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
@@ -247,9 +249,10 @@ OPERATOR_SCHEMA(ReduceFrontMean)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("num_reduce_dims", "Number of dimensions to reduce")
-    .SetDoc(
-        R"DOC("Reduces the input tensor along the first dimension of the input
-                 tensor by applying 'Mean')DOC")
+    .SetDoc(R"DOC(
+Reduces the input tensor along the first dimension of the input
+tensor by applying 'Mean'
+)DOC")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
@@ -278,9 +281,10 @@ OPERATOR_SCHEMA(ReduceBackMean)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("num_reduce_dims", "Number of dimensions to reduce")
-    .SetDoc(
-        R"DOC("Reduces the input tensor along the last dimension of the
-              input tensor by applying 'Mean')DOC")
+    .SetDoc(R"DOC(
+Reduces the input tensor along the last dimension of the
+input tensor by applying 'Mean'
+)DOC")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)
@@ -395,9 +399,10 @@ OPERATOR_SCHEMA(ReduceFrontMax)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("num_reduce_dims", "Number of dimensions to reduce")
-    .SetDoc(
-        R"DOC("Reduces the input tensor along the first dimension of the input
-                 tensor by applying 'Max')DOC")
+    .SetDoc(R"DOC(
+Reduces the input tensor along the first dimension of the input
+tensor by applying 'Max'
+)DOC")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(true)
@@ -408,9 +413,10 @@ OPERATOR_SCHEMA(ReduceBackMax)
     .NumInputs(1)
     .NumOutputs(1)
     .Arg("num_reduce_dims", "Number of dimensions to reduce")
-    .SetDoc(
-        R"DOC("Reduces the input tensor along the last dimension of the
-              input tensor by applying 'Max')DOC")
+    .SetDoc(R"DOC(
+Reduces the input tensor along the last dimension of the
+input tensor by applying 'Max'
+)DOC")
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       REDUCTION_OP_SHAPE_INFERENCE(false)

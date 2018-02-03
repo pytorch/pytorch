@@ -39,8 +39,8 @@ locally_connected_op.h file, which is why they are separate files.
 std::function<void(OpSchema&)> LCDocGenerator(const char* dim) {
   return [dim](OpSchema& schema) {
     string doc = R"DOC(
-    The locally connected operator consumes an input vector, a {dim}filter blob
-    and a bias blob and computes the output. {lc_doc})DOC";
+The locally connected operator consumes an input vector, a {dim}filter blob
+and a bias blob and computes the output. {lc_doc})DOC";
     ReplaceAll(doc, "{dim}", dim);
     ReplaceAll(doc, "{lc_doc}", kLCDoc);
     schema.SetDoc(doc);

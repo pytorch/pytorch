@@ -45,11 +45,13 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SparseLengthsSum8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Variation of SparseLengthsSum operator, where DATA is
-    stored using 8bits. DATA was quantized with 8Bit row-wise
-    quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
-    restore DATA from 8Bit, we use additional input that stores scales
-    and biases..)DOC")
+    .SetDoc(R"DOC(
+Variation of SparseLengthsSum operator, where DATA is
+stored using 8bits. DATA was quantized with 8Bit row-wise
+quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
+restore DATA from 8Bit, we use additional input that stores scales
+and biases.
+)DOC")
     .Input(
         0,
         "DATA",
@@ -75,11 +77,13 @@ OPERATOR_SCHEMA(SparseLengthsSum8BitsRowwise)
 OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Variation of SparseLengthsWeightedSum operator, where
-    DATA is stored using 8bits. DATA was quantized with 8Bit row-wise
-    quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
-    restore DATA from 8Bit, we use additional input that stores scales
-    and biases..)DOC")
+    .SetDoc(R"DOC(
+Variation of SparseLengthsWeightedSum operator, where
+DATA is stored using 8bits. DATA was quantized with 8Bit row-wise
+quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
+restore DATA from 8Bit, we use additional input that stores scales
+and biases.
+)DOC")
     .Input(
         0,
         "DATA",
@@ -109,11 +113,13 @@ OPERATOR_SCHEMA(SparseLengthsWeightedSum8BitsRowwise)
 OPERATOR_SCHEMA(SparseLengthsMean8BitsRowwise)
     .NumInputs(4)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Variation of SparseLengthsMean operator, where DATA is
-    stored using 8bits. DATA was quantized with 8Bit row-wise
-    quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
-    restore DATA from 8Bit, we use additional input that stores scales
-    and biases..)DOC")
+    .SetDoc(R"DOC(
+Variation of SparseLengthsMean operator, where DATA is
+stored using 8bits. DATA was quantized with 8Bit row-wise
+quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
+restore DATA from 8Bit, we use additional input that stores scales
+and biases.
+)DOC")
     .Input(
         0,
         "DATA",
@@ -139,11 +145,13 @@ OPERATOR_SCHEMA(SparseLengthsMean8BitsRowwise)
 OPERATOR_SCHEMA(SparseLengthsWeightedMean8BitsRowwise)
     .NumInputs(5)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Variation of SparseLengthsWeightedMean operator, where
-    DATA is stored using 8bits. DATA was quantized with 8Bit row-wise
-    quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
-    restore DATA from 8Bit, we use additional input that stores scales
-    and biases..)DOC")
+    .SetDoc(R"DOC(
+Variation of SparseLengthsWeightedMean operator, where
+DATA is stored using 8bits. DATA was quantized with 8Bit row-wise
+quantization (see doc to FloatToRowwiseQuantized8Bits operator). To
+restore DATA from 8Bit, we use additional input that stores scales
+and biases.
+)DOC")
     .Input(
         0,
         "DATA",
@@ -173,17 +181,19 @@ OPERATOR_SCHEMA(SparseLengthsWeightedMean8BitsRowwise)
 OPERATOR_SCHEMA(FloatToRowwiseQuantized8Bits)
     .NumInputs(1)
     .NumOutputs(2)
-    .SetDoc(R"DOC(This operator applies 8Bit row-wise quantization to
-    input tensor and returns quantized tensor. Row wise quantization of
-    input tensor is the following process. We take tensor of size
-    (m_1, m_2,...,m_n), n >= 2, reshape it into matrix of size
-    (m_1, m_2 x... x m_n) and apply row-wise quantization. After this,
-    we compute scale_i= (min_i - max_i) / 255 and  bias_i = min_i for
-    i-th row r_i of reshaped matrix, where min_i and max_i --  minimum
-    and maximum elements of i-th row, and quantize each element r_{ij} as
-    0 <= round(r_ij - bias_i) / scale_i) < 256. Instead of input tensor
-    we obtain uint8 tensor and auxiliary information as scale and bias to
-    restore input tensor (with losses).)DOC")
+    .SetDoc(R"DOC(
+This operator applies 8Bit row-wise quantization to
+input tensor and returns quantized tensor. Row wise quantization of
+input tensor is the following process. We take tensor of size
+(m_1, m_2,...,m_n), n >= 2, reshape it into matrix of size
+(m_1, m_2 x... x m_n) and apply row-wise quantization. After this,
+we compute scale_i= (min_i - max_i) / 255 and  bias_i = min_i for
+i-th row r_i of reshaped matrix, where min_i and max_i --  minimum
+and maximum elements of i-th row, and quantize each element r_{ij} as
+0 <= round(r_ij - bias_i) / scale_i) < 256. Instead of input tensor
+we obtain uint8 tensor and auxiliary information as scale and bias to
+restore input tensor (with losses).
+)DOC")
     .Input(0, "input", "input")
     .Output(0, "quantized_input", "quantized_input")
     .Output(
@@ -195,13 +205,15 @@ OPERATOR_SCHEMA(FloatToRowwiseQuantized8Bits)
 OPERATOR_SCHEMA(Rowwise8BitQuantizedToFloat)
     .NumInputs(2)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Given uint8 tensor, quantized using 8bit row-wise
-    quantization, and auxiliary scales and biases, this operator
-    restores float tensor in the following way. We take input 8bits tensor
-    of size  (m_1, m_2, ..., m_n), n >= 2, reshape it  into matrix of size
-    (m_1, m_2 x... x m_n). We compute element r_{ij} of output matrix as
-    r_{ij} * s_i + b_i and after this we reshape this output matrix into
-    output tensor of size (m_1, m_2, ..., m_n).)DOC")
+    .SetDoc(R"DOC(
+Given uint8 tensor, quantized using 8bit row-wise
+quantization, and auxiliary scales and biases, this operator
+restores float tensor in the following way. We take input 8bits tensor
+of size  (m_1, m_2, ..., m_n), n >= 2, reshape it  into matrix of size
+(m_1, m_2 x... x m_n). We compute element r_{ij} of output matrix as
+r_{ij} * s_i + b_i and after this we reshape this output matrix into
+output tensor of size (m_1, m_2, ..., m_n).
+)DOC")
     .Input(0, "quantized_input", "quantized_input")
     .Input(
         1,

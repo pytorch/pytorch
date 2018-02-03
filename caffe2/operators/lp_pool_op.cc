@@ -246,14 +246,12 @@ OPERATOR_SCHEMA(LpPool)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-
 LpPool consumes an input blob X and applies L-p pooling across the
 the blob according to kernel sizes, stride sizes, and pad lengths defined by the
 ConvPoolOpBase operator. L-p pooling consisting of taking the L-p norm of a
 subset of the input tensor according to the kernel size and downsampling the
 data into the output blob Y for further processing.
-
-  )DOC")
+)DOC")
     .Input(
         0,
         "X",

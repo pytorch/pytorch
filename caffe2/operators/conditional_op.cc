@@ -67,7 +67,7 @@ OPERATOR_SCHEMA(Conditional)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Given a 1-D tensor of boolean values, apply conditional operator along the first
-dimension of DataT and DataF and return DataO.  Note, DataT and DataF must
+dimension of DataT and DataF and return DataO. Note, DataT and DataF must
 have the exact same shape and type.
 )DOC")
     .Input(0, "Condition", "Boolean tensor to select DataT or DataF")

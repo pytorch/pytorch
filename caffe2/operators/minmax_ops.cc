@@ -27,11 +27,11 @@ OPERATOR_SCHEMA(Max)
     .IdenticalTypeAndShapeOfInput(0)
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
-  Element-wise max of each of the input tensors. The first input tensor can be
-  used in-place as the output tensor, in which case the max will be done in
-  place and results will be accumulated in input0. All inputs and outputs must
-  have the same shape and data type.
-  )DOC")
+Element-wise max of each of the input tensors. The first input tensor can be
+used in-place as the output tensor, in which case the max will be done in
+place and results will be accumulated in input0. All inputs and outputs must
+have the same shape and data type.
+)DOC")
     .Input(0, "data_0", "First of the input tensors. Can be inplace.")
     .Output(0, "max", "Output tensor. Same dimension as inputs.");
 

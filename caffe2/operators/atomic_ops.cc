@@ -136,7 +136,7 @@ OPERATOR_SCHEMA(ConditionalSetAtomicBool)
     .NumInputs(2)
     .NumOutputs(0)
     .SetDoc(R"DOC(
-    Set an atomic<bool> to true if the given condition bool variable is true
+Set an atomic<bool> to true if the given condition bool variable is true
     )DOC")
     .Input(0, "atomic_bool", "Blob containing a unique_ptr<atomic<bool>>")
     .Input(1, "condition", "Blob containing a bool");

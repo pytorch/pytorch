@@ -104,8 +104,8 @@ OPERATOR_SCHEMA(ElementwiseLinear)
     .NumInputs(3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-    Given inputs X of size (N x D), w of size D and b of size D,
-    the op computes Y of size (N X D) where Y_{nd} = X_{nd} * w_d + b_d
+Given inputs X of size (N x D), w of size D and b of size D,
+the op computes Y of size (N X D) where Y_{nd} = X_{nd} * w_d + b_d
   )DOC")
     .Input(0, "X", "2D input tensor of size (N X D) data")
     .Input(1, "w", "1D scaling factors of size D")

@@ -206,8 +206,8 @@ OPERATOR_SCHEMA(BoxWithNMSLimit)
     .NumInputs(2)
     .NumOutputs(3, 5)
     .SetDoc(R"DOC(
-Apply NMS to each class (except background) and limit the number of returned
-  boxes.
+Apply NMS to each class (except background) and limit the number of
+returned boxes.
 )DOC")
     .Arg("score_thres", "(float) TEST.SCORE_THRES")
     .Arg("nms", "(float) TEST.NMS")

@@ -420,25 +420,32 @@ Supports batching: given batch_dim, collapses dims 0 through batch_dim into a
 single dimension, e.g. if tensor dims are [4,2,1,3,4] and batch_dim=2, first
 collapse tensor to [4*2*1,3,4], then mask each batch [i,:,:].
 
+
 Two current operating modes:
+
+
 1) Given a 2D input tensor and 1D tensor of sequence lengths, for each row i in
-      the input tensor, set elements in that row to -inf if their column index
-      j >= sequence_lengths[i]. This mode takes two inputs and argument mode =
-      'sequence'
+the input tensor, set elements in that row to -inf if their column index
+j >= sequence_lengths[i]. This mode takes two inputs and argument mode =
+'sequence'
+
+
 2) Triangular mask. Given row index i and column index j, set elements to -inf
-      given the following conditions:
+given the following conditions:
 
       mode='upper', x_ij = -inf if j < i
       mode='lower', x_ij = -inf if j > i
       mode='upperdiag', x_ij = -inf if j <= i
       mode='lowerdiag', x_ij = -inf if j >= i
 
-    This mode takes one input.
+This mode takes one input.
+
+
 3) Window Mask. Given a 2D input tensor and 1D tensor of window centers,
-   for each row i in the input tensor, set elements in that row to -inf
-   if their column index j outside [center - radius, center + radius].
-   This mode takes two inputs and argument mode = 'sequence'.
-   Argument 'radius' should be provided.
+for each row i in the input tensor, set elements in that row to -inf
+if their column index j outside [center - radius, center + radius].
+This mode takes two inputs and argument mode = 'sequence'.
+Argument 'radius' should be provided.
 )DOC")
     .Input(0, "input", "Tensor to apply masking to")
     .Input(1, "sequence_lengths", "1D Tensor of sequence lengths for mode #1")

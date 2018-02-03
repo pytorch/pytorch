@@ -83,16 +83,14 @@ OPERATOR_SCHEMA(WeightedSample)
       return out;
     })
     .SetDoc(R"DOC(
-
-    The operator performs sampling based on the input sampling weights for
-    each batch. All weights must be non-negative numbers.
-    The input is a 2-D tensor (Tensor<float>) of size (batch_size x weights_dim).
-    For each batch, an index is randomly sampled from the distribution given by
-    the weights of the corresponding batch.
-    The output is a 1-D tensor (Tensor<int>) of size (batch_size x 1) and
-    contains the index(es) of the sampled output.
-
-    )DOC")
+The operator performs sampling based on the input sampling weights for
+each batch. All weights must be non-negative numbers.
+The input is a 2-D tensor (Tensor<float>) of size (batch_size x weights_dim).
+For each batch, an index is randomly sampled from the distribution given by
+the weights of the corresponding batch.
+The output is a 1-D tensor (Tensor<int>) of size (batch_size x 1) and
+contains the index(es) of the sampled output.
+)DOC")
     .Input(
         0,
         "sampling_weights",

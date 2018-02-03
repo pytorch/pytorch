@@ -162,12 +162,12 @@ OPERATOR_SCHEMA(ResizeNearest)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
     .SetDoc(R"DOC(
-            Resizes the spatial dimensions of the input using nearest neighbor
-            interpolation. The `width_scale` and `height_scale` arguments
-            control the size of the output, which is given by:
-            output_width = floor(input_width * width_scale)
-            output_height = floor(output_height * height_scale)
-            )DOC")
+Resizes the spatial dimensions of the input using nearest neighbor
+interpolation. The `width_scale` and `height_scale` arguments
+control the size of the output, which is given by:
+output_width = floor(input_width * width_scale)
+output_height = floor(output_height * height_scale)
+)DOC")
     .Input(0, "X", "Input tensor")
     .Output(0, "Y", "Output tensor");
 

@@ -359,9 +359,9 @@ OPERATOR_SCHEMA(SquaredL2Distance)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-  Given two input float tensors X, Y, and produces one output float tensor
-  of the L2 difference between X and Y that is computed as ||(X - Y)^2 / 2||.
-  )DOC")
+Given two input float tensors X, Y, and produces one output float tensor
+of the L2 difference between X and Y that is computed as ||(X - Y)^2 / 2||.
+)DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor");
@@ -390,9 +390,9 @@ OPERATOR_SCHEMA(L1Distance)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-  Given two input float tensors X, Y, and produces one output float tensor
-  of the L1 difference between X and Y, computed as L1(x,y) = sum over |x-y|
-  )DOC")
+Given two input float tensors X, Y, and produces one output float tensor
+of the L1 difference between X and Y, computed as L1(x,y) = sum over |x-y|
+)DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor");
@@ -423,9 +423,9 @@ OPERATOR_SCHEMA(DotProduct)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-  Given two input float tensors X, Y, and produces one output float tensor
-  of the dot product between X and Y.
-  )DOC")
+Given two input float tensors X, Y, and produces one output float tensor
+of the dot product between X and Y.
+)DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor");
@@ -455,9 +455,9 @@ OPERATOR_SCHEMA(CosineSimilarity)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-  Given two input float tensors X, Y, and produces one output float tensor
-  of the cosine similarity between X and Y.
-  )DOC")
+Given two input float tensors X, Y, and produces one output float tensor
+of the cosine similarity between X and Y.
+)DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor");
@@ -488,14 +488,14 @@ OPERATOR_SCHEMA(DotProductWithPadding)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-  Given two input float tensors X, Y with different shapes and produces one
-  output float tensor of the dot product between X and Y. We currently support
-  two kinds of strategies to achieve this. Before doing normal dot_product 1)
-  pad the smaller tensor (using pad_value) to the same shape as the other one.
-  2) replicate the smaller tensor to the same shape as the other one. Note the
-  first dimension of X, Y must be equal. Only the second dimension of X or Y
-  can be padded.
-  )DOC")
+Given two input float tensors X, Y with different shapes and produces one
+output float tensor of the dot product between X and Y. We currently support
+two kinds of strategies to achieve this. Before doing normal dot_product 1)
+pad the smaller tensor (using pad_value) to the same shape as the other one.
+2) replicate the smaller tensor to the same shape as the other one. Note the
+first dimension of X, Y must be equal. Only the second dimension of X or Y
+can be padded.
+)DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor")
     .Output(0, "Z", "1D output tensor")

@@ -35,7 +35,6 @@ OPERATOR_SCHEMA(RecurrentNetwork)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2, INT_MAX)
     .SetDoc(R"DOC(
-
 Run the input network in a recurrent fashion. This can be used to
 implement fairly general recurrent neural networks (RNNs).
 
@@ -43,7 +42,7 @@ The operator proceeds as follows.
 
 - First, initialized the states from the input recurrent states
 - For each timestep T, apply the links (that map offsets from input/output
-  tensors into the inputs/outputs for the `step` network)
+tensors into the inputs/outputs for the `step` network)
 - Finally, alias the recurrent states to the specified output blobs.
 
 This is a fairly special-case meta-operator, and so the implementation
@@ -52,7 +51,6 @@ against performance and control (compared to e.g. TF
 dynamic_rnn, Theano scan, etc).
 
 See the usage examples for a flavor of how to use it.
-
 )DOC");
 
 REGISTER_CPU_OPERATOR(
@@ -68,7 +66,9 @@ OPERATOR_SCHEMA(rnn_internal_accumulate_gradient_input)
     .NumOutputs(1, INT_MAX)
     .EnforceInplace({{2, 0}})
     .Private()
-    .SetDoc("--internal--");
+    .SetDoc(R"DOC(
+Internal RNN operator.
+)DOC");
 
 REGISTER_CPU_OPERATOR(
     rnn_internal_apply_link,
@@ -78,7 +78,9 @@ OPERATOR_SCHEMA(rnn_internal_apply_link)
     .NumOutputs(2)
     .EnforceInplace({{1, 1}})
     .Private()
-    .SetDoc("--internal--");
+    .SetDoc(R"DOC(
+Internal RNN operator.
+)DOC");
 
 struct GetRecurrentNetworkGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
