@@ -10,23 +10,6 @@ namespace torch { namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-// Creates a node for a + b and puts it after the given node.
-// If node is a null pointer, appends that node at the end of the node list.
-Value* addValues(Value *a, Value *b, Node *node = nullptr) {
-  Graph *graph = a->node()->owningGraph();
-  Node *add_node = graph->create(kadd, {a, b})
-                        ->t_(kalpha, at::Scalar(1).toTensor());
-  if (node) {
-    add_node->insertAfter(node);
-  } else {
-    graph->appendNode(add_node);
-  }
-  Value *add_output = add_node->output();
-  add_output->setType(a->typeOption());
-  return add_output;
-}
-
-
 std::unordered_set<Symbol> differentiable_kinds = {
   kadd, ksub, kmul, kConstant, kReplaceIfUndef,
 };
@@ -34,8 +17,6 @@ std::unordered_set<Symbol> differentiable_kinds = {
 bool isDifferentiable(Node * n) {
   return differentiable_kinds.count(n->kind()) > 0;
 }
-
-
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
@@ -103,7 +84,7 @@ static Value* createZerosLike(Value *v) {
   auto zeros = at_type.zeros({1}).expand(type->sizes());
   Node *constant = graph->createConstant(zeros)
                         ->i_(kis_zero, 1);
-  graph->appendNode(constant);
+  graph->insertNode(constant);
   return constant->output();
 }
 
@@ -116,7 +97,7 @@ static Value* createZerosLike(Value *v) {
 static Value* createUndefGuard(Value * dv, Value * alternative) {
   Graph* graph = dv->owningGraph();
   Node * n = graph->create(kReplaceIfUndef, {dv, alternative});
-  return graph->appendNode(n)->output();
+  return graph->insertNode(n)->output();
 }
 
 struct ReverseDetails {
@@ -153,8 +134,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   };
   const auto set_grad = [&](Value *x, Value *dx) {
     if (Value * prev_grad = grad_map[x]) {
-      Value * new_grad = addValues(prev_grad, dx);
-      grad_map[x] = new_grad;
+      grad_map[x] = toVar(prev_grad) + toVar(dx);
     } else {
       grad_map[x] = dx;
     }
@@ -218,7 +198,7 @@ static std::shared_ptr<Graph> splitOffStage(
     Node *node_clone = graph_clone->createClone(node, lookup_val);
     for (std::size_t i = 0, num_outputs = node_clone->outputs().size(); i < num_outputs; ++i)
       val_map[node->outputs()[i]] = node_clone->outputs()[i];
-    graph_clone->appendNode(node_clone);
+    graph_clone->insertNode(node_clone);
   }
 
   for (Value *output : outputs) {
@@ -257,7 +237,7 @@ static void passthroughUndefs(std::shared_ptr<Graph> graph) {
         graph->return_node()->replaceInput(i, v->node()->inputs()[0]);
         changed = true;
       } else if(isZero(v)) {
-        auto undef = graph->appendNode(graph->createUndefined());
+        auto undef = graph->insertNode(graph->createUndefined());
         graph->return_node()->replaceInput(i, undef->output());
         changed = true;
       }
@@ -369,16 +349,16 @@ static void lambdaLiftReverse(Graph& graph,
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
     Value * tmp_vjp_in = graph.addInput()->setType(tmp->typeOption());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
-    auto zeroes = createZerosLike(tmp);
-    tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
-    // make sure createUndefGuard happens before the addition but inside stage 1
-    zeroes->node()->moveBefore(tmp_vjp_prev->node());
-    tmp_vjp_in->node()->moveBefore(tmp_vjp_prev->node());
-
+    {
+      WithInsertPoint guard(graph, tmp_vjp_prev->node());
+      auto zeroes = createZerosLike(tmp);
+      tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
+    }
     // This is quite weird because we can't first make a sum and then replace all uses
     // of tmp_vjp_prev (that would replace its use in the sum too!), so we create an
     // incorrect sum that doesn't use prev vjp, replace uses, and fix the sum.
-    Value * new_vjp = addValues(tmp_vjp_in, tmp_vjp_in, tmp_vjp_prev->node());
+    Value * new_vjp = toVar(tmp_vjp_in) + toVar(tmp_vjp_in);
+    new_vjp->node()->moveAfter(tmp_vjp_prev->node());
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
     grad_desc.df_input_vjps.emplace_back(i);
@@ -409,6 +389,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
               "differentiate will mutate and destroy the graph, so it requires "
               "graph.use_count() == 1");
   std::swap(_graph, graph);
+  WithInsertPoint guard(*graph, graph->block());
   // XXX: Take care when handling outputs - they can be duplicated!
   Gradient grad_desc;
   // Fills in df_input_vjps and df_output_vjps
