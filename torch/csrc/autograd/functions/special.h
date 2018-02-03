@@ -12,8 +12,8 @@
 namespace torch { namespace autograd {
 
 struct EvalOutput : Function {
-  EvalOutput(const edge_type& next_edge)
-    : next_edge(next_edge) {
+  explicit EvalOutput(const FunctionPort& next_port_)
+    : next_port(next_port_) {
     num_inputs = 1;
   }
 
@@ -21,12 +21,12 @@ struct EvalOutput : Function {
     throw std::logic_error("EvalOutput::apply() called");
   }
 
-  edge_type next_edge;
+  FunctionPort next_port;
 };
 
 struct Eval : Function {
-  using edge_set = std::unordered_set<edge_type, edge_hasher>;
-  using edge_order = std::unordered_map<edge_type, int, edge_hasher>;
+  using edge_set = std::unordered_set<FunctionPort>;
+  using edge_order = std::unordered_map<FunctionPort, int>;
   using placeholder_list = std::vector<std::shared_ptr<EvalOutput>>;
 
   // This struct has only one member, but it's useful to e.g. add a set of all

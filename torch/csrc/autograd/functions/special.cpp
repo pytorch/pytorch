@@ -2,6 +2,14 @@
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/function_port.h"
+#include "torch/csrc/autograd/function.h"
+
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace torch { namespace autograd {
 
@@ -56,11 +64,11 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
   }
 
   // This is used to stop the search in situation 2 and find the corresponding placeholders.
-  std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> inherited_edges;
+  std::unordered_map<FunctionPort, std::shared_ptr<EvalOutput>> inherited_edges;
   inherited_edges.reserve(inherited_placeholders.size());
   for (auto & placeholder : inherited_placeholders) {
-    input_edges.emplace(placeholder->next_edge);
-    inherited_edges.emplace(placeholder->next_edge, placeholder);
+    input_edges.emplace(placeholder->next_port);
+    inherited_edges.emplace(placeholder->next_port, placeholder);
   }
 
   // Regular DFS data structures
@@ -80,7 +88,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
     int num_edges = fn->next_functions.size();
     for (int i = 0; i < num_edges; ++i) {
       auto & edge = fn->next_functions[i];
-      auto & next_fn = edge.first;
+      auto & next_fn = edge.function;
       if (!next_fn) continue; // See Note [Null-edge pruning]
       // Edge belongs to subgraph boundary. Register that and don't search along it.
       if (input_edges.count(edge) > 0) {
@@ -97,7 +105,7 @@ auto Eval::getSubgraph(const variable_list& inputs, const variable_list& outputs
       // Situation 1. If we end up in a placeholder, we need to inherit it.
       if (auto placeholder = std::dynamic_pointer_cast<EvalOutput>(next_fn)) {
         extra_placeholders.emplace(placeholder);
-        subgraph.boundary.ends.emplace(placeholder->next_edge);
+        subgraph.boundary.ends.emplace(placeholder->next_port);
         continue;
       }
       bool unseen = seen.emplace(next_fn.get()).second;
@@ -143,9 +151,10 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
     // attempt the optimization in this case.  To fix it properly,
     // we'd need to filter grad_next_fns and outputs of apply in Eval::apply.
     // The check below tests if null edge pruning occurred.
-    if (!inputs[i].defined() || !grad_next_fns[i].first) return false;
+    if (!inputs[i].defined() || !grad_next_fns[i].function) return false;
     const auto& input_grad = inputs[i].grad_fn() ? inputs[i].grad_fn() : inputs[i].grad_accumulator();
-    if (grad_next_fns[i].first != input_grad || grad_next_fns[i].second != inputs[i].output_nr()) return false;
+    if (grad_next_fns[i].function != input_grad) return false;
+    if (grad_next_fns[i].port != static_cast<uint32_t>(inputs[i].output_nr())) return false;
   }
 
   // Success! We still need to set up placeholders for next stages and to drop
@@ -178,7 +187,7 @@ variable_list Eval::filterRelevantOutputs(const variable_list& inputs, const var
   for (auto& output : outputs) {
     if (!output.defined()) continue;
     if (!output.grad_fn()) continue;
-    if (ignored_grad_fns.count(std::make_pair(output.grad_fn(), output.output_nr())) > 0) continue;
+    if (ignored_grad_fns.count(FunctionPort(output.grad_fn(), output.output_nr())) > 0) continue;
     relevant_outputs.emplace_back(output);
   }
   return relevant_outputs;
@@ -189,13 +198,11 @@ auto Eval::computeInputOrder(const variable_list& inputs, const placeholder_list
   int idx = 0;
   for (auto & input : inputs) {
     if (!input.defined()) continue;
-    input_order.emplace(
-      std::make_pair(input.grad_fn() ? input.grad_fn() : input.grad_accumulator(), input.output_nr()),
-      idx++
-    );
+    auto fn = input.grad_fn() ? input.grad_fn() : input.grad_accumulator();
+    input_order.emplace(FunctionPort(fn, input.output_nr()), idx++);
   }
   for (auto & placeholder : inherited_placeholders)
-    input_order.emplace(placeholder->next_edge, idx++);
+    input_order.emplace(placeholder->next_port, idx++);
   return input_order;
 }
 
@@ -218,9 +225,9 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     auto subgraph = getSubgraph(inputs, relevant_outputs, inherited_placeholders);
 
     // Prepare output placeholder nodes for each end.
-    std::unordered_map<edge_type, std::shared_ptr<EvalOutput>, edge_hasher> ends_to_outputs;
+    std::unordered_map<FunctionPort, std::shared_ptr<EvalOutput>> ends_to_outputs;
     for (auto & placeholder : placeholders) {
-      ends_to_outputs[placeholder->next_edge] = placeholder;
+      ends_to_outputs[placeholder->next_port] = placeholder;
     }
     for (auto & end : subgraph.boundary.ends) {
       if (ends_to_outputs.count(end) == 0) {
@@ -231,10 +238,9 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 
     // Replace begins with pointers to output nodes.
     // This detaches the subgraph from the full backward graph.
-    for (auto & begin : subgraph.boundary.begins) {
-      auto & fn = begin.first;
-      auto offset = begin.second;
-      fn->next_functions[offset] = std::make_pair(ends_to_outputs.at(fn->next_functions[offset]), 0);
+    for (auto& begin : subgraph.boundary.begins) {
+      begin.function->next_functions[begin.port] = FunctionPort(
+          ends_to_outputs.at(begin.function->next_functions[begin.port]));
     }
 
     // Replace subgraph with this node.
@@ -242,11 +248,11 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
 
     // Ensure placeholders and inputs are sorted in the same way.
     edge_order input_order = computeInputOrder(inputs, inherited_placeholders);
-    std::sort(next_functions.begin(), next_functions.end(), [&input_order](const edge_type &a, const edge_type &b) {
+    std::sort(next_functions.begin(), next_functions.end(), [&input_order](const FunctionPort &a, const FunctionPort &b) {
       return input_order.at(a) < input_order.at(b);
     });
     std::sort(placeholders.begin(), placeholders.end(), [&input_order](const std::shared_ptr<EvalOutput> &a, const std::shared_ptr<EvalOutput> &b) {
-      return input_order.at(a->next_edge) < input_order.at(b->next_edge);
+      return input_order.at(a->next_port) < input_order.at(b->next_port);
     });
   }
 
@@ -289,10 +295,9 @@ variable_list Eval::apply(const variable_list& inputs) {
   } else {
     auto& engine = python::PythonEngine::getDefaultEngine();
     auto exec_data = filterRoots(inputs);
-    function_list output_edges = fmap(placeholders,
-                                      [](const std::shared_ptr<EvalOutput>& o) -> edge_type {
-                                        return std::make_pair(o, 0);
-                                      });
+    auto output_edges = fmap(
+        placeholders,
+        [](const std::shared_ptr<EvalOutput>& o) { return FunctionPort(o); });
     outputs = engine.execute(exec_data.first, exec_data.second, true, true, output_edges);
   }
 
