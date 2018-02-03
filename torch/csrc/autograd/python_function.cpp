@@ -94,9 +94,13 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   // leads to unexpected error messages ("no nodes require computing gradients"),
   // but I don't have a better idea. These functions would raise an error
   // in backward anyway.
-  return wrap_outputs(inputs, std::move(tensor_results), [this](FunctionFlags &&f) {
-    return std::make_shared<Error>(name() + " is not differentiable twice", std::move(f));
-  });
+  return wrap_outputs(
+      inputs,
+      std::move(tensor_results),
+      [this](function_list&& next_functions) {
+        return std::make_shared<Error>(
+            name() + " is not differentiable twice", std::move(next_functions));
+      });
 }
 
 // NOTE: this function is written in a way that assumes it's only called for backward;
@@ -566,7 +570,8 @@ struct UnpackedInput {
 };
 
 struct InputFlags {
-  FunctionFlags flags;
+  bool is_executable = false;
+  function_list next_functions;
   THPObjectPtr needs_input_grad;
   std::vector<bool> is_variable_input;
 };
@@ -606,7 +611,8 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
     PyTuple_SET_ITEM(unpacked.tensor_input.get(), i, new_arg);
   }
 
-  flags.flags = Function::flags(unpacked.input_vars);
+  flags.is_executable = any_variable_requires_grad(unpacked.input_vars);
+  flags.next_functions = get_next_functions(unpacked.input_vars);
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
@@ -779,8 +785,8 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   auto info_pair = unpack_input<true>(_inputs);
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
-  bool is_executable = input_info.flags.is_executable;
-  self->cdata.set_flags(std::move(input_info.flags));
+  bool is_executable = input_info.is_executable;
+  self->cdata.set_next_functions(std::move(input_info.next_functions));
   self->needs_input_grad = input_info.needs_input_grad.release();
 
   // Now we're ready to call a forward (implemented in Python)
@@ -811,8 +817,8 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   InputFlags& input_info = info_pair.second;
 
   // Initialize backward function (and ctx)
-  bool is_executable = input_info.flags.is_executable;
-  ctx->cdata.set_flags(std::move(input_info.flags));
+  bool is_executable = input_info.is_executable;
+  ctx->cdata.set_next_functions(std::move(input_info.next_functions));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
@@ -877,7 +883,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 static void _trim_grad_input(THPFunction *self, THPObjectPtr& grad_input)
 {
   int num_grads = PyTuple_GET_SIZE(grad_input.get());
-  int num_next_fns = self->cdata.next_functions.size();
+  const int num_next_fns = self->cdata.next_functions.size();
   if (num_grads > num_next_fns) {
     // Check that all extra grads are none
     bool all_none = true;
@@ -1018,10 +1024,10 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   for (int i = 0; i < size; i++) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return NULL;
-    PyObject* fn = functionToPyObject(next_fns[i].first);
+    PyObject* fn = functionToPyObject(next_fns[i].function);
     if (!fn) return NULL;
     PyTuple_SET_ITEM(fn_tuple.get(), 0, fn);
-    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(next_fns[i].second));
+    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(next_fns[i].port));
     PyTuple_SET_ITEM(result.get(), i, fn_tuple.release());
   }
   return result.release();

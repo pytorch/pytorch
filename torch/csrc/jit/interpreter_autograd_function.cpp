@@ -1,5 +1,12 @@
 #include "Python.h"
-#include "interpreter_autograd_function.h"
+
+#include "torch/csrc/autograd/function_port.h"
+#include "torch/csrc/jit/interpreter_autograd_function.h"
+
+#include <algorithm>
+#include <memory>
+#include <tuple>
+#include <vector>
 
 namespace torch { namespace jit {
 

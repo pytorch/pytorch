@@ -498,6 +498,7 @@ main_sources = [
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/engine.cpp",
     "torch/csrc/autograd/function.cpp",
+    "torch/csrc/autograd/function_port.cpp",
     "torch/csrc/autograd/variable.cpp",
     "torch/csrc/autograd/saved_variable.cpp",
     "torch/csrc/autograd/input_buffer.cpp",
