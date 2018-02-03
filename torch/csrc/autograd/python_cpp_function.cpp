@@ -105,10 +105,10 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
     auto& c_tuple = next_functions[i];
     THPObjectPtr tuple(PyTuple_New(2));
     if (!tuple) return NULL;
-    PyObject *py_fn = functionToPyObject(c_tuple.first);
+    PyObject *py_fn = functionToPyObject(c_tuple.function);
     if (!py_fn) return NULL;
     PyTuple_SET_ITEM(tuple.get(), 0, py_fn);
-    PyObject *py_idx = PyLong_FromLong(c_tuple.second);
+    PyObject *py_idx = PyLong_FromLong(c_tuple.input_nr);
     if (!py_idx) return NULL;
     PyTuple_SET_ITEM(tuple.get(), 1, py_idx);
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());

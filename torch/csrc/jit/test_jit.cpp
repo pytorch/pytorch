@@ -487,9 +487,7 @@ std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_i
 }
 
 variable_list grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs) {
-  static const auto get_edge = [](const Variable& v) -> edge_type {
-    return std::make_pair(v.grad_fn() ? v.grad_fn() : v.grad_accumulator(), v.output_nr());
-  };
+  static const auto get_edge = [](const Variable& v) { return v.gradient_edge(); };
   auto & engine = torch::autograd::python::PythonEngine::getDefaultEngine();
   return engine.execute(fmap(outputs, get_edge), grad_outputs, true, false, fmap(inputs, get_edge));
 }

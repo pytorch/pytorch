@@ -116,7 +116,8 @@ private:
       // Why do I have to care here whether v has a grad_fn or grad accumulator?
       // Why do I have to care here about output_nr? I just want to say
       // grad_fn->setOutputTo(i, v.input_port());
-      grad_fn->next_functions.emplace_back(v.grad_fn() ? v.grad_fn() : v.grad_accumulator(), v.output_nr());
+      // TODO(psag): remove above rant once Function API is improved.
+      grad_fn->next_functions.push_back(v.gradient_edge());
     }
     captureInputs(*grad_fn, inputs);
 

@@ -270,19 +270,16 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
-    auto& next_fn = fn.next_functions[i].first;
-    int input_nr = fn.next_functions[i].second;
+    const auto& next = fn.next_functions[i];
 
-    if (!next_fn) {
-      continue;
-    }
+    if (!next.is_valid()) continue;
 
     // Check if the next function is ready to be computed
     bool is_ready = false;
     auto& dependencies = task.base->dependencies;
-    auto it = dependencies.find(next_fn.get());
+    auto it = dependencies.find(next.function.get());
     if (it == dependencies.end()) {
-      auto name = next_fn->name();
+      auto name = next.function->name();
       throw std::runtime_error(std::string("dependency not found for ") + name);
     } else if (--it->second == 0) {
       dependencies.erase(it);
@@ -290,31 +287,31 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     }
 
     auto& not_ready = task.base->not_ready;
-    auto not_ready_it = not_ready.find(next_fn.get());
+    auto not_ready_it = not_ready.find(next.function.get());
     if (not_ready_it == not_ready.end()) {
       // Skip functions that aren't supposed to be executed
       if (!exec_info.empty()) {
-        auto it = exec_info.find(next_fn.get());
+        auto it = exec_info.find(next.function.get());
         if (it == exec_info.end() || !it->second.should_execute()) {
           continue;
         }
       }
       // No buffers have been allocated for the function
-      InputBuffer input_buffer(next_fn->num_inputs);
-      input_buffer.add(input_nr, std::move(output));
+      InputBuffer input_buffer(next.function->num_inputs);
+      input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(FunctionTask(task.base, next_fn, std::move(input_buffer)));
+        queue.push(FunctionTask(task.base, next.function, std::move(input_buffer)));
       } else {
-        not_ready.emplace(next_fn.get(), std::move(input_buffer));
+        not_ready.emplace(next.function.get(), std::move(input_buffer));
       }
     } else {
       // The function already has a buffer
       auto &input_buffer = not_ready_it->second;
-      input_buffer.add(input_nr, std::move(output));
+      input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push(FunctionTask(task.base, next_fn, std::move(input_buffer)));
+        queue.push(FunctionTask(task.base, next.function, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
     }
@@ -333,12 +330,11 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   while (queue.size() > 0) {
     auto fn = queue.back(); queue.pop_back();
     for (auto& edge : fn->next_functions) {
-      Function* next_ptr = edge.first.get();
-      if (!next_ptr) continue;
-      dependencies[next_ptr] += 1;
-      bool inserted;
-      std::tie(std::ignore, inserted) = seen.insert(next_ptr);
-      if (inserted) queue.push_back(next_ptr);
+      if (auto next_ptr = edge.function.get()) {
+        dependencies[next_ptr] += 1;
+        const bool was_inserted = seen.insert(next_ptr).second;
+        if (was_inserted) queue.push_back(next_ptr);
+      }
     }
   }
 }
@@ -447,11 +443,11 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
 
   int output_idx = 0;
   for (auto & output_edge : outputs) {
-    Function *output = output_edge.first.get();
+    Function *output = output_edge.function.get();
     auto & info = exec_info[output];
     if (!info.captures)
       info.captures.reset(new std::vector<ExecInfo::Capture>());
-    info.captures->emplace_back(output_edge.second, output_idx++);
+    info.captures->emplace_back(output_edge.input_nr, output_idx++);
   }
   captured_vars.resize(output_idx);
 
@@ -471,7 +467,7 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
       auto & next = fn->next_functions;
       auto num_next = next.size();
       while (next_next_fn < num_next) {
-        auto fn = next[next_next_fn++].first.get();
+        auto fn = next[next_next_fn++].function.get();
         if (fn) return fn;
       }
       return nullptr;
@@ -480,8 +476,8 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
   std::vector<Frame> stack;
   std::unordered_set<Function*> seen;
   for (const auto & input : graph_root.next_functions) {
-    if (seen.count(input.first.get()) > 0) continue;
-    stack.emplace_back(input.first.get());
+    if (seen.count(input.function.get()) > 0) continue;
+    stack.emplace_back(input.function.get());
     while (!stack.empty()) {
       auto &frame = stack.back();
       if (Function *next_fn = frame.get_next_fn()) {
@@ -494,11 +490,11 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
         // using a return value from recursive call. It would make this manually unrolled
         // version a lot more complicated, so I skipped that.
         auto & next_fns = frame.fn->next_functions;
-        bool needed = std::any_of(next_fns.begin(), next_fns.end(),
-                                  [&](const edge_type& e) -> bool {
-                                    auto it = exec_info.find(e.first.get());
-                                    return it != exec_info.end() && it->second.should_execute();
-                                  });
+        const bool needed = std::any_of(
+            next_fns.begin(), next_fns.end(), [&](const Edge& port) {
+              auto it = exec_info.find(port.function.get());
+              return it != exec_info.end() && it->second.should_execute();
+            });
         exec_info[frame.fn].needed = needed;
         stack.pop_back();
       }
