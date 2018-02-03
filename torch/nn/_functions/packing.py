@@ -14,7 +14,6 @@ class PackPadded(Function):
 
         steps = []
         batch_sizes = []
-        lengths_iter = reversed(lengths)
         batch_size = input.size(1)
 
         if len(lengths) != batch_size:
@@ -22,7 +21,7 @@ class PackPadded(Function):
                              "{} (batch_size={}).".format(len(lengths), batch_size))
 
         prev_l = 0
-        for i, l in enumerate(lengths_iter):
+        for i, l in enumerate(reversed(list(lengths))):
             if l > prev_l:
                 c_batch_size = batch_size - i
                 steps.append(input[prev_l:l, :c_batch_size].contiguous().view(-1, *input.size()[2:]))
