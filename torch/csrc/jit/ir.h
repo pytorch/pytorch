@@ -48,6 +48,11 @@ struct Node;
 // Tensor or an opaque Handle object, as determined by type().
 struct Value;
 
+std::ostream& operator<<(std::ostream & out, const Graph & g);
+std::ostream& operator<<(std::ostream & out, const Type & t);
+std::ostream& operator<<(std::ostream & out, const Node & t);
+
+
 // Each use is represented by this type, see Node::uses()
 // 'user' is the consumer of the value, offset is the index into
 // 'user's input this where the produces will be found.
@@ -828,6 +833,7 @@ public:
   }
 
   friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  std::shared_ptr<Graph> copy();
 
 private:
 
@@ -964,10 +970,6 @@ inline Value* Value::setUniqueName(const std::string & name) {
     cout << "something else\n";
   IR_END()
 */
-
-std::ostream& operator<<(std::ostream & out, const Graph & g);
-std::ostream& operator<<(std::ostream & out, const Type & t);
-std::ostream& operator<<(std::ostream & out, const Node & t);
 
 /************* All nodes not required to be defined before Graph **************/
 

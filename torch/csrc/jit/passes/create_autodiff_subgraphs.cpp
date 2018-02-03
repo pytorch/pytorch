@@ -85,7 +85,6 @@ void CreateAutodiffSubgraphs(Graph & g, size_t threshold) {
 
   // a better strategy would be to try to treat this like a fusion problem
   // and group maximal groups
-  Symbol graph_executor = "GraphExecutor"_sym;
 
   std::vector<Node*> groupable;
   for(auto n : g.nodes()) { // Note: nodes() iterator stays valid since it is
@@ -95,13 +94,13 @@ void CreateAutodiffSubgraphs(Graph & g, size_t threshold) {
       groupable.push_back(n);
     } else {
       if(groupable.size() >= threshold) {
-        mergeNodes(g, graph_executor, groupable);
+        mergeNodes(g, kGraphExecutor, groupable);
       }
       groupable.clear();
     }
   }
   if(groupable.size() >= threshold) {
-    mergeNodes(g, graph_executor, groupable);
+    mergeNodes(g, kGraphExecutor, groupable);
   }
 }
 

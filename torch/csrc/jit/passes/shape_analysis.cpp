@@ -39,7 +39,7 @@ std::vector<at::Tensor> runNode(Node * n, ArrayRef<at::Tensor> inputs) {
 }
 
 void PropagateShapeOnNode(Node * node) {
-  std::vector<const TensorType*> types;
+  std::vector<TensorType*> types;
   // get all the input types, propagate unknown types if we don't have
   // valid tensor types for the inputs
   for(auto input : node->inputs()) {
@@ -59,8 +59,21 @@ void PropagateShapeOnNode(Node * node) {
     // to get a quick and dirty propagation
     case kneg: {
       node->output()->setType(types[0]->contiguous());
-      break;
-    } default: {
+    } break;
+    case kReplaceIfUndef: {
+      // If types[0] has a type, then it is not defined, and the type will
+      // get set to types[0] because that will be the value propagated.
+      // If its type is not defined, then unification is an undefined type.
+      node->output()->setType(types[0]->shared_from_this());
+    } break;
+    case kConstant: {
+      node->output()->inferTypeFrom(node->t(kvalue));
+    } break;
+    case kUndefined: {
+      node->output()->setType(nullptr);
+    } break;
+    default: {
+
       auto op = getTensorOp(node);
       std::vector<at::Tensor> inputs;
       for(auto & type : types) {

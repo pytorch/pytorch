@@ -40,7 +40,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     // because we won't have a trace containing computation of either
     // the tensor itself (not defined) or the stage for its gradient (requires_grad=False)
     if(!traced_flags.defined && actual_flags.defined) {
-      throw std::runtime_error("JIT intepreter received a defined input, but the"
+      throw std::runtime_error("JIT interpreter received a defined input, but the"
         " trace was compiled with the input being undefined.");
     }
     if(!traced_flags.requires_grad && actual_flags.requires_grad) {
