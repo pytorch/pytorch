@@ -6,6 +6,8 @@ namespace caffe2 {
 
 class NetObserverReporter {
  public:
+  virtual ~NetObserverReporter() = default;
+
   /*
     Report the delay metric collected by the observer.
     The delays are saved in a map. The key is an identifier associated
