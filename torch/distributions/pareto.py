@@ -59,5 +59,13 @@ class Pareto(Distribution):
         self._validate_log_prob_arg(value)
         return torch.log(self.alpha / value) + self.alpha * (self.scale / value).log()
 
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        return 1 - (self.scale / value).pow(self.alpha)
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        return self.scale / (1 - value).pow(self.alpha.reciprocal())
+
     def entropy(self):
         return ((self.scale / self.alpha).log() + (1 + self.alpha.reciprocal()))

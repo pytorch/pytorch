@@ -55,5 +55,13 @@ class Laplace(Distribution):
         self._validate_log_prob_arg(value)
         return -torch.log(2 * self.scale) - torch.abs(value - self.loc) / self.scale
 
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        term = torch.exp((value - self.loc) / self.scale)
+        result = value.new()
+        result[value < self.loc] = 0.5 * term
+        result[value >= self.loc] = 1 - 0.5 / term
+        return result
+
     def entropy(self):
         return 1 + torch.log(2 * self.scale)
