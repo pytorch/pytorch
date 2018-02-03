@@ -250,8 +250,9 @@ class DistributedDataParallel(Module):
                                              self.device_ids,
                                              self.broadcast_bucket_size)
                 for tensors, device_id in zip(result[1:], self.device_ids[1:]):
-                    for tensor, param in zip(tensors,
-                            self.param_type_buckets[tp][device_id]):
+                    for tensor, param in \
+                            zip(tensors,
+                                self.param_type_buckets[tp][device_id]):
                         param.data.set_(tensor)
 
         # module buffer sync
