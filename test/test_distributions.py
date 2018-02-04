@@ -309,7 +309,7 @@ class TestDistributions(TestCase):
     def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
                                num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
-        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        torch_samples = torch_dist.sample((num_samples,)).squeeze()
         if isinstance(torch_samples, Variable):
             torch_samples = torch_samples.data
         torch_samples = torch_samples.cpu().numpy()
@@ -340,7 +340,7 @@ class TestDistributions(TestCase):
     def _check_sampler_discrete(self, torch_dist, ref_dist, message,
                                 num_samples=10000, failure_rate=1e-3):
         """Runs a Chi2-test for the support, but ignores tail instead of combining"""
-        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        torch_samples = torch_dist.sample((num_samples,)).squeeze()
         if isinstance(torch_samples, Variable):
             torch_samples = torch_samples.data
         torch_samples = torch_samples.cpu().numpy()
