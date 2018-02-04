@@ -40,10 +40,10 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
     // way to release tensors incrementally as this runs
     variable_tensor_list all_inputs;
     all_inputs.reserve(captures.size() + inputs.size());
+    all_inputs.insert(all_inputs.end(), inputs.begin(), inputs.end());
     for(auto & sv : captures) {
       all_inputs.push_back(sv.unpack(this->shared_from_this()));
     }
-    all_inputs.insert(all_inputs.end(), inputs.begin(), inputs.end());
     auto tensors = graph.run(std::move(all_inputs));
     // TODO: another copy that needs to be removed
     return autograd::variable_list(tensors.begin(), tensors.end());

@@ -511,11 +511,11 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
   f_interpreter.runOneStage(tensors_in, tensors_out);
 
   tensor_list df_inputs;
+  df_inputs.insert(df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
   for (auto capture : grad_spec.df_input_captures) {
     bool is_input = capture.kind == Capture::Kind::Input;
     df_inputs.push_back(is_input ? tensors_in[capture.offset] : tensors_out[capture.offset]);
   }
-  df_inputs.insert(df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
   df_interpreter.runOneStage(df_inputs, tensor_grads_out);
 
   // Outputs of f needs to be sliced

@@ -435,7 +435,7 @@ public:
     return outputs_.back();
   }
   void eraseOutput(size_t i);
-
+  
   Block * addBlock();
   void eraseBlock(size_t i);
 
@@ -711,6 +711,11 @@ struct Block {
   Node * owningNode() {
     return owning_node_;
   }
+  // clone all inputs, nodes, and outputs from src and append them
+  // to the inputs, nodes, and outputs of this block
+  // value_map is used whenever a node in src references a free variable
+  // in src to look up its corresponding value
+  void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
   // should only be called in the constructor
   Node* initOutput(Node* p) {
@@ -719,7 +724,6 @@ private:
     p->setStage(std::numeric_limits<size_t>::max());
     return p;
   }
-  void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 
   // get rid of all nodes
   // destroys in reverse order so that uses internal to this block
