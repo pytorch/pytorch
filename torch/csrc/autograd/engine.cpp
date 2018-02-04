@@ -17,6 +17,7 @@
 #include <unordered_set>
 #include <typeinfo>
 #include <sstream>
+#include <queue>
 #include <TH/TH.h>
 
 #ifdef WITH_CUDA
@@ -51,13 +52,19 @@ struct FunctionTask {
     , inputs(std::move(inputs)) {}
 };
 
+struct CompareFunctionTaskTime {
+  bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
+    return t1.fn->time < t2.fn->time;
+  }
+};
+
 struct ReadyQueue {
-  std::deque<FunctionTask> queue;
+  std::priority_queue<FunctionTask, std::vector<FunctionTask>, CompareFunctionTaskTime> heap;
   std::condition_variable not_empty;
   std::mutex mutex;
 
-  void push_front(FunctionTask item);
-  FunctionTask pop_back();
+  void push(FunctionTask item);
+  FunctionTask pop();
 };
 
 struct GraphTask {
@@ -114,19 +121,19 @@ struct GraphTask {
     , owner(NO_DEVICE) {}
 };
 
-auto ReadyQueue::push_front(FunctionTask item) -> void {
+auto ReadyQueue::push(FunctionTask item) -> void {
   {
     std::lock_guard<std::mutex> lock(mutex);
     ++item.base->outstanding_tasks;
-    queue.push_front(std::move(item));
+    heap.push(std::move(item));
   }
   not_empty.notify_one();
 }
 
-auto ReadyQueue::pop_back() -> FunctionTask {
+auto ReadyQueue::pop() -> FunctionTask {
   std::unique_lock<std::mutex> lock(mutex);
-  not_empty.wait(lock, [this]{ return !queue.empty(); });
-  auto task = std::move(queue.back()); queue.pop_back();
+  not_empty.wait(lock, [this]{ return !heap.empty(); });
+  auto task = std::move(const_cast<FunctionTask&>(heap.top())); heap.pop();
   return task;
 }
 
@@ -160,7 +167,7 @@ auto Engine::thread_init(int device) -> void {
 auto Engine::thread_main(GraphTask *graph_task) -> void {
   auto queue = ready_queues[worker_device + 1];
   while (!graph_task || graph_task->outstanding_tasks > 0) {
-    FunctionTask task = queue->pop_back();
+    FunctionTask task = queue->pop();
     if (task.fn && !task.base->has_error.load()) {
       GradMode::set_enabled(task.base->grad_mode);
       try {
@@ -189,7 +196,7 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         if (--task.base->outstanding_tasks == 0) {
           // Synchronize outstanding_tasks with queue mutex
           std::atomic_thread_fence(std::memory_order_release);
-          ready_queue(base_owner).push_front(FunctionTask(task.base, nullptr, InputBuffer(0)));
+          ready_queue(base_owner).push(FunctionTask(task.base, nullptr, InputBuffer(0)));
         }
       }
     }
@@ -297,7 +304,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       input_buffer.add(input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push_front(FunctionTask(task.base, next_fn, std::move(input_buffer)));
+        queue.push(FunctionTask(task.base, next_fn, std::move(input_buffer)));
       } else {
         not_ready.emplace(next_fn.get(), std::move(input_buffer));
       }
@@ -307,7 +314,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
       input_buffer.add(input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
-        queue.push_front(FunctionTask(task.base, next_fn, std::move(input_buffer)));
+        queue.push(FunctionTask(task.base, next_fn, std::move(input_buffer)));
         not_ready.erase(not_ready_it);
       }
     }
@@ -370,7 +377,7 @@ auto Engine::execute(const function_list& input_roots,
   if (!outputs.empty()) {
     graph_task.init_to_execute(*graph_root, outputs);
   }
-  ready_queue(-1).push_front(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
+  ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
 
   // Not a worker
   if (worker_device == NO_DEVICE) {

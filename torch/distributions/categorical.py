@@ -68,6 +68,14 @@ class Categorical(Distribution):
     def param_shape(self):
         return self._param.size()
 
+    @property
+    def mean(self):
+        return self.probs.new([float('nan')]).expand(self._extended_shape())
+
+    @property
+    def variance(self):
+        return self.probs.new([float('nan')]).expand(self._extended_shape())
+
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)
         param_shape = sample_shape + torch.Size((self._num_events,))

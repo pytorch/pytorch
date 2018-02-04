@@ -16,6 +16,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
 
 using namespace at;
 using namespace torch::autograd;
@@ -44,15 +45,17 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   return obj;
 }
 
-PyObject * THPVariable_Wrap(Variable var, bool allow_scalar)
+PyObject * THPVariable_Wrap(Variable var)
 {
   if (!var.defined()) {
     Py_RETURN_NONE;
   }
 
-  if (!allow_scalar && var.dim() == 0) {
+#ifndef WITH_SCALARS
+  if (var.dim() == 0) {
     throw std::runtime_error("Variable API does not support Scalars");
   }
+#endif
 
   if (auto obj = var.get()->pyobj) {
     Py_INCREF(obj);
@@ -278,7 +281,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   Tensor tensor = torch::createTensor(data);
   if (&self->cdata.data().type() != &tensor.type()) {
     // we change the type of var.data so we must change the type of var
-    auto newType = VariableImpl::getType(tensor);
+    auto newType = VariableType::getType(tensor);
     self->cdata.get()->*get(TensorImpl_Type()) = newType;
   }
   self->cdata.data() = tensor;

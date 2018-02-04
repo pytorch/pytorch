@@ -16,8 +16,8 @@ inline Tensor Tensor::toType(const Type & t) const {
   return t.copy(*this);
 }
 
-inline Tensor & Tensor::copy_(const Tensor & src, bool async) {
-  return type().copy_(*this, src, async);
+inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
+  return type().copy_(*this, src, non_blocking);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {

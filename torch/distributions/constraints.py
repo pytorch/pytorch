@@ -1,3 +1,22 @@
+r"""
+The following constraints are implemented:
+
+- ``constraints.boolean``
+- ``constraints.dependent``
+- ``constraints.greater_than(lower_bound)``
+- ``constraints.integer_interval(lower_bound, upper_bound)``
+- ``constraints.interval(lower_bound, upper_bound)``
+- ``constraints.lower_cholesky``
+- ``constraints.lower_triangular``
+- ``constraints.lower_triangular``
+- ``constraints.nonnegative_integer``
+- ``constraints.positive``
+- ``constraints.positive_integer``
+- ``constraints.real``
+- ``constraints.simplex``
+- ``constraints.unit_interval``
+"""
+
 import torch
 
 
@@ -11,6 +30,7 @@ __all__ = [
     'interval',
     'is_dependent',
     'less_than',
+    'lower_cholesky',
     'lower_triangular',
     'nonnegative_integer',
     'positive',
@@ -165,7 +185,19 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        return (torch.tril(value) == value).min(-1).min(-1)
+        return (torch.tril(value) == value).min(-1)[0].min(-1)[0]
+
+
+class _LowerCholesky(Constraint):
+    """
+    Constrain to lower-triangular square matrices with positive diagonals.
+    """
+    def check(self, value):
+        n = value.size(-1)
+        diag_mask = torch.eye(n, n, out=value.new(n, n))
+        lower_triangular = (torch.tril(value) == value).min(-1)[0].min(-1)[0]
+        positive_diagonal = (value * diag_mask > (diag_mask - 1)).min(-1)[0].min(-1)[0]
+        return lower_triangular & positive_diagonal
 
 
 # Public interface.
@@ -183,3 +215,4 @@ unit_interval = _Interval(0, 1)
 interval = _Interval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
+lower_cholesky = _LowerCholesky()

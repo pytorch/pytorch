@@ -29,7 +29,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     // TODO: Iterator invalidation might make this hazardous
     .def("nodes",[](Graph &g) {
-      return py::make_iterator(g.begin(), g.end());
+      return py::make_iterator(g.nodes().begin(), g.nodes().end());
     })
     .def("addInput",[](Graph &g) { return g.addInput(); })
     .GS(advanceStage)

@@ -1044,6 +1044,18 @@ class TestTorch(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
+    def test_variable_factory(self):
+        expected = torch.autograd.Variable(torch.Tensor([1, 1]))
+        # test data
+        res1 = torch.autograd.variable([1, 1])
+        self.assertEqual(res1, expected)
+
+        # test copy
+        res2 = torch.autograd.variable(expected)
+        self.assertEqual(res2, expected)
+        res2[1] = 2
+        self.assertEqual(expected, torch.ones_like(expected))
+
     def test_diag(self):
         x = torch.rand(100, 100)
         res1 = torch.diag(x)
@@ -1954,6 +1966,13 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_cat_scalars(self):
+        from torch.autograd import variable
+        x = variable(0)
+        y = variable(1)
+        self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
@@ -1967,6 +1986,27 @@ class TestTorch(TestCase):
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
             self.assertEqual(res.select(dim, 2), z, 0)
+
+    def test_stack_out(self):
+        from torch.autograd import Variable
+        x = Variable(torch.rand(2, 3, 4))
+        y = Variable(torch.rand(2, 3, 4))
+        z = Variable(torch.rand(2, 3, 4))
+        for dim in range(4):
+            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            res_out = x.new(expected_size)
+            res_neg_out = x.new(expected_size)
+            res_out_dp = res_out.data_ptr()
+            res_out_neg_dp = res_neg_out.data_ptr()
+            torch.stack((x, y, z), dim, out=res_out)
+            torch.stack((x, y, z), dim - 4, out=res_neg_out)
+            self.assertEqual(res_out, res_neg_out)
+            self.assertEqual(res_out.size(), expected_size)
+            self.assertEqual(res_out_dp, res_out.data_ptr())
+            self.assertEqual(res_out_neg_dp, res_neg_out.data_ptr())
+            self.assertEqual(res_out.select(dim, 0), x, 0)
+            self.assertEqual(res_out.select(dim, 1), y, 0)
+            self.assertEqual(res_out.select(dim, 2), z, 0)
 
     def test_unbind(self):
         x = torch.rand(2, 3, 4, 5)
@@ -3010,8 +3050,8 @@ class TestTorch(TestCase):
     def test_pstrf(self):
         def checkPsdCholesky(a, uplo, inplace):
             if inplace:
-                u = torch.Tensor(a.size())
-                piv = torch.IntTensor(a.size(0))
+                u = torch.empty_like(a)
+                piv = a.new(a.size(0)).int()
                 kwargs = {'out': (u, piv)}
             else:
                 kwargs = {}
@@ -3041,6 +3081,8 @@ class TestTorch(TestCase):
             for inplace in (True, False):
                 for uplo in (None, True, False):
                     checkPsdCholesky(a, uplo, inplace)
+                    # TODO: remove once Variable and Tensor are merged
+                    checkPsdCholesky(torch.autograd.Variable(a), uplo, inplace)
 
     def test_numel(self):
         b = torch.ByteTensor(3, 100, 100)
@@ -4427,6 +4469,13 @@ class TestTorch(TestCase):
         w[2].sub_(1)
         for i in range(a.numel()):
             self.assertEqual(w[1][1][i], q[1][1][i] - 1)
+
+    def test_deepcopy_scalar(self):
+        from copy import deepcopy
+        from torch.autograd import variable
+        a = variable(5)
+        self.assertEqual(a.size(), deepcopy(a).size())
+        self.assertEqual(a, deepcopy(a))
 
     def test_copy(self):
         from copy import copy

@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 
+#include "ATen/Config.h"
 #if AT_CUDNN_ENABLED()
 #include "THC/THC.h"
 #include "ATen/cudnn/cudnn-wrapper.h"
@@ -381,7 +382,7 @@ at::Tensor _convolution(
         outputs[g] = at::_convolution_nogroup(
             input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
       }
-      output = cat(outputs, 1);
+      output = at::cat(outputs, 1);
     }
   }
 
@@ -421,7 +422,7 @@ at::Tensor _convolution_nogroup(
           stride, padding, output_padding, dilation);
     } else if (dim == 5) {
       return at::thnn_conv_transpose3d(
-        input, weight, bias,
+        input, weight, kernel_size, bias,
         stride, padding, output_padding, dilation);
       }
   } else {  /* Not transposed */

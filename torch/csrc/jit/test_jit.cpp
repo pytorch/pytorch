@@ -7,12 +7,20 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+
+#include "torch/csrc/jit/graph_executor.h"
 
 #include <vector>
 #include <iostream>
@@ -493,6 +501,28 @@ void assertAllClose(const tensor_list& a, const tensor_list& b) {
   }
 }
 
+std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
+                                                tensor_list& tensors_in,
+                                                tensor_list& tensor_grads_in) {
+  tensor_list tensors_out, tensor_grads_out;
+  Code f_code { grad_spec.f }, df_code { grad_spec.df };
+  InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
+
+  f_interpreter.runOneStage(tensors_in, tensors_out);
+
+  tensor_list df_inputs;
+  for (auto capture : grad_spec.df_input_captures) {
+    bool is_input = capture.kind == Capture::Kind::Input;
+    df_inputs.push_back(is_input ? tensors_in[capture.offset] : tensors_out[capture.offset]);
+  }
+  df_inputs.insert(df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  df_interpreter.runOneStage(df_inputs, tensor_grads_out);
+
+  // Outputs of f needs to be sliced
+  tensors_out.erase(tensors_out.begin() + grad_spec.f_real_outputs, tensors_out.end());
+  return std::make_pair(tensors_out, tensor_grads_out);
+}
+
 void testADFormulas() {
   static const auto unwrap = [](const Variable& v) { return v.data(); };
 
@@ -517,16 +547,13 @@ void testADFormulas() {
 
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
-    differentiate(graph);
-    Code bytecode {graph};
-    InterpreterState interpreter {bytecode};
+    auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
 
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
     auto tensor_grads_in           = fmap(var_grads_in, unwrap);
     tensor_list tensors_out, tensor_grads_out;
-    interpreter.runOneStage(tensors_in, tensors_out);
-    interpreter.runOneStage(tensor_grads_in, tensor_grads_out);
+    std::tie(tensors_out, tensor_grads_out) = runGradient(grad_spec, tensors_in, tensor_grads_in);
 
     // Compare results
     auto expected_tensors_out      = fmap(vars_out, unwrap);
@@ -536,7 +563,247 @@ void testADFormulas() {
   }
 }
 
-void runJITCPPTests() {
+std::string toString(std::shared_ptr<Graph>& graph) {
+  std::ostringstream s;
+  s << *graph;
+  return s.str();
+}
+
+bool operator==(const Capture& a, const Capture& b) {
+  return a.kind == b.kind && a.offset == b.offset;
+}
+
+void testDifferentiate(std::ostream & out) {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+
+  // Build up a fake graph
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto c = a * b * a + b;
+  graph->registerOutput(c.value());
+
+  auto grad_spec = differentiate(graph, {true, true});
+  std::vector<Capture> expected_captures = {
+    {Capture::Kind::Input, 0},
+    {Capture::Kind::Input, 1},
+    {Capture::Kind::Output, 1},
+  };
+  std::vector<std::size_t> expected_input_vjps = {0, 1};
+  std::vector<std::size_t> expected_output_vjps = {0, 1};
+  JIT_ASSERT(grad_spec.f_real_outputs == 1);
+  JIT_ASSERT(grad_spec.df_input_captures == expected_captures);
+  JIT_ASSERT(grad_spec.df_input_vjps == expected_input_vjps);
+  JIT_ASSERT(grad_spec.df_output_vjps == expected_output_vjps);
+  out << "testDifferentiate\n";
+  out << *grad_spec.f;
+  out << *grad_spec.df;
+  out << "\n";
+}
+
+void testDifferentiateWithRequiresGrad(std::ostream & out) {
+  auto graph = std::make_shared<Graph>();
+  at::ScalarType s = at::ScalarType::Float;
+  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+
+  // Build up a fake graph
+  auto a = SymbolicVariable::asNewInput(*graph, type);
+  auto b = SymbolicVariable::asNewInput(*graph, type);
+  auto d = b * b + b;
+  auto e = (d + a) * a + b;
+  graph->registerOutput(d.value());
+  graph->registerOutput(e.value());
+
+  auto grad_spec = differentiate(graph, {true, false});
+  std::vector<Capture> expected_captures = {
+    {Capture::Kind::Input, 0},
+    {Capture::Kind::Output, 2},
+  };
+  std::vector<std::size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
+  std::vector<std::size_t> expected_output_vjps = {0};    // only a requires grad
+  JIT_ASSERT(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
+  JIT_ASSERT(grad_spec.df_input_captures == expected_captures);
+  JIT_ASSERT(grad_spec.df_input_vjps == expected_input_vjps);
+  JIT_ASSERT(grad_spec.df_output_vjps == expected_output_vjps);
+  out << "testDifferentiateWithRequiresGrad\n";
+  out << *grad_spec.f;
+  out << *grad_spec.df;
+  out << "\n";
+}
+
+void testCreateAutodiffSubgraphs(std::ostream & out) {
+  auto graph = build_lstm();
+  CreateAutodiffSubgraphs(*graph, /*threshold=*/2);
+  out << "testCreateAutodiffSubgraphs\n";
+  out << *graph << "\n";
+}
+
+autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
+  return autograd::make_variable(t.rand(sizes), requires_grad);
+}
+autograd::Variable undef() {
+  return autograd::Variable();
+}
+
+int device(const autograd::Variable & v) {
+  return v.type().is_cuda() ? v.get_device() : -1;
+}
+
+bool isEqual(at::IntList lhs, at::IntList rhs) {
+  return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+
+bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
+  if(!ti.defined())
+    return ti.defined() == v.defined();
+  return
+    ti.device() == device(v) &&
+    ti.requires_grad() == v.requires_grad() &&
+    ti.type() == v.type().scalarType() &&
+    isEqual(ti.sizes(), v.sizes()) &&
+    isEqual(ti.strides(), v.strides());
+}
+
+// work around the fact that variable_tensor_list doesn't duplicate all
+// of std::vector's constructors.
+// most constructors are never used in the implementation, just in our tests.
+variable_tensor_list createVarList(std::vector<at::Tensor> && list) {
+  return variable_tensor_list(std::move(list));
+}
+
+void argumentSpecTest() {
+  auto & CF = at::CPU(at::kFloat);
+  auto & CD = at::CPU(at::kDouble);
+  auto & GF = at::CUDA(at::kFloat);
+  auto & GD = at::CUDA(at::kDouble);
+
+  auto list =  createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+
+  // make sure we have some non-standard strides
+  list[1].transpose_(0, 1);
+
+  // same list but different backing values
+  auto list2 = createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  list2[1].transpose_(0, 1);
+
+
+  ArgumentSpec a(true, list);
+  ArgumentSpec b(true, list);
+  JIT_ASSERT(a.hashCode() == b.hashCode());
+
+  JIT_ASSERT(a == b);
+  ArgumentSpec d(true, list2);
+  JIT_ASSERT(d == a && d.hashCode() == a.hashCode());
+
+  for(size_t i = 0; i < list.size(); ++i) {
+    JIT_ASSERT(isEqual(a.tensorInfo(i), list[i]));
+  }
+  ArgumentSpec no_grad(/*with_grad=*/false, list);
+  JIT_ASSERT(no_grad != a);
+
+  std::unordered_set<ArgumentSpec> spec;
+  spec.insert(std::move(a));
+  JIT_ASSERT(spec.count(b) > 0);
+  JIT_ASSERT(spec.count(no_grad) == 0);
+  spec.insert(std::move(no_grad));
+  JIT_ASSERT(spec.count(ArgumentSpec(true,list)) == 1);
+
+  list2[1].transpose_(0,1);
+  ArgumentSpec c(true, list2); // same as list, except for one stride
+  JIT_ASSERT(!(c == a));
+  JIT_ASSERT(spec.count(c) == 0);
+
+}
+
+void shapeAnalysisTest() {
+
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2*input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
+  auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+  auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+  auto g = build_lstm();
+  ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
+  PropagateInputShapes(*g, spec);
+  at::Tensor r0, r1;
+  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
+  auto o0 = g->outputs()[0]->type()->expect<TensorType>();
+  auto o1 = g->outputs()[1]->type()->expect<TensorType>();
+  JIT_ASSERT(o0->sizes() == std::vector<int64_t>(r0.sizes().begin(), r0.sizes().end()));
+  JIT_ASSERT(o1->sizes() == std::vector<int64_t>(r1.sizes().begin(), r1.sizes().end()));
+
+}
+
+void testGraphExecutor() {
+  constexpr int batch_size = 4;
+  constexpr int input_size = 256;
+
+  int hidden_size = 2*input_size;
+
+  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+
+  auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
+  auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
+  auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
+  auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+
+  std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
+  auto g = build_lstm();
+  GraphExecutor executor(g);
+  auto outputs = executor.run(variable_tensor_list(std::move(inputs)));
+  at::Tensor r0, r1;
+  std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
+  JIT_ASSERT(almostEqual(Variable(outputs[0]).data(), r0));
+  JIT_ASSERT(almostEqual(Variable(outputs[1]).data(), r1));
+}
+
+void testBlocks(std::ostream & out) {
+  Graph g;
+  auto a = Var::asNewInput(g, "a");
+  auto b = Var::asNewInput(g, "b");
+  auto c = a + b;
+  auto r = g.appendNode(g.create("If"_sym, {Var::asNewInput(g, "c").value()}));
+  auto then_block = r->addBlock();
+  auto else_block = r->addBlock();
+  {
+    WithInsertPoint guard(g, then_block);
+    auto t = c + c;
+    then_block->registerOutput(t.value());
+  }
+  {
+    WithInsertPoint guard(g, else_block);
+    auto  d = b + c;
+    auto e = d + c;
+    else_block->registerOutput(e.value());
+  }
+  g.registerOutput((Var(r->output()) + c).value());
+  g.lint();
+  out << "testBlocks\n" << g << "\n";
+  r->eraseBlock(0);
+  out << g << "\n";
+  g.lint();
+  // test recursive copy of blocks works
+  auto g2 = g.copy();
+  out << *g2 << "\n";
+}
+
+std::string runJITCPPTests() {
+  std::stringstream out;
+  testGraphExecutor();
+  testBlocks(out);
+  testCreateAutodiffSubgraphs(out);
+  testDifferentiate(out);
+  testDifferentiateWithRequiresGrad(out);
   testADFormulas();
   interpTest();
   interpStageTest();
@@ -544,6 +811,9 @@ void runJITCPPTests() {
   fusionTests();
   attributesTest();
   internedStringsTests();
+  argumentSpecTest();
+  shapeAnalysisTest();
+  return out.str();
 }
 
 }}

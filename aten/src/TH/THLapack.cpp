@@ -1,4 +1,4 @@
 #include "THLapack.h"
 
-#include "generic/THLapack.c"
+#include "generic/THLapack.cpp"
 #include "THGenerateFloatTypes.h"

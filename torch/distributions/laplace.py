@@ -1,5 +1,4 @@
 from numbers import Number
-
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
@@ -25,6 +24,18 @@ class Laplace(Distribution):
     support = constraints.real
     has_rsample = True
 
+    @property
+    def mean(self):
+        return self.loc
+
+    @property
+    def variance(self):
+        return 2 * self.scale.pow(2)
+
+    @property
+    def stddev(self):
+        return (2 ** 0.5) * self.scale
+
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
@@ -35,9 +46,9 @@ class Laplace(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        u = self.loc.new(*shape).uniform_(_finfo(self.loc).eps - 1, 1)
+        u = self.loc.new(shape).uniform_(_finfo(self.loc).eps - 1, 1)
         # TODO: If we ever implement tensor.nextafter, below is what we want ideally.
-        # u = self.loc.new(*shape).uniform_(self.loc.nextafter(-.5, 0), .5)
+        # u = self.loc.new(shape).uniform_(self.loc.nextafter(-.5, 0), .5)
         return self.loc - self.scale * u.sign() * torch.log1p(-u.abs())
 
     def log_prob(self, value):

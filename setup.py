@@ -25,6 +25,8 @@ from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
+from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
+    WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
 
 DEBUG = check_env_flag('DEBUG')
 
@@ -32,8 +34,8 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
-WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
+
+WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
 try:
     import ninja
@@ -136,6 +138,9 @@ def build_libs(libs):
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
 
+    if WITH_GLOO_IBVERBS:
+        build_libs_cmd += ['--with-gloo-ibverbs']
+
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
@@ -154,6 +159,16 @@ class build_deps(Command):
         pass
 
     def run(self):
+        # Check if you remembered to check out submodules
+        def check_file(f):
+            if not os.path.exists(f):
+                print("Could not find {}".format(f))
+                print("Did you run 'git submodule update --init'?")
+                sys.exit(1)
+        check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
+        check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
+        check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
             libs += ['nccl']
@@ -333,6 +348,13 @@ class install(setuptools.command.install.install):
     def run(self):
         if not self.skip_build:
             self.run_command('build_deps')
+
+        # Copy headers necessary to compile C++ extensions.
+        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
+        self.copy_tree('torch/lib/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
+        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
+
         setuptools.command.install.install.run(self)
 
 
@@ -385,16 +407,6 @@ else:
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 
-
-# Check if you remembered to check out submodules
-def check_file(f):
-    if not os.path.exists(f):
-        print("Could not find {}".format(f))
-        print("Did you run 'git submodule update --init'?")
-        sys.exit(1)
-check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
-check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
-check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
 
 tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
@@ -450,16 +462,19 @@ main_sources = [
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
+    "torch/csrc/utils/variadic.cpp",
     "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/fusion_compiler.cpp",
+    "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/python_ir.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_tracer.cpp",
+    "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/interned_strings.cpp",
     "torch/csrc/jit/type.cpp",
     "torch/csrc/jit/export.cpp",
@@ -468,6 +483,7 @@ main_sources = [
     "torch/csrc/jit/python_arg_flatten.cpp",
     "torch/csrc/jit/python_compiled_function.cpp",
     "torch/csrc/jit/variable_flags.cpp",
+    "torch/csrc/jit/passes/create_autodiff_subgraphs.cpp",
     "torch/csrc/jit/passes/graph_fuser.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
@@ -606,6 +622,9 @@ if DEBUG:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
 
+if WITH_SCALARS:
+    extra_compile_args += ['-DWITH_SCALARS']
+
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
     # get path of libstdc++ and link manually.
@@ -702,8 +721,10 @@ if WITH_CUDA:
 version = '0.4.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
     assert os.getenv('PYTORCH_BUILD_NUMBER') is not None
-    version = os.getenv('PYTORCH_BUILD_VERSION') \
-        + '_' + os.getenv('PYTORCH_BUILD_NUMBER')
+    build_number = int(os.getenv('PYTORCH_BUILD_NUMBER'))
+    version = os.getenv('PYTORCH_BUILD_VERSION')
+    if build_number > 1:
+        version += '.post' + str(build_number)
 else:
     try:
         sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=cwd).decode('ascii').strip()
@@ -723,20 +744,35 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
-
 if __name__ == '__main__':
-    setup(name="torch", version=version,
-          description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
-          ext_modules=extensions,
-          cmdclass=cmdclass,
-          packages=packages,
-          package_data={'torch': [
-              'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll', 'lib/*.lib',
-              'lib/torch_shm_manager',
-              'lib/*.h',
-              'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-              'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
-              'lib/include/ATen/*.h',
-          ]},
-          install_requires=['pyyaml', 'numpy'],
-          )
+    setup(
+        name="torch",
+        version=version,
+        description=("Tensors and Dynamic neural networks in "
+                     "Python with strong GPU acceleration"),
+        ext_modules=extensions,
+        cmdclass=cmdclass,
+        packages=packages,
+        package_data={
+            'torch': [
+                'lib/*.so*',
+                'lib/*.dylib*',
+                'lib/*.dll',
+                'lib/*.lib',
+                'lib/torch_shm_manager',
+                'lib/*.h',
+                'lib/include/ATen/*.h',
+                'lib/include/pybind11/*.h',
+                'lib/include/pybind11/detail/*.h',
+                'lib/include/TH/*.h',
+                'lib/include/TH/generic/*.h',
+                'lib/include/THC/*.h',
+                'lib/include/THC/generic/*.h',
+                'lib/include/torch/csrc/*.h',
+                'lib/include/torch/csrc/autograd/*.h',
+                'lib/include/torch/csrc/jit/*.h',
+                'lib/include/torch/csrc/utils/*.h',
+                'lib/include/torch/torch.h',
+            ]
+        },
+        install_requires=['pyyaml', 'numpy'], )

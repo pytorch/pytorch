@@ -25,8 +25,7 @@ struct THPVariable {
 THP_API PyObject *THPVariableClass;
 
 bool THPVariable_initModule(PyObject *module);
-// FixMe: remove allow_scalar when scalars are fully supported.
-PyObject * THPVariable_Wrap(torch::autograd::Variable var, bool allow_scalar=false);
+PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 PyObject * THPVariable_get_data(THPVariable *self);
 
 inline bool THPVariable_Check(PyObject *obj)

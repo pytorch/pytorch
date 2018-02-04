@@ -23,8 +23,8 @@
 #include "vector/AVX2.h"
 #endif
 
-#include "generic/THVectorDefault.c"
+#include "generic/THVectorDefault.cpp"
 #include "THGenerateAllTypes.h"
 
-#include "generic/THVectorDispatch.c"
+#include "generic/THVectorDispatch.cpp"
 #include "THGenerateAllTypes.h"

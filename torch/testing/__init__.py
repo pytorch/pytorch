@@ -12,7 +12,7 @@ __all__ = [
 
 def make_non_contiguous(tensor):
     if tensor.numel() <= 1:  # can't make non-contiguous
-        return tensor.new(tensor.size())
+        return tensor.clone()
     osize = list(tensor.size())
 
     # randomly inflate a few dimensions in osize
@@ -37,5 +37,4 @@ def make_non_contiguous(tensor):
     return input
 
 
-def randn_like(variable):
-    return torch._C._VariableFunctions.randn_like(variable)
+randn_like = torch._C._VariableFunctions.randn_like

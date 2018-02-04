@@ -8,6 +8,7 @@
 #include "torch/csrc/utils/python_compat.h"
 #include "torch/csrc/utils/python_numbers.h"
 
+#include <ATen/ExpandUtils.h>
 #include <vector>
 
 using namespace at;
@@ -220,6 +221,18 @@ static THPObjectPtr wrapTuple(PyObject* index) {
   return res;
 }
 
+static bool isSingleBoolScalar(const variable_list& vars) {
+  return vars.size() == 1 && vars[0].type().scalarType() == ScalarType::Byte && vars[0].dim() == 0;
+}
+
+static PyObject* applyBoolGetitem(const Variable& self, bool index) {
+  if (index) {
+    return wrap(self.type().copy(self.unsqueeze(0)));
+  } else {
+    return wrap(self.type().tensor({0}));
+  }
+}
+
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
@@ -232,11 +245,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   } else if (THPUtils_checkLong(index)) {
     return wrap(applySelect(self_, 0, THPUtils_unpackLong(index)));
   } else if (PyBool_Check(index)) {
-    if (index == Py_True) {
-      return wrap(self_.unsqueeze(0));
-    } else {
-      return wrap(self_.type().tensor({0}));
-    }
+    return applyBoolGetitem(self_, index == Py_True);
   } else if (PySlice_Check(index)) {
     return wrap(applySlice(self_, 0, index, true));
   }
@@ -253,11 +262,33 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
     }
     return wrap(sliced);
   }
+  if (isSingleBoolScalar(variableIndices)) {
+    return applyBoolGetitem(self_, variableIndices[0].toCByte());
+  }
 
   // indexing by tensors ("advanced" indexing)
   return wrap(dispatch_index(sliced, variableIndices));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
+}
+
+static void copy_to(Variable dst, const Variable& src) {
+  Tensor b_src;
+  // To match numpy semantics:
+  // As a special case for backwards compatibility,
+  // strip away unit dimensions from the left of 'src'
+  auto src_sizes = src.sizes();
+  size_t first_nonzero_src = src_sizes.size();
+  for (size_t i = 0; i < src_sizes.size(); ++i) {
+    if (src_sizes[i] != 1) {
+      first_nonzero_src = i;
+      break;
+    }
+  }
+
+  src_sizes = src_sizes.slice(first_nonzero_src);
+  std::tie(b_src) = expand_inplace(dst, src.view(src_sizes), "setitem");
+  dst.copy_(b_src);
 }
 
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
@@ -267,15 +298,20 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
 
   // handle simple types: integers, slices, ellipsis, bool
   if (index == Py_False) {
+    // do nothing for false (technically we should check the size, but we don't have
+    // real 0-sized shapes.
     return 0;
-  } else if (index == Py_None || index == Py_Ellipsis || index == Py_True) {
-    self_.copy_(value);
+  } else if (index == Py_Ellipsis) {
+    copy_to(self_, value);
+    return 0;
+  } else if (index == Py_None || index == Py_True) {
+    copy_to(self_.unsqueeze(0), value);
     return 0;
   } else if (THPUtils_checkLong(index)) {
-    applySelect(self_, 0, THPUtils_unpackLong(index)).copy_(value);
+    copy_to(applySelect(self_, 0, THPUtils_unpackLong(index)), value);
     return 0;
   } else if (PySlice_Check(index)) {
-    applySlice(self_, 0, index).copy_(value);
+    copy_to(applySlice(self_, 0, index), value);
     return 0;
   }
 
@@ -285,7 +321,13 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   variable_list variableIndices;
   Variable sliced = applySlicing(self_, holder.get(), variableIndices);
   if (variableIndices.empty()) {
-    sliced.copy_(value);
+    copy_to(sliced, value);
+    return 0;
+  }
+  if (isSingleBoolScalar(variableIndices)) {
+    if (variableIndices[0].toCByte()) {
+      copy_to(self_.unsqueeze(0), value);
+    }
     return 0;
   }
 

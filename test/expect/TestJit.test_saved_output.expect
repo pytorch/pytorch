@@ -1,0 +1,8 @@
+graph(%0 : Double(4, 4)
+      -------- stage 1 --------
+      %2 : Double(4, 4!)) {
+  %1 : Double(4, 4) = sigmoid(%0)
+  ---------------- stage 1 ----------------
+  %3 : Double(4, 4) = _sigmoid_backward(%2, %1)
+  return (%1, %3);
+}

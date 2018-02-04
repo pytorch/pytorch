@@ -111,7 +111,7 @@ struct EqualNodeCSE {
 // Since the nodes are visited in topological order, one pass is enough.
 void EliminateCommonSubexpression(std::shared_ptr<Graph>& graph) {
   std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
-  for (auto it = graph->begin(); it != graph->end(); ++ it) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++ it) {
     auto node = *it;
     if (node->kind() == kPythonOp
         || node->kind() == kCppOp

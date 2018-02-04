@@ -64,6 +64,20 @@ $PYCMD test_cuda.py $@
 echo "Running NCCL tests"
 $PYCMD test_nccl.py $@
 
+# Skipping C++ extensions tests for Windows because setup.py does not link
+# the required libraries. Windows users should create their own cmake file with
+# proper linker flags.
+if [[ "$OSTYPE" != "msys" ]]; then
+  echo "Running C++ Extensions tests"
+  cd cpp_extensions
+  $PYCMD setup.py install --root ./install
+  cd ..
+  PYTHONPATH="$PWD/$(find cpp_extensions/install -name '*-packages'):$PYTHONPATH" \
+    $PYCMD test_cpp_extensions.py $@
+  echo "Removing cpp_extensions/install"
+  rm -rf cpp_extensions/install
+fi
+
 # Skipping test_distributed for Windows because it doesn't have fcntl
 if [[ "$OSTYPE" != "msys" ]]; then
     distributed_set_up() {
@@ -112,6 +126,18 @@ if [[ "$OSTYPE" != "msys" ]]; then
     else
       echo "Skipping MPI backend tests (MPI not found)"
     fi
+
+    echo "Running distributed tests for the Nccl backend"
+    distributed_set_up
+    BACKEND=nccl WORLD_SIZE=2 $PYCMD ./test_distributed.py
+    distributed_tear_down
+
+    echo "Running distributed tests for the Nccl backend with file init_method"
+    distributed_set_up
+    BACKEND=nccl WORLD_SIZE=2 INIT_METHOD='file://'$TEMP_DIR'/shared_init_file' $PYCMD ./test_distributed.py
+    distributed_tear_down
+
+
 fi
 
 if [[ $COVERAGE -eq 1 ]]; then

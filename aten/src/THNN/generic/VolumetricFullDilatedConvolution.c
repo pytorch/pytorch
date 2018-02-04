@@ -89,15 +89,12 @@ static void THNN_(col2vol)(
 static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
                          THTensor *input, THTensor *gradOutput,
                          THTensor *weight, THTensor *bias,
-                         int dT, int dW, int dH, int pT, int pW, int pH,
+                         int kT, int kW, int kH, int dT, int dW, int dH,
+                         int pT, int pW, int pH,
                          int dilationT, int dilationW, int dilationH,
-                         int aT, int aW, int aH) {
+                         int aT, int aW, int aH, int weight_nullable) {
   THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
                 "4D or 5D (batch mode) tensor expected for input, but got: %s");
-  // number of input & output planes and kernel size is indirectly defined by the weight tensor
-  THNN_ARGCHECK(weight->nDimension == 5, 4, weight,
-                "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
-                "expected for weight, but got: %s");
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
   THArgCheck(dilationT > 0 && dilationW > 0 && dilationH > 0, 15,
@@ -111,17 +108,19 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
              "dilationT: %d dilationH: %d dilationW: %d",
              aT, aH, aW, dT, dH, dW, dilationT, dilationH, dilationW);
 
-  int ndim = input->nDimension;
-  const int nInputPlane  = (int)weight->size[0];
-  const int nOutputPlane = (int)weight->size[1];
-  const int kT           = (int)weight->size[2];
-  const int kH           = (int)weight->size[3];
-  const int kW           = (int)weight->size[4];
-
-  if (bias != NULL) {
-    THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[1]);
+  // number of input & output planes and kernel size is indirectly defined by the weight tensor
+  if (weight != NULL) {
+    THNN_ARGCHECK(weight->nDimension == 5, 4, weight,
+                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+                  "expected for weight, but got: %s");
+    if (bias != NULL) {
+      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[1]);
+    }
+  } else if (!weight_nullable) {
+    THError("weight tensor is expected to be non-nullable");
   }
 
+  int ndim = input->nDimension;
   int dimf = 0;
   int dimd = 1;
   int dimh = 2;
@@ -134,6 +133,11 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
     dimw++;
   }
 
+  if (weight != NULL) {
+    const int64_t nInputPlane = weight->size[0];
+    THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
+  }
+
   const int64_t inputWidth   = input->size[dimw];
   const int64_t inputHeight  = input->size[dimh];
   const int64_t inputDepth   = input->size[dimd];
@@ -141,13 +145,20 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
   const int64_t outputHeight = (inputHeight - 1) * dH - 2*pH + (dilationH * (kH - 1) + 1) + aH;
   const int64_t outputWidth  = (inputWidth - 1) * dW - 2*pW + (dilationW * (kW - 1) + 1) + aW;
 
-  if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1)
-    THError("Given input size: (%dx%dx%dx%d). Calculated output size: (%dx%dx%dx%d). Output size is too small",
-            nInputPlane,inputDepth,inputHeight,inputWidth,nOutputPlane,outputDepth,outputHeight,outputWidth);
+  if (outputDepth < 1 || outputWidth < 1 || outputHeight < 1) {
+    THError("Given input size per channel: (%ld x %ld x %ld). "
+      "Calculated output size per channel: (%ld x %ld x %ld). Output size is too small",
+      inputDepth, inputHeight, inputWidth, outputDepth, outputHeight, outputWidth);
+  }
 
-  THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
   if (gradOutput != NULL) {
-    THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    if (weight != NULL) {
+      const int64_t nOutputPlane = weight->size[1];
+      THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    } else if (bias != NULL) {
+      const int64_t nOutputPlane = bias->size[0];
+      THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
+    }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimd, outputDepth);
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimw, outputWidth);
@@ -162,6 +173,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   THTensor *bias,
   THTensor *finput,         // internal columns buffer
   THTensor *fgradInput,     // internal ones buffer
+  int kT, int kW, int kH,   // kernel size
   int dT, int dW, int dH,   // stride of the convolution
   int pT, int pW, int pH,   // padding
   int dilationT, int dilationW, int dilationH,
@@ -171,23 +183,20 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   THTensor *ones    = fgradInput;
 
   THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
-        input, NULL, weight, bias,
-        dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH);
+        input, NULL, weight, bias, kT, kW, kH,
+        dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 0);
 
   const int nInputPlane  = (int)weight->size[0];
   const int nOutputPlane = (int)weight->size[1];
-  const int kT           = (int)weight->size[2];
-  const int kH           = (int)weight->size[3];
-  const int kW           = (int)weight->size[4];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
   bias = bias ? THTensor_(newContiguous)(bias) : bias;
-  int batch = 1;
+  int is_batch = 1;
   if (input->nDimension == 4)
   {
     // Force batch
-    batch = 0;
+    is_batch = 0;
     THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
   }
 
@@ -285,7 +294,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   THTensor_(free)(output_n);
 
   // Resize output
-  if (batch == 0)
+  if (is_batch == 0)
   {
     THTensor_(resize4d)(output, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
@@ -304,6 +313,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
   THTensor *weight,
   THTensor *finput,
   THTensor *fgradInput,     // only used by cuda impl
+  int kT, int kW, int kH,   // kernel size
   int dT, int dW, int dH,   // stride
   int pT, int pW, int pH,   // padding
   int dilationT, int dilationW, int dilationH,
@@ -313,24 +323,21 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
 
   // number of input & output planes and kernel size is indirectly defined by the weight tensor
   THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
-        input, gradOutput, weight, NULL,
-        dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH);
+        input, gradOutput, weight, NULL, kT, kW, kH,
+        dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 0);
 
   const int nInputPlane  = (int)weight->size[0];
   const int nOutputPlane = (int)weight->size[1];
-  const int kT           = (int)weight->size[2];
-  const int kH           = (int)weight->size[3];
-  const int kW           = (int)weight->size[4];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
-  int batch = 1;
+  int is_batch = 1;
   if (input->nDimension == 4)
   {
     // Force batch
-    batch = 0;
+    is_batch = 0;
     THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
     THTensor_(resize5d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
   }
@@ -398,7 +405,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
   THTensor_(free)(gradOutput_n);
 
   // Resize output
-  if (batch == 0)
+  if (is_batch == 0)
   {
     THTensor_(resize4d)(gradOutput, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
@@ -418,6 +425,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   THTensor *gradBias,
   THTensor *finput,
   THTensor *fgradInput,
+  int kT, int kW, int kH,   // kernel size
   int dT, int dW, int dH,   // stride
   int pT, int pW, int pH,   // padding
   int dilationT, int dilationW, int dilationH,
@@ -427,29 +435,36 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   // number of input & output planes and kernel size is indirectly defined by the gradWeight tensor
   THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
-        input, gradOutput, gradWeight, gradBias,
-        dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH);
+        input, gradOutput, gradWeight, gradBias, kT, kW, kH,
+        dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 1);
 
-  int nInputPlane  = (int)gradWeight->size[0];
-  int nOutputPlane = (int)gradWeight->size[1];
-  int kT           = (int)gradWeight->size[2];
-  int kH           = (int)gradWeight->size[3];
-  int kW           = (int)gradWeight->size[4];
+  int nOutputPlane;
+  if (gradWeight) {
+    nOutputPlane = THTensor_(size)(gradWeight, 1);
+  } else if (gradBias) {
+    nOutputPlane = THTensor_(size)(gradBias, 0);
+  } else {
+    return;
+  }
 
   THTensor *columns = finput;
   THTensor *ones = fgradInput;
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
-  THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
-  if (gradBias)
+  if (gradWeight) {
+    THArgCheck(THTensor_(isContiguous)(gradWeight), 4, "gradWeight needs to be contiguous");
+  }
+  if (gradBias) {
     THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
+    THArgCheck(THTensor_(isContiguous)(ones), 7, "ones needs to be contiguous");
+  }
 
-  int batch = 1;
+  int is_batch = 1;
   if (input->nDimension == 4)
   {
     // Force batch
-    batch = 0;
+    is_batch = 0;
     THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
     THTensor_(resize5d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
   }
@@ -484,45 +499,50 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   for (elt = 0; elt < batchSize; ++elt)
   {
     // Matrix mulitply per output:
-    THTensor_(select)(input_n, input, 0, elt);
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 
-    // Extract columns:
-    THNN_(vol2col)(
-      THTensor_(data)(gradOutput_n), nOutputPlane,
-      outputDepth, outputHeight, outputWidth,
-      kT, kH, kW,
-      pT, pH, pW,
-      dT, dH, dW,
-      dilationT,  dilationH,  dilationW,
-      THTensor_(data)(columns)
-    );
+    // Do Weight:
+    if (gradWeight) {
+      // Matrix mulitply per output:
+      THTensor_(select)(input_n, input, 0, elt);
 
-    // M,N,K are dims of matrix A and B
-    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    const int64_t n = columns->size[0];   // nOutputPlane * kt * kh * kw
-    const int64_t m = input_n->size[0];   // nInputPlane
-    const int64_t k = columns->size[1];   // inputHeight * inputWidth
+      // Extract columns:
+      THNN_(vol2col)(
+        THTensor_(data)(gradOutput_n), nOutputPlane,
+        outputDepth, outputHeight, outputWidth,
+        kT, kH, kW,
+        pT, pH, pW,
+        dT, dH, dW,
+        dilationT,  dilationH,  dilationW,
+        THTensor_(data)(columns)
+      );
 
-    // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
-    THBlas_(gemm)(
-      't', 'n',
-      n, m, k,
-      scale,
-      THTensor_(data)(columns), k,
-      THTensor_(data)(input_n), k,
-      1,
-      THTensor_(data)(gradWeight), n
-    );
+      // M,N,K are dims of matrix A and B
+      // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+      const int64_t n = columns->size[0];   // nOutputPlane * kt * kh * kw
+      const int64_t m = input_n->size[0];   // nInputPlane
+      const int64_t k = columns->size[1];   // inputHeight * inputWidth
+
+      // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
+      THBlas_(gemm)(
+        't', 'n',
+        n, m, k,
+        scale,
+        THTensor_(data)(columns), k,
+        THTensor_(data)(input_n), k,
+        1,
+        THTensor_(data)(gradWeight), n
+      );
+    }
 
     // Do Bias:
-    // M,N,K are dims of matrix A and B
-    // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    const int64_t m_ = nOutputPlane;
-    const int64_t k_ = outputDepth * outputHeight * outputWidth;
-
-    // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
     if (gradBias) {
+      // M,N,K are dims of matrix A and B
+      // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
+      const int64_t m_ = nOutputPlane;
+      const int64_t k_ = outputDepth * outputHeight * outputWidth;
+
+      // Do GEMV (note: this is a bit confusing because gemv assumes column-major matrices)
       THBlas_(gemv)(
         't',
         k_, m_,
@@ -540,10 +560,10 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   THTensor_(free)(gradOutput_n);
 
   // Resize
-  if (batch == 0)
+  if (is_batch == 0)
   {
     THTensor_(resize4d)(gradOutput, nOutputPlane, outputDepth, outputHeight, outputWidth);
-    THTensor_(resize4d)(input, nInputPlane, inputDepth, inputHeight, inputWidth);
+    THTensor_(resize4d)(input, input->size[1], inputDepth, inputHeight, inputWidth);
   }
 
   THTensor_(free)(input);

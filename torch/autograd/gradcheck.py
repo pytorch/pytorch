@@ -182,7 +182,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
                 if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
-                    return fail_test('for output no. %d,\n numerical:%s\nanalytical:%s\n' % (j, numerical, analytical))
+                    return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                     'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
         if not reentrant:
             return fail_test('not reentrant')
@@ -207,7 +208,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     return True
 
 
-def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3, gen_non_contig_grad_outputs=False):
+def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
+                  gen_non_contig_grad_outputs=False, raise_exception=True):
     """Check gradients of gradients computed via small finite differences
        against analytical gradients
     This function checks that backpropagating through the gradients computed
@@ -228,6 +230,12 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
         rtol (float, optional): relative tolerance
+        gen_non_contig_grad_outputs (bool, optional): if :attr:`grad_outputs` is
+            ``None`` and :attr:`gen_non_contig_grad_outputs` is ``True``, the
+            randomly generated gradient outputs are made to be noncontiguous
+        raise_exception: bool indicating whether to raise an exception if
+            gradcheck fails. The exception gives more information about the
+            exact nature of the failure. This is helpful when debugging gradchecks.
 
     Returns:
         True if all differences satisfy allclose condition. Raises an exception
@@ -253,4 +261,4 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
         return grad_inputs
 
-    return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol)
+    return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol, raise_exception)

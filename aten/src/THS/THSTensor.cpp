@@ -1,6 +1,6 @@
 #include "THSTensor.h"
 
-#include "generic/THSTensor.c"
+#include "generic/THSTensor.cpp"
 #include "THSGenerateAllTypes.h"
 
 #include "generic/THSTensorMath.c"

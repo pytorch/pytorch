@@ -97,6 +97,10 @@ def medium_2d(t):
     return make_tensor(t, M, M)
 
 
+def medium_2d_expanded(t):
+    return t(1).expand(M, M)
+
+
 def medium_2d_scaled(t, scale=10):
     return make_tensor(t, M, M).mul(scale)
 
@@ -143,6 +147,13 @@ def new_t(*sizes):
         return t(*sizes).copy_(torch.randn(*sizes))
     return tmp
 
+# Content of each tuple:
+# - function name
+# - constructor for the tensor,    signature: fn(tensor_type) -> tensor
+# - constructor for the arguments, signature: fn(tensor_type) -> list
+# - postfix name for the test (must be unique for a given function) (default='')
+# - tensor types to use (default=types)
+# - disable inplace test, if set to True, no inplace test will be done (default=False)
 tests = [
     ('add', small_3d, lambda t: [number(3.14, 3, t)]),
     ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -296,9 +307,11 @@ tests = [
     ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort'),
     ('trace', medium_2d, lambda t: [],),
     ('tril', medium_2d, lambda t: [],),
+    ('tril', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
     ('tril', medium_2d, lambda t: [2], 'positive'),
     ('tril', medium_2d, lambda t: [-2], 'negative'),
     ('triu', medium_2d, lambda t: [],),
+    ('triu', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
     ('triu', medium_2d, lambda t: [2], 'positive'),
     ('triu', medium_2d, lambda t: [-2], 'negative'),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
@@ -315,11 +328,13 @@ tests = [
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
-    ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
     # TODO: add det to here once Variable and Tensor are the same thing
 ]
+
+if not IS_WINDOWS:
+    tests.append(('qr', large_2d_lapack, lambda t: [], 'big', float_types))
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
@@ -928,6 +943,13 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    def test_bernoulli_variable(self):
+        # TODO: delete when tensor/variable are merged
+        from torch.autograd import Variable
+        x = torch.cuda.FloatTensor([0, 1]).cuda()
+        x_var = Variable(x)
+        self.assertEqual(x_var.bernoulli().data, x.bernoulli())
+
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
         y = torch.randn(2, 1, 1).cuda()
@@ -1036,7 +1058,7 @@ class TestCuda(TestCase):
         self.assertTrue(user_stream.query())
         # copy 10 MB tensor from CPU-GPU which should take some time
         tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(async=True)
+        tensor2 = tensor1.cuda(non_blocking=True)
         self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
@@ -1084,7 +1106,7 @@ class TestCuda(TestCase):
         # Performs the CPU->GPU copy in a background stream
         def perform_copy():
             with torch.cuda.stream(stream):
-                tmp = t.cuda(async=True)
+                tmp = t.cuda(non_blocking=True)
                 ptr[0] = tmp.data_ptr()
             torch.cuda.current_stream().wait_stream(stream)
             tmp.record_stream(torch.cuda.current_stream())
@@ -1123,7 +1145,7 @@ class TestCuda(TestCase):
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
         torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-        gpu_tensor.copy_(t, async=True)
+        gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
@@ -1142,14 +1164,14 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(1):
             torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-            gpu_tensor1.copy_(t, async=True)
+            gpu_tensor1.copy_(t, non_blocking=True)
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
 
         with torch.cuda.device(0):
-            gpu_tensor0.copy_(t, async=True)
+            gpu_tensor0.copy_(t, non_blocking=True)
 
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
@@ -1342,18 +1364,27 @@ if HAS_CUDA:
         for t in types:
             tensor = t()
             gpu_tensor = get_gpu_type(t)()
+
+            # Default values
+            desc = ''
+            type_subset = types
+            no_inplace = False
             if len(decl) == 3:
                 name, constr, arg_constr = decl
-                desc = ''
             elif len(decl) == 4:
                 name, constr, arg_constr, desc = decl
             elif len(decl) == 5:
                 name, constr, arg_constr, desc, type_subset = decl
-                if t not in type_subset:
-                    continue
+            elif len(decl) == 6:
+                name, constr, arg_constr, desc, type_subset, no_inplace = decl
+
+            if t not in type_subset:
+                continue
 
             precision = custom_precision.get(name, TestCuda.precision)
             for inplace in (True, False):
+                if inplace and no_inplace:
+                    continue
                 if inplace:
                     name_inner = name + '_'
                 else:
