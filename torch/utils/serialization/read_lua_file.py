@@ -367,12 +367,6 @@ def storage_to_size(obj, *attrs):
 
 
 @registry_addon
-def storage_to_FP(obj, attr):
-    value = getattr(obj, attr)
-    setattr(obj, attr, value)
-
-
-@registry_addon
 def ensure_type(obj, type_map):
     for attr, converter in type_map.items():
         value = getattr(obj, attr)
@@ -399,6 +393,7 @@ ensure_attr('MultiMarginCriterion', 'weights')
 ensure_attr('SpatialConvolution', 'bias', 'gradWeight', 'gradBias', '_gradOutput')
 ensure_attr('SpatialCrossMapLRN', 'scale')
 ensure_attr('Dropout', 'inplace')
+ensure_attr('PixelShuffle', 'upscaleFactor')
 make_none_attr('SpatialConvolution', 'finput', 'fgradInput', '_input')
 attr_map('ReLU', {'val': 'value'})
 attr_map('Threshold', {'val': 'value'})
@@ -430,7 +425,6 @@ decrement_positive('Sum', 'dimension')
 decrement_positive('Max', 'dimension')
 decrement_positive('Min', 'dimension')
 decrement_positive('Mean', 'dimension')
-storage_to_FP('PixelShuffle', 'upscaleFactor')
 storage_to_size('View', 'size')
 storage_to_size('DepthConcat', 'outputSize')
 storage_to_size('MixtureTable', 'size')
