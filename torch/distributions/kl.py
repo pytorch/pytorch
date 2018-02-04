@@ -216,7 +216,7 @@ def _kl_exponential_exponential(p, q):
 def _kl_expfamily_expfamily(p, q):
     if not type(p) == type(q):
         raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
-                            be computed")
+                            be computed using Bregman divergences")
     p_nparams = [Variable(np.data, requires_grad=True) for np in p._natural_params]
     q_nparams = q._natural_params
     lg_normal = p._log_normalizer(*p_nparams)
