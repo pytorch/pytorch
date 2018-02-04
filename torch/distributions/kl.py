@@ -11,6 +11,7 @@ from .categorical import Categorical
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
+from .exp_family import ExponentialFamily
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
@@ -22,6 +23,7 @@ from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
+from .utils import _sum_rightmost
 from torch.autograd import Variable, variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
@@ -222,6 +224,22 @@ def _kl_exponential_exponential(p, q):
     rate_ratio = q.rate / p.rate
     t1 = -rate_ratio.log()
     return t1 + rate_ratio - 1
+
+
+@register_kl(ExponentialFamily, ExponentialFamily)
+def _kl_expfamily_expfamily(p, q):
+    if not type(p) == type(q):
+        raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
+                            be computed using Bregman divergences")
+    p_nparams = [Variable(np.data, requires_grad=True) for np in p._natural_params]
+    q_nparams = q._natural_params
+    lg_normal = p._log_normalizer(*p_nparams)
+    gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
+    result = q._log_normalizer(*q_nparams) - lg_normal.clone()
+    for pnp, qnp, g in zip(p_nparams, q_nparams, gradients):
+        term = (qnp - pnp) * g
+        result -= _sum_rightmost(term, len(q.event_shape))
+    return result
 
 
 @register_kl(Gamma, Gamma)

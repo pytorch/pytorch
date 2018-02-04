@@ -34,11 +34,13 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
-                                 Exponential, FisherSnedecor, Gamma, Geometric,
+                                 Exponential, ExponentialFamily,
+                                 FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  StudentT, TransformedDistribution, Uniform,
                                  constraints, kl_divergence)
+from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -181,8 +183,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0])),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5])),
         },
     ]),
     Example(LogNormal, [
@@ -209,8 +211,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0])),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5])),
         },
     ]),
     Example(OneHotCategorical, [
@@ -270,8 +272,8 @@ EXAMPLES = [
             'high': Variable(torch.ones(1), requires_grad=True),
         },
         {
-            'low': torch.Tensor([1.0, 1.0]),
-            'high': torch.Tensor([2.0, 3.0]),
+            'low': Variable(torch.Tensor([1.0, 1.0]), requires_grad=True),
+            'high': Variable(torch.Tensor([2.0, 3.0]), requires_grad=True),
         },
     ]),
 ]
@@ -376,7 +378,8 @@ class TestDistributions(TestCase):
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
         for Dist in globals().values():
-            if isinstance(Dist, type) and issubclass(Dist, Distribution) and Dist is not Distribution:
+            if isinstance(Dist, type) and issubclass(Dist, Distribution) \
+                    and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
@@ -1970,7 +1973,7 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            print('Testing KL({}, {})'.format(type(p).__name__, type(q).__name__))
+            print('Testing KL({}, {}) using Monte Carlo'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0
@@ -1987,6 +1990,21 @@ class TestKL(TestCase):
                 'Expected ({} Monte Carlo samples): {}'.format(denominator, expected),
                 'Actual (analytic): {}'.format(actual),
             ]))
+
+    def test_kl_exponential_family(self):
+        for (p, _), (_, q) in self.finite_examples:
+            if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
+                print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
+                actual = kl_divergence(p, q)
+                expected = _kl_expfamily_expfamily(p, q)
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
+                self.assertEqual(actual, expected, message='\n'.join([
+                    'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
+                    'Expected (using Bregman Divergence) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max())
+                ]))
 
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
@@ -2034,6 +2052,29 @@ class TestKL(TestCase):
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max()),
+                ]))
+
+    def test_entropy_exponential_family(self):
+        for Dist, params in EXAMPLES:
+            if not issubclass(Dist, ExponentialFamily):
+                continue
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                try:
+                    expected = ExponentialFamily.entropy(dist)
+                except NotImplementedError:
+                    continue
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
+                self.assertEqual(actual, expected, message='\n'.join([
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
+                    'Expected (Bregman Divergence) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max())
                 ]))
 
 

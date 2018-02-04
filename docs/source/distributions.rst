@@ -13,6 +13,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Distribution
     :members:
 
+:hidden:`ExponentialFamily`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+..autoclass:: ExponentialFamily
+    :members:
+
 :hidden:`Bernoulli`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

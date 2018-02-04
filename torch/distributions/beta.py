@@ -4,11 +4,11 @@ import torch
 from torch.autograd import variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
-class Beta(Distribution):
+class Beta(ExponentialFamily):
     r"""
     Beta distribution parameterized by `concentration1` and `concentration0`.
 
@@ -77,3 +77,10 @@ class Beta(Distribution):
             return torch.Tensor([result])
         else:
             return result
+
+    @property
+    def _natural_params(self):
+        return (self.concentration1, self.concentration0)
+
+    def _log_normalizer(self, x, y):
+        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)
