@@ -7,14 +7,6 @@
 
 namespace torch { namespace jit {
 
-struct Capture {
-  enum class Kind {Input, Output};
-  Capture(Kind kind, std::size_t offset)
-    : kind(kind), offset(offset) {}
-  Kind kind;
-  std::size_t offset;
-};
-
 using value_list = std::vector<Value*>;
 // Example showcasing how Gradient is constructed:
 //
@@ -56,7 +48,10 @@ struct Gradient {
   // specially, because this allows us to avoid adding extra vjps as df inputs.
 
   std::vector<std::size_t> df_input_vjps; // Offsets into f's outputs.
-  std::vector<Capture> df_input_captures;
+  // capture can come from inputs or outputs
+  std::vector<std::size_t> df_input_captured_inputs; // Offsets into f's inputs
+  std::vector<std::size_t> df_input_captured_outputs; // Offsets into f's outputs
+
 
   // df will produce vjps for a subset of inputs of f that required grad.
   // df_output_vjps[idx] == inp_idx means that idx-th output of df produces a vjp
@@ -80,7 +75,7 @@ struct Gradient {
   //   - Return outputs[:f_real_outputs]
   //
   // When running df:
-  //   - Concatenate received vjps and captured Variables 
+  //   - Concatenate received vjps and captured Variables
   //   - Interpret df
   //   - Wrap outputs of df into Variables (that don't require grad)
 };

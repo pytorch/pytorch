@@ -292,18 +292,16 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     // If it's already an output we don't have to add anything,
     // but register the fact that it needs to be captured.
     if (orig_primal_outputs_idx.count(capture_val) > 0) {
-      grad_desc.df_input_captures.emplace_back(Capture::Kind::Output,
-                                              orig_primal_outputs_idx[capture_val]);
+      grad_desc.df_input_captured_outputs.push_back(orig_primal_outputs_idx[capture_val]);
     // If it's an input, we could add it as an output but in fact it's
     // more efficient to use a special kind of capture.
     } else if (orig_primal_inputs_idx.count(capture_val) > 0) {
-      grad_desc.df_input_captures.emplace_back(Capture::Kind::Input,
-                                               orig_primal_inputs_idx.at(capture_val));
+      grad_desc.df_input_captured_inputs.push_back(orig_primal_inputs_idx.at(capture_val));
     // Otherwise it's just a regular intermediate value that we need to add as an output
     } else {
+      // we need to create a new temporary output for this capture because it wasn't availiable.
       graph.registerOutput(capture_val);
-      grad_desc.df_input_captures.emplace_back(Capture::Kind::Output,
-                                               graph.outputs().size() - 1);
+      grad_desc.df_input_captured_outputs.emplace_back(graph.outputs().size() - 1);
     }
   }
 
@@ -336,14 +334,16 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
   // afterward inputs: [output vjps][temporary vjps][captures]
   // construct a map from captured 'value' to the index in the input list
   // used to extract this block into its own function
-
   std::unordered_map<Value*, size_t> capture_to_formal_index;
-  for (Capture capture : grad_desc.df_input_captures) {
-    auto source = capture.kind == Capture::Kind::Input ? graph.inputs() : graph.outputs();
-    Value * captured = source[capture.offset];
+  const auto & add_capture = [&](Value * captured) {
     capture_to_formal_index[captured] = reverse_block->inputs().size();
     reverse_block->addInput()->copyMetadata(captured);
-  }
+  };
+  for(auto & offset : grad_desc.df_input_captured_inputs)
+    add_capture(graph.inputs()[offset]);
+  for(auto & offset : grad_desc.df_input_captured_outputs)
+    add_capture(graph.outputs()[offset]);
+
   grad_desc.df = std::make_shared<Graph>();
   grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
     return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
