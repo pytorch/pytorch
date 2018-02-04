@@ -37,11 +37,11 @@ is required to be differentiable. The code for implementing the pathwise estimat
 be as follows::
 
     probs = policy_network(state)
-    # NOTE: this is equivalent to what used to be called multinomial
-    m = Categorical(probs)
-    action = m.sample()
-    next_state, reward = env.step(action)
-    loss = -reward_function(m.rsample())
+    m = Normal(**probs)
+    # any distribution with has_rsample == True could work based on the application
+    action = m.rsample()
+    next_state, reward = env.step(action)  # Assume that reward is differentiable
+    loss = -reward
     loss.backward()
 """
 
