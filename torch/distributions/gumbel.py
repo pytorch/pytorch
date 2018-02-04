@@ -2,13 +2,15 @@ from numbers import Number
 import math
 import torch
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.uniform import Uniform
+from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import AffineTransform, ExpTransform
 from torch.distributions.utils import _finfo, broadcast_all
 
 euler_constant = 0.57721566490153286060  # Euler Mascheroni Constant
 
 
-class Gumbel(Distribution):
+class Gumbel(TransformedDistribution):
     r"""
     Samples from a Gumbel Distribution.
 
@@ -23,7 +25,6 @@ class Gumbel(Distribution):
         loc (float or Tensor or Variable): Location parameter of the distribution
         scale (float or Tensor or Variable): Scale parameter of the distribution
     """
-    has_rsample = True
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
 
@@ -33,19 +34,10 @@ class Gumbel(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.scale.size()
-        super(Gumbel, self).__init__(batch_shape)
-
-    def rsample(self, sample_shape=torch.Size()):
-        shape = self._extended_shape(sample_shape)
-        uni_dist = self.scale.new(shape).uniform_(_finfo(self.scale).eps, 1)
-        # X ~ Uniform(0, 1)
-        # Y = loc - scale * ln (-ln (X)) ~ Gumbel(loc, scale)
-        return self.loc - self.scale * torch.log(-uni_dist.log())
-
-    def log_prob(self, value):
-        self._validate_log_prob_arg(value)
-        z = (value - self.loc) / self.scale
-        return -(self.scale.log() + z + torch.exp(-z))
+        base_dist = Uniform(torch.zeros_like(self.loc), 1)
+        transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-1),
+                      ExpTransform().inv, AffineTransform(loc=loc, scale=-scale)]
+        super(Gumbel, self).__init__(base_dist, transforms)
 
     @property
     def mean(self):

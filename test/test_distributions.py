@@ -939,10 +939,10 @@ class TestDistributions(TestCase):
     def test_pareto(self):
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
         alpha = Variable(torch.randn(2, 3).abs(), requires_grad=True)
-        scale_1d = torch.randn(1).abs()
-        alpha_1d = torch.randn(1).abs()
-        self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).mean, float('inf'), allow_inf=True)
-        self.assertEqual(Pareto(scale_1d, torch.Tensor([0.5])).variance, float('inf'), allow_inf=True)
+        scale_1d = Variable(torch.randn(1).abs(), requires_grad=True)
+        alpha_1d = Variable(torch.randn(1).abs(), requires_grad=True)
+        self.assertEqual(Pareto(scale_1d, 0.5).mean, float('inf'), allow_inf=True)
+        self.assertEqual(Pareto(scale_1d, 0.5).variance, float('inf'), allow_inf=True)
         self.assertEqual(Pareto(scale, alpha).sample().size(), (2, 3))
         self.assertEqual(Pareto(scale, alpha).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample((1,)).size(), (1, 1))
@@ -970,8 +970,8 @@ class TestDistributions(TestCase):
     def test_gumbel(self):
         loc = Variable(torch.randn(2, 3), requires_grad=True)
         scale = Variable(torch.randn(2, 3).abs(), requires_grad=True)
-        loc_1d = torch.randn(1)
-        scale_1d = torch.randn(1).abs()
+        loc_1d = Variable(torch.randn(1), requires_grad=True)
+        scale_1d = Variable(torch.randn(1).abs(), requires_grad=True)
         self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
         self.assertEqual(Gumbel(loc, scale).sample((5,)).size(), (5, 2, 3))
         self.assertEqual(Gumbel(loc_1d, scale_1d).sample().size(), (1,))
@@ -2234,6 +2234,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.binom(10 * np.ones(simplex_tensor.shape), simplex_tensor)
             ),
             (
+                Cauchy(random_var, positive_var),
+                scipy.stats.cauchy(loc=random_var, scale=positive_var)
+            ),
+            (
                 Dirichlet(positive_var),
                 scipy.stats.dirichlet(positive_var)
             ),
@@ -2298,10 +2302,14 @@ class TestAgainstScipy(TestCase):
 
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
+            if isinstance(pytorch_dist, Cauchy):
+                continue
             self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
+            if isinstance(pytorch_dist, Cauchy):
+                continue
             if isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
@@ -2314,22 +2322,22 @@ class TestAgainstScipy(TestCase):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = pytorch_dist.sample((5,))
             try:
-                self.assertEqual(pytorch_dist.cdf(samples),
-                                 scipy_dist.cdf(samples),
-                                 message=pytorch_dist)
+                cdf = pytorch_dist.cdf(samples)
             except NotImplementedError:
-                pass
+                continue
+            print("Testing {}.cdf()".format(type(pytorch_dist).__name__))
+            self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
 
     def test_icdf(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = Variable(torch.rand((5,) + pytorch_dist.batch_shape))
             try:
-                self.assertEqual(pytorch_dist.icdf(samples),
-                                 scipy_dist.ppf(samples),
-                                 message=pytorch_dist)
+                icdf = pytorch_dist.icdf(samples)
             except NotImplementedError:
-                pass
+                continue
+            print("Testing {}.icdf()".format(type(pytorch_dist).__name__))
+            self.assertEqual(icdf, scipy_dist.ppf(samples), message=pytorch_dist)
 
 
 class TestTransforms(TestCase):
