@@ -150,6 +150,8 @@ class LayerModelHelper(model_helper.ModelHelper):
     def add_global_constant(
         self, name, array=None, dtype=None, initializer=None
     ):
+        assert isinstance(name, six.string_types), (
+            'name should be a string as we are using it as map key')
         # This is global namescope for constants. They will be created in all
         # init_nets and there should be very few of them.
         assert name not in self.global_constants, \
