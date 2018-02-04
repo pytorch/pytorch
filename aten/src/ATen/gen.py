@@ -225,7 +225,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#include <THCS/THCS.h>',
             '#undef THCIndexTensor_',
         ]
-        env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.h>']
+        env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.cuh>']
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)

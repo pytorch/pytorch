@@ -32,10 +32,6 @@ inline Tensor Tensor::toBackend(Backend b) const {
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
-template<typename T>
-inline T* Tensor::data() const {
-  runtime_error("data() cast to unexpected type.");
-}
 #define DEFINE_CAST(T,name,_) \
 template<> \
 inline T* Tensor::data() const { \
