@@ -283,12 +283,6 @@ static void check_no_requires_grad(const Tensor& tensor, const char* name) {
   }
 }
 
-// NB: This should be called with Tensor/TensorList arguments (not Variables)
-template <typename... Args>
-static function_list compute_next_functions(Args&&... args) {
-  return Function::tensor_flags(std::forward<Args>(args)...).next_functions;
-}
-
 static void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
@@ -387,7 +381,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   requires_grad &= isFloatingPoint(self.type().scalarType());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->next_functions = compute_next_functions( self, src );
+    grad_fn->next_functions = get_next_functions(self, src);
     grad_fn->num_inputs = 1;
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;

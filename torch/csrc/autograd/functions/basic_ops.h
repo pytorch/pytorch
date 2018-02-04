@@ -11,8 +11,8 @@
 namespace torch { namespace autograd {
 
 struct Error : public Function {
-  Error(std::string msg, FunctionFlags&& flags)
-    : Function(std::move(flags))
+  Error(std::string msg, function_list&& next_functions)
+    : Function(std::move(next_functions))
     , msg(std::move(msg)) {}
 
   Error(std::string msg)
@@ -35,9 +35,8 @@ struct DelayedError : public Function {
 
 struct GraphRoot : public Function {
   GraphRoot(function_list functions, variable_list inputs)
-    : outputs(std::move(inputs)) {
-      next_functions = std::move(functions);
-    };
+    : Function(std::move(functions)), outputs(std::move(inputs)) {
+    }
 
   virtual variable_list apply(const variable_list& inputs) {
     return outputs;
