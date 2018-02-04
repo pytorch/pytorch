@@ -1,7 +1,5 @@
 import torch
 from .Module import Module
-from torch.legacy.nn.View import View
-import numpy
 
 class PixelShuffle(Module):
     def __init__(self, upscaleFactor):
