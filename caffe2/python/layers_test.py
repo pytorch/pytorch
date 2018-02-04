@@ -385,7 +385,7 @@ class TestLayers(LayersTestCase):
 
         output_idx = [1, 3, 5]
         output_idx_blob = self.model.add_global_constant(
-            self.model.net.NextScopedBlob('pairwise_dot_product_gather'),
+            str(self.model.net.NextScopedBlob('pairwise_dot_product_gather')),
             output_idx,
             dtype=np.int32,
         )
