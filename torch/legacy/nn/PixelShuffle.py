@@ -1,6 +1,7 @@
 import torch
 from .Module import Module
 
+
 class PixelShuffle(Module):
     def __init__(self, upscaleFactor):
         super(PixelShuffle, self).__init__()
