@@ -3,7 +3,7 @@ from numbers import Number
 import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
@@ -13,7 +13,7 @@ def _poisson(rate):
     return torch._C._VariableFunctions.poisson(rate)
 
 
-class Poisson(Distribution):
+class Poisson(ExponentialFamily):
     r"""
     Creates a Poisson distribution parameterized by `rate`, the rate parameter.
 
@@ -57,3 +57,10 @@ class Poisson(Distribution):
         self._validate_log_prob_arg(value)
         rate, value = broadcast_all(self.rate, value)
         return (rate.log() * value) - rate - (value + 1).lgamma()
+
+    @property
+    def _natural_params(self):
+        return (torch.log(self.rate), )
+
+    def _log_normalizer(self, x):
+        return torch.exp(x)
