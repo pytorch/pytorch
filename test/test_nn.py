@@ -1263,6 +1263,21 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_maxpool3d_contiguous_range(self):
+        # Mostly just a test if THCDeviceTensor::isContiguousRange
+        # is okay with dims of size 1 but crazy strides
+        x = Variable(torch.randn(7, 1, 5, 3, 2).cuda())
+        strange_strides = [30, 1234, 6, 2, 1]
+        y = x.as_strided(x.size(), strange_strides)
+        x = x.cpu().as_strided(x.size(), strange_strides)
+
+        # Should not crash
+        out_y = F.max_pool3d(y, (5, 1, 1), stride=(5, 1, 1))
+        out_x = F.max_pool3d(x, (5, 1, 1), stride=(5, 1, 1))
+
+        self.assertEqual(out_y, out_x.cuda())
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_AvgPool3d_backward_after_cat_dim1_cuda(self):
         # x has to have batch_size 1 to test contiguous checks
         x = Variable(torch.randn(1, 3, 4, 4, 4).cuda(), requires_grad=True)
