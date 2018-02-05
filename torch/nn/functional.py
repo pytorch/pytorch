@@ -1550,6 +1550,35 @@ def pixel_shuffle(input, upscale_factor):
     return shuffle_out.view(batch_size, channels, out_height, out_width)
 
 
+def pixel_shuffle_3d(input, upscale_factor):
+    r"""Rearranges elements in a tensor of shape ``[*, C*r^3, H, W, D]`` to a
+    tensor of shape ``[C, H*r, W*r, D*r]``.
+    See :class:`~torch.nn.PixelShuffle3D` for details.
+    Args:
+        input (Variable): Input
+        upscale_factor (int): factor to increase spatial resolution by
+    Examples::
+        >>> ps = nn.PixelShuffle3D(2)
+        >>> input = autograd.Variable(torch.Tensor(1, 8, 4, 4, 4))
+        >>> output = ps(input)
+        >>> print(output.size())
+        torch.Size([1, 1, 8, 8, 8])
+    """
+    batch_size, channels, in_height, in_width, in_depth = input.size()
+    channels //= upscale_factor ** 3
+
+    out_height = in_height * upscale_factor
+    out_width = in_width * upscale_factor
+    out_depth = in_depth * upscale_factor
+
+    input_view = input.contiguous().view(
+        batch_size, channels, upscale_factor, upscale_factor, upscale_factor,
+        in_height, in_width, in_depth)
+
+    shuffle_out = input_view.permute(0, 1, 5, 2, 6, 3, 7, 4).contiguous()
+    return shuffle_out.view(batch_size, channels, out_height, out_width, out_depth)
+
+
 def upsample(input, size=None, scale_factor=None, mode='nearest'):
     r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`

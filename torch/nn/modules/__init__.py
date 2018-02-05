@@ -22,7 +22,7 @@ from .normalization import LocalResponseNorm, CrossMapLRN2d
 from .sparse import Embedding, EmbeddingBag
 from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
-from .pixelshuffle import PixelShuffle
+from .pixelshuffle import PixelShuffle, PixelShuffle3D
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample
 from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
