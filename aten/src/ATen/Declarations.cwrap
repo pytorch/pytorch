@@ -2985,7 +2985,8 @@
         - THTensor* mat2
 ]]
 [[
-  name: addmv
+  name: _addmv
+  cname: addmv
   variants:
     - method
     - function
@@ -3005,7 +3006,7 @@
     - THTensor* vec
 ]]
 [[
-  name: addmv_
+  name: _addmv_
   cname: addmv
   return: self
   arguments:
@@ -3021,7 +3022,8 @@
     - THTensor* vec
 ]]
 [[
-  name: addr
+  name: _addr
+  cname: addr
   variants:
     - method
     - function
@@ -3041,7 +3043,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: addr_
+  name: _addr_
   cname: addr
   return: self
   arguments:
@@ -3057,7 +3059,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: ger
+  name: _ger
   cname: addr
   variants:
     - method
@@ -3080,7 +3082,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: mv
+  name: _mv
   cname: addmv
   variants:
     - method

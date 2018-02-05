@@ -54,6 +54,67 @@ Tensor det(const Tensor& self) {
   return std::get<0>(self._det_with_svd());
 }
 
+static void check_1d(const Tensor& t, const char* arg, const char* fn) {
+  if (t.dim() != 1) {
+    runtime_error("%s: Expected 1-D argument %s, but got %d-D", fn, arg, t.dim());
+  }
+}
+
+Tensor ger(const Tensor& self, const Tensor& vec2) {
+  check_1d(self, "self", "ger");
+  check_1d(vec2, "vec2", "ger");
+  return at::_ger(self, vec2);
+}
+
+Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
+  check_1d(self, "self", "ger");
+  check_1d(vec2, "vec2", "ger");
+  return at::_ger_out(result, self, vec2);
+}
+
+Tensor mv(const Tensor& self, const Tensor& vec) {
+  check_1d(vec, "vec", "mv");
+  return at::_mv(self, vec);
+}
+
+Tensor& mv_out(Tensor& result, const Tensor& self, const Tensor& vec) {
+  check_1d(vec, "vec", "mv");
+  return at::_mv_out(result, self, vec);
+}
+
+Tensor addmv(const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
+  check_1d(vec, "vec", "addmv");
+  return at::_addmv(self, mat, vec, beta, alpha);
+}
+
+Tensor& addmv_(Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
+  check_1d(vec, "vec", "addmv");
+  return self._addmv_(mat, vec, beta, alpha);
+}
+
+Tensor& addmv_out(Tensor &result, const Tensor& self, const Tensor& mat, const Tensor& vec, Scalar beta, Scalar alpha) {
+  check_1d(vec, "vec", "addmv");
+  return at::_addmv_out(result, self, mat, vec, beta, alpha);
+}
+
+Tensor addr(const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
+  return at::_addr(self, vec1, vec2, beta, alpha);
+}
+
+Tensor& addr_(Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
+  return self._addr_(vec1, vec2, beta, alpha);
+}
+
+Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const Tensor& vec2, Scalar beta, Scalar alpha) {
+  check_1d(vec1, "vec1", "addr");
+  check_1d(vec2, "vec2", "addr");
+  return at::_addr_out(result, self, vec1, vec2, beta, alpha);
+}
+
 Tensor dot(const Tensor& self, const Tensor& tensor) {
   if (self.dim() != 1) {
     runtime_error("Expected argument self to have 1 dimension, but has %d", self.dim());
