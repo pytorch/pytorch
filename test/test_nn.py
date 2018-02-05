@@ -1497,10 +1497,29 @@ class TestNN(NNTestCase):
         output = IN(input_var + Variable(delta))
         self.assertEqual(output.transpose(0, 1).contiguous().view(c, -1).mean(1), torch.arange(c))
 
+    def _test_InstanceNorm_cuda_half(self, cls, input):
+        # THNN
+        input = Variable(input.cuda().half().random_(1, 10), requires_grad=True)
+        m = cls(input.size(1), affine=True, track_running_stats=True).cuda().half()
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        thnn_input_grad = input.grad.data.clone()
+        self.assertEqual(thnn_output.type(), input.type())
+        # cuDNN
+        if TEST_CUDNN:
+            input.grad = None
+            m = m.float()
+            cudnn_output = m(input)
+            cudnn_output.sum().backward()
+            cudnn_input_grad = input.grad.data.clone()
+            self.assertEqual(cudnn_output.type(), input.type())
+            self.assertAlmostEqual(cudnn_output, thnn_output, delta=1e-4)
+            self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
+
     def test_InstanceNorm1d_general(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
-        d = random.randint(2, 5)
+        d = random.randint(8, 10)
 
         input = torch.Tensor(b, c, d).uniform_()
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, torch.FloatTensor)
@@ -1509,16 +1528,17 @@ class TestNN(NNTestCase):
     def test_InstanceNorm1d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
-        d = random.randint(2, 5)
+        d = random.randint(8, 10)
 
         input = torch.Tensor(b, c, d).uniform_()
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, torch.cuda.FloatTensor)
+        self._test_InstanceNorm_cuda_half(nn.InstanceNorm1d, input)
 
     def test_InstanceNorm2d_general(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
-        w = random.randint(2, 5)
-        h = random.randint(2, 5)
+        w = random.randint(3, 6)
+        h = random.randint(6, 8)
 
         input = torch.Tensor(b, c, h, w).uniform_()
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, torch.FloatTensor)
@@ -1527,11 +1547,12 @@ class TestNN(NNTestCase):
     def test_InstanceNorm2d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
-        w = random.randint(2, 5)
-        h = random.randint(2, 5)
+        w = random.randint(3, 6)
+        h = random.randint(6, 8)
 
         input = torch.Tensor(b, c, h, w).uniform_()
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, torch.cuda.FloatTensor)
+        self._test_InstanceNorm_cuda_half(nn.InstanceNorm2d, input)
 
     def test_InstanceNorm3d_general(self):
         b = random.randint(3, 5)
@@ -1553,6 +1574,7 @@ class TestNN(NNTestCase):
 
         input = torch.Tensor(b, c, h, w, d).uniform_()
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, torch.cuda.FloatTensor)
+        self._test_InstanceNorm_cuda_half(nn.InstanceNorm3d, input)
 
     def _test_LayerNorm_general(self, type):
         for i in range(2, 6):
@@ -1589,12 +1611,21 @@ class TestNN(NNTestCase):
             output_new = ln(x + ln.running_var.sqrt()[0] * scale).data
             self.assertAlmostEqual((output_new - output_ref).mean(), scale, delta=1e-5)
 
+    def _test_LayerNorm_cuda_half(self):
+        # just THNN, LayerNorm has no cuDNN path
+        input = Variable(torch.rand(2, 3, 3, 2).cuda().half().random_(1, 10), requires_grad=True)
+        m = nn.LayerNorm([3, 2]).cuda().half()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqual(output.type(), input.type())
+
     def test_LayerNorm_general(self):
         self._test_LayerNorm_general(torch.FloatTensor)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_LayerNorm_general_cuda(self):
         self._test_LayerNorm_general(torch.cuda.FloatTensor)
+        self._test_LayerNorm_cuda_half()
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
@@ -3570,13 +3601,24 @@ class TestNN(NNTestCase):
         gradgradcheck(func, [v])
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @unittest.skipIf(not TEST_CUDNN, "cuDNN unavailable")
     def test_batchnorm_cudnn_half(self):
-        input = Variable(torch.rand(2, 3, 2, 2).half().cuda())
-        m = nn.BatchNorm2d(3).float().cuda()
-        output = m(input)
-        output.sum().backward()
-        self.assertEqual(output.type(), input.type())
+        # THNN
+        input = Variable(torch.rand(2, 3, 2, 2).half().cuda().random_(1, 10), requires_grad=True)
+        m = nn.BatchNorm2d(3).half().cuda()
+        thnn_output = m(input)
+        thnn_output.sum().backward()
+        thnn_input_grad = input.grad.data.clone()
+        self.assertEqual(thnn_output.type(), input.type())
+        # cuDNN
+        if TEST_CUDNN:
+            input.grad = None
+            m = m.float()
+            cudnn_output = m(input)
+            cudnn_output.sum().backward()
+            cudnn_input_grad = input.grad.data.clone()
+            self.assertEqual(cudnn_output.type(), input.type())
+            self.assertEqual(cudnn_output, thnn_output)
+            self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))
