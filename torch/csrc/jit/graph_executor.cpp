@@ -33,17 +33,19 @@ using autograd::variable_list;
 // is constructed and what variables are captured.
 struct ExecutionPlanAutogradFunction : public autograd::Function {
   ExecutionPlanAutogradFunction(GraphExecutor graph, size_t capture_size)
-  : graph(std::move(graph)), captures(capture_size) {}
+  : graph(std::move(graph)) {
+    captures.reserve(capture_size);
+  }
   virtual variable_list apply(const variable_list& inputs) override {
     // TODO: expensive copies here to convert to/from tensor_list
     // TODO: because inputs is passed by const reference there is no
     // way to release tensors incrementally as this runs
     variable_tensor_list all_inputs;
     all_inputs.reserve(captures.size() + inputs.size());
+    all_inputs.insert(all_inputs.end(), inputs.begin(), inputs.end());
     for(auto & sv : captures) {
       all_inputs.push_back(sv.unpack(this->shared_from_this()));
     }
-    all_inputs.insert(all_inputs.end(), inputs.begin(), inputs.end());
     auto tensors = graph.run(std::move(all_inputs));
     // TODO: another copy that needs to be removed
     return autograd::variable_list(tensors.begin(), tensors.end());
@@ -91,34 +93,21 @@ private:
     }
     return variable_tensor_list(std::move(list));
   }
-  // TODO: both captureInputs/captureOutputs have to iterate over the entire
-  // capture list because the list is not sorted with inputs before outputs.
-  // We cannot capture both, because we actually destroy our input lists (to release references)
-  // before we get the outputs list.
   // Capture (save) inputs that would be required to subsequently run backwards
   void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) const {
-    auto & capture_desc = grad.df_input_captures;
-    size_t N = capture_desc.size();
-    for(size_t i = 0; i < N; ++i) {
-      if(capture_desc[i].kind == Capture::Kind::Input) {
-        size_t offset = capture_desc[i].offset;
-        grad_fn.captures[i] = autograd::SavedVariable(static_cast<Variable&>(inputs[offset]), false);
-      }
+    for(auto offset : grad.df_input_captured_inputs) {
+      grad_fn.captures.emplace_back(static_cast<Variable&>(inputs[offset]), false);
     }
   }
   void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & outputs) const {
-    auto & capture_desc = grad.df_input_captures;
-    size_t N = capture_desc.size();
-    for(size_t i = 0; i < N; ++i) {
-      if(capture_desc[i].kind == Capture::Kind::Output) {
-        size_t offset = capture_desc[i].offset;
-        grad_fn.captures[i] = autograd::SavedVariable(static_cast<Variable&>(outputs[offset]), true);
-      }
+    for(auto offset : grad.df_input_captured_outputs) {
+      grad_fn.captures.emplace_back(static_cast<Variable&>(outputs[offset]), true);
     }
   }
 
   variable_tensor_list runWithGrad(variable_tensor_list&& inputs) const {
-    auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor, grad.df_input_captures.size());
+    auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor,
+      grad.df_input_captured_inputs.size() + grad.df_input_captured_outputs.size());
     // hook up the outputs of df to the gradient functions of the inputs that require
     // gradients
     for(auto idx : grad.df_output_vjps) {

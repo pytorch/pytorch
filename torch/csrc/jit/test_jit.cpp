@@ -511,11 +511,11 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
   f_interpreter.runOneStage(tensors_in, tensors_out);
 
   tensor_list df_inputs;
-  for (auto capture : grad_spec.df_input_captures) {
-    bool is_input = capture.kind == Capture::Kind::Input;
-    df_inputs.push_back(is_input ? tensors_in[capture.offset] : tensors_out[capture.offset]);
-  }
   df_inputs.insert(df_inputs.end(), tensor_grads_in.begin(), tensor_grads_in.end());
+  for(auto offset : grad_spec.df_input_captured_inputs)
+    df_inputs.push_back(tensors_in[offset]);
+  for(auto offset : grad_spec.df_input_captured_outputs)
+    df_inputs.push_back(tensors_out[offset]);
   df_interpreter.runOneStage(df_inputs, tensor_grads_out);
 
   // Outputs of f needs to be sliced
@@ -569,10 +569,6 @@ std::string toString(std::shared_ptr<Graph>& graph) {
   return s.str();
 }
 
-bool operator==(const Capture& a, const Capture& b) {
-  return a.kind == b.kind && a.offset == b.offset;
-}
-
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
@@ -585,15 +581,13 @@ void testDifferentiate(std::ostream & out) {
   graph->registerOutput(c.value());
 
   auto grad_spec = differentiate(graph, {true, true});
-  std::vector<Capture> expected_captures = {
-    {Capture::Kind::Input, 0},
-    {Capture::Kind::Input, 1},
-    {Capture::Kind::Output, 1},
-  };
+  std::vector<std::size_t> expected_captured_inputs = {0, 1};
+  std::vector<std::size_t> expected_captured_outputs = {1};
   std::vector<std::size_t> expected_input_vjps = {0, 1};
   std::vector<std::size_t> expected_output_vjps = {0, 1};
   JIT_ASSERT(grad_spec.f_real_outputs == 1);
-  JIT_ASSERT(grad_spec.df_input_captures == expected_captures);
+  JIT_ASSERT(grad_spec.df_input_captured_inputs == expected_captured_inputs);
+  JIT_ASSERT(grad_spec.df_input_captured_outputs == expected_captured_outputs);
   JIT_ASSERT(grad_spec.df_input_vjps == expected_input_vjps);
   JIT_ASSERT(grad_spec.df_output_vjps == expected_output_vjps);
   out << "testDifferentiate\n";
@@ -616,14 +610,11 @@ void testDifferentiateWithRequiresGrad(std::ostream & out) {
   graph->registerOutput(e.value());
 
   auto grad_spec = differentiate(graph, {true, false});
-  std::vector<Capture> expected_captures = {
-    {Capture::Kind::Input, 0},
-    {Capture::Kind::Output, 2},
-  };
   std::vector<std::size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
   std::vector<std::size_t> expected_output_vjps = {0};    // only a requires grad
   JIT_ASSERT(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
-  JIT_ASSERT(grad_spec.df_input_captures == expected_captures);
+  JIT_ASSERT(grad_spec.df_input_captured_inputs == std::vector<std::size_t>({0}));
+  JIT_ASSERT(grad_spec.df_input_captured_outputs == std::vector<std::size_t>({2}));
   JIT_ASSERT(grad_spec.df_input_vjps == expected_input_vjps);
   JIT_ASSERT(grad_spec.df_output_vjps == expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";

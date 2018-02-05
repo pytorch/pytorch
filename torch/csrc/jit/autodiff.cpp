@@ -10,23 +10,6 @@ namespace torch { namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-// Creates a node for a + b and puts it after the given node.
-// If node is a null pointer, appends that node at the end of the node list.
-Value* addValues(Value *a, Value *b, Node *node = nullptr) {
-  Graph *graph = a->node()->owningGraph();
-  Node *add_node = graph->create(kadd, {a, b})
-                        ->t_(kalpha, at::Scalar(1).toTensor());
-  if (node) {
-    add_node->insertAfter(node);
-  } else {
-    graph->appendNode(add_node);
-  }
-  Value *add_output = add_node->output();
-  add_output->setType(a->typeOption());
-  return add_output;
-}
-
-
 std::unordered_set<Symbol> differentiable_kinds = {
   kadd, ksub, kmul, kConstant, kReplaceIfUndef,
 };
@@ -34,8 +17,6 @@ std::unordered_set<Symbol> differentiable_kinds = {
 bool isDifferentiable(Node * n) {
   return differentiable_kinds.count(n->kind()) > 0;
 }
-
-
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
@@ -103,7 +84,7 @@ static Value* createZerosLike(Value *v) {
   auto zeros = at_type.zeros({1}).expand(type->sizes());
   Node *constant = graph->createConstant(zeros)
                         ->i_(kis_zero, 1);
-  graph->appendNode(constant);
+  graph->insertNode(constant);
   return constant->output();
 }
 
@@ -116,29 +97,37 @@ static Value* createZerosLike(Value *v) {
 static Value* createUndefGuard(Value * dv, Value * alternative) {
   Graph* graph = dv->owningGraph();
   Node * n = graph->create(kReplaceIfUndef, {dv, alternative});
-  return graph->appendNode(n)->output();
+  return graph->insertNode(n)->output();
 }
 
 struct ReverseDetails {
-  ReverseDetails(value_map&& grad_map, value_set&& requires_grad_set)
+  ReverseDetails(value_map&& grad_map, value_set&& requires_grad_set, Block * reverse_block)
     : grad_map(std::move(grad_map))
-    , requires_grad_set(std::move(requires_grad_set)) {}
+    , requires_grad_set(std::move(requires_grad_set))
+    , reverse_block(reverse_block) {}
 
   value_map grad_map;
   value_set requires_grad_set;
+  Block * reverse_block;
 };
 
 // Before:
-//   - graph has only stage 0
-//   - grad_desc doesn't have any fields initialized
+//   - grad_desc has field f initialized to the original 0-stage graph
 // After:
-//   - graph has stage 0 and stage 1 that computes its vjp
+//   - the last node of f (f->nodes().reverse()[0]) is a gradient node
+//     whose block has vjp inputs for all outputs that require_grad
+//     and vjp outputs for all primal inputs that require_grad
 //   - grad_desc has df_input_vjps and df_output_vjps set
 //     (but df_input_vjps will be modified later as well)
-static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
+static ReverseDetails addReverseInline(Gradient& grad_desc,
                                   const std::vector<bool>& input_requires_grad) {
-  JIT_ASSERT(graph.stage() == 0);
-  graph.advanceStage();
+  auto & graph = *grad_desc.f;
+  // note: reverse_node is intentionally not inserted to avoid
+  // accidentally acting on it (e.g. in elminate dead code),
+  // std::cout << *reverse_node << to view its state.
+  auto reverse_node = graph.create("Reverse"_sym, 0);
+  auto reverse_block = reverse_node->addBlock();
+  WithInsertPoint guard(graph, reverse_block);
 
   auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
@@ -153,8 +142,7 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   };
   const auto set_grad = [&](Value *x, Value *dx) {
     if (Value * prev_grad = grad_map[x]) {
-      Value * new_grad = addValues(prev_grad, dx);
-      grad_map[x] = new_grad;
+      grad_map[x] = toVar(prev_grad) + toVar(dx);
     } else {
       grad_map[x] = dx;
     }
@@ -163,8 +151,9 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   auto outputs = graph.outputs();
   for (std::size_t i = 0, num_outputs = outputs.size(); i < num_outputs; ++i) {
     Value * output = outputs[i];
-    if (!requires_grad(output)) continue;
-    Value * output_grad = graph.addInput()->setType(output->typeOption());
+    if (!requires_grad(output))
+      continue;
+    Value * output_grad = reverse_block->addInput()->setType(output->typeOption());
     output_grad = createUndefGuard(output_grad, createZerosLike(output));
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
@@ -173,7 +162,8 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   for (auto it = graph.nodes().rbegin(), end = graph.nodes().rend(); it != end; ++it) {
     Node *node = *it;
     auto inputs = node->inputs();
-    if (std::none_of(inputs.begin(), inputs.end(), requires_grad)) continue;
+    if (std::none_of(inputs.begin(), inputs.end(), requires_grad))
+      continue;
     value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (std::size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
@@ -184,49 +174,13 @@ static ReverseDetails addReverseInline(Graph& graph, Gradient& grad_desc,
   auto inputs = graph.inputs();
   for (std::size_t i = 0, num_inputs = inputs.size(); i < num_inputs; ++i) {
     Value * input = inputs[i];
-    if (input->stage() > 0) break;
-    if (!requires_grad(input)) continue;
-    graph.registerOutput(get_grad(input));
+    if (!requires_grad(input))
+      continue;
+    reverse_block->registerOutput(get_grad(input));
     grad_desc.df_output_vjps.push_back(i);
   }
 
-  return ReverseDetails(std::move(grad_map), std::move(requires_grad_set));
-}
-
-// This function will take the graph and return a new one that:
-//   - contains all nodes of graph that have given stage
-//   - there will be an input corresponding to each input of the inputs array
-//   - values corresponding to outputs will be returned from the new graph
-// It requires that values contained in inputs are sufficient to be able to
-// compute all values in a given stage. An exception will be thrown if this is
-// not the case.
-static std::shared_ptr<Graph> splitOffStage(
-        Graph& graph,
-        std::size_t stage,
-        ArrayRef<Value*> inputs,
-        ArrayRef<Value*> outputs) {
-  auto graph_clone = std::make_shared<Graph>();
-
-  value_map val_map; // values in graph -> values in graph_clone
-  const auto lookup_val = [&](Value *v) { return val_map.at(v); };
-
-  for (Value *input : inputs)
-    val_map[input] = graph_clone->addInput()->setType(input->typeOption());
-
-  for (Node *node : graph.nodes()) {
-    if (node->stage() != stage) continue;
-    Node *node_clone = graph_clone->createClone(node, lookup_val);
-    for (std::size_t i = 0, num_outputs = node_clone->outputs().size(); i < num_outputs; ++i)
-      val_map[node->outputs()[i]] = node_clone->outputs()[i];
-    graph_clone->appendNode(node_clone);
-  }
-
-  for (Value *output : outputs) {
-    JIT_ASSERT(output->stage() == stage);
-    graph_clone->registerOutput(val_map.at(output));
-  }
-
-  return graph_clone;
+  return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
 }
 
 bool isZero(Value * v) {
@@ -257,7 +211,7 @@ static void passthroughUndefs(std::shared_ptr<Graph> graph) {
         graph->return_node()->replaceInput(i, v->node()->inputs()[0]);
         changed = true;
       } else if(isZero(v)) {
-        auto undef = graph->appendNode(graph->createUndefined());
+        auto undef = graph->insertNode(graph->createUndefined());
         graph->return_node()->replaceInput(i, undef->output());
         changed = true;
       }
@@ -268,31 +222,31 @@ static void passthroughUndefs(std::shared_ptr<Graph> graph) {
 
 }
 
-// Takes a graph returned from `addReverseInline` and splits it into two graphs
-// (one for each stage). All intermediates needed in the second stage are added to
-// outputs of the first graph, and taken as inputs in the second one. For a more
+// Takes a grad_desc.f returned from `addReverseInline` and splits off the
+// reverse_block into its own graph, storing it in df.
+// All intermediates needed in the second stage are added to
+// outputs of f, and taken as inputs in df. For a more
 // detailed description see Note [Gradient graphs] in autodiff.h.
 // This function also initializes the fields in grad_desc that were undefined after
-// `addReverseInline` (and modifies `df_input_vjps`).
-static void lambdaLiftReverse(Graph& graph,
-                              ReverseDetails& rev_info,
-                              Gradient& grad_desc) {
-  static const auto is_stage_0 = [](Value *v) { return v->stage() == 0; };
-  static const auto is_stage_1 = [](Value *v) { return v->stage() == 1; };
-  // NOTE: in the comments inside this function first stage is stage 0
-  JIT_ASSERT(graph.stage() == 1);
+// `addReverseInline` (and extends `df_input_vjps` with vjps for captured temporaries).
+static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
+  auto & graph = *grad_desc.f;
+  auto primal_block = graph.block();
+  auto reverse_block = rev_info.reverse_block;
 
   // --------------------------------------------------------------------------
-  // 1. Find values of stage 0 that need to be captured.
+  // 1. Find values of f that need to be captured.
   // --------------------------------------------------------------------------
-  // First, we need to find all values that are produced in the first stage,
-  // and used in the second one. They will need to be added as inputs of the reverse
-  // graph, and some of them may also need to be appended as outputs of the primal graph.
+  // First, we need to find all values that are produced in f,
+  // and used in df. They will need to be added as inputs of the df
+  // and some of them may also need to be appended as outputs of f if
+  // they are not already an input or an output of f
   value_set reverse_captures_set;
   value_list reverse_captures; // Invariant: topo sorted
   auto check_uses = [&](Value *v) {
     for (auto use : v->uses()) {
-      if (use.user->stage() != 1) continue;
+      if (use.user->owningBlock() == primal_block)
+        continue;
       if (/* bool unseen = */ reverse_captures_set.emplace(v).second) {
         reverse_captures.push_back(v);
       }
@@ -309,7 +263,7 @@ static void lambdaLiftReverse(Graph& graph,
   }
 
   // --------------------------------------------------------------------------
-  // 2. Prepare input/outputs lists for both graphs.
+  // 2. Prepare input/outputs lists for f and df
   // --------------------------------------------------------------------------
   // It's simple to construct primal_inputs/reverse_outputs,
   // but primal_outputs/reverse_inputs are much more subtle.
@@ -319,42 +273,35 @@ static void lambdaLiftReverse(Graph& graph,
   //   [original outputs], [temporaries]
   //
   // Reverse inputs:
-  //   [captured primal values, in topological order],
   //   [output vjps (aka grad_outputs)], [temporary vjps]
-
-  // -- Simple cases -----------------------------------------------------------
-  value_list primal_inputs   = filter(graph.inputs(),  is_stage_0);
-  value_list reverse_outputs = filter(graph.outputs(), is_stage_1);
+  //   [captured primal values, in topological order],
 
   // -- Construct primal_outputs, df_input_captures, f_real_outputs ----
-  value_list primal_outputs  = filter(graph.outputs(), is_stage_0);
-  grad_desc.f_real_outputs = primal_outputs.size();
+  grad_desc.f_real_outputs = graph.outputs().size();
 
   std::unordered_map<Value*, std::size_t> orig_primal_outputs_idx;
   std::unordered_map<Value*, std::size_t> orig_primal_inputs_idx;
   // NOTE: we use emplace to avoid replacing an existing index if an output is repeated
-  for (std::size_t i = 0, num_outputs = primal_outputs.size(); i < num_outputs; ++i)
-    orig_primal_outputs_idx.emplace(primal_outputs[i], i);
-  for (std::size_t i = 0, num_inputs = primal_inputs.size(); i < num_inputs; ++i)
-    orig_primal_inputs_idx[primal_inputs[i]] = i;
+  for (std::size_t i = 0, num_outputs = graph.outputs().size(); i < num_outputs; ++i)
+    orig_primal_outputs_idx.emplace(graph.outputs()[i], i);
+  for (std::size_t i = 0, num_inputs = graph.inputs().size(); i < num_inputs; ++i)
+    orig_primal_inputs_idx[graph.inputs()[i]] = i;
 
   // NB: reverse_captures are already deduplicated, and in topo order
   for (Value * capture_val : reverse_captures) {
     // If it's already an output we don't have to add anything,
     // but register the fact that it needs to be captured.
     if (orig_primal_outputs_idx.count(capture_val) > 0) {
-      grad_desc.df_input_captures.emplace_back(Capture::Kind::Output,
-                                              orig_primal_outputs_idx[capture_val]);
+      grad_desc.df_input_captured_outputs.push_back(orig_primal_outputs_idx[capture_val]);
     // If it's an input, we could add it as an output but in fact it's
     // more efficient to use a special kind of capture.
     } else if (orig_primal_inputs_idx.count(capture_val) > 0) {
-      grad_desc.df_input_captures.emplace_back(Capture::Kind::Input,
-                                               orig_primal_inputs_idx.at(capture_val));
+      grad_desc.df_input_captured_inputs.push_back(orig_primal_inputs_idx.at(capture_val));
     // Otherwise it's just a regular intermediate value that we need to add as an output
     } else {
-      primal_outputs.emplace_back(capture_val);
-      grad_desc.df_input_captures.emplace_back(Capture::Kind::Output,
-                                               primal_outputs.size() - 1);
+      // we need to create a new temporary output for this capture because it wasn't availiable.
+      graph.registerOutput(capture_val);
+      grad_desc.df_input_captured_outputs.emplace_back(graph.outputs().size() - 1);
     }
   }
 
@@ -362,64 +309,69 @@ static void lambdaLiftReverse(Graph& graph,
   // NB [possible optimization]: use the newly added vjp input as soon as the first
   // vjp for that value is generated, to reduce the lifespan of this input
   // (currently we add it to the final vjp after all adds).
-  JIT_ASSERT(graph.stage() == 1); // We will be adding inputs to stage 1
-  for (std::size_t i = grad_desc.f_real_outputs; i < primal_outputs.size(); ++i) {
-    Value * tmp = primal_outputs.at(i);
+  for (std::size_t i = grad_desc.f_real_outputs; i < graph.outputs().size(); ++i) {
+    Value * tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
-    Value * tmp_vjp_in = graph.addInput()->setType(tmp->typeOption());
+    Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->typeOption());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
-    auto zeroes = createZerosLike(tmp);
-    tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
-    // make sure createUndefGuard happens before the addition but inside stage 1
-    zeroes->node()->moveBefore(tmp_vjp_prev->node());
-    tmp_vjp_in->node()->moveBefore(tmp_vjp_prev->node());
-
+    {
+      WithInsertPoint guard(graph, tmp_vjp_prev->node());
+      auto zeroes = createZerosLike(tmp);
+      tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
+    }
     // This is quite weird because we can't first make a sum and then replace all uses
     // of tmp_vjp_prev (that would replace its use in the sum too!), so we create an
     // incorrect sum that doesn't use prev vjp, replace uses, and fix the sum.
-    Value * new_vjp = addValues(tmp_vjp_in, tmp_vjp_in, tmp_vjp_prev->node());
+    Value * new_vjp = toVar(tmp_vjp_in) + toVar(tmp_vjp_in);
+    new_vjp->node()->moveAfter(tmp_vjp_prev->node());
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
     grad_desc.df_input_vjps.emplace_back(i);
   }
 
-  // -- Construct reverse_inputs -----------------------------------------------
-  // Quick reference:
-  //   [captured primal values, in topological order],            1st loop below
-  //   [output vjps (aka grad_outputs)], [temporary vjps]         2nd loop below
-  value_list reverse_inputs;
-  for (Capture capture : grad_desc.df_input_captures) {
-    auto & source = capture.kind == Capture::Kind::Input ? primal_inputs : primal_outputs;
-    reverse_inputs.push_back(source[capture.offset]);
-  }
-  // These are the vjps computed by differentiate + the code above
-  for (Value * reverse_vjp : filter(graph.inputs(), is_stage_1))
-    reverse_inputs.push_back(reverse_vjp);
+  // add the captures as formal arguments to the reverse_block
+  // afterward inputs: [output vjps][temporary vjps][captures]
+  // construct a map from captured 'value' to the index in the input list
+  // used to extract this block into its own function
+  std::unordered_map<Value*, size_t> capture_to_formal_index;
+  const auto & add_capture = [&](Value * captured) {
+    capture_to_formal_index[captured] = reverse_block->inputs().size();
+    reverse_block->addInput()->copyMetadata(captured);
+  };
+  for(auto & offset : grad_desc.df_input_captured_inputs)
+    add_capture(graph.inputs()[offset]);
+  for(auto & offset : grad_desc.df_input_captured_outputs)
+    add_capture(graph.outputs()[offset]);
 
-  // Finally, we can split the graph into two parts.
-  grad_desc.f  = splitOffStage(graph, 0, primal_inputs, primal_outputs);
-  grad_desc.df = splitOffStage(graph, 1, reverse_inputs, reverse_outputs);
+  grad_desc.df = std::make_shared<Graph>();
+  grad_desc.df->block()->cloneFrom(reverse_block, [&](Value* v) {
+    return grad_desc.df->inputs()[capture_to_formal_index.at(v)];
+  });
+  // reverse_node was just to hold onto reverse_block in a debuggable way
+  // we can remove it now.
+  reverse_block->owningNode()->destroy();
 }
 
 Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
+  Gradient grad_desc;
   // Take ownership of the graph
-  std::shared_ptr<Graph> graph;
   JIT_ASSERTM(_graph.use_count() == 1,
               "differentiate will mutate and destroy the graph, so it requires "
               "graph.use_count() == 1");
-  std::swap(_graph, graph);
+  std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
-  Gradient grad_desc;
+
+  WithInsertPoint guard(*grad_desc.f, grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
-  auto rev_info = addReverseInline(*graph, grad_desc, requires_grad);
+  auto rev_info = addReverseInline(grad_desc, requires_grad);
   // addReverseInline has to call gradientForNode if *any* of the outputs
   // require grad, but it will emit vjps for *all* outputs. Use DCE to remove
   // unnecessary nodes.
-  EliminateDeadCode(graph);
+  EliminateDeadCode(grad_desc.f);
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
-  lambdaLiftReverse(*graph, rev_info, grad_desc);
+  lambdaLiftReverse(grad_desc, rev_info);
   passthroughUndefs(grad_desc.df);
   return grad_desc;
 }
