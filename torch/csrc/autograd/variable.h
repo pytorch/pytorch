@@ -1,46 +1,109 @@
 #pragma once
 
-// A wrapper around at::Tensor to represent autograd Variables. Variables
-// can be implicitly converted to an at::Tensor.
+#include <Python.h>
 
-#include <mutex>
-#include <memory>
-#include <vector>
-#include <functional>
-#include <ATen/ATen.h>
-
-#include "torch/csrc/assertions.h"
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tracer_state.h"
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
-#include "torch/csrc/autograd/variable_version.h"
 #include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/Types.h"
+#include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/autograd/variable_version.h"
+#include "torch/csrc/jit/tracer_state.h"
+#include "torch/csrc/utils/auto_unique_ptr.h"
+
+#include <ATen/Scalar.h>
+#include <ATen/ScalarType.h>
+#include <ATen/Storage.h>
+#include <ATen/Tensor.h>
+#include <ATen/TensorImpl.h>
+#include <ATen/Type.h>
+
+#include <list>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
 
 namespace torch { namespace autograd {
 
-using at::Tensor;
-struct VariableImpl;
+struct Function;
 
-struct Variable : public at::Tensor {
-  inline Variable(VariableImpl * self, bool retain);
-  Variable() : Tensor() {}
-  Variable(const Variable & rhs) : Tensor(rhs) {}
-  Variable(Variable && rhs) noexcept : Tensor(std::move(rhs)) {}
+//===----------------------------------------------------------------------===//
+//                                Variable
+//===----------------------------------------------------------------------===//
 
-  // Implicitly casts a Tensor to a Variable. This should only be called on
-  // Tensors which you know are actually Variables.
-  /*implicit*/ Variable(Tensor const & rhs) : Tensor(rhs) {}
-  /*implicit*/ Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
+/// A `Variable` augments a `Tensor` with the ability to interact in our
+/// autograd machinery. `Variable` inherits from `Tensor` and may be converted
+/// to and from `Tensor` implicitly.
+class Variable : public at::Tensor {
+ public:
+  /// Creates a Variable that is a *view* of another (*base*) variable.
+  /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
+  static Variable
+  as_view(Variable base, at::Tensor data, Edge gradient_edge = Edge());
 
+  Variable() = default;
+  Variable(at::Tensor data, bool requires_grad);
+  Variable(at::Tensor data, Edge gradient_edge);
+
+  // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
+  // know are Variables.
+  /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {}
+  /*implicit*/ Variable(at::Tensor&& rhs) noexcept
+      : at::Tensor(std::move(rhs)) {}
+
+  // NOTE: Assignment operators to Tensor come for free from the constructors.
+
+  /// Compare this `Variable` to another `Variable` (or `Tensor`) via
+  /// pointer-equality.
+  bool operator==(const Variable& other) const noexcept {
+    return this->pImpl == other.pImpl;
+  }
+
+  bool operator!=(const Variable& other) const noexcept {
+    return !(*this == other);
+  }
+
+  void set_name(const std::string& name);
+  const std::string& name() const noexcept;
+
+  /// Get the gradient function of the `Variable`. If this is a leaf variable,
+  /// the pointer returned will be null.
+  const std::shared_ptr<Function>& grad_fn() const;
+
+  /// Set the gradient accumulator of the `Variable`. This is only applicable
+  /// to leaf variables. Interior variables should call `set_gradient_edge()`.
+  void set_grad_accumulator(std::weak_ptr<Function> grad_accumulator);
+
+  /// Attempt to get a pointer to the gradient accumulator of the `Variable`,
+  /// if it still exists. If the gradient accumulator function has been
+  /// destroyed, returns a `nullptr`.
+  std::shared_ptr<Function> try_get_grad_accumulator() const;
+
+  /// Get the gradient accumulator of the `Variable` if it has one, or else
+  /// create one on the fly and return it.
+  std::shared_ptr<Function> grad_accumulator() const;
+
+  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
+  /// `Variable`.
+  /// NOTE: This will always set the `grad_fn`, even if this is a leaf
+  /// variable, and never the `grad_accumulator`. For the latter, use
+  /// `set_grad_accumulator`. This allows late construction of an interior
+  /// `Variable`.
+  void set_gradient_edge(Edge&& edge);
+
+  /// Return the "canonical" gradient edge of this `Variable`, i.e. either the
+  /// gradient function if this is an interior `Variable`, or the gradient
+  /// accumulator otherwise. If the `Variable` is interior, the returned `Edge`
+  /// will store the input index of the `Function` to which this variable is
+  /// connected in its `input_nr` field. For leaves, the `input_nr` is always
+  /// zero. Note that `set_gradient_edge` and `gradient_edge` are not
+  /// symmetric. You must use `set_gradient_edge` to set the `grad_fn` and
+  /// `set_grad_accumulator` to set the accumulator.
   Edge gradient_edge() const {
     // If grad_fn is null (as is the case for a leaf node), we instead
-    // interpret the gradient function to be a grad accumulator,
-    // which will accumulate its inputs into the grad property of the
-    // variable. These nodes get suppressed in some situations,
-    // see "suppress grad accumulation" below. Note that only variables which
-    // have `requires_grad = True` can have grad accumulators.
+    // interpret the gradient function to be a gradient accumulator, which will
+    // accumulate its inputs into the grad property of the variable. These
+    // nodes get suppressed in some situations, see "suppress gradient
+    // accumulation" below. Note that only variables which have `requires_grad =
+    // True` can have gradient accumulators.
     if (const auto& gradient = grad_fn()) {
       return Edge(gradient, output_nr());
     } else {
@@ -48,103 +111,145 @@ struct Variable : public at::Tensor {
     }
   }
 
-  inline VariableImpl* get() const;
+  /// Return the input index of the gradient `Function` to which this `Variable`
+  /// is connected.
+  int output_nr() const noexcept;
 
-  inline const Tensor & data() const;
-  inline       Tensor & data();
+  void set_requires_grad(bool requires_grad);
+  bool requires_grad() const noexcept;
 
-  inline Tensor opt_data() const;
+  PyObject* pyobj() const noexcept;
+  void set_pyobj(PyObject* pyobj);
 
-  inline const Variable & grad() const;
-  inline       Variable & grad();
+  /// Set the type of the underlying `Tensor`.
+  void set_type(at::Type*);
 
-  inline bool is_leaf() const;
+  const at::Tensor& data() const;
+  at::Tensor& data();
 
-  inline const std::shared_ptr<Function>& grad_fn() const;
+  /// Access the gradient `Variable` of this `Variable`.
+  const Variable& grad() const;
+  Variable& grad();
+  void reset_grad();
 
-  // Updates the grad_fn of an existing Variable. Called after in-place modifications.
-  // XXX: this should be called only _after_ the version counter is implemented.
-  inline void rebase_history(int output_nr, std::shared_ptr<Function> grad_fn);
+  /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
+  bool is_leaf() const noexcept;
 
-  std::shared_ptr<Function> grad_accumulator() const;
+  /// Update the grad_fn of an existing Variable. Called after in-place
+  /// modifications.
+  void rebase_history(int output_nr, std::shared_ptr<Function> grad_fn);
+
+  /// Return a copy of this `Variable` that is detached from its autograd graph
+  /// and has a blank version. This method is OK to call if the `Variable` is a
+  /// view.
   Variable detach() const;
+
+  /// Like `detach()`, but removes this `Variable` in-place. This method may
+  /// only be called on non-view `Variable`s. You can use `is_view()` to check
+  /// this. If this `Variable` is a view, throws an `std::runtime_error()`.
   void detach_();
 
-  inline const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const;
-  inline       std::vector<std::shared_ptr<FunctionPreHook>>& hooks();
+  /// Increment the version count of this `Variable`.
+  void bump_version();
+  void set_version(const VariableVersion& version);
 
-  inline auto_unique_ptr<jit::tracer::ValueTracingState>& tracing_state() const;
+  /// Return true if this `Variable` is a view of another `Variable`.
+  bool is_view() const noexcept;
 
-  inline int current_version() const;
+  /// Return the `Variable` that this `Variable` is a view of. If this
+  /// `Variable` is not a view, throw a `std::runtime_error`.
+  const Variable& base() const;
 
-  inline VariableVersion& version_counter() const;
+  /// Retrieve this `Variable`s version counter.
+  const VariableVersion& version_counter() const noexcept;
 
-  inline const int& output_nr() const;
-  inline       int& output_nr();
+  /// Retrieve the current value of the `Variable`'s version counter. Equivalent
+  /// to calling `version_counter().current_version()`.
+  uint32_t current_version() const noexcept;
 
-  inline bool requires_grad() const;
+  void add_hook(std::shared_ptr<FunctionPreHook> hook);
+  const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const;
+  void clear_hooks();
 
-  inline bool is_view() const;
-  inline Variable& base() const;
+  void set_tracing_state(jit::tracer::ValueTracingState* new_tracing_state);
+  jit::tracer::ValueTracingState& tracing_state() const;
+  bool has_tracing_state() const noexcept;
 
-  inline const std::string& name() const;
-  inline       std::string& name();
-
-  inline Variable & operator=(Variable && rhs) &;
-  inline Variable & operator=(const Variable & rhs) &;
-  inline Variable & operator=(Tensor && rhs) &;
-  inline Variable & operator=(const Tensor & rhs) &;
+ private:
+  /// Private implementation struct of the `Variable`. This struct declaration
+  /// and the `get()` method which exposes it shall forever remain private and
+  /// never be exposed to the public interface of this class.
+  struct Impl;
+  struct ViewImpl;
+  Variable(Variable::Impl* self, bool retain);
+  Impl* get() const;
 };
 
-struct VariableImpl : public at::TensorImpl {
-public:
-  VariableImpl(at::Tensor data, bool requires_grad=false, int output_nr=0,
-               std::shared_ptr<Function> grad_fn=nullptr);
-  virtual ~VariableImpl();
-  virtual const char * toString() const override;
-  virtual at::IntList sizes() const override;
-  virtual at::IntList strides() const override;
-  virtual int64_t dim() const override;
-  virtual at::Scalar localScalar() override;
-  virtual void * unsafeGetTH(bool retain) override;
-  virtual std::unique_ptr<at::Storage> storage() override;
-  static const char * typeString();
+//===----------------------------------------------------------------------===//
+//                            Variable::Impl
+//===----------------------------------------------------------------------===//
 
-public:
+struct Variable::Impl : public at::TensorImpl {
+  explicit Impl(
+      at::Tensor data_,
+      bool requires_grad_ = false,
+      Edge edge = Edge());
+
+  virtual ~Impl();
+
+  const char* toString() const override;
+  at::IntList sizes() const override;
+  at::IntList strides() const override;
+  int64_t dim() const override;
+  at::Scalar localScalar() override;
+  void* unsafeGetTH(bool retain) override;
+  std::unique_ptr<at::Storage> storage() override;
+  static const char* typeString();
+
   std::shared_ptr<Function> get_grad_accumulator();
-  virtual std::shared_ptr<Function>& get_grad_fn() { return _grad_fn; }
+  virtual std::shared_ptr<Function>& get_grad_fn() {
+    return grad_fn;
+  }
 
+  std::string name;
   at::Tensor data;
+
   Variable grad;
-  std::shared_ptr<Function> _grad_fn;
+  std::shared_ptr<Function> grad_fn;
+  std::weak_ptr<Function> grad_accumulator;
+
   VariableVersion version_counter;
   std::vector<std::shared_ptr<FunctionPreHook>> hooks;
-  std::weak_ptr<Function> grad_accumulator;
-  // Mutex to ensure that concurrent read operations that modify internal state
-  // are still thread-safe. Used by get_grad_fn and get_grad_accumulator.
-  std::mutex mutex;
-  bool _requires_grad;  // only meaningful on leaf variables (must be false otherwise)
-  bool is_view;
+
+  bool requires_grad; // only meaningful on leaf variables (must be false
+                      // otherwise)
+  bool is_view = false;
   // The "output number" of this variable; e.g., if this variable
   // was the second output of a function, then output_nr == 1.
   // We use this to make sure we can setup the backwards trace
   // correctly when this variable is passed to another function.
   int output_nr;
-  PyObject *pyobj;  // weak reference
+  PyObject* pyobj = nullptr; // weak reference
 
-  std::string name;
+  // Mutex to ensure that concurrent read operations that modify internal
+  // state are still thread-safe. Used by get_grad_fn and
+  // get_grad_accumulator.
+  std::mutex mutex;
 
   // For use in torch::jit::tracer
   auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state;
-  friend struct VariableType;
 };
 
+//===----------------------------------------------------------------------===//
+//                          Variable::ViewImpl
+//===----------------------------------------------------------------------===//
+
 // A Variable that is a view on another Variable. The base and view share the
-// same version_counter. The _grad_fn field of the Variable may become stale
-// due to in-place modifications of the shared data. Accesses should go through
-// get_grad_fn(). All other fields are always valid.
-struct VariableViewImpl : public VariableImpl {
-  VariableViewImpl(Variable base, at::Tensor data, int output_nr, std::shared_ptr<Function> grad_fn);
+// same version_counter. The grad_fn field of the Variable may become stale
+// due to in-place modifications of the shared data. Accesses should go
+// through get_grad_fn(). All other fields are always valid.
+struct Variable::ViewImpl : public Variable::Impl {
+  ViewImpl(Variable base_, at::Tensor data_, Edge gradient_edge);
 
   // Gets the up-to-date grad_fn. If the shared data or base was modified, we
   // re-create the grad_fn to express the up-to-date view relationship between
@@ -159,171 +264,135 @@ struct VariableViewImpl : public VariableImpl {
   Variable base;
 
   // The value of the version_counter at the time grad_fn was created. The
-  // _grad_fn field is stale if attr_version != version_counter.current_version()
-  int attr_version;
+  // grad_fn field is stale if attr_version !=
+  // version_counter.current_version()
+  uint32_t attr_version = 0;
 };
 
-inline Variable make_variable(at::Tensor data, bool requires_grad=false) {
-  if (!data.defined()) {
-    return Variable();
-  }
+//===----------------------------------------------------------------------===//
+//                        Variable Implementation
+//===----------------------------------------------------------------------===//
 
-#ifndef WITH_SCALARS
-  if (data.dim() == 0) {
-    // don't expose 0-dim tensors to Variable API.
-    data = data.as_strided_({1}, {1});
-  }
-#endif
-
-  return Variable(new VariableImpl(std::move(data), requires_grad), false);
-}
-
-inline Variable make_variable(at::Tensor data, int output_nr, std::shared_ptr<Function> grad_fn) {
-  if (!data.defined()) {
-    return Variable();
-  }
-
-#ifndef WITH_SCALARS
-  if (data.dim() == 0) {
-    // don't expose 0-dim tensors to Variable API.
-    data = data.as_strided_({1}, {1});
-  }
-#endif
-
-  return Variable(new VariableImpl(std::move(data), false, output_nr, std::move(grad_fn)), false);
-}
-
-Variable make_variable(at::Tensor data, std::shared_ptr<Function> grad_fn);
-
-inline Variable make_variable_view(Variable base, at::Tensor data, int output_nr=0,
-                                   std::shared_ptr<Function> grad_fn=nullptr) {
-  if (!data.defined()) {
-    return Variable();
-  }
-
-#ifndef WITH_SCALARS
-  if (data.dim() == 0) {
-    // don't expose 0-dim tensors to Variable API.
-    data = data.as_strided_({1}, {1});
-  }
-#endif
-
-  return Variable(new VariableViewImpl(std::move(base), std::move(data), output_nr, std::move(grad_fn)), false);
-}
-
-
-inline Variable::Variable(VariableImpl * self, bool retain) : Tensor(self, retain) {
-}
-
-inline VariableImpl* Variable::get() const {
-  return static_cast<VariableImpl*>(pImpl);
-}
-
-inline const Tensor & Variable::data() const {
-  return get()->data;
-}
-inline Tensor & Variable::data() {
-  return get()->data;
-}
-
-inline Tensor Variable::opt_data() const {
-  if (!defined()) {
-    return Tensor();
-  }
-  return data();
-}
-
-inline const Variable & Variable::grad() const {
-  return get()->grad;
-}
-inline Variable & Variable::grad() {
-  return get()->grad;
-}
-
-inline bool Variable::is_leaf() const {
-  return get()->_grad_fn == nullptr;
-}
+inline Variable::Variable(Variable::Impl* self, bool retain)
+    : at::Tensor(self, retain) {}
 
 inline const std::shared_ptr<Function>& Variable::grad_fn() const {
   return get()->get_grad_fn();
-};
-inline void Variable::rebase_history(int output_nr, std::shared_ptr<Function> grad_fn) {
-  TORCH_ASSERT(grad_fn);
-  if (is_view()) {
-    auto& impl = static_cast<VariableViewImpl&>(*get());
-    impl.rebase_history(output_nr, std::move(grad_fn));
-  } else {
-    get()->output_nr = output_nr;
-    get()->_grad_fn = std::move(grad_fn);
-  }
 }
+
+inline void Variable::set_grad_accumulator(
+    std::weak_ptr<Function> grad_accumulator) {
+  get()->grad_accumulator = std::move(grad_accumulator);
+}
+
+inline std::shared_ptr<Function> Variable::try_get_grad_accumulator() const {
+  return get()->grad_accumulator.lock();
+}
+
 inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
-};
+}
 
-inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks() const {
+inline void Variable::set_gradient_edge(Edge&& edge) {
+  get()->grad_fn = std::move(edge.function);
+  get()->output_nr = edge.input_nr;
+}
+
+inline int Variable::output_nr() const noexcept {
+  return get()->output_nr;
+}
+
+inline void Variable::set_requires_grad(bool requires_grad) {
+  get()->requires_grad = requires_grad;
+}
+
+inline void Variable::set_pyobj(PyObject* pyobj) {
+  get()->pyobj = pyobj;
+}
+
+inline PyObject* Variable::pyobj() const noexcept {
+  return get()->pyobj;
+}
+
+inline void Variable::set_type(at::Type* new_type) {
+  pImpl->setType(new_type);
+}
+
+inline void Variable::reset_grad() {
+  get()->grad.reset();
+}
+
+inline const at::Tensor& Variable::data() const {
+  return get()->data;
+}
+
+inline at::Tensor& Variable::data() {
+  return get()->data;
+}
+
+inline const Variable& Variable::grad() const {
+  return get()->grad;
+}
+
+inline Variable& Variable::grad() {
+  return get()->grad;
+}
+
+inline bool Variable::is_leaf() const noexcept {
+  return get()->grad_fn == nullptr;
+}
+
+inline void Variable::add_hook(std::shared_ptr<FunctionPreHook> hook) {
+  get()->hooks.push_back(std::move(hook));
+}
+
+inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
+    const {
   return get()->hooks;
-};
-inline std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks() {
-  return get()->hooks;
-};
+}
 
-inline auto_unique_ptr<jit::tracer::ValueTracingState>& Variable::tracing_state() const {
-  return get()->tracing_state;
-};
+inline void Variable::clear_hooks() {
+  get()->hooks.clear();
+}
 
-inline int Variable::current_version() const {
+inline void Variable::set_tracing_state(
+    jit::tracer::ValueTracingState* new_tracing_state) {
+  get()->tracing_state.reset(new_tracing_state);
+}
+
+inline jit::tracer::ValueTracingState& Variable::tracing_state() const {
+  return *get()->tracing_state;
+}
+
+inline bool Variable::has_tracing_state() const noexcept {
+  return get()->tracing_state != nullptr;
+}
+
+inline void Variable::set_version(const VariableVersion& version) {
+  get()->version_counter = version;
+}
+
+inline void Variable::bump_version() {
+  get()->version_counter.bump();
+}
+
+inline uint32_t Variable::current_version() const noexcept {
   return get()->version_counter.current_version();
 }
 
-inline VariableVersion& Variable::version_counter() const {
+inline const VariableVersion& Variable::version_counter() const noexcept {
   return get()->version_counter;
 }
 
-inline const int& Variable::output_nr() const {
-  return get()->output_nr;
-}
-
-inline int& Variable::output_nr() {
-  return get()->output_nr;
-}
-
-inline bool Variable::requires_grad() const {
-  return get()->_requires_grad || get()->_grad_fn || (is_view() && base().requires_grad());
-}
-
-inline const std::string& Variable::name() const {
-  return get()->name;
-}
-inline std::string& Variable::name() {
-  return get()->name;
-}
-
-inline bool Variable::is_view()const {
+inline bool Variable::is_view() const noexcept {
   return get()->is_view;
 }
-inline Variable& Variable::base() const {
-  if (is_view()) {
-    return static_cast<VariableViewImpl&>(*get()).base;
-  }
-  throw std::runtime_error("Can't get base of non-view");
+
+inline void Variable::set_name(const std::string& name) {
+  get()->name = name;
 }
 
-inline Variable & Variable::operator=(Variable && rhs) & {
-  rhs.swap(*this);
-  return *this;
+inline const std::string& Variable::name() const noexcept {
+  return get()->name;
 }
-inline Variable & Variable::operator=(const Variable & rhs) & {
-  Variable(rhs).swap(*this);
-  return *this;
-}
-inline Variable & Variable::operator=(Tensor && rhs) & {
-  rhs.swap(*this);
-  return *this;
-}
-inline Variable & Variable::operator=(const Tensor & rhs) & {
-  Variable(rhs).swap(*this);
-  return *this;
-}
-
 }} // namespace torch::autograd

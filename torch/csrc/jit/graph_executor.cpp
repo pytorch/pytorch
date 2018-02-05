@@ -15,6 +15,7 @@
 #include "torch/csrc/jit/passes/batch_mm.h"
 
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/edge.h"
 
 #include <unordered_map>
 
@@ -89,7 +90,7 @@ private:
   // inplace to avoid allocations
   variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
-      v = autograd::make_variable(v);
+      v = autograd::Variable(v, /*requires_grad=*/false);
     }
     return variable_tensor_list(std::move(list));
   }
@@ -133,15 +134,9 @@ private:
     // this is currently intentionally not done here so we can get an idea of our
     // perf before introducing overhead for correctness
     for(auto idx : grad.df_input_vjps) {
-      auto & o = static_cast<Variable&>(outputs[idx]);
-      auto impl = o.get();
-      // Note: we have to set this up in place, or we have to
-      // throw away and reallocate variables that were already created in
-      // wrapTensors. We should add an API for this, and more generally
-      // we need to clean up the fields of Variable.
-      impl->_grad_fn = grad_fn;
-      impl->output_nr = grad_fn->num_inputs++;
-      impl->_requires_grad = true;
+      auto& output = static_cast<Variable&>(outputs[idx]);
+      output.set_gradient_edge(autograd::Edge(grad_fn, grad_fn->num_inputs++));
+      output.set_requires_grad(true);
     }
     captureOutputs(*grad_fn, outputs);
     // drop the temporary outputs so that we return the same number of

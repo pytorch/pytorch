@@ -463,7 +463,7 @@ struct ADTestSpec {
   std::vector<Variable> make_vars() const {
     std::vector<Variable> out;
     for (const auto & m : input_meta) {
-      out.emplace_back(make_variable(at::CPU(at::kFloat).tensor(m).normal_(), true));
+      out.emplace_back(Variable(at::CPU(at::kFloat).tensor(m).normal_(), /*requires_grad=*/true));
     }
     return out;
   }
@@ -642,7 +642,7 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
 }
 
 autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
-  return autograd::make_variable(t.rand(sizes), requires_grad);
+  return autograd::Variable(t.rand(sizes), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();
@@ -725,7 +725,7 @@ void shapeAnalysisTest() {
 
   int hidden_size = 2*input_size;
 
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto v = [](at::Tensor t) { return autograd::Variable(t, false); };
 
   auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
   auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
@@ -751,7 +751,7 @@ void testGraphExecutor() {
 
   int hidden_size = 2*input_size;
 
-  auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
+  auto v = [](at::Tensor t) { return autograd::Variable(t, false); };
 
   auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
   auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});

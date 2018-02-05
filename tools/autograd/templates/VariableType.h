@@ -8,7 +8,7 @@
 
 namespace torch { namespace autograd {
 
-struct Variable;
+class Variable;
 using at::Context;
 using at::Generator;
 using at::IntList;

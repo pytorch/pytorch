@@ -1,7 +1,7 @@
 #pragma once
 #include <iostream>
 namespace torch { namespace autograd {
-struct Variable;
+class Variable;
 }}
 
 namespace torch { namespace jit {

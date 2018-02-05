@@ -29,7 +29,7 @@
 namespace torch { namespace autograd {
 
 struct Function;
-struct Variable;
+class Variable;
 struct Edge;
 
 using tensor_list = std::vector<at::Tensor>;

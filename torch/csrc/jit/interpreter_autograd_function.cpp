@@ -135,9 +135,10 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
-      result.push_back(autograd::make_variable(toutputs[i], grad_fn));
+      autograd::Edge edge(grad_fn, grad_fn->num_inputs++);
+      result.emplace_back(toutputs[i], std::move(edge));
     } else {
-      result.push_back(autograd::make_variable(toutputs[i], false));
+      result.emplace_back(toutputs[i], false);
     }
   }
 

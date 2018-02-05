@@ -12,7 +12,7 @@
 
 namespace torch { namespace autograd {
 
-struct Variable;
+class Variable;
 struct Function;
 
 }}
