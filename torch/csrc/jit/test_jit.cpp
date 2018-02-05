@@ -767,9 +767,40 @@ void testGraphExecutor() {
   JIT_ASSERT(almostEqual(Variable(outputs[1]).data(), r1));
 }
 
+void testBlocks(std::ostream & out) {
+  Graph g;
+  auto a = Var::asNewInput(g, "a");
+  auto b = Var::asNewInput(g, "b");
+  auto c = a + b;
+  auto r = g.appendNode(g.create("If"_sym, {Var::asNewInput(g, "c").value()}));
+  auto then_block = r->addBlock();
+  auto else_block = r->addBlock();
+  {
+    WithInsertPoint guard(g, then_block);
+    auto t = c + c;
+    then_block->registerOutput(t.value());
+  }
+  {
+    WithInsertPoint guard(g, else_block);
+    auto  d = b + c;
+    auto e = d + c;
+    else_block->registerOutput(e.value());
+  }
+  g.registerOutput((Var(r->output()) + c).value());
+  g.lint();
+  out << "testBlocks\n" << g << "\n";
+  r->eraseBlock(0);
+  out << g << "\n";
+  g.lint();
+  // test recursive copy of blocks works
+  auto g2 = g.copy();
+  out << *g2 << "\n";
+}
+
 std::string runJITCPPTests() {
   std::stringstream out;
   testGraphExecutor();
+  testBlocks(out);
   testCreateAutodiffSubgraphs(out);
   testDifferentiate(out);
   testDifferentiateWithRequiresGrad(out);

@@ -6,18 +6,22 @@
 // Subclasses may represent "forward" or "backward" operations (i.e functions
 // and their derivatives). Some functions may be used as both.
 
+#include "torch/csrc/assertions.h"
+#include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
-#include "torch/csrc/autograd/function_hook.h"
-#include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/autograd/grad_mode.h"
 
 #include <ATen/ATen.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace torch { namespace autograd {
@@ -39,79 +43,50 @@ struct edge_hasher {
   }
 };
 
-// TODO: separate is_executable and next_functions
-// State used to create "backward" functions
-struct FunctionFlags {
-  // Roughly speaking, is_executable corresponds to requires_grad.
-  // It's true if any input requires grad and gradient calculation is enabled.
-  // See http://pytorch.org/docs/notes/autograd.html for more details.
-  bool is_executable = false;
-  // What functions take the output of this function as input.
-  // There is one function per output of this function.
-  function_list next_functions;
-};
-
 namespace detail {
-
-// Why can't we just combine the set_variable and set_tensor variants
-// into one set of overloads?  The problem is Variable is convertible
-// to both Tensor and ArrayRef<Variable>, making the overload ambiguous.
-
-// Invariant: this function unconditionally calls f.next_functions.emplace_back
-inline void set_function_flags(FunctionFlags& f, const Variable& var) {
-  if (!var.defined()) {
-    f.next_functions.emplace_back();
-    return;
+inline edge_type make_edge(const Variable &variable) {
+  if (variable.defined()) {
+    if (variable.grad_fn() != nullptr) {
+      return {variable.grad_fn(), variable.output_nr()};
+    } else if (variable.requires_grad()) {
+      return {variable.grad_accumulator(), 0};
+    }
   }
-  f.is_executable |= var.requires_grad();
-  if (var.grad_fn()) {
-    f.next_functions.emplace_back(var.grad_fn(), var.output_nr());
-  } else if (var.requires_grad()) {
-    f.next_functions.emplace_back(var.grad_accumulator(), 0);
-  } else {
-    f.next_functions.emplace_back();
-  }
+  return {nullptr, 0};
 }
 
-struct SetFunctionFlags : IterArgs<SetFunctionFlags> {
-  FunctionFlags& out;
-  SetFunctionFlags(FunctionFlags& out) : out(out) {}
-  using IterArgs<SetFunctionFlags>::operator();
-  void operator()(const Variable& v) { set_function_flags(out, v); }
-};
-
-struct SetTensorFunctionFlags : IterArgs<SetTensorFunctionFlags> {
-  FunctionFlags& out;
-  SetTensorFunctionFlags(FunctionFlags& out) : out(out) {}
-  using IterArgs<SetTensorFunctionFlags>::operator();
-  void operator()(const Tensor& t) {
-    set_function_flags(out, static_cast<const Variable&>(t));
+struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
+  function_list next_functions;
+  using IterArgs<MakeNextFunctionList>::operator();
+  void operator()(const Variable& variable) {
+    next_functions.push_back(make_edge(variable));
   }
 };
-
-
 } // namespace detail
+
+// Returns true if any of the variables in the list require a gradient.
+inline bool any_variable_requires_grad(const variable_list& variables) {
+  return std::any_of(
+      variables.begin(), variables.end(), [](const Variable& variable) {
+        return variable.requires_grad();
+      });
+}
+
+template <typename... Variables>
+function_list get_next_functions(Variables&&... variables) {
+  if (!GradMode::is_enabled()) return {};
+  detail::MakeNextFunctionList make;
+  make.apply(std::forward<Variables>(variables)...);
+  return std::move(make.next_functions);
+}
 
 struct Function : std::enable_shared_from_this<Function> {
   static thread_local uint64_t function_counter;
 
-  Function()
-    : num_inputs(0)
-    , time(function_counter++)
-    , next_functions()
-    , pre_hooks()
-    , post_hooks()
-    , pyobj(nullptr)
-    {}
-
-  Function(FunctionFlags&& flags)
-    : num_inputs(0)
-    , time(function_counter++)
-    , next_functions(std::move(flags.next_functions))
-    , pre_hooks()
-    , post_hooks()
-    , pyobj(nullptr)
-    {}
+  Function() : time(function_counter++) {}
+  Function(function_list&& next_functions_) : Function() {
+    next_functions = std::move(next_functions_);
+  }
 
   Function(const Function& other) = delete;
   Function(Function&& other) = delete;
@@ -136,26 +111,6 @@ struct Function : std::enable_shared_from_this<Function> {
     return shared_from_this();
   };
 
-  // Computes is_executable and next_functions from an arbitrary argument list
-  // of variables and lists of variables (but whose static type is Tensor)
-  template<typename... Args> inline static FunctionFlags tensor_flags(Args&&... args) {
-    FunctionFlags f;
-    if (!GradMode::is_enabled()) return f;
-    f.next_functions.reserve(count_tensors(std::forward<Args>(args)...));
-    detail::SetTensorFunctionFlags(f).apply(std::forward<Args>(args)...);
-    return f; // RVO
-  }
-
-  // Computes is_executable and next_functions from an arbitrary argument list
-  // of variables and lists of variables
-  template<typename... Args> inline static FunctionFlags flags(Args&&... args) {
-    FunctionFlags f;
-    if (!GradMode::is_enabled()) return f;
-    f.next_functions.reserve(count_variables(std::forward<Args>(args)...));
-    detail::SetFunctionFlags(f).apply(std::forward<Args>(args)...);
-    return f; // RVO
-  }
-
   // Releases saved variables if the operation won't be reused
   virtual inline void releaseVariables() {}
   // called before a an apply if will release variables is going to be called
@@ -165,26 +120,27 @@ struct Function : std::enable_shared_from_this<Function> {
   // Function name for debugging
   virtual std::string name();
 
-  inline bool should_compute_output(int i) const {
-    return bool(next_functions[i].first);
+  bool should_compute_output(size_t index) const {
+    TORCH_ASSERTM(index < next_functions.size(), "Index out of range");
+    return next_functions[index].first != nullptr;
   }
 
-  inline bool should_compute_any_outputs() const {
+  bool should_compute_any_outputs() const {
     for (size_t i = 0; i < next_functions.size(); ++i) {
-      if (should_compute_output((int)i)) {
+      if (should_compute_output(i)) {
         return true;
       }
     }
     return false;
   }
 
-  inline bool should_compute_output(std::initializer_list<int> idxs) const {
-    return std::any_of(idxs.begin(), idxs.end(), [this](int i) {
+  bool should_compute_output(std::initializer_list<size_t> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](size_t i) {
       return should_compute_output(i);
     });
   }
 
-  inline bool should_compute_output(std::initializer_list<std::pair<size_t, size_t>> idxs) const {
+  bool should_compute_output(std::initializer_list<std::pair<size_t, size_t>> idxs) const {
     return std::any_of(idxs.begin(), idxs.end(), [this](std::pair<size_t, size_t> range) {
       for (size_t i = range.first; i < range.second; i++) {
         if (should_compute_output(i)) return true;
@@ -193,8 +149,8 @@ struct Function : std::enable_shared_from_this<Function> {
     });
   }
 
-  inline void set_flags(FunctionFlags&& flags) {
-    next_functions = std::move(flags.next_functions);
+  void set_next_functions(function_list&& next_functions) {
+    this->next_functions = std::move(next_functions);
   }
 
   // An op is traceable if all operations happening within apply() are performed
@@ -222,13 +178,13 @@ struct Function : std::enable_shared_from_this<Function> {
   static void setUpContextEdge(jit::Node* this_node,
                                const variable_list& inputs, const variable_list& outputs);
 
-  int num_inputs;
+  int num_inputs = 0;
   uint64_t time;
   function_list next_functions;
   std::vector<std::shared_ptr<FunctionPreHook>> pre_hooks;
   std::vector<std::shared_ptr<FunctionPostHook>> post_hooks;
 
-  PyObject *pyobj;  // weak reference
+  PyObject* pyobj = nullptr; // weak reference
 
   auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state;
 };

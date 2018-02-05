@@ -34,11 +34,13 @@ from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
-                                 Exponential, FisherSnedecor, Gamma, Geometric,
+                                 Exponential, ExponentialFamily,
+                                 FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  StudentT, TransformedDistribution, Uniform,
                                  constraints, kl_divergence)
+from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -270,8 +272,8 @@ EXAMPLES = [
             'high': Variable(torch.ones(1), requires_grad=True),
         },
         {
-            'low': variable([1.0, 1.0]),
-            'high': variable([2.0, 3.0]),
+            'low': Variable(torch.Tensor([1.0, 1.0]), requires_grad=True),
+            'high': Variable(torch.Tensor([2.0, 3.0]), requires_grad=True),
         },
     ]),
 ]
@@ -309,7 +311,7 @@ class TestDistributions(TestCase):
     def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
                                num_samples=10000, failure_rate=1e-3):
         # Checks that the .sample() method matches a reference function.
-        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        torch_samples = torch_dist.sample((num_samples,)).squeeze()
         if isinstance(torch_samples, Variable):
             torch_samples = torch_samples.data
         torch_samples = torch_samples.cpu().numpy()
@@ -340,7 +342,7 @@ class TestDistributions(TestCase):
     def _check_sampler_discrete(self, torch_dist, ref_dist, message,
                                 num_samples=10000, failure_rate=1e-3):
         """Runs a Chi2-test for the support, but ignores tail instead of combining"""
-        torch_samples = torch_dist.sample_n(num_samples).squeeze()
+        torch_samples = torch_dist.sample((num_samples,)).squeeze()
         if isinstance(torch_samples, Variable):
             torch_samples = torch_samples.data
         torch_samples = torch_samples.cpu().numpy()
@@ -376,7 +378,8 @@ class TestDistributions(TestCase):
     def test_has_examples(self):
         distributions_with_examples = set(e.Dist for e in EXAMPLES)
         for Dist in globals().values():
-            if isinstance(Dist, type) and issubclass(Dist, Distribution) and Dist is not Distribution:
+            if isinstance(Dist, type) and issubclass(Dist, Distribution) \
+                    and Dist is not Distribution and Dist is not ExponentialFamily:
                 self.assertIn(Dist, distributions_with_examples,
                               "Please add {} to the EXAMPLES list in test_distributions.py".format(Dist.__name__))
 
@@ -1866,26 +1869,34 @@ class TestKL(TestCase):
         bernoulli = pairwise(Bernoulli, [0.1, 0.2, 0.6, 0.9])
         binomial30 = pairwise(Binomial30, [0.1, 0.2, 0.6, 0.9])
         beta = pairwise(Beta, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
+        categorical = pairwise(Categorical, [[0.4, 0.3, 0.3],
+                                             [0.2, 0.7, 0.1],
+                                             [0.33, 0.33, 0.34],
+                                             [0.2, 0.2, 0.6]])
         chi2 = pairwise(Chi2, [1.0, 2.0, 2.5, 5.0])
+        dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
+                                         [0.5, 0.4, 0.1],
+                                         [0.33, 0.33, 0.34],
+                                         [0.2, 0.2, 0.4]])
         exponential = pairwise(Exponential, [1.0, 2.5, 5.0, 10.0])
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         laplace = pairwise(Laplace, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         lognormal = pairwise(LogNormal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
         normal = pairwise(Normal, [-2.0, 2.0, -3.0, 3.0], [1.0, 2.0, 1.0, 2.0])
+        onehotcategorical = pairwise(OneHotCategorical, [[0.4, 0.3, 0.3],
+                                                         [0.2, 0.7, 0.1],
+                                                         [0.33, 0.33, 0.34],
+                                                         [0.2, 0.2, 0.6]])
         pareto = pairwise(Pareto, [2.5, 4.0, 2.5, 4.0], [2.25, 3.75, 2.25, 3.75])
         poisson = pairwise(Poisson, [0.3, 1.0, 5.0, 10.0])
         uniform_within_unit = pairwise(Uniform, [0.15, 0.95, 0.2, 0.8], [0.1, 0.9, 0.25, 0.75])
         uniform_positive = pairwise(Uniform, [1, 1.5, 2, 4], [1.2, 2.0, 3, 7])
         uniform_real = pairwise(Uniform, [-2, -1, 0, 2], [-1, 1, 1, 4])
         uniform_pareto = pairwise(Uniform, [6.5, 8.5, 6.5, 8.5], [7.5, 7.5, 9.5, 9.5])
-        dirichlet = pairwise(Dirichlet, [[0.1, 0.2, 0.7],
-                                         [0.5, 0.4, 0.1],
-                                         [0.33, 0.33, 0.34],
-                                         [0.2, 0.2, 0.4]])
 
         # These tests should pass with precision = 0.01, but that makes tests very expensive.
-        # Instead, we test with precision = 0.2 and only test with higher precision locally
+        # Instead, we test with precision = 0.1 and only test with higher precision locally
         # when adding a new KL implementation.
         # The following pairs are not tested due to very high variance of the monte carlo
         # estimator; their implementations have been reviewed with extra care:
@@ -1902,6 +1913,7 @@ class TestKL(TestCase):
             (beta, gamma),
             (beta, normal),
             (binomial30, binomial30),
+            (categorical, categorical),
             (chi2, chi2),
             (chi2, exponential),
             (chi2, gamma),
@@ -1924,7 +1936,9 @@ class TestKL(TestCase):
             (laplace, normal),
             (normal, gumbel),
             (normal, normal),
+            (onehotcategorical, onehotcategorical),
             (pareto, chi2),
+            (pareto, pareto),
             (pareto, exponential),
             (pareto, gamma),
             (poisson, poisson),
@@ -1938,6 +1952,9 @@ class TestKL(TestCase):
         ]
 
         self.infinite_examples = [
+            (Bernoulli(0), Bernoulli(1)),
+            (Bernoulli(1), Bernoulli(0)),
+            (Categorical(variable([0.9, 0.1])), Categorical(variable([1, 0]))),
             (Beta(1, 2), Uniform(0.25, 1)),
             (Beta(1, 2), Uniform(0, 0.75)),
             (Beta(1, 2), Uniform(0.25, 0.75)),
@@ -1989,7 +2006,7 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            print('Testing KL({}, {})'.format(type(p).__name__, type(q).__name__))
+            print('Testing KL({}, {}) using Monte Carlo'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0
@@ -2007,10 +2024,30 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual),
             ]))
 
+    def test_kl_exponential_family(self):
+        for (p, _), (_, q) in self.finite_examples:
+            if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
+                print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
+                actual = kl_divergence(p, q)
+                expected = _kl_expfamily_expfamily(p, q)
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
+                self.assertEqual(actual, expected, message='\n'.join([
+                    'Incorrect KL({}, {}).'.format(type(p).__name__, type(q).__name__),
+                    'Expected (using Bregman Divergence) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max())
+                ]))
+
     def test_kl_infinite(self):
         for p, q in self.infinite_examples:
             self.assertTrue((kl_divergence(p, q) == float('inf')).all(),
                             'Incorrect KL({}, {})'.format(type(p).__name__, type(q).__name__))
+
+    def test_kl_edgecases(self):
+        self.assertEqual(kl_divergence(Bernoulli(0), Bernoulli(0)), 0)
+        self.assertEqual(kl_divergence(Bernoulli(1), Bernoulli(1)), 0)
+        self.assertEqual(kl_divergence(Categorical(variable([0, 1])), Categorical(variable([0, 1]))), 0)
 
     def test_kl_shape(self):
         for Dist, params in EXAMPLES:
@@ -2048,6 +2085,29 @@ class TestKL(TestCase):
                     'Expected (monte carlo) {}'.format(expected),
                     'Actual (analytic) {}'.format(actual),
                     'max error = {}'.format(torch.abs(actual - expected).max()),
+                ]))
+
+    def test_entropy_exponential_family(self):
+        for Dist, params in EXAMPLES:
+            if not issubclass(Dist, ExponentialFamily):
+                continue
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                try:
+                    actual = dist.entropy()
+                except NotImplementedError:
+                    continue
+                try:
+                    expected = ExponentialFamily.entropy(dist)
+                except NotImplementedError:
+                    continue
+                if isinstance(expected, Variable) and not isinstance(actual, Variable):
+                    expected = expected.data
+                self.assertEqual(actual, expected, message='\n'.join([
+                    '{} example {}/{}, incorrect .entropy().'.format(Dist.__name__, i + 1, len(params)),
+                    'Expected (Bregman Divergence) {}'.format(expected),
+                    'Actual (analytic) {}'.format(actual),
+                    'max error = {}'.format(torch.abs(actual - expected).max())
                 ]))
 
 

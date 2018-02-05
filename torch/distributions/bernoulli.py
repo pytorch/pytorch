@@ -3,12 +3,12 @@ from numbers import Number
 import torch
 from torch.autograd import Variable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property
 from torch.nn.functional import binary_cross_entropy_with_logits
 
 
-class Bernoulli(Distribution):
+class Bernoulli(ExponentialFamily):
     r"""
     Creates a Bernoulli distribution parameterized by `probs` or `logits`.
 
@@ -29,6 +29,7 @@ class Bernoulli(Distribution):
     params = {'probs': constraints.unit_interval}
     support = constraints.boolean
     has_enumerate_support = True
+    _mean_carrier_measure = 0
 
     def __init__(self, probs=None, logits=None):
         if (probs is None) == (logits is None):
@@ -87,3 +88,10 @@ class Bernoulli(Distribution):
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values
+
+    @property
+    def _natural_params(self):
+        return (torch.log(self.probs / (1 - self.probs)), )
+
+    def _log_normalizer(self, x):
+        return torch.log(1 + torch.exp(x))

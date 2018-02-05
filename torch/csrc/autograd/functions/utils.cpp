@@ -1,19 +1,17 @@
 #include "torch/csrc/autograd/functions/utils.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/jit/tracer.h"
-
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <sstream>
+#include <vector>
 
 namespace torch { namespace autograd {
 
 variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
                            function_constructor ctr) {
-  auto flags = Function::flags(inputs);
   variable_list result;
   result.reserve(outputs.size());
-  if (!flags.is_executable) {
+  if (!any_variable_requires_grad(inputs)) {
     for (auto& output : outputs) {
       if (output.defined()) {
         result.emplace_back(make_variable(output, false));
@@ -22,7 +20,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
       }
     }
   } else {
-    auto grad_fn = ctr(std::move(flags));
+    auto grad_fn = ctr(get_next_functions(inputs));
     for (auto& output : outputs) {
       if (output.defined()) {
         result.emplace_back(make_variable(output, grad_fn));
@@ -53,5 +51,4 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
     }
   }
 }
-
 }}
