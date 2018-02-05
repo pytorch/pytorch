@@ -29,7 +29,7 @@ THC_API void THCTensor_(topk)(THCState* state,
   THLongStorage_free(topKSize);
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \
-  gatherTopK<real, INDEX_T, DIM, DIR>                                         \
+  gatherTopK<real, INDEX_T, DIM, DIR>                                   \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
       inputInfo,                                                        \
       sliceSize,                                                        \
@@ -63,10 +63,10 @@ THC_API void THCTensor_(topk)(THCState* state,
   }
 
 #define RUN_T(INDEX_T)                                                  \
-  TensorInfo<real, INDEX_T> inputInfo =                                \
-    getTensorInfo<THCTensor, INDEX_T>(state, input);                 \
-  TensorInfo<real, INDEX_T> topKInfo =                                 \
-    getTensorInfo<THCTensor, INDEX_T>(state, topK);                  \
+  TensorInfo<real, INDEX_T> inputInfo =                                 \
+    getTensorInfo<THCTensor, INDEX_T>(state, input);                    \
+  TensorInfo<real, INDEX_T> topKInfo =                                  \
+    getTensorInfo<THCTensor, INDEX_T>(state, topK);                     \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
     getTensorInfo<THCudaLongTensor, INDEX_T>(state, indices);           \
                                                                         \
