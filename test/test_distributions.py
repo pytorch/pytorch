@@ -1158,6 +1158,20 @@ class TestDistributions(TestCase):
             x = Beta(Tensor([1e-6]), Tensor([1e-6])).sample()[0]
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
+    def test_cdf_icdf_inverse(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                samples = dist.sample(sample_shape=(20,))
+                try:
+                    cdf = dist.cdf(samples)
+                    actual = dist.icdf(cdf)
+                except NotImplementedError:
+                    continue
+                self.assertEqual(actual, samples,
+                                 message='{} example {}/{},\
+                                 icdf(cdf(x)) != x'.format(Dist.__name__, i + 1, len(params)))
+
     def test_valid_parameter_broadcasting(self):
         # Test correct broadcasting of parameter sizes for distributions that have multiple
         # parameters.
