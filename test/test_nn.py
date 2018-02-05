@@ -122,10 +122,12 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
 
 class InputVariableMixin(object):
     def _get_input(self):
-        input = TestBase._get_input(self)
+        input = TestBase._get_input(self, False)
 
         def map_variables(i):
             if isinstance(i, Variable):
+                if i.is_floating_point():
+                    i.requires_grad = True
                 return i
             elif torch.is_tensor(i):
                 return Variable(i, requires_grad=True)
@@ -263,14 +265,11 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         test_case.assertEqual(p.get_device(), 1)
 
     def _get_target(self):
-        return self._get_arg('target', False, False)
+        return self._get_arg('target', False)
 
     @property
     def constructor_args(self):
-        return self._get_arg('constructor_args', False, False)
-
-    def _get_input(self):
-        return self._get_arg('input', False, True)
+        return self._get_arg('constructor_args', False)
 
 
 class NewCriterionTest(InputVariableMixin, CriterionTest):
@@ -289,16 +288,13 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             else:
                 _assertGradAndGradgradChecks(test_case, lambda x, y, z, *args, **kw: module(x, y, z),
                                              input + (target,) + params)
+
     def _get_target(self):
-        return self._get_arg('target', False, False)
+        return self._get_arg('target', False)
 
     @property
     def constructor_args(self):
-        return self._get_arg('constructor_args', False, False)
-
-    def _get_input(self):
-        input =  self._get_arg('input', False, True)
-        return input
+        return self._get_arg('constructor_args', False)
 
 
 class TestNN(NNTestCase):

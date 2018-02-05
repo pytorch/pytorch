@@ -692,9 +692,9 @@ class TestBase(object):
 
     @property
     def constructor_args(self):
-        return self._get_arg('constructor_args', True, False)
+        return self._get_arg('constructor_args', True)
 
-    def _get_arg(self, name, unpack, requires_grad):
+    def _get_arg(self, name, unpack):
         assert name in self._required_arg_names
 
         if name not in self._arg_cache:
@@ -703,7 +703,7 @@ class TestBase(object):
 
             def convert_tensors_to_vars(args):
                 def tensor_to_var(t):
-                    return Variable(t, requires_grad=requires_grad) if torch.is_tensor(t) else t
+                    return Variable(t) if torch.is_tensor(t) else t
 
                 if isinstance(args, tuple):
                     return tuple(tensor_to_var(x) for x in args)
@@ -721,19 +721,19 @@ class TestBase(object):
                     if isinstance(sizes, list):
                         return [map_tensor_sizes(s) for s in sizes]
                     elif torch.is_tensor(sizes):
-                        return Variable(sizes.double(), requires_grad=requires_grad)
+                        return Variable(sizes.double())
                     else:
                         if len(sizes) == 0:
-                            return torch.testing.randn_like(variable(0), requires_grad=requires_grad)
+                            return torch.testing.randn_like(variable(0))
                         else:
-                            return Variable(torch.randn(*sizes), requires_grad=requires_grad)
+                            return Variable(torch.randn(*sizes))
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
 
         return self._unpack(self._arg_cache[name]) if unpack else self._arg_cache[name]
 
-    def _get_input(self):
-        return self._get_arg('input', True, False)
+    def _get_input(self, unpack=True):
+        return self._get_arg('input', unpack)
 
     def __call__(self, test_case):
         raise NotImplementedError
@@ -915,7 +915,7 @@ class CriterionTest(TestBase):
         self.should_test_cuda = kwargs.get('test_cuda', True)
 
     def _get_target(self):
-        return self._get_arg('target', True, False)
+        return self._get_arg('target', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
