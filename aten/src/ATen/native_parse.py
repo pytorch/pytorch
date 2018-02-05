@@ -36,11 +36,18 @@ def parse_arguments(args, func_decl, func_name, func_return):
     arguments = []
     python_default_inits = func_decl.get('python_default_init', {})
     is_out_fn = func_name.endswith('_out')
+    kwarg_only = False
 
     # TODO: Use a real parser here; this will get bamboozled
     # by signatures that contain things like std::array<bool, 2> (note the space)
     for arg_idx, arg in enumerate(args.split(', ')):
-        t, name = [a.strip() for a in arg.rsplit(' ', 1)]
+        type_and_name = [a.strip() for a in arg.rsplit(' ', 1)]
+        if type_and_name == ['*']:
+            assert not kwarg_only
+            kwarg_only = True
+            continue
+
+        t, name = type_and_name
         default = None
         python_default_init = None
 
@@ -67,6 +74,8 @@ def parse_arguments(args, func_decl, func_name, func_return):
         # be better if we just named everything and matched by name.
         if is_out_fn and arg_idx < len(func_return):
             argument_dict['output'] = True
+        if kwarg_only:
+            argument_dict['kwarg_only'] = True
 
         arguments.append(argument_dict)
     return arguments

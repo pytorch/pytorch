@@ -222,7 +222,7 @@ void test(Type &T) {
         auto lhs = T.ones(*lhs_it);
         auto rhs = T.ones(*rhs_it);
         TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
-                       ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() > 1 || rhs.dim() > 1),
+                       ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() != 1 || rhs.dim() != 1),
                        [&]() {
                          int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
                          int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);

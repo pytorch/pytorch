@@ -8,6 +8,20 @@
 
 - func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
 
+- func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addmv_(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addmv_out(Tensor result, Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addr_(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
@@ -169,6 +183,11 @@
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: ger(Tensor self, Tensor vec2) -> Tensor
+
+- func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
+  variants: function
+
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
@@ -191,6 +210,11 @@
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: mv(Tensor self, Tensor vec) -> Tensor
+
+- func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
   variants: function
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
