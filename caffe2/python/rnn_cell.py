@@ -364,24 +364,17 @@ class LSTMCell(RNNCell):
         )
         brew.sum(model, [gates_t, input_t], gates_t)
 
-        no_sequence_lengths = seq_lengths is None
-        if no_sequence_lengths:
-            seq_lengths = model.net.ConstantFill(
-                [], self.scope("dummy"), value=0, shape=[1],
-                dtype=core.DataType.INT32)
+        if seq_lengths is not None:
+            inputs = [hidden_t_prev, cell_t_prev, gates_t, seq_lengths, timestep]
+        else:
+            inputs = [hidden_t_prev, cell_t_prev, gates_t, timestep]
 
         hidden_t, cell_t = model.net.LSTMUnit(
-            [
-                hidden_t_prev,
-                cell_t_prev,
-                gates_t,
-                seq_lengths,
-                timestep,
-            ],
+            inputs,
             list(self.get_state_names()),
             forget_bias=self.forget_bias,
             drop_states=self.drop_states,
-            no_sequence_lengths=no_sequence_lengths
+            sequence_lengths=(seq_lengths is not None),
         )
         model.net.AddExternalOutputs(hidden_t, cell_t)
         if self.memory_optimization:
