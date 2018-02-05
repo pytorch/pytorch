@@ -1,7 +1,7 @@
 {% set version = "0.8.dev" %}
 
 package:
-  name: caffe2-cuda
+  name: caffe2-cuda%%CUDA_VERSION%%-cudnn%%CUDNN_VERSION%%
   version: {{ version }}
 
 source:
@@ -20,8 +20,6 @@ requirements:
     - glog
     - gflags
     - lmdb
-    - mkl-include
-    - mkl
     - numpy
     - opencv
     - python
@@ -32,8 +30,6 @@ requirements:
     - glog
     - gflags
     - lmdb
-    - mkl
-    - mkl-include
     - numpy
     - opencv
     - protobuf
