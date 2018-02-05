@@ -348,12 +348,12 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
-        output = torch.zeros(n)
+        output = input.new(n).zero_()
         output[0] = _multilabelmarginloss_reference(input, target)
     else:
         n = input.size(0)
         dim = input.size(1)
-        output = torch.zeros(n)
+        output = input.new(n).zero_()
         for i in range(0, n):
             output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
