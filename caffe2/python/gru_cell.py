@@ -152,16 +152,17 @@ class GRUCell(rnn_cell.RNNCell):
             axis=2,
         )
 
+        if seq_lengths is not None:
+            inputs = [hidden_t_prev, gates_t, seq_lengths, timestep]
+        else:
+            inputs = [hidden_t_prev, gates_t, timestep]
+
         hidden_t = model.net.GRUUnit(
-            [
-                hidden_t_prev,
-                gates_t,
-                seq_lengths,
-                timestep,
-            ],
+            inputs,
             list(self.get_state_names()),
             forget_bias=self.forget_bias,
             drop_states=self.drop_states,
+            sequence_lengths=(seq_lengths is not None),
         )
         model.net.AddExternalOutputs(hidden_t)
         return (hidden_t,)

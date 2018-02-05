@@ -43,7 +43,7 @@ __global__ void GRUUnitKernel(
   CUDA_1D_KERNEL_LOOP(index, ND) {
     const int n = index / dim;
     const int d = index % dim;
-    const bool valid = t < seqLengths[n];
+    const bool valid = seqLengths == nullptr || t < seqLengths[n];
     if (!valid) {
       H[index] = H_prev[index] * !drop_states;
     } else {
@@ -72,7 +72,7 @@ __global__ void GRUUnitGradientKernel(
     T* X_diff) {
   CUDA_1D_KERNEL_LOOP(index, ND) {
     const int n = index / dim;
-    const bool valid = t < seqLengths[n];
+    const bool valid = seqLengths == nullptr || t < seqLengths[n];
     const int d = index % dim;
     const T* X_offset = X + 3 * dim * n;
     T* h_prev_diff = H_prev_diff + index;
