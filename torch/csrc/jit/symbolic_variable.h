@@ -7,6 +7,11 @@ namespace torch { namespace jit {
 struct SymbolicVariable {
   SymbolicVariable() : v(nullptr) {}
   /* implicit */ SymbolicVariable(Value * v) : v(v) {}
+  // we allow implicit conversions to/from Value since
+  // this type truly just provides more methods for value
+  operator Value*() {
+    return v;
+  }
   static SymbolicVariable asNewInput(Graph & g, std::string name = "") {
     return g.addInput(name);
   }
@@ -101,5 +106,10 @@ private:
   }
   Value * v;
 };
+
+// shorter method so that toVar(v) + toVar(c) is short.
+static inline SymbolicVariable toVar(Value * v) {
+  return SymbolicVariable(v);
+}
 
 }}
