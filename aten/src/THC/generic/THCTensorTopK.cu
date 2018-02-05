@@ -82,9 +82,11 @@ THC_API void THCTensor_(topk)(THCState* state,
   int collapseIndicesDim = indicesInfo.collapseDims(dim);               \
                                                                         \
   int64_t inputSlices = 1;                                              \
-  int64_t topKSlices = 1;                                               \
-  for (int i = 0; i < numDims; ++i) {                                   \
+  for (int i = 0; i < inputInfo.dims; ++i) {                            \
     inputSlices *= inputInfo.sizes[i];                                  \
+  }                                                                     \
+  int64_t topKSlices = 1;                                               \
+  for (int i = 0; i < topKInfo.dims; ++i) {                             \
     topKSlices *= topKInfo.sizes[i];                                    \
   }                                                                     \
                                                                         \
