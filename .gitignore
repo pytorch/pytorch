@@ -57,3 +57,4 @@ test/data/linear.pt
 .ninja_deps
 .ninja_log
 compile_commands.json
+*.egg-info/

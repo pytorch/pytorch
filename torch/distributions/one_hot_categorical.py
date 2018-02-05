@@ -40,6 +40,22 @@ class OneHotCategorical(Distribution):
         return self._categorical._new(*args, **kwargs)
 
     @property
+    def probs(self):
+        return self._categorical.probs
+
+    @property
+    def logits(self):
+        return self._categorical.logits
+
+    @property
+    def mean(self):
+        return self._categorical.probs
+
+    @property
+    def variance(self):
+        return self._categorical.probs * (1 - self._categorical.probs)
+
+    @property
     def param_shape(self):
         return self._categorical.param_shape
 

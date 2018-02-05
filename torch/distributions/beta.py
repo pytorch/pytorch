@@ -4,11 +4,11 @@ import torch
 from torch.autograd import variable
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
-class Beta(Distribution):
+class Beta(ExponentialFamily):
     r"""
     Beta distribution parameterized by `concentration1` and `concentration0`.
 
@@ -37,6 +37,16 @@ class Beta(Distribution):
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
         self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape)
+
+    @property
+    def mean(self):
+        return self.concentration1 / (self.concentration1 + self.concentration0)
+
+    @property
+    def variance(self):
+        total = self.concentration1 + self.concentration0
+        return (self.concentration1 * self.concentration0 /
+                (total.pow(2) * (total + 1)))
 
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
@@ -67,3 +77,10 @@ class Beta(Distribution):
             return torch.Tensor([result])
         else:
             return result
+
+    @property
+    def _natural_params(self):
+        return (self.concentration1, self.concentration0)
+
+    def _log_normalizer(self, x, y):
+        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)

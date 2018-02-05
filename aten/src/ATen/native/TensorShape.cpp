@@ -8,7 +8,29 @@
 namespace at {
 namespace native {
 
+static void check_cat_no_zero_dim(TensorList tensors) {
+  for(size_t i = 0; i < tensors.size(); ++i) {
+    auto& t = tensors[i];
+    if (t.dim() == 0) {
+      runtime_error("zero-dimensional tensor (at position %zu) cannot be concatenated", i);
+    }
+  }
+}
+
+Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  return at::_cat_out(result, tensors, dim);
+}
+
+Tensor cat(TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  return at::_cat(tensors, dim);
+}
+
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
+  if (self.dim() == 0) {
+    throw std::runtime_error("chunk expects at least a 1-dimensional tensor");
+  }
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
   return self.split(split_size, dim);
@@ -69,6 +91,35 @@ Tensor permute(const Tensor& self, IntList dims) {
   return self.as_strided(newSizes, newStrides);
 }
 
+Tensor repeat(const Tensor& self, IntList repeats) {
+  if (repeats.size() < (size_t)self.dim()) {
+    runtime_error("Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor");
+  }
+
+  // Add new leading dimensions to the tensor if the
+  // number of target dimensions is larger than the
+  // number of source dimensions.
+  int64_t num_new_dimensions = repeats.size() - self.dim();
+  std::vector<int64_t> padded_size(num_new_dimensions, 1);
+  padded_size.insert(padded_size.end(), self.sizes().begin(), self.sizes().end());
+  std::vector<int64_t> target_size(repeats.size());
+  for(size_t idx = 0; idx < repeats.size(); ++idx) {
+    target_size[idx] = padded_size[idx] * repeats[idx];
+  }
+
+  Tensor xtensor = self.expand(padded_size);
+
+  Tensor result = self.type().tensor(target_size);
+  Tensor urtensor = result.type().alias(result);
+  for (int64_t i = 0; i < xtensor.dim(); ++i) {
+    urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i));
+  }
+
+  urtensor.copy_(xtensor.expand_as(urtensor));
+
+  return result;
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
@@ -125,6 +176,9 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
+  if (self.dim() == 0) {
+    throw std::runtime_error("split expects at least a 1-dimensional tensor");
+  }
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;
   std::vector<Tensor> splits(num_splits);
@@ -137,19 +191,29 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
+  std::vector<Tensor> inputs(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    inputs[i] = tensors[i].unsqueeze(dim);
+  }
+  return inputs;
+}
+
 Tensor stack(TensorList tensors, int64_t dim) {
   if (tensors.size() == 0) {
     throw std::runtime_error("stack expects a non-empty TensorList");
   }
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-
-  std::vector<Tensor> inputs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    inputs[i] = tensors[i].unsqueeze(dim);
-  }
-  return at::cat(inputs, dim);
+  return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
+Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
+  if (tensors.size() == 0) {
+    throw std::runtime_error("stack expects a non-empty TensorList");
+  }
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+}
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t ndimI = self._indices().size(0);
@@ -240,7 +304,7 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
   std::vector<int64_t> sizes(tensor.sizes());
   std::vector<int64_t> strides(tensor.strides());
-  int64_t new_stride = dim >= tensor.dim() - 1 ? 1 : sizes[dim] * strides[dim];
+  int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
   sizes.insert(sizes.begin() + dim, 1);
   strides.insert(strides.begin() + dim, new_stride);
 

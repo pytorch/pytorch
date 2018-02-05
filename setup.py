@@ -348,6 +348,13 @@ class install(setuptools.command.install.install):
     def run(self):
         if not self.skip_build:
             self.run_command('build_deps')
+
+        # Copy headers necessary to compile C++ extensions.
+        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
+        self.copy_tree('torch/lib/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
+        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
+
         setuptools.command.install.install.run(self)
 
 
@@ -462,10 +469,12 @@ main_sources = [
     "torch/csrc/jit/interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/fusion_compiler.cpp",
+    "torch/csrc/jit/graph_executor.cpp",
     "torch/csrc/jit/python_ir.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
     "torch/csrc/jit/python_tracer.cpp",
+    "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/interned_strings.cpp",
     "torch/csrc/jit/type.cpp",
     "torch/csrc/jit/export.cpp",
@@ -735,20 +744,35 @@ cmdclass = {
 }
 cmdclass.update(build_dep_cmds)
 
-
 if __name__ == '__main__':
-    setup(name="torch", version=version,
-          description="Tensors and Dynamic neural networks in Python with strong GPU acceleration",
-          ext_modules=extensions,
-          cmdclass=cmdclass,
-          packages=packages,
-          package_data={'torch': [
-              'lib/*.so*', 'lib/*.dylib*', 'lib/*.dll', 'lib/*.lib',
-              'lib/torch_shm_manager',
-              'lib/*.h',
-              'lib/include/TH/*.h', 'lib/include/TH/generic/*.h',
-              'lib/include/THC/*.h', 'lib/include/THC/generic/*.h',
-              'lib/include/ATen/*.h',
-          ]},
-          install_requires=['pyyaml', 'numpy'],
-          )
+    setup(
+        name="torch",
+        version=version,
+        description=("Tensors and Dynamic neural networks in "
+                     "Python with strong GPU acceleration"),
+        ext_modules=extensions,
+        cmdclass=cmdclass,
+        packages=packages,
+        package_data={
+            'torch': [
+                'lib/*.so*',
+                'lib/*.dylib*',
+                'lib/*.dll',
+                'lib/*.lib',
+                'lib/torch_shm_manager',
+                'lib/*.h',
+                'lib/include/ATen/*.h',
+                'lib/include/pybind11/*.h',
+                'lib/include/pybind11/detail/*.h',
+                'lib/include/TH/*.h',
+                'lib/include/TH/generic/*.h',
+                'lib/include/THC/*.h',
+                'lib/include/THC/generic/*.h',
+                'lib/include/torch/csrc/*.h',
+                'lib/include/torch/csrc/autograd/*.h',
+                'lib/include/torch/csrc/jit/*.h',
+                'lib/include/torch/csrc/utils/*.h',
+                'lib/include/torch/torch.h',
+            ]
+        },
+        install_requires=['pyyaml', 'numpy'], )

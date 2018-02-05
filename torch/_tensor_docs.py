@@ -326,7 +326,7 @@ tensor.
 
 add_docstr_all('copy_',
                r"""
-copy_(src, async=False, broadcast=True) -> Tensor
+copy_(src, non_blocking=False, broadcast=True) -> Tensor
 
 Copies the elements from :attr:`src` into :attr:`self` tensor and returns
 :attr:`self`.
@@ -339,9 +339,9 @@ different device.
 
 Args:
     src (Tensor): the source tensor to copy from
-    async (bool): if ``True`` and this copy is between CPU and GPU, the copy may
-        occur asynchronously with respect to the host. For other cases, this
-        argument has no effect.
+    non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
+        the copy may occur asynchronously with respect to the host. For other
+        cases, this argument has no effect.
     broadcast (bool): if ``True``, :attr:`src` will be broadcast to the shape of
         the underlying tensor.
 """)

@@ -16,7 +16,6 @@ struct SymbolicVariable {
   void addAsOutput() {
     v->owningGraph()->registerOutput(v);
   }
-
   static std::vector<SymbolicVariable> create(Symbol kind, ArrayRef<SymbolicVariable> inputs,
                                  int num_outputs = 1,
                                  Node** created_node = nullptr,
@@ -24,7 +23,7 @@ struct SymbolicVariable {
       if(g == nullptr) {
         g = inputs.at(0).value()->owningGraph();
       }
-      Node * n = g->appendNode(g->create(kind, num_outputs));
+      Node * n = g->insertNode(g->create(kind, num_outputs));
       for(auto i : inputs) {
         n->addInput(i.value());
       }
@@ -37,8 +36,24 @@ struct SymbolicVariable {
       }
       return out;
   }
+  static bool isConstInt(at::Scalar s, int32_t i) {
+    // int32_t is safely convertible to both double and int64_t
+    if(s.isFloatingPoint()) {
+      return (double) i == s.toDouble();
+    } else {
+      return (int64_t) i == s.toLong();
+    }
+  }
   SymbolicVariable operator*(SymbolicVariable rhs) const {
     return create(kmul, {*this, rhs})[0].typeLike(*this);
+  }
+  SymbolicVariable operator*(at::Scalar rhs) const {
+    if(isConstInt(rhs, 1))
+      return *this;
+    Node * n;
+    auto r = create(kmul, {*this}, 1, &n)[0];
+    n->t_(kother, rhs.toTensor());
+    return r;
   }
   SymbolicVariable operator+(SymbolicVariable rhs) const {
     Node * n;

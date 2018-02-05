@@ -16,15 +16,15 @@
 
 // Helper macros for initialization
 #define FUNCTION_IMPL(NAME, EXT) \
-    { .function=(void *)NAME,    \
-      .supportedSimdExt=EXT      \
+    { (void *)NAME,    \
+      EXT      \
     }
 
 #define INIT_DISPATCH_PTR(OP)    \
   do {                           \
     int i;                       \
     for (i = 0; i < sizeof(THVector_(OP ## _DISPATCHTABLE)) / sizeof(FunctionDescription); ++i) { \
-      THVector_(OP ## _DISPATCHPTR) = THVector_(OP ## _DISPATCHTABLE)[i].function;                     \
+      THVector_(OP ## _DISPATCHPTR) = reinterpret_cast<decltype(THVector_(OP ## _DISPATCHPTR))>(THVector_(OP ## _DISPATCHTABLE)[i].function);                     \
       if (THVector_(OP ## _DISPATCHTABLE)[i].supportedSimdExt & hostSimdExts) {                       \
         break;                                                                                     \
       }                                                                                            \
@@ -101,7 +101,7 @@ static inline void cpuid(uint32_t *eax, uint32_t *ebx, uint32_t *ecx, uint32_t *
 {
 #if defined(_MSC_VER)
   uint32_t cpuInfo[4];
-  __cpuid(cpuInfo, *eax);
+  __cpuid((int *)cpuInfo, *eax);
   *eax = cpuInfo[0];
   *ebx = cpuInfo[1];
   *ecx = cpuInfo[2];

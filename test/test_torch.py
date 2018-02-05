@@ -1966,6 +1966,13 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_cat_scalars(self):
+        from torch.autograd import variable
+        x = variable(0)
+        y = variable(1)
+        self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
@@ -1979,6 +1986,27 @@ class TestTorch(TestCase):
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
             self.assertEqual(res.select(dim, 2), z, 0)
+
+    def test_stack_out(self):
+        from torch.autograd import Variable
+        x = Variable(torch.rand(2, 3, 4))
+        y = Variable(torch.rand(2, 3, 4))
+        z = Variable(torch.rand(2, 3, 4))
+        for dim in range(4):
+            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            res_out = x.new(expected_size)
+            res_neg_out = x.new(expected_size)
+            res_out_dp = res_out.data_ptr()
+            res_out_neg_dp = res_neg_out.data_ptr()
+            torch.stack((x, y, z), dim, out=res_out)
+            torch.stack((x, y, z), dim - 4, out=res_neg_out)
+            self.assertEqual(res_out, res_neg_out)
+            self.assertEqual(res_out.size(), expected_size)
+            self.assertEqual(res_out_dp, res_out.data_ptr())
+            self.assertEqual(res_out_neg_dp, res_neg_out.data_ptr())
+            self.assertEqual(res_out.select(dim, 0), x, 0)
+            self.assertEqual(res_out.select(dim, 1), y, 0)
+            self.assertEqual(res_out.select(dim, 2), z, 0)
 
     def test_unbind(self):
         x = torch.rand(2, 3, 4, 5)

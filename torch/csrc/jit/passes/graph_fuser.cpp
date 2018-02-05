@@ -209,7 +209,7 @@ struct GraphFuser {
     }
 
     // Clone all nodes
-    for (auto inner : *producer_subgraph) {
+    for (auto inner : producer_subgraph->nodes()) {
       Node * outer = graph->createClone(inner, [&](Value * k) -> Value* {
         return inner_to_outer.at(k);
       });

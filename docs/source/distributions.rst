@@ -13,6 +13,12 @@ Probability distributions - torch.distributions
 .. autoclass:: Distribution
     :members:
 
+:hidden:`ExponentialFamily`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+..autoclass:: ExponentialFamily
+    :members:
+
 :hidden:`Bernoulli`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -159,5 +165,12 @@ Probability distributions - torch.distributions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.constraints
+    :members:
+    :member-order: bysource
+
+`Constraint Registry`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: torch.distributions.constraint_registry
     :members:
     :member-order: bysource

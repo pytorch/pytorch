@@ -7,19 +7,23 @@ import torch
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial
+from .categorical import Categorical
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
+from .exp_family import ExponentialFamily
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .normal import Normal
+from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
 from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
+from .utils import _sum_rightmost
 from torch.autograd import Variable, variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
@@ -163,7 +167,11 @@ _euler_gamma = 0.57721566490153286060
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):
     t1 = p.probs * (p.probs / q.probs).log()
+    t1[q.probs == 0] = float('inf')
+    t1[p.probs == 0] = 0
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
+    t2[q.probs == 1] = float('inf')
+    t2[p.probs == 1] = 0
     return t1 + t2
 
 
@@ -191,6 +199,14 @@ def _kl_binomial_binomial(p, q):
         raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
 
 
+@register_kl(Categorical, Categorical)
+def _kl_categorical_categorical(p, q):
+    t = p.probs * (p.logits - q.logits)
+    t[q.probs == 0] = float('inf')
+    t[p.probs == 0] = 0
+    return t.sum(-1)
+
+
 @register_kl(Dirichlet, Dirichlet)
 def _kl_dirichlet_dirichlet(p, q):
     # From http://bariskurt.com/kullback-leibler-divergence-between-two-dirichlet-and-beta-distributions/
@@ -208,6 +224,22 @@ def _kl_exponential_exponential(p, q):
     rate_ratio = q.rate / p.rate
     t1 = -rate_ratio.log()
     return t1 + rate_ratio - 1
+
+
+@register_kl(ExponentialFamily, ExponentialFamily)
+def _kl_expfamily_expfamily(p, q):
+    if not type(p) == type(q):
+        raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
+                            be computed using Bregman divergences")
+    p_nparams = [Variable(np.data, requires_grad=True) for np in p._natural_params]
+    q_nparams = q._natural_params
+    lg_normal = p._log_normalizer(*p_nparams)
+    gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
+    result = q._log_normalizer(*q_nparams) - lg_normal.clone()
+    for pnp, qnp, g in zip(p_nparams, q_nparams, gradients):
+        term = (qnp - pnp) * g
+        result -= _sum_rightmost(term, len(q.event_shape))
+    return result
 
 
 @register_kl(Gamma, Gamma)
@@ -251,6 +283,11 @@ def _kl_normal_normal(p, q):
     var_ratio = (p.scale / q.scale).pow(2)
     t1 = ((p.loc - q.loc) / q.scale).pow(2)
     return 0.5 * (var_ratio + t1 - 1 - var_ratio.log())
+
+
+@register_kl(OneHotCategorical, OneHotCategorical)
+def _kl_onehotcategorical_onehotcategorical(p, q):
+    return _kl_categorical_categorical(p._categorical, q._categorical)
 
 
 @register_kl(Pareto, Pareto)

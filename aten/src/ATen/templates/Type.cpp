@@ -17,25 +17,25 @@ void Type::registerAll(Context * context) {
   context->type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)].reset(new UndefinedType(context));
 }
 
-Tensor & Type::copy_(Tensor & self, const Tensor & src, bool async) const {
+Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
   Tensor b_src;
   std::tie(b_src) = expand_inplace(self, src, "copy");
-  return s_copy_(self, b_src, async);
+  return s_copy_(self, b_src, non_blocking);
 }
 
-Tensor Type::copy(const Tensor & src, bool async) const {
+Tensor Type::copy(const Tensor & src, bool non_blocking) const {
   AT_ASSERT(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();
     auto values = src._values();
     auto & this_dense = toBackend(is_cuda() ? Backend::CUDA : Backend::CPU);
     auto & this_dense_idx = this_dense.toScalarType(ScalarType::Long);
-    auto indices_copy = this_dense_idx.copy(indices, async);
-    auto values_copy = this_dense.copy(values, async);
+    auto indices_copy = this_dense_idx.copy(indices, non_blocking);
+    auto values_copy = this_dense.copy(values, non_blocking);
     return sparse_coo_tensor(indices_copy, values_copy, src.sizes());
   } else {
     Tensor r = this->tensor(src.sizes());
-    r.copy_(src, async);
+    r.copy_(src, non_blocking);
     return r;
   }
 }

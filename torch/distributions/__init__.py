@@ -37,9 +37,11 @@ from .binomial import Binomial
 from .categorical import Categorical
 from .cauchy import Cauchy
 from .chi2 import Chi2
+from .constraint_registry import biject_to, transform_to
 from .dirichlet import Dirichlet
 from .distribution import Distribution
 from .exponential import Exponential
+from .exp_family import ExponentialFamily
 from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
@@ -66,6 +68,7 @@ __all__ = [
     'Dirichlet',
     'Distribution',
     'Exponential',
+    'ExponentialFamily',
     'FisherSnedecor',
     'Gamma',
     'Geometric',
@@ -80,7 +83,9 @@ __all__ = [
     'Poisson',
     'Uniform',
     'TransformedDistribution',
+    'biject_to',
     'kl_divergence',
     'register_kl',
+    'transform_to',
 ]
 __all__.extend(transforms.__all__)

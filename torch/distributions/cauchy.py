@@ -36,6 +36,14 @@ class Cauchy(Distribution):
             batch_shape = self.loc.size()
         super(Cauchy, self).__init__(batch_shape)
 
+    @property
+    def mean(self):
+        return self.loc.new([float('nan')]).expand(self._extended_shape())
+
+    @property
+    def variance(self):
+        return self.loc.new([float('inf')]).expand(self._extended_shape())
+
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(shape).cauchy_()

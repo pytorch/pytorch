@@ -48,6 +48,13 @@ struct Node;
 // Tensor or an opaque Handle object, as determined by type().
 struct Value;
 
+std::ostream& operator<<(std::ostream & out, const Graph & g);
+std::ostream& operator<<(std::ostream & out, const Type & t);
+std::ostream& operator<<(std::ostream & out, const Node & t);
+
+// A list of nodes, with inputs and outputs
+struct Block;
+
 // Each use is represented by this type, see Node::uses()
 // 'user' is the consumer of the value, offset is the index into
 // 'user's input this where the produces will be found.
@@ -227,6 +234,7 @@ public:
 struct Node : public Attributes<Node> {
   TH_DISALLOW_COPY_AND_ASSIGN(Node);
   friend struct Graph;
+  friend struct Block;
   friend struct Value;
   friend graph_node_list;
   friend const_graph_node_list;
@@ -252,7 +260,10 @@ private:
   const NodeKind kind_;
   std::vector<Value*> inputs_;
   std::vector<Value*> outputs_;
+  // subblocks
+  std::vector<Block*> blocks_;
   Graph* graph_;
+  Block* owning_block_;
   std::shared_ptr<SourceLocation> source_location_;
   size_t stage_;
   Scope* scope_;
@@ -274,6 +285,9 @@ public:
   }
   const Graph * owningGraph() const {
     return graph_;
+  }
+  Block * owningBlock() {
+    return owning_block_;
   }
   size_t stage() const {
     return stage_;
@@ -420,8 +434,35 @@ public:
     outputs_.push_back(new Value(this, outputs_.size()));
     return outputs_.back();
   }
-
   void eraseOutput(size_t i);
+
+  Block * addBlock();
+  void eraseBlock(size_t i);
+
+  // Each Node can have a list of subblocks. These are used to define structured
+  // nested control flow operators such as If and Loop.
+  // The meaning of a block is specific to the kind of node it is in, but
+  // all blocks share these semantics:
+  // * Nested lexical scoping: If a node 'Parent' has a subblock which contains a
+  //   node 'Child', Child can use any value that was in scope for the Parent
+  //   node in addition to any values defined before 'Child' in the subblock.
+  // * The list of inputs to the block are in scope for the duration of the block
+  // * the outputs of the Parent node are not in scope for the subblocks
+  // Typically the inputs to a block that represents control flow act as
+  // as the equivalents phi-nodes in standard SSA form,
+  // defining a new Value to represent any term that has multiple
+  // definitions depending on how control flowed. Outputs of the node containing
+  // control flow serve a similiar purpose defining new values for variables
+  // that would have different defintions depending on which way control flowed.
+
+  at::ArrayRef<Block*> blocks() {
+    return blocks_;
+  }
+  at::ArrayRef<const Block*> blocks() const {
+    // Vectors are not convertible in const-ness of elements, but
+    // raw pointers are.
+    return {blocks_.data(), blocks_.size()};
+  }
 
   // Insert unattached 'this' node after 'n' in the topological order.
   // Returns this (for chaining).
@@ -434,7 +475,7 @@ public:
   //          %5 = h(%1)
   //          %4 = g(%3)
   Node* insertBefore(Node * n) {
-    JIT_ASSERT(n->inGraphList());
+    JIT_ASSERT(n->inBlockList());
     insertAfter(n->prev());
     return this;
   }
@@ -450,7 +491,9 @@ public:
   //          %4 = g(%3)
   //          %5 = h(%1)
   Node* insertAfter(Node * n) {
-    JIT_ASSERT(!inGraphList() && n->inGraphList());
+    JIT_ASSERT(!inBlockList() && n->inBlockList());
+    JIT_ASSERT(n->owningBlock());
+    this->owning_block_ = n->owningBlock();
     Node * next = n->next();
     n->next() = this;
     this->prev() = n;
@@ -573,12 +616,15 @@ private:
     return input_node;
   }
 
-  bool inGraphList() const {
-    JIT_ASSERT(next() != nullptr || prev() == nullptr);
+  bool inBlockList() const {
+    if(next() == nullptr) {
+      JIT_ASSERT(prev() == nullptr);
+    }
     return next() != nullptr;
   }
   void removeFromList() {
-    JIT_ASSERT(inGraphList());
+    JIT_ASSERT(inBlockList());
+    this->owning_block_ = nullptr;
     Node * next = this->next();
     Node * prev = this->prev();
     prev->next() = next;
@@ -606,46 +652,11 @@ protected:
   virtual void cloneFrom(Node * s);
 };
 
-struct Graph {
-TH_DISALLOW_COPY_AND_ASSIGN(Graph);
-friend struct Node;
-friend struct Value;
-private:
-
-  // only used to keep track of allocated nodes
-  // actual representation of Graph is done with
-  // inputs, outputs, nodes
-
-  std::unordered_set<const Node*> all_nodes;
-  std::unordered_set<const Value*> all_values;
-  size_t next_unique_;
-
-  std::unordered_set<std::string> unique_names_;
-
-  size_t new_node_stage_;
-
-  std::shared_ptr<Scope> scope_root_;
-  Scope * current_scope_;
-
-  // holds outputs in a way that can be reflected
-  // as a Use object
-  // also used as the beginning/end of the circular node list to avoid
-  // having corner cases where the list is empty.
-  Node * const output_;
-  Node * const input_;
-
-public:
-
-  Graph(std::shared_ptr<Scope> scope_root)
-  : next_unique_(0)
-  , new_node_stage_(0)
-  , scope_root_(scope_root)
-  , current_scope_(scope_root_.get())
-  , output_(initOutput(create(kReturn, 0))), input_(create(kParam, 0)) {}
-
-  Graph()
-  : Graph( std::make_shared<Scope>()) {}
-
+struct Block {
+  friend struct Node;
+  friend struct Graph;
+  TH_DISALLOW_COPY_AND_ASSIGN(Block);
+  Block(Graph * graph_, Node * node_);
   at::ArrayRef<Value*> inputs() {
     return input_->outputs();
   }
@@ -665,38 +676,133 @@ public:
   const_graph_node_list nodes() const {
     return const_graph_node_list(output_, kNextDirection);
   }
-  // These invocations of begin() on output of function are OK
-  // because graph_node_list is non-owning, so it doesn't matter
-  // if it immediately dies after the invocation.
-  graph_node_list_iterator begin() {
-    return nodes().begin();
-  }
-  const_graph_node_list_iterator begin() const {
-    return nodes().begin();
-  }
-  graph_node_list_iterator end() {
-    return nodes().end();
-  }
-  const_graph_node_list_iterator end() const {
-    return nodes().end();
-  }
-  graph_node_list_iterator rbegin() {
-    return nodes().rbegin();
-  }
-  const_graph_node_list_iterator rbegin() const {
-    return nodes().rbegin();
-  }
-  graph_node_list_iterator rend() {
-    return nodes().rend();
-  }
-  const_graph_node_list_iterator rend() const {
-    return nodes().rend();
-  }
   Node * return_node() {
     return output_;
   }
   const Node * return_node() const {
     return output_;
+  }
+  Value * addInput(std::string name="") {
+    Value * v = input_->addOutput();
+    if (name != "") v->setUniqueName(name);
+    return v;
+  }
+  void eraseInput(size_t i) {
+    input_->eraseOutput(i);
+  }
+  size_t registerOutput(Value * n) {
+    output_->addInput(n);
+    return outputs().size() - 1;
+  }
+  Node * appendNode(Node * n) {
+    JIT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    n->insertBefore(output_);
+    return n;
+  }
+
+  Node * prependNode(Node * n) {
+    JIT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
+    n->insertAfter(output_);
+    return n;
+  }
+  Graph * owningGraph() {
+    return graph_;
+  }
+  Node * owningNode() {
+    return owning_node_;
+  }
+private:
+  // should only be called in the constructor
+  Node* initOutput(Node* p) {
+    p->next() = p;
+    p->prev() = p;
+    p->setStage(std::numeric_limits<size_t>::max());
+    return p;
+  }
+  void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
+
+  // get rid of all nodes
+  // destroys in reverse order so that uses internal to this block
+  // do not have to be removed before you can destroy the block
+  void destroy();
+
+  Graph * const graph_;
+  // holds outputs in a way that can be reflected
+  // as a Use object
+  // also used as the beginning/end of the circular node list to avoid
+  // having corner cases where the list is empty.
+  Node * const output_;
+  Node * const input_;
+  Node * const owning_node_; // either the node that has this block or nullptr for root
+};
+
+struct Graph {
+TH_DISALLOW_COPY_AND_ASSIGN(Graph);
+friend struct Node;
+friend struct Value;
+friend struct Block;
+private:
+
+  // only used to keep track of allocated nodes
+  // actual representation of Graph is done with
+  // inputs, outputs, nodes
+
+  std::unordered_set<const Node*> all_nodes;
+  std::unordered_set<const Value*> all_values;
+  std::unordered_set<const Block*> all_blocks;
+  size_t next_unique_;
+
+  std::unordered_set<std::string> unique_names_;
+
+  size_t new_node_stage_;
+
+  std::shared_ptr<Scope> scope_root_;
+  Scope * current_scope_;
+
+  Block* const block_;
+  // when insertNode() is called, the node is inserted before this node
+  // by default this is set to append to the top level block
+  Node* insert_before_;
+
+public:
+
+  Graph(std::shared_ptr<Scope> scope_root)
+  : next_unique_(0)
+  , new_node_stage_(0)
+  , scope_root_(scope_root)
+  , current_scope_(scope_root_.get())
+  , block_(new Block(this, nullptr))
+  , insert_before_(return_node()) {}
+
+  Graph()
+  : Graph( std::make_shared<Scope>()) {}
+
+  at::ArrayRef<Value*> inputs() {
+    return block_->inputs();
+  }
+  at::ArrayRef<const Value*> inputs() const {
+    const auto & block = *block_;
+    return block.inputs();
+  }
+  at::ArrayRef<Value*> outputs() {
+    return block_->outputs();
+  }
+  at::ArrayRef<const Value*> outputs() const {
+    const auto & block = *block_;
+    return block.outputs();
+  }
+  graph_node_list nodes() {
+    return block_->nodes();
+  }
+  const_graph_node_list nodes() const {
+    const auto & block = *block_;
+    return block.nodes();
+  }
+  Node * return_node() {
+    return block_->return_node();
+  }
+  const Node * return_node() const {
+    return block_->return_node();
   }
   void push_scope(const std::string& scope_name) {
     current_scope_ = current_scope_->push(Symbol(scope_name));
@@ -713,21 +819,14 @@ public:
     }
     current_scope_ = scope;
   }
-  ResourceGuard set_current_scope_temporary(Scope* scope) {
-    auto prev_scope = current_scope_;
-    this->set_current_scope(scope);
-    return ResourceGuard([prev_scope, this]() { this->current_scope_ = prev_scope; });
-  }
   std::shared_ptr<Scope> scope_root() {
     return scope_root_;
   }
   Value * addInput(std::string name="") {
-    Value * v = input_->addOutput();
-    if (name != "") v->setUniqueName(name);
-    return v;
+    return block_->addInput(std::move(name));
   }
   void eraseInput(size_t i) {
-    input_->eraseOutput(i);
+    block_->eraseInput(i);
   }
   void advanceStage() {
     new_node_stage_++;
@@ -745,8 +844,7 @@ public:
   }
 
   size_t registerOutput(Value * n) {
-    output_->addInput(n);
-    return outputs().size() - 1;
+    return block_->registerOutput(n);
   }
 
   Node * create(NodeKind kind, size_t num_outputs=1) {
@@ -784,7 +882,9 @@ public:
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
-  Node * createClone(Node * n, std::function<Value*(Value*)> value_map) {
+  // if copy_blocks is false, it will not recursively clone the nested blocks
+  // this node contains.
+  Node * createClone(Node * n, std::function<Value*(Value*)> value_map, bool copy_blocks=true) {
     //n can be from a different graph
     Node * r = n->allocNewInstance(this);
     for(auto o : n->outputs()) {
@@ -794,19 +894,50 @@ public:
     for(auto i : n->inputs()) {
       r->addInput(value_map(i));
     }
+    if(copy_blocks) {
+      for(auto b : n->blocks()) {
+        r->addBlock()->cloneFrom(b, value_map);
+      }
+    }
     return r;
   }
 
   Node * appendNode(Node * n) {
-    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
-    n->insertBefore(output_);
-    return n;
+    return block_->appendNode(n);
   }
 
   Node * prependNode(Node * n) {
-    JIT_ASSERT(n->graph_ == this && !n->inGraphList());
-    n->insertAfter(output_);
-    return n;
+    return block_->prependNode(n);
+  }
+
+  // insert before insert_before_ node
+  // initialized to insert at the end of the top level block
+  // can be changed with setInsertPoint()
+  Node * insertNode(Node * n) {
+    JIT_ASSERT(insert_before_->inBlockList() && "insert point node is no longer in a block list");
+    return n->insertBefore(insert_before_);
+  }
+  // set where nodes are inserted to append to the end of this block
+  void setInsertPoint(Block * b) {
+    JIT_ASSERT(b->owningGraph() == this);
+    insert_before_ = b->return_node();
+  }
+  // set where nodes are inserted to insert _before_ this node
+  // for implementation simplicity we only support inserting before a node for now
+  void setInsertPoint(Node * n) {
+    JIT_ASSERT(n->owningGraph() == this && n->inBlockList());
+    insert_before_ = n;
+  }
+  Node * insertPoint() {
+    return insert_before_;
+  }
+
+  // the top level block
+  Block * block() {
+    return block_;
+  }
+  const Block * block() const {
+    return block_;
   }
 
   // Checks well-formedness and invariants of graph
@@ -819,6 +950,8 @@ public:
       delete n;
     for (const Value * v : all_values)
       delete v;
+    for (const Block * b : all_blocks)
+      delete b;
   }
 
   std::string toString() const {
@@ -828,16 +961,9 @@ public:
   }
 
   friend std::ostream& operator<<(std::ostream & out, const Graph & g);
+  std::shared_ptr<Graph> copy();
 
 private:
-
-  // should only be called in the constructor
-  Node* initOutput(Node* p) {
-    p->next() = p;
-    p->prev() = p;
-    p->setStage(std::numeric_limits<size_t>::max());
-    return p;
-  }
 
   void freeNode(Node * n) {
     auto it = all_nodes.find(n);
@@ -848,8 +974,41 @@ private:
   void freeValue(Value * v) {
     auto it = all_values.find(v);
     JIT_ASSERT(it != all_values.end());
+    delete *it;
     all_values.erase(it);
   }
+  void freeBlock(Block * b) {
+    auto it = all_blocks.find(b);
+    JIT_ASSERT(it != all_blocks.end());
+    delete *it;
+    all_blocks.erase(it);
+  }
+};
+
+struct WithInsertPoint : public ResourceGuard {
+  WithInsertPoint(Graph & g, Node * n)
+  : ResourceGuard([this] {
+    prev->owningGraph()->setInsertPoint(prev);
+  })
+  , prev(g.insertPoint()) {
+    g.setInsertPoint(n);
+  }
+  WithInsertPoint(Graph & g, Block * b)
+  : WithInsertPoint(g, b->return_node()) {}
+private:
+  Node * prev;
+};
+
+struct WithCurrentScope : public ResourceGuard {
+  WithCurrentScope(Graph & g, Scope* scope)
+  : ResourceGuard([&g, this]() {
+    g.set_current_scope(prev_scope);
+  })
+  , prev_scope(g.current_scope()) {
+    g.set_current_scope(scope);
+  }
+private:
+  Scope * prev_scope;
 };
 
 inline Value::Value(Node * node_, size_t offset_)
@@ -880,6 +1039,7 @@ inline void Value::replaceAllUsesWith(Value * newValue) {
 inline Node::Node(Graph * graph_, NodeKind kind_) :
   kind_(kind_),
   graph_(graph_),
+  owning_block_(nullptr),
   stage_(graph_->new_node_stage_),
   scope_(graph_->current_scope_) {
   graph_->all_nodes.emplace(this);
@@ -896,12 +1056,26 @@ inline void Node::eraseOutput(size_t i) {
   }
 }
 
+inline Block * Node::addBlock() {
+  blocks_.push_back(new Block(owningGraph(), this));
+  return blocks_.back();
+}
+
+inline void Node::eraseBlock(size_t i) {
+  JIT_ASSERT(i < blocks_.size());
+  Block * n = blocks_[i];
+  blocks_.erase(blocks_.begin() + i);
+  n->destroy();
+}
+
 inline void Node::destroy() {
-  JIT_ASSERT(inGraphList());
   while(outputs().size() > 0)
     eraseOutput(outputs().size() - 1);
+  while(blocks().size() > 0)
+    eraseBlock(blocks().size() - 1);
   removeAllInputs();
-  removeFromList();
+  if(inBlockList())
+    removeFromList();
   graph_->freeNode(this);
 }
 
@@ -923,6 +1097,30 @@ inline Value* Value::setUniqueName(const std::string & name) {
   node_->graph_->unique_names_.insert(name);
   unique_name_ = name;
   return this;
+}
+
+inline Block::Block(Graph * graph_, Node * node_)
+: graph_(graph_)
+, output_(initOutput(graph_->create(kReturn, 0)))
+, input_(graph_->create(kParam,0))
+, owning_node_(node_) {
+  graph_->all_blocks.emplace(this);
+  output_->owning_block_ = this;
+  input_->owning_block_ = this;
+}
+
+inline void Block::destroy() {
+  // we cannot destroy the output because it is used as the sentinel
+  // for the nodes() list and has to remain valid for the loop
+  output_->removeAllInputs();
+  for(auto it = this->nodes().reverse().begin(),
+      end = this->nodes().reverse().end();
+      it != end; ++it) {
+    it.destroyCurrent();
+  }
+  output_->destroy();
+  input_->destroy();
+  graph_->freeBlock(this);
 }
 
 // Helper macros for constructing switch statements over Node types
@@ -964,10 +1162,6 @@ inline Value* Value::setUniqueName(const std::string & name) {
     cout << "something else\n";
   IR_END()
 */
-
-std::ostream& operator<<(std::ostream & out, const Graph & g);
-std::ostream& operator<<(std::ostream & out, const Type & t);
-std::ostream& operator<<(std::ostream & out, const Node & t);
 
 /************* All nodes not required to be defined before Graph **************/
 
