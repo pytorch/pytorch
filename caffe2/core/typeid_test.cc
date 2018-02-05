@@ -46,9 +46,9 @@ TEST(TypeMetaTest, Names) {
   TypeMeta null_meta;
   EXPECT_TRUE(string(null_meta.name()) == "nullptr (uninitialized)");
   TypeMeta int_meta = TypeMeta::Make<int>();
-  TypeMeta string_meta = TypeMeta::Make<string>();
   EXPECT_TRUE(string(int_meta.name()) == "int");
 #ifdef __GXX_RTTI
+  TypeMeta string_meta = TypeMeta::Make<string>();
   // For string, we should have a demangled name.
   EXPECT_TRUE(
       string(string_meta.name()) != typeid(string).name());
