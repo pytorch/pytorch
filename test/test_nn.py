@@ -1263,6 +1263,25 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pool3d_size_one_feature_dim(self):
+        # Tests crazy strides for feature dim of size 1
+        x = Variable(torch.randn(7, 1, 5, 3, 2).cuda())
+        strange_strides = [30, 1234, 6, 2, 1]
+        y = x.as_strided(x.size(), strange_strides)
+        x = x.cpu().as_strided(x.size(), strange_strides)
+
+        to_test = {
+            'max_pool3d': lambda t: F.max_pool3d(t, (5, 1, 1), stride=(5, 1, 1)),
+            'avg_pool3d': lambda t: F.avg_pool3d(t, (5, 1, 1), stride=(5, 1, 1)),
+        }
+
+        for test, fn in to_test.items():
+            # Should not crash
+            out_y = fn(y)
+            out_x = fn(x)
+            self.assertEqual(out_y, out_x.cuda(), test)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_AvgPool3d_backward_after_cat_dim1_cuda(self):
         # x has to have batch_size 1 to test contiguous checks
         x = Variable(torch.randn(1, 3, 4, 4, 4).cuda(), requires_grad=True)
