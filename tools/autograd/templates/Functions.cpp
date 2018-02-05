@@ -708,7 +708,7 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
     return smooth_l1_loss_backward(grad, input, target, size_average, reduce);
   }
   auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, size_average, true);
-  return (r * grad).sum().view({1});
+  return (r * grad).sum();
 }
 
 Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {
@@ -733,7 +733,7 @@ Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & 
     return mse_loss_backward(grad, input, target, size_average, reduce);
   }
   auto r = mse_loss_backward(ones_like(grad_output), input, target, size_average, true);
-  return (r * grad).sum().view({1});
+  return (r * grad).sum();
 }
 
 Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average) {
