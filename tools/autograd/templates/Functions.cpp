@@ -709,6 +709,38 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   return (r * grad).sum().view({1});
 }
 
+static inline int64_t diag_size(int64_t height, int64_t width, int64_t diagonal) {
+  if (width > height) {
+    return diag_size(width, height, -diagonal);
+  }
+  // Assumes height >= width
+  auto longest_diag = width;
+  if (diagonal >= 0) {
+    return longest_diag - diagonal;
+  }
+  if (longest_diag < height + diagonal) {
+    return longest_diag;
+  }
+  return height + diagonal;
+}
+
+Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal) {
+  auto ndimension = input_sizes.size();
+  TORCH_ASSERT(ndimension == 1 || ndimension == 2);
+
+  if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
+    return grad.diag(diagonal);
+  }
+
+  // Input was a matrix but was not square
+  auto grad_input = grad.type().zeros(input_sizes);
+  auto diagonal_size = diag_size(input_sizes[0], input_sizes[1], diagonal);
+  auto storage_offset = diagonal >= 0 ? diagonal : -diagonal * input_sizes[1];
+  auto diag = grad_input.as_strided({diagonal_size}, {input_sizes[1] + 1}, storage_offset);
+  diag.copy_(grad);
+  return grad_input;
+}
+
 Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {
   // fold the first two dims together and the last two together
   auto fold = [](const Tensor & t) -> Tensor {

@@ -198,7 +198,7 @@
   self: _det_with_svd_backward(grads, self, result0, result1, result2, result3)
 
 - name: diag(Tensor self, int64_t diagonal)
-  self: grad.diag(diagonal)
+  self: diag_backward(grad, self.sizes(), diagonal)
 
 - name: dist(Tensor self, Tensor other, Scalar p)
   self: norm_backward(grad, self - other, p, result)
