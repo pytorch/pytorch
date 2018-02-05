@@ -181,8 +181,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
         },
     ]),
     Example(LogNormal, [
@@ -195,8 +195,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
         },
     ]),
     Example(Normal, [
@@ -209,8 +209,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': torch.Tensor([1.0, 0.0]),
-            'scale': torch.Tensor([1e-5, 1e-5]),
+            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
         },
     ]),
     Example(OneHotCategorical, [
@@ -270,8 +270,8 @@ EXAMPLES = [
             'high': Variable(torch.ones(1), requires_grad=True),
         },
         {
-            'low': torch.Tensor([1.0, 1.0]),
-            'high': torch.Tensor([2.0, 3.0]),
+            'low': variable([1.0, 1.0]),
+            'high': variable([2.0, 3.0]),
         },
     ]),
 ]
@@ -1159,6 +1159,7 @@ class TestDistributions(TestCase):
             self.assertTrue(np.isfinite(x) and x > 0, 'Invalid Beta.sample(): {}'.format(x))
 
     def test_cdf_icdf_inverse(self):
+        # Tests the invertibility property on the distributions
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
@@ -1171,6 +1172,24 @@ class TestDistributions(TestCase):
                 self.assertEqual(actual, samples,
                                  message='{} example {}/{},\
                                  icdf(cdf(x)) != x'.format(Dist.__name__, i + 1, len(params)))
+
+    def test_cdf_log_prob(self):
+        # Tests if the differentiation of the CDF gives the PDF at a given value
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                dist = Dist(**param)
+                samples = dist.sample(sample_shape=(20,))
+                if not samples.requires_grad:
+                    continue
+                try:
+                    cdfs = dist.cdf(samples)
+                    pdfs = dist.log_prob(samples).exp()
+                except NotImplementedError:
+                    continue
+                cdfs_derivative = grad(cdfs.sum(), [samples])[0]
+                self.assertEqual(cdfs_derivative, pdfs,
+                                 message='{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1,
+                                                                                        len(params)))
 
     def test_valid_parameter_broadcasting(self):
         # Test correct broadcasting of parameter sizes for distributions that have multiple
@@ -2339,7 +2358,6 @@ class TestAgainstScipy(TestCase):
                 cdf = pytorch_dist.cdf(samples)
             except NotImplementedError:
                 continue
-            print("Testing {}.cdf()".format(type(pytorch_dist).__name__))
             self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
 
     def test_icdf(self):
@@ -2350,7 +2368,6 @@ class TestAgainstScipy(TestCase):
                 icdf = pytorch_dist.icdf(samples)
             except NotImplementedError:
                 continue
-            print("Testing {}.icdf()".format(type(pytorch_dist).__name__))
             self.assertEqual(icdf, scipy_dist.ppf(samples), message=pytorch_dist)
 
 
