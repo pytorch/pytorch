@@ -2939,8 +2939,9 @@
         kwarg_only: True
       - THTensor* mat1
       - THTensor* mat2
-    - cname: spaddmm
-      sparse: yes
+    - sparse: True
+      cname: spaddmm
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2970,8 +2971,9 @@
         kwarg_only: True
       - THTensor* mat1
       - THTensor* mat2
-    - cname: spaddmm
-      sparse: yes
+    - sparse: True
+      cname: spaddmm
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* self
         - arg: real beta
@@ -3131,7 +3133,6 @@
         - THTensor* self
         - THTensor* mat2
     - cname: spaddmm
-      sparse: True
       arguments:
         - arg: THTensor* result
           output: True
