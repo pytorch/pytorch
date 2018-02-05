@@ -4,8 +4,8 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
-from torch.distributions.utils import _finfo, broadcast_all
+from torch.distributions.exp_family import ExponentialFamily
+from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
 def _standard_gamma(concentration):
@@ -14,7 +14,7 @@ def _standard_gamma(concentration):
     return concentration._standard_gamma()
 
 
-class Gamma(Distribution):
+class Gamma(ExponentialFamily):
     r"""
     Creates a Gamma distribution parameterized by shape `concentration` and `rate`.
 
@@ -34,6 +34,7 @@ class Gamma(Distribution):
     params = {'concentration': constraints.positive, 'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
+    _mean_carrier_measure = 0
 
     @property
     def mean(self):
@@ -67,3 +68,10 @@ class Gamma(Distribution):
     def entropy(self):
         return (self.concentration - torch.log(self.rate) + torch.lgamma(self.concentration) +
                 (1.0 - self.concentration) * torch.digamma(self.concentration))
+
+    @property
+    def _natural_params(self):
+        return (self.concentration - 1, -self.rate)
+
+    def _log_normalizer(self, x, y):
+        return torch.lgamma(x + 1) + (x + 1) * torch.log(-y.reciprocal())

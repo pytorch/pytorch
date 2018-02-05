@@ -2,11 +2,11 @@ from numbers import Number
 
 import torch
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
-class Exponential(Distribution):
+class Exponential(ExponentialFamily):
     r"""
     Creates a Exponential distribution parameterized by `rate`.
 
@@ -23,6 +23,7 @@ class Exponential(Distribution):
     params = {'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
+    _mean_carrier_measure = 0
 
     @property
     def mean(self):
@@ -51,3 +52,10 @@ class Exponential(Distribution):
 
     def entropy(self):
         return 1.0 - torch.log(self.rate)
+
+    @property
+    def _natural_params(self):
+        return (-self.rate, )
+
+    def _log_normalizer(self, x):
+        return -torch.log(-x)

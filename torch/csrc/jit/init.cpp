@@ -1,6 +1,7 @@
 #include "torch/csrc/utils/pybind.h"
 
 #include "torch/csrc/jit/python_tracer.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
@@ -12,7 +13,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
-
+#include "torch/csrc/jit/graph_executor.h"
 
 
 namespace torch  { namespace jit {
@@ -32,6 +33,42 @@ bool loadPythonClasses() {
 template<void (*F)(std::shared_ptr<Graph>& graph)>
 void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
   return F(state->graph);
+}
+
+// This is a temporary constructor so that we can write python tests of
+// the executor. It does not have most of the functionality of CompiledFunction
+// such as being able to hold parameters...
+GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::TraceInput> inputs, bool optimize) {
+  auto enter_info = tracer::enter(std::move(inputs), 1);
+  py::tuple py_inputs(enter_info.second.size());
+  for(size_t i = 0; i < enter_info.second.size(); ++i) {
+    py_inputs[i] = py::cast(enter_info.second[i]);
+  }
+  // Call back into Python function
+  auto out = py::reinterpret_steal<py::object>(PyObject_CallObject(func.ptr(), py_inputs.ptr()));
+  if (!out)
+    throw py::error_already_set();
+  std::vector<autograd::Variable> outputs;
+  if(PyTuple_Check(out.ptr())) {
+    outputs = py::cast<std::vector<autograd::Variable>>(out);
+  } else {
+    outputs.push_back(py::cast<autograd::Variable>(out));
+  }
+  tracer::exit(outputs);
+  auto graph = enter_info.first->graph;
+  return GraphExecutor(std::move(graph), optimize);
+}
+
+// we cannot use the default py:cast<autograd::Variable> because it currently
+// unwraps the data tensor in the conversion process
+// TODO: replace with bs type
+variable_tensor_list createVariableTensorList(py::tuple tuple) {
+  variable_tensor_list result;
+  result.reserve(tuple.size());
+  for(auto e : tuple) {
+    result.push_back(py::cast<autograd::Variable>(e));
+  }
+  return result;
 }
 
 } // anonymous namespace
@@ -61,6 +98,17 @@ void initJITBindings(PyObject *module) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
    });
 
+   py::class_<GraphExecutor>(m,"GraphExecutor")
+   .def(py::init([](py::function func, std::vector<tracer::TraceInput> inputs, bool optimize){
+     return createExecutorByTracing(func, std::move(inputs), optimize);
+   }), py::arg("func"), py::arg("inputs"), py::arg("optimize") = true)
+   .def("__call__",[](GraphExecutor & ge, py::args args) {
+     auto inputs = createVariableTensorList(args);
+     auto outputs = ge.run(std::move(inputs));
+     // if we don't tell pybind these are variables it chokes on the conversion.
+     // TODO: fix conversions to be sane and make sure this works.
+     return std::vector<autograd::Variable>(outputs.begin(), outputs.end());
+   });
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
   python::initCompilerMixin(module);

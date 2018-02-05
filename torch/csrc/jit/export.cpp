@@ -229,11 +229,11 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
 }
 
 void validateGraph(const std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
+  for (auto node : graph->nodes()) {
       // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
       throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
-    IR_IF(*it, CppOp)
+    IR_IF(node, CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
       FAIL_EXPORT("Couldn't export C++ operator " + cpp_node->name())
     IR_ELSEIF(PythonOp)
@@ -241,13 +241,13 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       FAIL_EXPORT("Couldn't export Python operator " + py_node->name())
     IR_ELSE()
       // Expand is not a real ONNX operator yet, reject it
-      if (it->kind() == kExpand) {
+      if (node->kind() == kExpand) {
         FAIL_EXPORT("Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support");
       }
-      if (it->kind() == kUndefined) {
+      if (node->kind() == kUndefined) {
         FAIL_EXPORT("Couldn't export undefined constant tensor (please file an issue)")
       }
-      std::string n = it->kind().toString();
+      std::string n = node->kind().toString();
       if (n.size() == 0) {
         FAIL_EXPORT("Operator to export had empty name (please file an issue)")
       }
