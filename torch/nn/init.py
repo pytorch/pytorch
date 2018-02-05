@@ -2,7 +2,6 @@ import math
 import random
 
 import torch
-from torch.autograd import Variable
 
 
 def calculate_gain(nonlinearity, param=None):
@@ -60,11 +59,8 @@ def uniform(tensor, a=0, b=1):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.uniform(w)
     """
-    if isinstance(tensor, Variable):
-        uniform(tensor.data, a=a, b=b)
-        return tensor
-
-    return tensor.uniform_(a, b)
+    with torch.no_grad():
+        return tensor.uniform_(a, b)
 
 
 def normal(tensor, mean=0, std=1):
@@ -80,11 +76,8 @@ def normal(tensor, mean=0, std=1):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.normal(w)
     """
-    if isinstance(tensor, Variable):
-        normal(tensor.data, mean=mean, std=std)
-        return tensor
-
-    return tensor.normal_(mean, std)
+    with torch.no_grad():
+        return tensor.normal_(mean, std)
 
 
 def constant(tensor, val):
@@ -98,11 +91,8 @@ def constant(tensor, val):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.constant(w, 0.3)
     """
-    if isinstance(tensor, Variable):
-        constant(tensor.data, val)
-        return tensor
-
-    return tensor.fill_(val)
+    with torch.no_grad():
+        return tensor.fill_(val)
 
 
 def eye(tensor):
@@ -120,11 +110,9 @@ def eye(tensor):
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
 
-    if isinstance(tensor, Variable):
-        eye(tensor.data)
-        return tensor
-
-    return tensor.copy_(torch.eye(tensor.size(0), tensor.size(1)))
+    with torch.no_grad():
+        torch.eye(*tensor.shape, out=tensor)
+    return tensor
 
 
 def dirac(tensor):
@@ -143,21 +131,18 @@ def dirac(tensor):
     if dimensions not in [3, 4, 5]:
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
 
-    if isinstance(tensor, Variable):
-        dirac(tensor.data)
-        return tensor
-
     sizes = tensor.size()
     min_dim = min(sizes[0], sizes[1])
-    tensor.zero_()
+    with torch.no_grad():
+        tensor.zero_()
 
-    for d in range(min_dim):
-        if dimensions == 3:  # Temporal convolution
-            tensor[d, d, tensor.size(2) // 2] = 1
-        elif dimensions == 4:  # Spatial convolution
-            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
-        else:  # Volumetric convolution
-            tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
+        for d in range(min_dim):
+            if dimensions == 3:  # Temporal convolution
+                tensor[d, d, tensor.size(2) // 2] = 1
+            elif dimensions == 4:  # Spatial convolution
+                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
+            else:  # Volumetric convolution
+                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
     return tensor
 
 
@@ -198,14 +183,11 @@ def xavier_uniform(tensor, gain=1):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.xavier_uniform(w, gain=nn.init.calculate_gain('relu'))
     """
-    if isinstance(tensor, Variable):
-        xavier_uniform(tensor.data, gain=gain)
-        return tensor
-
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
     a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
-    return tensor.uniform_(-a, a)
+    with torch.no_grad():
+        return tensor.uniform_(-a, a)
 
 
 def xavier_normal(tensor, gain=1):
@@ -225,13 +207,10 @@ def xavier_normal(tensor, gain=1):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.xavier_normal(w)
     """
-    if isinstance(tensor, Variable):
-        xavier_normal(tensor.data, gain=gain)
-        return tensor
-
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / (fan_in + fan_out))
-    return tensor.normal_(0, std)
+    with torch.no_grad():
+        return tensor.normal_(0, std)
 
 
 def _calculate_correct_fan(tensor, mode):
@@ -266,15 +245,12 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.kaiming_uniform(w, mode='fan_in')
     """
-    if isinstance(tensor, Variable):
-        kaiming_uniform(tensor.data, a=a, mode=mode)
-        return tensor
-
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain('leaky_relu', a)
     std = gain / math.sqrt(fan)
     bound = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
-    return tensor.uniform_(-bound, bound)
+    with torch.no_grad():
+        return tensor.uniform_(-bound, bound)
 
 
 def kaiming_normal(tensor, a=0, mode='fan_in'):
@@ -299,14 +275,11 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.kaiming_normal(w, mode='fan_out')
     """
-    if isinstance(tensor, Variable):
-        kaiming_normal(tensor.data, a=a, mode=mode)
-        return tensor
-
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain('leaky_relu', a)
     std = gain / math.sqrt(fan)
-    return tensor.normal_(0, std)
+    with torch.no_grad():
+        return tensor.normal_(0, std)
 
 
 def orthogonal(tensor, gain=1):
@@ -324,16 +297,12 @@ def orthogonal(tensor, gain=1):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.orthogonal(w)
     """
-    if isinstance(tensor, Variable):
-        orthogonal(tensor.data, gain=gain)
-        return tensor
-
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported")
 
     rows = tensor.size(0)
     cols = tensor[0].numel()
-    flattened = torch.Tensor(rows, cols).normal_(0, 1)
+    flattened = tensor.new(rows, cols).normal_(0, 1)
 
     if rows < cols:
         flattened.t_()
@@ -343,13 +312,14 @@ def orthogonal(tensor, gain=1):
     # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
     d = torch.diag(r, 0)
     ph = d.sign()
-    q *= ph.expand_as(q)
+    q *= ph
 
     if rows < cols:
         q.t_()
 
-    tensor.view_as(q).copy_(q)
-    tensor.mul_(gain)
+    with torch.no_grad():
+        tensor.view_as(q).copy_(q)
+        tensor.mul_(gain)
     return tensor
 
 
@@ -369,22 +339,19 @@ def sparse(tensor, sparsity, std=0.01):
         >>> w = torch.Tensor(3, 5)
         >>> nn.init.sparse(w, sparsity=0.1)
     """
-    if isinstance(tensor, Variable):
-        sparse(tensor.data, sparsity, std=std)
-        return tensor
-
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
 
-    tensor.normal_(0, std)
-    rows, cols = tensor.size(0), tensor.size(1)
+    rows, cols = tensor.shape
     num_zeros = int(math.ceil(rows * sparsity))
 
-    for col_idx in range(tensor.size(1)):
-        row_indices = list(range(rows))
-        random.shuffle(row_indices)
-        zero_indices = row_indices[:num_zeros]
-        for row_idx in zero_indices:
-            tensor[row_idx, col_idx] = 0
+    with torch.no_grad():
+        tensor.normal_(0, std)
+        for col_idx in range(cols):
+            row_indices = list(range(rows))
+            random.shuffle(row_indices)
+            zero_indices = row_indices[:num_zeros]
+            for row_idx in zero_indices:
+                tensor[row_idx, col_idx] = 0
 
     return tensor
