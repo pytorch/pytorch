@@ -37,6 +37,8 @@ torch.manual_seed(SEED)
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+PY3 = sys.version_info > (3, 0)
+
 IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
