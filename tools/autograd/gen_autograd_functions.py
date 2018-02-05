@@ -22,9 +22,17 @@ struct ${op} : public ${superclass} {
   void releaseVariables() override {
     ${release_variables}
   }
+  ${will_release_variables}
   ${saved_variables}
   ${saved_list_sizes}
 };
+""")
+
+WILL_RELEASE_VARIABLES = CodeTemplate("""\
+bool retain_variables = true;
+virtual void willReleaseVariables() override {
+  retain_variables = false;
+}
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
@@ -124,6 +132,10 @@ def process_function(func):
             release_variables.append('{}_.data.reset();'.format(name))
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
+        elif arg['type'] == 'TensorList':
+            saved_variables.append('std::vector<SavedVariable> {}_;'.format(name))
+            release_variables.append('{}_.clear();'.format(name))
+            unpack.append('auto {} = unpack_list({}_);'.format(name, name))
         elif arg['type'] == 'IntList':
             saved_variables.append('std::vector<int64_t> {};'.format(name))
         else:
@@ -136,6 +148,11 @@ def process_function(func):
     env['saved_variables'] = saved_variables
     env['release_variables'] = release_variables
     env['saved_list_sizes'] = saved_list_sizes
+
+    if uses_retain_variables(func):
+        env['will_release_variables'] = WILL_RELEASE_VARIABLES.substitute()
+    else:
+        env['will_release_variables'] = ''
 
     body = []
 
@@ -174,11 +191,19 @@ def process_function(func):
     return nested_dict(env, func)
 
 
-def uses_single_grad(func):
+def uses_ident(func, ident):
     if func is None:
         return False
     for derivative in func['derivatives']:
         formula = derivative['formula']
-        if re.search(IDENT_REGEX.format('grad'), formula):
+        if re.search(IDENT_REGEX.format(ident), formula):
             return True
     return False
+
+
+def uses_retain_variables(func):
+    return uses_ident(func, 'retain_variables')
+
+
+def uses_single_grad(func):
+    return uses_ident(func, 'grad')
