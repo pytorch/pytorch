@@ -12,6 +12,7 @@
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -528,10 +529,19 @@ void testADFormulas() {
 
   using VL = variable_list;
   static const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
+  static const var_meta_list unary_pointwise  = {{2, 3, 4, 5}};
   static const std::vector<ADTestSpec> ad_tests = {
-    {"add", binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
-    {"sub", binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
-    {"mul", binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
+    {"add",     binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
+    {"sub",     binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
+    {"mul",     binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
+    {"sigmoid", unary_pointwise,  [](const VL& v) -> VL { return {v[0].sigmoid()}; }},
+    {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
+    {"t",       unary_pointwise,  [](const VL& v) -> VL { return {v[0].t()}; }},
+    {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
+    {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
+    {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
+    {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(4, 1)); }},
+    {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
   };
 
   // We have to release the GIL inside this method, because if we happen to
@@ -547,6 +557,7 @@ void testADFormulas() {
 
     // Trace and differentiate the op
     auto graph = trace(test, vars_in);
+    EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
     auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
 
     // Get outputs from the interpreter
