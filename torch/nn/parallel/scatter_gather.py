@@ -22,6 +22,11 @@ def scatter(inputs, target_gpus, dim=0):
             return list(map(type(obj), zip(*map(scatter_map, obj.items()))))
         return [obj for targets in target_gpus]
 
+    # After scatter_map is called, a scatter_map cell will exist. This cell
+    # has a reference to the actual function scatter_map, which has references
+    # to a closure that has a reference to the scatter_map cell (because the
+    # fn is recursive). To avoid this reference cycle, we set the function to
+    # None, clearing the cell
     try:
         return scatter_map(inputs)
     finally:
@@ -54,6 +59,8 @@ def gather(outputs, target_device, dim=0):
             return None
         return type(out)(map(gather_map, zip(*outputs)))
 
+    # Recursive function calls like this create reference cycles.
+    # Setting the function to None clears the refcycle.
     try:
         return gather_map(outputs)
     finally:
