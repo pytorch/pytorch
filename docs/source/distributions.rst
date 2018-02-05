@@ -16,7 +16,7 @@ Probability distributions - torch.distributions
 :hidden:`ExponentialFamily`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-..autoclass:: ExponentialFamily
+.. autoclass:: ExponentialFamily
     :members:
 
 :hidden:`Bernoulli`

@@ -201,6 +201,12 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   return ret;
 }
 
+// Assumed that saved tensor lists are never inplace outputs
+static std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
+  return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
+      return SavedVariable{tensor, false /* is output */}; });
+}
+
 static Tensor as_variable(Tensor tensor) {
   return make_variable(std::move(tensor));
 }
@@ -227,6 +233,17 @@ as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) {
       make_variable(std::move(std::get<1>(tensors))),
       make_variable(std::move(std::get<2>(tensors))),
       make_variable(std::move(std::get<3>(tensors))));
+}
+
+static std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> tensors) {
+  return std::make_tuple<>(
+      make_variable(std::move(std::get<0>(tensors))),
+      make_variable(std::move(std::get<1>(tensors))),
+      make_variable(std::move(std::get<2>(tensors))),
+      make_variable(std::move(std::get<3>(tensors))),
+      make_variable(std::move(std::get<4>(tensors)))
+      );
 }
 
 static std::vector<Tensor> as_variable(TensorList tl) {

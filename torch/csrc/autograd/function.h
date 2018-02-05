@@ -35,6 +35,8 @@ using edge_type = std::pair<std::shared_ptr<Function>, int>;
 using function_list = std::vector<edge_type>;
 using saved_variable_list = std::vector<SavedVariable>;
 
+using IndexRange = std::pair<size_t, size_t>; // inclusive-exclusive
+
 struct edge_hasher {
   std::size_t operator()(const edge_type& edge) const {
 #define HASH_IDX(idx) std::hash<std::tuple_element<idx, edge_type>::type>()(std::get<idx>(edge))
@@ -140,8 +142,8 @@ struct Function : std::enable_shared_from_this<Function> {
     });
   }
 
-  bool should_compute_output(std::initializer_list<std::pair<size_t, size_t>> idxs) const {
-    return std::any_of(idxs.begin(), idxs.end(), [this](std::pair<size_t, size_t> range) {
+  bool should_compute_output(std::initializer_list<IndexRange> idxs) const {
+    return std::any_of(idxs.begin(), idxs.end(), [this](IndexRange range) {
       for (size_t i = range.first; i < range.second; i++) {
         if (should_compute_output(i)) return true;
       }

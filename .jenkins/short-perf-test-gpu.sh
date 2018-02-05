@@ -21,20 +21,20 @@ import numpy
 from scipy import stats
 
 mean_values = {
-  "commit": "92aeca1279265d24493dc6ced7dde9a368faf048",
+  "commit": "e2127ef0d24103cc872a64515ce6e54f886941c5",
 
   "test_gpu_speed_mnist": "13.76155",
-  "test_gpu_speed_word_language_model": "114.20865",
+  "test_gpu_speed_word_language_model": "115.5332",
   "test_gpu_speed_cudnn_lstm": "4.9698",
   "test_gpu_speed_lstm": "5.15325",
   "test_gpu_speed_mlstm": "4.04270",
 }
 
 sigma_values = {
-  "commit": "92aeca1279265d24493dc6ced7dde9a368faf048",
+  "commit": "e2127ef0d24103cc872a64515ce6e54f886941c5",
 
   "test_gpu_speed_mnist": "0.42087",
-  "test_gpu_speed_word_language_model": "0.27014",
+  "test_gpu_speed_word_language_model": "0.10897",
   "test_gpu_speed_cudnn_lstm": "0.03257",
   "test_gpu_speed_lstm": "0.0725",
   "test_gpu_speed_mlstm": "0.03276",
@@ -43,15 +43,17 @@ sigma_values = {
 mean = float(mean_values[sys.argv[1]])
 sigma = float(sigma_values[sys.argv[1]])
 
-print("population mean: ", mean)
-print("population sigma: ", sigma)
+print("baseline mean: ", mean)
+print("baseline sigma: ", sigma)
 
 sample_data_list = sys.argv[2:]
 sample_data_list = [float(v.strip()) for v in sample_data_list]
 
 sample_mean = numpy.mean(sample_data_list)
+sample_sigma = numpy.std(sample_data_list)
 
-print("sample mean: ", sample_mean)
+print("test mean: ", sample_mean)
+print("test sigma: ", sample_sigma)
 
 z_value = (sample_mean - mean) / sigma
 
