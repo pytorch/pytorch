@@ -304,6 +304,8 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
     losses, weights = zip(*losses_and_weights)
     if isinstance(losses[0], Variable):
         losses_tensor = torch.stack(losses).type_as(input)
+        if not torch._C._with_scalars():
+            losses_tensor = losses_tensor.squeeze(1)
     else:
         losses_tensor = torch.Tensor(losses).type_as(input)
     if reduce and size_average:
