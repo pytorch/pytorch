@@ -1802,6 +1802,45 @@ class TestNN(NNTestCase):
         self.assertIsInstance(output[2], Variable)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_data_parallel_dict_and_custom_instance_output(self):
+        class State(object):
+            def __init__(self, state_list):
+                self.state_list = state_list
+                self.i = -1
+
+            def __iter__(self):
+                return self
+
+            def next(self):
+                self.i += 1
+                if self.i >= len(self.state_list):
+                    self.i = -1
+                    raise StopIteration()
+                return self.state_list[i]
+
+            def __next__(self):
+                self.next()
+
+        def fn(input):
+            return {'input': input}, State([input.sin(), input.cos()])
+
+        class Net(nn.Module):
+            def forward(self, input):
+                return fn(input)
+
+        i = Variable(torch.randn(2, 2).float().cuda())
+        gpus = range(torch.cuda.device_count())
+        output = dp.data_parallel(Net(), i, gpus)
+        expected_out = fn(i)
+        self.assertIsInstance(output, tuple)
+        self.assertEqual(len(output), 2)
+        self.assertIsInstance(output[0], dict)
+        self.assertIsInstance(output[1], State)
+        self.assertEqual(output[0].keys(), expected_out[0].keys())
+        self.assertEqual(output[0].values(), expected_out[0].values())
+        self.assertEqual(tuple(output[1]), tuple(expected_out[1]))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_input(self):
         def fn(input):
             return input[1][0]

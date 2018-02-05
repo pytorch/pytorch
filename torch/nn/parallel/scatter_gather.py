@@ -49,5 +49,8 @@ def gather(outputs, target_device, dim=0):
             return Gather.apply(target_device, dim, *outputs)
         if out is None:
             return None
-        return type(out)(map(gather_map, zip(*outputs)))
+        if isinstance(out, dict):
+            return dict(zip(out.keys(),
+                            map(gather_map, zip(*[d.values() for d in outputs]))))
+        return type(out)(map(gather_map, zip(*[tuple(o) for o in outputs])))
     return gather_map(outputs)
