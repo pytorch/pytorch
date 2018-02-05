@@ -3804,16 +3804,12 @@ class TestNNInit(TestCase):
         random.seed(123)
 
     def _is_normal(self, tensor, mean, std):
-        if isinstance(tensor, Variable):
-            tensor = tensor.data
-        samples = list(tensor.view(-1))
+        samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
     def _is_uniform(self, tensor, a, b):
-        if isinstance(tensor, Variable):
-            tensor = tensor.data
-        samples = list(tensor.view(-1))
+        samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
         return p_value > 0.0001
 
