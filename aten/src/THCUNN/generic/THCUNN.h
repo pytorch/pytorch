@@ -396,15 +396,18 @@ TH_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
                   THCIndexTensor *target,
                   THCTensor *output,
                   THCTensor *istarget,
-                  bool sizeaverage);
+                  bool sizeaverage,
+                  bool reduce);
 
 TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
+                  THCTensor *gradOutput,
                   THCTensor *gradInput,
                   THCTensor *istarget,
-                  bool sizeaverage);
+                  bool sizeaverage,
+                  bool reduce);
 
 TH_API void THNN_(MultiMarginCriterion_updateOutput)(
                   THCState *state,

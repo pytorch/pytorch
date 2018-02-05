@@ -683,8 +683,8 @@
 - name: multi_margin_loss_forward(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, bool size_average)
   self: multi_margin_loss_backward(self, target, p, margin, weight, size_average).mul_(grad)
 
-- name: multilabel_margin_loss_forward(Tensor self, Tensor target, bool size_average)
-  self: multilabel_margin_loss_backward(self, target, size_average, is_target).mul_(grad)
+- name: multilabel_margin_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
+  self: multilabel_margin_loss_backward(grad, self, target, size_average, reduce, is_target)
 
 - name: nll_loss_forward(Tensor self, Tensor target, Tensor weight, bool size_average, int64_t ignore_index, bool reduce)
   self: nll_loss_backward(grad, self, target, weight, size_average, ignore_index, reduce, total_weight)

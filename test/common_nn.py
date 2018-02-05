@@ -322,11 +322,48 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
+def _multilabelmarginloss_reference(input, target):
+    targets = []
+    for target_index in target:
+        if target_index < 0:
+            break
+        targets.append(target_index)
+
+    sum = 0
+    for target_index in targets:
+        for i in range(0, len(input)):
+            if i not in targets:
+                sum += max(0, 1 - input[target_index] + input[i])
+
+    return sum
+
+
+def multilabelmarginloss_reference(input, target, size_average=True, reduce=True):
+    if input.dim() == 1:
+        n = 1
+        dim = input.size(0)
+        output = torch.zeros(n)
+        output[0] = _multilabelmarginloss_reference(input, target)
+    else:
+        n = input.size(0)
+        dim = input.size(1)
+        output = torch.zeros(n)
+        for i in range(0, n):
+            output[i] = _multilabelmarginloss_reference(input[i], target[i])
+
+    if reduce and size_average:
+        return output.mean() / dim
+    elif reduce:
+        return output.sum() / dim
+    return output / dim
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
+    'MultiLabelMarginLoss': multilabelmarginloss_reference,
 }
 
 
@@ -441,8 +478,20 @@ criterion_tests = [
     ),
     dict(
         module_name='MultiLabelMarginLoss',
+        input_size=(10,),
+        target_fn=lambda: torch.rand(10).mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            multilabelmarginloss_reference(i, t, size_average=get_size_average(m)),
+        desc="1d",
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiLabelMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            multilabelmarginloss_reference(i, t, size_average=get_size_average(m)),
         check_no_size_average=True,
         check_gradgrad=False,
     ),
