@@ -6,8 +6,6 @@
 # $ cd <path to caffe2, e.g. ~/caffe2>
 # $ conda build conda/build
 #
-# This installation uses MKL and CUDA
-#
 # If you're debugging this, it may be useful to use the env that conda build is
 # using:
 # $ cd <anaconda_root>/conda-bld/caffe2_<timestamp>
@@ -25,15 +23,9 @@ echo "Installing caffe2 to ${PREFIX}"
 PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
 CMAKE_ARGS=()
 
-# Default leveldb from conda-forge doesn't work. If you want to use leveldb,
-# use this old pip version
-# pip install leveldb==0.18
+# Build with minimal required libraries
 CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
-
-# This installation defaults to using MKL because it is much faster. If you
-# want to build without MKL then you should also remove mkl from meta.yaml in
-# addition to removing the flags below
-CMAKE_ARGS+=("-DBLAS=MKL")
+CMAKE_ARGS+=("-DUSE_MPI=OFF")
 
 # Build with CUDA
 CMAKE_ARGS+=("-DUSE_CUDA=ON")
