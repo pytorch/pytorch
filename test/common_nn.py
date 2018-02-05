@@ -268,7 +268,7 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     if weight is None:
         weight = Variable(torch.ones(C).type_as(input))
     if torch.is_tensor(weight):
-        # TODO: get rid of this
+        # TODO: remove this once Variables and tensors merge
         weight = Variable(weight)
     total_weight_data = 0
     for tup in product(*[range(size) for size in out_size]):
@@ -297,7 +297,7 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         return (result, norm)
 
     if torch.is_tensor(weight):
-        # TODO: remove this
+        # TODO: remove this once Variables and tensors merge
         weight = Variable(weight)
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]

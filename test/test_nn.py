@@ -4254,7 +4254,7 @@ new_criterion_tests = [
         module_name='NLLLoss',
         constructor_args_fn=lambda: (torch.rand(3),),
         input_size=(2, 3, 5, 5),
-        target=Variable(torch.rand(2, 5, 5).mul(3).floor().long()),
+        target=torch.rand(2, 5, 5).mul(3).floor().long(),
         reference_fn=lambda i, t, m:
             loss_reference_fns['NLLLossNd'](i, t, weight=get_weight(m)),
         desc='2d_weights',
@@ -4459,7 +4459,7 @@ def nllloss_no_reduce_weights_ignore_index_neg_test():
         fullname='NLLLoss_no_reduce_weights_ignore_index_neg',
         constructor=wrap_functional(
             lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
-        input=Variable(torch.rand(15, 10).add(1e-2).log(), requires_grad=True),
+        input=torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
         pickle=False)
