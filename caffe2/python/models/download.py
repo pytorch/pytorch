@@ -154,7 +154,7 @@ def validModelName(name):
     invalid_names = ['__init__']
     if name in invalid_names:
         return False
-    if not re.match("^[a-zA-Z_]+$", name):
+    if not re.match("^[/0-9a-zA-Z_]+$", name):
         return False
     return True
 
@@ -173,4 +173,4 @@ if __name__ == "__main__":
         if validModelName(model):
             downloadModel(model, args)
         else:
-            print("'{model}' is not a valid model name.".format(model))
+            print("'{}' is not a valid model name.".format(model))
