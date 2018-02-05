@@ -26,7 +26,8 @@ from __future__ import print_function
 import os
 import sys
 from .utils import CodeTemplate, nested_dict, write
-from .gen_autograd import VIEW_FUNCTIONS, template_path
+from .gen_autograd import VIEW_FUNCTIONS, template_path, \
+    HARDCODED_DIFFERENTIABLE_OUTPUTS
 from .gen_autograd_functions import uses_single_grad
 
 VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
@@ -186,13 +187,17 @@ def emit_body(declaration):
 
     inputs = [arg for arg in arguments if not arg.get('output', False)]
     differentiable_inputs = list(filter(is_differentiable, inputs))
-    differentiable_outputs = list(filter(is_differentiable, returns))
+    candidate_differentiable_outputs = list(filter(is_differentiable, returns))
 
-    if uses_single_grad(func):
-        # If we only use `grad` and not `grads[i]` in the derivative than
-        # assume that only the first output is differentiable. TODO: remove
-        # this heuristic.
-        differentiable_outputs = differentiable_outputs[:1]
+    hardcoded_diff = HARDCODED_DIFFERENTIABLE_OUTPUTS.get(name)
+    if hardcoded_diff:
+        differentiable_outputs = []
+        for i in hardcoded_diff:
+            differentiable_outputs.append(candidate_differentiable_outputs[i])
+    elif uses_single_grad(func):
+        differentiable_outputs = candidate_differentiable_outputs[:1]
+    else:
+        differentiable_outputs = candidate_differentiable_outputs
 
     requires_derivative = (
         base_name not in DONT_REQUIRE_DERIVATIVE and
@@ -282,6 +287,9 @@ def emit_body(declaration):
                 if inplace and is_output:
                     var = 'self'
                 expr = 'SavedVariable({}, {})'.format(var, str(is_output).lower())
+            elif arg['type'] == 'TensorList':
+                name += '_'
+                expr = 'make_saved_variable_list({})'.format(arg['name'])
             stmts.append('grad_fn->{} = {};'.format(name, expr))
         return stmts
 
@@ -302,7 +310,10 @@ def emit_body(declaration):
                            if arg.get('output', False)]
             return '{' + ', '.join(output_args) + '}'
         trace_outs = [r['name'] for r in declaration['returns']]
-        return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
+        if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
+            return CodeTemplate("flatten( ${outs} )").substitute(outs=trace_outs)
+        else:
+            return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
     def emit_record_trace(env):
         # Operations involving Generator and Storage are not traceable
@@ -359,6 +370,7 @@ def emit_body(declaration):
         local['trace_name'] = declaration['api_name']
         if local['trace_name'].endswith('_'):
             local['trace_name'] = local['trace_name'][:-1]
+
         local['trace_outputs'] = get_trace_outputs(declaration)
 
         combined = nested_dict(local, nested_dict(env, declaration))
@@ -369,8 +381,9 @@ def emit_body(declaration):
             return ''
         if len(declaration['returns']) == 1:
             return ''
-        names = [ret['name'] for ret in declaration['returns']]
-        return 'Tensor {};'.format(', '.join(names))
+        # TODO: this will be ugly
+        names = [ret['type'] + ' ' + ret['name'] + ';' for ret in declaration['returns']]
+        return '\n'.join(names)
 
     def wrap_output(call):
         if 'Tensor' not in declaration['return_type']:

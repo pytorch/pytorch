@@ -35,3 +35,8 @@ if(NOT NO_CUDA)
   cuda_add_executable(offset_info_test offset_info_test.cu)
   target_link_libraries(offset_info_test ATen)
 endif()
+
+if (CUDNN_FOUND)
+  add_executable(cudnn_test cudnn_test.cpp)
+  target_link_libraries(cudnn_test ATen)
+endif()

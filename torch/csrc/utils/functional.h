@@ -9,6 +9,15 @@ namespace torch {
 // the actual implementations, C++ will resolve the overload to
 // itself, because there's an implicit conversion to vector in ArrayRef.
 
+// The passed in function must take T by value (T), or by
+// const reference (const T&); taking T by non-const reference
+// will result in an error like:
+//
+//    error: no type named 'type' in 'class std::result_of<foobar::__lambda(T)>'
+//
+// No explicit template parameters are required.
+
+// Overload for explicit function and ArrayRef
 template<typename F, typename T, typename R = typename std::result_of<F(T)>::type>
 inline std::vector<R> fmap(at::ArrayRef<T> inputs, const F& fn) {
   std::vector<R> r;
@@ -18,11 +27,17 @@ inline std::vector<R> fmap(at::ArrayRef<T> inputs, const F& fn) {
   return r;
 }
 
+// Overload for explicit function and vector (this is required because
+// template deduction will not apply an implicit conversion from std::vector
+// to ArrayRef)
 template<typename F, typename T, typename R = typename std::result_of<F(T)>::type>
 inline std::vector<R> fmap(const std::vector<T>& inputs, const F& fn) {
   return fmap<F, T, R>(static_cast<at::ArrayRef<T>>(inputs), fn);
 }
 
+// C++ forbids taking an address of a constructor, so here's a workaround...
+
+// Overload for ArrayRef and constructor (R) application
 template<typename R, typename T>
 inline std::vector<R> fmap(at::ArrayRef<T> inputs) {
   std::vector<R> r;
@@ -32,7 +47,7 @@ inline std::vector<R> fmap(at::ArrayRef<T> inputs) {
   return r;
 }
 
-// C++ forbids taking an address of a constructor, so here's a workaround...
+// Overload for std::vector and constructor (R) application
 template<typename R, typename T>
 inline std::vector<R> fmap(const std::vector<T>& inputs) {
   return fmap<R, T>(static_cast<at::ArrayRef<T>>(inputs));

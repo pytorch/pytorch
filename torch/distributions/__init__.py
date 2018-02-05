@@ -28,6 +28,21 @@ policy, the code for implementing REINFORCE would be as follows::
     next_state, reward = env.step(action)
     loss = -m.log_prob(action) * reward
     loss.backward()
+
+Another way to implement these stochastic/policy gradients would be to use the
+reparameterization trick from :meth:`~torch.distributions.Distribution.rsample`
+method, where the parameterized random variable can be defined as a parameterized
+deterministic function of a parameter-free random variable. The reparameterized sample
+is required to be differentiable. The code for implementing the pathwise estimation would
+be as follows::
+
+    params = policy_network(state)
+    m = Normal(*params)
+    # any distribution with .has_rsample == True could work based on the application
+    action = m.rsample()
+    next_state, reward = env.step(action)  # Assume that reward is differentiable
+    loss = -reward
+    loss.backward()
 """
 
 from .bernoulli import Bernoulli

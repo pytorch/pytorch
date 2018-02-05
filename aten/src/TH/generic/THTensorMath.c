@@ -2004,15 +2004,15 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   int64_t ldr__ = r__->stride[(transpose_r == 'n' ? 1 : 0)];
 
   /* m1 */
-  /* Need ldm1_ >= max(1, (transpose_m1 == 't' ? m : k)) */
+  /* Need ldm1_ >= max(1, (transpose_m1 == 'n' ? m : k)) */
   if(m1->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m1->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
+     m1->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, m))
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
   else if(m1->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m1->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, m))
+          m1->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, k))
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -2025,7 +2025,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   /* m2 */
-  /* Need ldm2_ >= max(1, (transpose_m2 == 't' ? n : k)) */
+  /* Need ldm2_ >= max(1, (transpose_m2 == 'n' ? k : n)) */
   if(m2->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
      m2->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
   {
