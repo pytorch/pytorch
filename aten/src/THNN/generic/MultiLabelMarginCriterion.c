@@ -9,9 +9,10 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THIndexTensor *target,
           THTensor *output,
           THTensor *isTarget,
-          bool sizeAverage)
+          bool sizeAverage,
+          bool reduce)
 {
-  real *input_data, *isTarget_data;
+  real *input_data, *output_data, *isTarget_data;
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d, dt, ddt;
@@ -19,7 +20,6 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
 	     "vector or matrix expected");
-  THTensor_(resize1d)(output, 1);
 
   if (input->nDimension == 1)
   {
@@ -48,7 +48,55 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   THTensor_(zero)(isTarget);
   isTarget_data = THTensor_(data)(isTarget);
 
-  sum = 0;
+  if (reduce)
+  {
+    THTensor_(resize1d)(output, 1);
+
+    sum = 0;
+    for (t = 0; t < nframe; t++)
+    {
+      for (ddt = 0; ddt < dim; ddt++)
+      {
+        THIndex_t target_idx = target_data[ddt] - TH_INDEX_BASE;
+        if (target_idx < 0)
+          break;
+        isTarget_data[target_idx] = 1;
+      }
+      for (dt = 0; dt < dim; dt++)
+      {
+        THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
+        real input_target;
+        if (target_idx < 0)
+          break;
+
+        input_target = input_data[target_idx];
+        for (d = 0; d < dim; d++)
+        {
+          if (!isTarget_data[d])
+          {
+            real z = 1 - input_target + input_data[d];
+            if (z > 0)
+              sum += z;
+          }
+        }
+      }
+      input_data += dim;
+      target_data += dim;
+      isTarget_data += dim;
+    }
+
+    sum /= dim;
+    if (sizeAverage)
+      sum /= nframe;
+    THTensor_fastSet1d(output, 0, sum);
+
+    THTensor_(free)(input);
+    THIndexTensor_(free)(target);
+    return;
+  }
+
+  THTensor_(resize1d)(output, nframe);
+
   for (t = 0; t < nframe; t++)
   {
     for (ddt = 0; ddt < dim; ddt++)
@@ -58,6 +106,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         break;
       isTarget_data[target_idx] = 1;
     }
+
+    sum = 0;
     for (dt = 0; dt < dim; dt++)
     {
       THIndex_t target_idx = target_data[dt] - TH_INDEX_BASE;
@@ -76,16 +126,14 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         }
       }
     }
+
+    sum /= dim;
+    THTensor_fastSet1d(output, t, sum);
+
     input_data += dim;
     target_data += dim;
     isTarget_data += dim;
   }
-
-  sum /= dim;
-  if (sizeAverage)
-    sum /= nframe;
-
-  THTensor_(set1d)(output, 0, sum);
 
   THTensor_(free)(input);
   THIndexTensor_(free)(target);
@@ -95,9 +143,11 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
+          THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *isTarget,
-          bool sizeAverage)
+          bool sizeAverage,
+          bool reduce)
 {
   real *input_data;
   real *gradInput_data;
@@ -142,11 +192,12 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   target_data = THIndexTensor_(data)(target);
   isTarget_data = THTensor_(data)(isTarget);
 
-  g = sizeAverage ? ( 1./((real)(nframe*dim)) ) : ( 1./((real)dim) );
-
   THTensor_(resizeAs)(gradInput, input);
+  gradInput = THTensor_(newContiguous)(gradInput);
   THTensor_(zero)(gradInput);
   gradInput_data = THTensor_(data)(gradInput);
+
+  g = sizeAverage && reduce ? (1./((real)(nframe*dim))) : (1./((real)dim));
 
   for (t = 0; t < nframe; t++)
   {
@@ -176,10 +227,32 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
     isTarget_data += dim;
     gradInput_data += dim;
   }
+  gradInput_data = THTensor_(data)(gradInput);
+
+  if (reduce)
+  {
+    THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
+    for (t = 0; t < nframe*dim; t++)
+    {
+      gradInput_data[t] *= THTensor_fastGet1d(gradOutput, 0);
+    }
+  }
+  else
+  {
+    THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, nframe);
+    for (t = 0; t < nframe; t++)
+    {
+      for (d = 0; d < dim; d++)
+      {
+        gradInput_data[t * dim + d] *= THTensor_fastGet1d(gradOutput, t);
+      }
+    }
+  }
 
   THTensor_(free)(input);
   THIndexTensor_(free)(target);
   THTensor_(free)(isTarget);
+  THTensor_(free)(gradInput);
 }
 
 #endif
