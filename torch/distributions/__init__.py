@@ -36,9 +36,9 @@ deterministic function of a parameter-free random variable. The reparameterized 
 is required to be differentiable. The code for implementing the pathwise estimation would
 be as follows::
 
-    probs = policy_network(state)
-    m = Normal(**probs)
-    # any distribution with has_rsample == True could work based on the application
+    params = policy_network(state)
+    m = Normal(*params)
+    # any distribution with .has_rsample == True could work based on the application
     action = m.rsample()
     next_state, reward = env.step(action)  # Assume that reward is differentiable
     loss = -reward
