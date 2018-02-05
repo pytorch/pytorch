@@ -50,6 +50,12 @@
 #     grad.  If we want to support more fine-grained signalling,
 #     we'll need some alternate variable which is not a std::array)
 #
+#   - 'retain_variables', a bool which is true if a user has specified
+#     that saved variables should be retained in case the backwards is
+#     run again later.  This allows an optimization where we can
+#     destroy saved buffers if we know variables are not going to be retained,
+#     e.g., it is used by _cudnn_rnn
+#
 # If you need a complex expression, e.g., with local variables,
 # write a _backward function in tools/autograd/templates/Functions.cpp
 # and invoke it from here.  By the way, go read
@@ -1091,3 +1097,6 @@
   input: nnpack_spatial_convolution_backward_input(input, grad, weight, kW, kH, padW, padH)
   weight: nnpack_spatial_convolution_backward_weight(input, weight.sizes(), grad, kW, kH, padW, padH)
   bias: grad.contiguous().view({grad.size(0), grad.size(1), -1}).sum(0).sum(1)
+
+- name: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, Tensor dropout_state)
+  input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
