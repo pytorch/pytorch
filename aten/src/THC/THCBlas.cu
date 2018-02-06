@@ -335,9 +335,9 @@ void THCudaBlas_Dgemm(THCState *state, char transa, char transb, int64_t m, int6
 }
 
 #if CUDA_VERSION >= 9010
-void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
-                             half alpha, const half *a, long lda, long strideA, const half *b, long ldb, long strideB,
-                             half beta, half *c, long ldc, long strideC, long batchCount)
+void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, int64_t m, int64_t n, int64_t k,
+                             half alpha, const half *a, int64_t lda, int64_t strideA, const half *b, int64_t ldb, int64_t strideB,
+                             half beta, half *c, int64_t ldc, int64_t strideC, int64_t batchCount)
 {
   if( (m >= INT_MAX) || (n >= INT_MAX) || (k >= INT_MAX) || (lda >= INT_MAX)  || (ldb >= INT_MAX) || (ldc >= INT_MAX) || (batchCount >= INT_MAX) )
 
