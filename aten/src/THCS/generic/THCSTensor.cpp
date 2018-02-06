@@ -137,7 +137,10 @@ THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices,
 }
 
 THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes)
-{  // If sizes are not given, it is inferred as max index of each dim.
+{
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
+
+  // If sizes are not given, it is inferred as max index of each dim.
   int64_t nDimI, nDimV;
 
   THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
