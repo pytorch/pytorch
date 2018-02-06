@@ -183,6 +183,9 @@
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average) -> Tensor
+  variants: function
+
 - func: ger(Tensor self, Tensor vec2) -> Tensor
 
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
