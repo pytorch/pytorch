@@ -79,6 +79,7 @@ _(transB) \
 _(other) \
 _(__and__) \
 _(__lshift__) \
+_(__not__) \
 _(__or__) \
 _(__rshift__) \
 _(__xor__) \
@@ -111,6 +112,7 @@ _(max) \
 _(min) \
 _(ne) \
 _(ones) \
+_(ones_like) \
 _(pow) \
 _(reciprocal) \
 _(remainder) \
@@ -123,6 +125,7 @@ _(sub) \
 _(tan) \
 _(trunc) \
 _(zeros) \
+_(zeros_like) \
 _(exponent) \
 _(device) \
 _(ReplaceIfUndef) \

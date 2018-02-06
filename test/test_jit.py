@@ -1297,6 +1297,53 @@ class TestJit(TestCase):
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
+    def test_script_add(self):
+        cu = torch.jit.jit_script('''
+        def add(a, b) -> (c):
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('add')))
+
+    def test_script_mul(self):
+        cu = torch.jit.jit_script('''
+        def mul(a, x) -> (y):
+            y = a * x
+        ''')
+        self.assertExpected(str(cu.get_graph('mul')))
+
+    def test_script_triple(self):
+        cu = torch.jit.jit_script('''
+        def triple(x) -> (y):
+            y = 3LL * x
+        ''')
+        self.assertExpected(str(cu.get_graph('triple')))
+
+    def test_script_slice(self):
+        cu = torch.jit.jit_script('''
+        def head(x) -> (head):
+            head = x[:5]
+        ''')
+        self.assertExpected(str(cu.get_graph('head')))
+
+    def test_script_gather(self):
+        cu = torch.jit.jit_script('''
+        def first(x) -> (y):
+            y = x[0]
+        ''')
+        self.assertExpected(str(cu.get_graph('first')))
+
+    def test_script_fc(self):
+        cu = torch.jit.jit_script('''
+        def add(a, b) -> (c):
+            c = a + b
+
+        def mul(a, x) -> (y):
+            y = a * x
+
+        def fc(w, x, b) -> (z):
+            z = add(mul(w, x), b)
+        ''')
+        self.assertExpected(str(cu.get_graph('fc')))
 
 if __name__ == '__main__':
     run_tests()
