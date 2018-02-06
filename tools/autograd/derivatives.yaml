@@ -704,8 +704,8 @@
 - name: smooth_l1_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: smooth_l1_loss_backward(grad, self, target, size_average, reduce)
 
-- name: soft_margin_loss_forward(Tensor self, Tensor target, bool size_average)
-  self: soft_margin_loss_backward(self, target, size_average).mul_(grad)
+- name: soft_margin_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
+  self: soft_margin_loss_backward(grad, self, target, size_average, reduce)
 
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale)
   self: elu_backward(grad, alpha, scale, output)
@@ -1000,8 +1000,9 @@
   grad_output: softmax_backward(grad, self, dim, output)
   self: softmax_double_backward(grad, grad_output, dim, output)
 
-- name: soft_margin_loss_backward(Tensor self, Tensor target, bool size_average)
-  self: soft_margin_loss_double_backward(grad, self, target, size_average)
+- name: soft_margin_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
+  grad_output: soft_margin_loss_double_backward_grad_output(grad, grad_output, self, target, size_average, reduce)
+  self: soft_margin_loss_double_backward(grad * grad_output, self, target, size_average, reduce)
 
 - name: softshrink_backward(Tensor grad_output, Tensor self, Scalar lambd)
   grad_output: softshrink_backward(grad, self, lambd)
