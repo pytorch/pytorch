@@ -18,7 +18,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import core, workspace
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -27,6 +27,38 @@ import numpy as np
 
 
 class TestReduceFrontReductions(hu.HypothesisTestCase):
+
+    def grad_variant_input_test(self, grad_op_name, X, ref, num_reduce_dim):
+        workspace.ResetWorkspace()
+
+        Y = np.array(ref(X)[0]).astype(np.float32)
+        dY = np.array(np.random.rand(*Y.shape)).astype(np.float32)
+        shape = np.array(X.shape).astype(np.int64)
+
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("dY", dY)
+        workspace.FeedBlob("shape", shape)
+
+        grad_op = core.CreateOperator(
+            grad_op_name,
+            ["dY", "X"],
+            ["dX"],
+            num_reduce_dim=num_reduce_dim
+        )
+
+        grad_op1 = core.CreateOperator(
+            grad_op_name,
+            ["dY", "shape"],
+            ["dX1"],
+            num_reduce_dim=num_reduce_dim
+        )
+
+        workspace.RunOperatorOnce(grad_op)
+        workspace.RunOperatorOnce(grad_op1)
+
+        dX = workspace.FetchBlob("dX")
+        dX1 = workspace.FetchBlob("dX1")
+        np.testing.assert_array_equal(dX, dX1)
 
     def reduce_op_test(self, op_name, op_ref, in_data, num_reduce_dims, device):
         op = core.CreateOperator(
@@ -54,6 +86,8 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             return [np.sum(X, axis=(tuple(range(num_reduce_dim))))]
 
         self.reduce_op_test("ReduceFrontSum", ref_sum, X, num_reduce_dim, gc)
+        self.grad_variant_input_test(
+            "ReduceFrontSumGradient", X, ref_sum, num_reduce_dim)
 
     @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_front_mean(self, num_reduce_dim, gc, dc):
@@ -63,6 +97,8 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             return [np.mean(X, axis=(tuple(range(num_reduce_dim))))]
 
         self.reduce_op_test("ReduceFrontMean", ref_mean, X, num_reduce_dim, gc)
+        self.grad_variant_input_test(
+            "ReduceFrontMeanGradient", X, ref_mean, num_reduce_dim)
 
     @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_front_max(self, num_reduce_dim, gc, dc):
@@ -138,13 +174,16 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             return [np.sum(X, axis=(0, 1, 2, 3)[4 - num_reduce_dim:])]
 
         self.reduce_op_test("ReduceBackSum", ref_sum, X, num_reduce_dim, gc)
+        self.grad_variant_input_test(
+            "ReduceBackSumGradient", X, ref_sum, num_reduce_dim)
 
     @given(num_reduce_dim=st.integers(0, 4), **hu.gcs)
     def test_reduce_back_mean(self, num_reduce_dim, dc, gc):
-        num_reduce_dim = 2
         X = np.random.rand(6, 7, 8, 2).astype(np.float32)
 
-        def ref_sum(X):
+        def ref_mean(X):
             return [np.mean(X, axis=(0, 1, 2, 3)[4 - num_reduce_dim:])]
 
-        self.reduce_op_test("ReduceBackMean", ref_sum, X, num_reduce_dim, gc)
+        self.reduce_op_test("ReduceBackMean", ref_mean, X, num_reduce_dim, gc)
+        self.grad_variant_input_test(
+            "ReduceBackMeanGradient", X, ref_mean, num_reduce_dim)

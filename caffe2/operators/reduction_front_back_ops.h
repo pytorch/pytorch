@@ -96,14 +96,31 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
   template <typename T>
   bool DoRunWithType() {
     auto& dY = Input(0);
-    auto& X = Input(1);
+    auto& input_1 = Input(1);
     auto* dX = Output(0);
 
-    dX->ResizeLike(X);
-    const int rows = FIRSTDIMS ? X.size_to_dim(num_reduce_dims_)
-                               : X.size_to_dim(X.ndim() - num_reduce_dims_);
-    const int cols = FIRSTDIMS ? X.size_from_dim(num_reduce_dims_)
-                               : X.size_from_dim(X.ndim() - num_reduce_dims_);
+    // In previous diff we changed the semantic: Input(1) was changed from
+    // the shape of the input to the data tensor. This made the backward
+    // computation incompatible with old models. To fix this, we check
+    // the dimension and type of Input(1).
+    if (input_1.ndim() == 1 && input_1.template IsType<TIndex>()) {
+      // Input(1) is the shape of the input
+      shape_.CopyFrom(input_1);
+      // Copy first dims
+      vector<TIndex> output_shape(
+          shape_.template data<TIndex>(),
+          shape_.template data<TIndex>() + shape_.size());
+      dX->Resize(output_shape);
+    } else {
+      // Input(1) is data tensor X
+      dX->ResizeLike(input_1);
+    }
+
+    const int rows = FIRSTDIMS ? dX->size_to_dim(num_reduce_dims_)
+                               : dX->size_to_dim(dX->ndim() - num_reduce_dims_);
+    const int cols = FIRSTDIMS
+        ? dX->size_from_dim(num_reduce_dims_)
+        : dX->size_from_dim(dX->ndim() - num_reduce_dims_);
 
     const T* dYdata = dY.template data<T>();
     T* dXdata = dX->template mutable_data<T>();
@@ -115,6 +132,8 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
   template <typename T>
   void Compute(int rows, int cols, const T* dYdata, T* dXdata);
   int num_reduce_dims_;
+  // scratch space used for former version of this reducer
+  Tensor<CPUContext> shape_;
 };
 
 template <typename T, class Context, bool FIRSTDIMS>
