@@ -73,7 +73,6 @@ static void THNN_(SpatialConvolutionLocal_updateOutput_frame)
       int64_t nInputPlane, int64_t inputWidth, int64_t inputHeight,
       int64_t nOutputPlane, int64_t outputWidth, int64_t outputHeight)
 {
-  int64_t i;
   THTensor *output3d, *finput3d;
 
   THNN_(unfolded_copy)(finput, input, kW, kH, dW, dH, padW, padH,

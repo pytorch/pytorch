@@ -857,7 +857,6 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
   int m = ra__->size[0];
-  int n = ra__->size[1];
   int k = tau->size[0];
   int lda = m;
 

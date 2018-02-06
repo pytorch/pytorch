@@ -12,7 +12,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           bool sizeAverage,
           bool reduce)
 {
-  real *input_data, *output_data, *isTarget_data;
+  real *input_data, *isTarget_data;
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d, dt, ddt;
