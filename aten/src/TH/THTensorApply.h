@@ -31,7 +31,7 @@
  */
 
 #define __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, DIM, ALLOW_CONTIGUOUS) \
-  __attribute__((unused)) TYPE *TENSOR##_data = NULL; \
+  TH_UNUSED TYPE *TENSOR##_data = NULL; \
   int64_t *TENSOR##_counter = NULL, *TENSOR##_sizes = NULL, *TENSOR##_strides = NULL, *TENSOR##_dimOffset = NULL; \
   int64_t TENSOR##_stride = 0, TENSOR##_size = 0, TENSOR##_dim = 0, TENSOR##_i, TENSOR##_n; \
   int TENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
@@ -331,7 +331,7 @@
       CODE                                         \
     }                                              \
   } else {                                         \
-    __attribute__((unused)) int TH_TENSOR_APPLY_hasFinished = 0;           \
+    TH_UNUSED int TH_TENSOR_APPLY_hasFinished = 0;           \
     int64_t TH_TENSOR_dim_index = 0;               \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, -1, 1);\
     PRAGMA(omp parallel if (TENSOR##Size > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(TENSOR##_sizes, TENSOR##_strides, TENSOR##_dim, TENSOR##_stride, TENSOR##_size, TENSOR##_i) reduction(OPERATION))\
@@ -394,7 +394,7 @@
      *    first one.
      * 4. iterate all elements in each thread. update the indexes in each dimension of the rest.
     */                                                                                             \
-    __attribute__((unused)) int TH_TENSOR_APPLY_hasFinished = 0; \
+    TH_UNUSED int TH_TENSOR_APPLY_hasFinished = 0; \
     int64_t TH_TENSOR_dim_index = 0;     \
     /*step 1*/                           \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
@@ -467,7 +467,7 @@
       } \
     }\
   } else{              \
-    __attribute__((unused)) int TH_TENSOR_APPLY_hasFinished = 0;\
+    TH_UNUSED int TH_TENSOR_APPLY_hasFinished = 0;\
     int64_t TH_TENSOR_dim_index = 0;\
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
