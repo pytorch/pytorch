@@ -1,7 +1,7 @@
 {% set version = "0.8.dev" %}
 
 package:
-  name: caffe2-cuda%%CUDA_VERSION%%-cudnn%%CUDNN_VERSION%%
+  name: caffe2-cuda
   version: {{ version }}
 
 source:
