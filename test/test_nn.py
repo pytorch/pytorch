@@ -31,7 +31,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, \
     smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, PY3
+    TEST_SCIPY, download_file, PY3, PY34
 
 if TEST_SCIPY:
     from scipy import stats
@@ -333,7 +333,10 @@ class TestNN(NNTestCase):
         def repeatHelper(f):
             def callHelper(self, *args):
                 for dtype in dtypes:
-                    with self.subTest(dtype=dtype):
+                    if PY34:
+                        with self.subTest(dtype=dtype):
+                            f(self, *args, dtype=dtype)
+                    else:
                         f(self, *args, dtype=dtype)
 
             return callHelper
