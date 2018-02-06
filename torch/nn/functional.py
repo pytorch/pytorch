@@ -1258,7 +1258,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
             size_average. When reduce is ``False``, returns a loss per batch
-            element instead and ignores size_average. Default: ``True``
+            instead and ignores size_average. Default: ``True``
     """
     if log_input:
         loss = torch.exp(input) - target * input
@@ -1288,7 +1288,7 @@ Args:
         in input tensor. Default: ``True``
     reduce (bool, optional): By default, the losses are averaged
         over observations for each minibatch, or summed, depending on
-        size_average. When reduce is False, returns a loss per batch
+        size_average. When reduce is False, returns a loss per input/target
         element instead and ignores size_average. Default: ``True``
 
 """)
@@ -1315,7 +1315,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
                 True, the loss is averaged over non-ignored targets. Default: -100
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
+                is False, returns a loss per batch instead and ignores
                 size_average. Default: ``True``
 
     Examples::
@@ -1345,7 +1345,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
                 for each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
+                is False, returns a loss per input/target element instead and ignores
                 size_average. Default: True
 
     Examples::
@@ -1388,7 +1388,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 for each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
+                is False, returns a loss per input/target element instead and ignores
                 size_average. Default: True
 
     Examples::
