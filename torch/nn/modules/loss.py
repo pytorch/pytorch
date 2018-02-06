@@ -332,8 +332,6 @@ class MSELoss(_Loss):
             \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
         \end{cases}
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each.
-
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
