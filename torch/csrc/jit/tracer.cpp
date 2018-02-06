@@ -131,14 +131,14 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
 // We must record the nodes of inputs before we actually carry out
 // the operation, because an inplace operation may destroy the information
 // we're interested in.  See #4480.
-PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
-                            at::ArrayRef<Variable> inputs) {
+template<typename F>
+PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
   PreTraceInfo info;
   info.state = getTracingState(inputs);
   auto& graph = info.state->graph;
   auto state_lock = info.state->lock();
 
-  Node *n = graph->create(Symbol(op), 0 /* initial outputs */);
+  Node *n = ctor(*graph);
   auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
 
@@ -151,7 +151,34 @@ PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
 
   info.n = n;
 
-  return info;  // RVO
+  return info;
+}
+
+PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
+                            at::ArrayRef<Variable> inputs) {
+  return makePreTraceInfo(inputs, [&op](Graph& graph) {
+    return graph.create(Symbol(op), 0 /* initial outputs */);
+  });
+}
+
+PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
+                                  std::string arg_types,
+                                  at::ArrayRef<Variable> inputs,
+                                  pyobj_list scalar_args) {
+  std::vector<VariableFlags> var_flags(inputs.size());
+  for (size_t i = 0; i < inputs.size(); i++) {
+    var_flags[i] = VariableFlags::of(inputs[i]);
+  }
+
+  return makePreTraceInfo(inputs, [&](Graph& graph) {
+    const bool is_legacy = false;
+    return graph.createPythonOp(
+        std::move(pyobj),
+        arg_types,
+        is_legacy,
+        std::move(var_flags),
+        std::move(scalar_args));
+  });
 }
 
 void postRecordTrace(const PreTraceInfo& info,

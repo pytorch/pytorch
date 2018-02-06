@@ -47,7 +47,7 @@ class Dropout(InplaceFunction):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.p > 0 and ctx.train:
-            return grad_output.mul(Variable(ctx.noise)), None, None, None
+            return grad_output * ctx.noise, None, None, None
         else:
             return grad_output, None, None, None
 

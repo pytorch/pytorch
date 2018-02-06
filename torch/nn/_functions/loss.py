@@ -47,7 +47,7 @@ class CosineEmbeddingLoss(Function):
             output = output / y.size(0)
 
         ctx.save_for_backward(input1, input2, y)
-        return input1.new((output,))
+        return output
 
     @staticmethod
     @once_differentiable
@@ -108,7 +108,7 @@ class MarginRankingLoss(Function):
             output = output / y.size(0)
 
         ctx.save_for_backward(input1, input2, y)
-        return input1.new((output,))
+        return output
 
     @staticmethod
     def backward(ctx, grad_output):
