@@ -122,10 +122,12 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
 
 class InputVariableMixin(object):
     def _get_input(self):
-        input = TestBase._get_input(self)
+        input = TestBase._get_input(self, False)
 
         def map_variables(i):
             if isinstance(i, Variable):
+                if i.is_floating_point():
+                    i.requires_grad = True
                 return i
             elif torch.is_tensor(i):
                 return Variable(i, requires_grad=True)
@@ -262,6 +264,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
 
+    def _get_target(self):
+        return self._get_arg('target', False)
+
+    @property
+    def constructor_args(self):
+        return self._get_arg('constructor_args', False)
+
 
 class NewCriterionTest(InputVariableMixin, CriterionTest):
     # TODO: check that criterions don't ignore grad_output
@@ -281,7 +290,11 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
                                              input + (target,) + params)
 
     def _get_target(self):
-        return Variable(CriterionTest._get_target(self), requires_grad=False)
+        return self._get_arg('target', False)
+
+    @property
+    def constructor_args(self):
+        return self._get_arg('constructor_args', False)
 
 
 class TestNN(NNTestCase):
@@ -301,7 +314,7 @@ class TestNN(NNTestCase):
             output = criterion(*args)
         else:
             output = criterion(input, target)
-        return output.data[0]
+        return output
 
     def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
@@ -331,8 +344,8 @@ class TestNN(NNTestCase):
         for p in module.parameters():
             if p.grad is None:
                 p._grad = torch.zeros_like(p)
-            params.append(p.data)
-            d_params.append(p.grad.data)
+            params.append(p)
+            d_params.append(p.grad)
         return params, d_params
 
     def test_module_backcompat(self):
@@ -4348,11 +4361,11 @@ def poissonnllloss_no_reduce_test():
 
 
 def bceloss_no_reduce_test():
-    t = torch.randn(15, 10).gt(0).double()
+    t = Variable(torch.randn(15, 10).gt(0).double())
     return dict(
         fullname='BCELoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)), reduce=False)),
+            lambda i: F.binary_cross_entropy(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
         check_gradgrad=False,
@@ -4360,13 +4373,13 @@ def bceloss_no_reduce_test():
 
 
 def bceloss_weights_no_reduce_test():
-    t = torch.randn(15, 10).gt(0).double()
-    weights = torch.rand(10)
+    t = Variable(torch.randn(15, 10).gt(0).double())
+    weights = Variable(torch.rand(10))
     return dict(
         fullname='BCELoss_weights_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)),
-                                             weight=weights.type_as(i.data), reduce=False)),
+            lambda i: F.binary_cross_entropy(i, t.type_as(i),
+                                             weight=weights.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
@@ -4374,12 +4387,12 @@ def bceloss_weights_no_reduce_test():
 
 
 def bce_with_logistic_no_reduce_test():
-    t = torch.randn(15, 10).gt(0).double()
+    t = Variable(torch.randn(15, 10).gt(0).double())
     sigmoid = nn.Sigmoid()
     return dict(
         fullname='BCEWithLogitsLoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.binary_cross_entropy_with_logits(i, Variable(t.type_as(i.data)), reduce=False)),
+            lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
@@ -4394,7 +4407,7 @@ def kldivloss_no_reduce_test():
             lambda i: F.kl_div(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, _:
-            loss_reference_fns['KLDivLoss'](i, t.data.type_as(i), reduce=False),
+            loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduce=False),
         pickle=False)
 
 
@@ -4405,17 +4418,17 @@ def l1loss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.l1_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.randn(2, 3, 4),
-        reference_fn=lambda i, m: (i - t.data.type_as(i)).abs(),
+        reference_fn=lambda i, m: (i - t.type_as(i)).abs(),
         pickle=False)
 
 
 def mseloss_no_reduce_test():
     input_size = (2, 3, 4, 5)
-    target = torch.randn(*input_size)
+    target = Variable(torch.randn(*input_size))
     return dict(
         fullname='MSELoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.mse_loss(i, Variable(target.type_as(i.data)), reduce=False)),
+            lambda i: F.mse_loss(i, target.type_as(i), reduce=False)),
         input_size=input_size,
         reference_fn=lambda i, m: (i - target).pow(2),
         pickle=False)
@@ -4449,7 +4462,7 @@ def nllloss_no_reduce_ignore_index_test():
 
 def nllloss_no_reduce_weights_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    weight = torch.rand(10)
+    weight = Variable(torch.rand(10))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False}
@@ -4457,7 +4470,7 @@ def nllloss_no_reduce_weights_test():
     return dict(
         fullname='NLLLoss_no_reduce_weights',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4466,7 +4479,7 @@ def nllloss_no_reduce_weights_test():
 
 def nllloss_no_reduce_weights_ignore_index_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    weight = torch.rand(10)
+    weight = Variable(torch.rand(10))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False,
@@ -4484,7 +4497,7 @@ def nllloss_no_reduce_weights_ignore_index_test():
 
 def nllloss_no_reduce_weights_ignore_index_neg_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    weight = torch.rand(10)
+    weight = Variable(torch.rand(10))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False,
@@ -4493,7 +4506,7 @@ def nllloss_no_reduce_weights_ignore_index_neg_test():
     return dict(
         fullname='NLLLoss_no_reduce_weights_ignore_index_neg',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input=torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4536,7 +4549,7 @@ def nllloss2d_no_reduce_weights_test():
     return dict(
         fullname='NLLLoss2d_no_reduce_weights',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLossNd'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4571,7 +4584,7 @@ def nlllossNd_no_reduce_ignore_index_test():
 
 def nlllossNd_no_reduce_weights_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    weight = torch.rand(3)
+    weight = Variable(torch.rand(3))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False}
@@ -4579,7 +4592,7 @@ def nlllossNd_no_reduce_weights_test():
     return dict(
         fullname='NLLLossNd_no_reduce_weights',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLossNd'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4594,7 +4607,7 @@ def smoothl1loss_no_reduce_test():
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, _:
-            loss_reference_fns['SmoothL1Loss'](i, t.data.type_as(i), reduce=False),
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduce=False),
         pickle=False)
 
 

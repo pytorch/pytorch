@@ -333,7 +333,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "cuda(int64_t device=-1, bool non_blocking=False)"
+    "cuda(int64_t? device=-1, bool non_blocking=False)"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];

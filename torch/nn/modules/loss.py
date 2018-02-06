@@ -496,8 +496,9 @@ class BCEWithLogitsLoss(Module):
 
     def forward(self, input, target):
         if self.weight is not None:
+            var = Variable(self.weight) if not isinstance(self.weight, Variable) else self.weight
             return F.binary_cross_entropy_with_logits(input, target,
-                                                      Variable(self.weight),
+                                                      var,
                                                       self.size_average,
                                                       reduce=self.reduce)
         else:
