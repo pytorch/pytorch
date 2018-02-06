@@ -208,7 +208,6 @@ struct DefCompiler {
       outputs.push_back(value_map(output));
     }
     return outputs;
-    // TODO: Add support for function call
   }
 
   void expectOutputs(
