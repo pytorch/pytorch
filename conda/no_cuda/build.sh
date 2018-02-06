@@ -53,8 +53,3 @@ else
 fi
 
 make install/fast
-
-# Python libraries got installed to wrong place, so move them
-# to the right place. See https://github.com/caffe2/caffe2/issues/1015
-echo "Installing Python to $SP_DIR"
-mv $PREFIX/caffe2 $SP_DIR

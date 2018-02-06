@@ -83,7 +83,35 @@ class develop(setuptools.command.develop.develop):
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+    """
+    Compiles everything when `python setup.py build` is run using cmake.
+
+    Custom args can be passed to cmake by specifying the `CMAKE_ARGS`
+    environment variable. E.g. to build without cuda support run:
+        `CMAKE_ARGS=-DUSE_CUDA=Off python setup.py build`
+
+    The number of CPUs used by `make` can be specified by passing `-j<ncpus>`
+    to `setup.py build`.  By default all CPUs are used.
+    """
+    user_options = [
+        ('jobs=', 'j', 'Specifies the number of jobs to use with make')
+    ]
+
+    def initialize_options(self):
+        setuptools.command.build_ext.build_ext.initialize_options(self)
+        self.jobs = None
+
+    def finalize_options(self):
+        setuptools.command.build_ext.build_ext.finalize_options(self)
+        # Check for the -j argument to make with a specific number of cpus
+        try:
+            self.jobs = int(self.jobs)
+        except Exception:
+            self.jobs = None
+
     def _build_with_cmake(self):
+        # build_temp resolves to something like: build/temp.linux-x86_64-3.5
+        # build_lib resolves to something like: build/lib.linux-x86_64-3.5
         build_temp = os.path.realpath(self.build_temp)
         build_lib = os.path.realpath(self.build_lib)
 
@@ -101,6 +129,10 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 cmake_args = []
             log.info('CMAKE_ARGS: {}'.format(cmake_args))
 
+            if self.jobs is not None:
+                # use envvars to pass information to `build_local.sh`
+                os.environ['CAFFE_MAKE_NCPUS'] = str(self.jobs)
+
             self.compiler.spawn([
                 os.path.join(TOP_DIR, 'scripts', 'build_local.sh'),
                 '-DBUILD_SHARED_LIBS=OFF',
@@ -114,8 +146,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 '-DBUILD_TEST=OFF',
                 '-BUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
-                TOP_DIR
-            ] + cmake_args)
+            ] + cmake_args + [TOP_DIR])
             # This is assuming build_local.sh will use TOP_DIR/build
             # as the cmake build directory
             self.compiler.spawn([
@@ -124,11 +155,17 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 'install'
             ])
         else:
+            # if `CMAKE_INSTALL_DIR` is specified in the environment, assume
+            # cmake has been run and skip the build step.
             cmake_install_dir = os.environ['CMAKE_INSTALL_DIR']
 
+        # CMake will install the python package to a directory that mirrors the
+        # standard site-packages name. This will vary slightly depending on the
+        # OS and python version.  (e.g. `lib/python3.5/site-packages`)
+        python_site_packages = sysconfig.get_python_lib(prefix='')
         for d in ['caffe', 'caffe2']:
-            self.copy_tree(os.path.join(cmake_install_dir, d),
-                           os.path.join(build_lib, d))
+            src = os.path.join(cmake_install_dir, python_site_packages, d)
+            self.copy_tree(src, os.path.join(build_lib, d))
 
     def get_outputs(self):
         return [os.path.join(self.build_lib, d)

@@ -39,14 +39,20 @@ else
   cd "$BUILD_ROOT"
   echo "Building Caffe2 in: $BUILD_ROOT"
 
-  # Now, actually build the target.
   cmake "$CAFFE2_ROOT" \
         "${CMAKE_ARGS[@]}" \
         "$@"
 
-  if [ "$(uname)" == 'Darwin' ]; then
-    cmake --build . -- "-j$(sysctl -n hw.ncpu)"
+  # Determine the number of CPUs to build with.
+  # If the `CAFFE_MAKE_NCPUS` variable is not specified, use them all.
+  if [ -n "${CAFFE_MAKE_NCPUS}" ]; then
+      CAFFE_MAKE_NCPUS="$CAFFE_MAKE_NCPUS"
+  elif [ "$(uname)" == 'Darwin' ]; then
+      CAFFE_MAKE_NCPUS="$(sysctl -n hw.ncpu)"
   else
-    cmake --build . -- "-j$(nproc)"
+      CAFFE_MAKE_NCPUS="$(nproc)"
   fi
+
+  # Now, actually build the target.
+  cmake --build . -- "-j$CAFFE_MAKE_NCPUS"
 fi
