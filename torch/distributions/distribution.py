@@ -72,8 +72,8 @@ class Distribution(object):
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
         """
-        z = self.rsample(sample_shape)
-        return z.detach() if hasattr(z, 'detach') else z
+        with torch.no_grad():
+            return self.rsample(sample_shape)
 
     def rsample(self, sample_shape=torch.Size()):
         """

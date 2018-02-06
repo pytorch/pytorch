@@ -52,10 +52,11 @@ class TransformedDistribution(Distribution):
         samples if the distribution parameters are batched. Samples first from base distribution
         and applies `transform()` for every transform in the list.
         """
-        x = self.base_dist.sample(sample_shape)
-        for transform in self.transforms:
-            x = transform(x)
-        return x.detach() if hasattr(x, 'detach') else x
+        with torch.no_grad():
+            x = self.base_dist.sample(sample_shape)
+            for transform in self.transforms:
+                x = transform(x)
+            return x
 
     def rsample(self, sample_shape=torch.Size()):
         """

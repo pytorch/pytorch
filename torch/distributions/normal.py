@@ -51,8 +51,8 @@ class Normal(ExponentialFamily):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        x = torch.normal(self.loc.expand(shape), self.scale.expand(shape))
-        return x.detach() if hasattr(x, 'detach') else x
+        with torch.no_grad():
+            return torch.normal(self.loc.expand(shape), self.scale.expand(shape))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

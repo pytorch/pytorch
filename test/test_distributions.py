@@ -379,8 +379,7 @@ class TestDistributions(TestCase):
     def test_rsample_requires_grad(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
-                variable_params = [p for p in param.values() if getattr(p, 'requires_grad', False)]
-                if not variable_params:
+                if not any(getattr(p, 'requires_grad', False) for p in param.values()):
                     continue
                 dist = Dist(**param)
                 if not dist.has_rsample:
