@@ -231,12 +231,18 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
+  if (self.numel() != 1) {
+    throw ValueError("only one element tensors can be converted to Python scalars");
+  }
   return self.toCDouble();
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
+  if (self.numel() != 1) {
+    throw ValueError("only one element tensors can be converted to Python scalars");
+  }
   return self.toCLong();
 }
 
@@ -427,6 +433,18 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_item(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.is_floating_point()) {
+    return wrap(dispatch_to_CDouble(self_));
+  } else {
+    return wrap(dispatch_to_CLong(self_));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -567,6 +585,7 @@ PyMethodDef variable_methods[] = {
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
+  {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"map2_", (PyCFunction)THPVariable_map2_, METH_VARARGS | METH_KEYWORDS, NULL},
