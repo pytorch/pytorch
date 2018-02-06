@@ -21,6 +21,7 @@ inputs = [
     'torch/csrc/generic/TensorMethods.cwrap',
     'torch/lib/tmp_install/share/ATen/Declarations.yaml',
     'tools/autograd/derivatives.yaml',
+    'tools/autograd/deprecated.yaml',
 ] + glob.glob('torch/csrc/generic/methods/*.cwrap')
 
 outputs = [

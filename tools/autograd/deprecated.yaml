@@ -4,6 +4,9 @@
 - name: add(Tensor self, Scalar alpha, Tensor other)
   aten: add(self, other, alpha)
 
+- name: add(Tensor self, Scalar alpha, Tensor other, *, Tensor out)
+  aten: add_out(out, self, other, alpha)
+
 - name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
   aten: addbmm(self, batch1, batch2, beta, alpha)
 
