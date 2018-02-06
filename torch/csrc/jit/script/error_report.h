@@ -43,10 +43,10 @@ const ErrorReport& operator<<(const ErrorReport& e, const T& t) {
   return e;
 }
 
-#define JIT_SCRIPT_ASSERT(ctx, cond)                                     \
-  if (!(cond)) {                                                         \
-    throw ::torch::jit::script::ErrorReport(ctx)                         \
-      << __FILE__ << ":" << __LINE__ << ": assertion failed: " << #cond; \
+#define JIT_SCRIPT_ASSERT(ctx, cond)                                       \
+  if (!(cond)) {                                                           \
+    throw ::torch::jit::script::ErrorReport(ctx)                           \
+        << __FILE__ << ":" << __LINE__ << ": assertion failed: " << #cond; \
   }
 } // namespace script
 } // namespace jit

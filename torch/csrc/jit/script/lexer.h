@@ -412,8 +412,7 @@ struct Lexer {
 
   [[noreturn]] void reportError(const std::string& what) {
     reportError(what, cur_);
-  }
-  [[noreturn]] void reportError(const std::string& what, const Token& t) {
+  }[[noreturn]] void reportError(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << what << ":\n";
     t.range.highlight(ss);
@@ -425,8 +424,7 @@ struct Lexer {
        << "' here:\n";
     t.range.highlight(ss);
     throw std::runtime_error(ss.str());
-  }
-  [[noreturn]] void expected(const std::string& what) {
+  }[[noreturn]] void expected(const std::string& what) {
     expected(what, cur_);
   }
   Token expect(int kind) {

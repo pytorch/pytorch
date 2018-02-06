@@ -1,6 +1,6 @@
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/script/parser.h"
 
 namespace torch {
 namespace jit {
@@ -31,8 +31,7 @@ using ValueTable = std::unordered_map<std::string, Value*>;
 
 struct DefCompiler {
   DefCompiler(FunctionDefinition& def, FunctionTable& function_table)
-      : def(def),
-        function_table(function_table) {}
+      : def(def), function_table(function_table) {}
 
   // populate def->graph
   std::vector<Value*> run() {
@@ -45,9 +44,9 @@ struct DefCompiler {
 
     std::vector<Value*> output_values{};
     for (auto output : tree.returns()) {
-        auto* value = lookup(output.ident());
-        def.graph->registerOutput(value);
-        output_values.push_back(value);
+      auto* value = lookup(output.ident());
+      def.graph->registerOutput(value);
+      output_values.push_back(value);
     }
     return output_values;
   }
@@ -76,15 +75,13 @@ struct DefCompiler {
     }
   }
   void emitIf(const If& stmt) {
-      // TODO: add support for control flow ops
-      throw ErrorReport(stmt)
-          << "Control flow is not supported yet.";
+    // TODO: add support for control flow ops
+    throw ErrorReport(stmt) << "Control flow is not supported yet.";
   }
 
   void emitWhile(const While& stmt) {
-      // TODO: add support for control flow ops
-      throw ErrorReport(stmt)
-          << "Control flow is not supported yet.";
+    // TODO: add support for control flow ops
+    throw ErrorReport(stmt) << "Control flow is not supported yet.";
   }
 
   void emitExpressionStatement(TreeRef stmt) {
@@ -193,23 +190,22 @@ struct DefCompiler {
     std::vector<Value*> inputs = getValues(apply.inputs());
 
     std::unordered_map<Value*, Value*> value_table;
-    auto value_map = [&](Value * v) {
-        return value_table.at(v);
-    };
+    auto value_map = [&](Value* v) { return value_table.at(v); };
     for (size_t i = 0; i < inputs.size(); ++i) {
-        value_table[fn.graph->inputs()[i]] = inputs[i];
+      value_table[fn.graph->inputs()[i]] = inputs[i];
     }
     for (auto* node : fn.graph->nodes()) {
-        auto* new_node = def.graph->appendNode(def.graph->createClone(node, value_map));
-        for (size_t i = 0; i < node->outputs().size(); ++i) {
-            value_table[node->outputs()[i]] = new_node->outputs()[i];
-            new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
-        }
+      auto* new_node =
+          def.graph->appendNode(def.graph->createClone(node, value_map));
+      for (size_t i = 0; i < node->outputs().size(); ++i) {
+        value_table[node->outputs()[i]] = new_node->outputs()[i];
+        new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
+      }
     }
 
     std::vector<Value*> outputs{};
-    for(auto* output : fn.graph->outputs()) {
-        outputs.push_back(value_map(output));
+    for (auto* output : fn.graph->outputs()) {
+      outputs.push_back(value_map(output));
     }
     return outputs;
     // TODO: Add support for function call
@@ -261,34 +257,33 @@ struct DefCompiler {
 
           std::unordered_map<std::string, TreeRef> attributes{};
           for (const auto& attr : apply.attributes()) {
-              attributes[attr.name().name()] = attr.value();
+            attributes[attr.name().name()] = attr.value();
           }
           return emitNode(kind, inputs, attributes, output_size);
         }
       } break;
       case TK_CAST: {
         const auto cast = Cast(tree);
-        return emitCast(cast.input(),
-                        cast.type());
+        return emitCast(cast.input(), cast.type());
       } break;
       case TK_CONST: {
-        return emitConst(tree->tree(0)->doubleValue(),
-                         tree->tree(1)->stringValue());
+        return emitConst(
+            tree->tree(0)->doubleValue(), tree->tree(1)->stringValue());
       } break;
       case TK_SLICE: {
         const auto slice = Slice(tree);
-        return emitSlice(slice.range(),
-                         {slice.value(), slice.startOr(0), slice.endOr(-1)},
-                         output_size);
+        return emitSlice(
+            slice.range(),
+            {slice.value(), slice.startOr(0), slice.endOr(-1)},
+            output_size);
       } break;
       case TK_GATHER: {
         const auto gather = Gather(tree);
-        return emitGather(gather.range(),
-                          {gather.value(), gather.indices()},
-                          output_size);
+        return emitGather(
+            gather.range(), {gather.value(), gather.indices()}, output_size);
       } break;
       case '.':
-          // TODO: add support for "."
+        // TODO: add support for "."
       case TK_IF_EXPR:
         // TODO: add support for conditional
       default:
@@ -298,90 +293,96 @@ struct DefCompiler {
   }
 
   std::vector<Value*> emitCast(const TreeRef& input, const int type) {
-      // TODO: add support for conditional
-      return {};
+    // TODO: add support for conditional
+    return {};
   }
 
   std::vector<Value*> emitConst(const double val, const std::string& type) {
-      if (type == "f") {
-          return {createConstant(at::CPU(at::kFloat).scalarTensor(val))};
-      } else if (type == "LL") {
-          return {createConstant(at::CPU(at::kLong).scalarTensor(val))};
-      } else if (type == "b") {
-          return {createConstant(at::CPU(at::kByte).scalarTensor(val))};
-      } else if (type == "i") {
-          return {createConstant(at::CPU(at::kInt).scalarTensor(val))};
-      } else {
-        throw std::runtime_error("unknown const type " + type);
-      }
+    if (type == "f") {
+      return {createConstant(at::CPU(at::kFloat).scalarTensor(val))};
+    } else if (type == "LL") {
+      return {createConstant(at::CPU(at::kLong).scalarTensor(val))};
+    } else if (type == "b") {
+      return {createConstant(at::CPU(at::kByte).scalarTensor(val))};
+    } else if (type == "i") {
+      return {createConstant(at::CPU(at::kInt).scalarTensor(val))};
+    } else {
+      throw std::runtime_error("unknown const type " + type);
+    }
   }
 
-  std::vector<Value*> emitNode(NodeKind kind,
-                               const std::vector<Value*> inputs,
-                               const std::unordered_map<std::string, TreeRef>& attributes,
-                               const size_t output_size) {
-      Node * n = def.graph->appendNode(def.graph->create(kind, output_size));
-      for (auto* input_value : inputs) {
-          n->addInput(input_value);
-      }
-      for (const auto& iter : attributes) {
-          const auto& name = Symbol(iter.first);
-          const auto& value = iter.second;
-          // TODO: handle non-float attributes
-          switch (value->kind()) {
-          case TK_CONST: {
-              auto v = value->tree(0)->doubleValue();
-              auto type = value->tree(1)->stringValue();
-              if (type == "f") {
-                  n->f_(name, v);
-              } else {
-                  n->i_(name, v);
-              }
-          } break;
-          case TK_LIST:
-              if (value->trees().size()) {
-                  std::vector<double> values{};
-                  for (const auto& tree : value->trees()) {
-                      values.push_back(tree->tree(0)->doubleValue());
-                  }
-                  if (value->trees()[0]->tree(1)->stringValue() == "f") {
-                      n->fs_(name, std::move(values));
-                  } else {
-                      n->is_(name, std::vector<int64_t>(values.begin(), values.end()));
-                  }
-              }
-              break;
+  std::vector<Value*> emitNode(
+      NodeKind kind,
+      const std::vector<Value*> inputs,
+      const std::unordered_map<std::string, TreeRef>& attributes,
+      const size_t output_size) {
+    Node* n = def.graph->appendNode(def.graph->create(kind, output_size));
+    for (auto* input_value : inputs) {
+      n->addInput(input_value);
+    }
+    for (const auto& iter : attributes) {
+      const auto& name = Symbol(iter.first);
+      const auto& value = iter.second;
+      // TODO: handle non-float attributes
+      switch (value->kind()) {
+        case TK_CONST: {
+          auto v = value->tree(0)->doubleValue();
+          auto type = value->tree(1)->stringValue();
+          if (type == "f") {
+            n->f_(name, v);
+          } else {
+            n->i_(name, v);
           }
+        } break;
+        case TK_LIST:
+          if (value->trees().size()) {
+            std::vector<double> values{};
+            for (const auto& tree : value->trees()) {
+              values.push_back(tree->tree(0)->doubleValue());
+            }
+            if (value->trees()[0]->tree(1)->stringValue() == "f") {
+              n->fs_(name, std::move(values));
+            } else {
+              n->is_(name, std::vector<int64_t>(values.begin(), values.end()));
+            }
+          }
+          break;
       }
-      return n->outputs();
+    }
+    return n->outputs();
   }
 
-  // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin, end).
-  std::vector<Value*> emitSlice(const SourceRange& range,
-                                TreeList&& inputs,
-                                const size_t output_size) {
+  // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
+  // end).
+  std::vector<Value*> emitSlice(
+      const SourceRange& range,
+      TreeList&& inputs,
+      const size_t output_size) {
     const auto applyInputs =
         Compound::create(TK_LIST, range, std::move(inputs));
     const auto applyAttributes = Compound::create(TK_LIST, range, {});
 
-    return emitNode(Symbol("slice"), getValues(applyInputs->trees()), {}, output_size);
+    return emitNode(
+        Symbol("slice"), getValues(applyInputs->trees()), {}, output_size);
   }
 
   // Desugars gather syntactic sugar tensor[indices] -> tensor.gather(indices).
-  std::vector<Value*> emitGather(const SourceRange& range,
-                                TreeList&& inputs,
-                                const size_t output_size) {
+  std::vector<Value*> emitGather(
+      const SourceRange& range,
+      TreeList&& inputs,
+      const size_t output_size) {
     const auto applyInputs =
         Compound::create(TK_LIST, range, std::move(inputs));
     const auto applyAttributes = Compound::create(TK_LIST, range, {});
-    return emitNode(Symbol("gather"), getValues(applyInputs->trees()), {}, output_size);
+    return emitNode(
+        Symbol("gather"), getValues(applyInputs->trees()), {}, output_size);
   }
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
   ValueTable value_table;
 
-private:
+ private:
   Value* createConstant(const at::Tensor& val) {
     return def.graph->appendNode(def.graph->createConstant(val))->output();
   }
@@ -425,18 +426,16 @@ void CompilationUnit::define(const std::string& script) {
   return pImpl->define(script);
 }
 
-const Graph& CompilationUnit::getGraph(
-    const std::string& func_name) {
+const Graph& CompilationUnit::getGraph(const std::string& func_name) {
   return pImpl->getGraph(func_name);
 }
 
 CompilationUnit::~CompilationUnit() {}
 
-
 std::unique_ptr<CompilationUnit> jitScriptCompile(const std::string& script) {
-    std::unique_ptr<CompilationUnit> cu{new CompilationUnit};
-    cu->define(script);
-    return cu;
+  std::unique_ptr<CompilationUnit> cu{new CompilationUnit};
+  cu->define(script);
+  return cu;
 }
 
 } // namespace script

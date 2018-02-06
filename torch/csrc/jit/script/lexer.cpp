@@ -25,4 +25,4 @@ SharedParserData& sharedParserData() {
 }
 } // namespace script
 } // namespace jit
-} // torch
+} // namespace torch
