@@ -154,6 +154,42 @@ PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
   return info;  // RVO
 }
 
+PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
+                                  std::string arg_types,
+                                  at::ArrayRef<Variable> inputs,
+                                  pyobj_list scalar_args) {
+  PreTraceInfo info;
+  info.state = getTracingState(inputs);
+  auto& graph = info.state->graph;
+  auto state_lock = info.state->lock();
+
+  std::vector<VariableFlags> var_flags(inputs.size());
+  for (size_t i = 0; i < inputs.size(); i++) {
+    var_flags[i] = VariableFlags::of(inputs[i]);
+  }
+
+  const bool is_legacy = false;
+  Node *n = graph->createPythonOp(
+      std::move(pyobj),
+      arg_types,
+      is_legacy,
+      std::move(var_flags),
+      std::move(scalar_args));
+  auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
+  n->setSourceLocation(sl);
+
+  for (Variable input : inputs) {
+    n->addInput(getValueTrace(info.state, input));
+  }
+
+  // NB: Order matters. This must append after inputs but before outputs.
+  graph->appendNode(n);
+
+  info.n = n;
+
+  return info;
+}
+
 void postRecordTrace(const PreTraceInfo& info,
                      at::ArrayRef<Variable> outputs) {
   // TODO: Technically, we could reduce the scope of the lock, but since we

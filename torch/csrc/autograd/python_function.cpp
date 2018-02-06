@@ -531,27 +531,21 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
-static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
-        PyObject *input_objects, PyObject *output_objects,
-        const variable_list& input_vars, bool is_inplace) {
-  if (!tracer::isTracingVar(input_vars))
-    return;
-
-  if (!op_obj) {
+static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
+  if (tracer::isTracingVar(input_vars)) {
     std::ostringstream oss;
-    oss << "Attempted to trace " << Py_TYPE(bw_obj)->tp_name;
+    oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
     throw std::runtime_error(oss.str());
   }
+}
 
-  auto tracing_state = tracer::getTracingState(input_vars);
-  bw_obj->is_traced = true;
-
-  // Isolate C variable ptrs in a vector
-  variable_list output_vars;
-  for (int i = 0; i < PyTuple_GET_SIZE(output_objects); ++i) {
-    THPVariable *var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
-    output_vars.emplace_back(var->cdata);
+static jit::tracer::PreTraceInfo _trace_pre_record(
+    PyObject* op_obj,
+    PyObject *input_objects,
+    const variable_list& input_vars) {
+  if (!tracer::isTracingVar(input_vars)) {
+    return jit::tracer::PreTraceInfo();
   }
 
   // Save scalar args and the calling convention
@@ -571,53 +565,37 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
     }
   }
 
-  auto state_lock = tracing_state->lock();
-
-  // Note [getValueTrace can allocate nodes]
-  // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  // When an input variable is not traced, we create a constant instruction
-  // to represent it.  This means that you must invoke getValueTrace() BEFORE
-  // actually constructing the function that takes these variables as inputs.
-  // If we do it the other order, the graph will be in the wrong topological
-  // order.
-
-  // See Note [getValueTrace can allocate nodes]
-  std::vector<Value*> value_traces;
-  std::vector<VariableFlags> var_flags;
-  value_traces.reserve(input_vars.size());
-  for (auto& i : input_vars) {
-    value_traces.emplace_back(tracer::getValueTrace(tracing_state, i));
-    var_flags.push_back(VariableFlags::of(i));
-  }
-
-  // NB: this function is called only from THPFunction_apply, which is used only
-  // when computing forward. All these functions are non-traceable by definition,
-  // because they are implemented in terms of tensor operations. Hence, there's no
-  // need for any conditionals in here and we can always create the node.
-
-  // Construct the IR Node and its Selects
   Py_INCREF(op_obj);
-  auto& graph = tracing_state->graph;
-  auto this_expr = graph->appendNode(graph->createPythonOp(
-    THPObjectPtr(op_obj),
-    arg_types,
-    false, // TODO: remove is_legacy
-    std::move(var_flags),
-    std::move(scalar_args)));
-  for (auto t : value_traces)
-    this_expr->addInput(t);
+  auto pyobj = THPObjectPtr(op_obj);
+  return jit::tracer::preRecordPythonTrace(
+    std::move(pyobj),
+    std::move(arg_types),
+    input_vars,
+    std::move(scalar_args));
+}
 
-  int num_outputs = output_vars.size();
-  for (int i = 0; i < num_outputs; ++i) {
-    auto& output = output_vars[i];
-    // NOTE: normally we don't add Select nodes when there's only a single
-    // output, but Python nodes can't be optimized away, so we simplify the
-    // code here.
-    auto sel = this_expr->addOutput();
-    sel->inferTypeFrom(output.data());
-    tracer::setValueTrace(tracing_state, output, sel);
+static void _trace_post_record(
+    const jit::tracer::PreTraceInfo& trace_info,
+    PyObject* op_obj,
+    const variable_list& input_vars,
+    PyObject *output_objects,
+    bool is_inplace) {
+  if (!trace_info.state) {
+    return;
   }
-  this_expr->i_(kinplace, is_inplace);
+
+  // Isolate C variable ptrs in a vector
+  int num_outputs = PyTuple_GET_SIZE(output_objects);
+  variable_list output_vars(num_outputs);
+  for (int i = 0; i < num_outputs; ++i) {
+    auto var = (THPVariable*)PyTuple_GET_ITEM(output_objects, i);
+    output_vars[i] = var->cdata;
+  }
+
+  jit::tracer::postRecordTrace(trace_info, output_vars);
+
+  auto state_lock = trace_info.state->lock();
+  trace_info.n->i_(kinplace, is_inplace);
 
   // See definition in function.cpp.
   THPObjectPtr passes_py_bool {PyObject_GetAttrString(op_obj, "is_traceable")};
@@ -627,13 +605,15 @@ static void _trace_create(PyObject* op_obj, THPFunction* bw_obj,
   // tracing_state->in_eval_subgraph (it's always false, because they are never part of backward
   // subgraphs AND we don't even materialize the forward function).
   if (!passes_state_transparently) {
+    // TODO: sgross and ezyang don't know if this is right
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
-    Function::setUpContextEdge(this_expr, input_vars, output_vars);
+    Function::setUpContextEdge(trace_info.n, input_vars, output_vars);
   }
 }
 
 PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const UnpackedInput& unpacked,
-                          PyObject *inputs, THPObjectPtr&& raw_output, bool is_executable) {
+                          PyObject *inputs, THPObjectPtr&& raw_output, bool is_executable,
+                          const jit::tracer::PreTraceInfo& trace_info) {
   bool unpack_output = ensure_tuple(raw_output);
 
   auto num_outputs = PyTuple_GET_SIZE(raw_output.get());
@@ -654,12 +634,12 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  // NOTE: _trace_create has to run before _save_variables, because we need
+  // NOTE: _trace_post_record has to run before _save_variables, because we need
   // to assign traces to outputs before we convert them to SavedVariables.
   // On the other hand, it needs to go after _mark_non_differentiable, because
   // it might be wraping backwards in Evals, and _mark_non_differentiable uses
   // grad_fn pointer equality for error checking.
-  _trace_create(op_obj, grad_fn, inputs, outputs, unpacked.input_vars, is_inplace);
+  _trace_post_record(trace_info, op_obj, unpacked.input_vars, outputs, is_inplace);
   if (is_executable) {
     _save_variables(grad_fn);
   } else {
@@ -693,6 +673,9 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   self->cdata.set_next_functions(std::move(input_info.next_functions));
   self->needs_input_grad = input_info.needs_input_grad.release();
 
+  // We don't support tracing in the legacy code path
+  _assert_not_tracing(Py_TYPE(self)->tp_name, unpacked_input.input_vars);
+
   // Now we're ready to call a forward (implemented in Python)
   AutoGradMode grad_mode(false);
   THPObjectPtr forward_fn(PyObject_GetAttrString((PyObject*)self, "forward"));
@@ -701,7 +684,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   if (!raw_output) return NULL;
 
   return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output),
-                         is_executable);
+                         is_executable, jit::tracer::PreTraceInfo());
   END_HANDLE_TH_ERRORS
 }
 
@@ -720,6 +703,13 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   auto info_pair = unpack_input<false>(inputs);
   UnpackedInput& unpacked_input = info_pair.first;
   InputFlags& input_info = info_pair.second;
+
+  // Record input nodes if tracing
+  auto trace_info = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
+  if (trace_info.state) {
+    // TODO: ezyang suggests this is unused and can be removed
+    ctx->is_traced = true;
+  }
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
@@ -745,7 +735,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   if (!tensor_outputs) return NULL;
 
   return process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
-                         is_executable);
+                         is_executable, trace_info);
   END_HANDLE_TH_ERRORS
 }
 

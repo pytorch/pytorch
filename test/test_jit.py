@@ -560,7 +560,6 @@ class TestJit(TestCase):
         torch._C._tracer_exit((y,))
         self.assertExpectedTrace(trace)
 
-    @unittest.expectedFailure
     def test_inplace_flags(self):
         class InplaceFn(Function):
             @staticmethod
@@ -592,6 +591,7 @@ class TestJit(TestCase):
             return y
         y = fn(*inputs)
         torch._C._tracer_exit((y,))
+        torch._C._jit_pass_dce(trace)
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
