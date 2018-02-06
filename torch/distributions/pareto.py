@@ -29,10 +29,6 @@ class Pareto(TransformedDistribution):
 
     def __init__(self, scale, alpha):
         self.scale, self.alpha = broadcast_all(scale, alpha)
-        if isinstance(scale, Number) and isinstance(alpha, Number):
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self.scale.size()
         base_dist = Exponential(alpha)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=scale)]
         super(Pareto, self).__init__(base_dist, transforms)
