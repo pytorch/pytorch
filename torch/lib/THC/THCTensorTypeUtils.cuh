@@ -51,6 +51,11 @@ struct TensorUtils {
                          TENSOR_TYPE* src);                             \
     static void squeeze1d(THCState *state, TENSOR_TYPE *dst,            \
                           TENSOR_TYPE *src, int dimension);             \
+    static void unsqueeze1d(THCState *state, TENSOR_TYPE *dst,          \
+                          TENSOR_TYPE *src, int dimension);             \
+    static void preserveReduceDimSemantics(                             \
+                          THCState *state, TENSOR_TYPE *tensor,         \
+                          int in_dims, int64_t dimension, int keepdim); \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
     static ptrdiff_t getNumElements(THCState* state, TENSOR_TYPE* t);   \
     static int64_t getSize(THCState* state, TENSOR_TYPE* t, int dim);   \
