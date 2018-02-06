@@ -1472,7 +1472,7 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
-    return _functions.loss.HingeEmbeddingLoss.apply(input, target, margin, size_average)
+    return torch._C._VariableFunctions.hinge_embedding_loss(input, target, margin, size_average)
 
 
 multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""
