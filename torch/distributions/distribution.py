@@ -73,7 +73,8 @@ class Distribution(object):
         samples if the distribution parameters are batched.
         """
         with torch.no_grad():
-            return self.rsample(sample_shape)
+            x = self.rsample(sample_shape)
+        return x.detach() if hasattr(x, 'detach') else x
 
     def rsample(self, sample_shape=torch.Size()):
         """
