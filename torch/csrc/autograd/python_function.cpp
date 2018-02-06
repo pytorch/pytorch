@@ -305,7 +305,7 @@ using t2var_type = std::unordered_map<PyObject *, THPVariable *>;
 
 // Bump the counters of all recorded dirty input tensors, adding each of them
 // into dirty_inputs.  Also does some sanity checking.
-static std::vector<PyObject*> _parse_dirty_inputs(THPFunction *self)
+static std::vector<PyObject*> _mark_dirty(THPFunction *self)
 {
   // Increase versions of modified tensors
   std::vector<PyObject*> dirty_inputs;
@@ -360,7 +360,7 @@ static void _wrap_outputs(THPFunction *self,
   }
 
   auto non_differentiable = _parse_non_differentiable(self);
-  auto dirty_inputs = _parse_dirty_inputs(self);
+  auto dirty_inputs = _mark_dirty(self);
 
   auto as_variable = [&](PyObject* obj, int i) -> Variable {
     if (THPVariable_Check(obj)) {
@@ -413,6 +413,8 @@ static void _wrap_outputs(THPFunction *self,
     bool is_modified = std::find(dirty_inputs.begin(), dirty_inputs.end(), obj) != dirty_inputs.end();
     bool is_non_differentiable = non_differentiable.count(obj) > 0;
 
+    // Note that output Variables may be repeated. In that case, the last call
+    // to set_history wins.
     auto var = as_variable(obj, i);
     set_history(var, i, is_input, is_modified, is_non_differentiable);
 

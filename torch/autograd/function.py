@@ -41,7 +41,8 @@ class _ContextMethodMixin(object):
     def mark_shared_storage(self, *pairs):
         warnings.warn(
             'mark_shared_storage is deprecated. '
-            'Tensors with shared storages are automatically tracked')
+            'Tensors with shared storages are automatically tracked. Note '
+            'that calls to `set_()` are not tracked')
 
     def mark_non_differentiable(self, *args):
         """Marks outputs as non-differentiable.
