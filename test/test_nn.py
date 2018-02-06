@@ -4857,7 +4857,7 @@ def softmarginloss_no_reduce_test():
             lambda i: F.soft_margin_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.randn(10),
         reference_fn=lambda i, _:
-            loss_reference_fns['SoftMarginLoss'](i, t.data.type_as(i), reduce=False),
+            loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduce=False),
         check_no_size_average=True,
         pickle=False)
 
