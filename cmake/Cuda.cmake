@@ -157,7 +157,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   endif()
 endif()
 
-find_package(CUDA 7.0 QUIET)
+find_package(CUDA 7.0)
 
 if(NOT CUDA_FOUND)
   return()
