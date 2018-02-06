@@ -458,10 +458,6 @@ def group_declarations(declarations):
 
 
 def get_python_signature(declaration, include_out):
-    # Use the saved signature for deprecated pseudo-declarations
-    if 'python_signature' in declaration:
-        return declaration['python_signature']
-
     # Compute the Python function signature for argument parsing
     typed_args = []
     output_args = []
