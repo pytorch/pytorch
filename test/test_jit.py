@@ -1298,42 +1298,42 @@ class TestJit(TestCase):
         self.assertEqual(g2result, g2result2)
 
     def test_script_add(self):
-        cu = torch.jit.jit_script('''
+        cu = torch.jit._jit_script_compile('''
         def add(a, b) -> (c):
             c = a + b
         ''')
         self.assertExpected(str(cu.get_graph('add')))
 
     def test_script_mul(self):
-        cu = torch.jit.jit_script('''
+        cu = torch.jit._jit_script_compile('''
         def mul(a, x) -> (y):
             y = a * x
         ''')
         self.assertExpected(str(cu.get_graph('mul')))
 
     def test_script_triple(self):
-        cu = torch.jit.jit_script('''
+        cu = torch.jit._jit_script_compile('''
         def triple(x) -> (y):
             y = 3LL * x
         ''')
         self.assertExpected(str(cu.get_graph('triple')))
 
     def test_script_slice(self):
-        cu = torch.jit.jit_script('''
+        cu = torch.jit._jit_script_compile('''
         def head(x) -> (head):
             head = x[:5]
         ''')
         self.assertExpected(str(cu.get_graph('head')))
 
     def test_script_gather(self):
-        cu = torch.jit.jit_script('''
+        cu = torch.jit._jit_script_compile('''
         def first(x) -> (y):
             y = x[0]
         ''')
         self.assertExpected(str(cu.get_graph('first')))
 
     def test_script_fc(self):
-        cu = torch.jit.jit_script('''
+        cu = torch.jit._jit_script_compile('''
         def add(a, b) -> (c):
             c = a + b
 

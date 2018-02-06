@@ -431,7 +431,3 @@ def _verify_equal(xs, ys):
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
-
-
-def jit_script(script):
-    return _jit_script_compile(script)

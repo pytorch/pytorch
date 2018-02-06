@@ -29,26 +29,19 @@ struct FunctionDefinition {
 using FunctionTable = std::unordered_map<std::string, FunctionDefinition>;
 using ValueTable = std::unordered_map<std::string, Value*>;
 
-struct DefCompiler {
-  DefCompiler(FunctionDefinition& def, FunctionTable& function_table)
-      : def(def), function_table(function_table) {}
-
-  // populate def->graph
-  std::vector<Value*> run() {
+struct to_ir {
+  to_ir(FunctionDefinition& def, FunctionTable& function_table)
+      : def(def), function_table(function_table) {
+    // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
       auto& name = input.ident().name();
-      map(name, def.graph->addInput(name));
+      setVar(name, def.graph->addInput(name));
     }
     emitStatements(tree.statements());
-
-    std::vector<Value*> output_values{};
     for (auto output : tree.returns()) {
-      auto* value = lookup(output.ident());
-      def.graph->registerOutput(value);
-      output_values.push_back(value);
+      def.graph->registerOutput(getVar(output.ident()));
     }
-    return output_values;
   }
   void emitStatements(const ListView<TreeRef>& statements) {
     for (auto stmt : statements) {
@@ -65,11 +58,11 @@ struct DefCompiler {
         case TK_GLOBAL:
           for (auto ident : stmt->trees()) {
             const auto& name = Ident(ident).name();
-            map(name, def.graph->addInput(name));
+            setVar(name, def.graph->addInput(name));
           }
           break;
         default:
-          emitExpressionStatement(stmt);
+          emitExpr(stmt, 0);
           break;
       }
     }
@@ -84,11 +77,6 @@ struct DefCompiler {
     throw ErrorReport(stmt) << "Control flow is not supported yet.";
   }
 
-  void emitExpressionStatement(TreeRef stmt) {
-    // expression with no used outputs
-    emit(stmt);
-  }
-
   std::vector<Value*> emitAssignment(const Assign& stmt) {
     std::vector<Value*> outputs{stmt.lhs().size()};
     if (stmt.reduction() != '=') {
@@ -100,30 +88,30 @@ struct DefCompiler {
       auto lhs = stmt.lhs()[0];
       auto expr =
           Compound::create(stmt.reduction(), stmt.range(), {lhs, stmt.rhs()});
-      outputs = emit(expr, 1);
+      outputs = emitExpr(expr, 1);
     } else {
-      outputs = emit(stmt.rhs(), stmt.lhs().size());
+      outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
     }
     int i = 0;
     for (auto ident : stmt.lhs()) {
       if (ident->kind() == TK_IDENT)
-        map(Ident(ident).name(), outputs.at(i));
+        setVar(Ident(ident).name(), outputs.at(i));
       i++;
     }
     return outputs;
   }
 
-  void map(const std::string& name, Value* value) {
+  void setVar(const std::string& name, Value* value) {
     value_table[name] = value;
   }
 
-  Value* lookup(const Ident& ident) {
+  Value* getVar(const Ident& ident) {
     if (value_table.count(ident.name()) == 0)
       throw ErrorReport(ident) << "undefined value " << ident.name();
     return value_table[ident.name()];
   }
 
-  NodeKind getKind(int kind, int ninputs) {
+  NodeKind getNodeKind(int kind, int ninputs) {
     switch (kind) {
       case '+':
         return kAdd;
@@ -159,26 +147,11 @@ struct DefCompiler {
     }
   }
 
-  Value* getValue(const TreeRef& tree) {
-    switch (tree->kind()) {
-      case TK_IDENT: {
-        return lookup(Ident(tree));
-      } break;
-      case '.': {
-        throw ErrorReport(tree) << "Not supported yet: " << tree;
-      } break;
-      default: {
-        const auto outputs = emit(tree, 1);
-        return outputs[0];
-      } break;
-    }
-  }
-
   template <typename Trees>
   std::vector<Value*> getValues(const Trees& trees) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
-      values.push_back(getValue(tree));
+      values.push_back(emitExpr(tree, 1)[0]);
     }
     return values;
   }
@@ -223,10 +196,13 @@ struct DefCompiler {
 
   // This will _always_ compute something, unlike 'getValue' which simply
   // returns an already computed reference if possible.
-  std::vector<Value*> emit(const TreeRef& tree, const size_t output_size = 0) {
+  std::vector<Value*> emitExpr(
+      const TreeRef& tree,
+      const size_t output_size = 0) {
     switch (tree->kind()) {
       case TK_IDENT: {
-        return {getValue(tree)};
+        expectOutputs(tree, output_size, 1);
+        return {getVar(Ident(tree))};
       } break;
       case TK_NE:
       case TK_EQ:
@@ -243,7 +219,7 @@ struct DefCompiler {
       case TK_NOT: {
         expectOutputs(tree, output_size, 1);
         const auto& inputs = tree->trees();
-        auto kind = getKind(tree->kind(), inputs.size());
+        auto kind = getNodeKind(tree->kind(), inputs.size());
         return emitNode(kind, getValues(inputs), {}, output_size);
       } break;
       case TK_APPLY: {
@@ -262,14 +238,17 @@ struct DefCompiler {
         }
       } break;
       case TK_CAST: {
+        expectOutputs(tree, output_size, 1);
         const auto cast = Cast(tree);
         return emitCast(cast.input(), cast.type());
       } break;
       case TK_CONST: {
+        expectOutputs(tree, output_size, 1);
         return emitConst(
             tree->tree(0)->doubleValue(), tree->tree(1)->stringValue());
       } break;
       case TK_SLICE: {
+        expectOutputs(tree, output_size, 1);
         const auto slice = Slice(tree);
         return emitSlice(
             slice.range(),
@@ -277,6 +256,7 @@ struct DefCompiler {
             output_size);
       } break;
       case TK_GATHER: {
+        expectOutputs(tree, output_size, 1);
         const auto gather = Gather(tree);
         return emitGather(
             gather.range(), {gather.value(), gather.indices()}, output_size);
@@ -395,9 +375,8 @@ struct CompilationUnitImpl {
       throw ErrorReport(def) << name << " already defined.";
     }
 
-    auto inserted = functions.emplace(name, FunctionDefinition{def});
-    DefCompiler compiler(inserted.first->second, functions);
-    compiler.run();
+    auto it = functions.emplace(name, FunctionDefinition{def}).first;
+    to_ir(it->second, functions);
   }
 
   void define(const std::string& script) {
@@ -415,7 +394,7 @@ struct CompilationUnitImpl {
   }
 
  private:
-  friend struct DefCompiler;
+  friend struct to_ir;
   FunctionTable functions;
 };
 
