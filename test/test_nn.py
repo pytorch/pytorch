@@ -49,15 +49,6 @@ type2prec = {'FloatTensor': 1e-5,
              'DoubleTensor': 1e-5,
              'HalfTensor': 1e-2}
 
-# Used for run the same test with different tensor types
-def repeat_test_for_types(dtypes):
-    def repeatHelper(f):
-        def callHelper(*args):
-            for dtype in dtypes:
-                f(*args, dtype=dtype)
-
-        return callHelper
-    return repeatHelper
 
 # WARNING: If you add a new top-level test case to this file, you MUST
 # update test/run_test.sh to list it, otherwise it will NOT be run in
@@ -111,11 +102,10 @@ class PackedSequenceTest(TestCase):
                 self.assertEqual(unpacked.type(), expected_type_str)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    @repeat_test_for_types(NO_HALF_TENSORTYPES)
-    # TODO(AILING): FIX THIS torch.HalfTensor object has no attribute random_
-    def test_cuda_mask(self, dtype=torch.FloatTensor):
-        cuda_type_str = 'torch.cuda.' + dtype.__name__
-        padded, lengths = self._padded_sequence(dtype)
+    def test_cuda_mask(self):
+        tensor_type = torch.FloatTensor
+        cuda_type_str = 'torch.cuda.FloatTensor'
+        padded, lengths = self._padded_sequence(tensor_type)
         packed = rnn_utils.pack_padded_sequence(padded, lengths)
         self.assertFalse(packed.is_cuda)
         packed = packed.cuda()
@@ -338,6 +328,17 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 
 class TestNN(NNTestCase):
+    # Used for run the same test with different tensor types
+    def repeat_test_for_types(dtypes):
+        def repeatHelper(f):
+            def callHelper(self, *args):
+                for dtype in dtypes:
+                    with self.subTest(dtype=dtype):
+                        f(self, *args, dtype=dtype)
+
+            return callHelper
+        return repeatHelper
+
     def _forward(self, module, input):
         with freeze_rng_state():
             return module(input)
@@ -1210,7 +1211,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    @unittest.skipIf(True, "TODO(AILING): FIX THIS https://github.com/pytorch/pytorch/issues/4752")
     def test_embedding_max_norm_cuda(self, dtype=torch.FloatTensor):
         embedding = nn.Embedding(22, 5, max_norm=1.0).type(dtype).cuda()
         # nn.Embedding only takes LongTensor as input
@@ -1343,7 +1343,7 @@ class TestNN(NNTestCase):
         if sparse:
             es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es_weight_grad, expected_grad_weight)
+        self.assertEqual(es.weight.grad.data, expected_grad_weight, type2prec[dtype.__name__])
 
         # check same example except as 2D (2 x 3)
         input = Variable(input.data.view(2, -1))
@@ -1355,7 +1355,7 @@ class TestNN(NNTestCase):
         if sparse:
             es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es_weight_grad, expected_grad_weight)
+        self.assertEqual(es.weight.grad.data, expected_grad_weight, type2prec[dtype.__name__])
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
@@ -1379,14 +1379,14 @@ class TestNN(NNTestCase):
             else:
                 ref_output = e(input).mean(1)
 
-            self.assertEqual(output, ref_output)
+            self.assertEqual(output, ref_output, type2prec[dtype.__name__])
 
             output.backward(grad_output)
             ref_output.backward(grad_output)
             es_weight_grad = es.weight.grad.data
             if sparse:
                 es_weight_grad = es.weight.grad.data.to_dense()
-            self.assertEqual(es_weight_grad, e.weight.grad.data)
+            self.assertEqual(es.weight.grad, e.weight.grad, type2prec[dtype.__name__])
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1458,9 +1458,7 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(False, 'mean', True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    #@repeat_test_for_types(ALL_TENSORTYPES)
-    @repeat_test_for_types(NO_HALF_TENSORTYPES)
-    # TODO(AILING): torch.HalfTensor' object has no attribute 'resize_as_'
+    @repeat_test_for_types(ALL_TENSORTYPES)
     def test_EmbeddingBag_cuda(self, dtype=torch.FloatTensor):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
@@ -1802,16 +1800,16 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_Conv2d_naive_groups(cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_Conv2d_naive_groups(dtype)
 
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_batchnorm_eval_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_batchnorm_eval(cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_batchnorm_eval(dtype)
 
     def test_batchnorm_simple_average(self):
         self._test_batchnorm_simple_average()
@@ -1826,8 +1824,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool1d_indices_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_maxpool_indices(1, dtype=cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_maxpool_indices(1, dtype=dtype)
 
     def test_MaxPool2d_indices(self):
         self._test_maxpool_indices(2)
@@ -1835,8 +1833,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool2d_indices_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_maxpool_indices(2, dtype=cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_maxpool_indices(2, dtype=dtype)
 
     def test_MaxPool3d_indices(self):
         self._test_maxpool_indices(3)
@@ -1844,8 +1842,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool3d_indices_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_maxpool_indices(3, dtype=cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_maxpool_indices(3, dtype=dtype)
 
     def test_AdaptiveMaxPool1d_indices(self):
         self._test_maxpool_indices(1, adaptive=True)
@@ -1853,8 +1851,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool1d_indices_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_maxpool_indices(1, adaptive=True, dtype=cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_maxpool_indices(1, adaptive=True, dtype=dtype)
 
     def test_AdaptiveMaxPool2d_indices(self):
         self._test_maxpool_indices(2, adaptive=True)
@@ -1862,8 +1860,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool2d_indices_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_maxpool_indices(2, adaptive=True, dtype=cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_maxpool_indices(2, adaptive=True, dtype=dtype)
 
     def test_AdaptiveMaxPool3d_indices(self):
         self._test_maxpool_indices(3, adaptive=True)
@@ -1871,8 +1869,8 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool3d_indices_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
-        self._test_maxpool_indices(3, adaptive=True, dtype=cuda_type)
+        dtype = getattr(torch.cuda, dtype.__name__)
+        self._test_maxpool_indices(3, adaptive=True, dtype=dtype)
 
     def _test_scatter(self, tensor):
         x = Variable(tensor, requires_grad=True)
@@ -2483,7 +2481,6 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
-        # TODO(AILING): Not necessary to repeat for all types?
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
         bias = Variable(torch.randn(1).half().cuda())
@@ -2499,7 +2496,6 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
-        # TODO(AILING): Not necessary repeat for all types?
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
         bias = Variable(torch.randn(1).half().cuda())
@@ -2532,8 +2528,6 @@ class TestNN(NNTestCase):
             self.assertEqual(conv1.bias.grad.data, conv2.bias.grad.data, prec=0.0)
             self.assertEqual(conv1.weight.grad.data, conv2.weight.grad.data, prec=0.0)
 
-    @unittest.skipIf(True, 'RuntimeError was raised instead of type error')
-    # TODO(AILING): FIX THIS
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
         self.assertRaises(TypeError, lambda: c(None))
@@ -2556,15 +2550,15 @@ class TestNN(NNTestCase):
             (1, 256, 80, 128),
             (1, 256, 120, 192),
         ]
-        cuda_type = getattr(torch.cuda, dtype.__name__)
+        dtype = getattr(torch.cuda, dtype.__name__)
 
         def run_test(benchmark):
             with torch.backends.cudnn.flags(benchmark=benchmark):
-                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).type(cuda_type)
+                conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1).type(dtype)
                 for size in sizes:
-                    x = torch.randn(size).type(cuda_type)
+                    x = torch.randn(size).type(dtype)
                     out = conv(Variable(x, requires_grad=True))
-                    out.backward(torch.ones(out.size()).type(cuda_type))
+                    out.backward(torch.ones(out.size()).type(dtype))
 
         run_test(benchmark=False)
         run_test(benchmark=True)
@@ -2658,7 +2652,6 @@ class TestNN(NNTestCase):
     def test_Conv2d_groups_nobias(self):
         types = (torch.FloatTensor,)
         if TEST_CUDA:
-            #TODO(AILING): Is half test necessary here? change this test?
             types += (torch.cuda.FloatTensor, torch.cuda.HalfTensor)
         for tp in types:
             m = nn.Conv2d(4, 4, kernel_size=3, groups=2, bias=False).type(tp)
@@ -2692,24 +2685,24 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_depthwise_naive_groups(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
+        dtype = getattr(torch.cuda, dtype.__name__)
         for depth_multiplier in [1, 2]:
-            m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(cuda_type)
-            i = Variable(torch.randn(2, 2, 6, 6).type(cuda_type) / 2, requires_grad=True)
+            m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(dtype)
+            i = Variable(torch.randn(2, 2, 6, 6).type(dtype) / 2, requires_grad=True)
             output = m(i)
-            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(cuda_type) / 2
+            grad_output = torch.randn(2, 2 * depth_multiplier, 4, 4).type(dtype) / 2
             output.backward(grad_output)
 
             offset = 1 * depth_multiplier
 
-            m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(cuda_type)
+            m1 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(dtype)
             m1.weight.data = m.weight.data[:offset].clone()
             m1.bias.data = m.bias.data[:offset].clone()
             i1 = Variable(i.data[:, :1].contiguous(), requires_grad=True)
             output1 = m1(i1)
             output1.backward(grad_output[:, :offset].contiguous())
 
-            m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(cuda_type)
+            m2 = nn.Conv2d(1, 1 * depth_multiplier, kernel_size=3).type(dtype)
             m2.weight.data.copy_(m.weight.data[offset:])
             m2.bias.data.copy_(m.bias.data[offset:])
             i2 = Variable(i.data[:, 1:].contiguous(), requires_grad=True)
@@ -3013,17 +3006,15 @@ class TestNN(NNTestCase):
 
         self.assertEqual(x_leaf.grad.data, grad_x)
         for p1, p2 in zip(lstm.parameters(), lstm2.parameters()):
-            self.assertEqual(p1.grad, p2.grad)
+            self.assertEqual(p1.grad, p2.grad, type2prec[dtype.__name__])
 
     def test_variable_sequence(self):
         self._test_variable_sequence(False)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @repeat_test_for_types(NO_HALF_TENSORTYPES)
-    #@repeat_test_for_types(ALL_TENSORTYPES)
-    # TODO(AILING): FIX THIS clone is not implemented for type torch.HalfTensor
+    @repeat_test_for_types(ALL_TENSORTYPES)
     def test_variable_sequence_cuda(self, dtype=torch.FloatTensor):
-        cuda_type = getattr(torch.cuda, dtype.__name__)
+        dtype = getattr(torch.cuda, dtype.__name__)
         self._test_variable_sequence(True, dtype)
 
     def test_LSTM_cell(self):
@@ -3122,6 +3113,7 @@ class TestNN(NNTestCase):
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_cuda_rnn_fused(self, dtype=torch.FloatTensor):
         dtype = getattr(torch.cuda, dtype.__name__)
+
         def copy_rnn(rnn1, rnn2):
             for x_layer, y_layer in zip(rnn1.all_weights, rnn2.all_weights):
                 for x, y in zip(x_layer, y_layer):
@@ -4310,14 +4302,15 @@ class TestNN(NNTestCase):
         gradcheck(lambda i, w, b, pad: F.conv_tbc(i, w, b, pad), (inp, weight, bias, 3))
 
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
-                                  inp_size, dilation, no_weight, groups=1, use_cuda=False, use_bias=True, dtype=torch.DoubleTensor):
+                                  inp_size, dilation, no_weight, groups=1, use_cuda=False,
+                                  use_bias=True, dtype=torch.DoubleTensor):
         tensor = torch.Tensor(1)
         if use_cuda:
             tensor = tensor.cuda()
 
         x = Variable(tensor.new(batch_size, chan_in, inp_size, inp_size).type(dtype), requires_grad=True)
         x.data.normal_()
-        weight = Variable(tensor.new(chan_out, chan_in // groups, kern, kern).type(dtype), requires_grad=True)
+        weight = Variable(tensor.new(chan_out, chan_in // groups, kern, kern).type(dtype), requires_grad=not no_weight)
         weight.data.normal_()
         if use_bias:
             bias = Variable(tensor.new(chan_out).type(dtype), requires_grad=True)
@@ -4326,31 +4319,20 @@ class TestNN(NNTestCase):
             bias = None
 
         def func(*inputs):
-            if no_weight:
-                lweight = weight
-                if use_bias:
-                    lx, lbias = inputs
-                else:
-                    lx, = inputs
-                    lbias = None
+            if use_bias:
+                lx, lweight, lbias = inputs
             else:
-                if use_bias:
-                    lx, lweight, lbias = inputs
-                else:
-                    lx, lweight = inputs
-                    lbias = None
+                lx, lweight = inputs
+                lbias = None
             # We disable cudnn during forward to avoid finite difference imprecision issues
             with cudnn.flags(enabled=False):
                 out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
-        if no_weight:
-            inputs = (x, bias)
+        if use_bias:
+            inputs = x, weight, bias
         else:
-            inputs = (x, weight, bias)
-
-        if not use_bias:
-            inputs = inputs[:-1]
+            inputs = x, weight
 
         dummy_out = func(*inputs)
         grad_y = Variable(tensor.new(dummy_out.size()).type(dtype), requires_grad=True)
@@ -4363,21 +4345,21 @@ class TestNN(NNTestCase):
         for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
-                no_weight = False
-                result = self.run_conv_double_back_test(kern, stride,
-                                                        padding, chan_in, chan_out,
-                                                        batch_size, inp_size, dilation,
-                                                        no_weight)
-                self.assertTrue(result,
-                                "Conv double backward test failed with parameters:" +
-                                "\nkern: " + str(kern) +
-                                "\nstride: " + str(stride) +
-                                "\npadding: " + str(padding) +
-                                "\nchan_in: " + str(chan_in) +
-                                "\nchan_out: " + str(chan_out) +
-                                "\nbatch_size: " + str(batch_size) +
-                                "\ninp_size: " + str(inp_size) +
-                                "\ndilation: " + str(dilation))
+                for no_weight in (True, False):
+                    result = self.run_conv_double_back_test(kern, stride,
+                                                            padding, chan_in, chan_out,
+                                                            batch_size, inp_size, dilation,
+                                                            no_weight)
+                    self.assertTrue(result,
+                                    "Conv double backward test failed with parameters:" +
+                                    "\nkern: " + str(kern) +
+                                    "\nstride: " + str(stride) +
+                                    "\npadding: " + str(padding) +
+                                    "\nchan_in: " + str(chan_in) +
+                                    "\nchan_out: " + str(chan_out) +
+                                    "\nbatch_size: " + str(batch_size) +
+                                    "\ninp_size: " + str(inp_size) +
+                                    "\ndilation: " + str(dilation))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -4454,8 +4436,8 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(DOUBLE_TENSORTYPES)
-    # TODO(AILING): Float and half, larger prec?
     def test_conv_double_backward_cuda(self, dtype=torch.FloatTensor):
+        # Double backward only runs with DoubleTensor due to precison reason
         dtype = getattr(torch.cuda, dtype.__name__)
         batch_size = 1
         for kern, inp_size, dilations in [(3, 5, [1, 2]), (4, 9, [1])]:
@@ -6414,6 +6396,8 @@ new_module_tests = [
         constructor_args=(None, 4, 'trilinear'),
         input_size=(1, 2, 4, 4, 4),
         desc='trilinear_scale_3d',
+        # See https://github.com/pytorch/pytorch/issues/5006
+        precision=3e-4,
     ),
     dict(
         module_name='AdaptiveMaxPool1d',
