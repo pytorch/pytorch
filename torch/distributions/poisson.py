@@ -51,7 +51,8 @@ class Poisson(ExponentialFamily):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        return _poisson(self.rate.expand(shape)).detach()
+        x = _poisson(self.rate.expand(shape))
+        return x.detach() if hasattr(x, 'detach') else x
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
