@@ -142,13 +142,6 @@ void THSetDefaultArgErrorHandler(THArgErrorHandlerFunction new_handler, void *da
 
 static __thread void (*torchGCFunction)(void *data) = NULL;
 static __thread void *torchGCData;
-static ptrdiff_t heapSize = 0;
-static __thread ptrdiff_t heapDelta = 0;
-static const ptrdiff_t heapMaxDelta = (ptrdiff_t)1e6; // limit to +/- 1MB before updating heapSize
-static const ptrdiff_t heapMinDelta = (ptrdiff_t)-1e6;
-static __thread ptrdiff_t heapSoftmax = (ptrdiff_t)3e8; // 300MB, adjusted upward dynamically
-static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
-static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
 
 /* Optional hook for integrating with a garbage-collected frontend.
  *
@@ -177,36 +170,6 @@ static ptrdiff_t getAllocSize(void *ptr) {
 #else
   return 0;
 #endif
-}
-
-static ptrdiff_t applyHeapDelta() {
-  ptrdiff_t oldHeapSize = THAtomicAddPtrdiff(&heapSize, heapDelta);
-#ifdef DEBUG
-  if (heapDelta > 0 && oldHeapSize > PTRDIFF_MAX - heapDelta)
-    THError("applyHeapDelta: heapSize(%td) + increased(%td) > PTRDIFF_MAX, heapSize overflow!", oldHeapSize, heapDelta);
-  if (heapDelta < 0 && oldHeapSize < PTRDIFF_MIN - heapDelta)
-    THError("applyHeapDelta: heapSize(%td) + decreased(%td) < PTRDIFF_MIN, heapSize underflow!", oldHeapSize, heapDelta);
-#endif
-  ptrdiff_t newHeapSize = oldHeapSize + heapDelta;
-  heapDelta = 0;
-  return newHeapSize;
-}
-
-/* (1) if the torch-allocated heap size exceeds the soft max, run GC
- * (2) if post-GC heap size exceeds 80% of the soft max, increase the
- *     soft max by 40%
- */
-static void maybeTriggerGC(ptrdiff_t curHeapSize) {
-  if (torchGCFunction && curHeapSize > heapSoftmax) {
-    torchGCFunction(torchGCData);
-
-    // ensure heapSize is accurate before updating heapSoftmax
-    ptrdiff_t newHeapSize = applyHeapDelta();
-
-    if (newHeapSize > heapSoftmax * heapSoftmaxGrowthThresh) {
-      heapSoftmax = (ptrdiff_t)(heapSoftmax * heapSoftmaxGrowthFactor);
-    }
-  }
 }
 
 static void* THAllocInternal(ptrdiff_t size)
