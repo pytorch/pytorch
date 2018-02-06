@@ -280,6 +280,23 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
   return self;
 }
 
+// Collapses the first two dimensions of a tensor.
+// Assumes the input tensor is contiguous.
+THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
+  int in_dims = THCTensor_(nDimension)(state, input);
+  THArgCheck(in_dims >= 2, 1, "Tensor needs to have at least two dimensions");
+  THArgCheck(THCTensor_(isContiguous)(state, input), 1,
+             "Tensor must be contiguous");
+  THLongStorage *newSize = THLongStorage_newWithSize(in_dims - 1);
+  newSize->data[0] = THCTensor_(size)(state, input, 0) * THCTensor_(size)(state, input, 1);
+  for (int i = 2; i < in_dims; i++) {
+    newSize->data[i - 1] = THCTensor_(size)(state, input, i);
+  }
+  THCTensor *output = THCTensor_(newView)(state, input, newSize);
+  THLongStorage_free(newSize);
+  return output;
+}
+
 /* Resize */
 void THCTensor_(resize)(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride)
 {

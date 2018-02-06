@@ -141,7 +141,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  if (input->nDimension == 5)
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+
+  if (fiveDimensionalInput)
   {
     dimt++;
     dimh++;
@@ -163,7 +165,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (fiveDimensionalInput)
   {
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
@@ -200,7 +202,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
       --outputWidth;
   }
 
-  if (input->nDimension == 4) /* 4D */
+  if (!fiveDimensionalInput) /* 4D */
   {
     /* resize output */
     THCTensor_(resize4d)(state, output, inputSlices,
@@ -217,23 +219,25 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
     // Index tensor packs index offsets as uchars into floats
     THCIndexTensor_(resize5d)(state, indices, batchSize, inputSlices,
                           outputTime, outputHeight, outputWidth);
+    fiveDimensionalInput = 1;
   }
 
   input = THCTensor_(newContiguous)(state, input);
+  if (fiveDimensionalInput) {
+    // Collapse batch and feature dimensions
+    output = THCTensor_(newFoldBatchDim)(state, output);
 
-  // Collapse batch and feature dimensions
+    THCTensor *old_input = input;
+    input = THCTensor_(newFoldBatchDim)(state, input);
+    THCTensor_(free)(state, old_input);
+  } else {
+    THCTensor_(retain)(state, output);
+  }
+
   THCDeviceTensor<real, 4> cudaInput;
   THCDeviceTensor<real, 4> cudaOutput;
-  if (THCTensor_(nDimension)(state, input) == 4)
-  {
-    cudaInput  = toDeviceTensor<real, 4>(state, input);
-    cudaOutput = toDeviceTensor<real, 4>(state, output);
-  }
-  else
-  {
-    cudaInput  = toDeviceTensor<real, 5>(state, input).downcastOuter<4>();
-    cudaOutput = toDeviceTensor<real, 5>(state, output).downcastOuter<4>();
-  }
+  cudaInput  = toDeviceTensor<real, 4>(state, input);
+  cudaOutput = toDeviceTensor<real, 4>(state, output);
 
   THLongStorage *indicesSize = THLongStorage_newWithSize(4);
   int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
@@ -281,6 +285,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
 
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, output);
   THCIndexTensor_(free)(state, indices1);
 }
 
@@ -310,13 +315,15 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int outputHeight;
   int outputWidth;
 
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
   THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
         state, input, gradOutput, indices, kT, kW, kH,
         dT, dW, dH, padT, padW, padH,
         dilationT, dilationW, dilationH, ceilMode);
 
-  if (THCTensor_(nDimension)(state, input) == 4) /* 4D */
+  if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
     inputSlices  = THCTensor_(size)(state, input, 0);
@@ -336,22 +343,21 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+  if (fiveDimensionalInput) {
+    // Collapse batch and feature dimensions
+    gradInput = THCTensor_(newFoldBatchDim)(state, gradInput);
 
-  // Collapse batch and feature dimensions
+    THCTensor *old_gradOutput = gradOutput;
+    gradOutput = THCTensor_(newFoldBatchDim)(state, gradOutput);
+    THCTensor_(free)(state, old_gradOutput);
+  } else {
+    THCTensor_(retain)(state, gradInput);
+  }
+
   THCDeviceTensor<real, 4> cudaGradInput;
   THCDeviceTensor<real, 4> cudaGradOutput;
-  if (THCTensor_(nDimension)(state, input) == 4)
-  {
-    cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
-    cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
-  }
-  else
-  {
-    cudaGradInput =
-      toDeviceTensor<real, 5>(state, gradInput).downcastOuter<4>();
-    cudaGradOutput =
-      toDeviceTensor<real, 5>(state, gradOutput).downcastOuter<4>();
-  }
+  cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
+  cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
 
   THLongStorage *indicesSize = THLongStorage_newWithSize(4);
   int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
@@ -388,6 +394,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
 
   // cleanup
+  THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);
   THCIndexTensor_(free)(state, indices1);
 }
