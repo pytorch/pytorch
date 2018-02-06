@@ -8,7 +8,7 @@ class ExponentialFamily(Distribution):
     ExponentialFamily is the abstract base class for probability distributions belonging to an
     exponential family, whose probability mass/density function has the form is defined below
 
-    ..math::
+    .. math::
 
         p_{F}(x; \theta) = \exp(\langle t(x), \theta\rangle) - F(\theta) + k(x))
 

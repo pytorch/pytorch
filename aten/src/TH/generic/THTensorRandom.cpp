@@ -284,23 +284,23 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
 
   if (start_dim == 1)
   {
-    THTensor_(resize2d)(prob_dist, 1, THTensor_(size)(prob_dist, 0));
+    THTensor_(unsqueeze1d)(prob_dist, prob_dist, 0);
   }
 
   n_dist = THTensor_(size)(prob_dist, 0);
   n_categories = THTensor_(size)(prob_dist, 1);
 
   THArgCheckWithCleanup(n_sample > 0,
-    THCleanup(if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+    THCleanup(if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
     2,
     "cannot sample n_sample <= 0 samples");
 
   if (!with_replacement)
   {
     THArgCheckWithCleanup((!with_replacement) && (n_sample <= n_categories),
-      THCleanup(if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+      THCleanup(if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
       2,
-      "cannot sample n_sample > prob_dist:size(1) samples without replacement");
+      "cannot sample n_sample > prob_dist.size(1) samples without replacement");
   }
 
   /* cumulative probability distribution vector */
@@ -321,7 +321,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         prob_dist->storageOffset+i*prob_dist->stride[0]+j*prob_dist->stride[1] \
       );
       THArgCheckWithCleanup((val >= 0),
-                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+                            THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                             2,
                             "invalid multinomial distribution (encountering probability entry < 0)");
       sum += val;
@@ -332,7 +332,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
       );
     }
     THArgCheckWithCleanup((sum > 0),
-                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(resize1d)(prob_dist, n_categories);),
+                          THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
                           2,
                           "invalid multinomial distribution (sum of probabilities <= 0)");
     /* normalize cumulative probability distribution so that last val is 1
@@ -434,7 +434,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
   if (start_dim == 1)
   {
     THLongTensor_resize1d(self, n_sample);
-    THTensor_(resize1d)(prob_dist, n_categories);
+    THTensor_(squeeze1d)(prob_dist, prob_dist, 0);
   }
 }
 #endif

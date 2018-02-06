@@ -1621,6 +1621,16 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(Variable(torch.ones(3, 1, 2))).size(), torch.Size((3, 3)))
 
     def test_categorical_shape(self):
+        # unbatched
+        dist = Categorical(variable([0.6, 0.3, 0.1]))
+        self.assertEqual(dist._batch_shape, torch.Size(()))
+        self.assertEqual(dist._event_shape, torch.Size(()))
+        self.assertEqual(dist.sample().size(), torch.Size(SCALAR_SHAPE))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2,)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+        self.assertEqual(dist.log_prob(Variable(torch.ones(3, 1))).size(), torch.Size((3, 1)))
+        # batched
         dist = Categorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size(()))
@@ -1631,6 +1641,17 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(Variable(torch.ones(3, 1))).size(), torch.Size((3, 3)))
 
     def test_one_hot_categorical_shape(self):
+        # unbatched
+        dist = OneHotCategorical(variable([0.6, 0.3, 0.1]))
+        self.assertEqual(dist._batch_shape, torch.Size(()))
+        self.assertEqual(dist._event_shape, torch.Size((3,)))
+        self.assertEqual(dist.sample().size(), torch.Size((3,)))
+        self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3)))
+        self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
+        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2,)))
+        self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((3,)))
+        self.assertEqual(dist.log_prob(Variable(torch.ones(3, 3))).size(), torch.Size((3,)))
+        # batched
         dist = OneHotCategorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
