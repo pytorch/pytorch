@@ -31,16 +31,10 @@ if [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  # NOTE: These are magic strings that exist in the meta.yaml
   # WARNING: This does not work on mac.
-  sed -i "s/%%CUDA_VERSION%%/${CAFFE2_CUDA_VERSION}/" "${CAFFE2_ROOT}/conda/cuda/meta.yaml"
-  sed -i "s/%%CUDNN_VERSION%%/${CAFFE2_CUDNN_VERSION}/" "${CAFFE2_ROOT}/conda/cuda/meta.yaml"
+  sed -i "s/caffe2-cuda/caffe2-cuda${CAFFE2_CUDA_VERSION}-cudnn${CAFFE2_CUDNN_VERSION}/" "${CAFFE2_ROOT}/conda/cuda/meta.yaml"
 
   conda build "${CAFFE2_ROOT}/conda/cuda" ${CONDA_BLD_ARGS[@]} "$@"
-
-  # Change the names back
-  sed -i "s/${CAFFE2_CUDA_VERSION}/%%CUDA_VERSION%%/" "${CAFFE2_ROOT}/conda/cuda/meta.yaml"
-  sed -i "s/${CAFFE2_CUDNN_VERSION}/%%CUDNN_VERSION%%/" "${CAFFE2_ROOT}/conda/cuda/meta.yaml"
 else
   conda build "${CAFFE2_ROOT}/conda/no_cuda" ${CONDA_BLD_ARGS[@]} "$@"
 fi
