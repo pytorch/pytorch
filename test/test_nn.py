@@ -28,7 +28,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file, IS_WINDOWS, PY3
 
@@ -4288,6 +4288,13 @@ new_criterion_tests = [
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         desc='weights'
+    ),
+    dict(
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch_rand(()),),
+        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch_randn(()).gt(0).double(),
+        desc='scalar_weights'
     ),
     dict(
         module_name='NLLLoss',

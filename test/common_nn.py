@@ -373,6 +373,23 @@ loss_reference_fns = {
 }
 
 
+# TODO: replace this with torch.rand() when Variables and tensors are merged;
+# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
+def torch_rand(sizes):
+    if len(sizes) == 0:
+        return variable(0).uniform_()
+    else:
+        return Variable(torch.rand(*sizes))
+
+
+# TODO: replace this with torch.randn() when Variables and tensors are merged;
+# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
+def torch_randn(sizes):
+    if len(sizes) == 0:
+        return variable(0).normal_()
+    else:
+        return Variable(torch.randn(*sizes))
+
 criterion_tests = [
     dict(
         module_name='L1Loss',
@@ -440,11 +457,28 @@ criterion_tests = [
         check_no_size_average=True,
     ),
     dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch_rand(()).log(),
+        target_fn=lambda: torch_rand(()),
+        reference_fn=lambda i, t, m:
+            kldivloss_reference(i, t, get_size_average(m), reduce=True),
+        check_no_size_average=True,
+        desc='scalar',
+    ),
+    dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
         target_size=(2, 3, 4, 5),
         reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
         check_no_size_average=True,
+    ),
+    dict(
+        module_name='MSELoss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
+        check_no_size_average=True,
+        desc='scalar'
     ),
     dict(
         module_name='BCELoss',
@@ -462,6 +496,16 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_size_average(m) else 1),
         desc='weights',
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch_rand(()),),
+        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch_rand(()).gt(0).double(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_size_average(m) else 1),
+        desc='scalar_weights',
         check_gradgrad=False,
     ),
     dict(
@@ -487,6 +531,14 @@ criterion_tests = [
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
         desc='margin',
+        check_no_size_average=True,
+    ),
+    dict(
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5,),
+        input_size=(),
+        target_fn=lambda: torch_randn(()).gt(0).double().mul_(2).sub(1),
+        desc='scalar_margin',
         check_no_size_average=True,
     ),
     dict(
@@ -535,6 +587,15 @@ criterion_tests = [
         check_no_size_average=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, size_average=get_size_average(m)),
+    ),
+    dict(
+        module_name='SmoothL1Loss',
+        input_size=(),
+        target_size=(),
+        check_no_size_average=True,
+        reference_fn=lambda i, t, m:
+            smoothl1loss_reference(i, t, size_average=get_size_average(m)),
+        desc='scalar',
     ),
     dict(
         module_name='SoftMarginLoss',
@@ -774,10 +835,7 @@ class TestBase(object):
                     elif torch.is_tensor(sizes):
                         return Variable(sizes.double())
                     else:
-                        if len(sizes) == 0:
-                            return torch.testing.randn_like(variable(0))
-                        else:
-                            return Variable(torch.randn(*sizes))
+                        return torch_randn(sizes)
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
 
