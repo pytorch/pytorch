@@ -3,6 +3,7 @@ import torch._C as _C
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
 import functools
+import warnings
 from collections import OrderedDict
 
 
@@ -38,24 +39,10 @@ class _ContextMethodMixin(object):
         self.dirty_tensors = args
 
     def mark_shared_storage(self, *pairs):
-        """Marks that given pairs of distinct tensors are sharing storage.
-
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be pairs of
-        (input, output).**
-
-        If some of the outputs are going to be tensors sharing storage with
-        some of the inputs, all pairs of (input_arg, output_arg) should be
-        given to this function, to ensure correctness checking of in-place
-        modification. The only exception is when an output is exactly the same
-        tensor as input (e.g. in-place ops). In such case it's easy to conclude
-        that they're sharing data, so we don't require specifying such
-        dependencies.
-
-        This function is not needed in most functions. It's primarily used in
-        indexing and transpose ops.
-        """
-        self.shared_pairs = pairs
+        warnings.warn(
+            'mark_shared_storage is deprecated. '
+            'Tensors with shared storages are automatically tracked. Note '
+            'that calls to `set_()` are not tracked')
 
     def mark_non_differentiable(self, *args):
         """Marks outputs as non-differentiable.
@@ -200,30 +187,43 @@ def once_differentiable(fn):
 
     @functools.wraps(fn)
     def wrapper(ctx, *args):
-        tensor_args = [arg.data if isinstance(arg, Variable) else arg
-                       for arg in args]
-        outputs = fn(ctx, *tensor_args)
-        # XXX: this is only an approximation of these flags - there's no way
+        with torch.no_grad():
+            outputs = fn(ctx, *args)
+
+        if not torch.is_grad_enabled():
+            return outputs
+
+        # If any of the inputs have requires_grad=True, we force the outputs
+        # to have requires_grad=True but point to a grad_fn which throws an
+        # error message during (double) back-propagation.
+        # XXX: this is only an approximation of requires_grad - there's no way
         # to figure out if fn didn't use ctx.saved_variables and as a result
         # some Variables might require grad, even if no args do.
         # Unfortunately, this leads to unexpected error messages ("no nodes
         # require computing gradients"), but I don't have a better idea.
         # These functions would raise an error in backward anyway.
-        requires_grad = any(arg.requires_grad if isinstance(arg, Variable) else False
+        requires_grad = any(isinstance(arg, Variable) and arg.requires_grad
                             for arg in args)
-        if not torch.is_grad_enabled():
-            def err_fn(*args):
-                return args
-        else:
-            err_fn = torch._C._functions.DelayedError(
-                b"trying to differentiate twice a function that was marked"
-                b"with @once_differentiable")
+        if not requires_grad:
+            return outputs
+
+        err_fn = torch._C._functions.DelayedError(
+            b"trying to differentiate twice a function that was marked"
+            b"with @once_differentiable")
+
         if not isinstance(outputs, tuple):
-            var = (Variable(outputs, requires_grad=requires_grad)
-                   if outputs is not None else None)
-            return err_fn(var)
-        return err_fn(*[Variable(o, requires_grad=requires_grad) if o is not None else None
-                      for o in outputs])
+            outputs = (outputs,)
+
+        # Create aliases of each output that has requires_grad=True. We need
+        # at least one of the inputs to err_fn to require grad so that the
+        # output will have a grad_fn.
+        def fake_requires_grad(var):
+            if var is not None:
+                var = var.detach()
+                var.requires_grad = True
+            return var
+
+        return err_fn(*[fake_requires_grad(v) for v in outputs])
     return wrapper
 
 
@@ -307,7 +307,9 @@ _iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
 _iter_tensors = _iter_filter(torch.is_tensor, condition_msg="Tensors")
-_iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o), condition_msg="Tensors or None")
+_iter_None_tensors = _iter_filter(
+    lambda o: o is None or torch.is_tensor(o) or isinstance(o, torch.autograd.Variable),
+    condition_msg="Tensors or None")
 _map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable),
                                    lambda o: o.data, condition_msg="Variables")
 

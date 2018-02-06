@@ -133,11 +133,8 @@ class TestAutograd(TestCase):
             @staticmethod
             @once_differentiable
             def backward(ctx, grad_output):
+                self.assertFalse(torch.is_grad_enabled())
                 t1, t2 = ctx.saved_tensors
-                # NOTE: self is the test case here
-                self.assertTrue(torch.is_tensor(t1))
-                self.assertTrue(torch.is_tensor(t2))
-                self.assertTrue(torch.is_tensor(grad_output))
                 return (grad_output + grad_output * t2, None,
                         grad_output * ctx.pyscalar + grad_output * t1)
 
@@ -517,14 +514,14 @@ class TestAutograd(TestCase):
             [0, 2, 2],
         ])
         v1 = torch.DoubleTensor([[1, 2], [4, 5], [7, 8]])
-        sparse_grad1 = torch.sparse.DoubleTensor(i1, v1, size)
+        sparse_grad1 = Variable(torch.sparse.DoubleTensor(i1, v1, size))
         i2 = torch.LongTensor([
             [0, 1, 3, 4],
             [0, 1, 2, 2],
         ])
         v2 = torch.DoubleTensor([[1, 2], [4, 3], [4, 5], [7, 8]])
-        sparse_grad2 = torch.sparse.DoubleTensor(i2, v2, size)
-        dense_grad = torch.rand(size).double()
+        sparse_grad2 = Variable(torch.sparse.DoubleTensor(i2, v2, size))
+        dense_grad = Variable(torch.rand(size).double())
         sparse_fn1 = FixedGradientFunction(sparse_grad1)
         sparse_fn2 = FixedGradientFunction(sparse_grad2)
         dense_fn = FixedGradientFunction(dense_grad)
@@ -532,15 +529,15 @@ class TestAutograd(TestCase):
         # sparse first
         x = Variable(torch.randn(5, 5), requires_grad=True)
         (sparse_fn1(x) + dense_fn(x) + sparse_fn2(x)).sum().backward()
-        self.assertEqual(x.grad.data, dense_grad + sparse_grad1 + sparse_grad2)
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # dense first
         x = Variable(torch.randn(5, 5), requires_grad=True)
         (dense_fn(x) + sparse_fn1(x) + sparse_fn2(x)).sum().backward()
-        self.assertEqual(x.grad.data, dense_grad + sparse_grad1 + sparse_grad2)
+        self.assertEqual(x.grad, dense_grad + sparse_grad1 + sparse_grad2)
         # sparse only
         x = Variable(torch.randn(5, 5), requires_grad=True)
         (sparse_fn1(x) + sparse_fn2(x)).sum().backward()
-        self.assertEqual(x.grad.data, sparse_grad1 + sparse_grad2)
+        self.assertEqual(x.grad, sparse_grad1 + sparse_grad2)
 
     def test_multi_backward(self):
         x = Variable(torch.randn(5, 5), requires_grad=True)
@@ -986,6 +983,52 @@ class TestAutograd(TestCase):
         r = MyFunction.apply(x * x)
         (r * x).sum().backward()
 
+    def test_return_duplicate(self):
+        class DoubleDuplicate(Function):
+            @staticmethod
+            def forward(ctx, x):
+                output = x * 2
+                return output, output
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2 + grad2 * 2
+
+        def fn(x):
+            a, b = DoubleDuplicate.apply(x)
+            self.assertIs(a, b)
+            return a + b
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        gradcheck(fn, [x])
+        gradgradcheck(fn, [x])
+
+    def test_return_duplicate_inplace(self):
+        class DoubleInplace(Function):
+            @staticmethod
+            def forward(ctx, x):
+                x.mul_(2)
+                ctx.mark_dirty(x)
+                return x, x
+
+            @staticmethod
+            def backward(ctx, grad1, grad2):
+                return grad1 * 2 + grad2 * 2
+
+        def inplace_fn(x):
+            a, b = DoubleInplace.apply(x.clone())
+            self.assertIs(a, b)
+            return a + b
+
+        x = Variable(torch.randn(5, 5), requires_grad=True)
+        gradcheck(inplace_fn, [x])
+        gradgradcheck(inplace_fn, [x])
+
+        # Can't modify leaf variables in-place
+        self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x))
+        # Functions which modify views in-place must return only one output
+        self.assertRaises(RuntimeError, lambda: InplaceFunction.apply(x.clone()[0]))
+
     @suppress_warnings
     def test_resize(self):
         x = Variable(torch.ones(2, 3))
@@ -1386,26 +1429,22 @@ class TestAutograd(TestCase):
             def backward(self, grad_a, grad_b):
                 return grad_a + grad_b, grad_b
 
-        class Inplace(InplaceFunction):
-
-            def forward(self, a, b):
-                self.mark_dirty(a)
-                return a.add_(b), b + 2
-
-            def backward(self, grad_a, grad_b):
-                return grad_a, grad_a + grad_b
-
+        hook_called = [False]
         x = Variable(torch.randn(5, 5), requires_grad=True)
         y = Variable(torch.randn(5, 5), requires_grad=True)
 
         q, p = Identity()(x, y)
+
         # Make sure hooks only receive grad from usage of q, not x.
-        q.register_hook(
-            lambda grad: self.assertEqual(grad.data, torch.ones(5, 5)))
+        def hook(grad):
+            hook_called[0] = True
+            self.assertEqual(grad.data, torch.ones(5, 5))
+
+        q.register_hook(hook)
         (q + p + x).sum().backward()
         self.assertEqual(x.grad.data, torch.ones(5, 5) * 3)
         self.assertEqual(y.grad.data, torch.ones(5, 5))
-        del q, p  # these need to be freed, or next part will raise an error
+        self.assertTrue(hook_called[0])
 
     def test_return_leaf_inplace(self):
         class Inplace(InplaceFunction):
@@ -1602,7 +1641,7 @@ class TestAutograd(TestCase):
         class F1(Function):
 
             def forward(self, input):
-                out = torch.randn(input.size())
+                out = Variable(torch.randn(input.size()))
                 self.mark_non_differentiable(out)
                 return input, out
 
@@ -1631,20 +1670,22 @@ class TestAutograd(TestCase):
 
         class Reenter(Function):
             @staticmethod
-            def forward(ctx, x_data):
-                ctx.x = Variable(x_data, requires_grad=True)
-                ctx.y = Variable(y_data, requires_grad=True)
-                ctx.output_var = ctx.x * ctx.y
-                return ctx.output_var.data
+            def forward(ctx, x):
+                with torch.enable_grad():
+                    ctx.x = Variable(x.data, requires_grad=True)
+                    ctx.y = Variable(y_data, requires_grad=True)
+                    ctx.output_var = ctx.x * ctx.y
+                return ctx.output_var.detach()
 
             @staticmethod
             def backward(ctx, grad_output):
-                ctx.output_var.sum().backward()
+                with torch.enable_grad():
+                    ctx.output_var.sum().backward()
                 return ctx.x.grad * grad_output
 
         x = Variable(torch.randn(2, 2), requires_grad=True)
         out = Reenter.apply(x)
-        out.sum().backward(create_graph=True)
+        out.sum().backward()
         self.assertEqual(x.grad.data, y_data)
 
     def test_cat(self):

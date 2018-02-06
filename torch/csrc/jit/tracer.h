@@ -279,6 +279,9 @@ struct PreTraceInfo {
 };
 
 PreTraceInfo preRecordTrace(std::string op, at::ArrayRef<Variable> inputs);
+PreTraceInfo preRecordPythonTrace(
+    THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<Variable> inputs,
+    pyobj_list scalar_args);
 void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 }}} // namespace torch::jit::tracer

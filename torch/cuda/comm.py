@@ -59,7 +59,6 @@ def reduce_add(inputs, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     input_size = inputs[0].size()
-    is_sparse = inputs[0].is_sparse
     nccl_root = None
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
@@ -70,9 +69,9 @@ def reduce_add(inputs, destination=None):
             expected = 'x'.join(str(x) for x in input_size)
             raise ValueError("input {} has invalid size: got {}, but expected "
                              "{}".format(i, got, expected))
-    assert nccl_root is not None, "reduce_add expects destination to be on the same GPU with one of the tensors"
-    with torch.cuda.device(destination):
-        result = type(inp)().resize_as_(inp).zero_()
+    if nccl_root is None:
+        raise RuntimeError("reduce_add expects destination to be on the same GPU with one of the tensors")
+    result = inp.new(device=destination).resize_as_(inp).zero_()
 
     if nccl.is_available(inputs) and inputs[0].get_device() == destination:
         outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
@@ -191,10 +190,14 @@ def gather(tensors, dim=0, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     if destination == -1:
-        result = getattr(torch, type(tensors[0]).__name__)(expected_size)
+        # TODO (sgross): clean-up once Variable and Tensor are merged
+        if isinstance(tensors[0], torch.autograd.Variable):
+            data = getattr(torch, type(tensors[0].data).__name__)(expected_size)
+            result = torch.autograd.Variable(data)
+        else:
+            result = getattr(torch, type(tensors[0]).__name__)(expected_size)
     else:
-        with torch.cuda.device(destination):
-            result = type(tensors[0])(expected_size)
+        result = tensors[0].new(expected_size, device=destination)
 
     chunk_start = 0
     # TODO: if copying to CPU, allocate a pinned buffer, do async copies to it,
