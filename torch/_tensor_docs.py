@@ -796,6 +796,21 @@ Returns True if this object refers to the same ``THTensor`` object from the
 Torch C API as the given tensor.
 """)
 
+# TODO (sgross): move to Tensor once Variable and Tensor are merged
+add_docstr(torch.autograd.Variable.item, r"""
+item() -> number
+
+Returns the value of this tensor as a standard Python number. This only works
+for tensors with one element.
+
+This operation is not differentiable.
+
+Example:
+    >>> x = torch.Tensor([1.0])
+    >>> x.item()
+    1.0
+""")
+
 add_docstr_all('kthvalue',
                r"""
 kthvalue(k, dim=None, keepdim=False) -> (Tensor, LongTensor)
