@@ -78,6 +78,11 @@ class DistributedDataParallel(Module):
         (e.g. BatchNorm stats) are broadcast form the module in process of rank
         0, to all other replicas in the system in every iteration.
 
+    .. warning::
+        Forward and backwrad hooks defined on :attr:`module` and its submodules
+        won't be invoked anymore, unless the hooks are initialized in the
+        :meth:`forward` method.
+
     Args:
         module: module to be parallelized
         device_ids: CUDA devices (default: all devices)

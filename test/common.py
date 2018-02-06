@@ -239,6 +239,8 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
+        elif isinstance(x, bool) and isinstance(y, bool):
+            super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == float('inf') or abs(y) == float('inf'):
                 if allow_inf:

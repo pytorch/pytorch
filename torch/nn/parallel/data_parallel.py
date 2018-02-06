@@ -26,6 +26,11 @@ class DataParallel(Module):
     other types will be a shallow copy and can be corrupted if written to in
     the model's forward pass.
 
+    .. warning::
+        Forward and backwrad hooks defined on :attr:`module` and its submodules
+        won't be invoked anymore, unless the hooks are initialized in the
+        :meth:`forward` method.
+
     Args:
         module: module to be parallelized
         device_ids: CUDA devices (default: all devices)

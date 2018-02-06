@@ -15,6 +15,12 @@ class Broadcast(Function):
         ctx.num_inputs = len(inputs)
         ctx.input_device = inputs[0].get_device()
         outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)
+        non_differentiables = []
+        for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
+            if not input_requires_grad:
+                for output in outputs:
+                    non_differentiables.append(output[idx])
+        ctx.mark_non_differentiable(*non_differentiables)
         return tuple([t for tensors in outputs for t in tensors])
 
     @staticmethod
