@@ -64,7 +64,7 @@ class Geometric(Distribution):
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         u = self.probs.new(shape).uniform_(_finfo(self.probs).tiny, 1)
-        return (u.log() / (-self.probs).log1p()).floor()
+        return (u.log() / (-self.probs).log1p()).floor().detach()
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

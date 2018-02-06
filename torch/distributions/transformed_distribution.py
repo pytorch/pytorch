@@ -55,7 +55,7 @@ class TransformedDistribution(Distribution):
         x = self.base_dist.sample(sample_shape)
         for transform in self.transforms:
             x = transform(x)
-        return x
+        return x.detach() if hasattr(x, 'detach') else x
 
     def rsample(self, sample_shape=torch.Size()):
         """

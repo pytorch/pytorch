@@ -364,6 +364,18 @@ class TestDistributions(TestCase):
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
 
+    def test_sample_detached(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                variable_params = [p for p in param.values() if getattr(p, 'requires_grad', False)]
+                if not variable_params:
+                    continue
+                dist = Dist(**param)
+                sample = dist.sample()
+                self.assertFalse(sample.requires_grad,
+                                 msg='{} example {}/{}, .sample() is not detached'.format(
+                                     Dist.__name__, i + 1, len(params)))
+
     def test_enumerate_support_type(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
