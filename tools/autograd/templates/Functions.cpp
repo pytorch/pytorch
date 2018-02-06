@@ -823,11 +823,19 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
   if (weight.numel() == 1) {
       // from PReLU.forward: num_parameters == 0 is used indicate that a
       // single weight is shared among all input channels.
-      auto mask = positive_mask + nonpositive_mask * weight.expand_as(input);
-      auto ggO = ggI * mask + ggW.expand_as(gO) * (nonpositive_mask * input);
+
+      // this is a little tricky because PReLU currently doesn't take a shape so the weight may be
+      // 1-d when the input is a scalar (and there isn't a good Parameter API for that anyway until Variable
+      // and tensor are merged).  So, use weight and ggW as 0-dim in this case.
+      bool scalar_input_1d_weight = (positive_mask.dim() == 0 && weight.dim() == 1);
+      auto weight_maybe_squeeze = scalar_input_1d_weight ? weight.squeeze() : weight;
+      auto ggW_maybe_squeeze = scalar_input_1d_weight ? ggW.squeeze() : ggW;
+
+      auto mask = positive_mask + nonpositive_mask * weight_maybe_squeeze.expand_as(input);
+      auto ggO = ggI * mask + ggW_maybe_squeeze.expand_as(gO) * (nonpositive_mask * input);
       return std::tuple<Tensor, Tensor, Tensor>(
                 ggO,
-                ggW.expand_as(gO) * gO * nonpositive_mask,
+                ggW_maybe_squeeze.expand_as(gO) * gO * nonpositive_mask,
                 (ggI * gO * nonpositive_mask).sum()
           );
   } else {

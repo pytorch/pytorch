@@ -241,6 +241,9 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: rand_like(Tensor self) -> Tensor
+  variants: function
+
 - func: randn_like(Tensor self) -> Tensor
   variants: function
 
