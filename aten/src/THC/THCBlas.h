@@ -40,7 +40,7 @@ THC_API void THCudaBlas_DgemmStridedBatched(THCState *state, char transa, char t
                                      double beta, double *c, int64_t ldc, int64_t strideC, int64_t batchCount);
 #endif
 
-#if CUDA_VERSION >= 9100
+#if CUDA_VERSION >= 9010
 void THCudaBlas_HgemmStridedBatched(THCState *state, char transa, char transb, long m, long n, long k,
                                      half alpha, const half *a, long lda, long strideA, const half *b, long ldb, long strideB,
                                                                   half beta, half *c, long ldc, long strideC, long batchCount);
