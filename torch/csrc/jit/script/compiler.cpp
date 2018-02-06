@@ -292,7 +292,7 @@ struct DefCompiler {
   }
 
   std::vector<Value*> emitCast(const TreeRef& input, const int type) {
-    // TODO: add support for conditional
+    // TODO: add support for cast
     return {};
   }
 
