@@ -1,6 +1,12 @@
 import torch
 import torch.cuda.comm as comm
-from torch.autograd import Function
+from torch.autograd import Function, Variable
+
+
+def wrap_output(x):
+    if torch.is_tensor(x):
+        return Variable(x)
+    return [wrap_output(o) for o in x]
 
 
 class Broadcast(Function):
@@ -15,6 +21,8 @@ class Broadcast(Function):
         ctx.num_inputs = len(inputs)
         ctx.input_device = inputs[0].get_device()
         outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)
+        # TODO (sgross): remove once Variable and Tensor are merged
+        outputs = wrap_output(outputs)
         non_differentiables = []
         for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
             if not input_requires_grad:
