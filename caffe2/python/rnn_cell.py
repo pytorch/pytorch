@@ -240,14 +240,15 @@ class BasicRNNCell(RNNCell):
         self,
         input_size,
         hidden_size,
-        activation,
         forget_bias,
         memory_optimization,
         drop_states=False,
         initializer=None,
+        activation=None,
         **kwargs
     ):
         super(BasicRNNCell, self).__init__(**kwargs)
+        self.drop_states = drop_states
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.activation = activation
@@ -288,6 +289,30 @@ class BasicRNNCell(RNNCell):
             raise RuntimeError(
                 'BasicRNNCell with unknown activation function (%s)'
                 % self.activation)
+        if seq_lengths is not None:
+            # TODO If this codepath becomes popular, it may be worth
+            # taking a look at optimizing it - for now a simple
+            # implementation is used to round out compatibility with
+            # ONNX.
+            timestep = model.net.CopyFromCPUInput(
+                timestep, self.scope('timestep_gpu'))
+            valid_b = model.net.GT(
+                [seq_lengths, timestep], self.scope('valid_b'), broadcast=1)
+            invalid_b = model.net.LE(
+                [seq_lengths, timestep], self.scope('invalid_b'), broadcast=1)
+            valid = model.net.Cast(valid_b, self.scope('valid'), to='float')
+            invalid = model.net.Cast(invalid_b, self.scope('invalid'), to='float')
+
+            hidden_valid = model.net.Mul(
+                [hidden_t, valid], self.scope('hidden_valid'), broadcast=1, axis=1)
+            if self.drop_states:
+                hidden_t = hidden_valid
+            else:
+                hidden_invalid = model.net.Mul(
+                    [hidden_t_prev, invalid],
+                    self.scope('hidden_invalid'),
+                    broadcast=1, axis=1)
+                model.net.Add([hidden_valid, hidden_invalid], hidden_t)
         return (hidden_t,)
 
     def prepare_input(self, model, input_blob):
