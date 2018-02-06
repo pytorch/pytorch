@@ -3108,7 +3108,7 @@
     - THTensor* vec
 ]]
 [[
-  name: mm
+  name: _mm
   variants:
     - method
     - function
@@ -3131,15 +3131,6 @@
         - argument 0
         - CONSTANT AS_REAL(1)
         - THTensor* self
-        - THTensor* mat2
-    - cname: spaddmm
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - CONSTANT AS_REAL(0)
-        - argument 0
-        - CONSTANT AS_REAL(1)
-        - THSTensor* self
         - THTensor* mat2
 ]]
 [[
