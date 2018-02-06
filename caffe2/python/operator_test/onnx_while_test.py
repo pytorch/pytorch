@@ -30,7 +30,7 @@ class TestONNXWhile(hu.HypothesisTestCase):
         condition=st.booleans(),
         max_trip_count=st.integers(0, 100),
         seed=st.integers(0, 65535),
-        **hu.gcs)
+        **hu.gcs_cpu_only)
     def test_onnx_while_fibb(self, condition, max_trip_count, seed, gc, dc):
         np.random.seed(seed)
 
