@@ -81,6 +81,14 @@ TensorUtils<TENSOR_TYPE>::squeeze1d(THCState *state,                    \
   TENSOR_TYPE##_squeeze1d(state, dst, src, dimension);                  \
 }                                                                       \
                                                                         \
+void                                                                    \
+TensorUtils<TENSOR_TYPE>::unsqueeze1d(THCState *state,                  \
+                                    TENSOR_TYPE *dst,                   \
+                                    TENSOR_TYPE *src,                   \
+                                    int dimension) {                    \
+  TENSOR_TYPE##_unsqueeze1d(state, dst, src, dimension);                \
+}                                                                       \
+                                                                        \
 DATA_TYPE*                                                              \
 TensorUtils<TENSOR_TYPE>::getData(THCState* state,                      \
                                   TENSOR_TYPE* t) {                     \
@@ -131,6 +139,24 @@ TensorUtils<TENSOR_TYPE>::allContiguous(THCState* state,                \
     }                                                                   \
   }                                                                     \
   return true;                                                          \
+}                                                                       \
+                                                                        \
+/* Due to the resize semantics of ops with `out=` keywords, if       */ \
+/* the output `tensor` has the same shape as the output of the       */ \
+/* reduction operation, then any noncontiguities in the output       */ \
+/* `tensor` should be preserved. This needs to be special cased b/c  */ \
+/* otherwise, when keepdim=False, the implementations of reduction   */ \
+/* ops resize `tensor` to the reduced size with keepdim=True, and    */ \
+/* then later squeeze `tensor` to the correct output size, breaking  */ \
+/* the contiguity guarantees of the resize semantics.                */ \
+void                                                                    \
+TensorUtils<TENSOR_TYPE>::preserveReduceDimSemantics(                   \
+                          THCState *state, TENSOR_TYPE *tensor,         \
+                          int in_dims, int64_t dimension, int keepdim) {\
+  int out_dims = TensorUtils<TENSOR_TYPE>::getDims(state, tensor);      \
+  if (out_dims > 0 && !keepdim && out_dims == in_dims - 1) {            \
+    TensorUtils<TENSOR_TYPE>::unsqueeze1d(state, tensor, tensor, dimension);\
+  }                                                                     \
 }                                                                       \
                                                                         \
 int                                                                     \

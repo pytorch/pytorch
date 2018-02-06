@@ -77,6 +77,9 @@ THC_API void
 THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int biased, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+
+  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+      state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
   THCTensor_(resize)(state, self_, dim, NULL);
@@ -103,6 +106,9 @@ THC_API void
 THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension, int biased, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+
+  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+      state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
   THCTensor_(resize)(state, self_, dim, NULL);
@@ -383,16 +389,21 @@ THCTensor_(median)(THCState *state,
 
   THCTensor_(sort)(state, sorted, sorted_indices, self, dimension, 0);
 
-  THCTensor_(narrow)(state, values, sorted, dimension, k, 1);
-  THCudaLongTensor_narrow(state, indices, sorted_indices, dimension, k, 1);
-
-  THCTensor_(free)(state, sorted);
-  THCudaLongTensor_free(state, sorted_indices);
+  THCTensor *newValues = THCTensor_(newNarrow)(state, sorted, dimension, k, 1);
+  THCudaLongTensor *newIndices = THCudaLongTensor_newNarrow(state, sorted_indices, dimension, k, 1);
 
   if (!keepdim) {
-    THCTensor_(squeeze1d)(state, values, values, dimension);
-    THCudaLongTensor_squeeze1d(state, indices, indices, dimension);
+    THCTensor_(squeeze1d)(state, newValues, newValues, dimension);
+    THCudaLongTensor_squeeze1d(state, newIndices, newIndices, dimension);
   }
+
+  THCTensor_(resizeAs)(state, values, newValues);
+  THCudaLongTensor_resizeAs(state, indices, newIndices);
+  THCTensor_(copy)(state, values, newValues);
+  THCudaLongTensor_copy(state, indices, newIndices);
+
+  THCTensor_(free)(state, newValues);
+  THCudaLongTensor_free(state, newIndices);
 
   THCudaCheck(cudaGetLastError());
 }
