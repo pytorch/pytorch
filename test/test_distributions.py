@@ -247,17 +247,17 @@ EXAMPLES = [
     Example(TransformedDistribution, [
         {
             'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
-                                        Variable(torch.randn(2, 3), requires_grad=True)),
+                                        Variable(torch.randn(2, 3).abs(), requires_grad=True)),
             'transforms': [],
         },
         {
             'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
-                                        Variable(torch.randn(2, 3), requires_grad=True)),
+                                        Variable(torch.randn(2, 3).abs(), requires_grad=True)),
             'transforms': ExpTransform(),
         },
         {
             'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
-                                        Variable(torch.randn(2, 3), requires_grad=True)),
+                                        Variable(torch.randn(2, 3).abs(), requires_grad=True)),
             'transforms': [AffineTransform(Variable(torch.randn(1)), Variable(torch.randn(1))),
                            ExpTransform()],
         },
@@ -1172,16 +1172,20 @@ class TestDistributions(TestCase):
                     actual = dist.icdf(cdf)
                 except NotImplementedError:
                     continue
-                self.assertEqual(actual, samples,
-                                 message='{} example {}/{}, icdf(cdf(x)) != x'.format(Dist.__name__, i + 1,
-                                                                                      len(params)))
+                rel_error = torch.abs(actual - samples) / (1e-10 + torch.abs(samples))
+                self.assertLess(rel_error.max(), 1e-4, msg='\n'.join([
+                    '{} example {}/{}, icdf(cdf(x)) != x'.format(Dist.__name__, i + 1, len(params)),
+                    'x = {}'.format(samples),
+                    'cdf(x) = {}'.format(cdf),
+                    'icdf(cdf(x)) = {}'.format(actual),
+                ]))
 
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                samples = dist.sample(sample_shape=(20,))
+                samples = dist.sample()
                 if not samples.requires_grad:
                     continue
                 try:
@@ -1190,9 +1194,13 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     continue
                 cdfs_derivative = grad(cdfs.sum(), [samples])[0]
-                self.assertEqual(cdfs_derivative, pdfs,
-                                 message='{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1,
-                                                                                        len(params)))
+                self.assertEqual(cdfs_derivative, pdfs, message='\n'.join([
+                    '{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1, len(params)),
+                    'x = {}'.format(samples),
+                    'cdf = {}'.format(cdfs),
+                    'pdf = {}'.format(pdfs),
+                    'grad(cdf) = {}'.format(cdfs_derivative),
+                ]))
 
     def test_valid_parameter_broadcasting(self):
         # Test correct broadcasting of parameter sizes for distributions that have multiple
