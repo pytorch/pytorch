@@ -372,6 +372,7 @@ loss_reference_fns = {
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
 }
 
+
 # TODO: replace this with torch.rand() when Variables and tensors are merged;
 # this function will correctly handle scalars (i.e. empty tuple sizes) for now.
 def torch_rand(sizes):
