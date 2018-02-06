@@ -30,13 +30,15 @@ class Gumbel(TransformedDistribution):
 
     def __init__(self, loc, scale):
         self.loc, self.scale = broadcast_all(loc, scale)
+        finfo = _finfo(self.loc)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
+            base_dist = Uniform(finfo.tiny, 1 - finfo.eps)
         else:
             batch_shape = self.scale.size()
-        base_dist = Uniform(torch.zeros_like(self.loc), 1)
-        transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-1),
-                      ExpTransform().inv, AffineTransform(loc=loc, scale=-scale)]
+            base_dist = Uniform(self.loc.new(self.loc.size()).fill_(finfo.tiny), 1 - finfo.eps)
+        transforms = [ExpTransform().inv, AffineTransform(loc=0, scale=-torch.ones_like(self.scale)),
+                      ExpTransform().inv, AffineTransform(loc=loc, scale=-self.scale)]
         super(Gumbel, self).__init__(base_dist, transforms)
 
     @property

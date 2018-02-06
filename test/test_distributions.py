@@ -51,7 +51,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SigmoidTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits
+from torch.distributions.utils import _finfo, probs_to_logits, softmax
 
 TEST_NUMPY = True
 try:
@@ -1173,8 +1173,8 @@ class TestDistributions(TestCase):
                 except NotImplementedError:
                     continue
                 self.assertEqual(actual, samples,
-                                 message='{} example {}/{},\
-                                 icdf(cdf(x)) != x'.format(Dist.__name__, i + 1, len(params)))
+                                 message='{} example {}/{}, icdf(cdf(x)) != x'.format(Dist.__name__, i + 1,
+                                                                                      len(params)))
 
     def test_cdf_log_prob(self):
         # Tests if the differentiation of the CDF gives the PDF at a given value
@@ -1774,6 +1774,16 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(pareto.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(pareto.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_gumbel_shape_scalar_params(self):
+        gumbel = Gumbel(1, 1)
+        self.assertEqual(gumbel._batch_shape, torch.Size())
+        self.assertEqual(gumbel._event_shape, torch.Size())
+        self.assertEqual(gumbel.sample().size(), torch.Size(SCALAR_SHAPE))
+        self.assertEqual(gumbel.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertRaises(ValueError, gumbel.log_prob, self.scalar_sample)
+        self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
         self.assertEqual(normal._batch_shape, torch.Size())
@@ -2312,7 +2322,7 @@ class TestAgainstScipy(TestCase):
         positive_var2 = Variable(torch.Tensor(20,).normal_()).exp()
         random_var = Variable(torch.Tensor(20,).normal_())
         random_tensor = torch.Tensor(20,).normal_()
-        simplex_tensor = random_tensor.exp() / random_tensor.exp().sum()
+        simplex_tensor = softmax(random_tensor)
         self.distribution_pairs = [
             (
                 Bernoulli(simplex_tensor),
@@ -2336,7 +2346,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 Exponential(positive_var),
-                scipy.stats.expon(scale=1. / positive_var)
+                scipy.stats.expon(scale=positive_var.reciprocal())
             ),
             (
                 FisherSnedecor(positive_var, 4 + positive_var2),  # var for df2<=4 is undefined
@@ -2344,7 +2354,7 @@ class TestAgainstScipy(TestCase):
             ),
             (
                 Gamma(positive_var, positive_var2),
-                scipy.stats.gamma(positive_var, scale=1 / positive_var2)
+                scipy.stats.gamma(positive_var, scale=positive_var2.reciprocal())
             ),
             (
                 Geometric(simplex_tensor),
