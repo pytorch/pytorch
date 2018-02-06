@@ -377,7 +377,6 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
   va_list(args);
   va_start(args, nTensors);
   int valid = 1;
-  int sparse = 1;
   for (unsigned int i = 0; i < nSparseTensors + nDenseTensors; i++) {
     THCSTensor *sparseTensor;
     THCTensor *denseTensor;

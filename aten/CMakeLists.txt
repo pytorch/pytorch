@@ -26,7 +26,7 @@ if("${isSystemDir}" STREQUAL "-1")
 endif()
 
 IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
 ENDIF(NOT MSVC)
 
@@ -127,7 +127,7 @@ ENDIF ()
 IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
   FIND_PACKAGE(OpenMP)
   SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-  
+
   # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
   # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
   SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")

@@ -256,7 +256,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
   int64_t output_nelem = THLongTensor_nElement(self);
   int64_t i = 0, _mask=0;
   real _q;
-  int64_t rand_ind, sample_idx, J_sample, kk_sample;
+  int64_t rand_ind, sample_idx, J_sample;
 
   for (i=0; i < output_nelem; i++)
     {

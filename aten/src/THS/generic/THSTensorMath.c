@@ -129,7 +129,6 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
   int t_coalesced = t->coalesced, s_coalesced = src->coalesced;
   int64_t nDimI = THSTensor_(nDimensionI)(src);
-  int64_t nDimV = THSTensor_(nDimensionV)(src);
   THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
   THTensor *t_values_ = THSTensor_(newValues)(t);
   THLongTensor *src_indices_ = THSTensor_(newIndices)(src);
@@ -216,7 +215,6 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t_, THSTensor *src_) {
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz;
   ptrdiff_t max_nnz = t_nnz < s_nnz ? t_nnz : s_nnz;
   int64_t nDimI = THSTensor_(nDimensionI)(src);
-  int64_t nDimV = THSTensor_(nDimensionV)(src);
   THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
   THTensor *t_values_ = THSTensor_(newValues)(t);
   THLongTensor *src_indices_ = THSTensor_(newIndices)(src);
@@ -525,7 +523,6 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
   THLongTensor  *indices = THSTensor_(newIndices)(sparse);
   THTensor      *values = THSTensor_(newValues)(sparse);
   THLongStorage *storage = THSTensor_(newSizeOf)(sparse);
-  int64_t       *sizes = storage->data;
   int64_t       nDim = THTensor_(nDimension)(dense);
   int64_t       nDimI = THSTensor_(nDimensionI)(sparse);
 

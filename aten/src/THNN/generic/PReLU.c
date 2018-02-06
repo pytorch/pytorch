@@ -174,7 +174,6 @@ void THNN_(PReLU_accGradParameters)(
 
   const real *input_data = THTensor_(data)(input);
   const real *gradOutput_data = THTensor_(data)(gradOutput);
-  const real *weight_data = THTensor_(data)(weight);
   real *gradWeight_data = THTensor_(data)(gradWeight);
 
   THIndex_t i, j, k;
