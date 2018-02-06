@@ -107,8 +107,10 @@ def load_deprecated_signatures(aten_decls):
             call_arg_to_idx = {arg: i for i, arg in enumerate(call_args)}
             original_args = declaration['arguments']
 
-            # Re-order the arguments in the deprecated overload, but keep
-            # the original types.
+            # Create an arguments list that uses the types from the original
+            # ATen declaration, but the ordering and parameter names from
+            # the deprecated overload. Any default parameter values from the
+            # original ATen declaration are ignored.
             arguments = []
             kwarg_only = False
             for param in params:
