@@ -42,7 +42,7 @@ template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context)
+  : Type(context, true)
   , baseType(baseType) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
