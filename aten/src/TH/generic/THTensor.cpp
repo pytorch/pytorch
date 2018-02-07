@@ -824,7 +824,7 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
       THStorage_(retain)(self->storage);
     }
     else
-      self->storage = NULL;
+      self->storage = THStorage_(new)();
   }
 
   /* storageOffset */
