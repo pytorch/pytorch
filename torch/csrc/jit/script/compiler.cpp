@@ -162,23 +162,23 @@ struct to_ir {
     auto& fn = function_table.at(apply.name().name());
     std::vector<Value*> inputs = getValues(apply.inputs());
 
-    std::unordered_map<Value*, Value*> value_table;
-    auto value_map = [&](Value* v) { return value_table.at(v); };
+    std::unordered_map<Value*, Value*> value_map;
+    auto value_map_func = [&](Value* v) { return value_map.at(v); };
     for (size_t i = 0; i < inputs.size(); ++i) {
-      value_table[fn.graph->inputs()[i]] = inputs[i];
+      value_map[fn.graph->inputs()[i]] = inputs[i];
     }
     for (auto* node : fn.graph->nodes()) {
       auto* new_node =
-          def.graph->appendNode(def.graph->createClone(node, value_map));
+          def.graph->appendNode(def.graph->createClone(node, value_map_func));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
-        value_table[node->outputs()[i]] = new_node->outputs()[i];
+        value_map[node->outputs()[i]] = new_node->outputs()[i];
         new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
       }
     }
 
     std::vector<Value*> outputs{};
     for (auto* output : fn.graph->outputs()) {
-      outputs.push_back(value_map(output));
+      outputs.push_back(value_map_func(output));
     }
     return outputs;
   }
