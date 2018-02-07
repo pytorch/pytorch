@@ -14,9 +14,10 @@ class DataParallel(Module):
     and each replica handles a portion of the input. During the backwards
     pass, gradients from each replica are summed into the original module.
 
-    The batch size should be larger than the number of GPUs used. It should
-    also be an integer multiple of the number of GPUs so that each chunk is the
-    same size (so that each GPU processes the same number of samples).
+    The batch size should be larger than the number of GPUs used. For better
+    performance, the batch size is recommended to be an integer multiple of
+    the number of GPUs so that each chunk is the same size (so that each GPU
+    processes the same number of samples).
 
     See also: :ref:`cuda-nn-dataparallel-instead`
 
