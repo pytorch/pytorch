@@ -343,22 +343,25 @@ struct to_ir {
       const size_t output_size) {
     const auto applyInputs =
         Compound::create(TK_LIST, range, std::move(inputs));
-    const auto applyAttributes = Compound::create(TK_LIST, range, {});
-
+    std::vector<Value*> input_values = getValues(applyInputs->trees());
+    auto* dim_0 = createConstant(at::CPU(at::kInt).scalarTensor(0));
+    input_values.insert(input_values.begin() + 1, dim_0);
     return emitNode(
-        Symbol("slice"), getValues(applyInputs->trees()), {}, output_size);
+        Symbol("slice"), input_values, {}, output_size);
   }
 
-  // Desugars gather syntactic sugar tensor[indices] -> tensor.gather(indices).
+  // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
   std::vector<Value*> emitGather(
       const SourceRange& range,
       TreeList&& inputs,
       const size_t output_size) {
     const auto applyInputs =
         Compound::create(TK_LIST, range, std::move(inputs));
-    const auto applyAttributes = Compound::create(TK_LIST, range, {});
+    std::vector<Value*> input_values = getValues(applyInputs->trees());
+    auto* dim_0 = createConstant(at::CPU(at::kInt).scalarTensor(0));
+    input_values.insert(input_values.begin() + 1, dim_0);
     return emitNode(
-        Symbol("gather"), getValues(applyInputs->trees()), {}, output_size);
+        Symbol("select"), input_values, {}, output_size);
   }
 
   FunctionDefinition& def; // the def being constructed
