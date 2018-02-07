@@ -74,14 +74,14 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(mat2.type().zeros({1}), self, mat2, 0, 1);
+    return mat2.type().addmm(mat2.type().zeros({}), self, mat2, 0, 1);
   }
   return self.type()._mm(self, mat2);
 }
 
 Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm_out(result, mat2.type().zeros({1}), self, mat2, 0, 1);
+    return mat2.type().addmm_out(result, mat2.type().zeros({}), self, mat2, 0, 1);
   }
   return self.type()._mm_out(result, self, mat2);
 }
