@@ -2096,7 +2096,7 @@ class TestKL(TestCase):
                     continue
                 expected_shape = dist.batch_shape if dist.batch_shape else torch.Size(SCALAR_SHAPE)
                 self.assertEqual(kl.shape, expected_shape, message='\n'.join([
-                    '{} example {}/{}'.format(Dist.__name__, i, len(params)),
+                    '{} example {}/{}'.format(Dist.__name__, i + 1, len(params)),
                     'Expected {}'.format(expected_shape),
                     'Actual {}'.format(kl.shape),
                 ]))
