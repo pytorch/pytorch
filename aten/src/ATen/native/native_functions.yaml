@@ -39,10 +39,6 @@
 
 - func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
-
-# This is separate from sspaddmm_out because we can't currently specify a sparse backend for dispatch
-- func: _sspaddmm_out(Tensor result, Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2) -> Tensor
-  variants: function
   dispatch:
     CPU: _sspaddmm_out_nyi
     CUDA: _sspaddmm_out_nyi

@@ -4,8 +4,8 @@
 namespace at {
 namespace native {
 
-Tensor& _sspaddmm_out_cuda(Tensor& result, Scalar beta, const Tensor& self,
-    Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
+Tensor& _sspaddmm_out_cuda(Tensor& result, const Tensor& self,
+    const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   runtime_error("NYI: CUDA sspaddmm is not implemented");
   return result;
 }

@@ -57,24 +57,19 @@ struct SspaddmmOp {
   }
 };
 
-// sparse, real, sparse, real, sparse, dense -> sparse
-Tensor& _sspaddmm_out_cpu(Tensor& result, Scalar beta, const Tensor& self,
-    Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
+// sparse, sparse, sparse, dense, real, real -> sparse
+Tensor& _sspaddmm_out_cpu(Tensor& result, const Tensor& self,
+    const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   dispatch_floating_types<void, SspaddmmOp>(self.type(), "sspaddmm",
       result, beta, self, alpha, mat1, mat2);
   return result;
 }
 
-Tensor& _sspaddmm_out_nyi(Tensor& result, Scalar beta, const Tensor& self,
-    Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
+// sparse, sparse, sparse, dense, real, real -> sparse
+Tensor& _sspaddmm_out_nyi(Tensor& result, const Tensor& self,
+    const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   runtime_error("tensor.sspaddmm(...) can only be called on sparse tensors");
   return result;
-}
-
-// sparse, sparse, sparse, dense, real, real -> sparse
-Tensor& sspaddmm_out(Tensor& result, const Tensor& self, const Tensor& mat1,
-    const Tensor& mat2, Scalar beta, Scalar alpha) {
-  return self.type()._sspaddmm_out(result, beta, self, alpha, mat1, mat2);
 }
 
 // sparse, sparse, dense, real, real -> sparse
