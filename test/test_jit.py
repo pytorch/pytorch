@@ -1297,7 +1297,7 @@ class TestJit(TestCase):
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
-    def checkScript(self, script, name, inputs, outputs, optimize):
+    def checkScript(self, script, inputs, outputs, optimize, name='func'):
         cu = torch.jit._jit_script_compile(script)
         graph = cu.get_graph(name)
         ge = torch._C.GraphExecutor(graph, optimize)
@@ -1306,54 +1306,54 @@ class TestJit(TestCase):
 
     def test_script_add(self):
         script = '''
-        def add(a, b) -> (c):
+        def func(a, b) -> (c):
             c = a + b
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
         outputs = a + b
-        self.checkScript(script, 'add', [a, b], [outputs], False)
+        self.checkScript(script, [a, b], [outputs], False)
 
     def test_script_mul(self):
         script = '''
-        def mul(a, b) -> (c):
+        def func(a, b) -> (c):
             c = a * b
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
         outputs = a * b
-        self.checkScript(script, 'mul', [a, b], [outputs], False)
+        self.checkScript(script, [a, b], [outputs], False)
 
     @unittest.skip("RuntimeError: Expected object of type CPUFloatType "
                    "but found type Variable[CPUFloatType] for argument #2 'other'")
     def test_script_triple(self):
         script = '''
-        def triple(x) -> (y):
+        def func(x) -> (y):
             y = 3f * x
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
-        self.checkScript(script, 'triple', [x], [outputs], False)
+        self.checkScript(script, [x], [outputs], False)
 
     def test_script_slice(self):
         script = '''
-        def head(x) -> (head):
+        def func(x) -> (head):
             head = x[:5]
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[:5]
-        self.checkScript(script, 'head', [x], [outputs], False)
+        self.checkScript(script, [x], [outputs], False)
 
     def test_script_gather(self):
         script = '''
-        def first(x) -> (y):
+        def func(x) -> (y):
             y = x[0]
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[0]
-        self.checkScript(script, 'first', [x], [outputs], False)
+        self.checkScript(script, [x], [outputs], False)
 
     def test_script_func_call(self):
         script = '''
@@ -1363,7 +1363,7 @@ class TestJit(TestCase):
         def mul(a, x) -> (y):
             y = a * x
 
-        def lin_comb(alpha, beta, x, y) -> (z):
+        def func(alpha, beta, x, y) -> (z):
             z = add(mul(alpha, x), mul(beta, y))
         '''
         alpha = Variable(torch.rand(1).float(), requires_grad=True)
@@ -1371,7 +1371,7 @@ class TestJit(TestCase):
         x = Variable(torch.rand(3).float(), requires_grad=True)
         y = Variable(torch.rand(3).float(), requires_grad=True)
         outputs = alpha * x + beta * y
-        self.checkScript(script, 'lin_comb', [alpha, beta, x, y], [outputs], False)
+        self.checkScript(script, [alpha, beta, x, y], [outputs], False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_script_cast(self):
