@@ -119,6 +119,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
         # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = 10 * MB
+        self.nccl_reduce_bucket_size = 128 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -139,6 +140,17 @@ class DistributedDataParallel(Module):
         else:
             self._module_copies = [self.module]
 
+<<<<<<< 314d632e04ee8ce4bc35a9bfc181cf2def3d5fab
+=======
+        # TODO: different types need different buckets
+        t = None
+        for p in self.module.parameters():
+            tp = type(p.data)
+            if t is not None and t is not tp:
+                raise ValueError("DistributedDataParallel requires all parameters' data to be of the same type")
+            t = tp
+
+>>>>>>> Added mixed precision support with nccl reduction bucketing
         # For NCCL backend, since every single NCCL call is asynchoronous, we
         # therefore directly enqueue all the NCCL reduction calls to the
         # default CUDA stream without spawning up other reduction threads.
@@ -147,6 +159,7 @@ class DistributedDataParallel(Module):
             self._register_nccl_grad_hook()
             return
 
+<<<<<<< 314d632e04ee8ce4bc35a9bfc181cf2def3d5fab
         bucket_bytes_cap = 1 * MB
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
@@ -155,6 +168,9 @@ class DistributedDataParallel(Module):
         for dev_idx, module in enumerate(self._module_copies):
             param_buckets.append(list(_take_tensors(module.parameters(), bucket_bytes_cap)))
 
+=======
+        # Split parameters into buckets that will coalesce reductions
+>>>>>>> Added mixed precision support with nccl reduction bucketing
         self.bucket_sizes = []
         self.bucket_map = {}
 
@@ -286,7 +302,7 @@ class DistributedDataParallel(Module):
         The NCCL reduction will directly be enqueued into the
         default CUDA stream. Therefore, no synchronization is needed.
         """
-        # creating a new group
+        # Creating a new group
         self.nccl_reduction_group_id = dist.new_group()
 
         def reduction_fn_nccl():
@@ -296,10 +312,11 @@ class DistributedDataParallel(Module):
             self.need_reduction = False
             all_grads = [[] for _ in range(len(self._module_copies))]
             all_grads_coalesced = []
+            # The gradient bucket for the first device of self.device_ids
+            mst_dev_grads_buckets = []
 
             # Coalesce all the gradients
-            # TODO: Add mixed precision support here
-            for idx, module in enumerate(self._module_copies):
+            for dev_idx, module in enumerate(self._module_copies):
                 for param in module.parameters():
                     if not param.requires_grad or param.grad is None:
                         continue
@@ -308,38 +325,55 @@ class DistributedDataParallel(Module):
                                            "with gradients that don't require "
                                            "grad")
                     # Adding the gradients for reduction
-                    all_grads[idx].append(param.grad.data)
-                with torch.cuda.device(self.device_ids[idx]):
-                    dev_grads_coalesced = _flatten_dense_tensors(all_grads[idx])
-                    all_grads_coalesced.append(dev_grads_coalesced)
+                    all_grads[dev_idx].append(param.grad.data)
 
+                # Now bucketing the parameters
+                dev_grads_buckets = _take_tensors(all_grads[dev_idx],
+                                                  self.nccl_reduce_bucket_size)
+                if dev_idx == 0:
+                    mst_dev_grads_buckets = list(dev_grads_buckets)
+                    all_grads_coalesced = \
+                        [[] for _ in range(len(mst_dev_grads_buckets))]
+
+                for bkt_idx, dev_grads in enumerate(dev_grads_buckets):
+                    # Coalescing the bucket
+                    dev_id = self.device_ids[dev_idx]
+                    with torch.cuda.device(dev_id):
+                        dev_grads_coalesced = _flatten_dense_tensors(dev_grads)
+                        all_grads_coalesced[bkt_idx].append(dev_grads_coalesced)
+
+            # Reduce all the gradients first
             # This single op will do all-reduce on all GPUs utilizing multiple
             # all reduce rings when we have more than one fast IB interfaces.
             # We will only use device 0's results, but this single op should be
             # faster than doing the following two operation sequentially:
             # (1) intra-node reduce to lead GPU, followed by
             # (2) inter-node allreduce for all the first lead GPUs in all nodes
-            dist.all_reduce_multigpu(all_grads_coalesced,
-                                     group=self.nccl_reduction_group_id)
+            for grads_coalesced in all_grads_coalesced:
+                dist.all_reduce_multigpu(grads_coalesced,
+                                         group=self.nccl_reduction_group_id)
 
-            # Now only work on the first lead GPU
-            all_grads_coalesced[0] /= dist.get_world_size()
-            for grad, reduced in \
-                    zip(all_grads[0],
-                        _unflatten_dense_tensors(all_grads_coalesced[0],
-                                                 all_grads[0])):
-                grad.copy_(reduced)
+            # Now only work on the first device of self.device_ids, uncoalesce
+            # the gradients for each bucket
+            for grads_coalesced, mst_dev_grads in zip(all_grads_coalesced,
+                                                      mst_dev_grads_buckets):
+                grads_coalesced[0] /= dist.get_world_size()
+                grads_reduced = _unflatten_dense_tensors(grads_coalesced[0],
+                                                         mst_dev_grads)
+                for grad, reduced in zip(mst_dev_grads, grads_reduced):
+                    grad.copy_(reduced)
 
         # Now register the reduction function in the execution engine
         for module in self._module_copies:
             for p in module.parameters():
-                if p.requires_grad:
-                    def allreduce_hook(*unused):
-                        Variable._execution_engine.\
-                            queue_callback(reduction_fn_nccl)
-                    p.register_hook(allreduce_hook)
+                if not p.requires_grad:
+                    continue
+                def allreduce_hook(*unused):
+                    Variable._execution_engine.queue_callback(reduction_fn_nccl)
+                p.register_hook(allreduce_hook)
 
     def _make_param_hook(self, param, device_idx):
+
         bucket_idx = self.bucket_map[param]
 
         def distributed_data_parallel_hook(*unused):
