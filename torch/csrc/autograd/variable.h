@@ -31,8 +31,12 @@ struct Variable : public at::Tensor {
 
   // Implicitly casts a Tensor to a Variable. This should only be called on
   // Tensors which you know are actually Variables.
-  /*implicit*/ Variable(Tensor const & rhs) : Tensor(rhs) {}
-  /*implicit*/ Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
+  /*implicit*/ Variable(Tensor const & rhs) : Tensor(rhs) {
+    AT_ASSERT(rhs.isVariable(), "not variable");
+  }
+  /*implicit*/ Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {
+    AT_ASSERT(rhs.isVariable(), "not variable");
+  }
 
   inline VariableImpl* get() const;
 
@@ -202,6 +206,7 @@ inline Variable::Variable(VariableImpl * self, bool retain) : Tensor(self, retai
 }
 
 inline VariableImpl* Variable::get() const {
+  AT_ASSERT(defined(), "Variable::get() !defined()");
   return static_cast<VariableImpl*>(pImpl);
 }
 
