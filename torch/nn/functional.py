@@ -1558,13 +1558,13 @@ See :class:`~torch.nn.SoftMarginLoss` for details.
 """)
 
 
-def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
+def multilabel_soft_margin_loss(input, target, weight=None, size_average=True, reduce=True):
     """multilabel_soft_margin_loss(input, target, weight=None, size_average=True) -> Variable
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
     input = torch.sigmoid(input)
-    return binary_cross_entropy(input, target, weight, size_average)
+    return binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):

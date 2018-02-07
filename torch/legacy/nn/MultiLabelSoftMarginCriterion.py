@@ -18,8 +18,10 @@ class MultiLabelSoftMarginCriterion(Criterion):
 
     """
 
-    def __init__(self, weights=None):
+    def __init__(self, weights=None, sizeAverage=True):
         super(MultiLabelSoftMarginCriterion, self).__init__()
+        self.weights = weights
+        self.sizeAverage = sizeAverage
         self.lsm = Sigmoid()
         self.nll = BCECriterion(weights)
 
