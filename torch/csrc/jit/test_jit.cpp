@@ -319,7 +319,8 @@ std::tuple<Var, Var> build_lstm_body(
   Var cx,
   Var w_ih,
   Var w_hh) {
-    auto gates =  input.mm(w_ih) + hx.mm(w_hh);
+    auto gates = input.mm(w_ih);
+    gates = gates + hx.mm(w_hh);
     auto outputs = gates.chunk(4, 1);
     auto ingate = outputs[0];
     auto forgetgate = outputs[1];
@@ -330,7 +331,8 @@ std::tuple<Var, Var> build_lstm_body(
     cellgate = cellgate.tanh();
     forgetgate = forgetgate.sigmoid();
 
-    auto cy = forgetgate*cx + ingate*cellgate;
+    auto cy = forgetgate*cx;
+    cy =  cy + ingate*cellgate;
     auto hy = outgate*cy.tanh();
 
     return std::make_tuple(hy,cy);
