@@ -315,6 +315,7 @@ def current_stream():
 
 def current_blas_handle():
     """Returns cublasHandle_t pointer to current cuBLAS handle"""
+    _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
 
@@ -322,6 +323,7 @@ def empty_cache():
     """Releases all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
     `nvidia-smi`."""
+    _lazy_init()
     return torch._C._cuda_emptyCache()
 
 
