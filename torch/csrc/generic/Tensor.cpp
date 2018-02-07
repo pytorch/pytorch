@@ -36,7 +36,7 @@
 #define COPY_FROM_ARRAY_CUDA(ELTYPE, ARRAY, STORAGE, SIZE) \
 { \
   ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);              \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);  \
+  std::unique_ptr<load_real[]> data_guard(new load_real[SIZE]);  \
   load_real *data = data_guard.get();                          \
   for (size_t i=0; i<SIZE; i++) {                              \
     data[i] = arrdata[i];                                      \
@@ -51,7 +51,7 @@
 #define COPY_FROM_ARRAY_CUDA_HALF(ELTYPE, ARRAY, STORAGE, SIZE) \
 { \
   ELTYPE *arrdata = (ELTYPE*)PyArray_DATA(ARRAY);                  \
-  std::unique_ptr<load_real> data_guard(new load_real[SIZE]);      \
+  std::unique_ptr<load_real[]> data_guard(new load_real[SIZE]);      \
   load_real *data = data_guard.get();                              \
   for (size_t i=0; i<SIZE; i++) {                                  \
     data[i] = arrdata[i];                                          \
@@ -379,7 +379,7 @@ static PyObject * THPTensor_(pynew)(PyTypeObject *type, PyObject *args, PyObject
     real *data = tensor->storage->data;
 #else
     size_t numel = THTensor_(numel)(LIBRARY_STATE tensor);
-    std::unique_ptr<load_real> data_guard(new load_real[numel]);
+    std::unique_ptr<load_real[]> data_guard(new load_real[numel]);
     load_real *data = data_guard.get();
 #endif
     THPObjectPtr final_sequence;
