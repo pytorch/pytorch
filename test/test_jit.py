@@ -1326,7 +1326,8 @@ class TestJit(TestCase):
         outputs = a * b
         self.checkScript(script, 'mul', [a, b], [outputs], False)
 
-    @unittest.skip("RuntimeError: Expected object of type CPUFloatType but found type Variable[CPUFloatType] for argument #2 'other'")
+    @unittest.skip("RuntimeError: Expected object of type CPUFloatType "
+                   "but found type Variable[CPUFloatType] for argument #2 'other'")
     def test_script_triple(self):
         script = '''
         def triple(x) -> (y):
