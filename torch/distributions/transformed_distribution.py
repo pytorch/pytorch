@@ -74,6 +74,7 @@ class TransformedDistribution(Distribution):
         Scores the sample by inverting the transform(s) and computing the score using the score
         of the base distribution and the log abs det jacobian
         """
+        self.base_dist._validate_log_prob_arg(value)
         event_dim = len(self.event_shape)
         log_prob = 0.0
         y = value
@@ -85,3 +86,23 @@ class TransformedDistribution(Distribution):
         log_prob += _sum_rightmost(self.base_dist.log_prob(y),
                                    event_dim - len(self.base_dist.event_shape))
         return log_prob
+
+    def cdf(self, value):
+        """
+        Computes the cumulative distribution function by inverting the transform(s) and computing
+        the score of the base distribution
+        """
+        self.base_dist._validate_log_prob_arg(value)
+        for transform in self.transforms[::-1]:
+            value = transform.inv(value)
+        return self.base_dist.cdf(value)
+
+    def icdf(self, value):
+        """
+        Computes the inverse cumulative distribution function using transform(s) and computing
+        the score of the base distribution
+        """
+        value = self.base_dist.icdf(value)
+        for transform in self.transforms:
+            value = transform(value)
+        return value
