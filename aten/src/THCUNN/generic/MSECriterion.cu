@@ -12,7 +12,7 @@ void THNN_(MSECriterion_updateOutput)(
            bool sizeAverage,
            bool reduce)
 {
-  THCUNN_check_nElement(state, input, target);
+  THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
   if (reduce) {
@@ -61,7 +61,7 @@ void THNN_(MSECriterion_updateGradInput)(
            bool sizeAverage,
            bool reduce)
 {
-  THCUNN_check_nElement(state, input, target);
+  THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
 
   if (reduce) {
