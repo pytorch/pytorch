@@ -3,7 +3,7 @@ import os
 import sys
 import re
 import itertools
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 import torch
 

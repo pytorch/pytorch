@@ -1069,10 +1069,11 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_pool3d_size_one_feature_dim(self):
         # Tests crazy strides for feature dim of size 1
-        x = Variable(torch.randn(7, 1, 5, 3, 2).cuda())
-        strange_strides = [30, 1234, 6, 2, 1]
-        y = x.as_strided(x.size(), strange_strides)
-        x = x.cpu().as_strided(x.size(), strange_strides)
+        x = torch.randn(7, 1, 5, 3, 2).cuda()
+        strange_strides = (30, 1234, 6, 2, 1)
+        y = x.new().set_(x.storage(), x.storage_offset(), x.size(), strange_strides)
+        x = x.cpu().set_(x.cpu().storage(), x.storage_offset(), x.size(), strange_strides)
+        x, y = Variable(x), Variable(y)
 
         to_test = {
             'max_pool3d': lambda t: F.max_pool3d(t, (5, 1, 1), stride=(5, 1, 1)),
