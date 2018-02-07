@@ -1298,6 +1298,91 @@ class TestJit(TestCase):
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
+    def checkScript(self, script, inputs, outputs, optimize, name='func'):
+        cu = torch.jit._jit_script_compile(script)
+        graph = cu.get_graph(name)
+        ge = torch._C.GraphExecutor(graph, optimize)
+        outputs_ge = ge(*inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+    def test_script_add(self):
+        script = '''
+        def func(a, b) -> (c):
+            c = a + b
+        '''
+
+        a = Variable(torch.rand(1), requires_grad=True)
+        b = Variable(torch.rand(1), requires_grad=True)
+        outputs = a + b
+        self.checkScript(script, [a, b], [outputs], False)
+
+    def test_script_mul(self):
+        script = '''
+        def func(a, b) -> (c):
+            c = a * b
+        '''
+
+        a = Variable(torch.rand(1), requires_grad=True)
+        b = Variable(torch.rand(1), requires_grad=True)
+        outputs = a * b
+        self.checkScript(script, [a, b], [outputs], False)
+
+    @unittest.skip("RuntimeError: Expected object of type CPUFloatType "
+                   "but found type Variable[CPUFloatType] for argument #2 'other'")
+    def test_script_triple(self):
+        script = '''
+        def func(x) -> (y):
+            y = 3f * x
+        '''
+        x = Variable(torch.rand(1).float(), requires_grad=True)
+        outputs = 3 * x
+        self.checkScript(script, [x], [outputs], False)
+
+    def test_script_slice(self):
+        script = '''
+        def func(x) -> (head):
+            head = x[:5]
+        '''
+        x = Variable(torch.rand(10).float(), requires_grad=True)
+        outputs = x[:5]
+        self.checkScript(script, [x], [outputs], False)
+
+    def test_script_gather(self):
+        script = '''
+        def func(x) -> (y):
+            y = x[0]
+        '''
+        x = Variable(torch.rand(10).float(), requires_grad=True)
+        outputs = x[0]
+        self.checkScript(script, [x], [outputs], False)
+
+    def test_script_func_call(self):
+        script = '''
+        def add(a, b) -> (c):
+            c = a + b
+
+        def mul(a, x) -> (y):
+            y = a * x
+
+        def func(alpha, beta, x, y) -> (z):
+            z = add(mul(alpha, x), mul(beta, y))
+        '''
+        alpha = Variable(torch.rand(1).float(), requires_grad=True)
+        beta = Variable(torch.rand(1).float(), requires_grad=True)
+        x = Variable(torch.rand(3).float(), requires_grad=True)
+        y = Variable(torch.rand(3).float(), requires_grad=True)
+        outputs = alpha * x + beta * y
+        self.checkScript(script, [alpha, beta, x, y], [outputs], False)
+
+    @unittest.skip("RuntimeError: VariableType::ID() not implemented")
+    def test_script_cast(self):
+        script = '''
+        def to_int(x) -> (y):
+            y = int(x)
+        '''
+        x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
+        outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
+        self.checkScript(script, 'to_int', [x], [outputs], False)
 
 if __name__ == '__main__':
     run_tests()

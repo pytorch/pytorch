@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/graph_executor.h"
+#include "torch/csrc/jit/script/init.h"
 
 
 namespace torch  { namespace jit {
@@ -33,6 +34,12 @@ bool loadPythonClasses() {
 template<void (*F)(std::shared_ptr<Graph>& graph)>
 void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
   return F(state->graph);
+}
+
+GraphExecutor createExecutorByGraph(
+    std::shared_ptr<Graph> graph,
+    bool optimize) {
+  return GraphExecutor(std::move(graph), optimize);
 }
 
 // This is a temporary constructor so that we can write python tests of
@@ -56,7 +63,7 @@ GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::Tra
   }
   tracer::exit(outputs);
   auto graph = enter_info.first->graph;
-  return GraphExecutor(std::move(graph), optimize);
+  return createExecutorByGraph(std::move(graph), optimize);
 }
 
 // we cannot use the default py:cast<autograd::Variable> because it currently
@@ -98,20 +105,34 @@ void initJITBindings(PyObject *module) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
    });
 
-   py::class_<GraphExecutor>(m,"GraphExecutor")
-   .def(py::init([](py::function func, std::vector<tracer::TraceInput> inputs, bool optimize){
-     return createExecutorByTracing(func, std::move(inputs), optimize);
-   }), py::arg("func"), py::arg("inputs"), py::arg("optimize") = true)
-   .def("__call__",[](GraphExecutor & ge, py::args args) {
-     auto inputs = createVariableTensorList(args);
-     auto outputs = ge.run(std::move(inputs));
-     // if we don't tell pybind these are variables it chokes on the conversion.
-     // TODO: fix conversions to be sane and make sure this works.
-     return std::vector<autograd::Variable>(outputs.begin(), outputs.end());
-   });
+  py::class_<GraphExecutor>(m, "GraphExecutor")
+      .def(
+          py::init([](py::function func,
+                      std::vector<tracer::TraceInput> inputs,
+                      bool optimize) {
+            return createExecutorByTracing(func, std::move(inputs), optimize);
+          }),
+          py::arg("func"),
+          py::arg("inputs"),
+          py::arg("optimize") = true)
+      .def(
+          py::init([](std::shared_ptr<Graph> graph, bool optimize) {
+            return createExecutorByGraph(std::move(graph), optimize);
+          }),
+          py::arg("graph"),
+          py::arg("optimize") = true)
+      .def("__call__", [](GraphExecutor& ge, py::args args) {
+        auto inputs = createVariableTensorList(args);
+        auto outputs = ge.run(std::move(inputs));
+        // if we don't tell pybind these are variables it chokes on the
+        // conversion.
+        // TODO: fix conversions to be sane and make sure this works.
+        return std::vector<autograd::Variable>(outputs.begin(), outputs.end());
+      });
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
   python::initCompilerMixin(module);
+  script::initJitScriptBindings(module);
 }
 
 }}
