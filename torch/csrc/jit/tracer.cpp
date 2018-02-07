@@ -104,7 +104,7 @@ struct TraceEval : autograd::Eval {
 
     detail::_exit(tracing_state, outputs);
     auto stage = tracing_state->graph->stage();
-    tracing_state->output_edges[stage] = fmap(placeholders, [](const std::shared_ptr<autograd::EvalOutput> p) {
+    tracing_state->output_edges[stage] = fmap(placeholders, [](const std::shared_ptr<autograd::EvalOutput>& p) {
       return p->next_edge;
     });
   }

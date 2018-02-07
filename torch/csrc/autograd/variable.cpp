@@ -7,6 +7,8 @@
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/functions/tensor.h"
 
+#include <memory>
+
 using namespace at;
 
 namespace torch { namespace autograd {

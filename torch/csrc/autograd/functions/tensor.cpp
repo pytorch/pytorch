@@ -35,10 +35,11 @@ CopySlices::CopySlices(const Variable& base_var, at::TensorGeometry view_, std::
 
   // Take the next_functions of fn as our own, except for index 0 which goes
   // to base instead of the view.
-  next_functions.resize(fn->next_functions.size());
-  next_functions[0] = std::make_pair(base_var.grad_fn(), base_var.output_nr());
-  for (size_t i = 1; i < next_functions.size(); i++) {
-    next_functions[i] = fn->next_functions[i];
+  const auto num_connections = fn->next_functions.size();
+  next_functions.reserve(num_connections);
+  next_functions.push_back(base_var.gradient_edge());
+  for (size_t i = 1; i < num_connections; i++) {
+    next_functions.push_back(fn->next_functions[i]);
   }
 }
 

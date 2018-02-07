@@ -8,6 +8,7 @@
 
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/function_hook.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/saved_variable.h"
@@ -20,6 +21,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -28,40 +30,24 @@ namespace torch { namespace autograd {
 
 struct Function;
 struct Variable;
+struct Edge;
 
 using tensor_list = std::vector<at::Tensor>;
 using variable_list = std::vector<Variable>;
-using edge_type = std::pair<std::shared_ptr<Function>, int>;
-using function_list = std::vector<edge_type>;
+using function_list = std::vector<Edge>;
 using saved_variable_list = std::vector<SavedVariable>;
-
-using IndexRange = std::pair<size_t, size_t>; // inclusive-exclusive
-
-struct edge_hasher {
-  std::size_t operator()(const edge_type& edge) const {
-#define HASH_IDX(idx) std::hash<std::tuple_element<idx, edge_type>::type>()(std::get<idx>(edge))
-    // TODO: that's probably a bad hash function, but whatever
-    return HASH_IDX(0) ^ HASH_IDX(1);
-  }
-};
+using IndexRange = std::pair<size_t, size_t>;
 
 namespace detail {
-inline edge_type make_edge(const Variable &variable) {
-  if (variable.defined()) {
-    if (variable.grad_fn() != nullptr) {
-      return {variable.grad_fn(), variable.output_nr()};
-    } else if (variable.requires_grad()) {
-      return {variable.grad_accumulator(), 0};
-    }
-  }
-  return {nullptr, 0};
-}
-
 struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
   function_list next_functions;
   using IterArgs<MakeNextFunctionList>::operator();
   void operator()(const Variable& variable) {
-    next_functions.push_back(make_edge(variable));
+    if (variable.defined()) {
+      next_functions.push_back(variable.gradient_edge());
+    } else {
+      next_functions.emplace_back();
+    }
   }
 };
 } // namespace detail
@@ -124,7 +110,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   bool should_compute_output(size_t index) const {
     TORCH_ASSERTM(index < next_functions.size(), "Index out of range");
-    return next_functions[index].first != nullptr;
+    return next_functions[index].is_valid();
   }
 
   bool should_compute_any_outputs() const {
@@ -197,5 +183,4 @@ struct TraceableFunction : public Function {
 
   virtual inline bool is_traceable() final { return true; };
 };
-
 }} // namespace torch::autograd

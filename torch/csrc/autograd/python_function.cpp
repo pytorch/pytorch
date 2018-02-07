@@ -781,7 +781,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 static void _trim_grad_input(THPFunction *self, THPObjectPtr& grad_input)
 {
   int num_grads = PyTuple_GET_SIZE(grad_input.get());
-  int num_next_fns = self->cdata.next_functions.size();
+  const int num_next_fns = self->cdata.next_functions.size();
   if (num_grads > num_next_fns) {
     // Check that all extra grads are none
     bool all_none = true;
@@ -922,10 +922,10 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   for (int i = 0; i < size; i++) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return NULL;
-    PyObject* fn = functionToPyObject(next_fns[i].first);
+    PyObject* fn = functionToPyObject(next_fns[i].function);
     if (!fn) return NULL;
     PyTuple_SET_ITEM(fn_tuple.get(), 0, fn);
-    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(next_fns[i].second));
+    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(next_fns[i].input_nr));
     PyTuple_SET_ITEM(result.get(), i, fn_tuple.release());
   }
   return result.release();
