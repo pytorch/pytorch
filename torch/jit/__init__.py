@@ -17,7 +17,7 @@ import copy
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
-
+_jit_script_compile = torch._C._jit_script_compile
 
 # This global variable is set when we are tracing a *forwards* computation.
 # It is intended to be a cheap way to test if tracing has occurred, before
