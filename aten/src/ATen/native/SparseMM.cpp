@@ -3,7 +3,6 @@
 #include "ATen/NativeFunctions.h"
 
 #include <TH/TH.h>
-#include <THNN/THNN.h>
 #undef THNN_
 #include <THS/THS.h>
 
@@ -17,14 +16,15 @@ namespace native {
 
 // Calling into TH for sspaddmm because ATen code generation currently
 // doesn't support Sparse x Dense operations on Sparse tensors
-template <class scalar>
-void TH_sspaddmm(Tensor & result, Scalar beta, const Tensor& self,
+template <class scalar_t>
+void sspaddmm_TH_dispatch(Tensor & result, Scalar beta, const Tensor& self,
     Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
-  runtime_error("sspaddmm NYI for passed in types\n");
+  runtime_error("sspaddmm NYI for types %s %s %s",
+      self.type().toString(), mat1.type().toString(), mat2.type().toString());
 }
 
 template <>
-void TH_sspaddmm<float>(Tensor& result, Scalar beta, const Tensor& self,
+void sspaddmm_TH_dispatch<float>(Tensor& result, Scalar beta, const Tensor& self,
     Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
   auto result_ = checked_cast_tensor<SparseCPUFloatTensor>(result.pImpl,"result",0, false);
   auto beta_ = beta.toFloat();
@@ -37,7 +37,7 @@ void TH_sspaddmm<float>(Tensor& result, Scalar beta, const Tensor& self,
 }
 
 template <>
-void TH_sspaddmm<double>(Tensor& result, Scalar beta, const Tensor& self,
+void sspaddmm_TH_dispatch<double>(Tensor& result, Scalar beta, const Tensor& self,
     Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
   auto result_ = checked_cast_tensor<SparseCPUDoubleTensor>(result.pImpl,"result",0, false);
   auto beta_ = beta.toDouble();
@@ -49,11 +49,11 @@ void TH_sspaddmm<double>(Tensor& result, Scalar beta, const Tensor& self,
   result_->maybeScalar(self_->isScalar() && mat1_->isScalar() && mat2_->isScalar());
 }
 
-template <typename scalar>
+template <typename scalar_t>
 struct SspaddmmOp {
   static void apply(Tensor& result, Scalar beta, const Tensor& self,
       Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
-    TH_sspaddmm<scalar>(result, beta, self, alpha, mat1, mat2);
+    sspaddmm_TH_dispatch<scalar_t>(result, beta, self, alpha, mat1, mat2);
   }
 };
 
@@ -65,20 +65,23 @@ Tensor& _sspaddmm_out_cpu(Tensor& result, Scalar beta, const Tensor& self,
   return result;
 }
 
-// sparse, real, sparse, real, sparse, dense -> sparse
-Tensor& sspaddmm_out(Tensor& result, const Tensor& self, const Tensor& mat1,
-    const Tensor& mat2, Scalar beta, Scalar alpha) {
-  return mat2.type()._sspaddmm_out(result, beta, self, alpha, mat1, mat2);
+Tensor& _sspaddmm_out_nyi(Tensor& result, Scalar beta, const Tensor& self,
+    Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
+  runtime_error("tensor.sspaddmm(...) can only be called on sparse tensors");
+  return result;
 }
 
-// real, sparse, real, sparse, dense -> sparse
+// sparse, sparse, sparse, dense, real, real -> sparse
+Tensor& sspaddmm_out(Tensor& result, const Tensor& self, const Tensor& mat1,
+    const Tensor& mat2, Scalar beta, Scalar alpha) {
+  return self.type()._sspaddmm_out(result, beta, self, alpha, mat1, mat2);
+}
+
+// sparse, sparse, dense, real, real -> sparse
 Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
     Scalar beta, Scalar alpha) {
-  // There's no easy way to make an empty sparse tensor right now
-  auto result = self.clone();
-  // Dispatch on the DENSE type, because native_functions.yaml
-  // doesn't support specifying sparse backend dispatch
-  mat2.type().sspaddmm_out(result, self, mat1, mat2, beta, alpha);
+  auto result = self.type().tensor();
+  self.type().sspaddmm_out(result, self, mat1, mat2, beta, alpha);
   return result;
 }
 

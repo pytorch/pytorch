@@ -44,8 +44,10 @@
 - func: _sspaddmm_out(Tensor result, Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2) -> Tensor
   variants: function
   dispatch:
-    CPU: _sspaddmm_out_cpu
-    CUDA: _sspaddmm_out_cuda
+    CPU: _sspaddmm_out_nyi
+    CUDA: _sspaddmm_out_nyi
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
