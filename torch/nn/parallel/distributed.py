@@ -5,7 +5,9 @@ import copy
 
 import torch
 from torch.autograd import Variable
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
+    _take_tensors
+
 from torch.cuda.comm import broadcast_coalesced
 from torch.cuda import nccl
 import torch.distributed as dist
@@ -105,12 +107,7 @@ class DistributedDataParallel(Module):
         self.broadcast_bucket_size = 10 * MB
 
         # Sync params and buffers
-        # Here we will coalesce all the parameters and buffers in several big
-        # flat tensors and broadcast them out to reduce the number of broadcasts
-        # as well as improve performance, even though this function is
-        # only called one time.
         module_states = list(self.module.state_dict().values())
-
         if len(module_states) > 0:
             self._dist_broadcast_coalesced(module_states,
                                            self.broadcast_bucket_size)
@@ -207,17 +204,8 @@ class DistributedDataParallel(Module):
                             same GPU.
         buffer_size (int): maximum size of the buffer for coalescing
         """
-        tensors_bucket = []
-        # To init the first bucket right away
-        cur_bucket_size = buffer_size
-        for tensor in tensors:
-            if cur_bucket_size >= buffer_size:
-                tensors_bucket.append([])
-                cur_bucket_size = 0
-            tensors_bucket[-1].append(tensor)
-            cur_bucket_size += tensor.numel() * tensor.element_size()
-
-        for tensors in tensors_bucket:
+        tensors_buckets = _take_tensors(tensors, buffer_size)
+        for tensors in tensors_buckets:
             flat_tensors = _flatten_dense_tensors(tensors)
             dist.broadcast(flat_tensors, 0)
             for tensor, synced in zip(tensors,
