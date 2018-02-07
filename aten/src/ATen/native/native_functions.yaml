@@ -215,6 +215,11 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+- func: mm(Tensor self, Tensor mat2) -> Tensor
+
+- func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
 
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
