@@ -788,6 +788,33 @@ class TestNN(NNTestCase):
         self.assertEqual(n[:-3], nn.Sequential(l1))
         self.assertEqual(n[::-1], nn.Sequential(l4, l3, l2, l1))
 
+    def test_Sequential_setitem(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3)
+        n[0] = l4
+        n[-1] = l4
+        self.assertEqual(n[0], l4)
+        self.assertEqual(n[2], l4)
+
+    def test_Sequential_setitem_named(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(OrderedDict([
+            ('linear1', l1),
+            ('linear2', l2),
+            ('linear3', l3),
+        ]))
+
+        n[0] = l4
+        n[-1] = l4
+        self.assertEqual(n.linear1, l4)
+        self.assertEqual(n.linear3, l4)
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)

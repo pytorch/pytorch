@@ -1,7 +1,8 @@
-from collections import OrderedDict, Iterable
-import string
-import torch
 import warnings
+from collections import OrderedDict, Iterable
+from itertools import islice
+
+import torch
 from .module import Module
 
 
@@ -49,18 +50,23 @@ class Sequential(Module):
             for idx, module in enumerate(args):
                 self.add_module(str(idx), module)
 
+    def _get_item_by_idx(self, iterator, idx):
+        """Get the idx-th item of the iterator"""
+        size = len(self)
+        if not -size <= idx < size:
+            raise IndexError('index {} is out of range'.format(idx))
+        idx %= size
+        return next(islice(iterator, idx, None))
+
     def __getitem__(self, idx):
         if isinstance(idx, slice):
             return Sequential(OrderedDict(list(self._modules.items())[idx]))
         else:
-            if not (-len(self) <= idx < len(self)):
-                raise IndexError('index {} is out of range'.format(idx))
-            if idx < 0:
-                idx += len(self)
-            it = iter(self._modules.values())
-            for i in range(idx):
-                next(it)
-            return next(it)
+            return self._get_item_by_idx(self._modules.values(), idx)
+
+    def __setitem__(self, idx, module):
+        key = self._get_item_by_idx(self._modules.keys(), idx)
+        return setattr(self, key, module)
 
     def __len__(self):
         return len(self._modules)
