@@ -1190,6 +1190,9 @@ class TestCuda(TestCase):
     def test_stft(self):
         TestTorch._test_stft(self, lambda t: t.cuda())
 
+    def test_multinomial(self):
+        TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
+
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
 
