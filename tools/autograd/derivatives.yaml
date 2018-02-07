@@ -407,7 +407,7 @@
   self: grad.clone().masked_fill_(self >= other, 0)
   other: grad.clone().masked_fill_(self < other, 0)
 
-- name: mm(Tensor self, Tensor mat2)
+- name: _mm(Tensor self, Tensor mat2)
   self: mm_mat1_backward(grad, mat2, self.sizes(), self.strides(), 1)
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 

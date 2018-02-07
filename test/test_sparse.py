@@ -744,6 +744,8 @@ class TestSparse(TestCase):
         to_test_mixed = {
             'addmm': lambda sp, de: de.addmm(sp, de),
             'addmm_': lambda sp, de: de.addmm(sp, de),
+            'mm': lambda sp, de: torch.mm(sp, de),
+            'mm_out': lambda sp, de: torch.mm(sp, de, out=de),
         }
 
         i = self.IndexTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
