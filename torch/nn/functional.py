@@ -626,7 +626,7 @@ def glu(input, dim=-1):
     """
     if input.dim() == 0:
         raise RuntimeError("glu does not suppport scalars because halving size must be even")
-    torch._C._nn.glu(input, dim)
+    return torch._C._nn.glu(input, dim)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
