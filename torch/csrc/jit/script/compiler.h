@@ -12,7 +12,7 @@ struct CompilationUnitImpl;
 struct CompilationUnit {
   CompilationUnit();
   void define(const std::string& str);
-  const Graph& getGraph(const std::string& func_name);
+  std::shared_ptr<Graph> getGraph(const std::string& func_name);
   ~CompilationUnit();
 
  private:

@@ -1,7 +1,0 @@
-graph(%x : UNKNOWN_TYPE) {
-  %1 : UNKNOWN_TYPE = Constant[value={0}]()
-  %2 : UNKNOWN_TYPE = Constant[value={5}]()
-  %3 : UNKNOWN_TYPE = Constant[value={0}]()
-  %4 : UNKNOWN_TYPE = slice(%x, %3, %1, %2)
-  return (%4);
-}

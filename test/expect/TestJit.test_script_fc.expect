@@ -1,7 +1,0 @@
-graph(%w : UNKNOWN_TYPE
-      %x : UNKNOWN_TYPE
-      %b : UNKNOWN_TYPE) {
-  %3 : UNKNOWN_TYPE = Mul(%w, %x)
-  %4 : UNKNOWN_TYPE = Add(%3, %b)
-  return (%4);
-}

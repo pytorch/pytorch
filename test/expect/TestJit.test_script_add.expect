@@ -1,5 +1,0 @@
-graph(%a : UNKNOWN_TYPE
-      %b : UNKNOWN_TYPE) {
-  %2 : UNKNOWN_TYPE = Add(%a, %b)
-  return (%2);
-}

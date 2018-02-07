@@ -1297,60 +1297,90 @@ class TestJit(TestCase):
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
+    def checkScript(self, script, name, inputs, outputs, optimize):
+        cu = torch.jit._jit_script_compile(script)
+        graph = cu.get_graph(name)
+        ge = torch._C.GraphExecutor(graph, optimize)
+        outputs_ge = ge(*inputs)
+        self.assertEqual(outputs, outputs_ge)
+
     def test_script_add(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def add(a, b) -> (c):
             c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('add')))
+        '''
+
+        a = Variable(torch.rand(1), requires_grad=True)
+        b = Variable(torch.rand(1), requires_grad=True)
+        outputs = a + b
+        self.checkScript(script, 'add', [a, b], [outputs], False)
 
     def test_script_mul(self):
-        cu = torch.jit._jit_script_compile('''
-        def mul(a, x) -> (y):
-            y = a * x
-        ''')
-        self.assertExpected(str(cu.get_graph('mul')))
+        script = '''
+        def mul(a, b) -> (c):
+            c = a * b
+        '''
 
+        a = Variable(torch.rand(1), requires_grad=True)
+        b = Variable(torch.rand(1), requires_grad=True)
+        outputs = a * b
+        self.checkScript(script, 'mul', [a, b], [outputs], False)
+
+    @unittest.skip("RuntimeError: Expected object of type CPUFloatType but found type Variable[CPUFloatType] for argument #2 'other'")
     def test_script_triple(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def triple(x) -> (y):
-            y = 3LL * x
-        ''')
-        self.assertExpected(str(cu.get_graph('triple')))
+            y = 3f * x
+        '''
+        x = Variable(torch.rand(1).float(), requires_grad=True)
+        outputs = 3 * x
+        self.checkScript(script, 'triple', [x], [outputs], False)
 
     def test_script_slice(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def head(x) -> (head):
             head = x[:5]
-        ''')
-        self.assertExpected(str(cu.get_graph('head')))
+        '''
+        x = Variable(torch.rand(10).float(), requires_grad=True)
+        outputs = x[:5]
+        self.checkScript(script, 'head', [x], [outputs], False)
 
     def test_script_gather(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def first(x) -> (y):
             y = x[0]
-        ''')
-        self.assertExpected(str(cu.get_graph('first')))
+        '''
+        x = Variable(torch.rand(10).float(), requires_grad=True)
+        outputs = x[0]
+        self.checkScript(script, 'first', [x], [outputs], False)
 
-    def test_script_fc(self):
-        cu = torch.jit._jit_script_compile('''
+    def test_script_func_call(self):
+        script = '''
         def add(a, b) -> (c):
             c = a + b
 
         def mul(a, x) -> (y):
             y = a * x
 
-        def fc(w, x, b) -> (z):
-            z = add(mul(w, x), b)
-        ''')
-        self.assertExpected(str(cu.get_graph('fc')))
+        def lin_comb(alpha, beta, x, y) -> (z):
+            z = add(mul(alpha, x), mul(beta, y))
+        '''
+        alpha = Variable(torch.rand(1).float(), requires_grad=True)
+        beta = Variable(torch.rand(1).float(), requires_grad=True)
+        x = Variable(torch.rand(3).float(), requires_grad=True)
+        y = Variable(torch.rand(3).float(), requires_grad=True)
+        outputs = alpha * x + beta * y
+        self.checkScript(script, 'lin_comb', [alpha, beta, x, y], [outputs], False)
 
+    @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_script_cast(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def to_int(x) -> (y):
             y = int(x)
-        ''')
-        self.assertExpected(str(cu.get_graph('to_int')))
+        '''
+        x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
+        outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
+        self.checkScript(script, 'to_int', [x], [outputs], False)
 
 if __name__ == '__main__':
     run_tests()

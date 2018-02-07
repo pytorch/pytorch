@@ -21,13 +21,18 @@ struct FunctionDefinition {
     return tree == nullptr;
   }
   std::unique_ptr<Def> tree;
-  std::unique_ptr<Graph> graph;
+  std::shared_ptr<Graph> graph;
 };
 
 } // namespace
 
 using FunctionTable = std::unordered_map<std::string, FunctionDefinition>;
 using ValueTable = std::unordered_map<std::string, Value*>;
+using AttributeMap =
+    std::unordered_map<std::string, std::pair<double, std::string>>;
+using ListAttributeMap = std::unordered_map<
+    std::string,
+    std::pair<const std::vector<double>, std::string>>;
 
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
@@ -114,16 +119,16 @@ struct to_ir {
   NodeKind getNodeKind(int kind, int ninputs) {
     switch (kind) {
       case '+':
-        return kAdd;
+        return kadd;
       case '-':
         if (ninputs == 1)
           return kneg;
         else
-          return kSub;
+          return ksub;
       case '*':
-        return kMul;
+        return kmul;
       case '/':
-        return kDiv;
+        return kdiv;
       case TK_NE:
         return kne;
       case TK_EQ:
@@ -210,18 +215,25 @@ struct to_ir {
       case '>':
       case TK_LE:
       case TK_GE:
-      case '-':
       case '*':
       case '/':
-      case '+':
       case TK_AND:
       case TK_OR:
       case TK_NOT: {
         expectOutputs(tree, output_size, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        return emitNode(kind, getValues(inputs), {}, output_size);
+        return emitNode(kind, getValues(inputs), output_size)->outputs();
       } break;
+      case '+':
+      case '-': {
+        expectOutputs(tree, output_size, 1);
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto* node = emitNode(kind, getValues(inputs), output_size);
+        node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        return node->outputs();
+      }
       case TK_APPLY: {
         auto apply = Apply(tree);
         if (function_table.count(apply.name().name()) > 0) {
@@ -230,11 +242,32 @@ struct to_ir {
           const auto& inputs = getValues(apply.inputs());
           NodeKind kind{apply.name().name()};
 
-          std::unordered_map<std::string, TreeRef> attributes{};
+          AttributeMap attributes{};
+          ListAttributeMap list_attributes{};
           for (const auto& attr : apply.attributes()) {
-            attributes[attr.name().name()] = attr.value();
+            const auto& name = attr.name().name();
+            const auto& value = attr.value();
+            // TODO: handle non-float attributes
+            switch (value->kind()) {
+              case TK_CONST: {
+                auto v = value->tree(0)->doubleValue();
+                const auto& type = value->tree(1)->stringValue();
+                attributes.insert({name, {v, type}});
+              } break;
+              case TK_LIST:
+                std::vector<double> vs{};
+                for (const auto& tree : value->trees()) {
+                  vs.push_back(tree->tree(0)->doubleValue());
+                }
+                const auto& type = value->trees()[0]->tree(1)->stringValue();
+                list_attributes.insert({name, {std::move(vs), type}});
+            }
+            break;
+            break;
           }
-          return emitNode(kind, inputs, attributes, output_size);
+          return emitNode(
+                     kind, inputs, output_size, attributes, list_attributes)
+              ->outputs();
         }
       } break;
       case TK_CAST: {
@@ -271,13 +304,29 @@ struct to_ir {
     }
   }
 
-  std::vector<Value*> emitCast(const TreeRef& input, const int type) {
+  std::vector<Value*> emitCast(const TreeRef& input, int type) {
+    at::ScalarType t;
+    switch (type) {
+      case TK_INT:
+        t = at::kInt;
+        break;
+      case TK_FLOAT:
+        t = at::kFloat;
+        break;
+      case TK_LONG:
+        t = at::kLong;
+        break;
+      case TK_BOOL:
+        t = at::kByte;
+        break;
+      default:
+        throw ErrorReport(input) << "Unrecognized type: " << type;
+    }
     return emitNode(
-        Symbol("type_as"),
-        {emitExpr(input, 1)[0],
-         createConstant(at::CPU(at::kInt).scalarTensor(0))},
-        {},
-        1);
+               Symbol("type_as"),
+               {emitExpr(input, 1)[0], createConstant(at::CPU(t).ones({1}))},
+               1)
+        ->outputs();
   }
 
   std::vector<Value*> emitConst(const double val, const std::string& type) {
@@ -294,45 +343,37 @@ struct to_ir {
     }
   }
 
-  std::vector<Value*> emitNode(
+  Node* emitNode(
       NodeKind kind,
       const std::vector<Value*> inputs,
-      const std::unordered_map<std::string, TreeRef>& attributes,
-      const size_t output_size) {
+      const size_t output_size,
+      const AttributeMap& attributes = {},
+      const ListAttributeMap& list_attributes = {}) {
     Node* n = def.graph->appendNode(def.graph->create(kind, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
-    for (const auto& iter : attributes) {
-      const auto& name = Symbol(iter.first);
-      const auto& value = iter.second;
-      // TODO: handle non-float attributes
-      switch (value->kind()) {
-        case TK_CONST: {
-          auto v = value->tree(0)->doubleValue();
-          auto type = value->tree(1)->stringValue();
-          if (type == "f") {
-            n->f_(name, v);
-          } else {
-            n->i_(name, v);
-          }
-        } break;
-        case TK_LIST:
-          if (value->trees().size()) {
-            std::vector<double> values{};
-            for (const auto& tree : value->trees()) {
-              values.push_back(tree->tree(0)->doubleValue());
-            }
-            if (value->trees()[0]->tree(1)->stringValue() == "f") {
-              n->fs_(name, std::move(values));
-            } else {
-              n->is_(name, std::vector<int64_t>(values.begin(), values.end()));
-            }
-          }
-          break;
+    for (const auto& attr : attributes) {
+      const auto name = Symbol(attr.first);
+      auto value = attr.second.first;
+      const auto& type = attr.second.second;
+      if (type == "f") {
+        n->f_(name, value);
+      } else {
+        n->i_(name, value);
       }
     }
-    return n->outputs();
+    for (const auto& attr : list_attributes) {
+      const auto name = Symbol(attr.first);
+      const auto& values = attr.second.first;
+      const auto& type = attr.second.second;
+      if (type == "f") {
+        n->fs_(name, std::vector<double>{values.begin(), values.end()});
+      } else {
+        n->is_(name, std::vector<int64_t>{values.begin(), values.end()});
+      }
+    }
+    return n;
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
@@ -343,11 +384,19 @@ struct to_ir {
       const size_t output_size) {
     const auto applyInputs =
         Compound::create(TK_LIST, range, std::move(inputs));
-    std::vector<Value*> input_values = getValues(applyInputs->trees());
-    auto* dim_0 = createConstant(at::CPU(at::kInt).scalarTensor(0));
-    input_values.insert(input_values.begin() + 1, dim_0);
+    const auto input_values = getValues(applyInputs->trees());
+    Value* tensor = input_values[0];
+    const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
+    const auto& end = at::Scalar(input_values[2]->node()->t(kvalue)).toInt();
     return emitNode(
-        Symbol("slice"), input_values, {}, output_size);
+               Symbol("slice"),
+               {tensor},
+               output_size,
+               {{"dim", {0, "LL"}},
+                {"step", {1, "LL"}},
+                {"start", {begin, "LL"}},
+                {"end", {end, "LL"}}})
+        ->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -357,11 +406,15 @@ struct to_ir {
       const size_t output_size) {
     const auto applyInputs =
         Compound::create(TK_LIST, range, std::move(inputs));
-    std::vector<Value*> input_values = getValues(applyInputs->trees());
-    auto* dim_0 = createConstant(at::CPU(at::kInt).scalarTensor(0));
-    input_values.insert(input_values.begin() + 1, dim_0);
+    const auto input_values = getValues(applyInputs->trees());
+    Value* tensor = input_values[0];
+    const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
     return emitNode(
-        Symbol("select"), input_values, {}, output_size);
+               Symbol("select"),
+               {tensor},
+               output_size,
+               {{"dim", {0, "LL"}}, {"index", {idx, "LL"}}})
+        ->outputs();
   }
 
   FunctionDefinition& def; // the def being constructed
@@ -393,11 +446,11 @@ struct CompilationUnitImpl {
     }
   }
 
-  const Graph& getGraph(const std::string& func_name) {
+  std::shared_ptr<Graph> getGraph(const std::string& func_name) {
     if (functions.count(func_name) == 0)
       throw ErrorReport() << "undefined function: " << func_name << "\n";
     auto& def = functions.at(func_name);
-    return *def.graph;
+    return def.graph;
   }
 
  private:
@@ -411,7 +464,7 @@ void CompilationUnit::define(const std::string& script) {
   return pImpl->define(script);
 }
 
-const Graph& CompilationUnit::getGraph(const std::string& func_name) {
+std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
   return pImpl->getGraph(func_name);
 }
 

@@ -1,6 +1,0 @@
-graph(%x : UNKNOWN_TYPE) {
-  %1 : UNKNOWN_TYPE = Constant[value={0}]()
-  %2 : UNKNOWN_TYPE = Constant[value={0}]()
-  %3 : UNKNOWN_TYPE = select(%x, %2, %1)
-  return (%3);
-}

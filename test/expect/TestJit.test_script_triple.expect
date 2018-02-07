@@ -1,5 +1,0 @@
-graph(%x : UNKNOWN_TYPE) {
-  %1 : UNKNOWN_TYPE = Constant[value={3}]()
-  %2 : UNKNOWN_TYPE = Mul(%1, %x)
-  return (%2);
-}
