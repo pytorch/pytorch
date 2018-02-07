@@ -1185,9 +1185,7 @@ class TestDistributions(TestCase):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
                 dist = Dist(**param)
-                samples = dist.sample()
-                if not samples.requires_grad:
-                    continue
+                samples = Variable(dist.sample().data, requires_grad=True)
                 try:
                     cdfs = dist.cdf(samples)
                     pdfs = dist.log_prob(samples).exp()
@@ -2413,13 +2411,13 @@ class TestAgainstScipy(TestCase):
 
     def test_mean(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, Cauchy):
+            if isinstance(pytorch_dist, Cauchy):  # Cauchy distribution's mean is nan, skipping check
                 continue
             self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
-            if isinstance(pytorch_dist, Cauchy):
+            if isinstance(pytorch_dist, Cauchy):  # Cauchy distribution's standard deviation is nan, skipping check
                 continue
             if isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
@@ -2429,7 +2427,6 @@ class TestAgainstScipy(TestCase):
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
 
     def test_cdf(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = pytorch_dist.sample((5,))
             try:
@@ -2439,7 +2436,6 @@ class TestAgainstScipy(TestCase):
             self.assertEqual(cdf, scipy_dist.cdf(samples), message=pytorch_dist)
 
     def test_icdf(self):
-        set_rng_seed(0)  # see Note [Randomized statistical tests]
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             samples = Variable(torch.rand((5,) + pytorch_dist.batch_shape))
             try:
