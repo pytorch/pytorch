@@ -65,6 +65,14 @@ class Normal(ExponentialFamily):
         log_scale = math.log(self.scale) if isinstance(self.scale, Number) else self.scale.log()
         return -((value - self.loc) ** 2) / (2 * var) - log_scale - math.log(math.sqrt(2 * math.pi))
 
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        return 0.5 * (1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2)))
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
+
     def entropy(self):
         return 0.5 + 0.5 * math.log(2 * math.pi) + torch.log(self.scale)
 
