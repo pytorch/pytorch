@@ -1,0 +1,5 @@
+graph(%x : UNKNOWN_TYPE) {
+  %1 : UNKNOWN_TYPE = Constant[value={0}]()
+  %2 : UNKNOWN_TYPE = type_as(%x, %1)
+  return (%2);
+}

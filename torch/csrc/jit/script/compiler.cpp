@@ -272,8 +272,12 @@ struct to_ir {
   }
 
   std::vector<Value*> emitCast(const TreeRef& input, const int type) {
-    // TODO: add support for cast
-    return {};
+    return emitNode(
+        Symbol("type_as"),
+        {emitExpr(input, 1)[0],
+         createConstant(at::CPU(at::kInt).scalarTensor(0))},
+        {},
+        1);
   }
 
   std::vector<Value*> emitConst(const double val, const std::string& type) {

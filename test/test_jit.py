@@ -1345,5 +1345,12 @@ class TestJit(TestCase):
         ''')
         self.assertExpected(str(cu.get_graph('fc')))
 
+    def test_script_cast(self):
+        cu = torch.jit._jit_script_compile('''
+        def to_int(x) -> (y):
+            y = int(x)
+        ''')
+        self.assertExpected(str(cu.get_graph('to_int')))
+
 if __name__ == '__main__':
     run_tests()
