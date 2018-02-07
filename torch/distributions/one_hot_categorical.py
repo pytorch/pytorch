@@ -7,11 +7,15 @@ from torch.distributions.distribution import Distribution
 
 class OneHotCategorical(Distribution):
     r"""
-    Creates a one-hot categorical distribution parameterized by `probs`.
+    Creates a one-hot categorical distribution parameterized by :attr:`probs` or
+    :attr:`logits`.
 
-    Samples are one-hot coded vectors of size probs.size(-1).
+    Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
-    See also: :func:`torch.distributions.Categorical`
+    .. note:: :attr:`probs` will be normalized to be summing to 1.
+
+    See also: :func:`torch.distributions.Categorical` for specifications of
+    :attr:`probs` and :attr:`logits`.
 
     Example::
 
@@ -25,6 +29,7 @@ class OneHotCategorical(Distribution):
 
     Args:
         probs (Tensor or Variable): event probabilities
+        logits (Tensor or Variable): event log probabilities
     """
     params = {'probs': constraints.simplex}
     support = constraints.simplex
@@ -69,6 +74,7 @@ class OneHotCategorical(Distribution):
         return one_hot.scatter_(-1, indices, 1)
 
     def log_prob(self, value):
+        self._validate_log_prob_arg(value)
         indices = value.max(-1)[1]
         return self._categorical.log_prob(indices)
 
