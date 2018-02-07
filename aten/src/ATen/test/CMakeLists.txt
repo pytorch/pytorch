@@ -39,7 +39,7 @@ if(NOT NO_CUDA)
   target_link_libraries(integer_divider_test ATen)
 endif()
 
-if (CUDNN_FOUND)
+if (AT_CUDNN_ENABLED AND CUDNN_FOUND)
   add_executable(cudnn_test cudnn_test.cpp)
   target_link_libraries(cudnn_test ATen)
 endif()
