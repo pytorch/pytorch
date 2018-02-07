@@ -4668,7 +4668,7 @@ def smoothl1loss_no_reduce_test():
 def multilabelmarginloss_1d_no_reduce_test():
     t = Variable(torch.rand(10).mul(10).floor().long())
     return dict(
-        fullname='MultiLabelMarginLoss_no_reduce',
+        fullname='MultiLabelMarginLoss_1d_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
         input_fn=lambda: torch.randn(10),
@@ -4696,7 +4696,7 @@ def multilabelmarginloss_index_neg_test():
 def multilabelmarginloss_no_reduce_test():
     t = Variable(torch.rand(5, 10).mul(10).floor().long())
     return dict(
-        fullname='MultiLabelMarginLoss_1d_no_reduce',
+        fullname='MultiLabelMarginLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
         input_fn=lambda: torch.randn(5, 10),
