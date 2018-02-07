@@ -61,7 +61,7 @@ DONT_PROFILE = {
 # not examine or modify requires_grad or grad_fn.
 DONT_REQUIRE_DERIVATIVE = {
     # These  only depend on the input Tensor's shape and device, not the data
-    'ones_like', 'zeros_like', 'randn_like',
+    'ones_like', 'zeros_like', 'rand_like', 'randn_like',
     # Tensor constructors
     'sparse_coo_tensor',
     # These are only implemented on integral types
