@@ -192,7 +192,7 @@ def _wrap_function(function, ffi):
     @wraps(function)
     def safe_call(*args, **kwargs):
         args = tuple(ffi.cast(_torch_to_cffi.get(type(arg), 'void') + '*', arg._cdata)
-                     if torch.is_tensor(arg) or torch.is_storage(arg) or isinstance(Variable, arg)
+                     if torch.is_tensor(arg) or torch.is_storage(arg) or isinstance(arg, Variable)
                      else arg
                      for arg in args)
         args = (function,) + args
