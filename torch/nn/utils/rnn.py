@@ -91,6 +91,9 @@ class PackedSequence(PackedSequence_):
 
 
 def _pack_padded_sequence(input, lengths, batch_first=False):
+    if isinstance(lengths, list):
+        lengths = Variable(torch.LongTensor(lengths))
+
     data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
 
     return PackedSequence(data, batch_sizes)
