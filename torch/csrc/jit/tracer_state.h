@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/autograd/edge.h"
 
 #include <memory>
 #include <mutex>
@@ -20,8 +21,8 @@ namespace torch { namespace jit { namespace tracer {
 
 using torch::autograd::Variable;
 using torch::autograd::Function;
+using edge_list = std::vector<autograd::Edge>;
 using variable_list = std::vector<Variable>;
-using function_list = std::vector<std::pair<std::shared_ptr<Function>, int>>;
 
 // TracingState tracks the necessary state when we are tracing the execution of
 // autograd code; most importantly, it holds a reference to the actual IR
@@ -60,7 +61,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   std::unordered_map<void*, Value*> buffer_map;
   // A pair of (input_flags, output_flags) for each stage
   io_variable_flags_list var_flags;
-  std::vector<function_list> output_edges;
+  std::vector<edge_list> output_edges;
 
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage

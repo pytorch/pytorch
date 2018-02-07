@@ -1,5 +1,12 @@
 #include "Python.h"
-#include "interpreter_autograd_function.h"
+
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/jit/interpreter_autograd_function.h"
+
+#include <algorithm>
+#include <memory>
+#include <tuple>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -115,9 +122,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
         grad_fn->next_functions.emplace_back();
         continue;
       }
-      grad_fn->next_functions.emplace_back(
-        input.grad_fn() ? input.grad_fn() : input.grad_accumulator(),
-        input.output_nr());
+      grad_fn->next_functions.push_back(input.gradient_edge());
     }
   };
 
