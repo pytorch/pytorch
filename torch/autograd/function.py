@@ -295,8 +295,11 @@ def _unflatten(input, proto):
         if not isinstance(proto, (list, tuple)):
             return input[0], input[1:]
         for e in proto:
-            res_e, input = unflatten_helper(input, e)
-            res.append(res_e)
+            if e is None:
+                res.append(e)
+            else:
+                res_e, input = unflatten_helper(input, e)
+                res.append(res_e)
         return type(proto)(res), input
 
     return unflatten_helper(input, proto)[0]
