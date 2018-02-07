@@ -14,7 +14,10 @@ class PackPadded(Function):
 
         steps = []
         batch_sizes = []
-        lengths_iter = reversed(lengths)
+
+        # lengths is a Tensor, so we must convert to list before reversed()
+        lengths_iter = reversed(list(lengths))
+
         batch_size = input.size(1)
 
         if len(lengths) != batch_size:

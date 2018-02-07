@@ -3054,9 +3054,11 @@ class TestNN(NNTestCase):
                 grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
                 if variable_len:
-                    batch_sizes = [7, 5, 5, 2, 1, 1]
-                    input_val = rnn_utils.pack_padded_sequence(input_val, batch_sizes, batch_first=batch_first)
-                    grad_output = rnn_utils.pack_padded_sequence(grad_output, batch_sizes, batch_first=batch_first).data
+                    lengths = [7, 5, 5, 2, 1, 1]
+                    input_val = Variable(input_val)
+                    grad_output = Variable(grad_output)
+                    input_val = rnn_utils.pack_padded_sequence(input_val, lengths, batch_first=batch_first)
+                    grad_output = rnn_utils.pack_padded_sequence(grad_output, lengths, batch_first=batch_first).data
 
                 rnn = module(input_size,
                              hidden_size,

@@ -118,7 +118,7 @@ class RNNBase(Module):
                     self.input_size, input.size(-1)))
 
         if is_input_packed:
-            mini_batch = batch_sizes[0]
+            mini_batch = int(batch_sizes[0])
         else:
             mini_batch = input.size(0) if self.batch_first else input.size(1)
 
@@ -142,7 +142,7 @@ class RNNBase(Module):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
             input, batch_sizes = input
-            max_batch_size = batch_sizes[0]
+            max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
             max_batch_size = input.size(0) if self.batch_first else input.size(1)
@@ -174,11 +174,11 @@ class RNNBase(Module):
             dropout=self.dropout,
             train=self.training,
             bidirectional=self.bidirectional,
-            batch_sizes=batch_sizes,
             dropout_state=self.dropout_state,
+            variable_length=is_packed,
             flat_weight=flat_weight
         )
-        output, hidden = func(input, self.all_weights, hx)
+        output, hidden = func(input, self.all_weights, hx, batch_sizes)
         if is_packed:
             output = PackedSequence(output, batch_sizes)
         return output, hidden
