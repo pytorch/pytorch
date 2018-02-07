@@ -1142,6 +1142,44 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
     )
 
 
+def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
+                  training=False, momentum=0.1, eps=1e-5, affine=False):
+    """Applies instance normalization over an input. The implementation is
+    based on batch_norm, in which we do reshape, batchnorm, and reshape again.
+
+    See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
+    :class:`~torch.nn.InstanceNorm3d` for details.
+    """
+    import torch
+    import torch.onnx.symbolic
+
+    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
+    def _instance_norm(input, weight=None, bias=None, saved_running_mean=None,
+                       saved_running_var=None, training=False, momentum=0.1,
+                       eps=1e-5, affine=False):
+        b, c = input.size(0), input.size(1)
+
+        # Repeat stored stats and affine transform params
+        running_mean = saved_running_mean.repeat(b)
+        running_var = saved_running_var.repeat(b)
+
+        # Apply instance norm
+        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
+
+        out = batch_norm(
+            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
+            training=training, momentum=momentum, eps=eps)
+
+        # Reshape back
+        saved_running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
+        saved_running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
+
+        return out.view(b, c, *input.size()[2:])
+    return _instance_norm(input, weight=weight, bias=bias, saved_running_mean=saved_running_mean,
+                          saved_running_var=saved_running_var, training=training,
+                          momentum=momentum, eps=eps, affine=affine)
+
+
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     if training:
