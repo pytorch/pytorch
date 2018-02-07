@@ -42,9 +42,10 @@ set MAGMA_HOME=%cd%\\magma_cuda90_release
 aws s3 cp s3://ossci-windows/clcache.7z clcache.7z && 7z x -aoa clcache.7z -oclcache
 
 :: Install Miniconda3
+rm -rf C:\\Jenkins\\Miniconda3
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
-start /wait "" Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=%cd%\\Miniconda3
-call %cd%\\Miniconda3\\Scripts\\activate.bat %cd%\\Miniconda3
+.\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
+call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
 call conda install -y numpy mkl cffi pyyaml boto3
 
 :: Install ninja
@@ -75,7 +76,7 @@ set CMAKE_GENERATOR=Ninja
 
 xcopy /Y aten\\src\\ATen\\common_with_cwrap.py tools\\shared\\cwrap_common.py
 
-python setup.py install && 7z a %IMAGE_COMMIT_TAG%.7z %cd%\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+python setup.py install && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
 
 EOL
 
