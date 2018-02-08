@@ -365,9 +365,13 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
 
 
 def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
-    zeros = input.new().zero_()
-    margin_clamp = (margin - self).clamp(min=0)
-    output = torch.where(target == 1, self, margin_clamp)
+    # needed for legacy tests
+    if not isinstance(input, Variable):
+        input = Variable(input)
+        target = Variable(target)
+
+    margin_clamp = (margin - input).clamp(min=0).type_as(input)
+    output = torch.where(target == 1, input, margin_clamp)
 
     if reduce and size_average:
         return output.mean()
@@ -382,6 +386,7 @@ loss_reference_fns = {
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
+    'HingeEmbeddingLoss': hingeembeddingloss_reference,
 }
 
 
@@ -492,6 +497,8 @@ criterion_tests = [
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
+        reference_fn=lambda i, t, m:
+            hingeembeddingloss_reference(i, t, size_average=get_size_average(m)),
         check_no_size_average=True,
     ),
     dict(
@@ -499,6 +506,8 @@ criterion_tests = [
         constructor_args=(0.5,),
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
+        reference_fn=lambda i, t, m:
+            hingeembeddingloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
         desc='margin',
         check_no_size_average=True,
     ),
