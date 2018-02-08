@@ -43,7 +43,9 @@ Variable::Impl::Impl(at::Tensor data_, bool requires_grad_, Edge gradient_edge)
       data(std::move(data_)),
       grad_fn(std::move(gradient_edge.function)),
       requires_grad(requires_grad_),
-      output_nr(gradient_edge.input_nr) {
+      is_view(false),
+      output_nr(gradient_edge.input_nr),
+      pyobj(nullptr) {
   TORCH_ASSERTM(
       !grad_fn || !requires_grad,
       "_requires_grad should be false if grad_fn is set");
@@ -165,48 +167,27 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
   return grad_fn;
 }
 
-void Variable::ViewImpl::rebase_history(
-    int output_nr,
-    std::shared_ptr<Function> grad_fn) {
-  TORCH_ASSERT(output_nr == 0);
-  TORCH_ASSERT(grad_fn);
+void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
+  TORCH_ASSERT(gradient_edge.input_nr == 0);
+  TORCH_ASSERT(gradient_edge.function);
   TORCH_ASSERTM(
-      grad_fn->num_inputs == 1,
+      gradient_edge.function->num_inputs == 1,
       "Functions which modify views in-place must return a single Variable");
-  this->output_nr = output_nr;
+  this->output_nr = gradient_edge.input_nr;
   auto copy_slices = std::make_shared<CopySlices>(
-      base, at::TensorGeometry(data), std::move(grad_fn));
+      base, at::TensorGeometry(data), std::move(gradient_edge.function));
   base.set_gradient_edge({std::move(copy_slices), 0});
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 
-Variable::Impl* Variable::get() const {
-  return static_cast<Variable::Impl*>(pImpl);
-}
-
-void Variable::rebase_history(
-    int output_nr,
-    std::shared_ptr<Function> grad_fn) {
-  TORCH_ASSERT(grad_fn);
+void Variable::rebase_history(Edge gradient_edge) {
+  TORCH_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
     auto& impl = static_cast<Variable::ViewImpl&>(*get());
-    impl.rebase_history(output_nr, std::move(grad_fn));
+    impl.rebase_history(std::move(gradient_edge));
   } else {
-    get()->output_nr = output_nr;
-    get()->grad_fn = std::move(grad_fn);
+    set_gradient_edge(std::move(gradient_edge));
   }
-}
-
-bool Variable::requires_grad() const noexcept {
-  return get()->requires_grad || get()->grad_fn ||
-      (is_view() && base().requires_grad());
-}
-
-const Variable& Variable::base() const {
-  if (is_view()) {
-    return static_cast<Variable::ViewImpl*>(get())->base;
-  }
-  throw std::runtime_error("Can't get base of non-view");
 }
 
 Variable Variable::detach() const {

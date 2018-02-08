@@ -265,7 +265,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     // This output is already rebased. This happens when there
     // the same Variable has been returned multiple times, and
     // is repeated in this list.
-    if (output.grad_fn().get() == this) {
+    if (output.grad_fn_ptr() == this) {
       auto replicate = std::make_shared<Replicate>();
       replicate->next_functions.emplace_back(this_shared, output.output_nr());
       output.set_gradient_edge({std::move(replicate), 0});

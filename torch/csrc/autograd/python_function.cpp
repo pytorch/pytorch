@@ -400,7 +400,7 @@ static void _wrap_outputs(THPFunction *self,
         grad_acc->variable.reset();
       }
       if (cdata) {
-        var.rebase_history(output_nr, cdata);
+        var.rebase_history({cdata, output_nr});
       }
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view

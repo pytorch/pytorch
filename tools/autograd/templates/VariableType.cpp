@@ -5,6 +5,7 @@
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/generated/Functions.h"
@@ -303,18 +304,18 @@ static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
     auto& var = static_cast<Variable&>(tensor);
     grad_fn->num_inputs = 1;
-    var.rebase_history(0, std::move(grad_fn));
+    var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
 static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
     grad_fn->num_inputs = tensors.size();
-    int output_nr = 0;
+    uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
         auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
-        var.rebase_history(output_nr, grad_fn);
+        var.rebase_history({grad_fn, output_nr});
       }
       output_nr++;
     }

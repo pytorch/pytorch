@@ -42,7 +42,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
     v->cdata.set_pyobj(obj);
-    if (auto fn = std::dynamic_pointer_cast<PyFunction>(v->cdata.grad_fn())) {
+    if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn_ptr())) {
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
       const auto output_nr = static_cast<uint32_t>(v->cdata.output_nr());

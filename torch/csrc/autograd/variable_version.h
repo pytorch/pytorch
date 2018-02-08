@@ -14,8 +14,7 @@
 // 2. Detached variables share the version counter of the source,
 // 3. Unpacked saved variables share the version counter of the source.
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 
 class VariableVersion {
  public:
@@ -25,7 +24,7 @@ class VariableVersion {
   VariableVersion(uint32_t version = 0)
       : version_block_(std::make_shared<std::atomic<uint32_t>>(version)) {}
 
-  void bump() {
+  void bump() noexcept {
     version_block_->fetch_add(1);
   }
 
@@ -36,5 +35,4 @@ class VariableVersion {
  private:
   std::shared_ptr<std::atomic<uint32_t>> version_block_;
 };
-} // namespace autograd
-} // namespace torch
+}} // namespace torch::autograd

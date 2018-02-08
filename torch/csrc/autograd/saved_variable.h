@@ -2,7 +2,7 @@
 
 #include "torch/csrc/autograd/variable_version.h"
 
-#include <ATen/Tensor.h>
+#include <ATen/ATen.h>
 
 #include <cstdint>
 #include <list>

@@ -272,7 +272,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   Variable sliced = applySlicing(self_, holder.get(), variableIndices);
   if (variableIndices.empty()) {
-    if (sliced == self_) {
+    if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
