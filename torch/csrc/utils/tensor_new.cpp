@@ -173,7 +173,6 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     return set_requires_grad(new_with_tensor_copy(type, r.tensor(0)), r.toBool(1));
-    return set_requires_grad(new_with_tensor(type, r.tensor(0)), r.toBool(1));
   } else if (r.idx == 1) {
     return set_requires_grad(new_from_data(type, r.toInt64(1), r.pyobject(0)), r.toBool(2));
   }
