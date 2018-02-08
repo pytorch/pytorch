@@ -238,13 +238,23 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   THCTensor *r__, *m1_, *m2_;
 
   if( (m1->nDimension != 2) || (m2->nDimension != 2) )
-    THError("matrix and matrix expected");
+    THError("matrices expected, got %dD, %dD tensors", m1->nDimension, m2->nDimension);
 
   if(t->nDimension != 2)
-    THError("size mismatch");
+    THError("matrix expected, got %dD tensor for t", t->nDimension);
 
-  if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) || (m1->size[1] != m2->size[0]) )
-    THError("size mismatch");
+  if(m1->size[1] != m2->size[0]) {
+    THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
+    THCDescBuff bm2 = THCTensor_(sizeDesc)(state, m2);
+    THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
+  }
+
+  if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) ) {
+    THCDescBuff bt  = THCTensor_(sizeDesc)(state, t);
+    THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
+    THCDescBuff bm2 = THCTensor_(sizeDesc)(state, m2);
+    THError("size mismatch, t: %s, m1: %s, m2: %s", bt.str, bm1.str, bm2.str);
+  }
 
   if(t != r_)
   {
