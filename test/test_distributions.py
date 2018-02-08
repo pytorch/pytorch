@@ -251,8 +251,8 @@ EXAMPLES = [
             'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True),
         },
         {
-            'temperature': torch.Tensor([2.0]),
-            'probs': torch.Tensor([0.3]),
+            'temperature': Variable(torch.Tensor([2.0])),
+            'probs': Variable(torch.Tensor([0.3])),
         },
         {
             'temperature': Variable(torch.Tensor([7.2])),
@@ -265,8 +265,8 @@ EXAMPLES = [
             'probs': Variable(torch.Tensor([[0.1, 0.2, 0.7], [0.5, 0.3, 0.2]]), requires_grad=True)
         },
         {
-            'temperature': torch.Tensor([2.0]),
-            'probs': torch.Tensor([[1.0, 0.0], [0.0, 1.0]])
+            'temperature': Variable(torch.Tensor([2.0])),
+            'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]))
         },
         {
             'temperature': Variable(torch.Tensor([7.2])),
