@@ -38,8 +38,9 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, Multinomial,
                                  Normal, OneHotCategorical, Pareto, Poisson,
-                                 StudentT, TransformedDistribution, Uniform,
-                                 constraints, kl_divergence)
+                                 RelaxedBernoulli, RelaxedOneHotCategorical, StudentT,
+                                 TransformedDistribution, Uniform, constraints,
+                                 kl_divergence)
 from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
@@ -242,6 +243,34 @@ EXAMPLES = [
         },
         {
             'rate': 0.2,
+        }
+    ]),
+    Example(RelaxedBernoulli, [
+        {
+            'temperature': Variable(torch.Tensor([0.5]), requires_grad=True),
+            'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True),
+        },
+        {
+            'temperature': torch.Tensor([2.0]),
+            'probs': torch.Tensor([0.3]),
+        },
+        {
+            'temperature': Variable(torch.Tensor([7.2])),
+            'logits': Variable(torch.Tensor([-2.0, 2.0, 1.0, 5.0]))
+        }
+    ]),
+    Example(RelaxedOneHotCategorical, [
+        {
+            'temperature': Variable(torch.Tensor([0.5]), requires_grad=True),
+            'probs': Variable(torch.Tensor([[0.1, 0.2, 0.7], [0.5, 0.3, 0.2]]), requires_grad=True)
+        },
+        {
+            'temperature': torch.Tensor([2.0]),
+            'probs': torch.Tensor([[1.0, 0.0], [0.0, 1.0]])
+        },
+        {
+            'temperature': Variable(torch.Tensor([7.2])),
+            'logits': Variable(torch.Tensor([[-2.0, 2.0], [1.0, 5.0]]))
         }
     ]),
     Example(TransformedDistribution, [
@@ -664,6 +693,103 @@ class TestDistributions(TestCase):
                                          scipy.stats.poisson(rate),
                                          'Poisson(lambda={}, cuda)'.format(rate),
                                          failure_rate=1e-3)
+
+    def test_relaxed_bernoulli(self):
+        p = variable([0.7, 0.2, 0.4], requires_grad=True)
+        r = variable(0.3, requires_grad=True)
+        s = 0.3
+        temp = Variable(torch.Tensor([0.67]), requires_grad=True)
+        self.assertEqual(RelaxedBernoulli(temp, p).sample((8,)).size(), (8, 3))
+        self.assertTrue(isinstance(RelaxedBernoulli(temp, p).sample().data, torch.Tensor))
+        self.assertEqual(RelaxedBernoulli(temp, r).sample((8,)).size(), (8,) + SCALAR_SHAPE)
+        self.assertEqual(RelaxedBernoulli(temp, r).sample().size(), SCALAR_SHAPE)
+        self.assertEqual(RelaxedBernoulli(temp, r).sample((3, 2)).size(), (3, 2,) + SCALAR_SHAPE)
+        self.assertEqual(RelaxedBernoulli(temp, s).sample().size(), SCALAR_SHAPE)
+        self._gradcheck_log_prob(RelaxedBernoulli, (temp, p))
+        self._gradcheck_log_prob(RelaxedBernoulli, (temp, r))
+
+        # test that rsample doesn't fail
+        s = RelaxedBernoulli(temp, p).rsample()
+        s.backward(torch.ones_like(s))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_rounded_relaxed_bernoulli(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+
+        class Rounded(object):
+            def __init__(self, dist):
+                self.dist = dist
+
+            def sample(self, *args, **kwargs):
+                return torch.round(self.dist.sample(*args, **kwargs))
+
+        for probs, temp in product([0.1, 0.2, 0.8], [0.1, 1.0, 10.0]):
+            self._check_sampler_discrete(Rounded(RelaxedBernoulli(temp, probs)),
+                                         scipy.stats.bernoulli(probs),
+                                         'Rounded(RelaxedBernoulli(temp={}, probs={}))'.format(temp, probs),
+                                         failure_rate=1e-3)
+
+        for probs in [0.001, 0.2, 0.999]:
+            equal_probs = torch.Tensor([0.5])
+            dist = RelaxedBernoulli(1e10, probs)
+            s = dist.rsample()
+            self.assertEqual(equal_probs, s)
+
+    def test_relaxed_one_hot_categorical_1d(self):
+        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        temp = Variable(torch.Tensor([0.67]), requires_grad=True)
+        self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().size(), (3,))
+        self.assertTrue(isinstance(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().data, torch.Tensor))
+        self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((2, 2)).size(), (2, 2, 3))
+        self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample_n(1).size(), (1, 3))
+        self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
+
+    def test_relaxed_one_hot_categorical_2d(self):
+        probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
+        probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
+        temp = Variable(torch.Tensor([3.00]), requires_grad=True)
+        temp_2 = Variable(torch.Tensor([0.2]), requires_grad=True)
+        p = Variable(torch.Tensor(probabilities), requires_grad=True)
+        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
+        self.assertEqual(RelaxedOneHotCategorical(temp, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
+        self.assertEqual(RelaxedOneHotCategorical(temp, p).sample_n(6).size(), (6, 2, 3))
+        self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
+        self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp_2, p))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_argmax_relaxed_categorical(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+
+        class ArgMax(object):
+            def __init__(self, dist):
+                self.dist = dist
+
+            def sample(self, *args, **kwargs):
+                s = self.dist.sample(*args, **kwargs)
+                _, idx = torch.max(s, -1)
+                return idx
+
+        class ScipyCategorical(object):
+            def __init__(self, dist):
+                self.dist = dist
+
+            def pmf(self, samples):
+                new_samples = np.zeros(samples.shape + self.dist.p.shape)
+                new_samples[np.arange(samples.shape[0]), samples] = 1
+                return self.dist.pmf(new_samples)
+
+        for probs, temp in product([torch.Tensor([0.1, 0.9]), torch.Tensor([0.2, 0.2, 0.6])], [0.1, 1.0, 10.0]):
+            self._check_sampler_discrete(ArgMax(RelaxedOneHotCategorical(temp, probs)),
+                                         ScipyCategorical(scipy.stats.multinomial(1, probs)),
+                                         'Rounded(RelaxedOneHotCategorical(temp={}, probs={}))'.format(temp, probs),
+                                         failure_rate=1e-3)
+
+        for probs in [torch.Tensor([0.1, 0.9]), torch.Tensor([0.2, 0.2, 0.6])]:
+            equal_probs = torch.ones(probs.size()) / probs.size()[0]
+            dist = RelaxedOneHotCategorical(1e10, probs)
+            s = dist.rsample()
+            self.assertEqual(equal_probs, s)
 
     def test_uniform(self):
         low = Variable(torch.zeros(5, 5), requires_grad=True)

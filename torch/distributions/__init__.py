@@ -69,6 +69,8 @@ from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
 from .poisson import Poisson
+from .relaxed_bernoulli import RelaxedBernoulli
+from .relaxed_categorical import RelaxedOneHotCategorical
 from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
@@ -94,6 +96,8 @@ __all__ = [
     'Normal',
     'OneHotCategorical',
     'Pareto',
+    'RelaxedBernoulli',
+    'RelaxedOneHotCategorical',
     'StudentT',
     'Poisson',
     'Uniform',
