@@ -246,6 +246,7 @@ public:
   }
   size_t stage() const {
     return stage_;
+  }
   Scope* scope() {
     return scope_;
   }
@@ -630,9 +631,9 @@ public:
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
   , new_node_stage_(0)
-  , output_(initOutput(create(kReturn))) {}
   , scope_root_(scope_root)
   , current_scope_(scope_root_.get())
+  , output_(initOutput(create(kReturn))) {}
 
   Graph()
   : Graph( std::make_shared<Scope>()) {}
@@ -862,10 +863,10 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
   graph_(graph_),
   unique_(graph_->next_unique_++),
   stage_(graph_->new_node_stage_),
-  scope_(graph_->current_scope_) {
+  scope_(graph_->current_scope_) ,
   type_(getInitialType(kind_)) {
-  graph_->all_nodes.emplace(this);
-}
+    graph_->all_nodes.emplace(this);
+  }
 
 inline void Node::destroy() {
   JIT_ASSERT(inGraphList());

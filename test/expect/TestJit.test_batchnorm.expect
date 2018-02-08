@@ -3,6 +3,6 @@ graph(%1 : Double(2, 2)
       %3 : Double(2)
       %4 : Double(2)
       %5 : Double(2)) {
-  %7 : Double(2, 2), %8 : Handle = CppOp[N5torch8autograd16BatchNormForwardE](%1, %2, %3), uses = [[%0.i0], []];
+  %7 : Double(2, 2), %8 : Handle = CppOp[N5torch8autograd16BatchNormForwardE](%1, %2, %3), uses = [[%0.i0], []], scope: BatchNorm2d;
   return (%7);
 }

@@ -50,6 +50,12 @@ def LSTMCellC(*args, **kwargs):
 class TestJit(TestCase):
     maxDiff = None
 
+    def assertExpectedTrace(self, trace, *args, **kwargs):
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), *args, **kwargs)
+
     def test_simple(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -87,7 +93,7 @@ class TestJit(TestCase):
         net = Net()
         t = Variable(torch.ones(2), requires_grad=True)
         trace, _ = torch.jit.trace(net, (t, ))
-        torch.onnx._optimize_trace(trace, False)
+        torch.onnx._optimize_trace(trace)
 
         self.assertExpectedTrace(trace)
 
@@ -114,7 +120,7 @@ class TestJit(TestCase):
         with torch.onnx.set_training(model, False):
             trace, _ = torch.jit.trace(model, (t, ))
 
-        torch.onnx._optimize_trace(trace, False)
+        torch.onnx._optimize_trace(trace)
 
         self.assertExpectedTrace(trace)
 
@@ -125,7 +131,7 @@ class TestJit(TestCase):
         net = Net()
         t = Variable(torch.ones(2), requires_grad=True)
         trace, _ = torch.jit.trace(net, (t, ))
-        torch.onnx._optimize_trace(trace, False)
+        torch.onnx._optimize_trace(trace)
         g = torch._C._jit_get_graph(trace)
         for node in g.nodes():
             self.assertTrue(node.scopeName() == 'Net')
@@ -151,13 +157,13 @@ class TestJit(TestCase):
         with torch.onnx.set_training(model, False):
             trace, _ = torch.jit.trace(model, (t, ))
 
-        torch.onnx._optimize_trace(trace, False)
+        torch.onnx._optimize_trace(trace)
         graph = torch._C._jit_get_graph(trace)
         nodes = list(graph.nodes())
 
-        self.assertTrue(nodes[0].scopeName() == 'Net/Sequential[features]/Conv2d[0]')
-        self.assertTrue(nodes[1].scopeName() == 'Net/Sequential[features]/ReLU[1]')
-        self.assertTrue(nodes[2].scopeName() == 'Net/Sequential[features]/MaxPool2d[2]')
+        self.assertEqual(nodes[0].scopeName(), 'Net/Sequential[features]/Conv2d[0]')
+        self.assertEqual(nodes[1].scopeName(), 'Net/Sequential[features]/ReLU[1]')
+        self.assertEqual(nodes[2].scopeName(), 'Net/Sequential[features]/MaxPool2d[2]')
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):

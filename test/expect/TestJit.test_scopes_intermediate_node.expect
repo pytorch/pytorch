@@ -1,5 +1,5 @@
-graph(%0 : Double(2)) {
-  %1 : Double(2) = Softmax[axis=0](%0), scope: Net
-  %2 : Double(2) = Log(%1), scope: Net
-  return (%2);
+graph(%1 : Double(2)) {
+  %2 : Double(2) = Softmax[axis=0](%1), uses = [%3.i0], scope: Net;
+  %3 : Double(2) = Log(%2), uses = [%0.i0], scope: Net;
+  return (%3);
 }

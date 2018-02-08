@@ -23,7 +23,6 @@ class Placeholder(object):
     def __str__(self):
         return self.s
 
-<<<<<<< HEAD
     def __repr__(self):
         return self.s
 

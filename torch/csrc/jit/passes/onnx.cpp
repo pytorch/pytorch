@@ -225,7 +225,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
         for (auto& el: outputs) {
-          el->node()->setScope(node->scope());
+          el->setScope(node->scope());
         }
         setOutputs(value->name(), node, outputs);
       } else {
