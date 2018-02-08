@@ -45,6 +45,8 @@ _(value) \
 _(Subgraph) \
 _(BatchNormalization) \
 _(Conv) \
+_(PackPadded) \
+_(PadPacked) \
 _(ConvTranspose) \
 _(is_test) \
 _(epsilon) \
@@ -61,6 +63,9 @@ _(strides) \
 _(stride) \
 _(pads) \
 _(pad) \
+_(RNN) \
+_(LSTM) \
+_(GRU) \
 _(beta) \
 _(alpha) \
 _(dilations) \
@@ -79,6 +84,7 @@ _(transB) \
 _(other) \
 _(__and__) \
 _(__lshift__) \
+_(__not__) \
 _(__or__) \
 _(__rshift__) \
 _(__xor__) \
@@ -111,6 +117,7 @@ _(max) \
 _(min) \
 _(ne) \
 _(ones) \
+_(ones_like) \
 _(pow) \
 _(reciprocal) \
 _(remainder) \
@@ -123,8 +130,14 @@ _(sub) \
 _(tan) \
 _(trunc) \
 _(zeros) \
+_(zeros_like) \
 _(exponent) \
-_(device)
+_(device) \
+_(ReplaceIfUndef) \
+_(is_zero) \
+_(GraphExecutor) \
+_(mm) \
+_(t)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \

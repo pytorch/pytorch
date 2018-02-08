@@ -126,6 +126,29 @@ class TestSparse(TestCase):
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
 
+    def test_ctor_size_checks(self):
+        indices = self.IndexTensor([
+            [0, 0, 0],
+            [0, 3, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+        ])
+        values = self.ValueTensor([2, 1, 3, 4])
+
+        # indices inconsistent with size
+        self.assertRaises(
+            RuntimeError,
+            lambda: self.SparseTensor(indices, values, torch.Size([2, 1, 1])))
+
+        # values inconsistent with size
+        values = self.ValueTensor([
+            [2, 1, 2, 1],
+            [1, 0, 5, 2],
+        ])
+        self.assertRaises(
+            RuntimeError,
+            lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
+
     def test_to_dense(self):
         i = self.IndexTensor([
             [0, 1, 2, 2],
@@ -717,6 +740,28 @@ class TestSparse(TestCase):
             tensor2 = sparse_mat2.clone()
             self.assertEqual(test_fn(var1, var2).data,
                              test_fn(tensor1, tensor2), test_name)
+
+        to_test_mixed = {
+            'addmm': lambda sp, de: de.addmm(sp, de),
+            'addmm_': lambda sp, de: de.addmm(sp, de),
+            'mm': lambda sp, de: torch.mm(sp, de),
+            'mm_out': lambda sp, de: torch.mm(sp, de, out=de),
+        }
+
+        i = self.IndexTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
+        v = self.ValueTensor([3, 3, 4, 1, 2])
+        sparse_mat = self.SparseTensor(i, v, torch.Size([3, 3]))
+        sparse_var = Variable(sparse_mat)
+        dense_mat = sparse_mat.to_dense().random_(0, 5)
+        dense_var = Variable(dense_mat)
+
+        for test_name, test_fn in to_test_mixed.items():
+            sp_var = sparse_var.clone()
+            de_var = dense_var.clone()
+            sp_mat = sparse_mat.clone()
+            de_mat = dense_mat.clone()
+            self.assertEqual(test_fn(sp_var, de_var).data,
+                             test_fn(sp_mat, de_mat), test_name)
 
     def test_sparse_mask_hybrid(self):
         self._test_sparse_mask_hybrid_fixed()

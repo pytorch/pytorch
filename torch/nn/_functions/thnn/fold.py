@@ -15,7 +15,7 @@ class Col2Im(Function):
         ctx.padding = padding
         ctx.stride = stride
 
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         output = input.new()
 
@@ -57,7 +57,7 @@ class Im2Col(Function):
         ctx.stride = stride
         ctx.input_size = (input.size(2), input.size(3))
 
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         output = input.new()
 

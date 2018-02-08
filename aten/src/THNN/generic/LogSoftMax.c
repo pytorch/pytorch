@@ -14,17 +14,16 @@ void THNN_(LogSoftMax_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int dim)
-{
+          int64_t dim) {
   THArgCheck(dim >= 0 && dim < input->nDimension, 4,
 	     "dim out of range (got %d, but input has %d dims)", dim, input->nDimension);
 
   uint64_t outer_size = 1;
   uint64_t dim_size = input->size[dim];
   uint64_t inner_size = 1;
-  for (uint64_t i = 0; i < dim; ++i)
+  for (int64_t i = 0; i < dim; ++i)
     outer_size *= input->size[i];
-  for (uint64_t i = dim + 1; i < input->nDimension; ++i)
+  for (int64_t i = dim + 1; i < input->nDimension; ++i)
     inner_size *= input->size[i];
 
   input = THTensor_(newContiguous)(input);
@@ -68,7 +67,7 @@ void THNN_(LogSoftMax_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *output,
-          int dim)
+          int64_t dim)
 {
   THNN_CHECK_SHAPE(output, gradOutput);
   THArgCheck(dim >= 0 && dim < output->nDimension, 6,
@@ -77,9 +76,9 @@ void THNN_(LogSoftMax_updateGradInput)(
   uint64_t outer_size = 1;
   uint64_t dim_size = output->size[dim];
   uint64_t inner_size = 1;
-  for (uint64_t i = 0; i < dim; ++i)
+  for (int64_t i = 0; i < dim; ++i)
     outer_size *= output->size[i];
-  for (uint64_t i = dim + 1; i < output->nDimension; ++i)
+  for (int64_t i = dim + 1; i < output->nDimension; ++i)
     inner_size *= output->size[i];
 
   gradOutput = THTensor_(newContiguous)(gradOutput);

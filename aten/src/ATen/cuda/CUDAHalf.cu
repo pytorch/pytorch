@@ -1,4 +1,4 @@
-#include "ATen/cuda/CUDAHalf.h"
+#include "ATen/cuda/CUDAHalf.cuh"
 #include "ATen/Half.h"
 
 #include <cuda.h>

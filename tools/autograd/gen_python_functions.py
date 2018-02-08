@@ -98,6 +98,7 @@ SUPPORTED_RETURN_TYPES = {
     'Tensor', 'std::tuple<Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*'
 }
@@ -457,10 +458,6 @@ def group_declarations(declarations):
 
 
 def get_python_signature(declaration, include_out):
-    # Use the saved signature for deprecated pseudo-declarations
-    if 'python_signature' in declaration:
-        return declaration['python_signature']
-
     # Compute the Python function signature for argument parsing
     typed_args = []
     output_args = []

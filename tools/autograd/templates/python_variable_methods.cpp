@@ -191,17 +191,18 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args)
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool async) {
+static Tensor dispatch_copy_(Tensor & self, const Tensor & other, bool non_blocking) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
-  return self.copy_(other, async);
+  return self.copy_(other, non_blocking);
 }
 
 static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "copy_(Tensor other, bool async=False)"
+    "copy_(Tensor other, bool non_blocking=False)",
+    "copy_(Tensor other, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
@@ -230,12 +231,18 @@ static PyObject * THPVariable_detach_(PyObject* self, PyObject* args)
 static double dispatch_to_CDouble(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
+  if (self.numel() != 1) {
+    throw ValueError("only one element tensors can be converted to Python scalars");
+  }
   return self.toCDouble();
 }
 
 static int64_t dispatch_to_CLong(const Tensor & self) {
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(self);
+  if (self.numel() != 1) {
+    throw ValueError("only one element tensors can be converted to Python scalars");
+  }
   return self.toCLong();
 }
 
@@ -299,7 +306,7 @@ static void lazy_init_cuda() {
   });
 }
 
-static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool async) {
+static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool non_blocking) {
   if (type.is_cuda()) {
     lazy_init_cuda();
   }
@@ -308,7 +315,7 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
   if (tensor_device != at::current_device()) {
     // copy if the devices are different even if the types are the same
-    return type.copy(self, async);
+    return type.copy(self, non_blocking);
   }
   return self.toType(type);
 }
@@ -332,7 +339,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "cuda(int64_t device=-1, bool async=False)"
+    "cuda(int64_t? device=-1, bool non_blocking=False)"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
@@ -426,6 +433,18 @@ static PyObject * THPVariable_record_stream(PyObject* self, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_item(PyObject* self, PyObject* args)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  if (self_.is_floating_point()) {
+    return wrap(dispatch_to_CDouble(self_));
+  } else {
+    return wrap(dispatch_to_CLong(self_));
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -501,7 +520,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "type(PyObject* new_type=None, bool async=False)"
+    "type(PyObject* new_type=None, bool non_blocking=False)",
+    "type(PyObject* new_type=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
@@ -565,6 +585,7 @@ PyMethodDef variable_methods[] = {
   {"float", (PyCFunction)THPVariable_float, METH_NOARGS, NULL},
   {"half", (PyCFunction)THPVariable_half, METH_NOARGS, NULL},
   {"int", (PyCFunction)THPVariable_int, METH_NOARGS, NULL},
+  {"item", (PyCFunction)THPVariable_item, METH_NOARGS, NULL},
   {"long", (PyCFunction)THPVariable_long, METH_NOARGS, NULL},
   {"map_", (PyCFunction)THPVariable_map_, METH_VARARGS | METH_KEYWORDS, NULL},
   {"map2_", (PyCFunction)THPVariable_map2_, METH_VARARGS | METH_KEYWORDS, NULL},

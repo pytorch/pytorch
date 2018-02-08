@@ -7,14 +7,6 @@
 
 namespace torch { namespace jit {
 
-struct Capture {
-  enum class Kind {Input, Output};
-  Capture(Kind kind, std::size_t offset)
-    : kind(kind), offset(offset) {}
-  Kind kind;
-  std::size_t offset;
-};
-
 using value_list = std::vector<Value*>;
 // Example showcasing how Gradient is constructed:
 //
@@ -28,16 +20,19 @@ using value_list = std::vector<Value*>;
 //
 // In this case differentiate(f) will return this:
 //   y, n, t = f(x, m)        // `t` is appended to the output list
-//   dx = f'(x, t, y, dy, dt) // No `dm` or `dn` because they do not require gradient
+//   dx = f'(dy, dt, x, t, y) // No `dm` or `dn` because they do not require gradient
 //                            // All needed values from f are prepended to the input list
 //
 //   f_real_outputs = 2       // Only first two outputs were present in f originally
-//   df_input_captures = {O0, O2, I0} // Order matches the prefix of inputs to df
-//                        y   t   x
 //   df_input_vjps = {0, 2}   // i.e. connect grad_fn of y and t variables produced by f,
 //                    y  t    // with y's output_nr = 0 and t's output_nr = 1
+//   df_input_captures = {I0, O2, O0} // Order matches the prefix of inputs to df
+//                        x   t   y
 //   df_output_vjps = {0}     // i.e. connect next_function[0] of grad_fn to x's (grad_fn, output_nr).
 struct Gradient {
+  operator bool() const {
+    return df != nullptr;
+  }
   std::shared_ptr<Graph> f;
   std::shared_ptr<Graph> df;
 
@@ -46,13 +41,17 @@ struct Gradient {
   // only to be saved for df (and should be ignored).
   std::size_t f_real_outputs;
 
-  // df inputs are split into two sections: captures are vjps (aka grad_outputs).
-  // Captures are values the need to be saved when f is run. We handle inputs
-  // specially, because this allows us to avoid adding extra vjps as df inputs.
+  // df inputs are split into two sections: vjps (aka grad_outputs) and captures.
   // VJPs are "seeds" for the gradient computation given for each input capture
   // of an Output kind.
-  std::vector<Capture> df_input_captures;
+  // Captures are values the need to be saved when f is run. We handle inputs
+  // specially, because this allows us to avoid adding extra vjps as df inputs.
+
   std::vector<std::size_t> df_input_vjps; // Offsets into f's outputs.
+  // capture can come from inputs or outputs
+  std::vector<std::size_t> df_input_captured_inputs; // Offsets into f's inputs
+  std::vector<std::size_t> df_input_captured_outputs; // Offsets into f's outputs
+
 
   // df will produce vjps for a subset of inputs of f that required grad.
   // df_output_vjps[idx] == inp_idx means that idx-th output of df produces a vjp
@@ -70,13 +69,13 @@ struct Gradient {
   //         outputs[offset].set_grad_fn(grad_fn, output_nr=i)
   //   - Use df_output_vjps to connect next_functions of grad_fn:
   //       for idx in df_output_vjps:
-  //         grad_fn.next_functions.push_back(inputs[idx].grad_fn(), inputs[idx].output_nr)
+  //         grad_fn.next_functions.push_back(inputs[idx].gradient_edge())
   //   - Save captures for df (care needs to be taken to use SavedVariables for inputs and
   //                           outputs that we will actually return)
   //   - Return outputs[:f_real_outputs]
   //
   // When running df:
-  //   - Concatenate captured Variables with received vjps
+  //   - Concatenate received vjps and captured Variables
   //   - Interpret df
   //   - Wrap outputs of df into Variables (that don't require grad)
 };
@@ -84,5 +83,6 @@ Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& r
 
 // can we take a derivative of this node symbolically?
 bool isDifferentiable(Node * n);
+bool isZero(Value * v);
 
 }}

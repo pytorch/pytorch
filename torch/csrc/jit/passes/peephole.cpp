@@ -10,7 +10,7 @@ namespace torch { namespace jit {
 //
 // TODO: Decide what kind of fixed point strategy we will have
 void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
 
     // eliminate redundant expand

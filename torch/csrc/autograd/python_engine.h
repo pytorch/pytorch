@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Python.h>
+
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/engine.h"
 
 bool THPEngine_initModule(PyObject *module);

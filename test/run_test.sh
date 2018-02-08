@@ -64,6 +64,20 @@ $PYCMD test_cuda.py $@
 echo "Running NCCL tests"
 $PYCMD test_nccl.py $@
 
+# Skipping C++ extensions tests for Windows because setup.py does not link
+# the required libraries. Windows users should create their own cmake file with
+# proper linker flags.
+if [[ "$OSTYPE" != "msys" ]]; then
+  echo "Running C++ Extensions tests"
+  cd cpp_extensions
+  $PYCMD setup.py install --root ./install
+  cd ..
+  PYTHONPATH="$PWD/$(find cpp_extensions/install -name '*-packages'):$PYTHONPATH" \
+    $PYCMD test_cpp_extensions.py $@
+  echo "Removing cpp_extensions/install"
+  rm -rf cpp_extensions/install
+fi
+
 # Skipping test_distributed for Windows because it doesn't have fcntl
 if [[ "$OSTYPE" != "msys" ]]; then
     distributed_set_up() {

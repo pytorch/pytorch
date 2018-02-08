@@ -8,6 +8,25 @@
 namespace at {
 namespace native {
 
+static void check_cat_no_zero_dim(TensorList tensors) {
+  for(size_t i = 0; i < tensors.size(); ++i) {
+    auto& t = tensors[i];
+    if (t.dim() == 0) {
+      runtime_error("zero-dimensional tensor (at position %zu) cannot be concatenated", i);
+    }
+  }
+}
+
+Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  return at::_cat_out(result, tensors, dim);
+}
+
+Tensor cat(TensorList tensors, int64_t dim) {
+  check_cat_no_zero_dim(tensors);
+  return at::_cat(tensors, dim);
+}
+
 std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   if (self.dim() == 0) {
     throw std::runtime_error("chunk expects at least a 1-dimensional tensor");
@@ -172,19 +191,29 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   return splits;
 }
 
+static inline std::vector<Tensor> get_stack_inputs(TensorList tensors, int64_t dim) {
+  std::vector<Tensor> inputs(tensors.size());
+  for (size_t i = 0; i < tensors.size(); ++i) {
+    inputs[i] = tensors[i].unsqueeze(dim);
+  }
+  return inputs;
+}
+
 Tensor stack(TensorList tensors, int64_t dim) {
   if (tensors.size() == 0) {
     throw std::runtime_error("stack expects a non-empty TensorList");
   }
   dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
-
-  std::vector<Tensor> inputs(tensors.size());
-  for (size_t i = 0; i < tensors.size(); ++i) {
-    inputs[i] = tensors[i].unsqueeze(dim);
-  }
-  return at::cat(inputs, dim);
+  return at::cat(get_stack_inputs(tensors, dim), dim);
 }
 
+Tensor& stack_out(Tensor& result, TensorList tensors, int64_t dim) {
+  if (tensors.size() == 0) {
+    throw std::runtime_error("stack expects a non-empty TensorList");
+  }
+  dim = maybe_wrap_dim(dim, tensors[0].dim() + 1);
+  return at::cat_out(result, get_stack_inputs(tensors, dim), dim);
+}
 
 static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   int64_t ndimI = self._indices().size(0);

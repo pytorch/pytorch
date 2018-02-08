@@ -2812,9 +2812,9 @@
     - real max
 ]]
 [[
-  name: dot
+  name: _dot
   backend_type_pairs: [[CUDA,floating_point], [CPU,all]]
-
+  cname: dot
   variants:
     - method
     - function
@@ -2939,8 +2939,9 @@
         kwarg_only: True
       - THTensor* mat1
       - THTensor* mat2
-    - cname: spaddmm
-      sparse: yes
+    - sparse: True
+      cname: spaddmm
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2970,8 +2971,9 @@
         kwarg_only: True
       - THTensor* mat1
       - THTensor* mat2
-    - cname: spaddmm
-      sparse: yes
+    - sparse: True
+      cname: spaddmm
+      aten_dense_sparse: True
       arguments:
         - arg: THTensor* self
         - arg: real beta
@@ -2985,7 +2987,8 @@
         - THTensor* mat2
 ]]
 [[
-  name: addmv
+  name: _addmv
+  cname: addmv
   variants:
     - method
     - function
@@ -3005,7 +3008,7 @@
     - THTensor* vec
 ]]
 [[
-  name: addmv_
+  name: _addmv_
   cname: addmv
   return: self
   arguments:
@@ -3021,7 +3024,8 @@
     - THTensor* vec
 ]]
 [[
-  name: addr
+  name: _addr
+  cname: addr
   variants:
     - method
     - function
@@ -3041,7 +3045,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: addr_
+  name: _addr_
   cname: addr
   return: self
   arguments:
@@ -3057,7 +3061,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: ger
+  name: _ger
   cname: addr
   variants:
     - method
@@ -3080,7 +3084,7 @@
     - THTensor* vec2
 ]]
 [[
-  name: mv
+  name: _mv
   cname: addmv
   variants:
     - method
@@ -3104,7 +3108,7 @@
     - THTensor* vec
 ]]
 [[
-  name: mm
+  name: _mm
   variants:
     - method
     - function
@@ -3127,16 +3131,6 @@
         - argument 0
         - CONSTANT AS_REAL(1)
         - THTensor* self
-        - THTensor* mat2
-    - cname: spaddmm
-      sparse: True
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - CONSTANT AS_REAL(0)
-        - argument 0
-        - CONSTANT AS_REAL(1)
-        - THSTensor* self
         - THTensor* mat2
 ]]
 [[
@@ -3734,6 +3728,7 @@
   name: random_
   backends:
     - CPU
+    - CUDA
   return: self
   options:
     - cname: random
@@ -3748,15 +3743,15 @@
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - long to
+        - int64_t to
     - cname: clampedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - long from
-        - long to
+        - int64_t from
+        - int64_t to
 ]]
 [[
   name: multinomial
@@ -4162,7 +4157,7 @@
 ]]
 
 [[
-  name: cat
+  name: _cat
   cname: catArray
   variants: [function]
   return: self

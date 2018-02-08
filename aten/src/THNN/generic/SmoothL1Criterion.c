@@ -10,7 +10,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
           bool sizeAverage,
           bool reduce)
 {
-  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_SHAPE(input, target);
 
   if (!reduce) {
     THTensor_(resizeAs)(output, input);
@@ -44,11 +44,11 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
           bool sizeAverage,
           bool reduce)
 {
-  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
   if (!reduce) {
-    THNN_CHECK_NELEMENT(gradOutput, input);
+    THNN_CHECK_SHAPE(gradOutput, input);
     TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
       real x = *input_data - *target_data;
       if (x < -1.) {

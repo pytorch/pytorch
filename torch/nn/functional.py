@@ -1142,6 +1142,44 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
     )
 
 
+def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
+                  training=False, momentum=0.1, eps=1e-5, affine=False):
+    """Applies instance normalization over an input. The implementation is
+    based on batch_norm, in which we do reshape, batchnorm, and reshape again.
+
+    See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
+    :class:`~torch.nn.InstanceNorm3d` for details.
+    """
+    import torch
+    import torch.onnx.symbolic
+
+    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
+    def _instance_norm(input, weight=None, bias=None, saved_running_mean=None,
+                       saved_running_var=None, training=False, momentum=0.1,
+                       eps=1e-5, affine=False):
+        b, c = input.size(0), input.size(1)
+
+        # Repeat stored stats and affine transform params
+        running_mean = saved_running_mean.repeat(b)
+        running_var = saved_running_var.repeat(b)
+
+        # Apply instance norm
+        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
+
+        out = batch_norm(
+            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
+            training=training, momentum=momentum, eps=eps)
+
+        # Reshape back
+        saved_running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
+        saved_running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
+
+        return out.view(b, c, *input.size()[2:])
+    return _instance_norm(input, weight=weight, bias=bias, saved_running_mean=saved_running_mean,
+                          saved_running_var=saved_running_var, training=training,
+                          momentum=momentum, eps=eps, affine=affine)
+
+
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     if training:
@@ -1464,6 +1502,9 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
+    if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
+        raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
+                            "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
     return _functions.loss.MarginRankingLoss.apply(input1, input2, target, margin, size_average)
 
 
@@ -1472,11 +1513,11 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
-    return _functions.loss.HingeEmbeddingLoss.apply(input, target, margin, size_average)
+    return torch._C._VariableFunctions.hinge_embedding_loss(input, target, margin, size_average)
 
 
 multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""
-multilabel_margin_loss(input, target, size_average=True) -> Variable
+multilabel_margin_loss(input, target, size_average=True, reduce=True) -> Variable
 
 See :class:`~torch.nn.MultiLabelMarginLoss` for details.
 """)

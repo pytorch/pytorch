@@ -37,6 +37,8 @@ torch.manual_seed(SEED)
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+PY3 = sys.version_info > (3, 0)
+
 IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
@@ -237,6 +239,8 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
+        elif isinstance(x, bool) and isinstance(y, bool):
+            super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == float('inf') or abs(y) == float('inf'):
                 if allow_inf:

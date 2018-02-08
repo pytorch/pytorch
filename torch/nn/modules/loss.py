@@ -332,8 +332,6 @@ class MSELoss(_Loss):
             \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
         \end{cases}
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each.
-
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
@@ -496,8 +494,9 @@ class BCEWithLogitsLoss(Module):
 
     def forward(self, input, target):
         if self.weight is not None:
+            var = Variable(self.weight) if not isinstance(self.weight, Variable) else self.weight
             return F.binary_cross_entropy_with_logits(input, target,
-                                                      Variable(self.weight),
+                                                      var,
                                                       self.size_average,
                                                       reduce=self.reduce)
         else:
@@ -562,13 +561,35 @@ class MultiLabelMarginLoss(_Loss):
 
     `y` and `x` must have the same size.
 
-    The criterion only considers the first non-negative `y[j]` targets.
+    The criterion only considers a contiguous block of non-negative targets that
+    starts at the front.
 
     This allows for different samples to have variable amounts of target classes
+
+    Args:
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
+
+    Shape:
+        - Input: :math:`(C)` or :math:`(N, C)` where `N` is the batch size and `C`
+          is the number of classes.
+        - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
+        - Output: scalar. If `reduce` is False, then `(N)`.
     """
+    def __init__(self, size_average=True, reduce=True):
+        super(MultiLabelMarginLoss, self).__init__(size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.multilabel_margin_loss(input, target, size_average=self.size_average)
+        return F.multilabel_margin_loss(input, target, size_average=self.size_average,
+                                        reduce=self.reduce)
 
 
 class SmoothL1Loss(_Loss):

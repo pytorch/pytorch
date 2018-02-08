@@ -8,7 +8,6 @@ void THNN_(Sqrt_updateOutput)(
           THTensor *output,
           accreal eps_)
 {
-  real eps = TH_CONVERT_ACCREAL_TO_REAL(eps_);
   THTensor_(resizeAs)(output, input);
   THTensor_(sqrt)(output, input);
 }

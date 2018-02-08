@@ -310,6 +310,7 @@ class TestDataLoader(TestCase):
         next(loader1_it)
         next(loader2_it)
 
+    @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()

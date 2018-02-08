@@ -15,13 +15,13 @@
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/autograd/variable_version.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/Types.h"
 
 namespace torch { namespace autograd {
 
 using at::Tensor;
 struct VariableImpl;
-
 
 struct Variable : public at::Tensor {
   inline Variable(VariableImpl * self, bool retain);
@@ -33,6 +33,20 @@ struct Variable : public at::Tensor {
   // Tensors which you know are actually Variables.
   /*implicit*/ Variable(Tensor const & rhs) : Tensor(rhs) {}
   /*implicit*/ Variable(Tensor && rhs) noexcept : Tensor(std::move(rhs)) {}
+
+  Edge gradient_edge() const {
+    // If grad_fn is null (as is the case for a leaf node), we instead
+    // interpret the gradient function to be a grad accumulator,
+    // which will accumulate its inputs into the grad property of the
+    // variable. These nodes get suppressed in some situations,
+    // see "suppress grad accumulation" below. Note that only variables which
+    // have `requires_grad = True` can have grad accumulators.
+    if (const auto& gradient = grad_fn()) {
+      return Edge(gradient, output_nr());
+    } else {
+      return Edge(grad_accumulator(), 0);
+    }
+  }
 
   inline VariableImpl* get() const;
 
@@ -95,11 +109,6 @@ public:
   virtual void * unsafeGetTH(bool retain) override;
   virtual std::unique_ptr<at::Storage> storage() override;
   static const char * typeString();
-
-  // Get the VariableType for a base Tensor type
-  static at::Type* getType(const at::Type& baseType);
-  static at::Type* getType(const at::Tensor& tensor);
-  static std::vector<at::Type*> allTypes();
 
 public:
   std::shared_ptr<Function> get_grad_accumulator();

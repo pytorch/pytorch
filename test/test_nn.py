@@ -28,9 +28,9 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, IS_WINDOWS
+    TEST_SCIPY, download_file, IS_WINDOWS, PY3
 
 if TEST_SCIPY:
     from scipy import stats
@@ -122,10 +122,12 @@ def _assertGradAndGradgradChecks(test_case, apply_fn, inputs):
 
 class InputVariableMixin(object):
     def _get_input(self):
-        input = TestBase._get_input(self)
+        input = TestBase._get_input(self, False)
 
         def map_variables(i):
             if isinstance(i, Variable):
+                if i.is_floating_point():
+                    i.requires_grad = True
                 return i
             elif torch.is_tensor(i):
                 return Variable(i, requires_grad=True)
@@ -262,6 +264,13 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
 
+    def _get_target(self):
+        return self._get_arg('target', False)
+
+    @property
+    def constructor_args(self):
+        return self._get_arg('constructor_args', False)
+
 
 class NewCriterionTest(InputVariableMixin, CriterionTest):
     # TODO: check that criterions don't ignore grad_output
@@ -281,7 +290,11 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
                                              input + (target,) + params)
 
     def _get_target(self):
-        return Variable(CriterionTest._get_target(self), requires_grad=False)
+        return self._get_arg('target', False)
+
+    @property
+    def constructor_args(self):
+        return self._get_arg('constructor_args', False)
 
 
 class TestNN(NNTestCase):
@@ -301,7 +314,7 @@ class TestNN(NNTestCase):
             output = criterion(*args)
         else:
             output = criterion(input, target)
-        return output.data[0]
+        return output
 
     def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
@@ -331,8 +344,8 @@ class TestNN(NNTestCase):
         for p in module.parameters():
             if p.grad is None:
                 p._grad = torch.zeros_like(p)
-            params.append(p.data)
-            d_params.append(p.grad.data)
+            params.append(p)
+            d_params.append(p.grad)
         return params, d_params
 
     def test_module_backcompat(self):
@@ -774,6 +787,33 @@ class TestNN(NNTestCase):
         self.assertEqual(n[:-1], nn.Sequential(l1, l2, l3))
         self.assertEqual(n[:-3], nn.Sequential(l1))
         self.assertEqual(n[::-1], nn.Sequential(l4, l3, l2, l1))
+
+    def test_Sequential_setitem(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3)
+        n[0] = l4
+        n[-1] = l4
+        self.assertEqual(n[0], l4)
+        self.assertEqual(n[2], l4)
+
+    def test_Sequential_setitem_named(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(OrderedDict([
+            ('linear1', l1),
+            ('linear2', l2),
+            ('linear3', l3),
+        ]))
+
+        n[0] = l4
+        n[-1] = l4
+        self.assertEqual(n.linear1, l4)
+        self.assertEqual(n.linear3, l4)
 
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
@@ -1263,6 +1303,25 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_pool3d_size_one_feature_dim(self):
+        # Tests crazy strides for feature dim of size 1
+        x = Variable(torch.randn(7, 1, 5, 3, 2).cuda())
+        strange_strides = [30, 1234, 6, 2, 1]
+        y = x.as_strided(x.size(), strange_strides)
+        x = x.cpu().as_strided(x.size(), strange_strides)
+
+        to_test = {
+            'max_pool3d': lambda t: F.max_pool3d(t, (5, 1, 1), stride=(5, 1, 1)),
+            'avg_pool3d': lambda t: F.avg_pool3d(t, (5, 1, 1), stride=(5, 1, 1)),
+        }
+
+        for test, fn in to_test.items():
+            # Should not crash
+            out_y = fn(y)
+            out_x = fn(x)
+            self.assertEqual(out_y, out_x.cuda(), test)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_AvgPool3d_backward_after_cat_dim1_cuda(self):
         # x has to have batch_size 1 to test contiguous checks
         x = Variable(torch.randn(1, 3, 4, 4, 4).cuda(), requires_grad=True)
@@ -1597,6 +1656,20 @@ class TestNN(NNTestCase):
                                               torch.randn(4, 4).cuda())
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_broadcast_not_requiring_grad(self):
+        variables = [
+            Variable(torch.randn(1, 2).cuda(), requires_grad=True),
+            Variable(torch.randn(1, 2).cuda(), requires_grad=False),
+            Variable(torch.randn(1, 2).cuda(), requires_grad=False),
+            Variable(torch.randn(1, 2).cuda(), requires_grad=True),
+            Variable(torch.randn(1, 2).cuda(), requires_grad=True),
+        ]
+        broadcasted_variables = Broadcast.apply((0, 1), *variables)
+        for output_idx, broadcasted_var in enumerate(broadcasted_variables):
+            input_var = variables[output_idx % len(variables)]
+            self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
         input = Variable(torch.randn(2, 10).float().cuda())
@@ -1709,6 +1782,29 @@ class TestNN(NNTestCase):
         i = Variable(torch.randn(20, 10).float().cuda())
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
+
+    @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
+    def test_data_parallel_model_no_refcycles(self):
+        # Python 2.7 will create reference cycles with the following
+        # Module on multiple GPUs, but Python 3 shouldn't unless
+        # there are refcycles on the PyTorch side (or the defined module)
+        import gc
+
+        class Model(nn.Module):
+            def __init__(self):
+                super(Model, self).__init__()
+                self.linear = nn.Linear(1, 1)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        gc.collect()
+        model = nn.DataParallel(Model().cuda())
+        data = Variable(torch.randn(1).cuda())
+        model(data)
+
+        refcycles = gc.collect()
+        self.assertEqual(refcycles, 0)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_no_grad(self):
@@ -2149,7 +2245,7 @@ class TestNN(NNTestCase):
 
     def test_Conv2d_missing_argument(self):
         c = nn.Conv2d(3, 3, 3)
-        self.assertRaises(RuntimeError, lambda: c(None))
+        self.assertRaises(TypeError, lambda: c(None))
 
     def test_Conv2d_backward_twice(self):
         input = Variable(torch.randn(2, 3, 5, 5))
@@ -2393,6 +2489,24 @@ class TestNN(NNTestCase):
                     hx = cell(input, hx)
 
                 hx.sum().backward()
+
+    def _test_loss_equal_input_target_shape(self, cast):
+        # Tests losses whose inputs should have the same size.
+        losses = {
+            'mse_loss': lambda x, y: F.mse_loss(x, y),
+            'l1_loss': lambda x, y: F.l1_loss(x, y),
+            'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
+            'kl_div': lambda x, y: F.kl_div(x, y),
+            'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
+        }
+
+        input = Variable(cast(torch.randn(3, 5)))
+        target = Variable(cast(torch.randn(5, 3)))
+        for name, fn in losses.items():
+            self.assertRaises(Exception, lambda: fn(input, target))
+
+    def test_loss_equal_input_target_shape(self):
+        self._test_loss_equal_input_target_shape(lambda x: x)
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
@@ -2939,7 +3053,9 @@ class TestNN(NNTestCase):
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig, variable_len in product((True, False), repeat=5):
+            for bias, bidirectional, batch_first, contig, variable_len, lens_as_variable \
+                    in product((True, False), repeat=6):
+
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
                     input_val = torch.randn(batch, seq_length, input_size)
@@ -2958,9 +3074,13 @@ class TestNN(NNTestCase):
                 grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
                 if variable_len:
-                    batch_sizes = [7, 5, 5, 2, 1, 1]
-                    input_val = rnn_utils.pack_padded_sequence(input_val, batch_sizes, batch_first=batch_first)
-                    grad_output = rnn_utils.pack_padded_sequence(grad_output, batch_sizes, batch_first=batch_first).data
+                    lengths = [7, 5, 5, 2, 1, 1]
+                    if lens_as_variable:
+                        lengths = Variable(torch.LongTensor(lengths))
+                    input_val = Variable(input_val)
+                    grad_output = Variable(grad_output)
+                    input_val = rnn_utils.pack_padded_sequence(input_val, lengths, batch_first=batch_first)
+                    grad_output = rnn_utils.pack_padded_sequence(grad_output, lengths, batch_first=batch_first).data
 
                 rnn = module(input_size,
                              hidden_size,
@@ -3652,7 +3772,7 @@ class TestNN(NNTestCase):
 
         x = Variable(tensor.new(batch_size, chan_in, inp_size, inp_size), requires_grad=True)
         x.data.normal_()
-        weight = Variable(tensor.new(chan_out, chan_in // groups, kern, kern), requires_grad=True)
+        weight = Variable(tensor.new(chan_out, chan_in // groups, kern, kern), requires_grad=not no_weight)
         weight.data.normal_()
         if use_bias:
             bias = Variable(tensor.new(chan_out), requires_grad=True)
@@ -3661,31 +3781,20 @@ class TestNN(NNTestCase):
             bias = None
 
         def func(*inputs):
-            if no_weight:
-                lweight = weight
-                if use_bias:
-                    lx, lbias = inputs
-                else:
-                    lx, = inputs
-                    lbias = None
+            if use_bias:
+                lx, lweight, lbias = inputs
             else:
-                if use_bias:
-                    lx, lweight, lbias = inputs
-                else:
-                    lx, lweight = inputs
-                    lbias = None
+                lx, lweight = inputs
+                lbias = None
             # We disable cudnn during forward to avoid finite difference imprecision issues
             with cudnn.flags(enabled=False):
                 out = F.conv2d(lx, lweight, lbias, stride, padding, dilation, groups)
             return out
 
-        if no_weight:
-            inputs = (x, bias)
+        if use_bias:
+            inputs = x, weight, bias
         else:
-            inputs = (x, weight, bias)
-
-        if not use_bias:
-            inputs = inputs[:-1]
+            inputs = x, weight
 
         dummy_out = func(*inputs)
         grad_y = Variable(tensor.new(dummy_out.size()), requires_grad=True)
@@ -3698,21 +3807,21 @@ class TestNN(NNTestCase):
         for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
             for stride, padding, chan_in, chan_out, dilation in \
                     product([1, 2], [0, 1, 2], [2], [3], dilations):
-                no_weight = False
-                result = self.run_conv_double_back_test(kern, stride,
-                                                        padding, chan_in, chan_out,
-                                                        batch_size, inp_size, dilation,
-                                                        no_weight)
-                self.assertTrue(result,
-                                "Conv double backward test failed with parameters:" +
-                                "\nkern: " + str(kern) +
-                                "\nstride: " + str(stride) +
-                                "\npadding: " + str(padding) +
-                                "\nchan_in: " + str(chan_in) +
-                                "\nchan_out: " + str(chan_out) +
-                                "\nbatch_size: " + str(batch_size) +
-                                "\ninp_size: " + str(inp_size) +
-                                "\ndilation: " + str(dilation))
+                for no_weight in (True, False):
+                    result = self.run_conv_double_back_test(kern, stride,
+                                                            padding, chan_in, chan_out,
+                                                            batch_size, inp_size, dilation,
+                                                            no_weight)
+                    self.assertTrue(result,
+                                    "Conv double backward test failed with parameters:" +
+                                    "\nkern: " + str(kern) +
+                                    "\nstride: " + str(stride) +
+                                    "\npadding: " + str(padding) +
+                                    "\nchan_in: " + str(chan_in) +
+                                    "\nchan_out: " + str(chan_out) +
+                                    "\nbatch_size: " + str(batch_size) +
+                                    "\ninp_size: " + str(inp_size) +
+                                    "\ndilation: " + str(dilation))
 
     def test_conv_double_backward_no_bias(self):
         kern = 3
@@ -3815,16 +3924,12 @@ class TestNNInit(TestCase):
         random.seed(123)
 
     def _is_normal(self, tensor, mean, std):
-        if isinstance(tensor, Variable):
-            tensor = tensor.data
-        samples = list(tensor.view(-1))
+        samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'norm', args=(mean, std))[1]
         return p_value > 0.0001
 
     def _is_uniform(self, tensor, a, b):
-        if isinstance(tensor, Variable):
-            tensor = tensor.data
-        samples = list(tensor.view(-1))
+        samples = tensor.view(-1).tolist()
         p_value = stats.kstest(samples, 'uniform', args=(a, (b - a)))[1]
         return p_value > 0.0001
 
@@ -4211,7 +4316,7 @@ def add_test(test):
         raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
     setattr(TestNN, test_name, lambda self, test=test: test(self))
     # Hardshrink is not implemented in CUDA, so we must not test it.
-    if test_name != "test_Hardshrink":
+    if not test_name.startswith("test_Hardshrink"):
         setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
@@ -4234,6 +4339,13 @@ new_criterion_tests = [
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         desc='weights'
+    ),
+    dict(
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch_rand(()),),
+        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch_randn(()).gt(0).double(),
+        desc='scalar_weights'
     ),
     dict(
         module_name='NLLLoss',
@@ -4307,11 +4419,11 @@ def poissonnllloss_no_reduce_test():
 
 
 def bceloss_no_reduce_test():
-    t = torch.randn(15, 10).gt(0).double()
+    t = Variable(torch.randn(15, 10).gt(0).double())
     return dict(
         fullname='BCELoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)), reduce=False)),
+            lambda i: F.binary_cross_entropy(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
         check_gradgrad=False,
@@ -4319,13 +4431,13 @@ def bceloss_no_reduce_test():
 
 
 def bceloss_weights_no_reduce_test():
-    t = torch.randn(15, 10).gt(0).double()
-    weights = torch.rand(10)
+    t = Variable(torch.randn(15, 10).gt(0).double())
+    weights = Variable(torch.rand(10))
     return dict(
         fullname='BCELoss_weights_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.binary_cross_entropy(i, Variable(t.type_as(i.data)),
-                                             weight=weights.type_as(i.data), reduce=False)),
+            lambda i: F.binary_cross_entropy(i, t.type_as(i),
+                                             weight=weights.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
@@ -4333,12 +4445,12 @@ def bceloss_weights_no_reduce_test():
 
 
 def bce_with_logistic_no_reduce_test():
-    t = torch.randn(15, 10).gt(0).double()
+    t = Variable(torch.randn(15, 10).gt(0).double())
     sigmoid = nn.Sigmoid()
     return dict(
         fullname='BCEWithLogitsLoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.binary_cross_entropy_with_logits(i, Variable(t.type_as(i.data)), reduce=False)),
+            lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
@@ -4353,7 +4465,7 @@ def kldivloss_no_reduce_test():
             lambda i: F.kl_div(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(10, 10).log(),
         reference_fn=lambda i, _:
-            loss_reference_fns['KLDivLoss'](i, t.data.type_as(i), reduce=False),
+            loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduce=False),
         pickle=False)
 
 
@@ -4364,17 +4476,17 @@ def l1loss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.l1_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.randn(2, 3, 4),
-        reference_fn=lambda i, m: (i - t.data.type_as(i)).abs(),
+        reference_fn=lambda i, m: (i - t.type_as(i)).abs(),
         pickle=False)
 
 
 def mseloss_no_reduce_test():
     input_size = (2, 3, 4, 5)
-    target = torch.randn(*input_size)
+    target = Variable(torch.randn(*input_size))
     return dict(
         fullname='MSELoss_no_reduce',
         constructor=wrap_functional(
-            lambda i: F.mse_loss(i, Variable(target.type_as(i.data)), reduce=False)),
+            lambda i: F.mse_loss(i, target.type_as(i), reduce=False)),
         input_size=input_size,
         reference_fn=lambda i, m: (i - target).pow(2),
         pickle=False)
@@ -4408,7 +4520,7 @@ def nllloss_no_reduce_ignore_index_test():
 
 def nllloss_no_reduce_weights_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    weight = torch.rand(10)
+    weight = Variable(torch.rand(10))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False}
@@ -4416,7 +4528,7 @@ def nllloss_no_reduce_weights_test():
     return dict(
         fullname='NLLLoss_no_reduce_weights',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4425,7 +4537,7 @@ def nllloss_no_reduce_weights_test():
 
 def nllloss_no_reduce_weights_ignore_index_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    weight = torch.rand(10)
+    weight = Variable(torch.rand(10))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False,
@@ -4443,7 +4555,7 @@ def nllloss_no_reduce_weights_ignore_index_test():
 
 def nllloss_no_reduce_weights_ignore_index_neg_test():
     t = Variable(torch.Tensor(15).uniform_().mul(10).floor().long())
-    weight = torch.rand(10)
+    weight = Variable(torch.rand(10))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False,
@@ -4452,7 +4564,7 @@ def nllloss_no_reduce_weights_ignore_index_neg_test():
     return dict(
         fullname='NLLLoss_no_reduce_weights_ignore_index_neg',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input=torch.rand(15, 10).add(1e-2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLoss'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4495,7 +4607,7 @@ def nllloss2d_no_reduce_weights_test():
     return dict(
         fullname='NLLLoss2d_no_reduce_weights',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input_fn=lambda: torch.rand(2, 3, 5, 5).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLossNd'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4530,7 +4642,7 @@ def nlllossNd_no_reduce_ignore_index_test():
 
 def nlllossNd_no_reduce_weights_test():
     t = Variable(torch.rand(2, 5, 5, 2, 2).mul(3).floor().long())
-    weight = torch.rand(3)
+    weight = Variable(torch.rand(3))
 
     def kwargs(i):
         return {'weight': weight.type_as(i), 'reduce': False}
@@ -4538,7 +4650,7 @@ def nlllossNd_no_reduce_weights_test():
     return dict(
         fullname='NLLLossNd_no_reduce_weights',
         constructor=wrap_functional(
-            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i.data))),
+            lambda i: F.nll_loss(i, t.type_as(i).long(), **kwargs(i))),
         input_fn=lambda: torch.rand(2, 3, 5, 5, 2, 2).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['NLLLossNd'](i, t.type_as(i).long(), **kwargs(i)),
@@ -4553,7 +4665,49 @@ def smoothl1loss_no_reduce_test():
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.randn(2, 3, 4),
         reference_fn=lambda i, _:
-            loss_reference_fns['SmoothL1Loss'](i, t.data.type_as(i), reduce=False),
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduce=False),
+        pickle=False)
+
+
+def multilabelmarginloss_1d_no_reduce_test():
+    t = Variable(torch.rand(10).mul(10).floor().long())
+    return dict(
+        fullname='MultiLabelMarginLoss_1d_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multilabelmarginloss_index_neg_test():
+    t = Variable(torch.clamp(torch.rand(5, 10).add(-.5).mul(20).floor().long(), min=-1))
+    return dict(
+        fullname='MultiLabelMarginLoss_index_neg',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multilabelmarginloss_no_reduce_test():
+    t = Variable(torch.rand(5, 10).mul(10).floor().long())
+    return dict(
+        fullname='MultiLabelMarginLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiLabelMarginLoss'](i, t.data.type_as(i).long(), reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
         pickle=False)
 
 
@@ -4577,6 +4731,9 @@ new_module_tests = [
     nlllossNd_no_reduce_weights_test(),
     nlllossNd_no_reduce_ignore_index_test(),
     smoothl1loss_no_reduce_test(),
+    multilabelmarginloss_1d_no_reduce_test(),
+    multilabelmarginloss_index_neg_test(),
+    multilabelmarginloss_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -5238,6 +5395,8 @@ new_module_tests = [
         constructor_args=(None, 4, 'trilinear'),
         input_size=(1, 2, 4, 4, 4),
         desc='trilinear_scale_3d',
+        # See https://github.com/pytorch/pytorch/issues/5006
+        precision=3e-4,
     ),
     dict(
         module_name='AdaptiveMaxPool1d',

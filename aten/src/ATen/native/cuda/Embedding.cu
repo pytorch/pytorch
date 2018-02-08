@@ -4,6 +4,7 @@
 #include "ATen/NativeFunctions.h"
 
 #include "ATen/cuda/AccumulateType.h"
+#include "ATen/cuda/CUDATensorMethods.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>

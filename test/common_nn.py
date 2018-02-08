@@ -6,8 +6,8 @@ from itertools import product
 
 import torch
 import torch.cuda
-from torch.autograd import Variable
-from common import TestCase, to_gpu, freeze_rng_state
+from torch.autograd import Variable, variable
+from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
 
@@ -57,6 +57,13 @@ module_tests = [
     ),
     dict(
         module_name='Threshold',
+        constructor_args=(2, 1),
+        input_size=(),
+        check_inplace=True,
+        desc='threshold_value_scalar'
+    ),
+    dict(
+        module_name='Threshold',
         constructor_args=(2, 10),
         input_size=(2, 3, 4, 5),
         desc='large_value'
@@ -67,9 +74,21 @@ module_tests = [
         check_inplace=True,
     ),
     dict(
+        module_name='ReLU',
+        input_size=(),
+        check_inplace=True,
+        desc='scalar'
+    ),
+    dict(
         module_name='ReLU6',
         input_size=(2, 3, 4, 5),
         check_inplace=True,
+    ),
+    dict(
+        module_name='ReLU6',
+        input_size=(),
+        check_inplace=True,
+        desc='scalar'
     ),
     dict(
         module_name='RReLU',
@@ -84,23 +103,53 @@ module_tests = [
         test_cuda=False,
     ),
     dict(
+        module_name='RReLU',
+        constructor_args=(0.1, 0.9),
+        input_size=(),
+        desc='with_up_down_scalar',
+        test_cuda=False,
+    ),
+    dict(
         module_name='Hardtanh',
         input_size=(3, 2, 5),
         reference_fn=lambda i, _: i.clamp(-1, 1),
+    ),
+    dict(
+        module_name='Hardtanh',
+        input_size=(),
+        reference_fn=lambda i, _: i.clamp(-1, 1),
+        desc='scalar'
     ),
     dict(
         module_name='Sigmoid',
         input_size=(2, 3, 4, 5)
     ),
     dict(
+        module_name='Sigmoid',
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
         module_name='Tanh',
         input_size=(2, 3, 4, 5)
+    ),
+    dict(
+        module_name='Tanh',
+        input_size=(),
+        desc='scalar',
     ),
     dict(
         module_name='Softmax',
         constructor_args=(1,),
         input_size=(10, 20),
         reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(1, True).expand(10, 20)),
+    ),
+    dict(
+        module_name='Softmax',
+        constructor_args=(0,),
+        input_size=(),
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(0, True)),
+        desc='scalar',
     ),
     dict(
         module_name='Softmax2d',
@@ -121,15 +170,34 @@ module_tests = [
         desc='multiparam',
     ),
     dict(
+        module_name='LogSoftmax',
+        constructor_args=(0,),
+        input_size=(),
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
+        desc='multiparam_scalar',
+    ),
+    dict(
         module_name='ELU',
         constructor_args=(2.,),
         input_size=(3, 2, 5),
+    ),
+    dict(
+        module_name='ELU',
+        constructor_args=(2.,),
+        input_size=(),
+        desc='scalar',
     ),
     # TODO: reference function
     dict(
         module_name='Hardshrink',
         constructor_args=(2.,),
         input_size=(4, 3, 2, 4),
+    ),
+    dict(
+        module_name='Hardshrink',
+        constructor_args=(2.,),
+        input_size=(),
+        desc='scalar',
     ),
     dict(
         module_name='LeakyReLU',
@@ -144,9 +212,22 @@ module_tests = [
         desc='with_negval'
     ),
     dict(
+        module_name='LeakyReLU',
+        constructor_args=(0.5,),
+        input_size=(),
+        check_inplace=True,
+        desc='with_negval_scalar'
+    ),
+    dict(
         module_name='LogSigmoid',
         input_size=(2, 3, 4),
         reference_fn=lambda i, _: i.sigmoid().log(),
+    ),
+    dict(
+        module_name='LogSigmoid',
+        input_size=(),
+        reference_fn=lambda i, _: i.sigmoid().log(),
+        desc='scalar'
     ),
     dict(
         module_name='Softplus',
@@ -169,6 +250,14 @@ module_tests = [
         desc='beta_threshold',
     ),
     dict(
+        module_name='Softplus',
+        constructor_args=(2, -100),
+        input_size=(),
+        reference_fn=(lambda i, _: ((i * 2) > -100).type_as(i) * i +
+                                   ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+        desc='beta_threshold_scalar',
+    ),
+    dict(
         module_name='Softshrink',
         input_size=(3, 2, 5),
     ),
@@ -177,6 +266,12 @@ module_tests = [
         constructor_args=(1,),
         input_size=(3, 2, 5),
         desc='lambda',
+    ),
+    dict(
+        module_name='Softshrink',
+        constructor_args=(1,),
+        input_size=(),
+        desc='lambda_scalar',
     ),
     dict(
         module_name='CrossMapLRN2d',
@@ -196,6 +291,12 @@ module_tests = [
         input_size=(2, 3, 4),
         desc='1d_multiparam',
         reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(),
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        desc='scalar',
     ),
     dict(
         module_name='PReLU',
@@ -229,6 +330,12 @@ module_tests = [
         reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
     ),
     dict(
+        module_name='Softsign',
+        input_size=(),
+        reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
+        desc='scalar',
+    ),
+    dict(
         module_name='Softmin',
         constructor_args=(1,),
         input_size=(10, 20),
@@ -240,8 +347,19 @@ module_tests = [
         desc='multidim',
     ),
     dict(
+        module_name='Softmin',
+        constructor_args=(0,),
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
         module_name='Tanhshrink',
         input_size=(2, 3, 4, 5)
+    ),
+    dict(
+        module_name='Tanhshrink',
+        input_size=(),
+        desc='scalar',
     ),
 ]
 
@@ -263,13 +381,13 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
-    output = torch.zeros(out_size).type_as(input)
-    if isinstance(target, Variable):
-        target = target.data
+    output = Variable(torch.zeros(out_size).type_as(input))
 
     if weight is None:
-        weight = torch.ones(C).type_as(input)
-
+        weight = Variable(torch.ones(C).type_as(input))
+    if torch.is_tensor(weight):
+        # TODO: remove this once Variables and tensors merge
+        weight = Variable(weight)
     total_weight_data = 0
     for tup in product(*[range(size) for size in out_size]):
         t_nx = target[tup]
@@ -288,20 +406,26 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
                       size_average=True, reduce=True):
-    if isinstance(target, Variable):
-        target = target.data
 
     def nll_loss_helper(input, target, weight, ignore_index):
-        if target is ignore_index:
-            return (0, 0)
+        if target == ignore_index:
+            return (variable(0), variable(0))
         norm = 1 if weight is None else weight[target]
         result = -input[target] * norm
         return (result, norm)
 
+    if torch.is_tensor(weight):
+        # TODO: remove this once Variables and tensors merge
+        weight = Variable(weight)
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
-    losses_tensor = torch.Tensor(losses).type_as(input)
+    if isinstance(losses[0], Variable):
+        losses_tensor = torch.stack(losses).type_as(input)
+        if not torch._C._with_scalars():
+            losses_tensor = losses_tensor.squeeze(1)
+    else:
+        losses_tensor = torch.Tensor(losses).type_as(input)
     if reduce and size_average:
         return sum(losses_tensor) / sum(weights)
     elif reduce:
@@ -322,13 +446,70 @@ def smoothl1loss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
+def _multilabelmarginloss_reference(input, target):
+    targets = []
+    for target_index in target:
+        if target_index < 0:
+            break
+        targets.append(target_index)
+
+    sum = 0
+    for target_index in targets:
+        for i in range(0, len(input)):
+            if i not in targets:
+                sum += max(0, 1 - input[target_index] + input[i])
+
+    return sum
+
+
+def multilabelmarginloss_reference(input, target, size_average=True, reduce=True):
+    if input.dim() == 1:
+        n = 1
+        dim = input.size(0)
+        output = input.new(n).zero_()
+        output[0] = _multilabelmarginloss_reference(input, target)
+    else:
+        n = input.size(0)
+        dim = input.size(1)
+        output = input.new(n).zero_()
+        for i in range(0, n):
+            output[i] = _multilabelmarginloss_reference(input[i], target[i])
+
+    if reduce and size_average:
+        return output.mean() / dim
+    elif reduce:
+        return output.sum() / dim
+    return output / dim
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
+    'MultiLabelMarginLoss': multilabelmarginloss_reference,
 }
 
+
+sample_scalar = variable(0)
+
+
+# TODO: replace this with torch.rand() when Variables and tensors are merged;
+# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
+def torch_rand(sizes):
+    if len(sizes) == 0:
+        return torch.testing.rand_like(sample_scalar)
+    else:
+        return Variable(torch.rand(*sizes))
+
+
+# TODO: replace this with torch.randn() when Variables and tensors are merged;
+# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
+def torch_randn(sizes):
+    if len(sizes) == 0:
+        return torch.testing.randn_like(sample_scalar)
+    else:
+        return Variable(torch.randn(*sizes))
 
 criterion_tests = [
     dict(
@@ -337,6 +518,13 @@ criterion_tests = [
         target_size=(2, 3, 4),
         reference_fn=lambda i, t, _: 1. / i.numel() *
         sum((a - b).abs().sum() for a, b in zip(i, t)),
+    ),
+    dict(
+        module_name='L1Loss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
+        desc='scalar',
     ),
     dict(
         module_name='NLLLoss',
@@ -390,11 +578,28 @@ criterion_tests = [
         check_no_size_average=True,
     ),
     dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch_rand(()).log(),
+        target_fn=lambda: torch_rand(()),
+        reference_fn=lambda i, t, m:
+            kldivloss_reference(i, t, get_size_average(m), reduce=True),
+        check_no_size_average=True,
+        desc='scalar',
+    ),
+    dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
         target_size=(2, 3, 4, 5),
         reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
         check_no_size_average=True,
+    ),
+    dict(
+        module_name='MSELoss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
+        check_no_size_average=True,
+        desc='scalar'
     ),
     dict(
         module_name='BCELoss',
@@ -412,6 +617,16 @@ criterion_tests = [
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_size_average(m) else 1),
         desc='weights',
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch_rand(()),),
+        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch_rand(()).gt(0).double(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_size_average(m) else 1),
+        desc='scalar_weights',
         check_gradgrad=False,
     ),
     dict(
@@ -440,9 +655,29 @@ criterion_tests = [
         check_no_size_average=True,
     ),
     dict(
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5,),
+        input_size=(),
+        target_fn=lambda: torch_randn(()).gt(0).double().mul_(2).sub(1),
+        desc='scalar_margin',
+        check_no_size_average=True,
+    ),
+    dict(
+        module_name='MultiLabelMarginLoss',
+        input_size=(10,),
+        target_fn=lambda: torch.rand(10).mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            multilabelmarginloss_reference(i, t, size_average=get_size_average(m)),
+        desc="1d",
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
         module_name='MultiLabelMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(10).floor().long(),
+        reference_fn=lambda i, t, m:
+            multilabelmarginloss_reference(i, t, size_average=get_size_average(m)),
         check_no_size_average=True,
         check_gradgrad=False,
     ),
@@ -473,6 +708,15 @@ criterion_tests = [
         check_no_size_average=True,
         reference_fn=lambda i, t, m:
             smoothl1loss_reference(i, t, size_average=get_size_average(m)),
+    ),
+    dict(
+        module_name='SmoothL1Loss',
+        input_size=(),
+        target_size=(),
+        check_no_size_average=True,
+        reference_fn=lambda i, t, m:
+            smoothl1loss_reference(i, t, size_average=get_size_average(m)),
+        desc='scalar',
     ),
     dict(
         module_name='SoftMarginLoss',
@@ -546,7 +790,6 @@ class NNTestCase(TestCase):
     def _analytical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
         output = self._forward(module, input)
         output_size = output.nelement()
-        output_t = output.data if isinstance(output, Variable) else output
 
         if jacobian_input:
             jacobian_inp = self._jacobian(input, output_size)
@@ -558,7 +801,7 @@ class NNTestCase(TestCase):
 
         for i in range(output_size):
             _, d_param = self._get_parameters(module)
-            d_out = torch.zeros_like(output_t)
+            d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
 
@@ -629,7 +872,7 @@ class NNTestCase(TestCase):
                 x[i] = original - eps
                 fx2 = self._forward_criterion(criterion, input, target)
                 deriv = (fx1 - fx2) / (2. * eps)
-                d_x[i] = deriv
+                d_x[i] = float(deriv)
                 x[i] = original
 
         # TODO: check structure
@@ -674,24 +917,35 @@ class TestBase(object):
             return value.data
         elif torch.is_tensor(value):
             return value
-        else:
+        elif is_iterable(value):
             return type(value)(self._unpack(v) for v in value)
+        else:
+            return value
 
     @property
     def constructor_args(self):
-        return self._get_arg('constructor_args')
+        return self._get_arg('constructor_args', True)
 
-    def _get_arg(self, name):
+    def _get_arg(self, name, unpack):
         assert name in self._required_arg_names
 
         if name not in self._arg_cache:
             fn_name = name + '_fn'
             size_name = name + '_size'
 
+            def convert_tensors_to_vars(args):
+                def tensor_to_var(t):
+                    return Variable(t) if torch.is_tensor(t) else t
+
+                if isinstance(args, tuple):
+                    return tuple(tensor_to_var(x) for x in args)
+                else:
+                    return tensor_to_var(args)
+
             if name in self._extra_kwargs:
-                self._arg_cache[name] = self._extra_kwargs[name]
+                self._arg_cache[name] = convert_tensors_to_vars(self._extra_kwargs[name])
             elif fn_name in self._extra_kwargs:
-                self._arg_cache[name] = self._extra_kwargs[fn_name]()
+                self._arg_cache[name] = convert_tensors_to_vars(self._extra_kwargs[fn_name]())
             else:
                 assert size_name in self._extra_kwargs
 
@@ -699,15 +953,16 @@ class TestBase(object):
                     if isinstance(sizes, list):
                         return [map_tensor_sizes(s) for s in sizes]
                     elif torch.is_tensor(sizes):
-                        return sizes.double()
+                        return Variable(sizes.double())
                     else:
-                        return torch.randn(*sizes)
+                        return torch_randn(sizes)
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
-        return self._arg_cache[name]
 
-    def _get_input(self):
-        return self._get_arg('input')
+        return self._unpack(self._arg_cache[name]) if unpack else self._arg_cache[name]
+
+    def _get_input(self, unpack=True):
+        return self._get_arg('input', unpack)
 
     def __call__(self, test_case):
         raise NotImplementedError
@@ -723,6 +978,7 @@ class ModuleTest(TestBase):
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.FIXME_no_cuda_gradgrad_comparison = \
             kwargs.get('FIXME_no_cuda_gradgrad_comparison', False)
+        self.precision = kwargs.get('precision', 2e-4)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -730,12 +986,9 @@ class ModuleTest(TestBase):
 
         if self.reference_fn is not None:
             out = test_case._forward(module, input)
-            if isinstance(out, Variable):
-                out = out.data
-            ref_input = self._unpack(deepcopy(input))
+            ref_input = deepcopy(input)
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
             test_case.assertEqual(out, expected_out)
-
         self.test_noncontig(test_case, module, input)
 
         if self.should_test_pickle:
@@ -761,6 +1014,12 @@ class ModuleTest(TestBase):
         return noncontig
 
     def test_noncontig(self, test_case, module, input):
+        # check no scalars, can't make non-contig
+        if isinstance(input, Variable) and input.dim() == 0:
+            return
+        if any(i.dim() == 0 for i in input if isinstance(i, Variable)):
+            return
+
         test_case._zero_grad_parameters(module)
         test_case._zero_grad_input(input)
         with freeze_rng_state():
@@ -819,7 +1078,7 @@ class ModuleTest(TestBase):
             test_case._zero_grad_parameters(gpu_module)
             cpu_output = test_case._forward(cpu_module, cpu_input)
             gpu_output = test_case._forward(gpu_module, gpu_input)
-            test_case.assertEqual(cpu_output, gpu_output, 2e-4)
+            test_case.assertEqual(cpu_output, gpu_output, self.precision)
 
             # Run backwards on CPU and GPU and compare results
             for i in range(5):
@@ -828,9 +1087,9 @@ class ModuleTest(TestBase):
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)
-                test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
+                test_case.assertEqual(cpu_gradInput, gpu_gradInput, self.precision)
                 for cpu_d_p, gpu_d_p in zip(cpu_param[1], gpu_param[1]):
-                    test_case.assertEqual(cpu_d_p, gpu_d_p, 2e-4)
+                    test_case.assertEqual(cpu_d_p, gpu_d_p, self.precision)
 
             # Run double-backwards on CPU and GPU and compare results
             if self.check_gradgrad and not self.FIXME_no_cuda_gradgrad_comparison:
@@ -852,7 +1111,7 @@ class ModuleTest(TestBase):
                     create_graph=True)
 
                 for cpu_d_i, gpu_d_i in zip(cpu_gradInputs, gpu_gradInputs):
-                    test_case.assertEqual(cpu_d_i, gpu_d_i, 2e-4)
+                    test_case.assertEqual(cpu_d_i, gpu_d_i, self.precision)
 
                 # We mix output into the second backwards computation so that
                 # torch.autograd.grad doesn't complain that some inputs
@@ -867,9 +1126,9 @@ class ModuleTest(TestBase):
                     (gpu_input, gpu_gradOutput) + tuple(gpu_module.parameters()),
                     retain_graph=True)
 
-                test_case.assertEqual(cpu_gradInput, gpu_gradInput, 2e-4)
+                test_case.assertEqual(cpu_gradInput, gpu_gradInput, self.precision)
                 for cpu_d_p, gpu_d_p in zip(cpu_gg, gpu_gg):
-                    test_case.assertEqual(cpu_d_p, gpu_d_p, 2e-4)
+                    test_case.assertEqual(cpu_d_p, gpu_d_p, self.precision)
 
             self.test_noncontig(test_case, gpu_module, gpu_input)
         except NotImplementedError:
@@ -891,7 +1150,7 @@ class CriterionTest(TestBase):
         self.should_test_cuda = kwargs.get('test_cuda', True)
 
     def _get_target(self):
-        return self._get_arg('target')
+        return self._get_arg('target', True)
 
     def __call__(self, test_case):
         module = self.constructor(*self.constructor_args)
@@ -905,8 +1164,8 @@ class CriterionTest(TestBase):
 
         if self.reference_fn is not None:
             out = test_case._forward_criterion(module, input, target)
-            expected_out = self.reference_fn(deepcopy(self._unpack(input)),
-                                             deepcopy(self._unpack(target)), module)
+            expected_out = self.reference_fn(deepcopy(input),
+                                             deepcopy(target), module)
             test_case.assertEqual(out, expected_out)
 
         test_case.check_criterion_jacobian(module, input, target)

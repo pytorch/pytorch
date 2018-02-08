@@ -165,6 +165,19 @@ class TestTorch(TestCase):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_linear_algebra_scalar_raises(self):
+        from torch.autograd import Variable, variable
+        m = Variable(torch.randn(5, 5))
+        v = Variable(torch.randn(5))
+        s = variable(7)
+        self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
+        self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
+        self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
+        self.assertRaises(RuntimeError, lambda: torch.ger(s, v))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
+        self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
+
     def _testMath(self, torchfn, mathfn):
         size = (10, 5)
         # contiguous
@@ -370,16 +383,19 @@ class TestTorch(TestCase):
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
 
-        def normfn_attr(t, dim, keepdim=False):
+        def normfn_attr(t, dim, keepdim=False, out=None):
             attr = getattr(torch, "norm")
-            return attr(t, 2, dim, keepdim)
+            return attr(t, 2, dim, keepdim, out=out)
 
         for fn_name in dim_red_fns:
             fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(x, dim, keepdim=False):
-                ans = fn_attr(x, dim, keepdim=keepdim)
+            def fn(x, dim, keepdim=False, out=None):
+                ans = fn_attr(x, dim, keepdim=keepdim, out=out)
                 return ans if not isinstance(ans, tuple) else ans[0]
+
+            def fn_tuple(x, dim, keepdim=False, out=None):
+                return fn_attr(x, dim, keepdim=keepdim, out=out)
 
             def test_multidim(x, dim):
                 self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
@@ -404,6 +420,25 @@ class TestTorch(TestCase):
             dims[singleton_dim] = 1
             x = cast(torch.randn(dims))
             test_multidim(x, singleton_dim)
+
+            # check reducing with output kwargs
+            if fn_name in ['median', 'mode', 'max', 'min']:
+                y = cast(torch.randn(5, 3))
+                values = cast(torch.randn(5, 3))
+                indices = cast(torch.zeros(5, 3).long() - 1)
+                fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
+                values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
+                self.assertEqual(values[:, 1], values_expected,
+                                 '{} values with out= kwarg'.format(fn_name))
+                self.assertEqual(indices[:, 1], indices_expected,
+                                 '{} indices with out= kwarg'.format(fn_name))
+                continue
+
+            x = cast(torch.randn(5, 3))
+            y = cast(torch.randn(5, 3))
+            fn(y, 1, keepdim=False, out=x[:, 1])
+            expected = fn(y, 1, keepdim=False)
+            self.assertEqual(x[:, 1], expected, '{} with out= kwarg'.format(fn_name))
 
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
@@ -1102,46 +1137,71 @@ class TestTorch(TestCase):
         self.assertEqual(m3, m2)
         self.assertEqual(m3.norm(2, 0), m2.norm(2, 0))
 
-    def test_multinomial(self):
-        # with replacement
-        n_row = 3
-        for n_col in range(4, 5 + 1):
-            prob_dist = torch.rand(n_row, n_col)
-            prob_dist.select(1, n_col - 1).fill_(0)  # index n_col shouldn't be sampled
-            n_sample = n_col
+    @staticmethod
+    def _test_multinomial(self, type):
+        def make_prob_dist(shape, is_contiguous):
+            if is_contiguous:
+                return type(*shape).uniform_()
+            elif len(shape) == 1:
+                return type(*(shape + [5])).uniform_()[:, 2]
+            else:
+                # num dim = 2
+                new_shape = [2, shape[1], 7, 1, shape[0], 1, 10]
+                prob_dist = type(*new_shape).uniform_()
+                prob_dist = prob_dist.transpose(1, 4)
+                prob_dist = prob_dist[1, :, 5, 0, :, 0, 4]
+                assert not prob_dist.is_contiguous()  # sanity check
+                return prob_dist
+
+        for is_contiguous in (True, False):
+            # with replacement
+            n_row = 3
+            for n_col in range(4, 5 + 1):
+                prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
+                zero_prob_idx = n_col - 2  # index that shouldn't be sampled
+                prob_dist.select(1, zero_prob_idx).fill_(0)
+                n_sample = n_col * 3
+                sample_indices = torch.multinomial(prob_dist, n_sample, True)
+                self.assertEqual(prob_dist.dim(), 2)
+                self.assertEqual(sample_indices.size(1), n_sample)
+                for index in product(range(n_row), range(n_sample)):
+                    self.assertNotEqual(sample_indices[index], zero_prob_idx, "sampled an index with zero probability")
+
+            # without replacement
+            n_row = 3
+            for n_col in range(8, 10 + 1):
+                prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
+                zero_prob_idx = n_col - 2  # index that shouldn't be sampled
+                prob_dist.select(1, zero_prob_idx).fill_(0)
+                n_sample = n_col - 1
+                sample_indices = torch.multinomial(prob_dist, n_sample, False)
+                self.assertEqual(prob_dist.dim(), 2)
+                self.assertEqual(sample_indices.size(1), n_sample)
+                for i in range(n_row):
+                    row_samples = {}
+                    for j in range(n_sample):
+                        sample_idx = sample_indices[i, j]
+                        self.assertNotEqual(sample_idx, zero_prob_idx,
+                                            "sampled an index with zero probability")
+                        self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
+                        row_samples[sample_idx] = True
+
+            # vector
+            n_col = 4
+            prob_dist = make_prob_dist([n_col], is_contiguous).fill_(1)
+            zero_prob_idx = 1  # index that shouldn't be sampled
+            prob_dist[zero_prob_idx] = 0
+            n_sample = 20
             sample_indices = torch.multinomial(prob_dist, n_sample, True)
-            self.assertEqual(prob_dist.dim(), 2)
-            self.assertEqual(sample_indices.size(1), n_sample)
-            for index in product(range(n_row), range(n_sample)):
-                self.assertNotEqual(sample_indices[index], n_col, "sampled an index with zero probability")
+            for sample_index in sample_indices:
+                self.assertNotEqual(sample_index, zero_prob_idx, "sampled an index with zero probability")
+            s_dim = sample_indices.dim()
+            self.assertEqual(sample_indices.dim(), 1, "wrong number of dimensions")
+            self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
+            self.assertEqual(sample_indices.size(0), n_sample, "wrong number of samples")
 
-        # without replacement
-        n_row = 3
-        for n_col in range(4, 5 + 1):
-            prob_dist = torch.rand(n_row, n_col)
-            prob_dist.select(1, n_col - 1).fill_(0)  # index n_col shouldn't be sampled
-            n_sample = 3
-            sample_indices = torch.multinomial(prob_dist, n_sample, False)
-            self.assertEqual(prob_dist.dim(), 2)
-            self.assertEqual(sample_indices.size(1), n_sample)
-            for i in range(n_row):
-                row_samples = {}
-                for j in range(n_sample):
-                    sample_idx = sample_indices[i, j]
-                    self.assertNotEqual(sample_idx, n_col - 1,
-                                        "sampled an index with zero probability")
-                    self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
-                    row_samples[sample_idx] = True
-
-        # vector
-        n_col = 4
-        prob_dist = torch.rand(n_col)
-        n_sample = n_col
-        sample_indices = torch.multinomial(prob_dist, n_sample, True)
-        s_dim = sample_indices.dim()
-        self.assertEqual(sample_indices.dim(), 1, "wrong number of dimensions")
-        self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
-        self.assertEqual(sample_indices.size(0), n_sample, "wrong number of samples")
+    def test_multinomial(self):
+        self._test_multinomial(self, torch.FloatTensor)
 
     @suppress_warnings
     def test_range(self):
@@ -1966,6 +2026,13 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_cat_scalars(self):
+        from torch.autograd import variable
+        x = variable(0)
+        y = variable(1)
+        self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
@@ -1979,6 +2046,27 @@ class TestTorch(TestCase):
             self.assertEqual(res.select(dim, 0), x, 0)
             self.assertEqual(res.select(dim, 1), y, 0)
             self.assertEqual(res.select(dim, 2), z, 0)
+
+    def test_stack_out(self):
+        from torch.autograd import Variable
+        x = Variable(torch.rand(2, 3, 4))
+        y = Variable(torch.rand(2, 3, 4))
+        z = Variable(torch.rand(2, 3, 4))
+        for dim in range(4):
+            expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
+            res_out = x.new(expected_size)
+            res_neg_out = x.new(expected_size)
+            res_out_dp = res_out.data_ptr()
+            res_out_neg_dp = res_neg_out.data_ptr()
+            torch.stack((x, y, z), dim, out=res_out)
+            torch.stack((x, y, z), dim - 4, out=res_neg_out)
+            self.assertEqual(res_out, res_neg_out)
+            self.assertEqual(res_out.size(), expected_size)
+            self.assertEqual(res_out_dp, res_out.data_ptr())
+            self.assertEqual(res_out_neg_dp, res_neg_out.data_ptr())
+            self.assertEqual(res_out.select(dim, 0), x, 0)
+            self.assertEqual(res_out.select(dim, 1), y, 0)
+            self.assertEqual(res_out.select(dim, 2), z, 0)
 
     def test_unbind(self):
         x = torch.rand(2, 3, 4, 5)

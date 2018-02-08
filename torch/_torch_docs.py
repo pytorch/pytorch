@@ -2788,7 +2788,7 @@ Indices are ordered from left to right according to when each was sampled
 If :attr:`input` is a vector, :attr:`out` is a vector of size `num_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
-`m \u00D7 n`.
+`m \u00D7 num_samples`.
 
 If replacement is ``True``, samples are drawn with replacement.
 

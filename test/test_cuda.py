@@ -97,6 +97,10 @@ def medium_2d(t):
     return make_tensor(t, M, M)
 
 
+def medium_2d_expanded(t):
+    return t(1).expand(M, M)
+
+
 def medium_2d_scaled(t, scale=10):
     return make_tensor(t, M, M).mul(scale)
 
@@ -143,6 +147,13 @@ def new_t(*sizes):
         return t(*sizes).copy_(torch.randn(*sizes))
     return tmp
 
+# Content of each tuple:
+# - function name
+# - constructor for the tensor,    signature: fn(tensor_type) -> tensor
+# - constructor for the arguments, signature: fn(tensor_type) -> list
+# - postfix name for the test (must be unique for a given function) (default='')
+# - tensor types to use (default=types)
+# - disable inplace test, if set to True, no inplace test will be done (default=False)
 tests = [
     ('add', small_3d, lambda t: [number(3.14, 3, t)]),
     ('add', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -296,9 +307,11 @@ tests = [
     ('topk', small_3d_unique, lambda t: [2, 1, True, True], 'dim_desc_sort'),
     ('trace', medium_2d, lambda t: [],),
     ('tril', medium_2d, lambda t: [],),
+    ('tril', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
     ('tril', medium_2d, lambda t: [2], 'positive'),
     ('tril', medium_2d, lambda t: [-2], 'negative'),
     ('triu', medium_2d, lambda t: [],),
+    ('triu', medium_2d_expanded, lambda t: [], 'zero_stride', types, True),
     ('triu', medium_2d, lambda t: [2], 'positive'),
     ('triu', medium_2d, lambda t: [-2], 'negative'),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
@@ -393,18 +406,12 @@ def get_cycles_per_ms():
     return _cycles_per_ms
 
 
-def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5, force_gpu_half=False):
+def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
     def tmp(self):
         cpu_tensor = tensor_constructor(t)
-        type_map = {}
-        if force_gpu_half:
-            type_map = {
-                'torch.FloatTensor': 'torch.cuda.HalfTensor',
-                'torch.DoubleTensor': 'torch.cuda.HalfTensor',
-            }
-        gpu_tensor = to_gpu(cpu_tensor, type_map)
+        gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
-        gpu_args = [to_gpu(arg, type_map) for arg in cpu_args]
+        gpu_args = [to_gpu(arg) for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -1045,7 +1052,7 @@ class TestCuda(TestCase):
         self.assertTrue(user_stream.query())
         # copy 10 MB tensor from CPU-GPU which should take some time
         tensor1 = torch.ByteTensor(10000000).pin_memory()
-        tensor2 = tensor1.cuda(async=True)
+        tensor2 = tensor1.cuda(non_blocking=True)
         self.assertFalse(default_stream.query())
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
@@ -1093,7 +1100,7 @@ class TestCuda(TestCase):
         # Performs the CPU->GPU copy in a background stream
         def perform_copy():
             with torch.cuda.stream(stream):
-                tmp = t.cuda(async=True)
+                tmp = t.cuda(non_blocking=True)
                 ptr[0] = tmp.data_ptr()
             torch.cuda.current_stream().wait_stream(stream)
             tmp.record_stream(torch.cuda.current_stream())
@@ -1132,7 +1139,7 @@ class TestCuda(TestCase):
         # check that the allocation is not re-used if it's in-use by a copy
         gpu_tensor = torch.cuda.FloatTensor([0])
         torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-        gpu_tensor.copy_(t, async=True)
+        gpu_tensor.copy_(t, non_blocking=True)
         del t
         t = torch.FloatTensor([1]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
@@ -1151,14 +1158,14 @@ class TestCuda(TestCase):
 
         with torch.cuda.device(1):
             torch.cuda._sleep(int(50 * cycles_per_ms))  # delay the copy
-            gpu_tensor1.copy_(t, async=True)
+            gpu_tensor1.copy_(t, non_blocking=True)
 
         del t
         t = torch.FloatTensor([2]).pin_memory()
         self.assertNotEqual(t.data_ptr(), ptr, 'allocation re-used too soon')
 
         with torch.cuda.device(0):
-            gpu_tensor0.copy_(t, async=True)
+            gpu_tensor0.copy_(t, non_blocking=True)
 
         self.assertEqual(gpu_tensor1[0], 1)
         self.assertEqual(gpu_tensor0[0], 2)
@@ -1176,6 +1183,9 @@ class TestCuda(TestCase):
 
     def test_stft(self):
         TestTorch._test_stft(self, lambda t: t.cuda())
+
+    def test_multinomial(self):
+        TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
@@ -1351,18 +1361,27 @@ if HAS_CUDA:
         for t in types:
             tensor = t()
             gpu_tensor = get_gpu_type(t)()
+
+            # Default values
+            desc = ''
+            type_subset = types
+            no_inplace = False
             if len(decl) == 3:
                 name, constr, arg_constr = decl
-                desc = ''
             elif len(decl) == 4:
                 name, constr, arg_constr, desc = decl
             elif len(decl) == 5:
                 name, constr, arg_constr, desc, type_subset = decl
-                if t not in type_subset:
-                    continue
+            elif len(decl) == 6:
+                name, constr, arg_constr, desc, type_subset, no_inplace = decl
+
+            if t not in type_subset:
+                continue
 
             precision = custom_precision.get(name, TestCuda.precision)
             for inplace in (True, False):
+                if inplace and no_inplace:
+                    continue
                 if inplace:
                     name_inner = name + '_'
                 else:
@@ -1382,12 +1401,6 @@ if HAS_CUDA:
                 setattr(TestCuda,
                         test_name,
                         compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
-                if t == torch.FloatTensor and not IS_WINDOWS:  # CUDA HalfTensor currently doesn't work on Windows
-                    assert not hasattr(TestCuda, test_name + '_gpu_half'), "Duplicated test name: " + test_name
-                    setattr(TestCuda,
-                            test_name + '_gpu_half',
-                            compare_cpu_gpu(constr, arg_constr, name_inner, t,
-                                            precision, force_gpu_half=True))
 
 
 if __name__ == '__main__':

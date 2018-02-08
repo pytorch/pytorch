@@ -1,10 +1,12 @@
 #include "torch/csrc/autograd/python_engine.h"
 
-#include "torch/csrc/autograd/engine.h"
-#include "torch/csrc/autograd/python_function.h"
-#include "torch/csrc/THP.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/PtrWrapper.h"
+#include "torch/csrc/THP.h"
+#include "torch/csrc/autograd/engine.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 #ifndef _WIN32
@@ -106,28 +108,23 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   THPUtils_assert(num_variables == num_gradients, "got %ld variables and %ld "
       "gradients", num_variables, num_gradients);
 
-  function_list roots(num_variables);
-  variable_list grads(num_variables);
+  function_list roots;
+  roots.reserve(num_variables);
+  variable_list grads;
+  grads.reserve(num_variables);
   for (int i = 0; i < num_variables; i++) {
     PyObject *_variable = PyTuple_GET_ITEM(variables, i);
     THPUtils_assert(THPVariable_Check(_variable), "element %d of variables "
         "tuple is not a Variable", i);
     auto& variable = ((THPVariable*)_variable)->cdata;
-    // If grad_fn is NULL (as is the case for a leaf node), we instead
-    // interpret the gradient function to be a grad accumulator,
-    // which will accumulate its inputs into the grad property of the
-    // variable. These nodes get suppressed in some situations,
-    // see "suppress grad accumulation" below. Note that only variables which
-    // have requires_grad=True can have grad accumulators.
-    auto grad_fn = variable.grad_fn() ? variable.grad_fn() : variable.grad_accumulator();
-    int output_nr = variable.grad_fn() ? variable.output_nr() : 0;
-    THPUtils_assert(grad_fn,
+    auto gradient_edge = variable.gradient_edge();
+    THPUtils_assert(gradient_edge.function,
         "element %d of variables does not require grad and does not have a grad_fn", i);
-    roots[i] = std::make_pair<>(std::move(grad_fn), output_nr);
+    roots.push_back(std::move(gradient_edge));
 
     PyObject *grad = PyTuple_GET_ITEM(grad_variables, i);
     if (THPVariable_Check(grad)) {
-      grads[i] = ((THPVariable*)grad)->cdata;
+      grads.push_back(((THPVariable*)grad)->cdata);
     } else {
       THPUtils_assert(grad == Py_None,
           "element %d of gradients tuple is not a Variable or None", i);

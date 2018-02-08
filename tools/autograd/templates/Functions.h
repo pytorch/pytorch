@@ -17,6 +17,12 @@ using at::IntList;
 using at::Type;
 using at::TensorGeometry;
 
+inline std::vector<Tensor> unpack_list(at::ArrayRef<SavedVariable> xs) {
+  // NB: we must explicitly do the conversion in the lambda, otherwise template
+  // deduction will give a Tensor of Variable which is not convertible
+  return fmap(xs, [](const SavedVariable& x) { return static_cast<Tensor>(x.unpack()); });
+}
+
 struct TypeAndSize {
   TypeAndSize() : type(nullptr) {}
   /* implicit */

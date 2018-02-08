@@ -282,13 +282,13 @@ struct TensorPowOp {
     } else if (StaticExp == 2) {
       *out = THCNumerics<T>::mul(*in, *in);
     } else if (StaticExp == 3) {
-      *out = THCNumerics<T>::mul(*in, *in);
-      *out = THCNumerics<T>::mul(*out, *in);
+      T square = THCNumerics<T>::mul(*in, *in);
+      *out = THCNumerics<T>::mul(square, *in);
     } else if (StaticExp == -1) {
       *out = THCNumerics<T>::cinv(*in);
     } else if (StaticExp == -2) {
-      *out = THCNumerics<T>::mul(*in, *in);
-      *out = THCNumerics<T>::cinv(*out);
+      T square = THCNumerics<T>::mul(*in, *in);
+      *out = THCNumerics<T>::cinv(square);
     } else {
       *out = THCNumerics<T>::pow(*in, val);
     }
@@ -304,8 +304,8 @@ struct TensorPowOp {
     } else if (StaticExp == -1) {
       *v = THCNumerics<T>::cinv(*v);
     } else if (StaticExp == -2) {
-      *v = THCNumerics<T>::mul(*v, *v);
-      *v = THCNumerics<T>::cinv(*v);
+      T square = THCNumerics<T>::mul(*v, *v);
+      *v = THCNumerics<T>::cinv(square);
     } else {
       *v = THCNumerics<T>::pow(*v, val);
     }
@@ -411,17 +411,19 @@ struct TensorDivOp<half> {
 template <typename T>
 struct TensorCRemainderOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out =  *out % *in;
-    if ((*out * *in)<0){
-      *out += *in;
+    T val =  *out % *in;
+    if ((val * *in)<0){
+      val += *in;
     }
+    *out = val;
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = *in1 % *in2;
-    if ((*out * *in2)<0){
-      *out += *in2;
+    T val = *in1 % *in2;
+    if ((val * *in2)<0){
+      val += *in2;
     }
+    *out = val;
   }
 };
 
@@ -557,20 +559,24 @@ struct TensorCrossOp {
   TensorCrossOp(int64_t sx, int64_t sy, int64_t so) : sx(sx), sy(sy), so(so) {}
 
   __device__ __forceinline__ void operator()(T* out, T* x, T*y) {
-    out[0 * so] = THCNumerics<T>::sub(
+    T val0 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[1 * sx], y[2 * sy]),
         THCNumerics<T>::mul(x[2 * sx], y[1 * sy])
     );
 
-    out[1 * so] = THCNumerics<T>::sub(
+    T val1 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[2 * sx], y[0 * sy]),
         THCNumerics<T>::mul(x[0 * sx], y[2 * sy])
     );
 
-    out[2 * so] = THCNumerics<T>::sub(
+    T val2 = THCNumerics<T>::sub(
         THCNumerics<T>::mul(x[0 * sx], y[1 * sy]),
         THCNumerics<T>::mul(x[1 * sx], y[0 * sy])
     );
+
+    out[0 * so] = val0;
+    out[1 * so] = val1;
+    out[2 * so] = val2;
   }
 
   const int64_t sx, sy, so;

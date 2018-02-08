@@ -9,29 +9,19 @@ class _InstanceNorm(_BatchNorm):
         self._use_running_stats = False
 
     def forward(self, input):
-        b, c = input.size(0), input.size(1)
-
-        # Repeat stored stats and affine transform params
-        running_mean = self.running_mean.repeat(b)
-        running_var = self.running_var.repeat(b)
+        b = input.size(0)
 
         weight, bias = None, None
         if self.affine:
             weight = self.weight.repeat(b)
             bias = self.bias.repeat(b)
 
-        # Apply instance norm
-        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
-
-        out = F.batch_norm(
-            input_reshaped, running_mean, running_var, weight, bias,
-            not self._use_running_stats, self.momentum, self.eps)
-
-        # Reshape back
-        self.running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        self.running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
-
-        return out.view(b, c, *input.size()[2:])
+        training = not self._use_running_stats
+        return F.instance_norm(input, weight=weight, bias=bias,
+                               saved_running_mean=self.running_mean,
+                               saved_running_var=self.running_var,
+                               training=training, momentum=self.momentum,
+                               eps=self.eps, affine=self.affine)
 
     def use_running_stats(self, mode=True):
         r"""Set using running statistics or instance statistics.
