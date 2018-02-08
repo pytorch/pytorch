@@ -1637,7 +1637,6 @@ class RNNCellTest(hu.HypothesisTestCase):
            max_num_units=st.integers(1, 3),
            num_layers=st.integers(2, 3),
            batch_size=st.integers(1, 3))
-    @utils.debug
     def test_multi_lstm(
         self,
         input_length,
@@ -1665,7 +1664,7 @@ class RNNCellTest(hu.HypothesisTestCase):
             initial_states=None,
             dim_in=dim_in,
             dim_out=dim_out,
-            scope='test',
+            # scope='test',
             outputs_with_grads=(0,),
             return_params=False,
             memory_optimization=False,
@@ -1699,23 +1698,26 @@ class RNNCellTest(hu.HypothesisTestCase):
         for i in range(num_layers):
             hidden_input_list.append(
                 workspace.FetchBlob(
-                    'test/test/layer_{}/initial_hidden_state'.format(i)),
+                    'layer_{}/initial_hidden_state'.format(i)),
             )
             cell_input_list.append(
                 workspace.FetchBlob(
-                    'test/test/layer_{}/initial_cell_state'.format(i)),
+                    'layer_{}/initial_cell_state'.format(i)),
             )
+            # Input projection for the first layer is produced outside
+            # of the cell ans thus not scoped
+            prefix = 'layer_{}/'.format(i) if i > 0 else ''
             i2h_w_list.append(
-                workspace.FetchBlob('test/layer_{}/i2h_w'.format(i)),
+                workspace.FetchBlob('{}i2h_w'.format(prefix)),
             )
             i2h_b_list.append(
-                workspace.FetchBlob('test/layer_{}/i2h_b'.format(i)),
+                workspace.FetchBlob('{}i2h_b'.format(prefix)),
             )
             gates_w_list.append(
-                workspace.FetchBlob('test/layer_{}/gates_t_w'.format(i)),
+                workspace.FetchBlob('layer_{}/gates_t_w'.format(i)),
             )
             gates_b_list.append(
-                workspace.FetchBlob('test/layer_{}/gates_t_b'.format(i)),
+                workspace.FetchBlob('layer_{}/gates_t_b'.format(i)),
             )
 
         workspace.RunNetOnce(model.net)
@@ -1772,6 +1774,7 @@ class RNNCellTest(hu.HypothesisTestCase):
                 step_size=0.0001,
                 threshold=0.05,
             )
+
 
 if __name__ == "__main__":
     workspace.GlobalInit([

@@ -21,6 +21,7 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 import functools
+import inspect
 import itertools
 import logging
 import numpy as np
@@ -30,28 +31,49 @@ from future.utils import viewkeys
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python.attention import (
-    AttentionType,
-    apply_regular_attention,
-    apply_recurrent_attention,
     apply_dot_attention,
+    apply_recurrent_attention,
+    apply_regular_attention,
     apply_soft_coverage_attention,
+    AttentionType,
 )
-from caffe2.python import core, recurrent, workspace, brew, scope
+from caffe2.python import core, recurrent, workspace, brew, scope, utils
 from caffe2.python.modeling.parameter_sharing import ParameterSharing
 from caffe2.python.modeling.parameter_info import ParameterTags
 from caffe2.python.modeling.initializers import Initializer
 from caffe2.python.model_helper import ModelHelper
 
 
+def _RectifyName(blob_reference_or_name):
+    if blob_reference_or_name is None:
+        return None
+    if isinstance(blob_reference_or_name, six.string_types):
+        return core.ScopedBlobReference(blob_reference_or_name)
+    if not isinstance(blob_reference_or_name, core.BlobReference):
+        raise Exception("Unknown blob reference type")
+    return blob_reference_or_name
+
+
+def _RectifyNames(blob_references_or_names):
+    if blob_references_or_names is None:
+        return None
+    return list(map(_RectifyName, blob_references_or_names))
+
+
 class RNNCell(object):
     '''
     Base class for writing recurrent / stateful operations.
 
-    One needs to implement 3 methods: _apply, prepare_input and get_state_names.
+    One needs to implement 2 methods: apply_override
+    and get_state_names_override.
+
     As a result base class will provice apply_over_sequence method, which
     allows you to apply recurrent operations over a sequence of any length.
+
+    As optional you could add input and output preparation steps by overriding
+    corresponding methods.
     '''
-    def __init__(self, name, forward_only=False, initializer=None):
+    def __init__(self, name=None, forward_only=False, initializer=None):
         self.name = name
         self.recompute_blobs = []
         self.forward_only = forward_only
@@ -72,14 +94,14 @@ class RNNCell(object):
         self,
         model,
         inputs,
-        seq_lengths,
+        seq_lengths=None,
         initial_states=None,
         outputs_with_grads=None,
     ):
         if initial_states is None:
             with scope.NameScope(self.name):
                 if self.initializer is None:
-                    raise Exception("Either initial states"
+                    raise Exception("Either initial states "
                                     "or initializer have to be set")
                 initial_states = self.initializer.create_states(model)
 
@@ -88,6 +110,11 @@ class RNNCell(object):
         input_t, timestep = step_model.net.AddScopedExternalInputs(
             'input_t',
             'timestep',
+        )
+        utils.raiseIfNotEqual(
+            len(initial_states), len(self.get_state_names()),
+            "Number of initial state values provided doesn't match the number "
+            "of states"
         )
         states_prev = step_model.net.AddScopedExternalInputs(*[
             s + '_prev' for s in self.get_state_names()
@@ -99,6 +126,11 @@ class RNNCell(object):
             states=states_prev,
             timestep=timestep,
         )
+
+        external_outputs = set(step_model.net.Proto().external_output)
+        for state in states:
+            if state not in external_outputs:
+                step_model.net.AddExternalOutput(state)
 
         if outputs_with_grads is None:
             outputs_with_grads = [self.get_output_state_index() * 2]
@@ -134,19 +166,52 @@ class RNNCell(object):
 
     def _apply(
         self,
-        model,
-        input_t,
-        seq_lengths,
-        states,
-        timestep,
-        extra_inputs,
+        model, input_t, seq_lengths, states, timestep, extra_inputs=None
     ):
         '''
-        A single step of a recurrent network.
+        This  method uses apply_override provided by a custom cell.
+        On the top it takes care of applying self.scope() to all the outputs.
+        While all the inputs stay within the scope this function was called
+        from.
+        '''
+        args = self._rectify_apply_inputs(
+            input_t, seq_lengths, states, timestep, extra_inputs)
+        with core.NameScope(self.name):
+            return self.apply_override(model, *args)
+
+    def _rectify_apply_inputs(
+            self, input_t, seq_lengths, states, timestep, extra_inputs):
+        '''
+        Before applying a scope we make sure that all external blob names
+        are converted to blob reference. So further scoping doesn't affect them
+        '''
+
+        input_t, seq_lengths, timestep = _RectifyNames(
+            [input_t, seq_lengths, timestep])
+        states = _RectifyNames(states)
+        if extra_inputs:
+            extra_input_names, extra_input_sizes = zip(*extra_inputs)
+            extra_inputs = _RectifyNames(extra_input_names)
+            extra_inputs = zip(extra_input_names, extra_input_sizes)
+
+        arg_names = inspect.getargspec(self.apply_override).args
+        rectified = [input_t, seq_lengths, states, timestep]
+        if 'extra_inputs' in arg_names:
+            rectified.append(extra_inputs)
+        return rectified
+
+
+    def apply_override(
+        self,
+        model, input_t, seq_lengths, timestep, extra_inputs=None,
+    ):
+        '''
+        A single step of a recurrent network to be implemented by each custom
+        RNNCell.
 
         model: ModelHelper object new operators would be added to
 
-        input_t: single input with shape (1, batch_size, input_dim)
+        input_t: singlse input with shape (1, batch_size, input_dim)
 
         seq_lengths: blob containing sequence lengths which would be passed to
         LSTMUnit operator
@@ -184,7 +249,15 @@ class RNNCell(object):
 
     def get_state_names(self):
         '''
-        Return the names of the recurrent states.
+        Returns recurrent state names with self.name scoping applied
+        '''
+        return list(map(self.scope, self.get_state_names_override()))
+
+    def get_state_names_override(self):
+        '''
+        Override this funtion in your custom cell.
+        It should return the names of the recurrent states.
+
         It's required by apply_over_sequence method in order to allocate
         recurrent states for all steps with meaningful names.
         '''
@@ -258,7 +331,7 @@ class BasicRNNCell(RNNCell):
                 'BasicRNNCell with unknown activation function (%s)'
                 % self.activation)
 
-    def _apply(
+    def apply_override(
         self,
         model,
         input_t,
@@ -269,50 +342,54 @@ class BasicRNNCell(RNNCell):
     ):
         hidden_t_prev = states[0]
 
-        gates_t = self.scope('gates_t')
-        hidden_t = self.scope('hidden_t')
-
-        brew.fc(
+        gates_t = brew.fc(
             model,
             hidden_t_prev,
-            gates_t,
+            'gates_t',
             dim_in=self.hidden_size,
             dim_out=self.hidden_size,
             axis=2,
         )
+
         brew.sum(model, [gates_t, input_t], gates_t)
         if self.activation == 'tanh':
-            model.net.Tanh(gates_t, hidden_t)
+            hidden_t = model.net.Tanh(gates_t, 'hidden_t')
         elif self.activation == 'relu':
-            model.net.Relu(gates_t, hidden_t)
+            hidden_t = model.net.Relu(gates_t, 'hidden_t')
         else:
             raise RuntimeError(
                 'BasicRNNCell with unknown activation function (%s)'
                 % self.activation)
+
         if seq_lengths is not None:
             # TODO If this codepath becomes popular, it may be worth
             # taking a look at optimizing it - for now a simple
             # implementation is used to round out compatibility with
             # ONNX.
             timestep = model.net.CopyFromCPUInput(
-                timestep, self.scope('timestep_gpu'))
+                timestep, 'timestep_gpu')
             valid_b = model.net.GT(
-                [seq_lengths, timestep], self.scope('valid_b'), broadcast=1)
+                [seq_lengths, timestep], 'valid_b', broadcast=1)
             invalid_b = model.net.LE(
-                [seq_lengths, timestep], self.scope('invalid_b'), broadcast=1)
-            valid = model.net.Cast(valid_b, self.scope('valid'), to='float')
-            invalid = model.net.Cast(invalid_b, self.scope('invalid'), to='float')
+                [seq_lengths, timestep], 'invalid_b', broadcast=1)
+            valid = model.net.Cast(valid_b, 'valid', to='float')
+            invalid = model.net.Cast(invalid_b, 'invalid', to='float')
 
             hidden_valid = model.net.Mul(
-                [hidden_t, valid], self.scope('hidden_valid'), broadcast=1, axis=1)
+                [hidden_t, valid],
+                'hidden_valid',
+                broadcast=1,
+                axis=1,
+            )
             if self.drop_states:
                 hidden_t = hidden_valid
             else:
                 hidden_invalid = model.net.Mul(
                     [hidden_t_prev, invalid],
-                    self.scope('hidden_invalid'),
+                    'hidden_invalid',
                     broadcast=1, axis=1)
-                model.net.Add([hidden_valid, hidden_invalid], hidden_t)
+                hidden_t = model.net.Add(
+                    [hidden_valid, hidden_invalid], hidden_t)
         return (hidden_t,)
 
     def prepare_input(self, model, input_blob):
@@ -355,7 +432,7 @@ class LSTMCell(RNNCell):
         self.drop_states = drop_states
         self.gates_size = 4 * self.hidden_size
 
-    def _apply(
+    def apply_override(
         self,
         model,
         input_t,
@@ -374,7 +451,7 @@ class LSTMCell(RNNCell):
             fc_input = brew.concat(
                 model,
                 [hidden_t_prev] + list(extra_input_blobs),
-                self.scope('gates_concatenated_input_t'),
+                'gates_concatenated_input_t',
                 axis=2,
             )
             fc_input_dim += sum(extra_input_sizes)
@@ -382,7 +459,7 @@ class LSTMCell(RNNCell):
         gates_t = brew.fc(
             model,
             fc_input,
-            self.scope('gates_t'),
+            'gates_t',
             dim_in=fc_input_dim,
             dim_out=self.gates_size,
             axis=2,
@@ -396,7 +473,7 @@ class LSTMCell(RNNCell):
 
         hidden_t, cell_t = model.net.LSTMUnit(
             inputs,
-            list(self.get_state_names()),
+            ['hidden_state', 'cell_state'],
             forget_bias=self.forget_bias,
             drop_states=self.drop_states,
             sequence_lengths=(seq_lengths is not None),
@@ -429,8 +506,8 @@ class LSTMCell(RNNCell):
             axis=2,
         )
 
-    def get_state_names(self):
-        return (self.scope('hidden_t'), self.scope('cell_t'))
+    def get_state_names_override(self):
+        return ['hidden_t', 'cell_t']
 
     def get_output_dim(self):
         return self.hidden_size
@@ -513,7 +590,7 @@ class LayerNormLSTMCell(RNNCell):
                 seq_lengths,
                 timestep,
             ],
-            list(self.get_state_names()),
+            self.get_state_names(),
             forget_bias=self.forget_bias,
             drop_states=self.drop_states,
         )
@@ -835,10 +912,16 @@ class MultiRNNCellInitializer(object):
 
     def create_states(self, model):
         states = []
-        for cell in self.cells:
-            with core.NameScope(cell.name):
+        for i, cell in enumerate(self.cells):
+            if cell.initializer is None:
+                raise Exception("Either initial states "
+                                "or initializer have to be set")
+
+            with core.NameScope("layer_{}".format(i)),\
+                    core.NameScope(cell.name):
                 states.extend(cell.initializer.create_states(model))
         return states
+
 
 class MultiRNNCell(RNNCell):
     '''
@@ -896,21 +979,17 @@ class MultiRNNCell(RNNCell):
         self.output_indices.append(output_index_per_layer[-1])
 
         self.state_names = []
-        for cell in self.cells:
-            self.state_names.extend(cell.get_state_names())
-
-        if len(self.state_names) != len(set(self.state_names)):
-            duplicates = {
-                state_name for state_name in self.state_names
-                if self.state_names.count(state_name) > 1
-            }
-            raise RuntimeError(
-                'Duplicate state names in MultiRNNCell: {}'.format(
-                    list(duplicates),
-                ),
+        for i, cell in enumerate(self.cells):
+            self.state_names.extend(
+                map(self.layer_scoper(i), cell.get_state_names())
             )
 
         self.initializer = MultiRNNCellInitializer(cells)
+
+    def layer_scoper(self, layer_id):
+        def helper(name):
+            return "layer_{}/{}".format(layer_id, name)
+        return helper
 
     def prepare_input(self, model, input_blob):
         return self.cells[0].prepare_input(model, input_blob)
@@ -924,6 +1003,15 @@ class MultiRNNCell(RNNCell):
         timestep,
         extra_inputs=None,
     ):
+        '''
+        Because below we will do scoping across layers, we need
+        to make sure that string blob names are convereted to BlobReference
+        objects.
+        '''
+
+        input_t, seq_lengths, states, timestep, extra_inputs = \
+            self._rectify_apply_inputs(
+                input_t, seq_lengths, states, timestep, extra_inputs)
 
         states_per_layer = [len(cell.get_state_names()) for cell in self.cells]
         assert len(states) == sum(states_per_layer)
@@ -933,40 +1021,45 @@ class MultiRNNCell(RNNCell):
 
         layer_input = input_t
         for i, layer_cell in enumerate(self.cells):
-            num_states = states_per_layer[i]
-            layer_states = states[states_index:(states_index + num_states)]
-            states_index += num_states
+            # # If cells don't have different names we still
+            # take care of scoping
+            with core.NameScope(self.name), core.NameScope("layer_{}".format(i)):
+                num_states = states_per_layer[i]
+                layer_states = states[states_index:(states_index + num_states)]
+                states_index += num_states
 
-            if i > 0:
-                prepared_input = layer_cell.prepare_input(model, layer_input)
-            else:
-                prepared_input = layer_input
-
-            layer_next_states = layer_cell._apply(
-                model,
-                prepared_input,
-                seq_lengths,
-                layer_states,
-                timestep,
-                extra_inputs=(None if i > 0 else extra_inputs),
-            )
-            # Since we're using here non-public method _apply, instead of apply,
-            # we have to manually extract output from states
-            if i != len(self.cells) - 1:
-                layer_output = layer_cell._prepare_output(
-                    model,
-                    layer_next_states,
-                )
-                if i > 0 and i in self.residual_output_layers:
-                    layer_input = brew.sum(
-                        model,
-                        [layer_output, layer_input],
-                        self.scope('residual_output_{}'.format(i)),
-                    )
+                if i > 0:
+                    prepared_input = layer_cell.prepare_input(
+                        model, layer_input)
                 else:
-                    layer_input = layer_output
+                    prepared_input = layer_input
 
-            next_states.extend(layer_next_states)
+                layer_next_states = layer_cell._apply(
+                    model,
+                    prepared_input,
+                    seq_lengths,
+                    layer_states,
+                    timestep,
+                    extra_inputs=(None if i > 0 else extra_inputs),
+                )
+                # Since we're using here non-public method _apply,
+                # instead of apply, we have to manually extract output
+                # from states
+                if i != len(self.cells) - 1:
+                    layer_output = layer_cell._prepare_output(
+                        model,
+                        layer_next_states,
+                    )
+                    if i > 0 and i in self.residual_output_layers:
+                        layer_input = brew.sum(
+                            model,
+                            [layer_output, layer_input],
+                            self.scope('residual_output_{}'.format(i)),
+                        )
+                    else:
+                        layer_input = layer_output
+
+                next_states.extend(layer_next_states)
         return next_states
 
     def get_state_names(self):
@@ -1397,7 +1490,7 @@ def _LSTM(
     initial_states,
     dim_in,
     dim_out,
-    scope,
+    scope=None,
     outputs_with_grads=(0,),
     return_params=False,
     memory_optimization=False,
@@ -1459,13 +1552,12 @@ def _LSTM(
 
     cells = []
     for i in range(num_layers):
-        name = scope + "/layer_{}".format(i) if num_layers > 1 else scope
         cell = cell_class(
             input_size=(dim_in if i == 0 else dim_out[i - 1]),
             hidden_size=dim_out[i],
             forget_bias=forget_bias,
             memory_optimization=memory_optimization,
-            name=name,
+            name=scope,
             forward_only=forward_only,
             drop_states=drop_states,
             **cell_kwargs
@@ -1539,7 +1631,7 @@ class UnrolledCell(RNNCell):
             scope_name = "timestep_{}".format(t)
             # Parameters of all timesteps are shared
             with ParameterSharing({scope_name: ''}),\
-                 scope.NameScope(scope_name):
+                    scope.NameScope(scope_name):
                 timestep = model.param_init_net.ConstantFill(
                     [], "timestep", value=t, shape=[1],
                     dtype=core.DataType.INT32,

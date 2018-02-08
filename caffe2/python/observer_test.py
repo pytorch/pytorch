@@ -87,7 +87,6 @@ class TestObservers(unittest.TestCase):
                 initial_states=init_blobs,
                 dim_in=input_dim,
                 dim_out=[hidden_dim] * num_layers,
-                scope="",
                 drop_states=True,
                 forward_only=forward_only,
                 return_last_layer_only=True,

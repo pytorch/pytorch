@@ -141,7 +141,6 @@ class Seq2SeqModelCaffe2EnsembleDecoder(object):
                 )
 
             cell = rnn_cell.LSTMCell(
-                name=seq2seq_util.get_layer_scope(scope, 'decoder', i),
                 forward_only=True,
                 input_size=input_size,
                 hidden_size=num_units,
