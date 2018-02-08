@@ -17,7 +17,7 @@ struct TensorImpl : public Retainable {
   explicit TensorImpl(Type * type)
   : is_scalar(false), type_(type) {}
 
-  void setType(Type* type) {
+  void setType(Type* type) noexcept {
     type_ = type;
   }
   Type & type() const {

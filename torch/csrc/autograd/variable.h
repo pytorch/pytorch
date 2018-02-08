@@ -53,7 +53,7 @@ class Variable : public at::Tensor {
     return this->pImpl == other.pImpl;
   }
 
-  void set_name(const std::string& name) noexcept;
+  void set_name(const std::string& name);
   const std::string& name() const noexcept;
 
   /// Get the gradient function of the `Variable`. If this is a leaf variable,
@@ -400,7 +400,7 @@ inline const Variable& Variable::base() const {
   throw std::runtime_error("Can't get base of non-view");
 }
 
-inline void Variable::set_name(const std::string& name) noexcept {
+inline void Variable::set_name(const std::string& name) {
   get()->name = name;
 }
 
