@@ -698,7 +698,7 @@ class TestDistributions(TestCase):
         p = variable([0.7, 0.2, 0.4], requires_grad=True)
         r = variable(0.3, requires_grad=True)
         s = 0.3
-        temp = Variable(torch.Tensor([0.67]), requires_grad=True)
+        temp = variable(0.67, requires_grad=True)
         self.assertEqual(RelaxedBernoulli(temp, p).sample((8,)).size(), (8, 3))
         self.assertTrue(isinstance(RelaxedBernoulli(temp, p).sample().data, torch.Tensor))
         self.assertEqual(RelaxedBernoulli(temp, r).sample((8,)).size(), (8,) + SCALAR_SHAPE)
@@ -737,7 +737,7 @@ class TestDistributions(TestCase):
 
     def test_relaxed_one_hot_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
-        temp = Variable(torch.Tensor([0.67]), requires_grad=True)
+        temp = variable(0.67, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().size(), (3,))
         self.assertTrue(isinstance(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().data, torch.Tensor))
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((2, 2)).size(), (2, 2, 3))
