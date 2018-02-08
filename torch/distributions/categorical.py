@@ -73,17 +73,23 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        # verbose because of differening Variable/Tensor apis and lack of dtypes
+        # TODO: verbose because of differening Variable/Tensor apis and lack of dtypes
         if isinstance(self.probs, Variable):
-            return variable(float('nan')).type_as(self.probs).expand(self._extended_shape())
+            v = variable(float('nan'))
+            if v.is_cuda:
+                v = v.cuda(self.probs.get_device())
+            return v.type_as(self.probs).expand(self._extended_shape())
         else:
             return self.probs.new([float('nan')]).expand(self._extended_shape())
 
     @property
     def variance(self):
-        # verbose because of differening Variable/Tensor apis and lack of dtypes
+        # TODO: verbose because of differening Variable/Tensor apis and lack of dtypes
         if isinstance(self.probs, Variable):
-            return variable(float('nan')).type_as(self.probs).expand(self._extended_shape())
+            v = variable(float('nan'))
+            if v.is_cuda:
+                v = v.cuda(self.probs.get_device())
+            return v.type_as(self.probs).expand(self._extended_shape())
         else:
             return self.probs.new([float('nan')]).expand(self._extended_shape())
 
