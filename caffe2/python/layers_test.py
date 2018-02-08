@@ -1005,6 +1005,17 @@ class TestLayers(LayersTestCase):
         assert len(ops[0].output) == 1
         assert ops[0].output[0] in ops[1].input
 
+    def testHalfToFloatTypeInference(self):
+        input = self.new_record(schema.Scalar((np.float32, (32,))))
+
+        output = self.model.FloatToHalf(input, 1)
+        assert output.field_type().base == np.float16
+        assert output.field_type().shape == (32, )
+
+        output = self.model.HalfToFloat(output, 1)
+        assert output.field_type().base == np.float32
+        assert output.field_type().shape == (32, )
+
     def testFunctionalLayerHelperAutoInferenceScalar(self):
         loss = self.model.AveragedLoss(self.model.input_feature_schema, 1)
         self.assertEqual(1, len(loss.field_types()))
