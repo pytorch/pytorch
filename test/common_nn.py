@@ -364,6 +364,18 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
     return output / dim
 
 
+def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
+    zeros = input.new().zero_()
+    margin_clamp = (margin - self).clamp(min=0)
+    output = torch.where(target == 1, self, margin_clamp)
+
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -480,6 +492,7 @@ criterion_tests = [
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
+        check_no_size_average=True,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
