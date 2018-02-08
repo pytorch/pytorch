@@ -121,6 +121,8 @@ class Functional(ModelLayer):
                     dtype = (np.int32, shape)
                 elif types[blob] == caffe2_pb2.TensorProto.INT64:
                     dtype = (np.int64, shape)
+                elif types[blob] == caffe2_pb2.TensorProto.FLOAT16:
+                    dtype = (np.float16, shape)
 
                 if dtype is not None:
                     scalar_schema.set_type(dtype)
