@@ -130,7 +130,7 @@ static Tensor new_from_data(const Type & type, int device, PyObject *data) {
   }
 }
 
-Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
+Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, int64_t device=-1)",
     "new(IntList size, *, int64_t device=-1)",
@@ -171,7 +171,7 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-Tensor variable_data_factory(const Type& type, PyObject* args, PyObject* kwargs) {
+Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(Tensor other, *, bool requires_grad=False)",
     "new(PyObject* data, *, int64_t device=-1, bool requires_grad=False)",
@@ -185,7 +185,7 @@ Tensor variable_data_factory(const Type& type, PyObject* args, PyObject* kwargs)
   } else if (r.idx == 1) {
     return set_requires_grad(new_from_data(type, r.toInt64(1), r.pyobject(0)), r.toBool(2));
   }
-  throw std::runtime_error("variable(): invalid arguments");
+  throw std::runtime_error("new_tensor(): invalid arguments");
 }
 
 }} // namespace torch::utils
