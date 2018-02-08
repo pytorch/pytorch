@@ -77,7 +77,7 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 static PyObject * THPVariable_variable(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPVariable_Wrap(torch::utils::variable_data_factory(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_tensor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
