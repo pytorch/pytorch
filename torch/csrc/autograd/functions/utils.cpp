@@ -16,7 +16,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
   if (!any_variable_requires_grad(inputs)) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(Variable(output, false));
+        result.push_back(make_variable(output, /*requires_grad=*/false));
       } else {
         result.emplace_back();
       }
@@ -25,7 +25,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
     auto grad_fn = ctr(get_next_functions(inputs));
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(output, Edge(grad_fn, grad_fn->num_inputs++));
+        result.push_back(make_variable(output, Edge(grad_fn, grad_fn->num_inputs++)));
       } else {
         ++grad_fn->num_inputs;
         result.emplace_back();

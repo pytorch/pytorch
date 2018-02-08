@@ -11,7 +11,7 @@
 
 namespace torch { namespace autograd {
 
-class Variable;
+struct Variable;
 struct Function;
 
 extern const char* ERR_BACKWARD_TWICE;
@@ -39,7 +39,6 @@ class SavedVariable {
   }
 
  private:
-  bool was_default_constructed_ = true;
   at::Tensor data_;
 
   // The gradient function associated with this node. If has_grad_fn
@@ -47,15 +46,14 @@ class SavedVariable {
   // it would create a circular reference. In that case, the grad_fn must be
   // passed in to the unpack function when reconstructing the Variable.
   std::shared_ptr<Function> grad_fn_;
-  bool has_grad_fn_ = false;
   std::weak_ptr<Function> grad_accumulator_;
-
-  VariableVersion version_counter_;
-  uint32_t saved_version_ = 0;
-
-  bool requires_grad_ = false;
-  int output_nr_ = -1;
-
   std::unique_ptr<jit::tracer::ValueTracingState> tracing_state_;
+  VariableVersion version_counter_;
+
+  uint32_t saved_version_ = 0;
+  int output_nr_ = -1;
+  bool was_default_constructed_ = true;
+  bool requires_grad_ = false;
+  bool has_grad_fn_ = false;
 };
 }} // namespace torch::autograd

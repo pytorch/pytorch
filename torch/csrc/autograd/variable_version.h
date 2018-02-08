@@ -16,7 +16,7 @@
 
 namespace torch { namespace autograd {
 
-class VariableVersion {
+struct VariableVersion {
  public:
   // NOTE: As of C++11 and 14, default-constructing a std::atomic variable
   // leaves it in a persistently undefined state. See

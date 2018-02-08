@@ -21,18 +21,6 @@
 #include <vector>
 
 namespace torch { namespace autograd {
-namespace {
-at::Tensor handle_scalars(at::Tensor& data) {
-#ifndef WITH_SCALARS
-  if (data.dim() == 0) {
-    // Don't expose 0-dim tensors to Variable API.
-    return data.as_strided_({1}, {1});
-  }
-#endif
-  return data;
-}
-} // namespace
-
 Variable::Impl::Impl(at::Tensor data_, bool requires_grad_, Edge gradient_edge_)
     : TensorImpl(VariableType::getType(data_)),
       data(std::move(data_)),
@@ -50,29 +38,6 @@ Variable::Impl::Impl(at::Tensor data_, bool requires_grad_, Edge gradient_edge_)
 }
 
 Variable::Impl::~Impl() = default;
-
-Variable Variable::as_view(Variable base, at::Tensor data, Edge gradient_edge) {
-  if (data.defined()) {
-    data = handle_scalars(data);
-    auto impl = new Variable::ViewImpl(
-        std::move(base), std::move(data), std::move(gradient_edge));
-    return Variable(std::move(impl), false);
-  }
-  return Variable();
-}
-
-Variable::Variable(at::Tensor data, bool requires_grad) {
-  if (data.defined()) {
-    pImpl = new Variable::Impl(handle_scalars(data), requires_grad);
-  }
-}
-
-Variable::Variable(at::Tensor data, Edge gradient_edge) {
-  if (data.defined()) {
-    pImpl = new Variable::Impl(
-        handle_scalars(data), false, std::move(gradient_edge));
-  }
-}
 
 const char* Variable::Impl::toString() const {
   return "Variable";
@@ -186,7 +151,7 @@ void Variable::rebase_history(Edge gradient_edge) {
 }
 
 Variable Variable::detach() const {
-  Variable detached(data(), /*requires_grad=*/false);
+  auto detached = make_variable(data(), /*requires_grad=*/false);
   detached.set_version(version_counter());
   return detached;
 }

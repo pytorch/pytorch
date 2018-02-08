@@ -6,7 +6,7 @@
 
 namespace torch { namespace autograd {
 
-class Variable;
+struct Variable;
 using variable_list = std::vector<Variable>;
 
 struct FunctionPreHook {

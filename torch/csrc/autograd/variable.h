@@ -28,16 +28,29 @@ struct Function;
 /// A `Variable` augments a `Tensor` with the ability to interact in our
 /// autograd machinery. `Variable` inherits from `Tensor` and may be converted
 /// to and from `Tensor` implicitly.
-class Variable : public at::Tensor {
+struct Variable : public at::Tensor {
  public:
-  /// Creates a Variable that is a *view* of another (*base*) variable.
-  /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
-  static Variable
-  as_view(Variable base, at::Tensor data, Edge gradient_edge = Edge());
-
+  /// Default constructor.
   Variable() = default;
-  Variable(at::Tensor data, bool requires_grad);
-  Variable(at::Tensor data, Edge gradient_edge);
+
+  // NOTE: These factory functions have to be friends to access the
+  // `Variable::Impl`. As a side effect, it allows us to keep them in the class.
+
+  /// Create a Variable that is a *view* of another (*base*) variable.
+  /// The `gradient_edge` is an optional (gradient_function, input_number) pair.
+  friend Variable
+  make_variable_view(Variable base, at::Tensor data, Edge gradient_edge);
+
+  /// Create a `Variable` from the given `Tensor`. `requires_grad` should be set
+  /// only for leaves, and determines whether the `Variable` will accumulate
+  /// gradients.
+  friend Variable make_variable(at::Tensor data, bool requires_grad);
+
+  /// Create a `Variable` from the given `Tensor` and specify a `gradient_edge`,
+  /// i.e. a (function, input_nr) pair specifying the function in the autograd
+  /// graph, and what particular input of that function, this variable is
+  /// connected to.
+  friend Variable make_variable(at::Tensor data, Edge gradient_edge);
 
   // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
   // know are Variables.
@@ -268,6 +281,18 @@ struct Variable::ViewImpl : public Variable::Impl {
 //                        Variable Implementation
 //===----------------------------------------------------------------------===//
 
+namespace detail {
+inline at::Tensor handle_scalars(at::Tensor& data) {
+#ifndef WITH_SCALARS
+  if (data.dim() == 0) {
+    // Don't expose 0-dim tensors to Variable API.
+    return data.as_strided_({1}, {1});
+  }
+#endif
+  return data;
+}
+} // namespace detail
+
 inline Variable::Variable(Variable::Impl* self, bool retain)
     : at::Tensor(self, retain) {}
 
@@ -410,5 +435,35 @@ inline const std::string& Variable::name() const noexcept {
 
 inline Variable::Impl* Variable::get() const noexcept {
   return static_cast<Variable::Impl*>(pImpl);
+}
+
+inline Variable make_variable_view(
+    Variable base,
+    at::Tensor data,
+    Edge gradient_edge = Edge()) {
+  if (data.defined()) {
+    data = detail::handle_scalars(data);
+    auto impl = new Variable::ViewImpl(
+        std::move(base), std::move(data), std::move(gradient_edge));
+    return Variable(impl, /*retain=*/false);
+  }
+  return Variable();
+}
+
+inline Variable make_variable(at::Tensor data, bool requires_grad) {
+  if (data.defined()) {
+    auto impl = new Variable::Impl(detail::handle_scalars(data), requires_grad);
+    return Variable(impl, /*retain=*/false);
+  }
+  return Variable();
+}
+
+inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
+  if (data.defined()) {
+    auto impl = new Variable::Impl(
+        detail::handle_scalars(data), false, std::move(gradient_edge));
+    return Variable(impl, /*retain=*/false);
+  }
+  return Variable();
 }
 }} // namespace torch::autograd

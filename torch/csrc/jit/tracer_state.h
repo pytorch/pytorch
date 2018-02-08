@@ -12,7 +12,7 @@
 
 namespace torch {
 namespace autograd {
-class Variable;
+struct Variable;
 struct Edge;
 } // namespace autograd
 namespace jit {

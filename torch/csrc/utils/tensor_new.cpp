@@ -93,7 +93,7 @@ static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
   }
 #ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
-    return autograd::Variable(tensor_from_numpy(data), /*requires_grad=*/false);
+    return autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
   }
 #endif
 

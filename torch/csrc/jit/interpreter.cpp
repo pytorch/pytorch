@@ -66,10 +66,10 @@ struct HandleBuilder {
     if(handle && flags_.requires_grad) {
       auto gradient_edge = autograd::Edge(
           handle->forward_inputs, handle->forward_inputs->num_inputs++);
-      return autograd::Variable(
+      return autograd::make_variable(
           unsafeToTensorShare(input), std::move(gradient_edge));
     } else {
-      return autograd::Variable(unsafeToTensorShare(input), /*requires_grad=*/false);
+      return autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
     }
   }
   at::Retainable* addOutput(const autograd::Variable & output) {

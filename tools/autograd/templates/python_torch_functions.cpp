@@ -70,7 +70,7 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(Variable(std::move(data), /*requires_grad=*/false));
+  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
   END_HANDLE_TH_ERRORS
 }
 

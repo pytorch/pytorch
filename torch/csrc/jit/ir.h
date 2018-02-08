@@ -27,7 +27,9 @@
 #include "torch/csrc/jit/variable_flags.h"
 
 namespace torch { namespace autograd {
+
 struct Function;
+
 }} // namespace torch::autograd
 
 namespace torch { namespace jit {

@@ -117,7 +117,7 @@ static Variable valueToTensor(const Type & type, PyObject* value) {
     return type.scalarTensor(Scalar(THPUtils_unpackDouble(value)));
   }
   if (THPModule_isTensor(value)) {
-    return Variable(createTensor(value), /*requires_grad=*/false);
+    return make_variable(createTensor(value), /*requires_grad=*/false);
   }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }
@@ -154,7 +154,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     } else if (THPVariable_Check(obj)) {
       handle_var(reinterpret_cast<THPVariable*>(obj)->cdata);
     } else if (THPModule_isTensor(obj)) {
-      handle_var(Variable(createTensor(obj), /*requires_grad=*/false));
+      handle_var(make_variable(createTensor(obj), /*requires_grad=*/false));
     } else if (PySequence_Check(obj)) {
       handle_var(sequenceToVariable(self.type(), obj));
     } else {

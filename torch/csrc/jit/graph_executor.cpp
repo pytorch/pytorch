@@ -90,7 +90,7 @@ private:
   // inplace to avoid allocations
   variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
-      v = autograd::Variable(v, /*requires_grad=*/false);
+      v = autograd::make_variable(v, /*requires_grad=*/false);
     }
     return variable_tensor_list(std::move(list));
   }

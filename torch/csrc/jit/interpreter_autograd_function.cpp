@@ -2,6 +2,7 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/interpreter_autograd_function.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tracer_state.h"
@@ -141,9 +142,9 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
       autograd::Edge edge(grad_fn, grad_fn->num_inputs++);
-      result.emplace_back(toutputs[i], std::move(edge));
+      result.push_back(autograd::make_variable(toutputs[i], std::move(edge)));
     } else {
-      result.emplace_back(toutputs[i], false);
+      result.push_back(autograd::make_variable(toutputs[i], /*requires_grad=*/false));
     }
   }
 

@@ -74,7 +74,7 @@ std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::u
   return baseType->storageWithAllocator(size, std::move(allocator));
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return Variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
+  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
 }
 std::unique_ptr<Generator> VariableType::generator() const {
   return baseType->generator();
@@ -215,7 +215,7 @@ std::tuple<Tensors...> as_variable_impl(
   // constructions. This turns into (boolean omitted):
   // Variable(std::get<0>(tensors)), Variable(std::get<1>(tensors)), ...
   return std::tuple<Tensors...>(
-      Variable(std::get<Is>(tensors), /*requires_grad=*/false)...);
+      make_variable(std::get<Is>(tensors), /*requires_grad=*/false)...);
 }
 
 template <typename... Tensors>
@@ -229,13 +229,13 @@ std::tuple<Tensors...> as_variable(std::tuple<Tensors...> tensors) {
 }
 
 static Tensor as_variable(Tensor tensor) {
-  return Variable(std::move(tensor), /*requires_grad=*/false);
+  return make_variable(std::move(tensor), /*requires_grad=*/false);
 }
 
 static std::vector<Tensor> as_variable(TensorList tl) {
   std::vector<Tensor> variables;
   for (auto& t : tl) {
-    variables.emplace_back(Variable(std::move(t), /*requires_grad=*/false));
+    variables.emplace_back(make_variable(std::move(t), /*requires_grad=*/false));
   }
   return variables;
 }
@@ -245,7 +245,7 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   if (base_var.is_view()) {
     base_var = base_var.base();
   }
-  return Variable::as_view(std::move(base_var), std::move(tensor));
+  return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
 #ifndef WITH_SCALARS
