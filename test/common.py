@@ -93,7 +93,9 @@ def to_gpu(obj, type_map={}):
     elif isinstance(obj, Variable):
         assert obj.is_leaf
         t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
-        return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
+        o = obj.type(t).detach()
+        o.requires_grad = obj.requires_grad
+        return o
     elif isinstance(obj, list):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):

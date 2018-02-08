@@ -606,23 +606,27 @@ def relu_(input):
     return threshold_(input, 0, 0)
 
 
-glu = _add_docstr(torch._C._nn.glu, r"""
-glu(input, dim=-1) -> Variable
+def glu(input, dim=-1):
+    r"""
+    glu(input, dim=-1) -> Variable
 
-The gated linear unit. Computes:
+    The gated linear unit. Computes:
 
-.. math ::
+    .. math ::
 
-    H = A \times \sigma(B)
+        H = A \times \sigma(B)
 
-where `input` is split in half along `dim` to form `A` and `B`.
+    where `input` is split in half along `dim` to form `A` and `B`.
 
-See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
+    See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
 
-Args:
-    input (Variable): input variable
-    dim (int): dimension on which to split the input
-""")
+    Args:
+        input (Variable): input variable
+        dim (int): dimension on which to split the input
+    """
+    if input.dim() == 0:
+        raise RuntimeError("glu does not suppport scalars because halving size must be even")
+    return torch._C._nn.glu(input, dim)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):

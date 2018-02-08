@@ -84,7 +84,7 @@ class CosineEmbeddingLoss(Function):
             gw1.div_(y.size(0))
             gw2.div_(y.size(0))
 
-        grad_output_val = grad_output[0]
+        grad_output_val = grad_output.item()
         if grad_output_val != 1:
             gw1.mul_(grad_output_val)
             gw2.mul_(grad_output_val)
