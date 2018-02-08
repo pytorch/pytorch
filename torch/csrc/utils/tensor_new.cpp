@@ -48,7 +48,7 @@ static Tensor new_with_tensor_copy(const Type& type, Tensor other) {
 static std::vector<int64_t> compute_sizes(PyObject* seq) {
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
-  do {
+  while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
     if (length < 0) throw python_error();
     sizes.push_back(length);
@@ -58,7 +58,7 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
     if (length == 0) break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
     seq = handle.get();
-  } while (PySequence_Check(seq));
+  }
 
   return sizes;
 }
@@ -87,10 +87,7 @@ static void recursive_store(char* data, IntList sizes, IntList strides, int64_t 
   }
 }
 
-static Tensor new_from_sequence(ScalarType scalarType, PyObject* data) {
-  if (!PySequence_Check(data)) {
-    throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
-  }
+static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
@@ -108,8 +105,8 @@ static Tensor new_from_sequence(ScalarType scalarType, PyObject* data) {
   return tensor;
 }
 
-static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
-  auto tensor = new_from_sequence(type.scalarType(), data);
+static Tensor new_from_data(const Type & type, int device, PyObject *data) {
+  auto tensor = new_from_data(type.scalarType(), data);
   if (tensor.type() != type) {
     AutoNoGIL no_gil;
     AutoGPU auto_gpu(device);
@@ -118,16 +115,11 @@ static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
   return tensor;
 }
 
-static Tensor new_from_data(const Type & type, int device, PyObject *data) {
-  if (PySequence_Check(data)) {
-    return new_from_sequence(type, device, data);
-  } else {
-    // could use scalarTensor but using store_scalar for consistency with the sequence path;
-    // this has stricter checking (i.e. a floating-point number passed to an integral type will error).
-    auto tensor = type.tensor({});
-    torch::utils::store_scalar((char*)tensor.data_ptr(), type.scalarType(), data);
-    return tensor;
+static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
+  if (!PySequence_Check(data)) {
+    throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
   }
+  return new_from_data(type, device, data);
 }
 
 Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
