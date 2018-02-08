@@ -138,9 +138,6 @@ struct Variable : public at::Tensor {
   PyObject* pyobj() const noexcept;
   void set_pyobj(PyObject* pyobj) noexcept;
 
-  /// Set the type of the underlying `Tensor`.
-  void set_type(at::Type*) noexcept;
-
   const at::Tensor& data() const noexcept;
   at::Tensor& data() noexcept;
 
@@ -192,6 +189,11 @@ struct Variable : public at::Tensor {
   jit::tracer::ValueTracingState& tracing_state() const noexcept;
   bool has_tracing_state() const noexcept;
 
+  /// Set the type of the underlying `Tensor`. Used for a bad (hopefully)
+  /// temporary hack in python_variable.h. If removed, also remove the `using
+  /// at::TensorImpl::type_;` in `Variable::Impl`.
+  void temporary_hack_set_type(at::Type*) noexcept;
+
  private:
   /// Private implementation struct of the `Variable`. This struct declaration
   /// and the `get()` method which exposes it shall forever remain private and
@@ -227,6 +229,10 @@ struct Variable::Impl : public at::TensorImpl {
   virtual std::shared_ptr<Function>& get_grad_fn() {
     return grad_fn;
   }
+
+  // Make this field public so we can access it from `Variable`. Part of
+  // temporary_hack_set_type.
+  using at::TensorImpl::type_;
 
   std::string name;
   at::Tensor data;
@@ -352,8 +358,8 @@ inline PyObject* Variable::pyobj() const noexcept {
   return get()->pyobj;
 }
 
-inline void Variable::set_type(at::Type* new_type) noexcept {
-  pImpl->setType(new_type);
+inline void Variable::temporary_hack_set_type(at::Type* new_type) noexcept {
+  get()->type_ = new_type;
 }
 
 inline void Variable::reset_grad() noexcept {
