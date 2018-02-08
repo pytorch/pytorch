@@ -201,6 +201,22 @@ EXAMPLES = [
             'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
         },
     ]),
+    Example(MultivariateNormal, [
+        {
+            'loc': Variable(torch.randn(5, 2), requires_grad=True),
+            'covariance_matrix': Variable(torch.Tensor([[2.0, 0.3], [0.3, 0.25]]), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(5, 3, 2), requires_grad=True),
+            'scale_tril': Variable(torch.Tensor([[[2.0, 0.0], [-0.5, 0.25]],
+                                                 [[2.0, 0.0], [0.3, 0.25]],
+                                                 [[5.0, 0.0], [-0.5, 1.5]]]), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.Tensor([1.0, -1.0])),
+            'covariance_matrix': Variable(torch.Tensor([[5.0, -0.5], [-0.5, 1.5]])),
+        },
+    ]),
     Example(Normal, [
         {
             'loc': Variable(torch.randn(5, 5), requires_grad=True),
@@ -232,20 +248,6 @@ EXAMPLES = [
             'scale': variable([1.0]),
             'alpha': 1.0
         }
-    ]),
-    Example(MultivariateNormal, [
-        {
-            'loc': Variable(torch.randn(5, 2), requires_grad=True),
-            'covariance_matrix': Variable(torch.Tensor([[2.0, 0.3], [0.3, 0.25]]), requires_grad=True),
-        },
-        {
-            'loc': Variable(torch.randn(2), requires_grad=True),
-            'scale_tril': Variable(torch.Tensor([[2.0, 0.0], [-0.5, 0.25]]), requires_grad=True),
-        },
-        {
-            'loc': torch.Tensor([1.0, -1.0]),
-            'covariance_matrix': torch.Tensor([[5.0, -0.5], [-0.5, 1.5]]),
-        },
     ]),
     Example(Poisson, [
         {
