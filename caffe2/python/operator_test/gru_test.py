@@ -348,13 +348,16 @@ class GRUCellTest(hu.HypothesisTestCase):
                       drop_states=drop_states,
                       linear_before_reset=linear_before_reset)
         with core.DeviceScope(gc):
-            net = _prepare_rnn(t, n, d, create_rnn,
-                                outputs_with_grads=outputs_with_grads,
-                                memory_optim=False,
-                                forget_bias=0.0,
-                                forward_only=fwd_only,
-                                drop_states=drop_states,
-                                linear_before_reset=linear_before_reset)[1]
+            net = _prepare_rnn(
+                t, n, d, create_rnn,
+                outputs_with_grads=outputs_with_grads,
+                memory_optim=False,
+                forget_bias=0.0,
+                forward_only=fwd_only,
+                drop_states=drop_states,
+                linear_before_reset=linear_before_reset,
+                num_states=1,
+            )[1]
         # here we don't provide a real input for the net but just for one of
         # its ops (RecurrentNetworkOp). So have to hardcode this name
         workspace.FeedBlob("test_name_scope/external/recurrent/i2h",

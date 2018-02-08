@@ -290,6 +290,9 @@ class DebugMode(object):
             sys.exit(1)
             raise
 
+def raiseIfNotEqual(a, b, msg):
+    if a != b:
+        raise Exception("{}. {} != {}".format(msg, a, b))
 
 def debug(f):
     '''

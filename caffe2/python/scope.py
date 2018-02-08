@@ -50,7 +50,7 @@ def CurrentDeviceScope():
 @contextlib.contextmanager
 def NameScope(prefix, reset=False):
     global _threadlocal_scope
-    assert isinstance(prefix, basestring), \
+    assert isinstance(prefix, basestring) or prefix is None, \
         "NameScope takes in a string as its argument."
     old_scope = CurrentNameScope()
     prefix = prefix + _NAMESCOPE_SEPARATOR if prefix else ''
