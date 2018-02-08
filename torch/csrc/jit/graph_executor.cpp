@@ -134,6 +134,9 @@ private:
     // this is currently intentionally not done here so we can get an idea of our
     // perf before introducing overhead for correctness
     for(auto idx : grad.df_input_vjps) {
+      // Note: we have to set this up in place, or we have to throw away and
+      // reallocate variables that were already created in wrapTensors. We
+      // should add an API for this.
       auto& output = autograd::as_variable_ref(outputs[idx]);
       output.set_gradient_edge(autograd::Edge(grad_fn, grad_fn->num_inputs++));
       output.set_requires_grad(true);

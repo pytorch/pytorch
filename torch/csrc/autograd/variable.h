@@ -83,7 +83,7 @@ struct Variable : public at::Tensor {
   const std::shared_ptr<Function>& grad_fn() const;
 
   /// Get the raw gradient function pointer, whatever it currently is.
-  Function* grad_fn_ptr() const;
+  Function* grad_fn_unsafe() const;
 
   /// Set the gradient accumulator of the `Variable`. This is only applicable
   /// to leaf variables. Interior variables should call `set_gradient_edge()`.
@@ -309,7 +309,7 @@ inline const std::shared_ptr<Function>& Variable::grad_fn() const {
   return get()->get_grad_fn();
 }
 
-inline Function* Variable::grad_fn_ptr() const {
+inline Function* Variable::grad_fn_unsafe() const {
   return get()->grad_fn.get();
 }
 
