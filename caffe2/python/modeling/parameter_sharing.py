@@ -21,7 +21,6 @@ from __future__ import unicode_literals
 from caffe2.python import scope
 
 import contextlib
-import itertools
 import logging
 
 logger = logging.getLogger(__name__)
@@ -85,8 +84,9 @@ class ParameterSharingContext(object):
     def pop(self):
         assert len(self._contexts) > 0
         self._contexts.pop()
-        self._scope_overrides = dict(*itertools.chain(
-            [x.items() for x in self._contexts]))
+        self._scope_overrides = {}
+        for x in self._contexts:
+            self._scope_overrides.update(x)
 
 
 parameter_sharing_context = ParameterSharingContext()
