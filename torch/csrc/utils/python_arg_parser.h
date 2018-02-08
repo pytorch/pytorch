@@ -147,10 +147,10 @@ inline at::Scalar PythonArgs::scalar(int i) {
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
-  if (PyFloat_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackDouble(args[i]));
+  if (PyLong_CheckExact(args[i])) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
   }
-  return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {

@@ -80,7 +80,16 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::TENSOR: {
       return THPVariable_Check(obj);
     }
-    case ParameterType::SCALAR: return THPUtils_checkDouble(obj);
+    case ParameterType::SCALAR: {
+      if (THPUtils_checkDouble(obj)) {
+        return true;
+      }
+      if (THPVariable_Check(obj)) {
+        auto& var = ((THPVariable*)obj)->cdata;
+        return !var.requires_grad() && var.dim() == 0;
+      }
+      return false;
+    }
     case ParameterType::INT64: return THPUtils_checkLong(obj);
     case ParameterType::DOUBLE: return THPUtils_checkDouble(obj);
     case ParameterType::TENSOR_LIST: return PyTuple_Check(obj) || PyList_Check(obj);
