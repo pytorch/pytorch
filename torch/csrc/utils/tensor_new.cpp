@@ -99,8 +99,10 @@ static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
 
   auto sizes = compute_sizes(data);
   auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), false);
+  // TODO: we should pass tensor.sizes() rather than sizes, but this doesn't works
+  // if scalars are disabled because the size changes without WITH_SCALARS.
   recursive_store(
-      (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
+      (char*)tensor.data_ptr(), sizes, tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);
   return tensor;
 }
