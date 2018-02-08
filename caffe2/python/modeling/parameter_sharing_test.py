@@ -104,6 +104,22 @@ class ParameterSharingTest(unittest.TestCase):
         self.assertNotEqual(model.get_param_info(p1), model.get_param_info(p2))
         model.Validate()
 
+    def test_deep_hierarchy(self):
+        model = model_helper.ModelHelper(name="test")
+        with ParameterSharing({'a': 'b'}):
+            with scope.NameScope('a'):
+                with ParameterSharing({'c': 'd'}):
+                    with scope.NameScope('c'):
+                        with ParameterSharing({'e': 'f'}):
+                            with scope.NameScope('e'):
+                                p = model.create_param(
+                                    'w',
+                                    shape=[2],
+                                    initializer=Initializer("ConstantFill")
+                                )
+        self.assertNotEqual(model.get_param_info(p), None)
+
+
     def test_parameter_sharing_brew(self):
         # Test no sharing default scopes
         model = model_helper.ModelHelper(name="test")
