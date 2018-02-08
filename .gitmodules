@@ -52,12 +52,3 @@
 [submodule "third-party/cpuinfo"]
 	path = third_party/cpuinfo
 	url = https://github.com/Maratyszcza/cpuinfo.git
-[submodule "third_party/python-enum"]
-	path = third_party/python-enum
-	url = https://github.com/PeachPy/enum34.git
-[submodule "third_party/python-peachpy"]
-	path = third_party/python-peachpy
-	url = https://github.com/Maratyszcza/PeachPy.git
-[submodule "third_party/python-six"]
-	path = third_party/python-six
-	url = https://github.com/benjaminp/six.git

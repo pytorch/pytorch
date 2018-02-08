@@ -59,9 +59,6 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     CACHE PATH "Confu-style dependencies binary directory")
 
   # Directories for NNPACK dependencies submoduled in Caffe2
-  set(PYTHON_SIX_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-six" CACHE STRING "six (Python package) source directory")
-  set(PYTHON_ENUM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-enum" CACHE STRING "enum34 (Python package) source directory")
-  set(PYTHON_PEACHPY_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-peachpy" CACHE STRING "PeachPy (Python package) source directory")
   set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
   set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
   set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
