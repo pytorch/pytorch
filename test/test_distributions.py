@@ -951,7 +951,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample().size(), (1,))
         self.assertEqual(Pareto(1.0, 1.0).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(Pareto(1.0, 1.0).sample((1,)).size(), (1,))
+        self.assertEqual(Pareto(1.0, 1.0).sample((1,)).size(), SCALAR_SHAPE + (1,))
 
         def ref_log_prob(idx, x, log_prob):
             s = scale.data.view(-1)[idx]
@@ -1793,10 +1793,10 @@ class TestDistributionShapes(TestCase):
 
     def test_pareto_shape_scalar_params(self):
         pareto = Pareto(1, 1)
-        self.assertEqual(pareto._batch_shape, torch.Size())
+        self.assertEqual(pareto._batch_shape, torch.Size(SCALAR_SHAPE))
         self.assertEqual(pareto._event_shape, torch.Size())
         self.assertEqual(pareto.sample().size(), torch.Size(SCALAR_SHAPE))
-        self.assertEqual(pareto.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(pareto.sample((3, 2)).size(), torch.Size((3, 2) + SCALAR_SHAPE))
         self.assertRaises(ValueError, pareto.log_prob, self.scalar_sample)
         self.assertEqual(pareto.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(pareto.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
