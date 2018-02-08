@@ -25,7 +25,7 @@ using namespace torch::autograd::utils;
 namespace torch { namespace autograd {
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<Variable&>(self).set_requires_grad(requires_grad);
+  as_variable_ref(self).set_requires_grad(requires_grad);
   return self;
 }
 

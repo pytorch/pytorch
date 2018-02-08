@@ -478,7 +478,7 @@ Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & 
 #ifdef WITH_SCALARS
   grad_input.masked_fill_(input == value, grad);
 #else
-  auto grad_data = static_cast<Variable&>(grad).data();
+  auto grad_data = as_variable_ref(grad).data();
   grad_input.masked_fill_(input == value, Scalar(grad_data[0]));
 #endif
   return grad_input;

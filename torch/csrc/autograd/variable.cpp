@@ -83,8 +83,7 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   std::lock_guard<std::mutex> lock(mutex);
 
   auto result = grad_accumulator.lock();
-  if (result)
-    return result;
+  if (result) return result;
 
   result = std::make_shared<AccumulateGrad>(Variable(this, true));
   grad_accumulator = result;
