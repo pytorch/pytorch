@@ -550,9 +550,8 @@ class HingeEmbeddingLoss(_Loss):
     """
 
     def __init__(self, margin=1.0, size_average=True, reduce=True):
-        super(HingeEmbeddingLoss, self).__init__()
+        super(HingeEmbeddingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
         self.reduce = reduce
 
     def forward(self, input, target):
