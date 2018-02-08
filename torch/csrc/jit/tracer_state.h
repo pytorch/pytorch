@@ -54,7 +54,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   std::unordered_map<void*, Value*> buffer_map;
   // A pair of (input_flags, output_flags) for each stage
   io_variable_flags_list var_flags;
-  std::vector<edge_list> output_edges;
+  std::vector<edge_list> next_edges;
 
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage

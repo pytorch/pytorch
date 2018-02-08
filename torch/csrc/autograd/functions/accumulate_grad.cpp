@@ -13,9 +13,7 @@ using at::Tensor;
 namespace torch { namespace autograd {
 
 AccumulateGrad::AccumulateGrad(Variable variable_)
-   : variable(std::move(variable_)) {
-  num_inputs = 1;
-}
+    : Function(/*num_inputs=*/1), variable(std::move(variable_)) {}
 
 auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
   // XXX: this method is not thread-safe!

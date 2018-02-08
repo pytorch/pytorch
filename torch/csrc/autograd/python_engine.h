@@ -13,11 +13,11 @@ struct PythonEngine : public Engine {
   virtual void thread_init(int device) override;
   virtual void thread_on_exception(FunctionTask& task, std::exception& e) override;
   virtual variable_list execute(
-      const function_list& roots,
+      const edge_list& roots,
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
-      const function_list& outputs = {}) override;
+      const edge_list& outputs = {}) override;
 
   static PythonEngine& getDefaultEngine();
 };

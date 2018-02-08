@@ -94,7 +94,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
 grad_fn = std::make_shared<${op}>(${op_ctor});
-grad_fn->next_functions = get_next_functions( ${args_with_derivatives} );
+grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
