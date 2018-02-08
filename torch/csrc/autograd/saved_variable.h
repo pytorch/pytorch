@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/autograd/variable_version.h"
+#include "torch/csrc/jit/tracer_state.h"
 
 #include <ATen/ATen.h>
 
@@ -8,18 +9,10 @@
 #include <list>
 #include <memory>
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
+
 class Variable;
 struct Function;
-} // namespace autograd
-namespace jit { namespace tracer {
-struct ValueTracingStateElem;
-using ValueTracingState = std::list<ValueTracingStateElem>;
-}} // namespace jit::tracer
-} // namespace torch
-
-namespace torch { namespace autograd {
 
 extern const char* ERR_BACKWARD_TWICE;
 

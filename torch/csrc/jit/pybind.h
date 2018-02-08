@@ -1,11 +1,15 @@
 #pragma once
 
 #include <Python.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/THP.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/tracer.h"
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace py = pybind11;
 

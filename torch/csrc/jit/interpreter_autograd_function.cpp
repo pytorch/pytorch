@@ -1,7 +1,12 @@
 #include "Python.h"
 
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/interpreter_autograd_function.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
+
+#include <ATen/ATen.h>
 
 #include <algorithm>
 #include <memory>

@@ -11,12 +11,7 @@
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 
-#include <ATen/Scalar.h>
-#include <ATen/ScalarType.h>
-#include <ATen/Storage.h>
-#include <ATen/Tensor.h>
-#include <ATen/TensorImpl.h>
-#include <ATen/Type.h>
+#include <ATen/ATen.h>
 
 #include <list>
 #include <memory>
@@ -38,13 +33,13 @@ at::Tensor handle_scalars(at::Tensor& data) {
 }
 } // namespace
 
-Variable::Impl::Impl(at::Tensor data_, bool requires_grad_, Edge gradient_edge)
+Variable::Impl::Impl(at::Tensor data_, bool requires_grad_, Edge gradient_edge_)
     : TensorImpl(VariableType::getType(data_)),
       data(std::move(data_)),
-      grad_fn(std::move(gradient_edge.function)),
+      grad_fn(std::move(gradient_edge_.function)),
       requires_grad(requires_grad_),
       is_view(false),
-      output_nr(gradient_edge.input_nr),
+      output_nr(gradient_edge_.input_nr),
       pyobj(nullptr) {
   TORCH_ASSERTM(
       !grad_fn || !requires_grad,
@@ -134,8 +129,8 @@ std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
 Variable::ViewImpl::ViewImpl(
     Variable base_,
     at::Tensor data_,
-    Edge gradient_edge)
-    : Variable::Impl(std::move(data_), false, std::move(gradient_edge)),
+    Edge gradient_edge_)
+    : Variable::Impl(std::move(data_), false, std::move(gradient_edge_)),
       base(std::move(base_)) {
   TORCH_ASSERTM(base.defined(), "base is undefined");
   if (base.is_view()) {
@@ -204,5 +199,4 @@ void Variable::detach_() {
   set_requires_grad(false);
   set_gradient_edge(Edge());
 }
-
 }} // namespace torch::autograd

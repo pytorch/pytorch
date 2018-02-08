@@ -7,7 +7,6 @@
 #include "python_numbers.h"
 
 #include <string>
-#include <list>
 #include <stdexcept>
 #include <vector>
 

@@ -5,7 +5,7 @@
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
-#include <ATen/Tensor.h>
+#include <ATen/ATen.h>
 
 #include <memory>
 #include <utility>

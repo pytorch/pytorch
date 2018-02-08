@@ -474,6 +474,7 @@ main_sources = [
     "torch/csrc/jit/python_ir.cpp",
     "torch/csrc/jit/test_jit.cpp",
     "torch/csrc/jit/tracer.cpp",
+    "torch/csrc/jit/tracer_state.cpp",
     "torch/csrc/jit/python_tracer.cpp",
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/interned_strings.cpp",
