@@ -41,7 +41,10 @@ struct to_ir {
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
       auto& name = input.ident().name();
-      setVar(name, def.graph->addInput(name));
+      Value* in_val = def.graph->addInput(name);
+      auto unique_name = in_val->uniqueName();
+      setVar(unique_name, in_val);
+      latest_version_base_scope[name] = def.graph->getValueVersion(name);
     }
     emitStatements(tree.statements());
     for (auto output : tree.returns()) {
@@ -63,7 +66,8 @@ struct to_ir {
         case TK_GLOBAL:
           for (auto ident : stmt->trees()) {
             const auto& name = Ident(ident).name();
-            setVar(name, def.graph->addInput(name));
+            Value* global_input = def.graph->addInput(name);
+            setVar(global_input->uniqueName(), global_input);
           }
           break;
         default:
@@ -99,8 +103,13 @@ struct to_ir {
     }
     int i = 0;
     for (auto ident : stmt.lhs()) {
-      if (ident->kind() == TK_IDENT)
-        setVar(Ident(ident).name(), outputs.at(i));
+      if (ident->kind() == TK_IDENT) {
+        auto unique_name =
+            outputs.at(i)->setUniqueName(Ident(ident).name())->uniqueName();
+        setVar(unique_name, outputs.at(i));
+        latest_version_base_scope[Ident(ident).name()] =
+            def.graph->getValueVersion(Ident(ident).name());
+      }
       i++;
     }
     return outputs;
@@ -111,9 +120,14 @@ struct to_ir {
   }
 
   Value* getVar(const Ident& ident) {
-    if (value_table.count(ident.name()) == 0)
-      throw ErrorReport(ident) << "undefined value " << ident.name();
-    return value_table[ident.name()];
+    std::string lookup_name = ident.name();
+    auto version = latest_version_base_scope[lookup_name];
+    if (version > 0) {
+      lookup_name += std::to_string(version);
+    }
+    if (value_table.count(lookup_name) == 0)
+      throw ErrorReport(ident) << "undefined value " << lookup_name;
+    return value_table[lookup_name];
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -177,7 +191,9 @@ struct to_ir {
           def.graph->appendNode(def.graph->createClone(node, value_map_func));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         value_map[node->outputs()[i]] = new_node->outputs()[i];
-        new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
+        // createClone already copies the unique name above, so we don't do it
+        // here. Otherwise we see gaps in the version assignments.
+        new_node->outputs()[i]->copyMetadata(node->outputs()[i], false);
       }
     }
 
@@ -420,6 +436,7 @@ struct to_ir {
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
   ValueTable value_table;
+  std::unordered_map<std::string, size_t> latest_version_base_scope;
 
  private:
   Value* createConstant(const at::Tensor& val) {

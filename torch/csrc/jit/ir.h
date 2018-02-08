@@ -157,6 +157,7 @@ private:
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   use_list uses_;
   std::string unique_name_;
+  std::string name_;
   TypePtr type_;
 public:
   bool hasType() const {
@@ -182,11 +183,14 @@ public:
   size_t unique() const {
     return unique_;
   }
-  Value* setUniqueName(const std::string & name);
+  Value* setUniqueName(const std::string& name, bool strict = false);
   std::string uniqueName() const {
     if (unique_name_ != "")
       return unique_name_;
     return std::to_string(unique());
+  }
+  std::string name() const {
+    return name_;
   }
   Value* setStage(size_t s) {
     stage_ = s;
@@ -224,10 +228,10 @@ public:
   //          %5 = h(%6, %6)
   void replaceAllUsesWith(Value * newValue);
 
-  Value* copyMetadata(Value * from) {
+  Value* copyMetadata(Value* from, bool clone_unique_name = true) {
     if(from->hasType()) setType(from->type());
-    if (from->unique_name_ != "")
-      setUniqueName(from->uniqueName());
+    if (clone_unique_name && from->name_ != "")
+      setUniqueName(from->name());
     return this;
   }
 
@@ -437,7 +441,7 @@ public:
     return outputs_.back();
   }
   void eraseOutput(size_t i);
-  
+
   Block * addBlock();
   void eraseBlock(size_t i);
 
@@ -770,7 +774,11 @@ private:
   // by default this is set to append to the top level block
   Node* insert_before_;
 
-public:
+  // This is used to keep track of unique names and create new versions when
+  // they already exist
+  std::unordered_map<std::string, size_t> value_versions;
+
+ public:
 
   Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
@@ -946,6 +954,10 @@ public:
     return block_;
   }
 
+  size_t getValueVersion(const std::string& name) {
+    return value_versions[name] - 1;
+  }
+
   // Checks well-formedness and invariants of graph
   void lint() const;
   // for use in debugger
@@ -1098,15 +1110,29 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Value* Value::setUniqueName(const std::string & name) {
+inline Value* Value::setUniqueName(const std::string& name, bool strict) {
   if (name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
   }
-  if (node_->graph_->unique_names_.find(name) != node_->graph_->unique_names_.end()) {
+  if (strict &&
+      node_->graph_->unique_names_.find(name) !=
+          node_->graph_->unique_names_.end()) {
     throw std::runtime_error("name is already in use in this graph: " + name);
   }
-  node_->graph_->unique_names_.insert(name);
-  unique_name_ = name;
+  std::string unique_name;
+  if (!strict) {
+    if (node_->graph_->value_versions[name] != 0) {
+      unique_name = name + std::to_string(node_->graph_->value_versions[name]);
+    } else {
+      unique_name = name;
+    }
+  } else {
+    unique_name = name;
+  }
+  node_->graph_->value_versions[name]++;
+  node_->graph_->unique_names_.insert(unique_name);
+  unique_name_ = unique_name;
+  name_ = name;
   return this;
 }
 
