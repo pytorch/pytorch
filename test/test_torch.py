@@ -1091,7 +1091,7 @@ class TestTorch(TestCase):
         res2[1] = 2
         self.assertEqual(expected, torch.ones_like(expected))
 
-    def test_tensor_new(self):
+    def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
         res1 = expected.new_tensor([1, 1])
@@ -1110,6 +1110,9 @@ class TestTorch(TestCase):
 
             res2 = expected.new_tensor(expected)
             self.assertEqual(res2.get_device(), expected.get_device())
+
+            res1 = expected.new_tensor(1)
+            self.assertEqual(res1.get_device(), expected.get_device())
 
     def test_diag(self):
         x = torch.rand(100, 100)
