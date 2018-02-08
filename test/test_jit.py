@@ -1316,6 +1316,25 @@ class TestJit(TestCase):
         outputs = a + b
         self.checkScript(script, [a, b], [outputs], False)
 
+    def test_script_ssa(self):
+        script = '''
+        def nested(a) -> (b, c):
+            a = a + a
+            b = a + a
+            b = b + a
+            c = b + a
+            c = c + b
+
+        def func(a) -> (a):
+            a = a + a
+            b, c = nested(a)
+            c = c * c
+        '''
+
+        a = Variable(torch.rand(1), requires_grad=True)
+        outputs = a + a
+        self.checkScript(script, [a], [outputs], False)
+
     def test_script_mul(self):
         script = '''
         def func(a, b) -> (c):
