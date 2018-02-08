@@ -83,7 +83,7 @@ class WatcherThread(threading.Thread):
 
                 print("\n".join(code))
                 log.error("Process did not terminate cleanly in 10 s, forcing")
-                os._exit(1)
+                os.abort()
 
             forcet = threading.Thread(target=forcequit, args=())
             forcet.daemon = True
