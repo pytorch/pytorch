@@ -42,19 +42,26 @@ struct Environment {
     kWhile,
   };
 
-  Environment(Type t, Block* b = nullptr) : t(t), b(b) {}
+  Environment(
+      Type t,
+      Block* b = nullptr,
+      std::shared_ptr<Environment> next = nullptr)
+      : t(t), b(b), next(next) {}
 
   Type t;
 
   std::vector<std::string> positional_inputs;
   ValueTable value_table;
   Block* b;
+
+  std::shared_ptr<Environment> next;
 };
 
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
-    environment_stack.push_back(Environment(Environment::Type::kNormal));
+    environment_stack =
+        std::make_shared<Environment>(Environment::Type::kNormal);
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
@@ -109,8 +116,8 @@ struct to_ir {
     // TODO iteration num and condition
 
     {
-      environment_stack.push_back(
-          Environment(Environment::Type::kWhile, body_block));
+      environment_stack = std::make_shared<Environment>(
+          Environment::Type::kWhile, body_block, environment_stack);
       WithInsertPoint guard(*def.graph, body_block);
       emitStatements(stmt.body());
 
@@ -118,7 +125,7 @@ struct to_ir {
       Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
       body_block->registerOutput(body_cond_value);
 
-      auto& curr_frame = environment_stack.back();
+      auto& curr_frame = *environment_stack;
 
       // Remove inputs for values that did not mutate within the
       // block
@@ -161,7 +168,7 @@ struct to_ir {
       auto preserve_positional_inputs = curr_frame.positional_inputs;
 
       // Drop out of block environment
-      environment_stack.pop_back();
+      environment_stack = environment_stack->next;
 
       // Add op inputs
       for (const auto& x : preserve_positional_inputs) {
@@ -195,7 +202,7 @@ struct to_ir {
   }
 
   Value* findInThisFrame(const std::string& name) {
-    const auto& e = environment_stack.back();
+    const auto& e = *environment_stack;
     if (e.value_table.count(name)) {
       return e.value_table.at(name);
     }
@@ -203,18 +210,16 @@ struct to_ir {
   }
 
   Value* findInParentFrame(const std::string& name) {
-    for (auto ritr = environment_stack.rbegin() + 1;
-         ritr != environment_stack.rend();
-         ++ritr) {
-      if (ritr->value_table.count(name)) {
-        return ritr->value_table.at(name);
+    for (auto runner = environment_stack->next; runner; runner = runner->next) {
+      if (runner->value_table.count(name)) {
+        return runner->value_table.at(name);
       }
     }
     return nullptr;
   }
 
   Value* createBlockInput(const std::string& name) {
-    auto& curr_frame = environment_stack.back();
+    auto& curr_frame = *environment_stack;
     Block* b = curr_frame.b;
 
     // Create the input
@@ -230,7 +235,7 @@ struct to_ir {
   }
 
   void setVar(const std::string& name, Value* value) {
-    auto& curr_frame = environment_stack.back();
+    auto& curr_frame = *environment_stack;
 
     switch (curr_frame.t) {
       case Environment::Type::kNormal: {
@@ -277,7 +282,7 @@ struct to_ir {
 
     retval = findInParentFrame(ident);
 
-    auto& curr_frame = environment_stack.back();
+    auto& curr_frame = *environment_stack;
     switch (curr_frame.t) {
       case Environment::Type::kNormal: {
         return retval;
@@ -600,7 +605,10 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  std::vector<Environment> environment_stack;
+
+  // Singly-linked list of environments. This top element contains a member
+  // `next` that points to the most immediate enclosing scope's value.
+  std::shared_ptr<Environment> environment_stack;
 
  private:
   Value* createConstant(const at::Tensor& val) {
