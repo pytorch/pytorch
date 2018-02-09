@@ -59,7 +59,7 @@ a real number, otherwise it should be an integer.
 Args:
     input (Tensor): the input tensor
     value (Number): the number to be added to each element of :attr:`input`
-    out (Tensor, optional): the output tensor
+    out (Tensor, optional): the output tensor. must be given as a keyword argument if present
 
 Example::
 
@@ -100,7 +100,7 @@ Args:
     input (Tensor): the first input tensor
     value (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
-    out (Tensor, optional): the output tensor
+    out (Tensor, optional): the output tensor. must be given as a keyword argument if present
 
 Example::
 
