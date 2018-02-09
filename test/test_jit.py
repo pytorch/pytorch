@@ -1437,5 +1437,27 @@ class TestJit(TestCase):
         ''')
         self.assertExpected(str(cu.get_graph('test_while')))
 
+    def test_script_if(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if(a, b) -> (c):
+            d = 3
+            if a > 10:
+                a = 3 + d
+            else:
+                b = 3 + d
+                d = 4
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if')))
+
+    def test_script_if_noelse(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if_noelse(a, b) -> (c):
+            if a > 10:
+                a = 3 + b
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if_noelse')))
+
 if __name__ == '__main__':
     run_tests()

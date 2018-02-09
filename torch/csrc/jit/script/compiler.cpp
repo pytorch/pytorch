@@ -40,19 +40,23 @@ struct Environment {
   enum class Type {
     kNormal,
     kWhile,
+    kIf,
   };
 
   Environment(
       Type t,
       Block* b = nullptr,
       std::shared_ptr<Environment> next = nullptr)
-      : t(t), b(b), next(next) {}
+      : t(t), b(b), lazy(false), next(next) {}
 
   Type t;
 
   std::vector<std::string> positional_inputs;
   ValueTable value_table;
   Block* b;
+  // When referring to or setting a value, do not create a new block input if
+  // true
+  bool lazy;
 
   std::shared_ptr<Environment> next;
 };
@@ -97,9 +101,137 @@ struct to_ir {
       }
     }
   }
+
+  // Given that after emitting statements in a block, we've added block inputs
+  // for all value references and assignments, delete inputs for which there was
+  // no assignment, only references.
+  void deleteExtraInputs(Block* b, std::shared_ptr<Environment> e) {
+    auto& curr_frame = *e;
+    std::vector<size_t> inputs_to_delete;
+    int i = 0;
+    for (const auto& x : curr_frame.positional_inputs) {
+      if (b->inputs()[i] == curr_frame.value_table[x]) {
+        inputs_to_delete.push_back(i);
+      }
+      i++;
+    }
+
+    for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
+         ++ritr) {
+      auto name = curr_frame.positional_inputs[*ritr];
+      Value* v = curr_frame.value_table[name];
+      Value* orig = findInParentFrame(name);
+      // Replace all matching node inputs with original value
+      // from an enclosing scope
+      for (auto node : b->nodes()) {
+        for (size_t i = 0; i < node->inputs().size(); ++i) {
+          if (node->input(i) == v) {
+            node->replaceInput(i, orig);
+          }
+        }
+      }
+
+      // Actually remove the input
+      b->eraseInput(*ritr);
+      curr_frame.positional_inputs.erase(
+          curr_frame.positional_inputs.begin() + *ritr);
+    }
+  }
+
   void emitIf(const If& stmt) {
-    // TODO: add support for control flow ops
-    throw ErrorReport(stmt) << "Control flow is not supported yet.";
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(Symbol("If"), 0));
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    // Emit both blocks once to get the union of all mutated values
+    std::shared_ptr<Environment> save_true_environment, save_false_environment;
+    {
+      environment_stack = std::make_shared<Environment>(
+          Environment::Type::kIf, true_block, environment_stack);
+      WithInsertPoint guard(*def.graph, true_block);
+      emitStatements(stmt.trueBranch());
+      deleteExtraInputs(true_block, environment_stack);
+
+      save_true_environment = environment_stack;
+      environment_stack = environment_stack->next;
+    }
+
+    {
+      environment_stack = std::make_shared<Environment>(
+          Environment::Type::kIf, false_block, environment_stack);
+      WithInsertPoint guard(*def.graph, false_block);
+      emitStatements(stmt.falseBranch());
+      deleteExtraInputs(false_block, environment_stack);
+
+      save_false_environment = environment_stack;
+      environment_stack = environment_stack->next;
+    }
+
+    std::unordered_set<std::string> all_mutated_values;
+    for (auto& input : save_true_environment->positional_inputs) {
+      all_mutated_values.insert(input);
+    }
+    for (auto& input : save_false_environment->positional_inputs) {
+      all_mutated_values.insert(input);
+    }
+
+    // Delete both blocks
+    n->eraseBlock(1);
+    n->eraseBlock(0);
+
+    true_block = n->addBlock();
+    false_block = n->addBlock();
+
+    {
+      environment_stack = std::make_shared<Environment>(
+          Environment::Type::kIf, true_block, environment_stack);
+      environment_stack->lazy = true;
+
+      // Pre-populate block inputs with the union of mutated values from both
+      // branches
+      for (const auto& input : all_mutated_values)
+        createBlockInput(input);
+
+      WithInsertPoint guard(*def.graph, true_block);
+      emitStatements(stmt.trueBranch());
+
+      auto& curr_frame = *environment_stack;
+      for (const auto& x : curr_frame.positional_inputs) {
+        true_block->registerOutput(curr_frame.value_table[x]);
+      }
+
+      environment_stack = environment_stack->next;
+    }
+
+    {
+      environment_stack = std::make_shared<Environment>(
+          Environment::Type::kIf, false_block, environment_stack);
+      environment_stack->lazy = true;
+
+      // Pre-populate block inputs with the union of mutated values from both
+      // branches
+      for (const auto& input : all_mutated_values)
+        createBlockInput(input);
+
+      WithInsertPoint guard(*def.graph, false_block);
+      emitStatements(stmt.falseBranch());
+
+      auto& curr_frame = *environment_stack;
+      for (const auto& x : curr_frame.positional_inputs) {
+        false_block->registerOutput(curr_frame.value_table[x]);
+      }
+
+      environment_stack = environment_stack->next;
+    }
+
+    // Add op inputs and outputs
+    for (const auto& x : all_mutated_values) {
+      n->addInput(getVar(x));
+      setVar(x, n->addOutput());
+    }
   }
 
   void emitWhile(const While& stmt) {
@@ -125,42 +257,12 @@ struct to_ir {
       Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
       body_block->registerOutput(body_cond_value);
 
-      auto& curr_frame = *environment_stack;
-
       // Remove inputs for values that did not mutate within the
       // block
-      std::vector<size_t> inputs_to_delete;
-      int i = 0;
-      for (const auto& x : curr_frame.positional_inputs) {
-        if (body_block->inputs()[i] == curr_frame.value_table[x]) {
-          inputs_to_delete.push_back(i);
-        }
-        i++;
-      }
-
-      for (auto ritr = inputs_to_delete.rbegin();
-           ritr != inputs_to_delete.rend();
-           ++ritr) {
-        auto name = curr_frame.positional_inputs[*ritr];
-        Value* v = curr_frame.value_table[name];
-        Value* orig = findInParentFrame(name);
-        // Replace all matching node inputs with original value
-        // from an enclosing scope
-        for (auto node : body_block->nodes()) {
-          for (size_t i = 0; i < node->inputs().size(); ++i) {
-            if (node->input(i) == v) {
-              node->replaceInput(i, orig);
-            }
-          }
-        }
-
-        // Actually remove the input
-        body_block->eraseInput(*ritr);
-        curr_frame.positional_inputs.erase(
-            curr_frame.positional_inputs.begin() + *ritr);
-      }
+      deleteExtraInputs(body_block, environment_stack);
 
       // Add block outputs
+      auto& curr_frame = *environment_stack;
       for (const auto& x : curr_frame.positional_inputs) {
         body_block->registerOutput(curr_frame.value_table[x]);
       }
@@ -242,7 +344,8 @@ struct to_ir {
         curr_frame.value_table[name] = value;
       } break;
 
-      case Environment::Type::kWhile: {
+      case Environment::Type::kWhile:
+      case Environment::Type::kIf: {
         // Overwriting an existing value means it's already been
         // accounted for.
         if (findInThisFrame(name)) {
@@ -254,7 +357,8 @@ struct to_ir {
         if (findInParentFrame(name)) {
           // Writing to a value in a parent frame. Make this a
           // loop-carried dependency.
-          createBlockInput(name);
+          if (!curr_frame.lazy)
+            createBlockInput(name);
 
           // Overwrite in value map
           curr_frame.value_table[name] = value;
@@ -277,8 +381,9 @@ struct to_ir {
 
   Value* getVar(const std::string& ident) {
     Value* retval = findInThisFrame(ident);
-    if (retval)
+    if (retval) {
       return retval;
+    }
 
     retval = findInParentFrame(ident);
 
@@ -288,11 +393,13 @@ struct to_ir {
         return retval;
       } break;
 
-      case Environment::Type::kWhile: {
+      case Environment::Type::kWhile:
+      case Environment::Type::kIf: {
         if (retval) {
           // Reading from a value in a parent frame. Make this a
-          // loop-carried dependency.
-          retval = createBlockInput(ident);
+          // loop-carried dependency or explicit input
+          if (!curr_frame.lazy)
+            retval = createBlockInput(ident);
 
           return retval;
         } else {
