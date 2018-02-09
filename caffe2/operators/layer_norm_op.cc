@@ -196,7 +196,7 @@ Computes layer normalization as described in https://arxiv.org/pdf/1607.06450.pd
 Given an input vector x \in [a_0, a_1, ...,a_{k-1}, a_k, ..., a_{n-1}],
 this op treats dimensions a_k through a_{n-1} as feature vectors. For each
 feature vector, the op contains the mean and standard deviation. Then,
-it returns the normalized values (with restdev_mapct to the feature vector).
+it returns the normalized values (with respect to the feature vector).
 
 Note that this op does not contain the scale an bias terms described in the
 paper. Simply follow this op with an FC op to add those. Concretely, this op
