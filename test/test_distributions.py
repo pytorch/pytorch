@@ -1316,7 +1316,7 @@ class TestDistributions(TestCase):
                     pdfs = dist.log_prob(samples).exp()
                 except NotImplementedError:
                     continue
-                cdfs_derivative = grad(cdfs.sum(), [samples])[0]
+                cdfs_derivative = torch.abs(grad(cdfs.sum(), [samples])[0])
                 self.assertEqual(cdfs_derivative, pdfs, message='\n'.join([
                     '{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1, len(params)),
                     'x = {}'.format(samples),
