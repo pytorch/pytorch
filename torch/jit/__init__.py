@@ -252,6 +252,7 @@ class TracedModule(Module):
 
     def forward(self, *args, **kwargs):
         global _tracing
+
         # TODO: Possible optimization: use the unflattened
         # output so we don't unflatten it when we get out
         # NB: Not a method because _raw_trace can't deal
