@@ -66,7 +66,7 @@ Tensor& _sspaddmm_out_cpu(Tensor& result, const Tensor& self,
 }
 
 // sparse, sparse, sparse, dense, real, real -> sparse
-Tensor& _sspaddmm_out_nyi(Tensor& result, const Tensor& self,
+Tensor& _sspaddmm_out_only_sparse(Tensor& result, const Tensor& self,
     const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
   runtime_error("tensor.sspaddmm(...) can only be called on sparse tensors");
   return result;
