@@ -698,7 +698,7 @@ class TestDistributions(TestCase):
         p = variable([0.7, 0.2, 0.4], requires_grad=True)
         r = variable(0.3, requires_grad=True)
         s = 0.3
-        temp = Variable(torch.Tensor([0.67]), requires_grad=True)
+        temp = variable(0.67, requires_grad=True)
         self.assertEqual(RelaxedBernoulli(temp, p).sample((8,)).size(), (8, 3))
         self.assertTrue(isinstance(RelaxedBernoulli(temp, p).sample().data, torch.Tensor))
         self.assertEqual(RelaxedBernoulli(temp, r).sample((8,)).size(), (8,) + SCALAR_SHAPE)
@@ -737,7 +737,7 @@ class TestDistributions(TestCase):
 
     def test_relaxed_one_hot_categorical_1d(self):
         p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
-        temp = Variable(torch.Tensor([0.67]), requires_grad=True)
+        temp = variable(0.67, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().size(), (3,))
         self.assertTrue(isinstance(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().data, torch.Tensor))
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((2, 2)).size(), (2, 2, 3))
@@ -1077,7 +1077,7 @@ class TestDistributions(TestCase):
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample((1,)).size(), (1, 1))
         self.assertEqual(Pareto(scale_1d, alpha_1d).sample().size(), (1,))
         self.assertEqual(Pareto(1.0, 1.0).sample().size(), SCALAR_SHAPE)
-        self.assertEqual(Pareto(1.0, 1.0).sample((1,)).size(), (1,))
+        self.assertEqual(Pareto(1.0, 1.0).sample((1,)).size(), SCALAR_SHAPE + (1,))
 
         def ref_log_prob(idx, x, log_prob):
             s = scale.data.view(-1)[idx]
@@ -1919,10 +1919,10 @@ class TestDistributionShapes(TestCase):
 
     def test_pareto_shape_scalar_params(self):
         pareto = Pareto(1, 1)
-        self.assertEqual(pareto._batch_shape, torch.Size())
+        self.assertEqual(pareto._batch_shape, torch.Size(SCALAR_SHAPE))
         self.assertEqual(pareto._event_shape, torch.Size())
         self.assertEqual(pareto.sample().size(), torch.Size(SCALAR_SHAPE))
-        self.assertEqual(pareto.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(pareto.sample((3, 2)).size(), torch.Size((3, 2) + SCALAR_SHAPE))
         self.assertRaises(ValueError, pareto.log_prob, self.scalar_sample)
         self.assertEqual(pareto.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(pareto.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
@@ -2222,7 +2222,7 @@ class TestKL(TestCase):
                     continue
                 expected_shape = dist.batch_shape if dist.batch_shape else torch.Size(SCALAR_SHAPE)
                 self.assertEqual(kl.shape, expected_shape, message='\n'.join([
-                    '{} example {}/{}'.format(Dist.__name__, i, len(params)),
+                    '{} example {}/{}'.format(Dist.__name__, i + 1, len(params)),
                     'Expected {}'.format(expected_shape),
                     'Actual {}'.format(kl.shape),
                 ]))
