@@ -162,11 +162,6 @@ struct to_ir {
         mutated_parent_values.begin(), mutated_parent_values.end());
     std::sort(sorted_mutations.begin(), sorted_mutations.end());
 
-    std::cout << "Mutated parent values" << std::endl;
-    for (const auto& x : sorted_mutations) {
-      std::cout << x << std::endl;
-    }
-
     // Register outputs in each block
     environment_stack = save_true;
     for (const auto& x : sorted_mutations) {
