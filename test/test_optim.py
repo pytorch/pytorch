@@ -230,15 +230,6 @@ class TestOptim(TestCase):
             constructor
         )
 
-    def _test_error_scenarios(self, constructor, error_msg):
-        with self.assertRaisesRegexp(ValueError, error_msg):
-            self._test_basic_cases_template(
-                torch.randn(10, 5),
-                torch.randn(10),
-                torch.randn(5),
-                constructor
-            )
-
     def _build_params_dict(self, weight, bias, **kwargs):
         return [dict(params=[weight]), dict(params=[bias], **kwargs)]
 
@@ -301,11 +292,8 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3, amsgrad=True)
         )
-        self._test_error_scenarios(
-            lambda weight, bias: optim.Adam(
-                [weight, bias], lr=1e-2, betas=(1.0, 0.0), amsgrad=True),
-            "Invalid beta parameter at index 0: 1.0"
-        )
+        with self.assertRaisesRegexp(ValueError, "Invalid beta parameter at index 0: 1.0"):
+            optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
