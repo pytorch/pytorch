@@ -6,9 +6,82 @@ namespace torch {
 namespace jit {
 namespace script {
 
-// TreeView provides a statically-typed way to access the members of a TreeRef
-// instead of using TK_MATCH
+// TreeView provides a statically-typed way to traverse the tree, which should
+// be formed according to the grammar below.
+//
+// A few notes on types and their aliases:
+// - List<T> is really a Tree with kind TK_LIST and elements as subtrees
+// - Maybe<T> is really either a Tree with kind TK_OPTION or T
+// - Builtin types are: Ident (TK_IDENT), String (TK_STRING),
+//                      Number (TK_NUMBER) and Bool (TK_BOOL)
+//
+// Type  = TensorType()                                                 TK_TENSOR_TYPE
+// Param = Param(Type type, Ident name)                                 TK_PARAM
+//
+// -- TODO: change returns to be a list of expressions
+// Def   = Def(Ident name, List<Param> params, List<Param> returns, List<Stmt> body) TK_DEF
+//
+// Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
+//       | While(Expr cond, List<Stmt> body)                            TK_WHILE
+//       | Global(List<Ident> idents)                                   TK_GLOBAL
+//       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
+//       | ExprStmt(Expr expr)                                          TK_EXPR_STMT
+//
+// Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
+//       | BinOp(Expr lhs, Expr rhs)
+//       |     And                                                      TK_AND
+//       |     Or                                                       TK_OR
+//       |     Lt                                                       '<'
+//       |     Gt                                                       '>'
+//       |     Eq                                                       TK_EQ
+//       |     Le                                                       TK_LE
+//       |     Ge                                                       TK_GE
+//       |     Ne                                                       TK_NE
+//       |     Add                                                      '+'
+//       |     Sub                                                      '-'
+//       |     Mul                                                      '*'
+//       |     Div                                                      '/'
+//       | UnaryOp(Expr expr)
+//       |     Not                                                      TK_NOT
+//       |     USub                                                     '-'
+//       -- * is one of  |   Number  | Bool |
+//       --              +-----------+------+
+//       -- type is then | "i" | "f" |  "b" |
+//       -- TODO: change this to a generic "Scalar" node that keep arbitrary precision values
+//       | Const(* value, String type)                                  TK_CONST
+//       | Cast(ScalarType type, Expr expr)                             TK_CAST
+//       -- NB: x.name(y) is desugared into name(x, y)
+//       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
+//       | Select(Expr base, Ident attr_name)                           '.'
+//       | Slice(Expr value, Maybe<Expr> first, Maybe<Expr> second)     TK_SLICE
+//       | Gather(Expr value, Expr indices)                             TK_GATHER
+//       | Var(Ident name)                                              TK_VAR
+//
+// -- NB: only allowed expressions are Const or List(Const)
+//        (List as a value, not type constructor)
+// Attribute = Attribute(Ident name, Expr value)                        TK_ATTRIBUTE
+//
+// AssignKind = Regular()                                               '='
+//            | Add()                                                   TK_PLUS_EQ
+//            | Sub()                                                   TK_MINUS_EQ
+//            | Mul()                                                   TK_TIMES_EQ
+//            | Div()                                                   TK_DIV_EQ
+//
+// ScalarType = IntType()                                               TK_INT
+//            | FloatType()                                             TK_FLOAT
+//            | LongType()                                              TK_LONG
+//            | DoubleType()                                            TK_DOUBLE
 
+// Each subclass of TreeView should provide:
+// 1. Constructor that takes a TreeRef, and checks that it's of the right type.
+// 2. Accessors that get underlying information out of the object. If they
+//    return subtrees, they should wrap them in appropriate views too.
+// 3. Static method 'create' that creates the underlying TreeRef object
+//    for every TreeRef kind that has a TreeView, the parser always uses
+//    (e.g.) Ident::create rather than Compound::Create, this means that
+//    changes to the structure of Ident are always made right here rather
+//    than both in the parser and in this code.
+// XXX: these structs should have no fields to prevent slicing when passing by value
 struct TreeView {
   explicit TreeView(const TreeRef& tree_) : tree_(tree_) {}
   TreeRef tree() const {
@@ -20,38 +93,40 @@ struct TreeView {
   operator TreeRef() const {
     return tree_;
   }
+  const TreeRef& get() const {
+    return tree_;
+  }
+  int kind() const {
+    return tree_->kind();
+  }
 
- protected:
+protected:
+  const TreeRef& subtree(std::size_t i) const {
+    return tree_->trees().at(i);
+  }
   TreeRef tree_;
 };
 
 template <typename T>
-struct ListViewIterator {
-  ListViewIterator(TreeList::const_iterator it) : it(it) {}
-  bool operator!=(const ListViewIterator& rhs) const {
-    return it != rhs.it;
-  }
-  T operator*() const {
-    return T(*it);
-  }
-  void operator++() {
-    ++it;
-  }
-  void operator--() {
-    --it;
-  }
+struct List : public TreeView {
+  struct Iterator {
+    Iterator(TreeList::const_iterator it) : it(it) {}
+    bool operator!=(const Iterator& rhs) const { return it != rhs.it; }
+    T operator*() const { return T(*it); }
+    void operator++() { ++it; }
+    void operator--() { --it; }
 
- private:
-  TreeList::const_iterator it;
-};
+  private:
+    TreeList::const_iterator it;
+  };
+  typedef Iterator iterator;
+  typedef Iterator const_iterator;
 
-template <typename T>
-struct ListView : public TreeView {
-  ListView(const TreeRef& tree) : TreeView(tree) {
+  List(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_LIST);
+    // Iterate over list to temporarily instantiate Ts that will check the type
+    for (const T& elem : *this);
   }
-  typedef ListViewIterator<T> iterator;
-  typedef ListViewIterator<T> const_iterator;
   iterator begin() const {
     return iterator(tree_->trees().begin());
   }
@@ -59,10 +134,14 @@ struct ListView : public TreeView {
     return iterator(tree_->trees().end());
   }
   T operator[](size_t i) const {
-    return T(tree_->trees().at(i));
+    return T(subtree(i));
   }
   TreeRef map(std::function<TreeRef(const T&)> fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
+  }
+  static List create(const SourceRange& range, const std::vector<T>& subtrees) {
+    TreeList type_erased_sub {subtrees.begin(), subtrees.end()};
+    return List(Compound::create(TK_LIST, range, std::move(type_erased_sub)));
   }
   size_t size() const {
     return tree_->trees().size();
@@ -70,16 +149,19 @@ struct ListView : public TreeView {
 };
 
 template <typename T>
-struct OptionView : public TreeView {
-  explicit OptionView(const TreeRef& tree) : TreeView(tree) {
-    JIT_SCRIPT_ASSERT(tree, tree->kind() == TK_OPTION);
+struct Maybe : public TreeView {
+  explicit Maybe(const TreeRef& tree) : TreeView(tree) {
+    if (tree->kind() != TK_OPTION) {
+      std::cout << kindToString(tree->kind()) << std::endl;
+      T{tree}; // invoke the constructor to check the type
+    }
   }
+  /* implicit */ Maybe(const T& tree) : TreeView(tree) {}
   bool present() const {
     return tree_->trees().size() > 0;
   }
   T get() const {
-    JIT_SCRIPT_ASSERT(tree_, present());
-    return T(tree_->trees()[0]);
+    return T(tree_->trees().at(0));
   }
   TreeRef map(std::function<TreeRef(const T&)> fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
@@ -87,356 +169,441 @@ struct OptionView : public TreeView {
 };
 
 struct Ident : public TreeView {
-  // each subclass of TreeView provides:
-  // 1. a constructor that takes a TreeRef, and matches it to the right type.
   explicit Ident(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_IDENT, name_);
+    tree_->match(TK_IDENT);
   }
-  // 2. accessors that get underlying information out of the object
-  // in this case, we return the name of the identifier, and handle the
-  // converstion to a string in the method
   const std::string& name() const {
-    return name_->stringValue();
+    return subtree(0)->stringValue();
   }
-
-  // 3. a static method 'create' that creates the underlying TreeRef object
-  // for every TreeRef kind that has a TreeView, the parser always uses
-  // (e.g.) Ident::create rather than Compound::Create, this means that
-  // changes to the structure of Ident are always made right here rather
-  // than both in the parser and in this code
-  static TreeRef create(const SourceRange& range, const std::string& name) {
-    return Compound::create(TK_IDENT, range, {String::create(name)});
+  static Ident create(const SourceRange& range, const std::string& name) {
+    return Ident(Compound::create(TK_IDENT, range, {String::create(name)}));
   }
-
- private:
-  TreeRef name_;
 };
+
+////////////////////////////////////////////////////////////////////////////////
+// Base types (production LHS)
+////////////////////////////////////////////////////////////////////////////////
+
+struct Type : public TreeView {
+  explicit Type(const TreeRef& tree) : TreeView(tree) {
+    switch (tree->kind()) {
+      case TK_TENSOR_TYPE:
+        return;
+      default:
+        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Type";
+    }
+  }
+};
+
+struct Stmt : public TreeView {
+  explicit Stmt(const TreeRef& tree) : TreeView(tree) {
+    switch (tree->kind()) {
+      case TK_IF:
+      case TK_WHILE:
+      case TK_GLOBAL:
+      case TK_ASSIGN:
+      case TK_EXPR_STMT:
+        return;
+      default:
+        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Stmt";
+    }
+  }
+};
+
+struct Expr : public TreeView {
+  explicit Expr(const TreeRef& tree) : TreeView(tree) {
+    switch (tree->kind()) {
+      case TK_IF_EXPR:
+      case TK_AND:
+      case TK_OR:
+      case '<':
+      case '>':
+      case TK_EQ:
+      case TK_LE:
+      case TK_GE:
+      case TK_NE:
+      case '+':
+      case '-':
+      case '*':
+      case '/':
+      case TK_NOT:
+      /* case '-': - unary minus */
+      case TK_CONST:
+      case TK_CAST:
+      case TK_APPLY:
+      case '.':
+      case TK_SLICE:
+      case TK_GATHER:
+      case TK_VAR:
+        return;
+      default:
+        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
+    }
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Helper nodes (mostly for function arguments)
+////////////////////////////////////////////////////////////////////////////////
 
 struct Attribute : public TreeView {
   explicit Attribute(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_ATTRIBUTE, name_, value_);
+    tree_->match(TK_ATTRIBUTE);
   }
   Ident name() const {
-    return Ident(name_);
+    return Ident(subtree(0));
   }
-  TreeRef value() const {
-    return value_;
+  Expr value() const {
+    return Expr(subtree(1));
   }
-  static TreeRef create(const SourceRange& range, TreeRef name, TreeRef value) {
-    return Compound::create(TK_ATTRIBUTE, range, {name, value});
+  static Attribute create(const SourceRange& range, const Ident& name, const Expr& value) {
+    return Attribute(Compound::create(TK_ATTRIBUTE, range, {name, value}));
   }
-
- private:
-  TreeRef name_;
-  TreeRef value_;
 };
 
-struct Apply : public TreeView {
-  explicit Apply(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_APPLY, name_, inputs_, attributes_);
-  }
-
-  Ident name() const {
-    return Ident(name_);
-  }
-  ListView<TreeRef> inputs() const {
-    return ListView<TreeRef>(inputs_);
-  }
-  ListView<Attribute> attributes() const {
-    return ListView<Attribute>(attributes_);
-  }
-
-  static TreeRef create(
-      const SourceRange& range,
-      TreeRef name,
-      TreeRef inputs,
-      TreeRef attributes) {
-    return Compound::create(TK_APPLY, range, {name, inputs, attributes});
-  }
-
- private:
-  TreeRef name_;
-  TreeRef inputs_;
-  TreeRef attributes_;
-};
-
-struct Slice : public TreeView {
-  explicit Slice(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_SLICE, value_, start_, end_);
-  }
-
-  TreeRef value() const {
-    return value_;
-  }
-
-  OptionView<TreeRef> start() const {
-    return OptionView<TreeRef>(start_);
-  }
-
-  OptionView<TreeRef> end() const {
-    return OptionView<TreeRef>(end_);
-  }
-
-  TreeRef startOr(int alternative) const {
-    const auto startOption = start();
-    return startOption.present() ? startOption.get() : createInt(alternative);
-  }
-
-  TreeRef endOr(int alternative) const {
-    const auto endOption = end();
-    return endOption.present() ? endOption.get() : createInt(alternative);
-  }
-
-  static TreeRef
-  create(const SourceRange& range, TreeRef value, TreeRef start, TreeRef end) {
-    return Compound::create(TK_SLICE, range, {value, start, end});
-  }
-
- private:
-  TreeRef createInt(int value) const {
-    return Compound::create(
-        TK_CONST, range(), {Number::create(value), String::create("i")});
-  }
-
-  TreeRef value_;
-  TreeRef start_;
-  TreeRef end_;
-};
-
-struct Gather : public TreeView {
-  explicit Gather(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_GATHER, value_, indices_);
-  }
-
-  TreeRef value() const {
-    return value_;
-  }
-
-  TreeRef indices() const {
-    return indices_;
-  }
-
-  static TreeRef
-  create(const SourceRange& range, TreeRef value, TreeRef indices) {
-    return Compound::create(TK_GATHER, range, {value, indices});
-  }
-
- private:
-  TreeRef value_;
-  TreeRef indices_;
-};
-
-struct Cast : public TreeView {
-  explicit Cast(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_CAST, type_, input_);
-  }
-
-  int type() const {
-    return type_->kind();
-  }
-  TreeRef input() const {
-    return input_;
-  }
-
-  static TreeRef create(const SourceRange& range, TreeRef type, TreeRef input) {
-    return Compound::create(TK_CAST, range, {type, input});
-  }
-
- private:
-  TreeRef type_;
-  TreeRef input_;
-};
-
-struct TensorType : public TreeView {
-  explicit TensorType(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_TENSOR_TYPE, scalar_type_, dims_);
-  }
-  static TreeRef
-  create(const SourceRange& range, TreeRef scalar_type_, TreeRef dims_) {
-    return Compound::create(TK_TENSOR_TYPE, range, {scalar_type_, dims_});
-  }
-  int scalarType() const {
-    if (scalar_type_->kind() == TK_IDENT)
-      throw ErrorReport(tree_)
-          << " TensorType has a symbolic ident " << Ident(scalar_type_).name()
-          << " rather than a concrete type";
-    return scalar_type_->kind();
-  }
-  ListView<Ident> dims() const {
-    return ListView<Ident>(dims_);
-  }
-
- private:
-  TreeRef scalar_type_;
-  TreeRef dims_;
-};
 
 struct Param : public TreeView {
   explicit Param(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_PARAM, ident_, type_);
+    tree_->match(TK_PARAM);
   }
-  static TreeRef create(const SourceRange& range, TreeRef ident, TreeRef type) {
-    return Compound::create(TK_PARAM, range, {ident, type});
+  static Param create(const SourceRange& range, const Ident& ident, const Type& type) {
+    return Param(Compound::create(TK_PARAM, range, {ident, type}));
   }
-  // when the type of a field is statically know the accessors return
-  // the wrapped type. for instance here we know ident_ is an identifier
-  // so the accessor returns an Ident
-  // this means that clients can do p.ident().name() to get the name of the
-  // parameter.
   Ident ident() const {
-    return Ident(ident_);
+    return Ident(subtree(0));
   }
-  // may be TensorType or TK_INFERRED
-  TreeRef type() const {
-    return type_;
+  Type type() const {
+    return Type(subtree(1));
   }
-  bool typeIsInferred() const {
-    return type_->kind() == TK_INFERRED;
+  template<typename T>
+  T typeExpect() const {
+    return T(type());
   }
-  // helper for when you know the type is not inferred.
-  TensorType tensorType() const {
-    return TensorType(type_);
-  }
-
- private:
-  TreeRef ident_;
-  TreeRef type_;
 };
 
-struct Assign : public TreeView {
-  explicit Assign(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_ASSIGN, lhs_, reduction_, rhs_);
-  }
-  static TreeRef create(
-      const SourceRange& range,
-      TreeRef lhs,
-      TreeRef reduction,
-      TreeRef rhs) {
-    return Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs});
-  }
-  // when the type of a field is statically know the accessors return
-  // the wrapped type. for instance here we know ident_ is an identifier
-  // so the accessor returns an Ident
-  // this means that clients can do p.ident().name() to get the name of the
-  // parameter.
-  ListView<TreeRef> lhs() const {
-    return ListView<TreeRef>(lhs_);
-  }
-  int reduction() const {
-    return reduction_->kind();
-  }
-  TreeRef rhs() const {
-    return rhs_;
-  }
 
- private:
-  TreeRef lhs_;
-  TreeRef reduction_;
-  TreeRef rhs_;
+////////////////////////////////////////////////////////////////////////////////
+// Type
+////////////////////////////////////////////////////////////////////////////////
+
+struct TensorType : public Type {
+  explicit TensorType(const TreeRef& tree) : Type(tree) {
+    tree_->match(TK_TENSOR_TYPE);
+  }
+  static TensorType create(const SourceRange& range) {
+    return TensorType(Compound::create(TK_TENSOR_TYPE, range, {}));
+  }
 };
+
+struct ScalarType : public TreeView {
+  explicit ScalarType(const TreeRef& tree) : TreeView(tree) {
+    switch (tree->kind()) {
+      case TK_INT:
+      case TK_LONG:
+      case TK_FLOAT:
+      case TK_DOUBLE:
+        return;
+      default:
+        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid ScalarType";
+    }
+  }
+};
+
+////////////////////////////////////////////////////////////////////////////////
+// Top level definitions
+////////////////////////////////////////////////////////////////////////////////
 
 struct Def : public TreeView {
   explicit Def(const TreeRef& tree) : TreeView(tree) {
-    tree->match(TK_DEF, name_, paramlist, retlist, stmts_list);
+    tree->match(TK_DEF);
   }
   Ident name() const {
-    return Ident(name_);
+    return Ident(subtree(0));
   }
-  // ListView helps turn TK_LISTs into vectors of TreeViews
-  // so that we can, e.g., return lists of parameters
-  ListView<Param> params() const {
-    return ListView<Param>(paramlist);
+  List<Param> params() const {
+    return List<Param>(subtree(1));
   }
-  ListView<Param> returns() const {
-    return ListView<Param>(retlist);
+  List<Param> returns() const {
+    return List<Param>(subtree(2));
   }
-  ListView<TreeRef> statements() const {
-    return ListView<TreeRef>(stmts_list);
+  List<TreeRef> statements() const {
+    return List<TreeRef>(subtree(3));
   }
-  static TreeRef create(
+  static Def create(
       const SourceRange& range,
-      TreeRef name,
-      TreeRef paramlist,
-      TreeRef retlist,
-      TreeRef stmts_list) {
-    return Compound::create(
-        TK_DEF, range, {name, paramlist, retlist, stmts_list});
+      const Ident& name,
+      const List<Param>& params,
+      const List<Param>& returns,
+      const List<Stmt>& stmts) {
+    return Def(Compound::create(
+        TK_DEF, range, {name, params, returns, stmts}));
   }
-
- private:
-  TreeRef name_;
-  TreeRef paramlist;
-  TreeRef retlist;
-  TreeRef stmts_list;
 };
 
-struct Select : public TreeView {
-  explicit Select(const TreeRef& tree) : TreeView(tree) {
-    tree_->match('.', value_, selector_);
+
+////////////////////////////////////////////////////////////////////////////////
+// Statements
+////////////////////////////////////////////////////////////////////////////////
+
+struct If : public Stmt {
+  explicit If(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_IF);
   }
-  TreeRef value() const {
-    return value_;
+  Expr cond() const {
+    return Expr(subtree(0));
+  }
+  List<Stmt> trueBranch() const {
+    return List<Stmt>(subtree(1));
+  }
+  List<Stmt> falseBranch() const {
+    return List<Stmt>(subtree(2));
+  }
+  static If create(
+      const SourceRange& range,
+      const Expr& cond,
+      const List<Stmt>& true_branch,
+      const List<Stmt>& false_branch) {
+    return If(Compound::create(TK_IF, range, {cond, true_branch, false_branch}));
+  }
+};
+
+struct While : public Stmt {
+  explicit While(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_WHILE);
+  }
+  Expr cond() const {
+    return Expr(subtree(0));
+  }
+  List<Stmt> body() const {
+    return List<Stmt>(subtree(1));
+  }
+  static While create(const SourceRange& range, const Expr& cond, const List<Stmt>& body) {
+    return While(Compound::create(TK_WHILE, range, {cond, body}));
+  }
+};
+
+struct Global : public Stmt {
+  explicit Global(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_GLOBAL);
+  }
+  List<Ident> names() {
+    return List<Ident>(subtree(0));
+  }
+  static Global create(const SourceRange& range, const List<Ident>& names) {
+    return Global(Compound::create(TK_GLOBAL, range, {names}));
+  }
+};
+
+struct AssignKind : public TreeView {
+  explicit AssignKind(const TreeRef& tree) : TreeView(tree) {
+    switch (tree->kind()) {
+      case '=':
+      case TK_PLUS_EQ:
+      case TK_MINUS_EQ:
+      case TK_TIMES_EQ:
+      case TK_DIV_EQ:
+        return;
+      default:
+        throw ErrorReport(tree) << "is not a valid AssignKind";
+    }
+  }
+};
+
+struct Assign : public Stmt {
+  explicit Assign(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_ASSIGN);
+  }
+  static Assign create(
+      const SourceRange& range,
+      const List<Ident>& lhs,
+      const AssignKind& reduction,
+      const Expr& rhs) {
+    return Assign(Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs}));
+  }
+  List<Ident> lhs() const {
+    return List<Ident>(subtree(0));
+  }
+  int reduction() const {
+    return subtree(1)->kind();
+  }
+  Expr rhs() const {
+    return Expr(subtree(2));
+  }
+};
+
+struct ExprStmt : public Stmt {
+  explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_EXPR_STMT);
+  }
+  Expr expr() {
+    return Expr(subtree(0));
+  }
+  static ExprStmt create(const SourceRange& range, const Expr& value) {
+    return ExprStmt(Compound::create(TK_EXPR_STMT, range, {value}));
+  }
+};
+
+
+////////////////////////////////////////////////////////////////////////////////
+// Expressions
+////////////////////////////////////////////////////////////////////////////////
+
+struct BinOp : public Expr {
+  explicit BinOp(const TreeRef& tree) : Expr(tree) {
+    switch (tree->kind()) {
+      case TK_AND:
+      case TK_OR:
+      case '<':
+      case '>':
+      case TK_EQ:
+      case TK_LE:
+      case TK_GE:
+      case TK_NE:
+      case '+':
+      case '*':
+      case '/':
+      case '-':
+        if (tree->trees().size() != 2)
+          throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
+        return;
+      default:
+        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid BinOp";
+    }
+  }
+  Expr lhs() const {
+    return Expr(subtree(0));
+  }
+  Expr rhs() const {
+    return Expr(subtree(1));
+  }
+};
+
+struct UnaryOp : public Expr {
+  explicit UnaryOp(const TreeRef& tree) : Expr(tree) {
+    switch (tree->kind()) {
+      case '-':
+      case TK_NOT:
+        if (tree->trees().size() != 1)
+          throw ErrorReport(tree) << "UnaryOp expected 1 subtree, found " << tree->trees().size();
+        return;
+      default:
+        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid UnaryOp";
+    }
+  }
+};
+
+struct Cast : public Expr {
+  explicit Cast(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_CAST);
+  }
+  ScalarType type() const {
+    return ScalarType(subtree(0));
+  }
+  Expr input() const {
+    return Expr(subtree(1));
+  }
+  static Cast create(const SourceRange& range, const Type& type, const Expr& input) {
+    return Cast(Compound::create(TK_CAST, range, {type, input}));
+  }
+};
+
+struct Apply : public Expr {
+  explicit Apply(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_APPLY);
+  }
+  Ident name() const {
+    return Ident(subtree(0));
+  }
+  List<Expr> inputs() const {
+    return List<Expr>(subtree(1));
+  }
+  List<Attribute> attributes() const {
+    return List<Attribute>(subtree(2));
+  }
+  static Apply create(
+      const SourceRange& range,
+      const Ident& name,
+      const List<Expr>& inputs,
+      const List<Attribute>& attributes) {
+    return Apply(Compound::create(TK_APPLY, range, {name, inputs, attributes}));
+  }
+};
+
+struct Select : public Expr {
+  explicit Select(const TreeRef& tree) : Expr(tree) {
+    tree_->match('.');
+  }
+  Expr value() const {
+    return Expr(subtree(0));
   }
   Ident selector() const {
-    return Ident(selector_);
+    return Ident(subtree(1));
   }
-  static TreeRef
-  create(const SourceRange& range, TreeRef value, TreeRef selector) {
-    return Compound::create('.', range, {value, selector});
+  static Select create(const SourceRange& range, const Expr& value, const Ident& selector) {
+    return Select(Compound::create('.', range, {value, selector}));
   }
-
- private:
-  TreeRef value_;
-  TreeRef selector_;
 };
 
-struct If : public TreeView {
-  explicit If(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_IF, cond_, true_branch_, false_branch_);
+struct Slice : public Expr {
+  explicit Slice(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_SLICE);
   }
-  const TreeRef& cond() const {
-    return cond_;
+  Expr value() const {
+    return Expr(subtree(0));
   }
-  ListView<TreeRef> trueBranch() const {
-    return ListView<TreeRef>(true_branch_);
+  Maybe<Expr> start() const {
+    return Maybe<Expr>(subtree(1));
   }
-  ListView<TreeRef> falseBranch() const {
-    return ListView<TreeRef>(false_branch_);
+  Maybe<Expr> end() const {
+    return Maybe<Expr>(subtree(2));
   }
-
-  static TreeRef create(
+  Expr startOr(int alternative) const {
+    const auto startOption = start();
+    return startOption.present() ? startOption.get() : createInt(alternative);
+  }
+  Expr endOr(int alternative) const {
+    const auto endOption = end();
+    return endOption.present() ? endOption.get() : createInt(alternative);
+  }
+  static Slice create(
       const SourceRange& range,
-      TreeRef cond_,
-      TreeRef true_branch_,
-      TreeRef false_branch_) {
-    return Compound::create(TK_IF, range, {cond_, true_branch_, false_branch_});
+      const Expr& value,
+      const Maybe<Expr>& start,
+      const Maybe<Expr>& end) {
+    return Slice(Compound::create(TK_SLICE, range, {value, start, end}));
   }
-
- private:
-  TreeRef cond_;
-  TreeRef true_branch_;
-  TreeRef false_branch_;
+private:
+  Expr createInt(int value) const {
+    return Expr(Compound::create(
+        TK_CONST, range(), {Number::create(value), String::create("i")}));
+  }
 };
 
-struct While : public TreeView {
-  explicit While(const TreeRef& tree) : TreeView(tree) {
-    tree_->match(TK_WHILE, cond_, body_);
+struct Gather : public Expr {
+  explicit Gather(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_GATHER);
   }
-  const TreeRef& cond() const {
-    return cond_;
+  Expr value() const {
+    return Expr(subtree(0));
   }
-  ListView<TreeRef> body() const {
-    return ListView<TreeRef>(body_);
+  Expr indices() const {
+    return Expr(subtree(1));
   }
+  static Gather create(const SourceRange& range, const Expr& value, const Expr& indices) {
+    return Gather(Compound::create(TK_GATHER, range, {value, indices}));
+  }
+};
 
-  static TreeRef
-  create(const SourceRange& range, TreeRef cond_, TreeRef body_) {
-    return Compound::create(TK_WHILE, range, {cond_, body_});
+struct Var : public Expr {
+  explicit Var(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_VAR);
+  };
+  Ident name() {
+    return Ident(subtree(0));
   }
-
- private:
-  TreeRef cond_;
-  TreeRef body_;
+  static Var create(const SourceRange& range, const Ident& name) {
+    return Var(Compound::create(TK_VAR, range, {name}));
+  }
 };
 
 } // namespace script
