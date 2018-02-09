@@ -530,22 +530,31 @@ class HingeEmbeddingLoss(_Loss):
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
 
-    `x` and `y` can be of arbitrary shapes with a total of `n` elements each.
-    The sum operation operates over all the elements.
+    Args:
+        margin (float, optional): Has a default value of `1`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
-    The division by `n` can be avoided if one sets the internal
-    variable `size_average=False`.
-
-    The `margin` has a default value of `1`, or can be set in the constructor.
+    Shape:
+        - Input: Tensor of arbitrary shape. The sum operation operates over all the elements.
+        - Target: Same shape as input.
+        - Output: scalar. If reduce is ``False``, then same shape as the input
     """
 
-    def __init__(self, margin=1.0, size_average=True):
-        super(HingeEmbeddingLoss, self).__init__()
+    def __init__(self, margin=1.0, size_average=True, reduce=True):
+        super(HingeEmbeddingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input, target):
-        return F.hinge_embedding_loss(input, target, self.margin, self.size_average)
+        return F.hinge_embedding_loss(input, target, self.margin, self.size_average,
+                                      self.reduce)
 
 
 class MultiLabelMarginLoss(_Loss):
