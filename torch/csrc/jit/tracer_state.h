@@ -1,5 +1,8 @@
 #pragma once
 
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/variable.h"
+
 #include <atomic>
 #include <cstdint>
 #include <list>
@@ -10,17 +13,11 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
-struct Variable;
-struct Edge;
-} // namespace autograd
-namespace jit {
+namespace torch { namespace jit {
 struct Graph;
 struct Value;
 struct VariableFlags;
-} // namespace jit
-} // namespace torch
+}} // namespace torch::jit
 
 namespace torch { namespace jit { namespace tracer {
 

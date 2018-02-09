@@ -163,4 +163,13 @@ void Variable::detach_() {
   set_requires_grad(false);
   set_gradient_edge(Edge());
 }
+
+void Variable::set_tracing_state(
+    jit::tracer::ValueTracingState* new_tracing_state) {
+  get()->tracing_state.reset(new_tracing_state);
+}
+
+jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
+  return *get()->tracing_state;
+}
 }} // namespace torch::autograd
