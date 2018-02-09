@@ -21,6 +21,7 @@ from __future__ import unicode_literals
 import hypothesis.strategies as st
 import numpy as np
 import numpy.testing as npt
+import unittest
 from hypothesis import given
 
 import caffe2.python.hypothesis_test_util as hu
@@ -1005,6 +1006,7 @@ class TestLayers(LayersTestCase):
         assert len(ops[0].output) == 1
         assert ops[0].output[0] in ops[1].input
 
+    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support.")
     def testHalfToFloatTypeInference(self):
         input = self.new_record(schema.Scalar((np.float32, (32,))))
 
