@@ -488,6 +488,11 @@ class TestSparse(TestCase):
         self._test_spadd_shape([50, 30, 20], [2])
         self._test_spadd_shape([5, 5, 5, 5, 5, 5], [2])
 
+    def test_norm(self):
+        x, _, _ = self._gen_sparse(3, 10, 100)
+        y = x.coalesce()
+        self.assertEqual(x.norm(), y._values().norm())
+
     def _test_basic_ops_shape(self, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
@@ -704,6 +709,7 @@ class TestSparse(TestCase):
             'to_dense': lambda x: x.to_dense(),
             '_dimI': lambda x: x._dimI(),
             '_dimV': lambda x: x._dimV(),
+            'norm': lambda x: x.norm(),
         }
 
         for test_name, test_fn in to_test_one_arg.items():
@@ -714,6 +720,10 @@ class TestSparse(TestCase):
             out_tensor = test_fn(tensor1)
 
             if isinstance(out_tensor, int) or isinstance(out_tensor, bool):
+                if not isinstance(out_var, int) and not isinstance(out_var, bool):
+                    check_var = out_var.data[0]
+                else:
+                    check_var = out_var
                 self.assertEqual(out_var, out_tensor)
                 continue
 

@@ -505,6 +505,15 @@ void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real valu
 }
 #endif
 
+#if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE) || defined(THCS_REAL_IS_HALF)
+accreal THCSTensor_(normall)(THCState *state, THCSTensor *self, real value) {
+  THCSTensor* self_coalesced = THCSTensor_(newCoalesce)(state, self);
+  accreal result = THCTensor_(normall)(state, self_coalesced->values, value); 
+  THCSTensor_(free)(state, self_coalesced);
+  return result;
+}
+#endif
+
 #undef ROW_PTR2
 #undef COL_PTR2
 
