@@ -43,7 +43,7 @@ void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
     for (auto i = 0; i < t1.size(); ++i) {
       const float t1_i = t1.template data<float>()[i];
       const float t2_i = t2.template data<float>()[i];
-      CHECK_NEAR(t1_i, t2_i, error);
+      EXPECT_NEAR(t1_i, t2_i, error);
       float err = t1_i - t2_i;
       if (err > maxError) {
         maxError = err;
@@ -55,7 +55,7 @@ void checkError(const TensorCPU& t1, const TensorCPU& t2, float error) {
     for (auto i = 0; i < t1.size(); ++i) {
       const uint8_t t1_i = t1.template data<uint8_t>()[i];
       const uint8_t t2_i = t2.template data<uint8_t>()[i];
-      CHECK_NEAR(t1_i, t2_i, error);
+      EXPECT_NEAR(t1_i, t2_i, error);
       float err = t1_i - t2_i;
       if (err > maxError) {
         maxError = err;
