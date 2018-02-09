@@ -31,6 +31,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
 try:
@@ -332,6 +333,8 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
+        # assertRegexpMatches renamed assertRegex in 3.2
+        assertRegex = unittest.TestCase.assertRegexpMatches
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 

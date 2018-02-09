@@ -1,6 +1,9 @@
 import math
 import sys
+import errno
+import os
 import ctypes
+import signal
 import torch
 import time
 import traceback
@@ -8,9 +11,12 @@ import unittest
 from torch import multiprocessing
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
-from torch.utils.data.dataloader import default_collate
-from common import TestCase, run_tests, TEST_NUMPY
+from torch.utils.data.dataloader import default_collate, ExceptionWrapper
+from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
+
+
+JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -100,6 +106,46 @@ class TestConcatDataset(TestCase):
         self.assertEqual(0, (d3[0][0] - result[14][0]).abs().sum())
 
 
+# Stores the first encountered exception in .exception.
+# Inspired by https://stackoverflow.com/a/33599967
+class ErrorTrackingProcess(multiprocessing.Process):
+
+    def __init__(self, *args, **kwargs):
+        super(ErrorTrackingProcess, self).__init__(*args, **kwargs)
+        self._pconn, self._cconn = multiprocessing.Pipe()
+        self._exception = None
+
+    def run(self):
+        # Disable stderr printing from os level, and make workers not printing
+        # to stderr.
+        # Can't use sys.stderr.close, otherwise Python `raise` will error with
+        # ValueError: I/O operation on closed file.
+        os.close(sys.stderr.fileno())
+        try:
+            super(ErrorTrackingProcess, self).run()
+            self._cconn.send(None)
+        except Exception as e:
+            self._cconn.send(ExceptionWrapper(sys.exc_info()))
+            raise
+
+    @property
+    def exception(self):
+        if self._pconn.poll():
+            self._exception = self._pconn.recv()
+        if self._exception is None:
+            return None
+        else:
+            return self._exception.exc_type(self._exception.exc_msg)
+
+    # ESRCH means that os.kill can't finds alive proc
+    def send_signal(self, signum, ignore_ESRCH=False):
+        try:
+            os.kill(self.pid, signum)
+        except OSError as e:
+            if not ignore_ESRCH or e.errno != errno.ESRCH:
+                raise
+
+
 class ErrorDataset(Dataset):
 
     def __init__(self, size):
@@ -168,6 +214,23 @@ class SynchronizedSeedDataset(Dataset):
 
     def __len__(self):
         return self.size
+
+
+def _test_timeout():
+    dataset = SleepDataset(10, 10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
+    _ = next(iter(dataloader))
+
+
+def _test_segfault():
+    dataset = SegfaultDataset(10)
+    dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
+    _ = next(iter(dataloader))
+
+
+# test custom init function
+def init_fn(worker_id):
+    torch.manual_seed(12345)
 
 
 class TestDataLoader(TestCase):
@@ -248,34 +311,30 @@ class TestDataLoader(TestCase):
 
     @unittest.skipIf(True, "flaky test")
     def test_segfault(self):
-        def _test_segfault():
-            sys.stderr.close()
-            dataset = SegfaultDataset(10)
-            dataloader = DataLoader(dataset, batch_size=2, num_workers=2)
-            _ = next(iter(dataloader))
-
-        p = multiprocessing.Process(target=_test_segfault)
+        p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
-        p.join(1.0)
+        p.join(JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
+            if IS_WINDOWS:
+                self.assertIsInstance(p.exception, OSError)
+                self.assertRegex(str(p.exception), r'access violation reading ')
+            else:
+                self.assertIsInstance(p.exception, RuntimeError)
+                self.assertRegex(str(p.exception), r'DataLoader worker \(pid \d+\) is killed by signal: ')
         finally:
             p.terminate()
 
     def test_timeout(self):
-        def _test_timeout():
-            sys.stderr.close()
-            dataset = SleepDataset(10, 10)
-            dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
-            _ = next(iter(dataloader))
-
-        p = multiprocessing.Process(target=_test_timeout)
+        p = ErrorTrackingProcess(target=_test_timeout)
         p.start()
-        p.join(3.0)
+        p.join(JOIN_TIMEOUT)
         try:
             self.assertFalse(p.is_alive())
             self.assertNotEqual(p.exitcode, 0)
+            self.assertIsInstance(p.exception, RuntimeError)
+            self.assertRegex(str(p.exception), r'DataLoader timed out after \d+ seconds')
         finally:
             p.terminate()
 
@@ -289,10 +348,6 @@ class TestDataLoader(TestCase):
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_init_fn(self):
-        # test custom init function
-        def init_fn(worker_id):
-            torch.manual_seed(12345)
-
         dataset = SeedDataset(4)
         dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
                                 worker_init_fn=init_fn)
@@ -381,10 +436,10 @@ class TestDataLoader(TestCase):
                 break
         del loader
         for w in workers:
-            w.join(1.0)  # timeout of one second
+            w.join(JOIN_TIMEOUT)
             self.assertFalse(w.is_alive(), 'subprocess not terminated')
             self.assertEqual(w.exitcode, 0)
-        worker_manager_thread.join(1.0)
+        worker_manager_thread.join(JOIN_TIMEOUT)
         self.assertFalse(worker_manager_thread.is_alive())
 
     def test_len(self):
