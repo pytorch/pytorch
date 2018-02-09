@@ -66,8 +66,8 @@ struct to_ir {
             setVar(name, def.graph->addInput(name));
           }
           break;
-        case TK_EXPR:
-          emitExpr(ExprStmt(stmt).value(), 0);
+        case TK_EXPR_STMT:
+          emitExpr(ExprStmt(stmt).expr(), 0);
           break;
       }
     }

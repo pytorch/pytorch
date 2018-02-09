@@ -251,7 +251,7 @@ struct Parser {
     }
     L.expect(']');
 
-    return Slice::create(range, Expr(value), Expr(first), Expr(second));
+    return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
   }
   TreeRef parseIdentList() {
     return parseList('(', ',', ')', [&](int i) { return parseIdent(); });

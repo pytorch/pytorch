@@ -55,7 +55,7 @@ namespace script {
   _(TK_ELSE, "else", "else")                     \
   _(TK_ELIF, "elif", "elif")                     \
   _(TK_WHILE, "while", "while")                  \
-  _(TK_EXPR, "expression", "")                   \
+  _(TK_EXPR_STMT, "expression statement", "")    \
   _(TK_NE, "ne", "!=")                           \
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
