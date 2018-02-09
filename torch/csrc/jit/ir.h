@@ -69,6 +69,64 @@ struct SourceLocation {
   std::string python_traceback;
 };
 
+// Scope is a node of a trie that represents the tree of nested scopes.
+// Individual scopes are pushed and popped from Graph, which holds a
+// pointer to the current scope. Each Node in Graph holds a pointer
+// to the scope that was current when the node was created.
+// The trie never needs to shrink, it only grows until it is disposed
+// of when Graph is deallocated. Hence, pointers to scopes held by nodes
+// will always be valid as long as Graph is alive.
+struct Scope {
+private:
+  Scope* parent_;
+  Symbol name_;
+  std::vector<std::unique_ptr<Scope> > children_;
+public:
+  Scope() {
+    name_ = stringToSymbol("");
+    parent_ = NULL;
+  }
+  Scope(Scope* parent, Symbol name) {
+    name_ = name;
+    parent_ = parent;
+  }
+  Scope* push(Symbol name) {
+    children_.push_back(std::unique_ptr<Scope>(new Scope(this, name)));
+    return children_.back().get();
+  }
+  Scope* parent() {
+    if (parent_ == NULL) {
+      throw std::runtime_error("Cannot get parent from Scope with no parent");
+    }
+    return parent_;
+  }
+  bool isRoot() {
+    return parent_ == NULL;
+  }
+  Scope* getRoot() {
+    Scope* current = this;
+    while (current->parent_) {
+      current = current->parent_;
+    }
+    return current;
+  }
+  Symbol name() {
+    return name_;
+  }
+  std::string namesFromRoot(const std::string& separator="/") {
+    std::string out = std::string(symbolToString(this->name_));
+    if (this->isRoot()) {
+      return out;
+    }
+    Scope* parent = this->parent_;
+    while (!parent->isRoot()) {
+      out = std::string(symbolToString(parent->name_)) + separator + out;
+      parent = parent->parent_;
+    }
+    return out;
+  }
+};
+
 // the list types are intentionally simple, but we type-def
 // them here so if we need to change them, refactoring will be easier
 using node_list = std::vector<Node*>;
@@ -123,6 +181,7 @@ private:
   size_t stage_ = 0;           // 0-forward, 1-backward, 2-double-backward,...
   std::string debug_name_;
   std::shared_ptr<SourceLocation> source_location_;
+  Scope* scope_;
 protected:
   TypePtr type_;
   Node(Graph * graph_, NodeKind kind_); //defined after graph
@@ -187,6 +246,18 @@ public:
   }
   size_t stage() const {
     return stage_;
+  }
+  Scope* scope() {
+    return scope_;
+  }
+  void setScope(Scope* scope) {
+    scope_ = scope;
+  }
+  std::string scopeName() const {
+    if (scope_ == NULL) {
+      return "";
+    }
+    return scope_->namesFromRoot();
   }
   // NB: This returns an ArrayRef; that means that it will
   // get invalidated if you resize inputs (e.g., using addInput)
@@ -528,12 +599,7 @@ protected:
   //
   // NB: This does NOT clone stages.  You're expected to set the stage correctly
   // if you are going to preserve it.
-  virtual void cloneFrom(Node * s) {
-    if (s->hasType()) setType(s->type());
-    setDebugName(s->debugName());
-    setSourceLocation(s->getSourceLocation());
-    copyAttributes(*s);
-  }
+  virtual void cloneFrom(Node * s);
 };
 
 struct Graph {
@@ -551,6 +617,9 @@ private:
 
   size_t new_node_stage_;
 
+  std::shared_ptr<Scope> scope_root_;
+  Scope * current_scope_;
+
   // holds outputs in a way that can be reflected
   // as a Use object
   // also used as the beginning/end of the circular node list to avoid
@@ -558,10 +627,16 @@ private:
   Node * const output_;
 
 public:
-  Graph()
+
+  Graph(std::shared_ptr<Scope> scope_root)
   : next_unique_(0)
   , new_node_stage_(0)
+  , scope_root_(scope_root)
+  , current_scope_(scope_root_.get())
   , output_(initOutput(create(kReturn))) {}
+
+  Graph()
+  : Graph( std::make_shared<Scope>()) {}
 
   at::ArrayRef<Node*> inputs() {
     return inputs_;
@@ -617,6 +692,29 @@ public:
 
   Node * addInput() {
     return addInput(create(kParam));
+  }
+  void push_scope(const std::string& scope_name) {
+    current_scope_ = current_scope_->push(stringToSymbol(scope_name));
+  }
+  void pop_scope() {
+    current_scope_ = current_scope_->parent();
+  }
+  Scope * current_scope() {
+    return current_scope_;
+  }
+  void set_current_scope(Scope* scope) {
+    if (scope->getRoot() != scope_root_.get()) {
+      throw std::runtime_error("trying to set a scope as current that does not belong to the Graph's scope trie");
+    }
+    current_scope_ = scope;
+  }
+  ResourceGuard set_current_scope_temporary(Scope* scope) {
+    auto prev_scope = current_scope_;
+    this->set_current_scope(scope);
+    return ResourceGuard([prev_scope, this]() { this->current_scope_ = prev_scope; });
+  }
+  std::shared_ptr<Scope> scope_root() {
+    return scope_root_;
   }
 
   Node * addInput(Node* n) {
@@ -694,7 +792,8 @@ public:
   }
   Node * createFusionGroup() {
     auto n = create(kFusionGroup);
-    n->g_(kSubgraph,std::make_shared<Graph>());
+    auto subgraph = std::make_shared<Graph>(scope_root_);
+    n->g_(kSubgraph, subgraph);
     return n;
   }
   Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, pyobj_list&& scalar_args);
@@ -764,9 +863,10 @@ inline Node::Node(Graph * graph_, NodeKind kind_) :
   graph_(graph_),
   unique_(graph_->next_unique_++),
   stage_(graph_->new_node_stage_),
+  scope_(graph_->current_scope_) ,
   type_(getInitialType(kind_)) {
-  graph_->all_nodes.emplace(this);
-}
+    graph_->all_nodes.emplace(this);
+  }
 
 inline void Node::destroy() {
   JIT_ASSERT(inGraphList());
@@ -786,6 +886,16 @@ inline Node* Node::makeMultireturn() {
   select->insertAfter(this);
   setType(multiType());
   return select;
+}
+
+inline void Node::cloneFrom(Node * s) {
+  if (s->hasType()) setType(s->type());
+  setDebugName(s->debugName());
+  setSourceLocation(s->getSourceLocation());
+	if (s->owningGraph()->scope_root_ == owningGraph()->scope_root_) {
+    scope_ = s->scope_;
+  }
+  copyAttributes(*s);
 }
 
 // Helper macros for constructing switch statements over Node types

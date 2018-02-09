@@ -31,6 +31,30 @@ HOLE = Placeholder("HOLE")
 VOLATILE = Placeholder("VOLATILE")
 
 
+# This global variable is set when we are tracing a *forwards* computation.
+# It is intended to be a cheap way to test if tracing has occurred, before
+# doing the slower path using `get_tracing_state` (below.)
+_tracing = False
+
+
+def get_tracing_state(args):
+    if not torch._C._is_tracing(args):
+        return None
+    return torch._C._get_tracing_state(args)
+
+
+@contextlib.contextmanager
+def scope(scope_name, *vars):
+    tracing_state = get_tracing_state(vars)
+    if tracing_state:
+        tracing_state.push_scope(scope_name)
+    try:
+        yield
+    finally:
+        if tracing_state:
+            tracing_state.pop_scope()
+
+
 def compile(arg=None, **kwargs):
     """
     Decorator which marks a function or module class as eligible for
@@ -227,6 +251,8 @@ class TracedModule(Module):
         self.nderivs = nderivs
 
     def forward(self, *args, **kwargs):
+        global _tracing
+
         # TODO: Possible optimization: use the unflattened
         # output so we don't unflatten it when we get out
         # NB: Not a method because _raw_trace can't deal
@@ -238,7 +264,9 @@ class TracedModule(Module):
         kw_items = list(kwargs.items())
         kw_items.sort()
         in_vars, in_struct = _flatten((args, tuple(kw_items)), self.state_dict(keep_vars=True).values())
+        _tracing = True
         trace, (out_vars, out_struct) = traced_inner(in_vars, in_struct)
+        _tracing = False
         out, unmatched = _unflatten(out_vars, out_struct)
         assert len(unmatched) == 0
         return trace, out

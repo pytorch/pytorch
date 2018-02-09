@@ -50,6 +50,12 @@ def LSTMCellC(*args, **kwargs):
 class TestJit(TestCase):
     maxDiff = None
 
+    def assertExpectedTrace(self, trace, *args, **kwargs):
+        torch._C._jit_pass_lint(trace)
+        torch._C._jit_pass_dce(trace)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace), *args, **kwargs)
+
     def test_simple(self):
         x = Variable(torch.Tensor([0.4]), requires_grad=True)
         y = Variable(torch.Tensor([0.7]), requires_grad=True)
@@ -60,6 +66,63 @@ class TestJit(TestCase):
         trace, z = torch.jit.trace(f, (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
         self.assertExpected(str(trace))
+
+    def test_scopes(self):
+        x = Variable(torch.Tensor([0.4]), requires_grad=True)
+        y = Variable(torch.Tensor([0.7]), requires_grad=True)
+
+        def f(x, y):
+            out = x + y
+            with torch.jit.scope('Foo', out):
+                out = x * out
+                with torch.jit.scope('Bar', out):
+                    out = torch.tanh(out)
+                out = torch.sigmoid(out)
+            return out
+
+        trace, z = torch.jit.trace(f, (x, y), nderivs=0)
+        torch._C._jit_pass_lint(trace)
+        self.assertExpected(str(trace))
+
+    def test_scopes_intermediate_node(self):
+
+        class Net(nn.Module):
+            def forward(self, x):
+                return F.log_softmax(x, dim=0)
+
+        net = Net()
+        t = Variable(torch.ones(2), requires_grad=True)
+        trace, _ = torch.jit.trace(net, (t, ))
+        torch.onnx._optimize_trace(trace)
+
+        self.assertExpectedTrace(trace)
+
+    def test_scopes_identity_node(self):
+
+        class Net(nn.Module):
+
+            def __init__(self):
+                super(Net, self).__init__()
+                self.features = nn.Sequential(
+                    nn.Conv2d(3, 64, kernel_size=11, stride=4, padding=2),
+                    nn.ReLU(inplace=True),
+                    nn.MaxPool2d(kernel_size=3, stride=2),
+                )
+
+            def forward(self, x):
+                x = self.features(x)
+                return x
+
+        model = Net()
+
+        t = Variable(torch.ones(1, 3, 227, 227), requires_grad=True)
+
+        with torch.onnx.set_training(model, False):
+            trace, _ = torch.jit.trace(model, (t, ))
+
+        torch.onnx._optimize_trace(trace)
+
+        self.assertExpectedTrace(trace)
 
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_lstm_fusion(self):

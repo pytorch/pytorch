@@ -33,7 +33,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
     throw std::logic_error("ToONNX: tracing state is expired");
   }
 
-  auto new_graph = std::make_shared<Graph>();
+  auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
   std::unordered_map<void*, Node*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;
@@ -159,6 +159,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
         py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
+    auto scope_guard = ctx.graph->set_current_scope_temporary(n->scope());
+
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs);
 
     processSymbolicOutput(symbolToString(n->kind()), n, raw_output);
@@ -195,6 +197,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       py_symbolic_args[input_nr++] = obj;
     }
 
+    auto scope_guard = ctx.graph->set_current_scope_temporary(op->scope());
+
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch
@@ -218,6 +222,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       // Selects are translated by multi-return nodes.
       JIT_ASSERT(env.count(value) > 0);
     IR_ELSEIFM(CppOp)
+      auto scope_guard = new_graph->set_current_scope_temporary(node->scope());
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
         setOutputs(value->name(), node, outputs);
