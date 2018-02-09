@@ -55,6 +55,21 @@ type2prec = {'FloatTensor': 1e-5,
 # CI.
 
 
+# Used to run the same test with different tensor types
+def repeat_test_for_types(dtypes):
+    def repeat_helper(f):
+        def call_helper(self, *args):
+            for dtype in dtypes:
+                if PY34:
+                    with TestCase.subTest(self, dtype=dtype):
+                        f(self, *args, dtype=dtype)
+                else:
+                    f(self, *args, dtype=dtype)
+
+        return call_helper
+    return repeat_helper
+
+
 class PackedSequenceTest(TestCase):
 
     _type_by_name = {
@@ -328,20 +343,6 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
 
 
 class TestNN(NNTestCase):
-    # Used for run the same test with different tensor types
-    def repeat_test_for_types(dtypes):
-        def repeatHelper(f):
-            def callHelper(self, *args):
-                for dtype in dtypes:
-                    if PY34:
-                        with self.subTest(dtype=dtype):
-                            f(self, *args, dtype=dtype)
-                    else:
-                        f(self, *args, dtype=dtype)
-
-            return callHelper
-        return repeatHelper
-
     def _forward(self, module, input):
         with freeze_rng_state():
             return module(input)
