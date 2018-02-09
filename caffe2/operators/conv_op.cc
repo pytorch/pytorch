@@ -74,6 +74,8 @@ OPERATOR_SCHEMA(Conv)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
+    .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .FillUsing(ConvDocGenerator(""));
 
 REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
@@ -99,6 +101,8 @@ REGISTER_CPU_OPERATOR(Conv3D, ConvOp<float, CPUContext>);
 OPERATOR_SCHEMA(Conv3D)
     .NumInputs(2, 3)
     .NumOutputs(1)
+    .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
+        ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .FillUsing(ConvDocGenerator("3D "));
 

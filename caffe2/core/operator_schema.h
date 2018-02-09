@@ -181,11 +181,12 @@ class OpSchema {
 
   /*
    * @brief A struct to store various cost information about
-   * an operator such as FLOPs and total memory use.
+   * an operator such as FLOPs, total memory use and parameters.
    */
   struct Cost {
     uint64_t flops; // Floating point operations.
     uint64_t bytes_moved; // Total memory used.
+    uint64_t params_bytes; // Memory footprint of parameters
   };
   /**
    * @brief Registers a function that takes in an OperatorDef
@@ -490,6 +491,7 @@ OpSchema::Cost PointwiseCostInference(
   }
 
   c.flops = size * OpsPerPoint;
+  c.bytes_moved = size;
   return c;
 }
 

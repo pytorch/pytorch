@@ -61,6 +61,26 @@ std::vector<TensorShape> FCShapeInference(
   out[0] = CreateTensorShape(y_shape, in[0].data_type());
   return out;
 }
+
+OpSchema::Cost CostInferenceForFC(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  struct OpSchema::Cost c;
+  ArgumentHelper helper(def);
+
+  auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
+  const auto canonical_axis = canonical_axis_index_(axis, in[0].dims().size());
+  const int M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
+  const int K = size_from_dim_(canonical_axis, GetDimsVector(in[0]));
+  auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
+  const int canonical_axis_w =
+      canonical_axis_index_(axis_w, in[1].dims().size());
+  const int N = size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
+  c.flops = 2 * K * M * N + M * N;
+  c.bytes_moved = M * N * sizeof(float);
+  c.params_bytes = (K * N + N) * sizeof(float);
+  return c;
+}
 } // namespace
 
 using namespace std::placeholders;
@@ -77,6 +97,8 @@ OPERATOR_SCHEMA(FC)
     .NumInputs(3)
     .NumOutputs(1)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
+    .CostInferenceFunction(
+        OpSchema::CostInferenceFunctionType(CostInferenceForFC))
     .SetDoc(R"DOC(
 Computes the result of passing an input vector X into a fully
 connected layer with 2D weight matrix W and 1D bias vector b. That is,

@@ -67,6 +67,19 @@ bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+namespace {
+OpSchema::Cost CostInferenceForRelu(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  struct OpSchema::Cost cost = PointwiseCostInference<2>(def, in);
+  if (def.input(0) == def.output(0)) {
+    cost.bytes_moved = 0;
+  }
+  cost.params_bytes = 0;
+  return cost;
+}
+} // namespace
+
 REGISTER_CPU_OPERATOR(Relu, ReluOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(ReluGradient, ReluGradientOp<float, CPUContext>);
 
@@ -75,7 +88,7 @@ OPERATOR_SCHEMA(Relu)
     .NumInputs(1)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .CostInferenceFunction(PointwiseCostInference<2>)
+    .CostInferenceFunction(CostInferenceForRelu)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Relu takes one input data (Tensor<T>) and produces one output data

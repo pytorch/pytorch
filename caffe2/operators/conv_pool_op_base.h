@@ -403,33 +403,57 @@ class ConvPoolOpBase : public Operator<Context> {
     const TensorShape X = inputs[0];
     const TensorShape W = inputs[1];
     const TensorShape Y = TensorInferenceForConv(def, inputs)[0];
-
     ArgumentHelper helper(def);
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
 
+    unsigned long long N;
+    unsigned long long Y_t = 1;
     unsigned long long Y_h;
     unsigned long long Y_w;
+    unsigned long long kernel_t = 1;
     unsigned long long kernel_h;
     unsigned long long kernel_w;
     unsigned long long in_channels;
     unsigned long long out_channels;
-    if (order == StorageOrder::NHWC) {
-      Y_h = Y.dims(1);
-      Y_w = Y.dims(2);
-      kernel_h = W.dims(1);
-      kernel_w = W.dims(2);
-      in_channels = W.dims(3);
-      out_channels = W.dims(0);
-    } else {
-      Y_h = Y.dims(2);
-      Y_w = Y.dims(3);
-      kernel_h = W.dims(2);
-      kernel_w = W.dims(3);
+
+    N = X.dims(0);
+    if (X.dims_size() == 5) {
+      // 3D convolution
+      CAFFE_ENFORCE_EQ(order, StorageOrder::NCHW, "Conv3D only supports NCHW");
+      Y_t = Y.dims(2);
+      Y_h = Y.dims(3);
+      Y_w = Y.dims(4);
+      kernel_t = W.dims(2);
+      kernel_h = W.dims(3);
+      kernel_w = W.dims(4);
       in_channels = W.dims(1);
       out_channels = W.dims(0);
+    } else {
+      // 2D convolution
+      CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
+      if (order == StorageOrder::NHWC) {
+        Y_h = Y.dims(1);
+        Y_w = Y.dims(2);
+        kernel_h = W.dims(1);
+        kernel_w = W.dims(2);
+        in_channels = W.dims(3);
+        out_channels = W.dims(0);
+      } else {
+        Y_h = Y.dims(2);
+        Y_w = Y.dims(3);
+        kernel_h = W.dims(2);
+        kernel_w = W.dims(3);
+        in_channels = W.dims(1);
+        out_channels = W.dims(0);
+      }
     }
-    c.flops = Y_h * Y_w * kernel_w * kernel_h * in_channels * out_channels * 2;
+    // grouping is NOT properly handled yet
+    c.flops = N * Y_t * Y_h * Y_w * kernel_t * kernel_w * kernel_h *
+        in_channels * out_channels * 2;
+    c.bytes_moved = N * out_channels * Y_t * Y_h * Y_w * sizeof(float);
+    c.params_bytes = out_channels * in_channels * kernel_t * kernel_h *
+        kernel_w * sizeof(float);
     return c;
   }
 
@@ -442,12 +466,10 @@ class ConvPoolOpBase : public Operator<Context> {
     CAFFE_ENFORCE_GT(in[0].dims_size(), 0);
     int N = in[0].dims(0);
     bool channel_first;
-
     vector<int> pads = helper.GetRepeatedArgument<int>("pads");
     vector<int> kernel = helper.GetRepeatedArgument<int>("kernels");
     vector<int> strides = helper.GetRepeatedArgument<int>("strides");
     vector<int> dilations = helper.GetRepeatedArgument<int>("dilation");
-
     if (helper.HasArgument("pad")) {
       pads.resize(4, helper.GetSingleArgument<int>("pad", 0));
     } else if (
@@ -483,17 +505,17 @@ class ConvPoolOpBase : public Operator<Context> {
       strides.push_back(helper.GetSingleArgument<int>("dilation_w", 1));
     }
 
-    auto check_and_set_default_value = [](
-        vector<int>& vec, int size, int value) {
-      if (vec.size() == 0) {
-        vec.resize(size, value);
-      }
-    };
+    auto check_and_set_default_value =
+        [](vector<int>& vec, int size, int value) {
+          if (vec.size() == 0) {
+            vec.resize(size, value);
+          }
+        };
 
-    check_and_set_default_value(pads, 4, 0);
     check_and_set_default_value(kernel, 2, 1);
-    check_and_set_default_value(strides, 2, 1);
-    check_and_set_default_value(dilations, 2, 1);
+    check_and_set_default_value(strides, kernel.size(), 1);
+    check_and_set_default_value(pads, kernel.size() * 2, 0);
+    check_and_set_default_value(dilations, kernel.size(), 1);
 
     vector<int> output_dims;
     ConvPoolOpBase<CPUContext>::InferOutputSize(
@@ -516,127 +538,127 @@ class ConvPoolOpBase : public Operator<Context> {
     } else {
       output_dims.push_back(output_channel);
       output_dims.insert(output_dims.begin(), N);
-   }
+    }
 
-   out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
-   return out;
- }
+    out[0] = CreateTensorShape(output_dims, TensorProto::FLOAT);
+    return out;
+  }
 
- static vector<TensorShape> TensorInferenceForConv(
-   const OperatorDef& def,
-   const vector<TensorShape>& in) {
-   return TensorInferenceForSchema(def, in, in[1].dims(0));
- }
+  static vector<TensorShape> TensorInferenceForConv(
+      const OperatorDef& def,
+      const vector<TensorShape>& in) {
+    return TensorInferenceForSchema(def, in, in[1].dims(0));
+  }
 
- static vector<TensorShape> TensorInferenceForPool(
-     const OperatorDef& def,
-     const vector<TensorShape>& in) {
-   ArgumentHelper helper(def);
-   auto order =
-       StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
-   int num_channels =
-       (order == StorageOrder::NCHW ? in[0].dims(1) : in[0].dims(3));
-   return TensorInferenceForSchema(def, in, num_channels);
- }
+  static vector<TensorShape> TensorInferenceForPool(
+      const OperatorDef& def,
+      const vector<TensorShape>& in) {
+    ArgumentHelper helper(def);
+    auto order =
+        StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
+    int num_channels =
+        (order == StorageOrder::NCHW ? in[0].dims(1) : in[0].dims(3));
+    return TensorInferenceForSchema(def, in, num_channels);
+  }
 
- virtual ~ConvPoolOpBase() {}
+  virtual ~ConvPoolOpBase() {}
 
-protected:
- LegacyPadding legacy_pad_;
- bool global_pooling_;
- vector<int> kernel_;
- vector<int> dilation_;
- vector<int> stride_;
- vector<int> pads_;
+ protected:
+  LegacyPadding legacy_pad_;
+  bool global_pooling_;
+  vector<int> kernel_;
+  vector<int> dilation_;
+  vector<int> stride_;
+  vector<int> pads_;
 
- // We need the above parameters to be available for the devices.
- Tensor<Context> kernel_device_;
- Tensor<Context> dilation_device_;
- Tensor<Context> stride_device_;
- Tensor<Context> pads_device_;
+  // We need the above parameters to be available for the devices.
+  Tensor<Context> kernel_device_;
+  Tensor<Context> dilation_device_;
+  Tensor<Context> stride_device_;
+  Tensor<Context> pads_device_;
 
- int group_;
- StorageOrder order_;
- bool shared_buffer_;
- Workspace* ws_;
+  int group_;
+  StorageOrder order_;
+  bool shared_buffer_;
+  Workspace* ws_;
 
- static inline void ComputeSizeAndPad(
-     const int in_size,
-     const int stride,
-     const int kernel,
-     const int dilation,
-     LegacyPadding legacy_pad,
-     int* pad_head,
-     int* pad_tail,
-     int* out_size) {
-   const int dkernel = dilation * (kernel - 1) + 1;
-   switch (legacy_pad) {
-     case LegacyPadding::NOTSET:
-       // We will just use the direct padding head and tail values, but we
-       // will verify that they are non-negative.
-       CAFFE_ENFORCE_GE(in_size + *pad_head + *pad_tail, dkernel);
-       *out_size = static_cast<int>(
-           static_cast<float>(in_size + *pad_head + *pad_tail - dkernel) /
-               stride +
-           1);
-       break;
-     case LegacyPadding::VALID:
-       *pad_head = 0;
-       *pad_tail = 0;
-       *out_size = (in_size - dkernel) / stride + 1;
-       break;
-     case LegacyPadding::SAME: {
-       CAFFE_ENFORCE(
-           1 == dilation, "Dilation not supported for legacy padding.");
-       int legacy_target_size = (in_size + stride - 1) / stride;
-       int pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
-       if (CAFFE2_PAD_HEAD_MORE) {
-         *pad_head = (pad_needed + 1) / 2;
-       } else {
-         *pad_head = pad_needed / 2;
-       }
-       *pad_tail = pad_needed - *pad_head;
-       *out_size = (in_size + pad_needed - dkernel) / stride + 1;
-       break;
-     }
-     case LegacyPadding::CAFFE_LEGACY_POOLING:
-       // This is in order to adapt Caffe's pooling padding case. In this case,
-       // we will only use pad_head and will compute pad_tail to match the
-       // old caffe pooling strategy. Also see caffe2_legacy.proto for more
-       // details.
-       CAFFE_ENFORCE_GE(*pad_head, 0);
-       // Here, notice that caffe casts UP while caffe2 casts DOWN for the
-       // output size computation.
-       *out_size = std::ceil(
-           static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
-       // If we have padding, caffe also ensures that the last pooling starts
-       // strictly inside the image (instead of at the padding); otherwise clip
-       // the last.
-       if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
-         --*out_size;
-       }
-       // Now, compare the output size with the standard Caffe2 output size.
-       // The
-       // caffe2 standard output size should always be no larger than the
-       // output
-       // size of caffe.
-       int standard_out_size = static_cast<int>(
-           static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
-       CAFFE_ENFORCE_GE(
-           *out_size,
-           standard_out_size,
-           "This should never happen. If this happens, double check the logic "
-           "above.");
-       if (*out_size > standard_out_size) {
-         LOG(WARNING)
-             << "You are hitting a case where Caffe's legacy padding calculation "
-                "is hit. This leads to inefficient and sometimes incorrect "
-                "results. We are keeping this behavior for backward compatibility"
-                ", but you are strongly recommended to move away from it.";
-       }
-       *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
-       break;
-   }
+  static inline void ComputeSizeAndPad(
+      const int in_size,
+      const int stride,
+      const int kernel,
+      const int dilation,
+      LegacyPadding legacy_pad,
+      int* pad_head,
+      int* pad_tail,
+      int* out_size) {
+    const int dkernel = dilation * (kernel - 1) + 1;
+    switch (legacy_pad) {
+      case LegacyPadding::NOTSET:
+        // We will just use the direct padding head and tail values, but we
+        // will verify that they are non-negative.
+        CAFFE_ENFORCE_GE(in_size + *pad_head + *pad_tail, dkernel);
+        *out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head + *pad_tail - dkernel) /
+                stride +
+            1);
+        break;
+      case LegacyPadding::VALID:
+        *pad_head = 0;
+        *pad_tail = 0;
+        *out_size = (in_size - dkernel) / stride + 1;
+        break;
+      case LegacyPadding::SAME: {
+        CAFFE_ENFORCE(
+            1 == dilation, "Dilation not supported for legacy padding.");
+        int legacy_target_size = (in_size + stride - 1) / stride;
+        int pad_needed = (legacy_target_size - 1) * stride + kernel - in_size;
+        if (CAFFE2_PAD_HEAD_MORE) {
+          *pad_head = (pad_needed + 1) / 2;
+        } else {
+          *pad_head = pad_needed / 2;
+        }
+        *pad_tail = pad_needed - *pad_head;
+        *out_size = (in_size + pad_needed - dkernel) / stride + 1;
+        break;
+      }
+      case LegacyPadding::CAFFE_LEGACY_POOLING:
+        // This is in order to adapt Caffe's pooling padding case. In this case,
+        // we will only use pad_head and will compute pad_tail to match the
+        // old caffe pooling strategy. Also see caffe2_legacy.proto for more
+        // details.
+        CAFFE_ENFORCE_GE(*pad_head, 0);
+        // Here, notice that caffe casts UP while caffe2 casts DOWN for the
+        // output size computation.
+        *out_size = std::ceil(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
+        // If we have padding, caffe also ensures that the last pooling starts
+        // strictly inside the image (instead of at the padding); otherwise clip
+        // the last.
+        if (*pad_head > 0 && (*out_size - 1) * stride >= in_size + *pad_head) {
+          --*out_size;
+        }
+        // Now, compare the output size with the standard Caffe2 output size.
+        // The
+        // caffe2 standard output size should always be no larger than the
+        // output
+        // size of caffe.
+        int standard_out_size = static_cast<int>(
+            static_cast<float>(in_size + *pad_head * 2 - kernel) / stride + 1);
+        CAFFE_ENFORCE_GE(
+            *out_size,
+            standard_out_size,
+            "This should never happen. If this happens, double check the logic "
+            "above.");
+        if (*out_size > standard_out_size) {
+          LOG(WARNING)
+              << "You are hitting a case where Caffe's legacy padding calculation "
+                 "is hit. This leads to inefficient and sometimes incorrect "
+                 "results. We are keeping this behavior for backward compatibility"
+                 ", but you are strongly recommended to move away from it.";
+        }
+        *pad_tail = *pad_head + stride * (*out_size - standard_out_size);
+        break;
+    }
   }
 
   // Accessors for 2D conv params.
