@@ -20,8 +20,8 @@ class _InstanceNorm(_BatchNorm):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 3d input (a mini-batch of 2d inputs)
-    as described in the paper
+    r"""Applies Instance Normalization over a 2d or 3d input (a mini-batch of 1d
+    inputs with optional additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
@@ -50,7 +50,7 @@ class InstanceNorm1d(_InstanceNorm):
 
     Args:
         num_features: num_features from an expected input of size
-            `[batch_size x num_features x width]`
+            :math:`(N, C, L)` or :math:`(N, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -83,8 +83,8 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input (a mini-batch of 3d inputs)
-    as described in the paper
+    r"""Applies Instance Normalization over a 4d input (a mini-batch of 2d inputs
+    with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
@@ -113,7 +113,7 @@ class InstanceNorm2d(_InstanceNorm):
 
     Args:
         num_features: num_features from an expected input of size
-            `[batch_size x num_features x height x width]`
+            :math:`(N, C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -146,8 +146,8 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input (a mini-batch of 4d inputs)
-    as described in the paper
+    r"""Applies Instance Normalization over a 5d input (a mini-batch of 3d inputs
+    with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
@@ -176,7 +176,7 @@ class InstanceNorm3d(_InstanceNorm):
 
     Args:
         num_features: num_features from an expected input of size
-            `[batch_size x num_features x depth x height x width]`
+            :math:`(N, C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has

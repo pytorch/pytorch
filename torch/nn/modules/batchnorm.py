@@ -55,8 +55,8 @@ class _BatchNorm(Module):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 3d input (a mini-batch of 2d inputs)
-    as described in the paper
+    r"""Applies Batch Normalization over a 2d or 3d input (a mini-batch of 1d
+    inputs with optional additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
 
     .. math::
@@ -89,7 +89,7 @@ class BatchNorm1d(_BatchNorm):
 
     Args:
         num_features: num_features from an expected input of size
-            `[batch_size x num_features (x width)]`
+            :math:`(N, C, L)` or :math:`(N, L)`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
@@ -124,8 +124,8 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4d input (a mini-batch of 3d inputs)
-    as described in the paper
+    r"""Applies Batch Normalization over a 4d input (a mini-batch of 2d inputs
+    with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
 
     .. math::
@@ -157,8 +157,8 @@ class BatchNorm2d(_BatchNorm):
     on `(N, H, W)` slices, it's common terminology to call this Spatial BatchNorm
 
     Args:
-        num_features: num_features from an expected input of
-            size `[batch_size x num_features x height x width]`
+        num_features: num_features from an expected input of size
+            :math:`(N, C, H, W)`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
@@ -193,8 +193,8 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5d input (a mini-batch of 4d inputs)
-    as described in the paper
+    r"""Applies Batch Normalization over a 5d input (a mini-batch of 3d inputs
+    with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
 
     .. math::
@@ -227,8 +227,8 @@ class BatchNorm3d(_BatchNorm):
     or Spatio-temporal BatchNorm
 
     Args:
-        num_features: num_features from an expected input of
-            `[size batch_size x num_features x depth x height x width]`
+        num_features: num_features from an expected input of size
+            :math:`(N, C, D, H, W)`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var

@@ -1175,7 +1175,8 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
     """Applies Batch Normalization for each channel across a batch of data.
 
-    See :class:`~torch.nn.BatchNorm2d` (or the 1d and 3d variants) for details.
+    See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
+    :class:`~torch.nn.BatchNorm3d` for details.
     """
     if training:
         size = list(input.size())
@@ -1202,13 +1203,17 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
     if not use_input_stats and (running_mean is None or running_var is None):
         raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
 
+    b, c = input.size(0), input.size(1)
+    if weight is not None:
+        weight = weight.repeat(b)
+    if bias is not None:
+        bias = bias.repeat(b)
+
     import torch.onnx.symbolic
 
     @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
-    def _instance_norm(input, running_mean, running_var, weight, bias,
-                       use_input_stats, momentum, eps):
-        b, c = input.size(0), input.size(1)
-
+    def _instance_norm(input, running_mean=None, running_var=None, weight=None,
+                       bias=None, use_input_stats=None, momentum=None, eps=None):
         # Repeat stored stats and affine transform params if necessary
         if running_mean is not None:
             running_mean_orig = running_mean
@@ -1216,10 +1221,6 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
         if running_var is not None:
             running_var_orig = running_var
             running_var = running_var_orig.repeat(b)
-        if weight is not None:
-            weight = weight.repeat(b)
-        if bias is not None:
-            bias = bias.repeat(b)
 
         # Apply instance norm
         input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
@@ -1235,8 +1236,10 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
             running_var_orig.copy_(running_var.view(b, c).mean(0, keepdim=False))
 
         return out.view(b, c, *input.size()[2:])
-    return _instance_norm(input, running_mean, running_var, weight, bias,
-                          use_input_stats, momentum, eps)
+    return _instance_norm(input, running_mean=running_mean,
+                          running_var=running_var, weight=weight, bias=bias,
+                          use_input_stats=use_input_stats, momentum=momentum,
+                          eps=eps)
 
 
 def layer_norm(input, normalized_shape, running_mean, running_var,
