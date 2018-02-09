@@ -37,26 +37,14 @@ using ListAttributeMap = std::unordered_map<
 // Keep track of environment as we descend down nested control
 // structures.
 struct Environment {
-  enum class Type {
-    kNormal,
-    kWhile,
-    kIf,
-  };
-
   Environment(
-      Type t,
       Block* b = nullptr,
       std::shared_ptr<Environment> next = nullptr)
-      : t(t), b(b), lazy(false), next(next) {}
-
-  Type t;
+      : b(b), next(next) {}
 
   std::vector<std::string> positional_inputs;
   ValueTable value_table;
   Block* b;
-  // When referring to or setting a value, do not create a new block input if
-  // true
-  bool lazy;
 
   std::shared_ptr<Environment> next;
 };
@@ -65,7 +53,7 @@ struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
     environment_stack =
-        std::make_shared<Environment>(Environment::Type::kNormal);
+        std::make_shared<Environment>();
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
@@ -149,8 +137,7 @@ struct to_ir {
     // Emit both blocks once to get the union of all mutated values
     std::shared_ptr<Environment> save_true_environment, save_false_environment;
     {
-      environment_stack = std::make_shared<Environment>(
-          Environment::Type::kIf, true_block, environment_stack);
+      environment_stack = std::make_shared<Environment>(true_block, environment_stack);
       WithInsertPoint guard(*def.graph, true_block);
       emitStatements(stmt.trueBranch());
       deleteExtraInputs(true_block, environment_stack);
@@ -160,8 +147,7 @@ struct to_ir {
     }
 
     {
-      environment_stack = std::make_shared<Environment>(
-          Environment::Type::kIf, false_block, environment_stack);
+      environment_stack = std::make_shared<Environment>(false_block, environment_stack);
       WithInsertPoint guard(*def.graph, false_block);
       emitStatements(stmt.falseBranch());
       deleteExtraInputs(false_block, environment_stack);
@@ -186,9 +172,7 @@ struct to_ir {
     false_block = n->addBlock();
 
     {
-      environment_stack = std::make_shared<Environment>(
-          Environment::Type::kIf, true_block, environment_stack);
-      environment_stack->lazy = true;
+      environment_stack = std::make_shared<Environment>(true_block, environment_stack);
 
       // Pre-populate block inputs with the union of mutated values from both
       // branches
@@ -207,9 +191,7 @@ struct to_ir {
     }
 
     {
-      environment_stack = std::make_shared<Environment>(
-          Environment::Type::kIf, false_block, environment_stack);
-      environment_stack->lazy = true;
+      environment_stack = std::make_shared<Environment>(false_block, environment_stack);
 
       // Pre-populate block inputs with the union of mutated values from both
       // branches
@@ -248,8 +230,7 @@ struct to_ir {
     // TODO iteration num and condition
 
     {
-      environment_stack = std::make_shared<Environment>(
-          Environment::Type::kWhile, body_block, environment_stack);
+      environment_stack = std::make_shared<Environment>(body_block, environment_stack);
       WithInsertPoint guard(*def.graph, body_block);
       emitStatements(stmt.body());
 
@@ -339,35 +320,35 @@ struct to_ir {
   void setVar(const std::string& name, Value* value) {
     auto& curr_frame = *environment_stack;
 
-    switch (curr_frame.t) {
-      case Environment::Type::kNormal: {
+    Symbol owning_kind = Symbol();
+    if (curr_frame.b) {
+      owning_kind = curr_frame.b->owningNode()->kind();
+    }
+
+    if (owning_kind == Symbol("Loop") || owning_kind == Symbol("If")) {
+      // Overwriting an existing value means it's already been
+      // accounted for.
+      if (findInThisFrame(name)) {
         curr_frame.value_table[name] = value;
-      } break;
+        return;
+      }
 
-      case Environment::Type::kWhile:
-      case Environment::Type::kIf: {
-        // Overwriting an existing value means it's already been
-        // accounted for.
-        if (findInThisFrame(name)) {
-          curr_frame.value_table[name] = value;
-          return;
-        }
+      // Value not here. search in parent scopes
+      if (findInParentFrame(name)) {
+        // Writing to a value in a parent frame. Make this a
+        // loop-carried dependency.
+        if (owning_kind == Symbol("Loop"))
+          createBlockInput(name);
 
-        // Value not here. search in parent scopes
-        if (findInParentFrame(name)) {
-          // Writing to a value in a parent frame. Make this a
-          // loop-carried dependency.
-          if (!curr_frame.lazy)
-            createBlockInput(name);
-
-          // Overwrite in value map
-          curr_frame.value_table[name] = value;
-        } else {
-          // Not accessing a value in enclosing scope. Make a new
-          // value as usual
-          curr_frame.value_table[name] = value;
-        }
-      } break;
+        // Overwrite in value map
+        curr_frame.value_table[name] = value;
+      } else {
+        // Not accessing a value in enclosing scope. Make a new
+        // value as usual
+        curr_frame.value_table[name] = value;
+      }
+    } else {
+      curr_frame.value_table[name] = value;
     }
   }
 
@@ -388,25 +369,26 @@ struct to_ir {
     retval = findInParentFrame(ident);
 
     auto& curr_frame = *environment_stack;
-    switch (curr_frame.t) {
-      case Environment::Type::kNormal: {
-        return retval;
-      } break;
 
-      case Environment::Type::kWhile:
-      case Environment::Type::kIf: {
-        if (retval) {
-          // Reading from a value in a parent frame. Make this a
-          // loop-carried dependency or explicit input
-          if (!curr_frame.lazy)
-            retval = createBlockInput(ident);
-
-          return retval;
-        } else {
-          throw ErrorReport() << "undefined value " << ident;
-        }
-      } break;
+    Symbol owning_kind = Symbol();
+    if (curr_frame.b) {
+      owning_kind = curr_frame.b->owningNode()->kind();
     }
+
+    if (owning_kind == Symbol("Loop") || owning_kind == Symbol("If")) {
+      if (retval) {
+        // Reading from a value in a parent frame. Make this a
+        // loop-carried dependency or explicit input
+        retval = createBlockInput(ident);
+
+        return retval;
+      } else {
+        throw ErrorReport() << "undefined value " << ident;
+      }
+    } else {
+      return retval;
+    }
+
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
