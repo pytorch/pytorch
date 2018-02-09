@@ -79,7 +79,10 @@ void THNN_(Im2Col_updateOutput)(
 
     THNN_(im2col)(
       THTensor_(data)(input_n),
-      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, sH, sW,
+      nInputPlane,
+      inputHeight, inputWidth,
+      outputHeight, outputWidth,
+      kH, kW, padH, padW, sH, sW,
       dH, dW, THTensor_(data)(output_n));
   }
 
