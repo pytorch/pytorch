@@ -31,6 +31,7 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
 try:

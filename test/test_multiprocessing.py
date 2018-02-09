@@ -11,7 +11,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests
+from common import TestCase, run_tests, IS_WINDOWS
 
 
 TEST_REPEATS = 30
