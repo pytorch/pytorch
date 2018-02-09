@@ -417,17 +417,20 @@ TH_API void THNN_(MultiMarginCriterion_updateOutput)(
                   bool sizeAverage,
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
-                  accreal margin);
+                  accreal margin,
+                  bool reduce);
 
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCIndexTensor *target,
+                  THCTensor *gradOutput,
                   THCTensor *gradInput,
                   bool sizeAverage,
                   int p,
                   THCTensor *weights,           // [OPTIONAL]
-                  accreal margin);
+                  accreal margin,
+                  bool reduce);
 
 TH_API void THNN_(PReLU_updateOutput)(
                   THCState *state,

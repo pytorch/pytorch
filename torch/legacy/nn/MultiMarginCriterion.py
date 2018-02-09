@@ -4,7 +4,7 @@ from .Criterion import Criterion
 
 class MultiMarginCriterion(Criterion):
 
-    def __init__(self, p=1, weights=None, margin=1, sizeAverage=True):
+    def __init__(self, p=1, margin=1, weights=None, sizeAverage=True):
         super(MultiMarginCriterion, self).__init__()
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
@@ -28,21 +28,25 @@ class MultiMarginCriterion(Criterion):
             self.sizeAverage,
             self.p,
             self.weights,
-            self.margin
+            self.margin,
+            True,  # reduce
         )
         self.output = self.output_tensor[0].item()
         return self.output
 
     def updateGradInput(self, input, target):
         target = target.long()
+        implicit_gradOutput = torch.ones(1).type_as(input)
         self._backend.MultiMarginCriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,
+            implicit_gradOutput,
             self.gradInput,
             self.sizeAverage,
             self.p,
             self.weights,
-            self.margin
+            self.margin,
+            True,  # reduce
         )
         return self.gradInput
