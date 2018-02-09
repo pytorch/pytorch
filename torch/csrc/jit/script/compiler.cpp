@@ -34,9 +34,27 @@ using ListAttributeMap = std::unordered_map<
     std::string,
     std::pair<const std::vector<double>, std::string>>;
 
+// Keep track of environment as we descend down nested control
+// structures.
+struct Environment {
+  enum class Type {
+    kNormal,
+    kWhile,
+  };
+
+  Environment(Type t, Block* b = nullptr) : t(t), b(b) {}
+
+  Type t;
+
+  std::vector<std::string> positional_inputs;
+  ValueTable value_table;
+  Block* b;
+};
+
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
+    environment_stack.push_back(Environment(Environment::Type::kNormal));
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
@@ -78,8 +96,79 @@ struct to_ir {
   }
 
   void emitWhile(const While& stmt) {
-    // TODO: add support for control flow ops
-    throw ErrorReport(stmt) << "Control flow is not supported yet.";
+    // TODO: scan outputs
+
+    Value* trip_count_dummy = emitConst(0, "i")[0];
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(Symbol("Loop"), 0));
+    n->addInput(trip_count_dummy);
+    n->addInput(cond_value);
+    auto* body_block = n->addBlock();
+
+    // TODO iteration num and condition
+
+    {
+      environment_stack.push_back(
+          Environment(Environment::Type::kWhile, body_block));
+      WithInsertPoint guard(*def.graph, body_block);
+      emitStatements(stmt.body());
+
+      // Also emit the conditional
+      Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
+      body_block->registerOutput(body_cond_value);
+
+      auto& curr_frame = environment_stack.back();
+
+      // Remove inputs for values that did not mutate within the
+      // block
+      std::vector<size_t> inputs_to_delete;
+      int i = 0;
+      for (const auto& x : curr_frame.positional_inputs) {
+        if (body_block->inputs()[i] == curr_frame.value_table[x]) {
+          inputs_to_delete.push_back(i);
+        }
+        i++;
+      }
+
+      for (auto ritr = inputs_to_delete.rbegin();
+           ritr != inputs_to_delete.rend();
+           ++ritr) {
+        auto name = curr_frame.positional_inputs[*ritr];
+        Value* v = curr_frame.value_table[name];
+        Value* orig = findInParentFrame(name);
+        // Replace all matching node inputs with original value
+        // from an enclosing scope
+        for (auto node : body_block->nodes()) {
+          for (size_t i = 0; i < node->inputs().size(); ++i) {
+            if (node->input(i) == v) {
+              node->replaceInput(i, orig);
+            }
+          }
+        }
+
+        // Actually remove the input
+        body_block->eraseInput(*ritr);
+        curr_frame.positional_inputs.erase(
+            curr_frame.positional_inputs.begin() + *ritr);
+      }
+
+      // Add block outputs
+      for (const auto& x : curr_frame.positional_inputs) {
+        body_block->registerOutput(curr_frame.value_table[x]);
+      }
+
+      auto preserve_positional_inputs = curr_frame.positional_inputs;
+
+      // Drop out of block environment
+      environment_stack.pop_back();
+
+      // Add op inputs
+      for (const auto& x : preserve_positional_inputs) {
+        n->addInput(getVar(x));
+        setVar(x, n->addOutput());
+      }
+    }
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -105,14 +194,107 @@ struct to_ir {
     return outputs;
   }
 
+  Value* findInThisFrame(const std::string& name) {
+    const auto& e = environment_stack.back();
+    if (e.value_table.count(name)) {
+      return e.value_table.at(name);
+    }
+    return nullptr;
+  }
+
+  Value* findInParentFrame(const std::string& name) {
+    for (auto ritr = environment_stack.rbegin() + 1;
+         ritr != environment_stack.rend();
+         ++ritr) {
+      if (ritr->value_table.count(name)) {
+        return ritr->value_table.at(name);
+      }
+    }
+    return nullptr;
+  }
+
+  Value* createBlockInput(const std::string& name) {
+    auto& curr_frame = environment_stack.back();
+    Block* b = curr_frame.b;
+
+    // Create the input
+    Value* new_input = b->addInput();
+
+    // Associate this name with this value
+    curr_frame.value_table[name] = new_input;
+
+    // List as a positional input
+    curr_frame.positional_inputs.push_back(name);
+
+    return new_input;
+  }
+
   void setVar(const std::string& name, Value* value) {
-    value_table[name] = value;
+    auto& curr_frame = environment_stack.back();
+
+    switch (curr_frame.t) {
+      case Environment::Type::kNormal: {
+        curr_frame.value_table[name] = value;
+      } break;
+
+      case Environment::Type::kWhile: {
+        // Overwriting an existing value means it's already been
+        // accounted for.
+        if (findInThisFrame(name)) {
+          curr_frame.value_table[name] = value;
+          return;
+        }
+
+        // Value not here. search in parent scopes
+        if (findInParentFrame(name)) {
+          // Writing to a value in a parent frame. Make this a
+          // loop-carried dependency.
+          createBlockInput(name);
+
+          // Overwrite in value map
+          curr_frame.value_table[name] = value;
+        } else {
+          // Not accessing a value in enclosing scope. Make a new
+          // value as usual
+          curr_frame.value_table[name] = value;
+        }
+      } break;
+    }
   }
 
   Value* getVar(const Ident& ident) {
-    if (value_table.count(ident.name()) == 0)
-      throw ErrorReport(ident) << "undefined value " << ident.name();
-    return value_table[ident.name()];
+    try {
+      return getVar(ident.name());
+    } catch (ErrorReport e) {
+      throw ErrorReport(ident) << e.what();
+    }
+  }
+
+  Value* getVar(const std::string& ident) {
+    Value* retval = findInThisFrame(ident);
+    if (retval)
+      return retval;
+
+    retval = findInParentFrame(ident);
+
+    auto& curr_frame = environment_stack.back();
+    switch (curr_frame.t) {
+      case Environment::Type::kNormal: {
+        return retval;
+      } break;
+
+      case Environment::Type::kWhile: {
+        if (retval) {
+          // Reading from a value in a parent frame. Make this a
+          // loop-carried dependency.
+          retval = createBlockInput(ident);
+
+          return retval;
+        } else {
+          throw ErrorReport() << "undefined value " << ident;
+        }
+      } break;
+    }
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -173,7 +355,7 @@ struct to_ir {
     }
     for (auto* node : fn.graph->nodes()) {
       auto* new_node =
-          def.graph->appendNode(def.graph->createClone(node, value_map_func));
+          def.graph->insertNode(def.graph->createClone(node, value_map_func));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         value_map[node->outputs()[i]] = new_node->outputs()[i];
         new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
@@ -348,7 +530,7 @@ struct to_ir {
       const size_t output_size,
       const AttributeMap& attributes = AttributeMap{},
       const ListAttributeMap& list_attributes = ListAttributeMap{}) {
-    Node* n = def.graph->appendNode(def.graph->create(kind, output_size));
+    Node* n = def.graph->insertNode(def.graph->create(kind, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -418,11 +600,11 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  ValueTable value_table;
+  std::vector<Environment> environment_stack;
 
  private:
   Value* createConstant(const at::Tensor& val) {
-    return def.graph->appendNode(def.graph->createConstant(val))->output();
+    return def.graph->insertNode(def.graph->createConstant(val))->output();
   }
 };
 
