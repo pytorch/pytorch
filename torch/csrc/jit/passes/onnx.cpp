@@ -222,11 +222,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state) {
       // Selects are translated by multi-return nodes.
       JIT_ASSERT(env.count(value) > 0);
     IR_ELSEIFM(CppOp)
+      auto scope_guard = new_graph->set_current_scope_temporary(node->scope());
       if (auto fn = std::dynamic_pointer_cast<autograd::HasSymbolic>(value->fn)) {
         auto outputs = fn->symbolic(&ctx, fmap(node->inputs(), envFn));
-        for (auto& el: outputs) {
-          el->setScope(node->scope());
-        }
         setOutputs(value->name(), node, outputs);
       } else {
         cloneNode(node);
