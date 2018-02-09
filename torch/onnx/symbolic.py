@@ -571,8 +571,8 @@ def Elman_RNN_symbolic_builder(
     def symbolic(g, input, all_weights, h0, batch_sizes):
         if batch_first:
             return _unimplemented("RNN", "batch_first")
-        if dropout:
-            return _unimplemented("RNN", "dropout")
+        if dropout and kwargs['train']:
+            return _unimplemented("RNN", "dropout in training mode")
 
         unidirectional = not bidirectional
 
@@ -616,8 +616,8 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
     def symbolic(g, input, all_weights, h0_and_c0, batch_sizes):
         if batch_first:
             return _unimplemented("LSTM", "batch_first")
-        if dropout:
-            return _unimplemented("LSTM", "dropout")
+        if dropout and kwargs['train']:
+            return _unimplemented("RNN", "dropout in training mode")
 
         unidirectional = not bidirectional
 
@@ -670,8 +670,8 @@ def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropo
     def symbolic(g, input, all_weights, h0, batch_sizes):
         if batch_first:
             return _unimplemented("GRU", "batch_first")
-        if dropout:
-            return _unimplemented("GRU", "dropout")
+        if dropout and kwargs['train']:
+            return _unimplemented("RNN", "dropout in training mode")
 
         unidirectional = not bidirectional
 
