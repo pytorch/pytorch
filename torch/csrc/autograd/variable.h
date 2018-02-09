@@ -196,6 +196,8 @@ struct Variable : public at::Tensor {
 
   void set_tracing_state(jit::tracer::ValueTracingState* new_tracing_state);
   jit::tracer::ValueTracingState& tracing_state() const noexcept;
+
+  /// Return true if the `Variable`'s tracing state is not null.
   bool has_tracing_state() const noexcept;
 
   /// Set the type of the underlying `Tensor`. Used for a bad (hopefully)
