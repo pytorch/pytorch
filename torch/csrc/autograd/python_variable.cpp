@@ -46,7 +46,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
     if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn_unsafe())) {
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
-      const auto output_nr = static_cast<uint32_t>(v->cdata.output_nr());
+      const auto output_nr = v->cdata.output_nr();
       v->cdata.set_gradient_edge(
           {THPFunction_asFunction((THPFunction*)fn->obj), output_nr});
     }
@@ -329,7 +329,8 @@ int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
 PyObject *THPVariable_get_output_nr(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  return PyInt_FromLong(self->cdata.output_nr());
+  const auto output_nr = static_cast<long>(self->cdata.output_nr());
+  return PyInt_FromLong(output_nr);
   END_HANDLE_TH_ERRORS
 }
 

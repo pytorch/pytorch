@@ -51,7 +51,7 @@ class SavedVariable {
   VariableVersion version_counter_;
 
   uint32_t saved_version_ = 0;
-  int output_nr_ = -1;
+  uint32_t output_nr_ = 0;
   bool was_default_constructed_ = true;
   bool requires_grad_ = false;
   bool has_grad_fn_ = false;

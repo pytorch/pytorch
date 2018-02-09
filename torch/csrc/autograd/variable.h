@@ -139,7 +139,7 @@ struct Variable : public at::Tensor {
 
   /// Return the input index of the gradient `Function` to which this `Variable`
   /// is connected.
-  int output_nr() const noexcept;
+  uint32_t output_nr() const noexcept;
 
   void set_requires_grad(bool requires_grad) noexcept;
   bool requires_grad() const noexcept;
@@ -260,7 +260,7 @@ struct Variable::Impl : public at::TensorImpl {
   // was the second output of a function, then output_nr == 1.
   // We use this to make sure we can setup the backwards trace
   // correctly when this variable is passed to another function.
-  int output_nr;
+  uint32_t output_nr;
   PyObject* pyobj; // weak reference
 
   // Mutex to ensure that concurrent read operations that modify internal
@@ -346,7 +346,7 @@ inline void Variable::set_gradient_edge(Edge&& edge) noexcept {
   get()->output_nr = edge.input_nr;
 }
 
-inline int Variable::output_nr() const noexcept {
+inline uint32_t Variable::output_nr() const noexcept {
   return get()->output_nr;
 }
 
