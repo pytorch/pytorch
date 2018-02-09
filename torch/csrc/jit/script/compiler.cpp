@@ -37,9 +37,7 @@ using ListAttributeMap = std::unordered_map<
 // Keep track of environment as we descend down nested control
 // structures.
 struct Environment {
-  Environment(
-      Block* b = nullptr,
-      std::shared_ptr<Environment> next = nullptr)
+  Environment(Block* b = nullptr, std::shared_ptr<Environment> next = nullptr)
       : b(b), next(next) {}
 
   std::vector<std::string> positional_inputs;
@@ -52,8 +50,7 @@ struct Environment {
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
-    environment_stack =
-        std::make_shared<Environment>();
+    environment_stack = std::make_shared<Environment>();
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
@@ -111,13 +108,7 @@ struct to_ir {
       Value* orig = findInParentFrame(name);
       // Replace all matching node inputs with original value
       // from an enclosing scope
-      for (auto node : b->nodes()) {
-        for (size_t i = 0; i < node->inputs().size(); ++i) {
-          if (node->input(i) == v) {
-            node->replaceInput(i, orig);
-          }
-        }
-      }
+      v->replaceAllUsesWith(orig);
 
       // Actually remove the input
       b->eraseInput(*ritr);
@@ -135,83 +126,60 @@ struct to_ir {
     auto* false_block = n->addBlock();
 
     // Emit both blocks once to get the union of all mutated values
-    std::shared_ptr<Environment> save_true_environment, save_false_environment;
+    std::unordered_set<std::string> mutated_parent_values;
+    std::shared_ptr<Environment> save_true, save_false;
     {
-      environment_stack = std::make_shared<Environment>(true_block, environment_stack);
-      WithInsertPoint guard(*def.graph, true_block);
-      emitStatements(stmt.trueBranch());
-      deleteExtraInputs(true_block, environment_stack);
-
-      save_true_environment = environment_stack;
-      environment_stack = environment_stack->next;
-    }
-
-    {
-      environment_stack = std::make_shared<Environment>(false_block, environment_stack);
-      WithInsertPoint guard(*def.graph, false_block);
-      emitStatements(stmt.falseBranch());
-      deleteExtraInputs(false_block, environment_stack);
-
-      save_false_environment = environment_stack;
-      environment_stack = environment_stack->next;
-    }
-
-    std::unordered_set<std::string> all_mutated_values;
-    for (auto& input : save_true_environment->positional_inputs) {
-      all_mutated_values.insert(input);
-    }
-    for (auto& input : save_false_environment->positional_inputs) {
-      all_mutated_values.insert(input);
-    }
-
-    // Delete both blocks
-    n->eraseBlock(1);
-    n->eraseBlock(0);
-
-    true_block = n->addBlock();
-    false_block = n->addBlock();
-
-    {
-      environment_stack = std::make_shared<Environment>(true_block, environment_stack);
-
-      // Pre-populate block inputs with the union of mutated values from both
-      // branches
-      for (const auto& input : all_mutated_values)
-        createBlockInput(input);
-
+      environment_stack =
+          std::make_shared<Environment>(true_block, environment_stack);
       WithInsertPoint guard(*def.graph, true_block);
       emitStatements(stmt.trueBranch());
 
-      auto& curr_frame = *environment_stack;
-      for (const auto& x : curr_frame.positional_inputs) {
-        true_block->registerOutput(curr_frame.value_table[x]);
+      for (const auto& kv : environment_stack->value_table) {
+        if (findInParentFrame(kv.first)) {
+          mutated_parent_values.insert(kv.first);
+        }
       }
-
+      save_true = environment_stack;
       environment_stack = environment_stack->next;
     }
 
     {
-      environment_stack = std::make_shared<Environment>(false_block, environment_stack);
-
-      // Pre-populate block inputs with the union of mutated values from both
-      // branches
-      for (const auto& input : all_mutated_values)
-        createBlockInput(input);
-
+      environment_stack =
+          std::make_shared<Environment>(false_block, environment_stack);
       WithInsertPoint guard(*def.graph, false_block);
       emitStatements(stmt.falseBranch());
 
-      auto& curr_frame = *environment_stack;
-      for (const auto& x : curr_frame.positional_inputs) {
-        false_block->registerOutput(curr_frame.value_table[x]);
+      for (const auto& kv : environment_stack->value_table) {
+        if (findInParentFrame(kv.first)) {
+          mutated_parent_values.insert(kv.first);
+        }
       }
-
+      save_false = environment_stack;
       environment_stack = environment_stack->next;
     }
 
-    // Add op inputs and outputs
-    for (const auto& x : all_mutated_values) {
-      n->addInput(getVar(x));
+    std::vector<std::string> sorted_mutations(
+        mutated_parent_values.begin(), mutated_parent_values.end());
+    std::sort(sorted_mutations.begin(), sorted_mutations.end());
+
+    std::cout << "Mutated parent values" << std::endl;
+    for (const auto& x : sorted_mutations) {
+      std::cout << x << std::endl;
+    }
+
+    // Register outputs in each block
+    environment_stack = save_true;
+    for (const auto& x : sorted_mutations) {
+      true_block->registerOutput(getVar(x));
+    }
+    environment_stack = save_false;
+    for (const auto& x : sorted_mutations) {
+      false_block->registerOutput(getVar(x));
+    }
+    environment_stack = environment_stack->next;
+
+    // Add op outputs
+    for (const auto& x : mutated_parent_values) {
       setVar(x, n->addOutput());
     }
   }
@@ -230,7 +198,8 @@ struct to_ir {
     // TODO iteration num and condition
 
     {
-      environment_stack = std::make_shared<Environment>(body_block, environment_stack);
+      environment_stack =
+          std::make_shared<Environment>(body_block, environment_stack);
       WithInsertPoint guard(*def.graph, body_block);
       emitStatements(stmt.body());
 
@@ -379,7 +348,8 @@ struct to_ir {
       if (retval) {
         // Reading from a value in a parent frame. Make this a
         // loop-carried dependency or explicit input
-        retval = createBlockInput(ident);
+        if (owning_kind == Symbol("Loop"))
+          retval = createBlockInput(ident);
 
         return retval;
       } else {
@@ -388,7 +358,6 @@ struct to_ir {
     } else {
       return retval;
     }
-
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
