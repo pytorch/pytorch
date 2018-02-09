@@ -73,7 +73,7 @@ struct Eval : Function {
     return std::make_shared<Eval>();
   }
 
-  // Roots are empty if simple_graph is not NULL.
+  // Roots are empty if simple_graph is not nullptr.
   // simple_graph is an optimization of first backward stage - in this case
   // all Eval subgraphs contain only a single gradient function, and the
   // graph search on creation + call to the engine in apply can be elided
