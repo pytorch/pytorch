@@ -285,9 +285,9 @@ EXAMPLES = [
             'transforms': ExpTransform(),
         },
         {
-            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
-                                        Variable(torch.randn(2, 3).abs(), requires_grad=True)),
-            'transforms': [AffineTransform(Variable(torch.randn(1)), Variable(torch.randn(1))),
+            'base_distribution': Normal(Variable(torch.randn(2, 3, 5), requires_grad=True),
+                                        Variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
+            'transforms': [AffineTransform(Variable(torch.randn(3, 5)), Variable(torch.randn(3, 5))),
                            ExpTransform()],
         },
     ]),
@@ -1317,7 +1317,7 @@ class TestDistributions(TestCase):
                     pdfs = dist.log_prob(samples).exp()
                 except NotImplementedError:
                     continue
-                cdfs_derivative = grad(cdfs.sum(), [samples])[0]
+                cdfs_derivative = grad(cdfs.sum(), [samples])[0]  # this should not be wrapped in torch.abs()
                 self.assertEqual(cdfs_derivative, pdfs, message='\n'.join([
                     '{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1, len(params)),
                     'x = {}'.format(samples),

@@ -61,12 +61,16 @@ class Transform(object):
             the codomain. Transforms that are not bijective should at least
             maintain the weaker pseudoinverse properties
             ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
+        sign (int or Variable): For bijective univariate transforms, this
+            should be +1 or -1 depending on whether transform is monotone
+            increasing or decreasing.
         event_dim (int): Number of dimensions that are correlated together in
             the transform ``event_shape``. This should be 0 for pointwise
             transforms, 1 for transforms that act jointly on vectors, 2 for
             transforms that act jointly on matrices, etc.
     """
     bijective = False
+    sign = float('nan')
     event_dim = 0
 
     def __init__(self, cache_size=0):
@@ -167,6 +171,10 @@ class _InverseTransform(Transform):
         return self._inv.bijective
 
     @property
+    def sign(self):
+        return self._inv.sign
+
+    @property
     def event_dim(self):
         return self._inv.event_dim
 
@@ -220,6 +228,13 @@ class ComposeTransform(Transform):
         return all(p.bijective for p in self.parts)
 
     @lazy_property
+    def sign(self):
+        sign = 1
+        for p in self.parts:
+            sign = sign * p.sign
+        return sign
+
+    @lazy_property
     def event_dim(self):
         return max(p.event_dim for p in self.parts) if self.parts else 0
 
@@ -261,6 +276,7 @@ class ExpTransform(Transform):
     domain = constraints.real
     codomain = constraints.positive
     bijective = True
+    sign = +1
 
     def __eq__(self, other):
         return isinstance(other, ExpTransform)
@@ -282,6 +298,7 @@ class SigmoidTransform(Transform):
     domain = constraints.real
     codomain = constraints.unit_interval
     bijective = True
+    sign = +1
 
     def __eq__(self, other):
         return isinstance(other, SigmoidTransform)
@@ -340,6 +357,10 @@ class AffineTransform(Transform):
         if isinstance(result, Variable):
             result = result.data.view(-1)[0]
         return result
+
+    @property
+    def sign(self):
+        return self.scale.sign()
 
     def _call(self, x):
         return self.loc + self.scale * x
