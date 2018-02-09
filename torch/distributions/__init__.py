@@ -1,7 +1,7 @@
 r"""
 The ``distributions`` package contains parameterizable probability distributions
-and sampling functions. This allows the construction and optimization of dynamic
-stochastic computation graphs.
+and sampling functions. This allows the construction of stochastic computation
+graphs and stochastic gradient estimators for optimization.
 
 It is not possible to directly backpropagate through random samples. However,
 there are two main methods for creating surrogate functions that can be
