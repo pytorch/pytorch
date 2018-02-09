@@ -12,7 +12,11 @@ pathwise derivative estimator is commonly seen in the reparameterization trick
 in variational autoencoders. Whilst the score function only requires the value
 of samples :math:`f(x)`, the pathwise derivative requires the derivative
 :math:`f'(x)`. The next sections discuss these two in a reinforcement learning
-example.
+example. For more details see
+`Gradient Estimation Using Stochastic Computation Graphs`_ .
+
+.. _`Gradient Estimation Using Stochastic Computation Graphs`:
+     https://arxiv.org/abs/1506.05254
 
 Score function
 ^^^^^^^^^^^^^^
