@@ -18,7 +18,7 @@ struct softmargin_functor
   }
 };
 
-template <typename Dtype>
+template <typename Dtype, typename Acctype>
 struct softmargin_no_reduce_functor
 {
   __host__ __device__ void operator()(
@@ -26,7 +26,8 @@ struct softmargin_no_reduce_functor
     const Dtype *y,
     Dtype *out) const
   {
-    *out = THCNumerics<Dtype>::log(ScalarConvert<int, Dtype>::to(1) + THCNumerics<Dtype>::exp(-*x * *y));
+    *out = ScalarConvert<Acctype, Dtype>::to(log(ScalarConvert<int, Acctype>::to(1)
+                                             + exp(ScalarConvert<Dtype, Acctype>::to(-*x) * *y)));
   }
 };
 
@@ -46,7 +47,7 @@ struct softmargin_updateGradInput_functor
     }
 };
 
-template <typename Dtype>
+template <typename Dtype, typename Acctype>
 struct softmargin_updateGradInput_no_reduce_functor
 {
   __forceinline__ __host__ __device__ void operator()(
@@ -54,8 +55,8 @@ struct softmargin_updateGradInput_no_reduce_functor
       const Dtype *y,
       Dtype *gradInput) const
   {
-      Dtype temp = exp(-*x * *y);
-      *gradInput = -*y * temp / (ScalarConvert<int, Dtype>::to(1) + temp);
+      Acctype temp = exp(ScalarConvert<Dtype, Acctype>::to(-*x) * *y);
+      *gradInput = ScalarConvert<Acctype, Dtype>::to(-*y * temp / (ScalarConvert<int, Acctype>::to(1) + temp));
   }
 };
 

@@ -781,7 +781,7 @@ Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const T
     return soft_margin_loss_backward(grad, input, target, size_average, reduce);
   }
   auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, size_average, true);
-  return (r * grad).sum().view({1});
+  return (r * grad).sum();
 }
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {
