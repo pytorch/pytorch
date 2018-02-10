@@ -18,7 +18,7 @@
 
 #if defined(__APPLE__)
 #define CAFFE2_SUPPORTS_SIGNAL_HANDLER
-#elif defined(__linux__)
+#elif defined(__linux__) && !defined(CAFFE2_DISABLE_SIGNAL_HANDLERS)
 #define CAFFE2_SUPPORTS_FATAL_SIGNAL_HANDLERS
 #define CAFFE2_SUPPORTS_SIGNAL_HANDLER
 #endif
