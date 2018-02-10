@@ -1459,5 +1459,63 @@ class TestJit(TestCase):
         ''')
         self.assertExpected(str(cu.get_graph('test_if_noelse')))
 
+    def test_script_while_nonexistant_value(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + x
+                b = b + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_while_nonexistant_cond_value(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < x:
+                a = a + 1
+                b = b + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_while_write_outer_then_read(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + 1
+                b = a + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    # TODO: does not propagate c out of nested if statement
+    def test_script_while_nest_if(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while_if(a, b) -> (c):
+            c = 0
+            while a < 10:
+                a = a + 1
+                b = b + 1
+                if a > b:
+                    c = -a
+                else:
+                    c = -b
+            c = c + 1
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while_if')))
+
+    # TODO; does not propagate c out of nested if statement
+    def test_script_if_nest_while(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if_while(a, b) -> (c):
+            c = 0
+            if a > b:
+                while a > b:
+                    b = b + 1
+                    c = -b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if_while')))
+
 if __name__ == '__main__':
     run_tests()
