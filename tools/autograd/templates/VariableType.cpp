@@ -164,7 +164,7 @@ Variable & VariableType::checked_cast_variable(const Tensor & t, const char * na
     runtime_error("Expected object of type Variable but found type %s for argument #%d '%s'",
         t.type().toString(), pos, name);
   }
-  return static_cast<Variable&>(const_cast<Tensor&>(t));
+  return as_variable_ref(const_cast<Tensor&>(t));
 }
 
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
@@ -302,7 +302,7 @@ static void throw_error_out_requires_grad(const char* name) {
 
 static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
-    auto& var = static_cast<Variable&>(tensor);
+    auto& var = as_variable_ref(tensor);
     grad_fn->num_inputs = 1;
     var.rebase_history({std::move(grad_fn), 0});
   }
@@ -314,7 +314,7 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
     uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
-        auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
+        auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
         var.rebase_history({grad_fn, output_nr});
       }
       output_nr++;
@@ -326,7 +326,7 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
 // overload for functions with multiple differentiable outputs.
 static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
-    auto& var = static_cast<Variable&>(tensor);
+    auto& var = as_variable_ref(tensor);
     grad_fn->num_inputs = 1;
     var.set_gradient_edge({std::move(grad_fn), 0});
   }
@@ -338,7 +338,7 @@ static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
     uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
-        auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
+        auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
         var.set_gradient_edge({grad_fn, output_nr});
       }
       output_nr++;
@@ -363,7 +363,7 @@ template<typename... Args> inline variable_list flatten(Args&&... args) {
 }
 
 static void increment_version(Tensor & t) {
-  static_cast<Variable&>(t).bump_version();
+  as_variable_ref(t).bump_version();
 }
 
 static bool isFloatingPoint(ScalarType s) {
@@ -394,7 +394,7 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
-  if (static_cast<Variable&>(self).requires_grad()) {
+  if (as_variable_ref(self).requires_grad()) {
     at::runtime_error("cannot resize variables that require grad");
   }
   baseType->resize_(self_, size);
@@ -404,7 +404,7 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
 Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
-  if (static_cast<Variable&>(self).requires_grad()) {
+  if (as_variable_ref(self).requires_grad()) {
     at::runtime_error("cannot resize variables that require grad");
   }
   baseType->resize_as_(self_, the_template_);
