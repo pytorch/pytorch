@@ -37,29 +37,91 @@ using ListAttributeMap = std::unordered_map<
 // Keep track of environment as we descend down nested control
 // structures.
 struct Environment {
-  Environment(Block* b = nullptr, std::shared_ptr<Environment> next = nullptr)
+  Environment(Block* b, std::shared_ptr<Environment> next = nullptr)
       : b(b), next(next) {}
 
-  std::vector<std::string> positional_inputs;
+  std::vector<std::string> captured_inputs;
   ValueTable value_table;
   Block* b;
 
   std::shared_ptr<Environment> next;
+
+  Value* findInThisFrame(const std::string& name) {
+    if (value_table.count(name)) {
+      return value_table.at(name);
+    }
+    return nullptr;
+  }
+
+  Value* findInParentFrame(const std::string& name) {
+    for (auto runner = next; runner; runner = runner->next) {
+      if (runner->value_table.count(name)) {
+        return runner->value_table.at(name);
+      }
+    }
+    return nullptr;
+  }
+
+  Value* createCapturedInput(const std::string& name) {
+    // Create the input
+    Value* new_input = b->addInput();
+
+    // Associate this name with this value
+    value_table[name] = new_input;
+
+    // List as a positional input
+    captured_inputs.push_back(name);
+
+    return new_input;
+  }
+
+  Symbol getBlockOwningKind() {
+    Symbol owning_kind = Symbol();
+    if (b->owningNode()) {
+      owning_kind = b->owningNode()->kind();
+    }
+    return owning_kind;
+  }
+
+  void setVar(const std::string& name, Value* value) {
+    if (!findInThisFrame(name) && findInThisFrame(name) &&
+        getBlockOwningKind() == Symbol("Loop"))
+      createCapturedInput(name);
+    value_table[name] = value;
+  }
+
+  Value* getVar(const Ident& ident) {
+    return getVar(ident.name(), ident);
+  }
+
+  Value* getVar(const std::string& ident, const TreeView& tv) {
+    Value* retval = findInThisFrame(ident);
+
+    if (!retval && (retval = findInParentFrame(ident)) &&
+        getBlockOwningKind() == Symbol("Loop"))
+      retval = createCapturedInput(ident);
+
+    if (!retval) {
+      throw ErrorReport(tv) << "undefined value " << ident;
+    }
+
+    return retval;
+  }
 };
 
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
-    environment_stack = std::make_shared<Environment>();
+    environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
       auto& name = input.ident().name();
-      setVar(name, def.graph->addInput(name));
+      environment_stack->setVar(name, def.graph->addInput(name));
     }
     emitStatements(tree.statements());
     for (auto output : tree.returns()) {
-      def.graph->registerOutput(getVar(output.ident()));
+      def.graph->registerOutput(environment_stack->getVar(output.ident()));
     }
   }
   void emitStatements(const List<TreeRef>& statements) {
@@ -77,7 +139,7 @@ struct to_ir {
         case TK_GLOBAL:
           for (auto ident : stmt->trees()) {
             const auto& name = Ident(ident).name();
-            setVar(name, def.graph->addInput(name));
+            environment_stack->setVar(name, def.graph->addInput(name));
           }
           break;
         case TK_EXPR_STMT:
@@ -94,7 +156,7 @@ struct to_ir {
     auto& curr_frame = *e;
     std::vector<size_t> inputs_to_delete;
     int i = 0;
-    for (const auto& x : curr_frame.positional_inputs) {
+    for (const auto& x : curr_frame.captured_inputs) {
       if (b->inputs()[i] == curr_frame.value_table[x]) {
         inputs_to_delete.push_back(i);
       }
@@ -103,18 +165,36 @@ struct to_ir {
 
     for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
          ++ritr) {
-      auto name = curr_frame.positional_inputs[*ritr];
+      auto name = curr_frame.captured_inputs[*ritr];
       Value* v = curr_frame.value_table[name];
-      Value* orig = findInParentFrame(name);
+      Value* orig = environment_stack->findInParentFrame(name);
       // Replace all matching node inputs with original value
       // from an enclosing scope
       v->replaceAllUsesWith(orig);
 
       // Actually remove the input
       b->eraseInput(*ritr);
-      curr_frame.positional_inputs.erase(
-          curr_frame.positional_inputs.begin() + *ritr);
+      curr_frame.captured_inputs.erase(
+          curr_frame.captured_inputs.begin() + *ritr);
     }
+  }
+
+  std::shared_ptr<Environment> emitSingleIfBranch(
+      Block* b,
+      const ListView<TreeRef> branch,
+      std::unordered_set<std::string>* mutated_parent_values) {
+    environment_stack = std::make_shared<Environment>(b, environment_stack);
+    WithInsertPoint guard(*def.graph, b);
+    emitStatements(branch);
+
+    for (const auto& kv : environment_stack->value_table) {
+      if (environment_stack->findInParentFrame(kv.first)) {
+        mutated_parent_values->insert(kv.first);
+      }
+    }
+    auto save_env = environment_stack;
+    environment_stack = environment_stack->next;
+    return save_env;
   }
 
   void emitIf(const If& stmt) {
@@ -128,35 +208,10 @@ struct to_ir {
     // Emit both blocks once to get the union of all mutated values
     std::unordered_set<std::string> mutated_parent_values;
     std::shared_ptr<Environment> save_true, save_false;
-    {
-      environment_stack =
-          std::make_shared<Environment>(true_block, environment_stack);
-      WithInsertPoint guard(*def.graph, true_block);
-      emitStatements(stmt.trueBranch());
-
-      for (const auto& kv : environment_stack->value_table) {
-        if (findInParentFrame(kv.first)) {
-          mutated_parent_values.insert(kv.first);
-        }
-      }
-      save_true = environment_stack;
-      environment_stack = environment_stack->next;
-    }
-
-    {
-      environment_stack =
-          std::make_shared<Environment>(false_block, environment_stack);
-      WithInsertPoint guard(*def.graph, false_block);
-      emitStatements(stmt.falseBranch());
-
-      for (const auto& kv : environment_stack->value_table) {
-        if (findInParentFrame(kv.first)) {
-          mutated_parent_values.insert(kv.first);
-        }
-      }
-      save_false = environment_stack;
-      environment_stack = environment_stack->next;
-    }
+    save_true = emitSingleIfBranch(
+        true_block, stmt.trueBranch(), &mutated_parent_values);
+    save_false = emitSingleIfBranch(
+        false_block, stmt.falseBranch(), &mutated_parent_values);
 
     std::vector<std::string> sorted_mutations(
         mutated_parent_values.begin(), mutated_parent_values.end());
@@ -165,17 +220,17 @@ struct to_ir {
     // Register outputs in each block
     environment_stack = save_true;
     for (const auto& x : sorted_mutations) {
-      true_block->registerOutput(getVar(x));
+      true_block->registerOutput(environment_stack->getVar(x, stmt));
     }
     environment_stack = save_false;
     for (const auto& x : sorted_mutations) {
-      false_block->registerOutput(getVar(x));
+      false_block->registerOutput(environment_stack->getVar(x, stmt));
     }
     environment_stack = environment_stack->next;
 
     // Add op outputs
-    for (const auto& x : mutated_parent_values) {
-      setVar(x, n->addOutput());
+    for (const auto& x : sorted_mutations) {
+      environment_stack->setVar(x, n->addOutput());
     }
   }
 
@@ -208,19 +263,19 @@ struct to_ir {
 
       // Add block outputs
       auto& curr_frame = *environment_stack;
-      for (const auto& x : curr_frame.positional_inputs) {
+      for (const auto& x : curr_frame.captured_inputs) {
         body_block->registerOutput(curr_frame.value_table[x]);
       }
 
-      auto preserve_positional_inputs = curr_frame.positional_inputs;
+      auto preserve_captured_inputs = curr_frame.captured_inputs;
 
       // Drop out of block environment
       environment_stack = environment_stack->next;
 
       // Add op inputs
-      for (const auto& x : preserve_positional_inputs) {
-        n->addInput(getVar(x));
-        setVar(x, n->addOutput());
+      for (const auto& x : preserve_captured_inputs) {
+        n->addInput(environment_stack->getVar(x, stmt));
+        environment_stack->setVar(x, n->addOutput());
       }
     }
   }
@@ -241,118 +296,11 @@ struct to_ir {
       outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
     }
     int i = 0;
-    for (const Ident& ident : stmt.lhs()) {
-      setVar(ident.name(), outputs.at(i));
+    for (auto ident : stmt.lhs()) {
+      environment_stack->setVar(Ident(ident).name(), outputs.at(i));
       i++;
     }
     return outputs;
-  }
-
-  Value* findInThisFrame(const std::string& name) {
-    const auto& e = *environment_stack;
-    if (e.value_table.count(name)) {
-      return e.value_table.at(name);
-    }
-    return nullptr;
-  }
-
-  Value* findInParentFrame(const std::string& name) {
-    for (auto runner = environment_stack->next; runner; runner = runner->next) {
-      if (runner->value_table.count(name)) {
-        return runner->value_table.at(name);
-      }
-    }
-    return nullptr;
-  }
-
-  Value* createBlockInput(const std::string& name) {
-    auto& curr_frame = *environment_stack;
-    Block* b = curr_frame.b;
-
-    // Create the input
-    Value* new_input = b->addInput();
-
-    // Associate this name with this value
-    curr_frame.value_table[name] = new_input;
-
-    // List as a positional input
-    curr_frame.positional_inputs.push_back(name);
-
-    return new_input;
-  }
-
-  void setVar(const std::string& name, Value* value) {
-    auto& curr_frame = *environment_stack;
-
-    Symbol owning_kind = Symbol();
-    if (curr_frame.b) {
-      owning_kind = curr_frame.b->owningNode()->kind();
-    }
-
-    if (owning_kind == Symbol("Loop") || owning_kind == Symbol("If")) {
-      // Overwriting an existing value means it's already been
-      // accounted for.
-      if (findInThisFrame(name)) {
-        curr_frame.value_table[name] = value;
-        return;
-      }
-
-      // Value not here. search in parent scopes
-      if (findInParentFrame(name)) {
-        // Writing to a value in a parent frame. Make this a
-        // loop-carried dependency.
-        if (owning_kind == Symbol("Loop"))
-          createBlockInput(name);
-
-        // Overwrite in value map
-        curr_frame.value_table[name] = value;
-      } else {
-        // Not accessing a value in enclosing scope. Make a new
-        // value as usual
-        curr_frame.value_table[name] = value;
-      }
-    } else {
-      curr_frame.value_table[name] = value;
-    }
-  }
-
-  Value* getVar(const Ident& ident) {
-    try {
-      return getVar(ident.name());
-    } catch (ErrorReport e) {
-      throw ErrorReport(ident) << e.what();
-    }
-  }
-
-  Value* getVar(const std::string& ident) {
-    Value* retval = findInThisFrame(ident);
-    if (retval) {
-      return retval;
-    }
-
-    retval = findInParentFrame(ident);
-
-    auto& curr_frame = *environment_stack;
-
-    Symbol owning_kind = Symbol();
-    if (curr_frame.b) {
-      owning_kind = curr_frame.b->owningNode()->kind();
-    }
-
-    if (owning_kind == Symbol("Loop") || owning_kind == Symbol("If")) {
-      if (retval) {
-        // Reading from a value in a parent frame. Make this a
-        // loop-carried dependency or explicit input
-        if (owning_kind == Symbol("Loop"))
-          retval = createBlockInput(ident);
-
-        return retval;
-      } else {
-        throw ErrorReport() << "undefined value " << ident;
-      }
-    } else {
-      return retval;
-    }
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -446,7 +394,7 @@ struct to_ir {
     switch (tree->kind()) {
       case TK_VAR: {
         expectOutputs(tree, output_size, 1);
-        return {getVar(Var(tree).name())};
+        return {environment_stack->getVar(Var(tree).name())};
       } break;
       case TK_NE:
       case TK_EQ:
