@@ -36,7 +36,6 @@ class TestChannelStats(hu.HypothesisTestCase):
     )
     def testChannelStats(self, size, inputChannels, batchSize, gc, dc):
 
-        assume(gc.device_type != caffe2_pb2.CUDA)
         op = core.CreateOperator(
             "ChannelStats",
             ["X"],
