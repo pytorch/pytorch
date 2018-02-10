@@ -1,6 +1,6 @@
 import torch
 from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
-from torch.nn.modules.utils import _pair
+from torch.nn.modules.utils import _pair, _triple
 import warnings
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -164,6 +164,10 @@ def neg(g, self):
     return g.op("Neg", self)
 
 
+def sqrt(g, self):
+    return g.op("Sqrt", self)
+
+
 def tanh(g, self):
     return g.op("Tanh", self)
 
@@ -173,11 +177,30 @@ def sigmoid(g, self):
 
 
 def mean(g, self, dim=None, keepdim=None):
-    kwargs = {}
+    if dim is None and keepdim is None:
+        return g.op("Mean", self)
     # NB: ONNX's default is different from PyTorch's
     if keepdim is None:
         keepdim = 0
-    return g.op("ReduceMean", self, axes_i=dim, keepdims_i=keepdim)
+    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
+
+
+def sum(g, self, dim=None, keepdim=None):
+    if dim is None and keepdim is None:
+        return g.op("Sum", self)
+    if keepdim is None:
+        keepdim = 0
+    return g.op("ReduceSum", self, axes_i=[dim], keepdims_i=keepdim)
+
+
+def prod(g, self, dim=None, keepdim=None):
+    if dim is None:
+        dims = None
+    else:
+        dims = [dim]
+    if keepdim is None:
+        keepdim = 0
+    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
@@ -206,6 +229,8 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
+    if self.type().sizes()[0] == size[0] and len(size) == 2:
+        return g.op("Flatten", self, axis_i=1)
     return g.op("Reshape", self, shape_i=size)
 
 
@@ -229,20 +254,17 @@ def squeeze(g, self, dim=None):
     return g.op("Squeeze", self, axes_i=dims)
 
 
-# NB: This appears to be dead at the moment
-def prelu(g, input, weight):
-    if all(s == 1 for s in weight.type().sizes()):
-        return _unimplemented("prelu", "single weight shared among input channels")
-    return g.op("PRelu", input, weight)
+def prelu(g, self, weight):
+    return g.op("PRelu", self, weight)
 
 
-def threshold(g, input, threshold, value, inplace=False):
+def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
     if _scalar(value) != 0:
         return _unimplemented("threshold", "non-zero value")
-    return g.op("Relu", input)
+    return g.op("Relu", self)
 
 
 def leaky_relu(g, input, negative_slope, inplace=False):
@@ -259,7 +281,31 @@ def glu(g, input, dim):
 
 
 def softmax(g, input, dim=None):
+    # Softmax does normalization at vector level.
+    # PyTorch and ONNX use different strategies to split the input tensor into vectors.
+    # Thus dim and axis have different meanings.
+    # PyTorch slices the input tensor into vectors along the `dim`-th dimension.
+    # ONNX reshapes the input into a 2-D tensor, and `axis` indicates where the input is coerced.
+    # If input is a 2 x 3 tensor:
+    # input = [[1.0, 1.0, 1.0],
+    #          [1.0, 1,0, 1,0]]
+    # with dim = 0, the result is:
+    # result = [[0.5, 0.5, 0.5],
+    #           [0.5, 0.5, 0.5]]
+    # with axis = 0, the result is:
+    # result = [[0.167, 0.167, 0.167],
+    #           [0.167, 0.167, 0.167]]
+    # So only when dim and axis both equal to ndim - 1 (the last dimension),
+    # their semantics are equivalent.
+    if len(input.type().sizes()) != dim + 1:
+        return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op('Softmax', input, axis_i=dim)
+
+
+def softplus(g, self, beta, threshold):
+    if beta != 1:
+        return _unimplemented("beta", "has to be 1")
+    return g.op('Softplus', self)
 
 
 def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
@@ -271,7 +317,7 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
         stride = kernel_size
     r = g.op("MaxPool", input,
              kernel_shape_i=_pair(kernel_size),
-             pads_i=_pair(padding),
+             pads_i=_pair(padding) * 2,
              strides_i=_pair(stride))
     return r, None
 
@@ -285,11 +331,23 @@ def avg_pool2d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
     return g.op("AveragePool", input,
                 kernel_shape_i=_pair(kernel_size),
                 strides_i=_pair(stride),
-                pads_i=_pair(padding))
+                pads_i=_pair(padding) * 2)
+
+
+def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+    if ceil_mode:
+        return _unimplemented("avg_pool3d", "ceil_mode")
+    if not stride:
+        stride = kernel_size
+    # TODO: What about count_include_pad?!
+    return g.op("AveragePool", input,
+                kernel_shape_i=_triple(kernel_size),
+                strides_i=_triple(stride),
+                pads_i=_triple(padding))
 
 
 def log_softmax(g, input, dim=None):
-    return g.op("Log", g.op('Softmax', input, axis_i=dim).setTypeAs(input))
+    return g.op("LogSoftmax", input, axis_i=dim)
 
 
 def unfold(g, input, dimension, size, step):
@@ -299,3 +357,40 @@ def unfold(g, input, dimension, size, step):
 def elu(g, input, alpha, inplace=False):
     # See Note [Export inplace]
     return g.op("Elu", input, alpha_f=_scalar(alpha))
+
+
+def index_select(g, self, index, dim):
+    return g.op("Gather", self, index, axis_i=dim)
+
+
+# ignore clone operators that are inserted by PyTorch autograd
+def clone(g, input):
+    return input
+
+
+def abs(g, self):
+    return g.op("Abs", self)
+
+
+def pow(g, self, exponent):
+    return g.op("Pow", self, exponent)
+
+
+def clamp(g, self, min, max):
+    return g.op("Clip", self, min_f=min, max_f=max)
+
+
+def max(g, self, other):
+    return g.op("Max", self, other)
+
+
+def min(g, self, other):
+    return g.op("Min", self, other)
+
+
+def eq(g, self, other):
+    return g.op("Equal", self, other)
+
+
+def exp(g, self):
+    return g.op("Exp", self)
