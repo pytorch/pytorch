@@ -38,6 +38,9 @@ class ChannelStatsOp : public Operator<Context> {
  protected:
   INPUT_TAGS(INPUT);
   OUTPUT_TAGS(SUM, SUMSQ);
+
+  Tensor<Context> sumScratch_;
+  Tensor<Context> sumsqScratch_;
 };
 
 } // namespace caffe2
