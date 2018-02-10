@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-//#include "caffe2/mkl/utils/mkl_context.h"
+// #include "caffe2/mkl/utils/mkl_context.h"
 
 #include "caffe2/core/event_cpu.h"
 
