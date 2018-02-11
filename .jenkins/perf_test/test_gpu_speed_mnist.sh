@@ -6,7 +6,7 @@ test_gpu_speed_mnist () {
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
 
-  git clone https://github.com/yf225/examples.git -b benchmark_test
+  git clone https://github.com/pytorch/examples.git -b perftests
 
   cd examples/mnist
 
