@@ -107,6 +107,34 @@ struct Environment {
 
     return retval;
   }
+
+  // Given that after emitting statements in a block, we've added block inputs
+  // for all value references and assignments, delete inputs for which there was
+  // no assignment, only references.
+  void deleteExtraInputs() {
+    std::vector<size_t> inputs_to_delete;
+    int i = 0;
+    for (const auto& x : captured_inputs) {
+      if (b->inputs()[i] == value_table[x]) {
+        inputs_to_delete.push_back(i);
+      }
+      i++;
+    }
+
+    for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
+         ++ritr) {
+      auto name = captured_inputs[*ritr];
+      Value* v = value_table[name];
+      Value* orig = findInParentFrame(name);
+      // Replace all matching node inputs with original value
+      // from an enclosing scope
+      v->replaceAllUsesWith(orig);
+
+      // Actually remove the input
+      b->eraseInput(*ritr);
+      captured_inputs.erase(captured_inputs.begin() + *ritr);
+    }
+  }
 };
 
 struct to_ir {
@@ -146,36 +174,6 @@ struct to_ir {
           emitExpr(ExprStmt(stmt).expr(), 0);
           break;
       }
-    }
-  }
-
-  // Given that after emitting statements in a block, we've added block inputs
-  // for all value references and assignments, delete inputs for which there was
-  // no assignment, only references.
-  void deleteExtraInputs(Block* b, std::shared_ptr<Environment> e) {
-    auto& curr_frame = *e;
-    std::vector<size_t> inputs_to_delete;
-    int i = 0;
-    for (const auto& x : curr_frame.captured_inputs) {
-      if (b->inputs()[i] == curr_frame.value_table[x]) {
-        inputs_to_delete.push_back(i);
-      }
-      i++;
-    }
-
-    for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
-         ++ritr) {
-      auto name = curr_frame.captured_inputs[*ritr];
-      Value* v = curr_frame.value_table[name];
-      Value* orig = environment_stack->findInParentFrame(name);
-      // Replace all matching node inputs with original value
-      // from an enclosing scope
-      v->replaceAllUsesWith(orig);
-
-      // Actually remove the input
-      b->eraseInput(*ritr);
-      curr_frame.captured_inputs.erase(
-          curr_frame.captured_inputs.begin() + *ritr);
     }
   }
 
@@ -259,7 +257,7 @@ struct to_ir {
 
       // Remove inputs for values that did not mutate within the
       // block
-      deleteExtraInputs(body_block, environment_stack);
+      environment_stack->deleteExtraInputs();
 
       // Add block outputs
       auto& curr_frame = *environment_stack;
