@@ -179,7 +179,7 @@ struct to_ir {
 
   std::shared_ptr<Environment> emitSingleIfBranch(
       Block* b,
-      const ListView<TreeRef> branch,
+      const List<TreeRef> branch,
       std::unordered_set<std::string>* mutated_parent_values) {
     environment_stack = std::make_shared<Environment>(b, environment_stack);
     WithInsertPoint guard(*def.graph, b);
@@ -207,9 +207,9 @@ struct to_ir {
     std::unordered_set<std::string> mutated_parent_values;
     std::shared_ptr<Environment> save_true, save_false;
     save_true = emitSingleIfBranch(
-        true_block, stmt.trueBranch(), &mutated_parent_values);
+        true_block, static_cast<List<TreeRef>>(stmt.trueBranch()), &mutated_parent_values);
     save_false = emitSingleIfBranch(
-        false_block, stmt.falseBranch(), &mutated_parent_values);
+        false_block, static_cast<List<TreeRef>>(stmt.falseBranch()), &mutated_parent_values);
 
     std::vector<std::string> sorted_mutations(
         mutated_parent_values.begin(), mutated_parent_values.end());
@@ -249,7 +249,7 @@ struct to_ir {
       environment_stack =
           std::make_shared<Environment>(body_block, environment_stack);
       WithInsertPoint guard(*def.graph, body_block);
-      emitStatements(stmt.body());
+      emitStatements(static_cast<List<TreeRef>>(stmt.body()));
 
       // Also emit the conditional
       Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];

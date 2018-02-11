@@ -1426,8 +1426,8 @@ class TestJit(TestCase):
                 second = third
                 j = 0
                 while j < 10:
-                    somenum *= 2
-                    j += 1
+                    somenum = somenum * 2
+                    j = j + 1
                 i = i + j
                 i = i + dontmutateme
 
