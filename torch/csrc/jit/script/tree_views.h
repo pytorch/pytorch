@@ -398,10 +398,10 @@ struct AssignKind : public TreeView {
   explicit AssignKind(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
       case '=':
-      case TK_PLUS_EQ:
-      case TK_MINUS_EQ:
-      case TK_TIMES_EQ:
-      case TK_DIV_EQ:
+      case '+':
+      case '-':
+      case '*':
+      case '/':
         return;
       default:
         throw ErrorReport(tree) << "is not a valid AssignKind";
@@ -475,6 +475,9 @@ struct BinOp : public Expr {
   }
   Expr rhs() const {
     return Expr(subtree(1));
+  }
+  static BinOp create(const SourceRange& range, int kind, const Expr& lhs, const Expr& rhs) {
+    return BinOp(Compound::create(kind, range, {lhs, rhs}));
   }
 };
 
