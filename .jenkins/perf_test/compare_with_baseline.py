@@ -26,10 +26,10 @@ z_value = (sample_mean - mean) / sigma
 
 print("z-value: ", z_value)
 
-if z_value >= 3:
+if z_value >= 2:
     raise Exception('''\n
-z-value >= 3, there is >99.7% chance of perf regression.\n
+z-value >= 2, there is >97.7% chance of perf regression.\n
 To reproduce this regression, run `cd .jenkins/perf_test/ && bash ''' + test_name + '''.sh` on your local machine and compare the runtime before/after your code change.
 ''')
 else:
-    print("z-value < 3, no perf regression detected.")
+    print("z-value < 2, no perf regression detected.")
