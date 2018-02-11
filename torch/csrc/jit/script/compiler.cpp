@@ -84,7 +84,7 @@ struct Environment {
   }
 
   void setVar(const std::string& name, Value* value) {
-    if (!findInThisFrame(name) && findInThisFrame(name) &&
+    if (!findInThisFrame(name) && findInParentFrame(name) &&
         getBlockOwningKind() == Symbol("Loop"))
       createCapturedInput(name);
     value_table[name] = value;

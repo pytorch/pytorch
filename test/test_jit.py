@@ -1489,7 +1489,6 @@ class TestJit(TestCase):
         ''')
         self.assertExpected(str(cu.get_graph('test_while')))
 
-    # TODO: does not propagate c out of nested if statement
     def test_script_while_nest_if(self):
         cu = torch.jit._jit_script_compile('''
         def test_while_if(a, b) -> (c):
@@ -1505,7 +1504,6 @@ class TestJit(TestCase):
         ''')
         self.assertExpected(str(cu.get_graph('test_while_if')))
 
-    # TODO; does not propagate c out of nested if statement
     def test_script_if_nest_while(self):
         cu = torch.jit._jit_script_compile('''
         def test_if_while(a, b) -> (c):
