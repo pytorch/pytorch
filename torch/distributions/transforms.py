@@ -70,7 +70,6 @@ class Transform(object):
             transforms that act jointly on matrices, etc.
     """
     bijective = False
-    sign = float('nan')
     event_dim = 0
 
     def __init__(self, cache_size=0):
@@ -96,6 +95,14 @@ class Transform(object):
             inv = _InverseTransform(self)
             self._inv = weakref.ref(inv)
         return inv
+
+    @property
+    def sign(self):
+        """
+        Returns the sign of the determinant of the Jacobian, if applicable.
+        In general this only makes sense for bijective transforms.
+        """
+        raise NotImplementedError
 
     def __eq__(self, other):
         return self is other
