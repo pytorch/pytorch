@@ -1460,24 +1460,24 @@ class TestJit(TestCase):
         self.assertExpected(str(cu.get_graph('test_if_noelse')))
 
     def test_script_while_nonexistant_value(self):
-        cu = torch.jit._jit_script_compile('''
-        def test_while(a, b) -> (c):
-            while a < 10:
-                a = a + x
-                b = b + 1
-            c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_while')))
+        with self.assertRaisesRegex(RuntimeError, "undefined value x"):
+            cu = torch.jit._jit_script_compile('''
+            def test_while(a, b) -> (c):
+                while a < 10:
+                    a = a + x
+                    b = b + 1
+                c = a + b
+            ''')
 
     def test_script_while_nonexistant_cond_value(self):
-        cu = torch.jit._jit_script_compile('''
-        def test_while(a, b) -> (c):
-            while a < x:
-                a = a + 1
-                b = b + 1
-            c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_while')))
+        with self.assertRaisesRegex(RuntimeError, "undefined value x"):
+            cu = torch.jit._jit_script_compile('''
+            def test_while(a, b) -> (c):
+                while a < x:
+                    a = a + 1
+                    b = b + 1
+                c = a + b
+            ''')
 
     def test_script_while_write_outer_then_read(self):
         cu = torch.jit._jit_script_compile('''

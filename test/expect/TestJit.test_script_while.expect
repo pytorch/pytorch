@@ -1,0 +1,18 @@
+graph(%a : UNKNOWN_TYPE
+      %b : UNKNOWN_TYPE) {
+  %2 : UNKNOWN_TYPE = Constant[value={0}]()
+  %3 : UNKNOWN_TYPE = Constant[value={10}]()
+  %4 : UNKNOWN_TYPE = lt(%a, %3)
+  %13 : UNKNOWN_TYPE, %14 : UNKNOWN_TYPE = Loop(%2, %4, %a, %b)
+    block0(%5 : UNKNOWN_TYPE, %8 : UNKNOWN_TYPE) {
+      %6 : UNKNOWN_TYPE = Constant[value={1}]()
+      %7 : UNKNOWN_TYPE = add[alpha={1}](%5, %6)
+      %9 : UNKNOWN_TYPE = Constant[value={1}]()
+      %10 : UNKNOWN_TYPE = add[alpha={1}](%8, %9)
+      %11 : UNKNOWN_TYPE = Constant[value={10}]()
+      %12 : UNKNOWN_TYPE = lt(%7, %11)
+      -> (%12, %7, %10)
+    }
+  %15 : UNKNOWN_TYPE = add[alpha={1}](%13, %14)
+  return (%15);
+}
