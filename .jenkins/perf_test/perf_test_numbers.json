@@ -1,8 +1,8 @@
 {
-	"base-machine": "Mac Mini with 2.3 GHz i7 processors, 16GB RAM, 250GB SSD",
-	"docker-settings": "4 cores, 8GB RAM",
-	
 	"commit": "92aeca1279265d24493dc6ced7dde9a368faf048",
+
+	"cpu-test-base-machine": "Mac Mini with 2.3 GHz i7 processors, 16GB RAM, 250GB SSD",
+	"cpu-test-docker-settings": "2 cores, 4GB RAM",
 
 	"test_cpu_speed_mini_sequence_labeler": {
 		"mean": "2.62557", 
@@ -13,6 +13,8 @@
 		"mean": "18.79468", 
 		"sigma": "2.37561"
 	},
+
+	"gpu-test-base-machine": "g3.8xlarge",
 
 	"test_gpu_speed_mnist": {
 		"mean": "13.76155",
