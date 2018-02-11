@@ -4811,6 +4811,32 @@ def multilabelmarginloss_no_reduce_test():
         pickle=False)
 
 
+def hingeembeddingloss_no_reduce_test():
+    t = Variable(torch.randn(10).gt(0).double().mul_(2).sub(1))
+    return dict(
+        fullname='HingeEmbeddingLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.hinge_embedding_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['HingeEmbeddingLoss'](i, t.type_as(i), reduce=False),
+        check_no_size_average=True,
+        pickle=False)
+
+
+def hingeembeddingloss_margin_no_reduce_test():
+    t = Variable(torch.randn(10).gt(0).double().mul_(2).sub(1))
+    return dict(
+        fullname='HingeEmbeddingLoss_margin_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.hinge_embedding_loss(i, t.type_as(i), margin=0.5, reduce=False)),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['HingeEmbeddingLoss'](i, t.type_as(i), margin=0.5, reduce=False),
+        check_no_size_average=True,
+        pickle=False)
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -4841,6 +4867,8 @@ new_module_tests = [
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
     multilabelmarginloss_no_reduce_test(),
+    hingeembeddingloss_no_reduce_test(),
+    hingeembeddingloss_margin_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),

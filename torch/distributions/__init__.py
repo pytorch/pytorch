@@ -1,11 +1,29 @@
 r"""
 The ``distributions`` package contains parameterizable probability distributions
-and sampling functions.
+and sampling functions. This allows the construction of stochastic computation
+graphs and stochastic gradient estimators for optimization.
 
-Policy gradient methods can be implemented using the
-:meth:`~torch.distributions.Distribution.log_prob` method, when the probability
-density function is differentiable with respect to its parameters. A basic
-method is the REINFORCE rule:
+It is not possible to directly backpropagate through random samples. However,
+there are two main methods for creating surrogate functions that can be
+backpropagated through. These are the score function estimator/likelihood ratio
+estimator/REINFORCE and the pathwise derivative estimator. REINFORCE is commonly
+seen as the basis for policy gradient methods in reinforcement learning, and the
+pathwise derivative estimator is commonly seen in the reparameterization trick
+in variational autoencoders. Whilst the score function only requires the value
+of samples :math:`f(x)`, the pathwise derivative requires the derivative
+:math:`f'(x)`. The next sections discuss these two in a reinforcement learning
+example. For more details see
+`Gradient Estimation Using Stochastic Computation Graphs`_ .
+
+.. _`Gradient Estimation Using Stochastic Computation Graphs`:
+     https://arxiv.org/abs/1506.05254
+
+Score function
+^^^^^^^^^^^^^^
+
+When the probability density function is differentiable with respect to its
+parameters, we only need :meth:`~torch.distributions.Distribution.sample` and
+:meth:`~torch.distributions.Distribution.log_prob` to implement REINFORCE:
 
 .. math::
 
@@ -22,25 +40,29 @@ descent, whilst the rule above assumes gradient ascent. With a categorical
 policy, the code for implementing REINFORCE would be as follows::
 
     probs = policy_network(state)
-    # NOTE: this is equivalent to what used to be called multinomial
+    # Note that this is equivalent to what used to be called multinomial
     m = Categorical(probs)
     action = m.sample()
     next_state, reward = env.step(action)
     loss = -m.log_prob(action) * reward
     loss.backward()
 
-Another way to implement these stochastic/policy gradients would be to use the
-reparameterization trick from :meth:`~torch.distributions.Distribution.rsample`
-method, where the parameterized random variable can be defined as a parameterized
-deterministic function of a parameter-free random variable. The reparameterized sample
-is required to be differentiable. The code for implementing the pathwise estimation would
-be as follows::
+Pathwise derivative
+^^^^^^^^^^^^^^^^^^^
+
+The other way to implement these stochastic/policy gradients would be to use the
+reparameterization trick from the
+:meth:`~torch.distributions.Distribution.rsample` method, where the
+parameterized random variable can be constructed via a parameterized
+deterministic function of a parameter-free random variable. The reparameterized
+sample therefore becomes differentiable. The code for implementing the pathwise
+derivative would be as follows::
 
     params = policy_network(state)
     m = Normal(*params)
-    # any distribution with .has_rsample == True could work based on the application
+    # Any distribution with .has_rsample == True could work based on the application
     action = m.rsample()
-    next_state, reward = env.step(action)  # Assume that reward is differentiable
+    next_state, reward = env.step(action)  # Assuming that reward is differentiable
     loss = -reward
     loss.backward()
 """

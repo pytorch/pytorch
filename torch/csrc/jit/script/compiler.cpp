@@ -48,7 +48,7 @@ struct to_ir {
       def.graph->registerOutput(getVar(output.ident()));
     }
   }
-  void emitStatements(const ListView<TreeRef>& statements) {
+  void emitStatements(const List<TreeRef>& statements) {
     for (auto stmt : statements) {
       switch (stmt->kind()) {
         case TK_IF:
@@ -66,8 +66,8 @@ struct to_ir {
             setVar(name, def.graph->addInput(name));
           }
           break;
-        default:
-          emitExpr(stmt, 0);
+        case TK_EXPR_STMT:
+          emitExpr(ExprStmt(stmt).expr(), 0);
           break;
       }
     }
@@ -98,9 +98,8 @@ struct to_ir {
       outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
     }
     int i = 0;
-    for (auto ident : stmt.lhs()) {
-      if (ident->kind() == TK_IDENT)
-        setVar(Ident(ident).name(), outputs.at(i));
+    for (const Ident& ident : stmt.lhs()) {
+      setVar(ident.name(), outputs.at(i));
       i++;
     }
     return outputs;
@@ -205,9 +204,9 @@ struct to_ir {
       const TreeRef& tree,
       const size_t output_size = 0) {
     switch (tree->kind()) {
-      case TK_IDENT: {
+      case TK_VAR: {
         expectOutputs(tree, output_size, 1);
-        return {getVar(Ident(tree))};
+        return {getVar(Var(tree).name())};
       } break;
       case TK_NE:
       case TK_EQ:
@@ -246,20 +245,20 @@ struct to_ir {
           ListAttributeMap list_attributes{};
           for (const auto& attr : apply.attributes()) {
             const auto& name = attr.name().name();
-            const auto& value = attr.value();
+            const Expr& value = attr.value();
             // TODO: handle non-float attributes
-            switch (value->kind()) {
+            switch (value.kind()) {
               case TK_CONST: {
-                auto v = value->tree(0)->doubleValue();
-                const auto& type = value->tree(1)->stringValue();
+                auto v = value.get()->tree(0)->doubleValue();
+                const auto& type = value.get()->tree(1)->stringValue();
                 attributes.insert({name, {v, type}});
               } break;
               case TK_LIST:
                 std::vector<double> vs{};
-                for (const auto& tree : value->trees()) {
+                for (const auto& tree : value.get()->trees()) {
                   vs.push_back(tree->tree(0)->doubleValue());
                 }
-                const auto& type = value->trees()[0]->tree(1)->stringValue();
+                const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
                 list_attributes.insert({name, {std::move(vs), type}});
             }
             break;
@@ -304,9 +303,9 @@ struct to_ir {
     }
   }
 
-  std::vector<Value*> emitCast(const TreeRef& input, int type) {
+  std::vector<Value*> emitCast(const TreeRef& input, const ScalarType& type) {
     at::ScalarType t;
-    switch (type) {
+    switch (type.kind()) {
       case TK_INT:
         t = at::kInt;
         break;

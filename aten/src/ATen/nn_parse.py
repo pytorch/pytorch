@@ -350,7 +350,7 @@ def backward_declaration(base, thnn_functions):
             pass
         else:
             base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
-            if base_name in [arg['name'] for arg in arguments]:
+            if base_name in [a['name'] for a in arguments]:
                 scalar_check[arg['name']] = base_name + '_->isScalar()'
             else:
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "

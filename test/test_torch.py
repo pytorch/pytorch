@@ -1091,6 +1091,29 @@ class TestTorch(TestCase):
         res2[1] = 2
         self.assertEqual(expected, torch.ones_like(expected))
 
+    def test_new_tensor(self):
+        expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
+        # test data
+        res1 = expected.new_tensor([1, 1])
+        self.assertEqual(res1, expected)
+
+        # test copy
+        res2 = expected.new_tensor(expected)
+        self.assertEqual(res2, expected)
+        res2[1] = 2
+        self.assertEqual(expected, torch.ones_like(expected))
+
+        if torch.cuda.device_count() >= 2:
+            expected = expected.cuda(1)
+            res1 = expected.new_tensor([1, 1])
+            self.assertEqual(res1.get_device(), expected.get_device())
+
+            res2 = expected.new_tensor(expected)
+            self.assertEqual(res2.get_device(), expected.get_device())
+
+            res1 = expected.new_tensor(1)
+            self.assertEqual(res1.get_device(), expected.get_device())
+
     def test_diag(self):
         x = torch.rand(100, 100)
         res1 = torch.diag(x)
@@ -2800,7 +2823,7 @@ class TestTorch(TestCase):
             if expected_error is None:
                 result = x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end)
                 ref_result = naive_stft(x, frame_length, hop, fft_size, return_onesided, window, pad_end)
-                self.assertEqual(result.data, ref_result, 5e-6, 'stft result')
+                self.assertEqual(result.data, ref_result, 7e-6, 'stft result')
             else:
                 self.assertRaises(expected_error,
                                   lambda: x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end))

@@ -484,6 +484,26 @@ PyObject * THSPTensor_(new)(THPTensor *self, PyObject *args, PyObject *kwargs)
 ]]
 
 [[
+  name: norm
+  types:
+    - float
+    - double
+  backends:
+    - CPU
+    - CUDA
+  sparse: yes
+  cname: normall
+  variants:
+    - method
+    - function
+  return: real
+  arguments:
+    - THSTensor* self
+    - arg: real value
+      default: AS_REAL(2)
+]]
+
+[[
   name: pow
   types:
     - float

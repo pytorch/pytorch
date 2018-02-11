@@ -66,6 +66,18 @@ struct Tree : std::enable_shared_from_this<Tree> {
   }
   template <typename... Args>
   void matchD(int k, const char* filename, int lineno, Args&... args) {
+    std::initializer_list<TreeRef*> vars = {&args...};
+    matchNumSubtreesD(k, filename, lineno, vars.size(), true);
+    size_t i = 0;
+    for (TreeRef* v : vars) {
+      *v = trees()[i++];
+    }
+  }
+  void matchNumSubtrees(int k, size_t expected_subtrees) {
+    return matchNumSubtreesD(k, "unknown", 0, expected_subtrees, false);
+  }
+  void matchNumSubtreesD(int k, const char* filename, int lineno,
+                         size_t expected_subtrees, bool allow_more) {
     if (kind() != k) {
       std::stringstream ss;
       ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
@@ -73,17 +85,13 @@ struct Tree : std::enable_shared_from_this<Tree> {
       range().highlight(ss);
       throw std::runtime_error(ss.str());
     }
-    std::initializer_list<TreeRef*> vars = {&args...};
-    if (vars.size() > trees().size()) {
+    if (trees().size() < expected_subtrees ||
+        (!allow_more && trees().size() != expected_subtrees)) {
       std::stringstream ss;
-      ss << filename << ":" << lineno << ": trying to match " << vars.size()
-         << " variables against " << trees().size() << " values in list.\n";
+      ss << filename << ":" << lineno << ": expected at least " << expected_subtrees
+         << " subtrees, but found only " << trees().size() << "\n";
       range().highlight(ss);
       throw std::runtime_error(ss.str());
-    }
-    size_t i = 0;
-    for (TreeRef* v : vars) {
-      *v = trees()[i++];
     }
   }
   virtual ~Tree() {}
