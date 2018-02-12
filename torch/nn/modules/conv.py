@@ -745,13 +745,6 @@ class Conv2dLocal(Module):
 
     def __init__(self, in_height, in_width, in_channels, out_channels,
                  kernel_size, stride=1, padding=0, bias=True, dilation=1):
-        # kernel_size = _pair(kernel_size)
-        # stride = _pair(stride)
-        # padding = _pair(padding)
-        # dilation = _pair(dilation)
-        # super(Conv2dLocal, self).__init__(
-        #     in_channels, out_channels, kernel_size, stride, padding, dilation,
-        #     False, _single(0), 1, bias)
         super(Conv2dLocal, self).__init__()
 
         self.in_channels = in_channels
@@ -786,6 +779,18 @@ class Conv2dLocal(Module):
         self.weight.data.uniform_(-stdv, stdv)
         if self.bias is not None:
             self.bias.data.uniform_(-stdv, stdv)
+
+    def __repr__(self):
+        s = ('{name}({in_channels}, {out_channels}, kernel_size={kernel_size}'
+             ', stride={stride}')
+        if self.padding != (0,) * len(self.padding):
+            s += ', padding={padding}'
+        if self.dilation != (1,) * len(self.dilation):
+            s += ', dilation={dilation}'
+        if self.bias is None:
+            s += ', bias=False'
+        s += ')'
+        return s.format(name=self.__class__.__name__, **self.__dict__)
 
     def forward(self, input):
         return F.conv2d_local(
