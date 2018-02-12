@@ -1,6 +1,7 @@
 from __future__ import print_function
 import sys
 import os
+import re
 import math
 import shutil
 import random
@@ -383,6 +384,88 @@ class TestLuaReader(TestCase):
 
     def _transform_MultiMarginCriterion(self, input, target):
         return input, target.sub(1)
+
+
+class TestBottleneck(TestCase):
+    def _run(self, command):
+        """Returns (return-code, stdout, stderr)"""
+        import subprocess
+        from common import PY3
+
+        p = subprocess.Popen(command, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE, shell=True)
+        output, err = p.communicate()
+        rc = p.returncode
+        if PY3:
+            output = output.decode("ascii")
+            err = err.decode("ascii")
+        return (rc, output, err)
+
+    def _run_bottleneck(self, test_file):
+        import os
+        curdir = os.path.dirname(os.path.abspath(__file__))
+        filepath = '{}/{}'.format(curdir, test_file)
+        rc, out, err = self._run('python -m torch.utils.bottleneck {}'.format(filepath))
+        return rc, out, err
+
+    def _fail_msg(self, msg, output):
+        return '{}, output was:\n{}'.format(msg, output)
+
+    def _check_environment_summary(self, output):
+        results = re.search('Environment Summary', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have Enviroment Summary', output))
+
+        # Up to five lines away from the heading, there should be the version number
+        results = re.search(r'Environment Summary.*(\n.*){,5}\nPyTorch \d+\.\d+', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have PyTorch version', output))
+
+    def _check_cprof_summary(self, output):
+        results = re.search('cProfile output', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have cProfile output', output))
+
+        # This assumes that after the cProfile output section we have
+        # the autograd profiler output
+        results = re.search(r'cProfile output.*(\n.*){6,50}\nautograd profiler output', output)
+        self.assertIsNotNone(results, self._fail_msg(
+            'Distance between cProfile and autograd prof out not in [6, 50] lines', output))
+
+    def _check_autograd_summary(self, output):
+        results = re.search('autograd profiler output', output)
+        self.assertIsNotNone(results, self._fail_msg('Should have autograd profiler output', output))
+
+        # This assumes that after the autograd profiler output is the end of the
+        # output.
+        results = re.search(r'autograd profiler output.*(\n.*){6,50}', output)
+        self.assertIsNotNone(results, self._fail_msg(
+            'Distance between autograd prof output and end of output not in [6, 50] lines', output))
+
+    def _check_cuda_env_vars(self, output):
+        if torch.cuda.is_available():
+            results = re.search('CUDA_LAUNCH_BLOCKING=1', output)
+            self.assertIsNotNone(results, self._fail_msg('Should tell users about CUDA_LAUNCH_BLOCKING', output))
+        else:
+            results = re.search('CUDA_LAUNCH_BLOCKING=1', output)
+            self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA_LAUNCH_BLOCKING', output))
+
+    @unittest.skipIf(torch.cuda.is_available(), 'CPU-only test')
+    def test_cpu_only(self):
+        rc, out, err = self._run_bottleneck('bottleneck/test.py')
+        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+
+        self._check_environment_summary(out)
+        self._check_autograd_summary(out)
+        self._check_cprof_summary(out)
+        self._check_cuda_env_vars(out)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'No CUDA')
+    def test_cuda(self):
+        rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
+        self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
+
+        self._check_environment_summary(out)
+        self._check_autograd_summary(out)
+        self._check_cprof_summary(out)
+        self._check_cuda_env_vars(out)
 
 
 class TestONNXUtils(TestCase):
