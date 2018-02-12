@@ -46,7 +46,7 @@ rm -rf C:\\Jenkins\\Miniconda3
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
 .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-call conda install -y numpy mkl cffi pyyaml boto3
+call conda install -y -q numpy mkl cffi pyyaml boto3
 
 :: Install ninja
 pip install ninja
