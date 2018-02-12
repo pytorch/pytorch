@@ -25,10 +25,6 @@ class SavedVariable {
   SavedVariable(SavedVariable&&) = default;
   SavedVariable& operator=(SavedVariable&&) = default;
 
-  // Must be defined externally to avoid it being inlined by the compiler,
-  // which would require it to see the definition of ValueTracingState.
-  ~SavedVariable();
-
   /// Reconstructs the saved variable. Pass `saved_for` as the gradient
   /// function if constructing the `SavedVariable` with it would have caused a
   /// circular reference.
@@ -50,10 +46,10 @@ class SavedVariable {
   std::unique_ptr<jit::tracer::ValueTracingState> tracing_state_;
   VariableVersion version_counter_;
 
-  uint32_t saved_version_ = 0;
-  uint32_t output_nr_ = 0;
+  uint32_t saved_version_;
+  uint32_t output_nr_;
   bool was_default_constructed_ = true;
-  bool requires_grad_ = false;
-  bool has_grad_fn_ = false;
+  bool requires_grad_;
+  bool has_grad_fn_;
 };
 }} // namespace torch::autograd

@@ -1,8 +1,8 @@
 #include "torch/csrc/autograd/saved_variable.h"
 
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/jit/tracer_state.h"
 
 #include <ATen/Tensor.h>
@@ -11,34 +11,30 @@
 #include <list>
 #include <memory>
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 
-SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
-  if (!variable.defined()) {
-    return;
-  }
-  was_default_constructed_ = false;
-
-  data_ = variable.data();
-  requires_grad_ = variable.requires_grad();
-  version_counter_ = variable.version_counter();
-  saved_version_ = version_counter_.current_version();
-  has_grad_fn_ = !variable.is_leaf();
-  output_nr_ = variable.output_nr();
-  if (!has_grad_fn_) {
-    grad_accumulator_ = variable.grad_accumulator();
-  }
-  if (!is_output) {
-    grad_fn_ = variable.grad_fn();
-  }
-  if (variable.has_tracing_state()) {
-    tracing_state_.reset(
-        new jit::tracer::ValueTracingState(variable.tracing_state()));
+SavedVariable::SavedVariable(const Variable& variable, bool is_output)
+    : output_nr_(variable.output_nr()),
+      requires_grad_(variable.requires_grad()),
+      has_grad_fn_(!variable.is_leaf()) {
+  if (variable.defined()) {
+    was_default_constructed_ = false;
+    // These copies are all shared_ptr copies, so slightly more expensive.
+    // Do them here instead of in the init list in case data is undefined.
+    data_ = variable.data();
+    if (variable.is_leaf()) {
+      grad_accumulator_ = variable.grad_accumulator();
+    } else if (!is_output) {
+      grad_fn_ = variable.grad_fn();
+    }
+    version_counter_ = variable.version_counter();
+    saved_version_ = version_counter_.current_version();
+    if (variable.has_tracing_state()) {
+      tracing_state_.reset(
+          new jit::tracer::ValueTracingState(variable.tracing_state()));
+    }
   }
 }
-
-SavedVariable::~SavedVariable() = default;
 
 Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   if (!data_.defined()) {
@@ -94,5 +90,4 @@ const char* ERR_BACKWARD_TWICE =
     "already been freed. Specify retain_graph=True when calling backward "
     "the first time.";
 
-} // namespace autograd
-} // namespace torch
+}} // namespace torch::autograd
