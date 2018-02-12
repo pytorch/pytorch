@@ -112,9 +112,8 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    # verbose because of differening Variable/Tensor apis and lack of dtypes
     if isinstance(tensor, Variable):
-        return variable(float('inf')).type_as(tensor).expand_as(tensor)
+        return tensor.new_tensor(float('inf')).expand_as(tensor)
     else:
         return tensor.new([float('inf')]).expand_as(tensor)
 

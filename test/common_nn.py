@@ -482,12 +482,29 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
     return output / dim
 
 
+def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
+    # needed for legacy tests
+    if not isinstance(input, Variable):
+        input = Variable(input)
+        target = Variable(target)
+
+    margin_clamp = (margin - input).clamp(min=0).type_as(input)
+    output = torch.where(target == 1, input, margin_clamp)
+
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
     'NLLLossNd': nlllossNd_reference,
     'SmoothL1Loss': smoothl1loss_reference,
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
+    'HingeEmbeddingLoss': hingeembeddingloss_reference,
 }
 
 
@@ -496,20 +513,20 @@ sample_scalar = variable(0)
 
 # TODO: replace this with torch.rand() when Variables and tensors are merged;
 # this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_rand(sizes):
+def torch_rand(sizes, requires_grad=False):
     if len(sizes) == 0:
-        return torch.testing.rand_like(sample_scalar)
+        return torch.testing.rand_like(sample_scalar, requires_grad=requires_grad)
     else:
-        return Variable(torch.rand(*sizes))
+        return Variable(torch.rand(*sizes), requires_grad=requires_grad)
 
 
 # TODO: replace this with torch.randn() when Variables and tensors are merged;
 # this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_randn(sizes):
+def torch_randn(sizes, requires_grad=False):
     if len(sizes) == 0:
-        return torch.testing.randn_like(sample_scalar)
+        return torch.testing.randn_like(sample_scalar, requires_grad=requires_grad)
     else:
-        return Variable(torch.randn(*sizes))
+        return Variable(torch.randn(*sizes), requires_grad=requires_grad)
 
 criterion_tests = [
     dict(
@@ -645,12 +662,17 @@ criterion_tests = [
         module_name='HingeEmbeddingLoss',
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
+        reference_fn=lambda i, t, m:
+            hingeembeddingloss_reference(i, t, size_average=get_size_average(m)),
+        check_no_size_average=True,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
         constructor_args=(0.5,),
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
+        reference_fn=lambda i, t, m:
+            hingeembeddingloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
         desc='margin',
         check_no_size_average=True,
     ),
@@ -1082,8 +1104,7 @@ class ModuleTest(TestBase):
 
             # Run backwards on CPU and GPU and compare results
             for i in range(5):
-                cpu_output_t = cpu_output.data if isinstance(cpu_output, Variable) else cpu_output
-                cpu_gradOutput = cpu_output_t.clone().normal_()
+                cpu_gradOutput = cpu_output.clone().normal_()
                 gpu_gradOutput = cpu_gradOutput.type('torch.cuda.FloatTensor')
                 cpu_gradInput = test_case._backward(cpu_module, cpu_input, cpu_output, cpu_gradOutput)
                 gpu_gradInput = test_case._backward(gpu_module, gpu_input, gpu_output, gpu_gradOutput)

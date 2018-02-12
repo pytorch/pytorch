@@ -51,6 +51,16 @@ static inline Backend toSparse(Backend b) {
   }
 }
 
+static inline Backend toDense(Backend b) {
+  switch (b) {
+    case Backend::CPU: return Backend::CPU;
+    case Backend::CUDA: return Backend::CUDA;
+    case Backend::SparseCPU: return Backend::CPU;
+    case Backend::SparseCUDA: return Backend::CUDA;
+    default: throw std::runtime_error("Unknown backend");
+  }
+}
+
 static inline const char * toString(Backend b) {
   switch(b) {
     case Backend::CPU: return "CPU";

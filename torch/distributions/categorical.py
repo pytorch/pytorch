@@ -1,5 +1,5 @@
 import torch
-from torch.autograd import Variable
+from torch.autograd import Variable, variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, log_sum_exp, lazy_property, broadcast_all
@@ -73,11 +73,17 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new([float('nan')]).expand(self._extended_shape())
+        if isinstance(self.probs, Variable):
+            return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        else:
+            return self.probs.new([float('nan')]).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return self.probs.new([float('nan')]).expand(self._extended_shape())
+        if isinstance(self.probs, Variable):
+            return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        else:
+            return self.probs.new([float('nan')]).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)

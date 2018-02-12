@@ -2028,11 +2028,19 @@
     - function
   options:
     - cname: normall
+      aten_sparse: True
       return: accreal
       arguments:
         - THTensor* self
         - arg: real p
           default: AS_REAL(2)
+      aten_custom_call: |
+        // norm(value) for a sparse tensor returns a DENSE 0-dim tensor
+        if (self.is_sparse()) {
+          auto result = ${THTensor}_normall(${state,} self_->tensor, convert<${THScalarType}>(p_));
+          return toBackend(toDense(backend())).tensor({}).fill_(result);
+        }
+        // aten_custom_call is followed by the generated call to normall
     - cname: norm
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
