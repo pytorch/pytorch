@@ -845,6 +845,21 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
 
+    def test_new(self):
+        def do_test(x, indices, values):
+            if not x.is_cuda:
+                # CUDA sparse tensors currently requires the size to be
+                # specified if nDimV > 0
+                self.assertEqual(x.new(indices, values), x)
+            self.assertEqual(x.new(indices, values, x.size()), x)
+
+        x, i, v = self._gen_sparse(3, 10, 100)
+        do_test(x, i, v)
+
+        # TODO: simplify once Variable and Tensor are merged
+        from torch.autograd import Variable
+        do_test(Variable(x), Variable(i), Variable(v))
+
     def test_is_sparse(self):
         x = torch.randn(3, 3)
         self.assertFalse(x.is_sparse)
