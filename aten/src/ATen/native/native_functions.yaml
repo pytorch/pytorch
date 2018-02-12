@@ -35,6 +35,16 @@
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sspaddmm_out_only_sparse
+    CUDA: _sspaddmm_out_only_sparse
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
+
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
