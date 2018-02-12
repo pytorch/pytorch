@@ -204,13 +204,11 @@ class DistributedDataParallel(Module):
                             same GPU.
         buffer_size (int): maximum size of the buffer for coalescing
         """
-        tensors_buckets = _take_tensors(tensors, buffer_size)
-        for tensors in tensors_buckets:
+        for tensors in _take_tensors(tensors, buffer_size):
             flat_tensors = _flatten_dense_tensors(tensors)
             dist.broadcast(flat_tensors, 0)
             for tensor, synced in zip(tensors,
-                                      _unflatten_dense_tensors(flat_tensors,
-                                                               tensors)):
+                                      _unflatten_dense_tensors(flat_tensors, tensors)):
                 tensor.copy_(synced)
 
     def _sync_params(self):
