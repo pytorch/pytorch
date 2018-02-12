@@ -2,6 +2,7 @@ import fcntl
 import multiprocessing
 import os
 import sys
+import copy
 import time
 import unittest
 from functools import wraps, reduce
@@ -11,7 +12,7 @@ import torch
 import torch.cuda
 import torch.nn as nn
 import torch.distributed as dist
-import torch.autograd.Variable as Variable
+from torch.autograd import Variable
 from common import TestCase
 
 BACKEND = os.environ['BACKEND']
@@ -54,6 +55,16 @@ def skip_if_no_multigpu(func):
 
         return func(*args, **kwargs)
     return wrapper
+
+
+def apply_hack_for_nccl():
+    # This is a hack for a known NCCL issue using multiprocess
+    # in conjunction with multiple threads to manage different GPUs which
+    # may cause ncclCommInitRank to fail.
+    # http://docs.nvidia.com/deeplearning/sdk/nccl-release-notes/rel_2.1.4.html#rel_2.1.4
+    # It slows down the performance of collective operations.
+    # Without this setting NCCL might throw unhandled error.
+    os.environ['NCCL_MAX_NRINGS'] = '1'
 
 
 @contextmanager
@@ -566,7 +577,7 @@ class _DistTestBase(object):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
 
-    # MULTIGPU TESTS(ONLY FOR NCCL BACKEND)
+    # MULTIGPU TESTS
     def _init_multigpu_helper(self):
         """Multigpu tests are designed to simulate the multi nodes with multi
         GPUs on each node. Nccl backend requires equal #GPUs in each process.
@@ -577,13 +588,8 @@ class _DistTestBase(object):
         world_size = dist.get_world_size()
         visible_devices = range(nGPUs)
 
-        # This is a hack for a known NCCL issue using multiprocess
-        # in conjunction with multiple threads to manage different GPUs which
-        # may cause ncclCommInitRank to fail.
-        # http://docs.nvidia.com/deeplearning/sdk/nccl-release-notes/rel_2.1.4.html#rel_2.1.4
-        # It slows down the performance of collective operations.
-        # Without this setting NCCL might throw unhandled error.
-        os.environ['NCCL_MAX_NRINGS'] = '1'
+        if BACKEND == 'nccl':
+            apply_hack_for_nccl()
 
         nGPUs_per_process = int(nGPUs / world_size)
         rankToGPUMapping = {}
@@ -713,9 +719,13 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
+    @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_DistributedDataParallel(self):
+        # Run a simple end to end DDP model, use result of single node model
+        # as baseline
         group, group_id, rank = self._init_global_test()
-        os.environ['NCCL_MAX_NRINGS'] = '1'
+        rankToGPUMapping = self._init_multigpu_helper()
 
         class Net(nn.Module):
             def __init__(self):
@@ -726,21 +736,43 @@ class _DistTestBase(object):
                 x = self.features(x)
                 return x
 
+        # cpu training setup
         model = Net()
-        model.cuda()
+        model_cpu = copy.deepcopy(model)
+        optimizer_cpu = torch.optim.SGD(model_cpu.parameters(), 0.1)
 
-        nGPUs = torch.cuda.device_count()
-        input_var = Variable(torch.randn(nGPUs, 1, 2), requires_grad=True).cuda()
-        target = Variable(torch.randn(nGPUs, 1, 4)).cuda()
+        # DDP training setup
+        model_DDP = copy.deepcopy(model)
+        gpu_subset = list(rankToGPUMapping[rank])
+        model_DDP.cuda(gpu_subset[0])
+        model_DDP = nn.parallel.DistributedDataParallel(model_DDP,
+                                                        device_ids=gpu_subset)
+        optimizer_DDP = torch.optim.SGD(model_DDP.parameters(), 0.1)
+
+        # batch_size for DDP should be divisible by #GPU per node.
+        batch_size = len(gpu_subset) * int(WORLD_SIZE)
+        input_cpu = torch.randn(batch_size, 1, 2)
+        target = torch.randn(batch_size, 1, 4)
         loss = nn.MSELoss()
-        optimizer = torch.optim.SGD(model.parameters(), 0.1)
 
-        model_expected = self._test_DDP_helper(model, input_var, target, loss, optimizer)
+        model_cpu = self._test_DDP_helper(
+            model_cpu,
+            Variable(input_cpu, requires_grad=True),
+            Variable(target),
+            loss,
+            optimizer_cpu)
 
-        model = torch.nn.parallel.DistributedDataParallel(model)
-        model_DDP = self._test_DDP_helper(model, input_var, target, loss, optimizer)
+        # DDP scatters subsets of input_cpu to GPUs
+        model_DDP = self._test_DDP_helper(
+            model_DDP,
+            Variable(input_cpu, requires_grad=True),
+            Variable(target.cuda(gpu_subset[0], non_blocking=True)),
+            loss,
+            optimizer_DDP)
 
-        self.assertEqual(model_expected.features.weight, model_DDP.module.features.weight)
+        self.assertEqual(model_cpu.features.weight,
+                         model_DDP.module.features.weight)
+        self._barrier()
 
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
@@ -748,7 +780,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     class TestDistBackend(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
-        JOIN_TIMEOUT = 15
+        JOIN_TIMEOUT = 18
 
         @staticmethod
         def manager_join(fn):
