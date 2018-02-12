@@ -25,7 +25,7 @@ RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-la
      /opt/conda/bin/conda create -y --name pytorch-py$PYTHON_VERSION python=$PYTHON_VERSION numpy pyyaml scipy ipython mkl&& \
      /opt/conda/bin/conda clean -ya 
 ENV PATH /opt/conda/envs/pytorch-py$PYTHON_VERSION/bin:$PATH
-RUN conda install --name pytorch-py$PYTHON_VERSION -c soumith magma-cuda80
+RUN conda install --name pytorch-py$PYTHON_VERSION -c soumith magma-cuda90
 # This must be done before pip so that requirements.txt is available
 WORKDIR /opt/pytorch
 COPY . .
