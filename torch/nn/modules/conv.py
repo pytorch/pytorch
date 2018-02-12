@@ -741,6 +741,54 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
             output_padding, self.groups, self.dilation)
 
 
-# TODO: Conv2dLocal
+class Conv2dLocal(Module):
+
+    def __init__(self, in_height, in_width, in_channels, out_channels,
+                 kernel_size, stride=1, padding=0, bias=True, dilation=1):
+        # kernel_size = _pair(kernel_size)
+        # stride = _pair(stride)
+        # padding = _pair(padding)
+        # dilation = _pair(dilation)
+        # super(Conv2dLocal, self).__init__(
+        #     in_channels, out_channels, kernel_size, stride, padding, dilation,
+        #     False, _single(0), 1, bias)
+        super(Conv2dLocal, self).__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = _pair(kernel_size)
+        self.stride = _pair(stride)
+        self.padding = _pair(padding)
+        self.dilation = _pair(dilation)
+
+        self.in_height = in_height
+        self.in_width = in_width
+        self.out_height = int(math.floor(
+            (in_height + 2 * self.padding[0] - self.dilation[0] * (self.kernel_size[0] - 1) - 1) / self.stride[0] + 1))
+        self.out_width = int(math.floor(
+            (in_width + 2 * self.padding[1] - self.dilation[1] * (self.kernel_size[1] - 1) - 1) / self.stride[1] + 1))
+        self.weight = Parameter(torch.Tensor(
+            self.out_height, self.out_width,
+            out_channels, in_channels, *self.kernel_size))
+        if bias:
+            self.bias = Parameter(torch.Tensor(
+                out_channels, self.out_height, self.out_width))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        n = self.in_channels
+        for k in self.kernel_size:
+            n *= k
+        stdv = 1. / math.sqrt(n)
+        self.weight.data.uniform_(-stdv, stdv)
+        if self.bias is not None:
+            self.bias.data.uniform_(-stdv, stdv)
+
+    def forward(self, input):
+        return F.conv2d_local(input, self.weight, self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation)
+
 # TODO: Conv2dMap
 # TODO: ConvTranspose2dMap

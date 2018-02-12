@@ -1,7 +1,8 @@
 from .module import Module
 from .linear import Linear, Bilinear
 from .conv import Conv1d, Conv2d, Conv3d, \
-    ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
+    ConvTranspose1d, ConvTranspose2d, ConvTranspose3d, \
+    Conv2dLocal
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
     Softmax, Softmax2d, LogSoftmax, ELU, SELU, Hardshrink, LeakyReLU, LogSigmoid, \
     Softplus, Softshrink, PReLU, Softsign, Softmin, Tanhshrink, RReLU, GLU
@@ -45,5 +46,5 @@ __all__ = [
     'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
     'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
-    'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
+    'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold', 'Conv2dLocal'
 ]
