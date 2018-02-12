@@ -99,7 +99,7 @@ static Variable sequenceToVariable(const Type& type, PyObject* seq) {
 #ifdef WITH_CUDA
   if (type.is_cuda()) ctor = THCPLongTensorClass;
 #endif
-  auto obj = THPObjectPtr(PyObject_CallFunctionObjArgs(ctor, seq, NULL));
+  auto obj = THPObjectPtr(PyObject_CallFunctionObjArgs(ctor, seq, nullptr));
   if (!obj) throw python_error();
   return make_variable(createTensor(obj.get()));
 }

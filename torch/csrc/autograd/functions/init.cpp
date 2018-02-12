@@ -33,7 +33,7 @@ struct NoCtor {
 
 template<typename C, typename T>
 static void addClass(PyObject* module, PyTypeObject& type, const char* name,
-  PyGetSetDef* function_properties=NULL, PyMethodDef* function_methods=NULL)
+  PyGetSetDef* function_properties=nullptr, PyMethodDef* function_methods=nullptr)
 {
   createForwardFunctionPyTypeObject<T>(type, name, function_properties, function_methods);
   Py_INCREF(&type);
@@ -50,7 +50,7 @@ PyObject* getTupleAttr(PyObject* obj, void* _unused)
   auto& arr = ((T*)(self->cdata.get()))->*ptr;
   auto num_elems = arr.size();
   THPObjectPtr py_tuple(PyTuple_New(num_elems));
-  if (!py_tuple) return NULL;
+  if (!py_tuple) return nullptr;
   for (size_t i = 0; i < num_elems; ++i) {
     PyTuple_SET_ITEM(py_tuple.get(), i, Convert(arr[i]));
   }
@@ -95,8 +95,8 @@ static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 
 static struct PyGetSetDef accumulate_grad_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
-  {(char*)"variable", accumulateGradVar, NULL, NULL, NULL},
-  {NULL}
+  {(char*)"variable", accumulateGradVar, nullptr, nullptr, nullptr},
+  {nullptr}
 };
 
 bool THPAutograd_initFunctions(PyObject* _unused)

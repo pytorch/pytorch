@@ -21,7 +21,7 @@
 using namespace at;
 using namespace torch::autograd;
 
-PyObject *THPVariableClass = NULL;
+PyObject *THPVariableClass = nullptr;
 
 static const char* VOLATILE_WARNING =
     "volatile was removed and now has no effect. Use "
@@ -118,21 +118,21 @@ static void THPVariable_dealloc(THPVariable* self)
 PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
   THPObjectPtr _data;
-  PyObject *data = NULL;
-  PyObject *grad_fn = NULL;
+  PyObject *data = nullptr;
+  PyObject *grad_fn = nullptr;
   char is_volatile = 0;
   char requires_grad = 0;
-  const char* name = NULL;
+  const char* name = nullptr;
 
-  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", NULL};
+  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbOz", (char**)accepted_args,
       &data, &requires_grad, &is_volatile, &grad_fn, &name))
-    return NULL;
+    return nullptr;
 
   if (grad_fn == Py_None)
-    grad_fn = NULL;
+    grad_fn = nullptr;
 
-  if (data == NULL || data == Py_None) {
+  if (data == nullptr || data == Py_None) {
     // For legacy serialization code, create an empty tensor temporarily.
     at::Tensor tensor = at::CPU(at::kFloat).tensor();
     _data = torch::createPyObject(tensor);
@@ -176,12 +176,12 @@ int THPVariable_pyinit(PyObject *self, PyObject *args, PyObject *kwds)
   // The 'data' argument is optional in __new__ to handle legacy serialized
   // Variables.
   PyObject *data;
-  PyObject *grad_fn = NULL;
+  PyObject *grad_fn = nullptr;
   char is_volatile = 0;
   char requires_grad = 0;
-  const char* name = NULL;
+  const char* name = nullptr;
 
-  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", NULL};
+  const char *accepted_args[] = {"data", "requires_grad", "volatile", "_grad_fn", "name", nullptr};
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "|ObbOz", (char**)accepted_args,
       &data, &requires_grad, &is_volatile, &grad_fn, &name))
     return -1;
@@ -444,24 +444,24 @@ PyObject *THPVariable_is_sparse(THPVariable *self)
 }
 
 static struct PyGetSetDef THPVariable_properties[] = {
-  {"_cdata", (getter)THPVariable_get_cdata, NULL, NULL, NULL},
-  {"_version", (getter)THPVariable_get_version, NULL, NULL, NULL},
-  {"grad_fn", (getter)THPVariable_get_grad_fn, NULL, NULL, NULL},
-  {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, NULL, NULL},
-  {"is_leaf", (getter)THPVariable_is_leaf, NULL, NULL, NULL},
-  {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, NULL, NULL},
-  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL}, // only for legacy reasons
-  {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, NULL, NULL},
-  {"_base", (getter)THPVariable_get_base, NULL, NULL, NULL},
-  {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, NULL, NULL},
-  {"output_nr", (getter)THPVariable_get_output_nr, NULL, NULL, NULL},
-  {"requires_grad", (getter)THPVariable_get_requires_grad, (setter)THPVariable_set_requires_grad, NULL, NULL},
-  {"_backward_hooks", (getter)THPVariable_get_backwards_hooks, (setter)THPVariable_set_backwards_hooks, NULL, NULL},
-  {"name", (getter)THPVariable_get_name, NULL, NULL, NULL},
-  {"shape", (getter)THPVariable_get_shape, NULL, NULL, NULL},
-  {"is_cuda", (getter)THPVariable_is_cuda, NULL, NULL, NULL},
-  {"is_sparse", (getter)THPVariable_is_sparse, NULL, NULL, NULL},
-  {NULL}
+  {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
+  {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
+  {"grad_fn", (getter)THPVariable_get_grad_fn, nullptr, nullptr, nullptr},
+  {"_grad_fn", (getter)THPVariable_get_grad_fn, (setter)THPVariable_set_grad_fn, nullptr, nullptr},
+  {"is_leaf", (getter)THPVariable_is_leaf, nullptr, nullptr, nullptr},
+  {"data", (getter)THPVariable_get_data, (setter)THPVariable_set_data, nullptr, nullptr},
+  {"_grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr}, // only for legacy reasons
+  {"grad", (getter)THPVariable_get_grad, (setter)THPVariable_set_grad, nullptr, nullptr},
+  {"_base", (getter)THPVariable_get_base, nullptr, nullptr, nullptr},
+  {"volatile", (getter)THPVariable_get_volatile, (setter)THPVariable_set_volatile, nullptr, nullptr},
+  {"output_nr", (getter)THPVariable_get_output_nr, nullptr, nullptr, nullptr},
+  {"requires_grad", (getter)THPVariable_get_requires_grad, (setter)THPVariable_set_requires_grad, nullptr, nullptr},
+  {"_backward_hooks", (getter)THPVariable_get_backwards_hooks, (setter)THPVariable_set_backwards_hooks, nullptr, nullptr},
+  {"name", (getter)THPVariable_get_name, nullptr, nullptr, nullptr},
+  {"shape", (getter)THPVariable_get_shape, nullptr, nullptr, nullptr},
+  {"is_cuda", (getter)THPVariable_is_cuda, nullptr, nullptr, nullptr},
+  {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
+  {nullptr}
 };
 
 static PyMappingMethods THPVariable_as_mapping = {
@@ -471,7 +471,7 @@ static PyMappingMethods THPVariable_as_mapping = {
 };
 
 PyTypeObject THPVariableType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._VariableBase",              /* tp_name */
   sizeof(THPVariable),                   /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -491,7 +491,7 @@ PyTypeObject THPVariableType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC, /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                               /* tp_doc */
   (traverseproc)THPVariable_traverse,    /* tp_traverse */
   (inquiry)THPVariable_clear,            /* tp_clear */
   0,                                     /* tp_richcompare */
