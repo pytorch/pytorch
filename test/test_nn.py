@@ -1246,7 +1246,7 @@ class TestNN(NNTestCase):
         res_F = F.embedding(a, embeddings)
         self.assertEqual(res_old, res_F)
 
-    def _test_gumbel_softmax_st(self, cuda):
+    def _test_gumbel_softmax_st(self, cuda, dtype=torch.FloatTensor):
         th = torch.cuda if cuda else torch
         """
         Things we might want to check:
@@ -1258,6 +1258,8 @@ class TestNN(NNTestCase):
         num_draws = 100
         K = 3
         logits = torch.FloatTensor([[0.2, 0.8, 0.1]])
+        if dtype != torch.HalfTensor:
+            logits = logits.type(dtype)
         logits_softmax = torch.nn.functional.softmax(Variable(logits), 1)
         y_draws = torch.zeros(num_draws, K)
         preds = torch.zeros(num_draws)
@@ -1299,9 +1301,9 @@ class TestNN(NNTestCase):
         self._test_gumbel_softmax_st(False)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    # torch.nn.functional doesn't provide half() method
-    def test_gumbel_softmax_st_cuda(self):
-        self._test_gumbel_softmax_st(True)
+    @repeat_test_for_types(ALL_TENSORTYPES)
+    def test_gumbel_softmax_st_cuda(self, dtype=torch.FloatTensor):
+        self._test_gumbel_softmax_st(True, dtype=dtype)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.FloatTensor):
         # check a known test example
