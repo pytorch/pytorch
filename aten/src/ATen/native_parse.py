@@ -81,6 +81,13 @@ def parse_arguments(args, func_decl, func_name, func_return):
     return arguments
 
 
+def has_sparse_dispatches(dispatches):
+    for dispatch in dispatches:
+        if 'Sparse' in dispatch:
+            return True
+    return False
+
+
 def parse_native_yaml(path):
     with open(path, 'r') as f:
         return yaml.load(f, Loader=Loader)
@@ -105,6 +112,8 @@ def run(paths):
             declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func,
                                                 declaration['name'], declaration['return']))
             declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+            declaration['aten_sparse'] = has_sparse_dispatches(
+                declaration['type_method_definition_dispatch'])
             declarations.append(declaration)
 
     return declarations
