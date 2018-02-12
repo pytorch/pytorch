@@ -215,7 +215,7 @@ struct Variable : public at::Tensor {
 
   /// Increments the version count of this `Variable`.
   void bump_version() noexcept;
-  void set_version(const VariableVersion& version) noexcept;
+  void set_version_counter(const VariableVersion& version_counter) noexcept;
 
   /// Retrieves this `Variable`s version counter.
   const VariableVersion& version_counter() const noexcept;
@@ -529,8 +529,9 @@ inline bool Variable::requires_grad() const noexcept {
 // Versions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline void Variable::set_version(const VariableVersion& version) noexcept {
-  get()->version_counter = version;
+inline void Variable::set_version_counter(
+    const VariableVersion& version_counter) noexcept {
+  get()->version_counter = version_counter;
 }
 
 inline void Variable::bump_version() noexcept {

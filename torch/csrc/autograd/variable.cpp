@@ -151,7 +151,7 @@ void Variable::rebase_history(Edge gradient_edge) {
 
 Variable Variable::detach() const {
   auto detached = make_variable(data(), /*requires_grad=*/false);
-  detached.set_version(version_counter());
+  detached.set_version_counter(version_counter());
   return detached;
 }
 

@@ -69,7 +69,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   } else {
     var = make_variable(data_, requires_grad_);
   }
-  var.set_version(saved_version_);
+  var.set_version_counter(saved_version_);
 
   // If a Variable is a leaf (no grad_fn saved), and it requires_grad, then we
   // should have saved the grad accumulator. Even if the Variable no longer
