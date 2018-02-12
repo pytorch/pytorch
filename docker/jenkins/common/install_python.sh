@@ -90,6 +90,11 @@ rm -rf pip-9.0.1*
 
 # Install pip packages
 pip install -U setuptools
+
+# Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
+# defaults installs the most recent networkx version, so we install this lower
+# version explicitly before scikit-image pulls it in as a dependency
+pip install networkx==2.0
 pip install --no-cache-dir \
     future \
     hypothesis \
