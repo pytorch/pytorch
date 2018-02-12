@@ -4,7 +4,10 @@ import numpy
 from scipy import stats
 import urllib.request
 
-urllib.request.urlretrieve("https://s3.amazonaws.com/ossci-perf-test/pytorch/perf_test_numbers.json", "perf_test_numbers.json")
+urllib.request.urlretrieve(
+    "https://s3.amazonaws.com/ossci-perf-test/pytorch/perf_test_numbers.json",
+    "perf_test_numbers.json"
+)
 
 with open('perf_test_numbers.json') as data_file:
     data = json.load(data_file)
