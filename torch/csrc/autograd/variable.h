@@ -38,10 +38,10 @@ namespace torch { namespace autograd {
 /// `Function`s in the autograd graph. A `Variable` can either be a leaf, like a
 /// weight in a neural network, or an interior variable, when it is the result
 /// of an operation between variables. Every `Variable` also stores another
-/// `Variable` (recursively) called its `grad` (gradient). If the variable is a
-/// leaf, its gradient will be accumulated into this variable.
+/// `Variable` called its `grad` (gradient). If the variable is a leaf, its
+/// gradient will be accumulated into this variable.
 ///
-///                             Gradient Edges
+///                              Gradient Edges
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// Furthermore, `Variable`s have the notion of a `gradient_edge`, which is the
 /// edge in the autograd graph that connects the variable to a particular input
@@ -61,7 +61,7 @@ namespace torch { namespace autograd {
 /// `Variable` at a certain version. You can retrieve a `Variable`'s version
 /// through its `current_version()` method.
 ///
-///                                Views
+///                                 Views
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// It is possible for a  `Variable` to be a *view* of another `Variable`, in
 /// which case it tracks that `Variable`'s data and autograd history. Beyond
@@ -75,10 +75,13 @@ namespace torch { namespace autograd {
 /// `Tensor`. This means you can perform all the usual mathematical and other
 /// operations you can perform on `Tensor`s also on `Variable`s. Furthermore,
 /// `Variable` and `Tensor` actually convert implicitly between each other. You
-/// can thus call functions defined on `Tensor`s also with `Variable`s. Besides
-/// the constructor of `Variable` that converts to it from `Tensor`, you can use
-/// the `make_variable` free functions to create variables. To create views,
-/// use `make_variable_view` instead.
+/// can thus call functions defined on `Tensor`s also with `Variable`s. For
+/// this, the `Variable` class allows implicit construction from `Tensor`. It is
+/// the responsibility of calling code to ensure that this constructor is
+/// invoked only when the `Tensor`'s dynamic type is actually `Variable`. Most
+/// notably, it is *not* correct to construct a brand new `Variable` from a
+/// `Tensor` using this constructor. To do so, you must use the `make_variable`
+/// free function instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct Variable : public at::Tensor {
@@ -96,9 +99,10 @@ struct Variable : public at::Tensor {
   friend Variable
   make_variable_view(Variable base, at::Tensor data, Edge gradient_edge);
 
-  /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be set
-  /// only for leaves, and determines whether the `Variable` will accumulate
-  /// gradients.
+  /// Creates a `Variable` from the given `Tensor`. `requires_grad` should be
+  /// set only for leaves, and determines whether the `Variable` will accumulate
+  /// gradients. NOTE: `data` must *not* be a `Variable` already. Its dynamic
+  /// type *must* be `Tensor`.
   friend Variable make_variable(at::Tensor data, bool requires_grad);
 
   /// Creates a `Variable` from the given `Tensor` and specify a `gradient_edge`,
@@ -159,6 +163,8 @@ struct Variable : public at::Tensor {
   /// variable, and never the `grad_accumulator`. For the latter, use
   /// `set_grad_accumulator`. This allows late construction of an interior
   /// `Variable`.
+  /// You will likely want to call `rebase_history()` if this call is involved
+  /// in an in-place modification of a `Variable`.
   void set_gradient_edge(Edge&& edge) noexcept;
 
   /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
@@ -221,7 +227,7 @@ struct Variable : public at::Tensor {
   // Autograd Graph Interaction
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// Update the grad_fn of an existing Variable. Called after in-place
+  /// Update the `grad_fn` of an existing Variable. Called after in-place
   /// modifications.
   void rebase_history(Edge gradient_edge);
 
