@@ -1068,7 +1068,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
-                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean'):
+                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean', sparse=False):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
         intermediate embeddings.
 
@@ -1093,6 +1093,8 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                     the words in the dictionary.
             mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+            sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes
+                                        for more details regarding sparse gradients.
 
         Shape:
             - Embedding_matrix: FloatTensor `(V, embedding_dim)`,
@@ -1129,21 +1131,44 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
                              "offsets of type {}".format(type(offsets)))
         else:
             offsets = Variable(torch.arange(0, indices.numel(), indices.size(1),
-                               out=indices.data.new().long()))
+                                            out=indices.data.new().long()))
             indices = indices.view(-1)
-
-    elif indices.dim() != 1:
+    elif indices.dim() == 1:
+        if offsets is None:
+            raise ValueError("offsets has to be a 1D Tensor but got None")
+        if offsets.dim() != 1:
+            raise ValueError("offsets has to be a 1D Tensor")
+        if offsets[0] != 0:
+            raise ValueError("offsets[0] has to be 0, i.e. the first sequence"
+                             " in the mini-batch has to start from position 0."
+                             "However, got {}".format(offsets[0]))
+        if offsets[-1] > indices.size(0):
+            raise ValueError("offsets[-1] has to be smaller than indices's length"
+                             " ({}), but got offsets[-1] of {}"
+                             .format(indices.size(0), offsets[-1]))
+    else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(indices.dim()))
 
-    if offsets is None:
-        raise ValueError("offsets has to be a 1D Tensor but got None")
+    if mode == 'sum':
+        mode = 0
+    elif mode == 'mean':
+        mode = 1
+    else:
+        raise ValueError("mode has to be one of sum or mean")
 
-    return _functions.thnn.EmbeddingBag.apply(
-        embedding_matrix, indices, offsets,
-        max_norm, norm_type,
-        scale_grad_by_freq, mode
-    )
+    if max_norm is not None:
+        with torch.no_grad():
+            torch._C._VariableFunctions.embedding_renorm_(weight, input, max_norm, norm_type)
+
+    ret, _, _ = torch._C._VariableFunctions.embedding_bag(
+        embedding_matrix,
+        indices,
+        offsets,
+        scale_grad_by_freq,
+        mode,
+        sparse)
+    return ret
 
 
 def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,

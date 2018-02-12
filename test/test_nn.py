@@ -1205,10 +1205,11 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st_cuda(self):
         self._test_gumbel_softmax_st(True)
 
-    def _test_EmbeddingBag(self, cuda, mode):
+    def _test_EmbeddingBag(self, cuda, mode, sparse):
         # check a known test example
-        es = nn.EmbeddingBag(5, 2, mode=mode)
+        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
+
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4, 0]))
         offsets = Variable(torch.LongTensor([0, 3]))
         grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
@@ -1245,8 +1246,11 @@ class TestNN(NNTestCase):
         output = es(input, offsets)
         output.backward(grad_output)
 
+        es_weight_grad = es.weight.grad.data
+        if sparse:
+            es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+        self.assertEqual(es_weight_grad, expected_grad_weight)
 
         # check same example except as 2D (2 x 3)
         input = Variable(input.data.view(2, -1))
@@ -1254,12 +1258,15 @@ class TestNN(NNTestCase):
         output = es(input)
         output.backward(grad_output)
 
+        es_weight_grad = es.weight.grad.data
+        if sparse:
+            es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+        self.assertEqual(es_weight_grad, expected_grad_weight)
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
-            es = nn.EmbeddingBag(N, D, mode=mode)
+            es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse)
             e = nn.Embedding(N, D)
             e.weight.data.copy_(es.weight.data)
             input = Variable(torch.rand(B, L).mul(N).long())
@@ -1283,7 +1290,10 @@ class TestNN(NNTestCase):
 
             output.backward(grad_output)
             ref_output.backward(grad_output)
-            self.assertEqual(es.weight.grad, e.weight.grad)
+            es_weight_grad = es.weight.grad.data
+            if sparse:
+                es_weight_grad = es.weight.grad.data.to_dense()
+            self.assertEqual(es_weight_grad, e.weight.grad.data)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1291,7 +1301,7 @@ class TestNN(NNTestCase):
             _test_vs_Embedding(*p)
 
         # check that giving illegal input combos raises error
-        es = nn.EmbeddingBag(10, 20, mode=mode)
+        es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
         input = Variable(torch.ones(3, 4))
         offset = Variable(torch.arange(0, 3))
         self.assertRaises(ValueError, lambda: es(input, offset))
@@ -1348,14 +1358,18 @@ class TestNN(NNTestCase):
         F.conv_transpose2d(Variable(x), Variable(torch.randn(16, 1, 1, 1)).cuda())
         F.conv2d(Variable(x), Variable(torch.randn(1, 16, 1, 1)).cuda())
 
-    def test_EmbeddingBag(self):
-        self._test_EmbeddingBag(False, 'sum')
-        self._test_EmbeddingBag(False, 'mean')
+    def test_embedding_bag(self):
+        self._test_EmbeddingBag(False, 'sum', False)
+        self._test_EmbeddingBag(False, 'mean', False)
+        self._test_EmbeddingBag(False, 'sum', True)
+        self._test_EmbeddingBag(False, 'mean', True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_EmbeddingBag_cuda(self):
-        self._test_EmbeddingBag(True, 'sum')
-        self._test_EmbeddingBag(True, 'mean')
+    def test_embedding_bag_cuda(self):
+        self._test_EmbeddingBag(True, 'sum', False)
+        self._test_EmbeddingBag(True, 'mean', False)
+        self._test_EmbeddingBag(True, 'sum', True)
+        self._test_EmbeddingBag(True, 'mean', True)
 
     def test_fractional_max_pool2d(self):
         x = Variable(torch.randn(1, 2, 7, 7), requires_grad=True)
@@ -5382,6 +5396,20 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='EmbeddingBag_sparse',
+        constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
         input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
         check_gradgrad=False,
