@@ -1309,11 +1309,12 @@ class TestJit(TestCase):
         script = '''
         def func(a, b) -> (c):
             c = a + b
+            c += a
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
-        outputs = a + b
+        outputs = a + b + a
         self.checkScript(script, [a, b], [outputs], False)
 
     def test_script_mul(self):
