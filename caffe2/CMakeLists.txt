@@ -204,16 +204,30 @@ if (BUILD_PYTHON)
       from distutils import sysconfig
       print(sysconfig.get_python_lib(prefix=''))
   ")
+  # Python extension suffix
+  # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
+  # fallback to ".pyd" if windows and ".so" for all others.
+  pycmd(PY_EXT_SUFFIX "
+      from distutils import sysconfig
+      ext_suffix = sysconfig.get_config_var('EXT_SUFFIX')
+      print(ext_suffix if ext_suffix else '')
+  ")
+  if("${PY_EXT_SUFFIX}" STREQUAL "")
+    if (MSVC)
+      set(PY_EXT_SUFFIX ".pyd")
+    else()
+      set(PY_EXT_SUFFIX ".so")
+    endif()
+  endif()
+
   # ---[ Python.
   add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
   set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
   add_dependencies(caffe2_pybind11_state ${Caffe2_MAIN_LIBS_ORDER})
   set_target_properties(caffe2_pybind11_state PROPERTIES PREFIX "")
+  set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
   if (APPLE)
-    set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ".so")
     set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-  elseif (MSVC)
-    set_target_properties(caffe2_pybind11_state PROPERTIES SUFFIX ".pyd")
   endif()
   set_target_properties(
       caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
@@ -228,11 +242,9 @@ if (BUILD_PYTHON)
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
     add_dependencies(caffe2_pybind11_state_gpu ${Caffe2_MAIN_LIBS_ORDER})
     set_target_properties(caffe2_pybind11_state_gpu PROPERTIES PREFIX "")
+    set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
     if (APPLE)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ".so")
       set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
-    elseif (MSVC)
-      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES SUFFIX ".pyd")
     endif()
     set_target_properties(
         caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
