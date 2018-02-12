@@ -31,22 +31,22 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-aws s3 cp s3://ossci-windows/mkl.7z mkl.7z && 7z x -aoa mkl.7z -omkl
+aws s3 cp s3://ossci-windows/mkl.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl
 set LIB=%cd%\\mkl;%LIB%
 
 :: Install MAGMA
-aws s3 cp s3://ossci-windows/magma_cuda90_release.7z magma_cuda90_release.7z && 7z x -aoa magma_cuda90_release.7z -omagma_cuda90_release
+aws s3 cp s3://ossci-windows/magma_cuda90_release.7z magma_cuda90_release.7z --quiet && 7z x -aoa magma_cuda90_release.7z -omagma_cuda90_release
 set MAGMA_HOME=%cd%\\magma_cuda90_release
 
 :: Install clcache
-aws s3 cp s3://ossci-windows/clcache.7z clcache.7z && 7z x -aoa clcache.7z -oclcache
+aws s3 cp s3://ossci-windows/clcache.7z clcache.7z --quiet && 7z x -aoa clcache.7z -oclcache
 
 :: Install Miniconda3
 rm -rf C:\\Jenkins\\Miniconda3
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
 .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-call conda install -y numpy mkl cffi pyyaml boto3
+call conda install -y -q numpy mkl cffi pyyaml boto3
 
 :: Install ninja
 pip install ninja

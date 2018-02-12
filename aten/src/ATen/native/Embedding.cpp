@@ -115,7 +115,7 @@ Tensor embedding_backward_cpu(
       int64_t end = start + (num_weights/nthreads + 1);
       for (int64_t i = 0; i < numel; i++) {
         if (indices_data[i] != padding_idx) {
-          int64_t k = indices_data[i] - TH_INDEX_BASE;
+          int64_t k = indices_data[i];
           if (k >= start && k < end) {
             double scale = 1.0;
             if (scale_grad_by_freq) {

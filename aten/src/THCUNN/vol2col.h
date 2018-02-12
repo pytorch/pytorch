@@ -45,6 +45,7 @@ CUDA_KERNEL_LOOP(index, n) {
 template <typename Dtype>
 void vol2col(cudaStream_t stream, const Dtype* data_vol, const int channels,
     const int depth, const int height, const int width,
+    const int depth_col, const int height_col, const int width_col,
     const int ksize_t, const int ksize_h, const int ksize_w,
     const int pad_t, const int pad_h, const int pad_w,
     const int stride_t, const int stride_h, const int stride_w,
@@ -52,9 +53,6 @@ void vol2col(cudaStream_t stream, const Dtype* data_vol, const int channels,
     Dtype* data_col) {
   // We are going to launch channels * depth_col * height_col * width_col kernels, each
   // kernel responsible for copying a single-channel grid.
-  int depth_col = (depth + 2 * pad_t - (dilation_t * (ksize_t - 1) + 1)) / stride_t + 1;
-  int height_col = (height + 2 * pad_h - (dilation_h * (ksize_h - 1) + 1)) / stride_h + 1;
-  int width_col = (width + 2 * pad_w - (dilation_w * (ksize_w - 1) + 1)) / stride_w + 1;
   int num_kernels = channels * depth_col * height_col * width_col;
   // Launch
   vol2col_kernel <<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>> (

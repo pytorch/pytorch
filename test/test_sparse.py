@@ -751,12 +751,16 @@ class TestSparse(TestCase):
             self.assertEqual(test_fn(var1, var2).data,
                              test_fn(tensor1, tensor2), test_name)
 
-        to_test_mixed = {
-            'addmm': lambda sp, de: de.addmm(sp, de),
-            'addmm_': lambda sp, de: de.addmm(sp, de),
-            'mm': lambda sp, de: torch.mm(sp, de),
-            'mm_out': lambda sp, de: torch.mm(sp, de, out=de),
-        }
+        to_test_mixed = [
+            # test name, lambda expression, should_run_when_cuda
+            ('sspaddmm', lambda sp, de: sp.sspaddmm(sp, de), False),
+            ('sspaddmm_b', lambda sp, de: sp.sspaddmm(2, sp, de), False),
+            ('sspaddmm_b_a', lambda sp, de: sp.sspaddmm(3, 2, sp, de), False),
+            ('addmm', lambda sp, de: de.addmm(sp, de), True),
+            ('addmm_', lambda sp, de: de.addmm(sp, de), True),
+            ('mm', lambda sp, de: torch.mm(sp, de), True),
+            ('mm_out', lambda sp, de: torch.mm(sp, de, out=de), True),
+        ]
 
         i = self.IndexTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
         v = self.ValueTensor([3, 3, 4, 1, 2])
@@ -765,7 +769,9 @@ class TestSparse(TestCase):
         dense_mat = sparse_mat.to_dense().random_(0, 5)
         dense_var = Variable(dense_mat)
 
-        for test_name, test_fn in to_test_mixed.items():
+        for test_name, test_fn, test_cuda in to_test_mixed:
+            if sparse_var.is_cuda and not test_cuda:
+                continue
             sp_var = sparse_var.clone()
             de_var = dense_var.clone()
             sp_mat = sparse_mat.clone()

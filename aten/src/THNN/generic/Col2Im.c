@@ -2,16 +2,68 @@
 #define TH_GENERIC_FILE "generic/Col2Im.c"
 #else
 
+// Note [im2col/col2im output padding]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Our implementations of im2col and col2im take both the input height/width as
+// well as a seemingly redundant output height/width.  In principle, you could
+// compute the output height/width by using the convolution shape formulas.  So,
+// what's up with that?
+//
+// The trouble arises when one runs the backward of a transposed convolution
+// with output_padding >= stride.  (BTW, output_padding is known as adj inside
+// THNN.) Let's consider a simple case where we have kernel=2, dilation=2,
+// stride=1, output_padding=1 for a 4x4 input:
+//
+// Input:  X
+//
+// Output: X.X.
+//         ....
+//         X.X.
+//         ....
+//
+// If we compute backwards of output with a standard convolution on the output
+// with the same parameters, we would end up with a 2x2 grad_input (because you
+// can slide the stencil over to the right once and down once).  But that is all
+// out-of-bounds if you're computing backwards for a 1x1 input.
+//
+// "Now Edward," you might say, "the real problem is that you set output_padding
+// >= stride, surely an error should have been raised in this case."  To
+// understand why it is useful to handle this case, we have to understand how we
+// compute the weight gradient of a convolution.  Suppose we have a convolution
+// with kernel=2, stride=2 on a 5x5 input.  Let us see all the contributions of
+// weight[0][0] (which we have labeled w) in the output:
+//
+// Input:  a.b..  Weight: w.
+//         .....          ..
+//         c.d..
+//         .....
+//         .....
+//
+// Output: [ aw+...  bw+... ]
+//         [ cw+...  dw+... ]
+//
+// From this diagram, it easy to see that we can compute the weight gradient
+// by performing a *dilated* convolution between the input and the
+// output gradients with kernel=2, dilation=2, stride=1.  But there's a rub: if
+// we do a dilated convolution directly, we'll end up with a 3x3 weight
+// gradient, when we clearly wanted a 2x2.  So how do we avoid going out
+// of bounds?  We could add a notion of 'output_padding' for non-transposed
+// convolution, but another simple and effective fix is to just accept
+// the desired output size directly, and compute only within those bounds.
+//
+//
+// ALSO do vol2col
+
 static void THNN_(im2col)(const real* data_im, const int channels,
-      const int height, const int width, const int kernel_h, const int kernel_w,
+      const int height, const int width,
+      const int output_height, const int output_width,
+      const int kernel_h, const int kernel_w,
       const int pad_h, const int pad_w,
       const int stride_h, const int stride_w,
       const int dilation_h, const int dilation_w,
       real* data_col) {
-  const int height_col = (height + 2 * pad_h -
-                          (dilation_h * (kernel_h - 1) + 1)) / stride_h + 1;
-  const int width_col = (width + 2 * pad_w -
-                         (dilation_w * (kernel_w - 1) + 1)) / stride_w + 1;
+  const int height_col = output_height;
+  const int width_col = output_width;
   const int channels_col = channels * kernel_h * kernel_w;
   for (int c_col = 0; c_col < channels_col; ++c_col) {
     int w_offset = c_col % kernel_w;

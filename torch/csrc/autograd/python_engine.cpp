@@ -62,7 +62,7 @@ PythonEngine& PythonEngine::getDefaultEngine() {
 
 }}} // namespace torch::autograd::python
 
-PyObject *THPEngineClass = NULL;
+PyObject *THPEngineClass = nullptr;
 
 static bool _reinitialize_engine = false;
 
@@ -85,18 +85,18 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
 {
   HANDLE_TH_ERRORS
   _maybe_reinitialize_engine_after_fork();
-  PyObject *variables = NULL;
-  PyObject *grad_variables = NULL;
+  PyObject *variables = nullptr;
+  PyObject *grad_variables = nullptr;
   unsigned char keep_graph = 0;
   unsigned char create_graph = 0;
-  PyObject *inputs = NULL;
+  PyObject *inputs = nullptr;
   const char *accepted_kwargs[] = {
       "variables", "grad_variables", "keep_graph", "create_graph", "inputs",
-      NULL
+      nullptr
   };
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "OObb|O", (char**)accepted_kwargs,
         &variables, &grad_variables, &keep_graph, &create_graph, &inputs))
-    return NULL;
+    return nullptr;
 
   THPUtils_assert(PyTuple_Check(variables), "variables argument is expected to "
       "be a tuple, but got %s", THPUtils_typename(variables));
@@ -134,7 +134,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   }
 
   function_list output_edges;
-  if (inputs != NULL) {
+  if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);
     for (int i = 0; i < num_inputs; ++i) {
@@ -165,10 +165,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     outputs = engine.execute(roots, grads, keep_graph, create_graph, output_edges);
   }
 
-  if (inputs != NULL) {
+  if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     THPObjectPtr py_outputs {PyTuple_New(num_inputs)};
-    if (!py_outputs) return NULL;
+    if (!py_outputs) return nullptr;
     for (int i = 0; i < num_inputs; i++) {
       PyTuple_SET_ITEM(py_outputs.get(), i, THPVariable_Wrap(outputs[i]));
     }
@@ -186,7 +186,7 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
   Py_INCREF(_callback);
   engine.queue_callback([callback]() {
     AutoGIL gil;
-    THPObjectPtr result {PyObject_CallFunctionObjArgs(callback.get(), NULL)};
+    THPObjectPtr result {PyObject_CallFunctionObjArgs(callback.get(), nullptr)};
     if (!result) throw python_error();
   });
   Py_RETURN_NONE;
@@ -199,14 +199,14 @@ PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 }
 
 static struct PyMethodDef THPEngine_methods[] = {
-  {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, NULL},
-  {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, NULL},
-  {NULL}
+  {(char*)"run_backward", (PyCFunction)THPEngine_run_backward, METH_VARARGS | METH_KEYWORDS, nullptr},
+  {(char*)"queue_callback", (PyCFunction)THPEngine_queue_callback, METH_O, nullptr},
+  {nullptr}
 };
 
 
 PyTypeObject THPEngineType = {
-  PyVarObject_HEAD_INIT(NULL, 0)
+  PyVarObject_HEAD_INIT(nullptr, 0)
   "torch._C._EngineBase",                /* tp_name */
   sizeof(THPEngine),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
@@ -226,7 +226,7 @@ PyTypeObject THPEngineType = {
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  NULL,                                  /* tp_doc */
+  nullptr,                               /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
   0,                                     /* tp_richcompare */
@@ -253,7 +253,7 @@ static void child_atfork() {
 bool THPEngine_initModule(PyObject *module)
 {
 #ifndef _WIN32
-  if (pthread_atfork(NULL, NULL, child_atfork) != 0) {
+  if (pthread_atfork(nullptr, nullptr, child_atfork) != 0) {
     throw std::runtime_error("unable to set pthread_atfork handler");
   }
 #endif

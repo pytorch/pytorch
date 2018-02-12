@@ -90,9 +90,9 @@ struct to_ir {
             << "reductions are only allow when there is a single variable "
             << "on the left-hand side.";
       }
-      auto lhs = stmt.lhs()[0];
-      auto expr =
-          Compound::create(stmt.reduction(), stmt.range(), {lhs, stmt.rhs()});
+      Ident lhs = stmt.lhs()[0];
+      Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
+                                Var::create(lhs.range(), lhs), stmt.rhs());
       outputs = emitExpr(expr, 1);
     } else {
       outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
