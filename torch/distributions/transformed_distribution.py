@@ -49,8 +49,9 @@ class TransformedDistribution(Distribution):
     def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
-        samples if the distribution parameters are batched. Samples first from base distribution
-        and applies `transform()` for every transform in the list.
+        samples if the distribution parameters are batched. Samples first from
+        base distribution and applies `transform()` for every transform in the
+        list.
         """
         x = self.base_dist.sample(sample_shape)
         for transform in self.transforms:
@@ -61,8 +62,8 @@ class TransformedDistribution(Distribution):
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
-        are batched. Samples first from base distribution and applies `transform()`
-        for every transform in the list.
+        are batched. Samples first from base distribution and applies
+        `transform()` for every transform in the list.
         """
         x = self.base_dist.rsample(sample_shape)
         for transform in self.transforms:
@@ -71,8 +72,8 @@ class TransformedDistribution(Distribution):
 
     def log_prob(self, value):
         """
-        Scores the sample by inverting the transform(s) and computing the score using the score
-        of the base distribution and the log abs det jacobian
+        Scores the sample by inverting the transform(s) and computing the score
+        using the score of the base distribution and the log abs det jacobian.
         """
         self.base_dist._validate_log_prob_arg(value)
         event_dim = len(self.event_shape)
@@ -87,21 +88,35 @@ class TransformedDistribution(Distribution):
                                    event_dim - len(self.base_dist.event_shape))
         return log_prob
 
+    def _monotonize_cdf(self, value):
+        """
+        This conditionally flips ``value -> 1-value`` to ensure :meth:`cdf` is
+        monotone increasing.
+        """
+        sign = 1
+        for transform in self.transforms:
+            sign = sign * transform.sign
+        if sign is 1:
+            return value
+        return sign * (value - 0.5) + 0.5
+
     def cdf(self, value):
         """
-        Computes the cumulative distribution function by inverting the transform(s) and computing
-        the score of the base distribution
+        Computes the cumulative distribution function by inverting the
+        transform(s) and computing the score of the base distribution.
         """
-        self.base_dist._validate_log_prob_arg(value)
         for transform in self.transforms[::-1]:
             value = transform.inv(value)
-        return self.base_dist.cdf(value)
+        value = self.base_dist.cdf(value)
+        value = self._monotonize_cdf(value)
+        return value
 
     def icdf(self, value):
         """
-        Computes the inverse cumulative distribution function using transform(s) and computing
-        the score of the base distribution
+        Computes the inverse cumulative distribution function using
+        transform(s) and computing the score of the base distribution.
         """
+        value = self._monotonize_cdf(value)
         value = self.base_dist.icdf(value)
         for transform in self.transforms:
             value = transform(value)
