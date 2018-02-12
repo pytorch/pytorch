@@ -257,8 +257,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   } else if (index == Py_Ellipsis) {
     return wrap(at::alias(self_));
   } else if (THPUtils_checkLong(index)) {
-    auto index_val = THPUtils_unpackLong(index);
-    return wrap(applySelect(self_, 0, index_val));
+    return wrap(applySelect(self_, 0, THPUtils_unpackLong(index)));
   } else if (PyBool_Check(index)) {
     return applyBoolGetitem(self_, index == Py_True);
   } else if (PySlice_Check(index)) {
