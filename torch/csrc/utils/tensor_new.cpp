@@ -107,7 +107,7 @@ static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
   return tensor;
 }
 
-static Tensor new_from_data(const Type & type, int device, PyObject *data) {
+Tensor new_from_data(const Type & type, int device, PyObject *data) {
   auto tensor = new_from_data(type.scalarType(), data);
   if (tensor.type() != type) {
     AutoNoGIL no_gil;
