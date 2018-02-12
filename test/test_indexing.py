@@ -1,6 +1,7 @@
 from common import TestCase, run_tests
 import unittest
 import torch
+import warnings
 from torch.autograd import Variable, variable
 
 
@@ -119,7 +120,6 @@ class TestIndexing(TestCase):
             tensors.append(variable(3))
 
         for a in tensors:
-            a_clone = a.clone()
             # prefix with a 1,1, to ensure we are compatible with numpy which cuts off prefix 1s
             # (some of these ops already prefix a 1 to the size)
             neg_ones = torch.ones_like(a) * -1
@@ -167,7 +167,7 @@ class TestIndexing(TestCase):
         r = variable(0).normal_()
         with self.assertRaises(RuntimeError):
             r[:]
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(IndexError):
             r[zero]
         self.assertEqual(r, r[...])
 
@@ -191,7 +191,7 @@ class TestIndexing(TestCase):
         r = variable(0).normal_()
         with self.assertRaises(RuntimeError):
             r[:] = 8.8
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(IndexError):
             r[zero] = 8.8
         r[...] = 9.9
         self.assertEqual(9.9, r)
@@ -237,9 +237,27 @@ class TestIndexing(TestCase):
         i, j = indices
         self.assertEqual(x[i:j], x[0:1])
 
+    def test_ellipsis_tensor(self):
+        x = Variable(torch.arange(0, 9).view(3, 3))
+        idx = Variable(torch.LongTensor([0, 2]))
+        self.assertEqual(x[..., idx].tolist(), [[0, 2],
+                                                [3, 5],
+                                                [6, 8]])
+        self.assertEqual(x[idx, ...].tolist(), [[0, 1, 2],
+                                                [6, 7, 8]])
+
     def test_invalid_index(self):
         x = Variable(torch.arange(0, 16).view(4, 4))
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
+
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_zero_dim_index(self):
+        # We temporarily support indexing a zero-dim tensor as if it were
+        # a one-dim tensor to better maintain backwards compatibility.
+        x = variable(10)
+        with warnings.catch_warnings(record=True) as w:
+            self.assertEqual(x, x[0])
+            self.assertEqual(len(w), 1)
 
 
 def tensor(*args, **kwargs):
@@ -357,14 +375,14 @@ class NumpyTests(TestCase):
         self.assertEqual(a[0, ...], a[0, :])
         self.assertEqual(a[..., 0], a[:, 0])
 
-        # Slicing with ellipsis always results
-        # in an array, not a scalar
-        self.assertEqual(a[0, ..., 1], tensor([2]))
+        # In NumPy, slicing with ellipsis results in a 0-dim array. In PyTorch
+        # we don't have separate 0-dim arrays and scalars.
+        self.assertEqual(a[0, ..., 1], variable(2))
 
         # Assignment with `(Ellipsis,)` on 0-d arrays
-        # b = np.array(1)
-        # b[(Ellipsis,)] = 2
-        # self.assertEqual(b, 2)
+        b = variable(1)
+        b[(Ellipsis,)] = 2
+        self.assertEqual(b, 2)
 
     def test_single_int_index(self):
         # Single integer index selects one row
