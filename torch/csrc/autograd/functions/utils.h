@@ -20,7 +20,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
 
 /**
  * Checks that inputs contains exactly `args` items and that the first `required_args`
- * items are not NULL. If not specified, `required_args` defaults to `args`.
+ * items are not nullptr. If not specified, `required_args` defaults to `args`.
  */
 void check_input_variables(const char* name, const variable_list& inputs, int args, int required_args=-1);
 }}

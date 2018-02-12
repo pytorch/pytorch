@@ -100,16 +100,16 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
   auto& next_functions = self->cdata->next_functions;
   auto num_next = next_functions.size();
   THPObjectPtr py_functions(PyTuple_New(num_next));
-  if (!py_functions) return NULL;
+  if (!py_functions) return nullptr;
   for (size_t i = 0; i < num_next; ++i) {
     auto& c_tuple = next_functions[i];
     THPObjectPtr tuple(PyTuple_New(2));
-    if (!tuple) return NULL;
+    if (!tuple) return nullptr;
     PyObject *py_fn = functionToPyObject(c_tuple.function);
-    if (!py_fn) return NULL;
+    if (!py_fn) return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 0, py_fn);
     PyObject *py_idx = PyLong_FromLong(c_tuple.input_nr);
-    if (!py_idx) return NULL;
+    if (!py_idx) return nullptr;
     PyTuple_SET_ITEM(tuple.get(), 1, py_idx);
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());
   }
@@ -141,12 +141,12 @@ PyObject* THPCppFunction_register_hook(PyObject* self, PyObject* hook)
 
 static struct PyMethodDef default_methods[] = {
   THP_FUNCTION_DEFAULT_METHODS,
-  {NULL}
+  {nullptr}
 };
 
 static struct PyGetSetDef default_properties[] = {
   THP_FUNCTION_DEFAULT_PROPERTIES,
-  {NULL}
+  {nullptr}
 };
 
 PyTypeObject* _initFunctionPyTypeObject(PyTypeObject& type, const char* name,
@@ -194,7 +194,7 @@ PyObject* functionToPyObject(std::shared_ptr<Function> cdata)
 
     PyTypeObject* type = (PyTypeObject*)it->second.get();
     THPObjectPtr obj(type->tp_alloc(type, 0));
-    if (!obj) return NULL;
+    if (!obj) return nullptr;
     THPCppFunction* f = (THPCppFunction*)obj.get();
     new (&f->cdata) std::shared_ptr<Function>(cdata);
 
@@ -222,9 +222,9 @@ PyObject* registerFunctionHook(Function& fn, PyObject* hook)
   }
 
   THPObjectPtr register_fn(PyObject_GetAttrString(THPFunctionClass, "_register_hook"));
-  if (!register_fn) return NULL;
-  THPObjectPtr res(PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, NULL));
-  if (!res) return NULL;
+  if (!register_fn) return nullptr;
+  THPObjectPtr res(PyObject_CallFunctionObjArgs(register_fn.get(), dict, hook, nullptr));
+  if (!res) return nullptr;
 
   if (dict == Py_None) {
     dict = PyTuple_GET_ITEM(res.get(), 0);
