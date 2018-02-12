@@ -155,8 +155,7 @@ This is how a ``Linear`` module can be implemented::
             # they won't appear in .parameters() (doesn't apply to buffers), and
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
-            # nn.Parameters can never be volatile and, different than Variables,
-            # they require gradients by default.
+            # nn.Parameters require gradients by default.
             self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
             if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))
