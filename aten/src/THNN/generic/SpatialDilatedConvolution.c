@@ -164,7 +164,9 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     // Extract columns:
     THNN_(im2col)(
       THTensor_(data)(input_n),
-      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+      nInputPlane, inputHeight, inputWidth,
+      outputHeight, outputWidth,
+      kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
       THTensor_(data)(columns)
     );
@@ -371,7 +373,9 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
       // Extract columns:
       THNN_(im2col)(
         THTensor_(data)(input_n),
-        nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, dH, dW,
+        nInputPlane, inputHeight, inputWidth,
+        outputHeight, outputWidth,
+        kH, kW, padH, padW, dH, dW,
         dilationH, dilationW,
         THTensor_(data)(columns)
       );
