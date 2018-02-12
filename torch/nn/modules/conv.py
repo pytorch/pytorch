@@ -788,7 +788,9 @@ class Conv2dLocal(Module):
             self.bias.data.uniform_(-stdv, stdv)
 
     def forward(self, input):
-        return F.conv2d_local(input, self.weight, self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation)
+        return F.conv2d_local(
+            input, self.weight, self.bias, stride=self.stride,
+            padding=self.padding, dilation=self.dilation)
 
 # TODO: Conv2dMap
 # TODO: ConvTranspose2dMap

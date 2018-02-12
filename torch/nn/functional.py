@@ -2021,6 +2021,7 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
     else:
         raise NotImplementedError("Input Error: Only 3D input Tensors supported (got {}D)".format(input.dim()))
 
+
 def conv2d_local(input, weight, bias=None, padding=0, stride=1, dilation=1):
     if input.dim() != 4:
         raise NotImplementedError("Input Error: Only 4D input Tensors supported (got {}D)".format(input.dim()))
@@ -2035,7 +2036,7 @@ def conv2d_local(input, weight, bias=None, padding=0, stride=1, dilation=1):
     cols = unfold(input, kernel_size, dilation=dilation, padding=padding, stride=stride)
     cols = cols.view(cols.size(0), cols.size(1), cols.size(2), 1).permute(0, 2, 3, 1)
 
-    out = torch.matmul(cols, weight.view(outH*outW, outC, inC*kH*kW).permute(0, 2, 1))
+    out = torch.matmul(cols, weight.view(outH * outW, outC, inC * kH * kW).permute(0, 2, 1))
     out = out.view(cols.size(0), outH, outW, outC).permute(0, 3, 1, 2)
 
     if bias is not None:
