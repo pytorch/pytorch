@@ -6,7 +6,7 @@ from copy import deepcopy
 import torch
 import torch.legacy.nn as nn
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
-    module_tests, criterion_tests, TEST_CUDA, PRECISION
+    module_tests, criterion_tests, TEST_CUDA, PRECISION, params, apply_params
 from common import to_gpu, freeze_rng_state, run_tests
 
 
@@ -37,7 +37,7 @@ class OldModuleTest(ModuleTest):
 
         if self.check_inplace:
             input2 = deepcopy(input)
-            module_ip = self.constructor(*self.constructor_args, inplace=True)
+            module_ip = apply_params(self.constructor, self.constructor_args, inplace=True)
             with freeze_rng_state():
                 output = module.forward(input)
             test_case.assertEqual(input, input2)

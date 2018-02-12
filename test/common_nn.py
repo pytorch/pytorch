@@ -34,6 +34,45 @@ def get_weight(m):
         return result
     return getattr(m, 'weights', None)
 
+
+class ParameterPack(object):
+    """
+    Represents an arbitrary function invocation from Python, which can
+    be saved and then used to invoke another function.
+
+    Suppose you write:
+
+    >>> f(0, 1, output_padding=2)
+
+    You can write this function call equivalently with a parameter
+    pack:
+
+    >>> apply_params(f, params(0, 1 output_padding=2))
+    """
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+
+    def invoke(self, f, **extra_kwargs):
+        def merge_two_dicts(x, y):
+            z = x.copy()
+            z.update(y)
+            return z
+
+        return f(*self.args, **merge_two_dicts(self.kwargs, extra_kwargs))
+
+
+def params(*args, **kwargs):
+    return ParameterPack(*args, **kwargs)
+
+
+def apply_params(f, args, **kwargs):
+    if isinstance(args, ParameterPack):
+        return args.invoke(f, **kwargs)
+    else:
+        return f(*args, **kwargs)
+
+
 module_tests = [
     dict(
         module_name='Linear',
@@ -1003,7 +1042,7 @@ class ModuleTest(TestBase):
         self.precision = kwargs.get('precision', 2e-4)
 
     def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
+        module = apply_params(self.constructor, self.constructor_args)
         input = self._get_input()
 
         if self.reference_fn is not None:
@@ -1083,8 +1122,8 @@ class ModuleTest(TestBase):
             type_map = {torch.DoubleTensor: torch.cuda.FloatTensor}
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
+            cpu_module = apply_params(self.constructor, self.constructor_args)
+            gpu_module = apply_params(self.constructor, self.constructor_args).float().cuda()
             cpu_param = test_case._get_parameters(cpu_module)
             gpu_param = test_case._get_parameters(gpu_module)
             for cpu_p, gpu_p in zip(cpu_param[0], gpu_param[0]):
@@ -1174,7 +1213,7 @@ class CriterionTest(TestBase):
         return self._get_arg('target', True)
 
     def __call__(self, test_case):
-        module = self.constructor(*self.constructor_args)
+        module = apply_params(self.constructor, self.constructor_args)
         input = self._get_input()
 
         # Check that these methods don't raise errors
@@ -1205,8 +1244,8 @@ class CriterionTest(TestBase):
             cpu_target = self._get_target()
             gpu_target = to_gpu(cpu_target, type_map=type_map)
 
-            cpu_module = self.constructor(*self.constructor_args)
-            gpu_module = self.constructor(*self.constructor_args).float().cuda()
+            cpu_module = apply_params(self.constructor, self.constructor_args)
+            gpu_module = apply_params(self.constructor, self.constructor_args).float().cuda()
 
             cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
