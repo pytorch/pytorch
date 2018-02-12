@@ -6,9 +6,14 @@ test_cpu_speed_mini_sequence_labeler () {
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
 
-  git clone https://github.com/yf225/benchmark.git -b perf_test_scripts
+  git clone https://github.com/pytorch/benchmark.git
 
-  cd benchmark/scripts/mini_sequence_labeler
+  cd benchmark/
+
+  git fetch origin pull/14/head:mini_sequence_labeler
+  git checkout mini_sequence_labeler
+
+  cd scripts/mini_sequence_labeler
 
   SAMPLE_ARRAY=()
   NUM_RUNS=20
