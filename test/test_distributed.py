@@ -9,7 +9,9 @@ from contextlib import contextmanager
 
 import torch
 import torch.cuda
+import torch.nn as nn
 import torch.distributed as dist
+import torch.autograd.Variable as Variable
 from common import TestCase
 
 BACKEND = os.environ['BACKEND']
@@ -699,6 +701,46 @@ class _DistTestBase(object):
         rankToGPUMapping = self._init_multigpu_helper()
         self._test_all_gather_multigpu_helper(group, group_id, rank,
                                               rankToGPUMapping)
+
+    # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
+    def _test_DDP_helper(self, model, input_var, target, loss, optimizer):
+        model.train()
+        output = model(input_var)
+        l = loss(output, target)
+        l.backward()
+        optimizer.step()
+        return model
+
+    @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
+                     "Only Nccl & Gloo backend support DistributedDataParallel")
+    def test_DistributedDataParallel(self):
+        group, group_id, rank = self._init_global_test()
+        os.environ['NCCL_MAX_NRINGS'] = '1'
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.features = nn.Linear(2, 4, bias=False)
+
+            def forward(self, x):
+                x = self.features(x)
+                return x
+
+        model = Net()
+        model.cuda()
+
+        nGPUs = torch.cuda.device_count()
+        input_var = Variable(torch.randn(nGPUs, 1, 2), requires_grad=True).cuda()
+        target = Variable(torch.randn(nGPUs, 1, 4)).cuda()
+        loss = nn.MSELoss()
+        optimizer = torch.optim.SGD(model.parameters(), 0.1)
+
+        model_expected = self._test_DDP_helper(model, input_var, target, loss, optimizer)
+
+        model = torch.nn.parallel.DistributedDataParallel(model)
+        model_DDP = self._test_DDP_helper(model, input_var, target, loss, optimizer)
+
+        self.assertEqual(model_expected.features.weight, model_DDP.module.features.weight)
 
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
