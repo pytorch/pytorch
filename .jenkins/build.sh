@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
 # Required environment variables:
 #   $JOB_NAME
 #   $PYTHON_VERSION
@@ -8,8 +10,6 @@
 # TODO: change this script to make use of $BUILD_ENVIRONMENT,
 # which we can hard code into Docker images and then these scripts
 # will work out of the box without having to set any env vars.
-
-set -ex
 
 export PATH=/opt/conda/bin:$PATH
 
@@ -39,11 +39,6 @@ python --version
 
 pip install -r requirements.txt || true
 
-# This token is used by a parser on Jenkins logs for determining
-# if a failure is a legitimate problem, or a problem with the build
-# system; to find out more, grep for this string in ossci-job-dsl.
-echo "ENTERED_USER_LAND"
-
 time python setup.py install
 
 if [[ "$JOB_NAME" != *cuda* ]]; then
@@ -59,5 +54,3 @@ if [[ "$JOB_NAME" != *pynightly* ]]; then
    cd extension-ffi/script
    python build.py
 fi
-
-echo "EXITED_USER_LAND"
