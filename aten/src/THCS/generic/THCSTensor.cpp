@@ -120,6 +120,16 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
   return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
+THCIndexTensor* THCSTensor_(rawIndices)(THCState *state, THCSTensor *self) {
+  THCudaLongTensor_retain(state, self->indices);
+  return self->indices;
+}
+
+THCTensor* THCSTensor_(rawValues)(THCState *state, THCSTensor *self) {
+  THCTensor_(retain)(state, self->values);
+  return self->values;
+}
+
 /*** end helper methods ***/
 
 /* Empty init */
@@ -466,5 +476,6 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCIndexTensor_(free)(state, maskIndices);
   THCTensor_(free)(state, maskValues);
 }
+
 
 #endif

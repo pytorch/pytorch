@@ -4129,6 +4129,30 @@
 ]]
 
 [[
+  name: sparse_raw_indices
+  cname: rawIndices
+  variants: [method]
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseIndexTensor*
+  arguments:
+    - THTensor* self
+]]
+
+[[
+  name: sparse_raw_values
+  cname: rawValues
+  variants: [method]
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: THDenseTensor*
+  arguments:
+    - THTensor* self
+]]
+
+[[
   name: sparse_raw_resize_
   variants: [method]
   backends:

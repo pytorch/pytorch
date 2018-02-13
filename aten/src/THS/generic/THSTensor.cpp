@@ -550,4 +550,12 @@ void THSTensor_(retain)(THSTensor *self)
   THAtomicIncrementRef(&self->refcount);
 }
 
+THLongTensor* THSTensor_(rawIndices)(THSTensor *self) {
+  return self->indices;
+}
+
+THTensor* THSTensor_(rawValues)(THSTensor *self) {
+  return self->values;
+}
+
 #endif
