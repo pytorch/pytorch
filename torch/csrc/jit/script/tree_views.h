@@ -328,8 +328,8 @@ struct Def : public TreeView {
   List<Param> returns() const {
     return List<Param>(subtree(2));
   }
-  List<TreeRef> statements() const {
-    return List<TreeRef>(subtree(3));
+  List<Stmt> statements() const {
+    return List<Stmt>(subtree(3));
   }
   static Def create(
       const SourceRange& range,
