@@ -81,11 +81,30 @@ class BuildExtension(build_ext):
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
-        # Store the compiler instance on the function (to retrieve it inside).
-        _wrap_compile.compiler_object = self.compiler
+        # Save the original _compile method for later.
+        original_compile = self.compiler._compile
+
+        def wrap_compile(obj, src, ext, cc_args, cflags, pp_opts):
+            try:
+                original_compiler = self.compiler.compiler_so
+                if os.path.splitext(src)[1].startswith('.cu'):
+                    nvcc = _join_cuda_home('bin', 'nvcc')
+                    self.compiler.set_executable('compiler_so', nvcc)
+                    if isinstance(cflags, dict):
+                        cflags = cflags['nvcc']
+                    cflags += ['-c', '--compiler-options', "'-fPIC'"]
+                else:
+                    if isinstance(cflags, dict):
+                        cflags = cflags['cxx']
+                    cflags.append('-std=c++11')
+
+                original_compile(obj, src, ext, cc_args, cflags, pp_opts)
+            finally:
+                # Put the original compiler back in place.
+                self.compiler.set_executable('compiler_so', original_compiler)
+
         # Monkey-patch the _compile method.
-        self.compiler._original_compile = self.compiler._compile
-        self.compiler._compile = _wrap_compile
+        self.compiler._compile = wrap_compile
 
         build_ext.build_extensions(self)
 
@@ -330,28 +349,6 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
         for block in blocks:
             lines = '\n'.join(block)
             build_file.write('{}\n\n'.format(lines))
-
-
-def _wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
-    # Recover the original compiler instance that we are monkey-patching.
-    self = _wrap_compile.compiler_object
-
-    # Store the original compiler for later.
-    original_compiler = self.compiler_so
-    if os.path.splitext(src)[1].startswith('.cu'):
-        self.set_executable('compiler_so', _join_cuda_home('bin', 'nvcc'))
-        if isinstance(extra_postargs, dict):
-            extra_postargs = extra_postargs['nvcc']
-        extra_postargs += ['-c', '--compiler-options', "'-fPIC'"]
-    else:
-        if isinstance(extra_postargs, dict):
-            extra_postargs = extra_postargs['cxx']
-        extra_postargs.append('-std=c++11')
-
-    self._original_compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
-
-    # Put the original compiler back in place.
-    self.set_executable('compiler_so', original_compiler)
 
 
 def _join_cuda_home(*paths):
