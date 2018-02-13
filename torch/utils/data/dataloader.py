@@ -200,9 +200,9 @@ class DataLoaderIter(object):
             self.worker_init_fn = loader.worker_init_fn
             self.ind_worker_queue = loader.ind_worker_queue
             if self.ind_worker_queue:
-                self.index_queue = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
+                self.index_queues = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
             else:
-                self.index_queue = [multiprocessing.SimpleQueue()]
+                self.index_queues = [multiprocessing.SimpleQueue()]
             self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
@@ -216,7 +216,7 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue[i if self.ind_worker_queue else 0],
+                    args=(self.dataset, self.index_queues[i if self.ind_worker_queue else 0],
                           self.worker_result_queue, self.collate_fn, base_seed + i,
                           self.worker_init_fn, i))
                 for i in range(self.num_workers)]
@@ -298,7 +298,7 @@ class DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue[self.worker_queue_idx].put((self.send_idx, indices))
+        self.index_queues[self.worker_queue_idx].put((self.send_idx, indices))
         if self.ind_worker_queue:
             self.worker_queue_idx = (self.worker_queue_idx + 1) % self.num_workers
         self.batches_outstanding += 1
@@ -333,9 +333,12 @@ class DataLoaderIter(object):
                     # fetched from the queue but the socket is already closed
                     # from the worker side (e.g. due to Python shutting down).
                     pass
-                for _ in self.workers:
-                    for q in self.index_queue:
+                if self.ind_worker_queue:
+                    for q in self.index_queues:
                         q.put(None)
+                else:
+                    for _ in self.workers:
+                        self.index_queues[0].put(None)
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
