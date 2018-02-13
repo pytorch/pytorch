@@ -2596,6 +2596,7 @@
     - method
     - function
   return: argument 0
+  aten_sparse: True
   options:
     - cname: mul
       arguments:
@@ -2604,7 +2605,6 @@
         - THTensor* self
         - real other
     - cname: cmul
-      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2615,6 +2615,7 @@
 [[
   name: mul_
   return: argument 0
+  aten_sparse: True
   options:
     - cname: mul
       arguments:
@@ -2622,7 +2623,6 @@
         - THTensor* self
         - real other
     - cname: cmul
-      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -4308,4 +4308,20 @@
   cname: newValues
   arguments:
      - THTensor* self
+]]
+[[
+  name: hspmm
+  variants:
+    - function
+  cname: hspmm
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - CONSTANT AS_REAL(1)
+    - THTensor* mat1
+    - THDenseTensor* mat2
 ]]

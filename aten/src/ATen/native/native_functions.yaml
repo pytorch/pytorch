@@ -35,16 +35,6 @@
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
-- func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-
-- func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _sspaddmm_out_only_sparse
-    CUDA: _sspaddmm_out_only_sparse
-    SparseCPU: _sspaddmm_out_cpu
-    SparseCUDA: _sspaddmm_out_cuda
-
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
@@ -86,7 +76,6 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
   variants: function
-
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
@@ -281,6 +270,7 @@
   variants: function
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
@@ -312,6 +302,8 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
+- func: smm(Tensor self, Tensor mat2) -> Tensor
+
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
 - func: squeeze(Tensor self) -> Tensor
@@ -321,6 +313,16 @@
 - func: squeeze_(Tensor self) -> Tensor
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
+
+- func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sspaddmm_out_only_sparse
+    CUDA: _sspaddmm_out_only_sparse
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
 
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
