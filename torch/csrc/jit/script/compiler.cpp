@@ -346,8 +346,8 @@ struct to_ir {
       NodeKind kind,
       const std::vector<Value*> inputs,
       const size_t output_size,
-      const AttributeMap& attributes = {},
-      const ListAttributeMap& list_attributes = {}) {
+      const AttributeMap& attributes = AttributeMap{},
+      const ListAttributeMap& list_attributes = ListAttributeMap{}) {
     Node* n = def.graph->appendNode(def.graph->create(kind, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
