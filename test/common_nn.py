@@ -491,6 +491,12 @@ def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, r
     margin_clamp = (margin - input).clamp(min=0).type_as(input)
     output = torch.where(target == 1, input, margin_clamp)
 
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
 
 def softmarginloss_reference(input, target, size_average=True, reduce=True):
     output = (1 + (-input * target).exp()).log()
