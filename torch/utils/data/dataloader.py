@@ -300,9 +300,7 @@ class DataLoaderIter(object):
             return
         self.index_queue[self.worker_queue_idx].put((self.send_idx, indices))
         if self.ind_worker_queue:
-            self.worker_queue_idx += 1
-            if self.worker_queue_idx == self.num_workers:
-                self.worker_queue_idx = 0
+            self.worker_queue_idx = (self.worker_queue_idx + 1) % self.num_workers
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -383,7 +381,7 @@ class DataLoader(object):
         worker_init_fn (callable, optional): If not None, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: None)
-        ind_worker_queue (bool, optional): If ``True``, the worker will binded to invididual
+        ind_worker_queue (bool, optional): If ``True``, the worker will binded to individual
             processing queue. (default: False)
 
     .. note:: By default, each worker will have its PyTorch seed set to
@@ -423,6 +421,10 @@ class DataLoader(object):
         if self.num_workers < 0:
             raise ValueError('num_workers cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
+
+        if self.ind_worker_queue and self.num_workers <= 0:
+            raise ValueError('ind_worker_queue cannot be set without any '
+                             'worker (num_worker should be >= 1)')
 
         if batch_sampler is None:
             if sampler is None:
