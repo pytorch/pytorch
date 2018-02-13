@@ -4851,6 +4851,19 @@ def hingeembeddingloss_margin_no_reduce_test():
         pickle=False)
 
 
+def softmarginloss_no_reduce_test():
+    t = Variable(torch.randn(5, 5))
+    return dict(
+        fullname='SoftMarginLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.soft_margin_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(5, 5),
+        reference_fn=lambda i, _:
+            loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduce=False),
+        check_no_size_average=True,
+        pickle=False)
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -4883,6 +4896,7 @@ new_module_tests = [
     multilabelmarginloss_no_reduce_test(),
     hingeembeddingloss_no_reduce_test(),
     hingeembeddingloss_margin_no_reduce_test(),
+    softmarginloss_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),

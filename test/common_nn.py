@@ -498,6 +498,16 @@ def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, r
     return output
 
 
+def softmarginloss_reference(input, target, size_average=True, reduce=True):
+    output = (1 + (-input * target).exp()).log()
+
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -505,6 +515,7 @@ loss_reference_fns = {
     'SmoothL1Loss': smoothl1loss_reference,
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
     'HingeEmbeddingLoss': hingeembeddingloss_reference,
+    'SoftMarginLoss': softmarginloss_reference,
 }
 
 
@@ -744,6 +755,8 @@ criterion_tests = [
         module_name='SoftMarginLoss',
         input_size=(5, 5),
         target_fn=lambda: torch.randn(5, 5).sign(),
+        reference_fn=lambda i, t, m:
+            softmarginloss_reference(i, t, size_average=get_size_average(m)),
         check_no_size_average=True,
     ),
     dict(

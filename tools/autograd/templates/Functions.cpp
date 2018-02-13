@@ -766,14 +766,22 @@ Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & 
   return (r * grad).sum();
 }
 
-Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average) {
+Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
   auto z = (input * -target).exp();
   auto zplus1 = z + 1;
   auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
-  if (size_average) {
+  if (size_average && reduce) {
     grad_input /= input.numel();
   }
   return grad_input;
+}
+
+Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
+  if (!reduce) {
+    return soft_margin_loss_backward(grad, input, target, size_average, reduce);
+  }
+  auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, size_average, true);
+  return (r * grad).sum();
 }
 
 Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scalar beta, Scalar threshold) {

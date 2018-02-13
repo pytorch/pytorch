@@ -1552,7 +1552,7 @@ See :class:`~torch.nn.MultiLabelMarginLoss` for details.
 """)
 
 soft_margin_loss = _add_docstr(torch._C._nn.soft_margin_loss, r"""
-soft_margin_loss(input, target, size_average=True) -> Variable
+soft_margin_loss(input, target, size_average=True, reduce=True) -> Variable
 
 See :class:`~torch.nn.SoftMarginLoss` for details.
 """)
