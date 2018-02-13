@@ -24,6 +24,8 @@ if HAS_CUDA:
 
 
 def is_floating(t):
+    if not isinstance(t, type):
+        raise TypeError('t should be an instance of type')
     return t in [torch.FloatTensor, torch.DoubleTensor,
                  torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
                  torch.HalfTensor, torch.cuda.HalfTensor]
@@ -537,7 +539,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         # Compare results
         if fn == 'element_size' and t.__name__ == 'HalfTensor':
             # Workaround since cpu_result is float
-            self.assertEqual(cpu_result, gpu_result * 2, precision)
+            self.assertEqual(2, gpu_result)
         else:
             self.assertEqual(cpu_result, gpu_result, precision)
     return tmp
@@ -1501,7 +1503,7 @@ if HAS_CUDA:
                     name_inner = name
 
                 if t != torch.HalfTensor and not hasattr(tensor, name_inner):
-                    # torch.HalfTenosr doesn't support most operations,
+                    # torch.HalfTensor doesn't support most operations,
                     # but we use torch.FloatTensor as cpu baseline
                     continue
                 if not hasattr(gpu_tensor, name_inner):
@@ -1517,6 +1519,7 @@ if HAS_CUDA:
                 setattr(TestCuda,
                         test_name,
                         compare_cpu_gpu(constr, arg_constr, name_inner, t, precision))
+
 
 if __name__ == '__main__':
     run_tests()
