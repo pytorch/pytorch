@@ -4847,6 +4847,8 @@ def hingeembeddingloss_margin_no_reduce_test():
         input_fn=lambda: torch.randn(10),
         reference_fn=lambda i, _:
             loss_reference_fns['HingeEmbeddingLoss'](i, t.type_as(i), margin=0.5, reduce=False),
+        check_no_size_average=True,
+        pickle=False)
 
 
 def softmarginloss_no_reduce_test():
