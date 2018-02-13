@@ -29,6 +29,23 @@ static at::Type& default_type() {
   return *VariableType::getType(*THPDefaultATenType);
 }
 
+static void lazy_init_cuda() {
+  static std::once_flag once;
+  std::call_once(once, []() {
+    auto module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
+    if (!module) throw python_error();
+    auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
+    if (!res) throw python_error();
+  });
+}
+
+static const at::Type& maybe_initialize_cuda(const at::Type &type) {
+  if(type.is_cuda()) {
+    lazy_init_cuda();
+  }
+  return type;
+}
+
 ${py_method_dispatch}
 
 }} // namespace torch::autograd

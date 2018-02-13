@@ -1079,6 +1079,23 @@ class TestTorch(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
+    def test_dtypes(self):
+        cpu_dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+                      torch.float16, torch.float32, torch.float64]
+        cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
+                       torch.cuda.float16, torch.cuda.float32, torch.cuda.float64]
+        dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
+
+        for dtype in dtypes:
+            # no ops on float16 currently, cuda.float16 doesn't work on windows
+            if dtype != torch.float16 and not (dtype == torch.cuda.float16 and IS_WINDOWS):
+                out = torch._C._VariableFunctions.eye(3, 3, dtype=dtype)
+                self.assertEqual(out.dtype, dtype)
+
+    def test_dtype_out_match(self):
+        d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
+        self.assertRaises(RuntimeError, lambda: torch._C._VariableFunctions.zeros((2, 3), out=d, dtype=torch.float32))
+
     def test_variable_factory(self):
         expected = torch.autograd.Variable(torch.Tensor([1, 1]))
         # test data
