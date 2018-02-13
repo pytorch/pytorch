@@ -13,7 +13,7 @@ if torch.cuda.is_available():
         'torch_test_cuda_extension',
         ['cuda_extension.cpp', 'cuda_extension_kernel.cu'],
         extra_compile_args={'cxx': ['-g'],
-                            'nvcc': ['-arch=sm_30']})
+                            'nvcc': ['-O2']})
     ext_modules.append(extension)
 
 setup(
