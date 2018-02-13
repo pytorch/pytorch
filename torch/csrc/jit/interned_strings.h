@@ -129,6 +129,9 @@ _(sqrt) \
 _(sub) \
 _(tan) \
 _(trunc) \
+_(squeeze) \
+_(unsqueeze) \
+_(view) \
 _(zeros) \
 _(zeros_like) \
 _(exponent) \

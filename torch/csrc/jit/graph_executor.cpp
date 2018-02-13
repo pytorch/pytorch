@@ -203,14 +203,6 @@ private:
     }
     return false;
   }
-  static bool isDifferentiable(Graph & g) {
-    for(auto n : g.nodes()) {
-      if(!jit::isDifferentiable(n))
-        return false;
-    }
-    return true;
-  }
-
   void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
 
     // these optimizations must run in the presence of variables
@@ -297,7 +289,7 @@ private:
   // 0 + a -> a
   void propagateZeros(Graph & g) {
     for(auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
-      if(it->kind() == kadd && at::Scalar(it->t(kalpha)).toDouble() == 1.0) {
+      if(it->kind() == kadd && it->inputs().size() == 2 && at::Scalar(it->t(kalpha)).toDouble() == 1.0) {
         if(isZero(it->inputs()[0])) {
           it->output()->replaceAllUsesWith(it->inputs()[1]);
           it.destroyCurrent();

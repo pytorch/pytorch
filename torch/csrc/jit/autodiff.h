@@ -83,6 +83,7 @@ Gradient differentiate(std::shared_ptr<Graph>& graph, const std::vector<bool>& r
 
 // can we take a derivative of this node symbolically?
 bool isDifferentiable(Node * n);
+bool isDifferentiable(Graph & g);
 bool isZero(Value * v);
 
 }}
