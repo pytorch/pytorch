@@ -75,6 +75,8 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
+  inline bool isVariable() const;
+
   template<typename T>
   T * data() const;
 
