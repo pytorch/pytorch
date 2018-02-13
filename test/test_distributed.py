@@ -28,7 +28,7 @@ if not dist.is_available():
 
 SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_MULTIGPU_EXIT_CODE = 76
-
+SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
 
 def skip_if_no_cuda_distributed(func):
     func.skip_if_no_cuda_distributed = True
@@ -56,6 +56,16 @@ def skip_if_no_multigpu(func):
         return func(*args, **kwargs)
     return wrapper
 
+def skip_if_small_worldsize(func):
+    func.skip_if_small_worldsize = True
+
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if int(os.environ['WORLD_SIZE']) <= 2:
+            sys.exit(SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE)
+
+        return func(*args, **kwargs)
+    return wrapper
 
 def apply_hack_for_nccl():
     # This is a hack for a known NCCL issue using multiprocess
@@ -286,6 +296,7 @@ class _DistTestBase(object):
         self._test_broadcast_helper(group, group_id, rank, True)
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_broadcast_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_broadcast_helper(group, group_id, rank)
@@ -352,6 +363,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
@@ -360,6 +372,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
@@ -369,6 +382,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
@@ -377,6 +391,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_reduce_helper(
@@ -441,6 +456,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_all_reduce_group_sum(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -448,6 +464,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_all_reduce_group_product(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -456,6 +473,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_all_reduce_group_min(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -463,6 +481,7 @@ class _DistTestBase(object):
         )
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_all_reduce_group_max(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_reduce_helper(
@@ -488,6 +507,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support scatter")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support scatter")
+    @skip_if_small_worldsize
     def test_scatter_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_scatter_helper(group, group_id, rank)
@@ -513,6 +533,7 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support gather")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_gather_helper(group, group_id, rank)
@@ -545,6 +566,7 @@ class _DistTestBase(object):
         self._test_all_gather_helper(group, group_id, rank, True)
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_all_gather_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_all_gather_helper(group, group_id, rank)
@@ -573,6 +595,7 @@ class _DistTestBase(object):
         self._test_barrier_helper(group, group_id, rank)
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
+    @skip_if_small_worldsize
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
@@ -838,7 +861,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
 
         def _join_and_reduce(self, fn):
             skip_ok = getattr(fn, "skip_if_no_cuda_distributed", False) \
-                or getattr(fn, "skip_if_no_multigpu", False)
+                or getattr(fn, "skip_if_no_multigpu", False) \
+                or getattr(fn, "skip_if_small_worldsize", False)
             for p in self.processes:
                 p.join(self.JOIN_TIMEOUT)
                 if not skip_ok:
@@ -850,7 +874,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
                 # mismatched exit codes if the first isn't valid
                 assert first_process.exitcode == 0 \
                     or first_process.exitcode == SKIP_IF_NO_CUDA_EXIT_CODE \
-                    or first_process.exitcode == SKIP_IF_NO_MULTIGPU_EXIT_CODE
+                    or first_process.exitcode == SKIP_IF_NO_MULTIGPU_EXIT_CODE \
+                    or first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE
 
                 for p in self.processes:
                     self.assertEqual(p.exitcode, first_process.exitcode)
@@ -858,6 +883,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
                     raise unittest.SkipTest("cuda is not available")
                 if first_process.exitcode == SKIP_IF_NO_MULTIGPU_EXIT_CODE:
                     raise unittest.SkipTest("multigpu is not available")
+                if first_process.exitcode == SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE:
+                    raise unittest.SkipTest("worldsize is too small to run group tests")
 
 elif BACKEND == 'mpi':
     dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
