@@ -4434,7 +4434,7 @@ new_criterion_tests = [
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='full_loss',  # with sterling approx
     ),
-  dict(
+    dict(
         module_name='L1Loss',
         input_size=(),
         target_size=(),
