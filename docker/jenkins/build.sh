@@ -23,10 +23,10 @@ valid_images=(
   py2-android-ubuntu16.04
 
   # Builds for Anaconda
-  py2-conda-ubuntu16.04
-  py2-conda-cuda9.0-cudnn7-ubuntu16.04
-  py3-conda-ubuntu16.04
-  py3-conda-cuda9.0-cudnn7-ubuntu16.04
+  conda2-ubuntu16.04
+  conda2-cuda9.0-cudnn7-ubuntu16.04
+  conda3-ubuntu16.04
+  conda3-cuda9.0-cudnn7-ubuntu16.04
 )
 
 image="$1"
@@ -51,7 +51,9 @@ else
   exit 1
 fi
 
-PYTHON_VERSION="$(echo "${image}" | perl -n -e'/py(\d+(\.\d+)?)/ && print $1')"
+if [[ "$image" == py* ]]; then
+  PYTHON_VERSION="$(echo "${image}" | perl -n -e'/py(\d+(\.\d+)?)/ && print $1')"
+fi
 
 if [[ "$image" == *cuda* ]]; then
   CUDA_VERSION="$(echo "${image}" | perl -n -e'/cuda(\d+\.\d+)/ && print $1')"

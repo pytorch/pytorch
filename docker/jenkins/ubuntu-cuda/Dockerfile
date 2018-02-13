@@ -15,7 +15,8 @@ RUN bash ./install_ccache.sh && rm install_ccache.sh
 # Install Python
 ARG PYTHON_VERSION
 ADD ./install_python.sh install_python.sh
-RUN bash ./install_python.sh && rm install_python.sh
+RUN if [ -n "${PYTHON_VERSION}" ]; then bash ./install_python.sh; fi
+RUN rm install_python.sh
 
 # Install Anaconda
 ARG ANACONDA_VERSION
