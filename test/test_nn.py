@@ -1307,8 +1307,9 @@ class TestNN(NNTestCase):
 
     def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.FloatTensor):
         # check a known test example
-        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse).type(dtype)
-        es.weight.data.copy_(torch.arange(1, 11).type(dtype).resize_as_(es.weight.data))
+        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse)
+        es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
+        es.type(dtype)
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4, 0]))
         offsets = Variable(torch.LongTensor([0, 3]))
         grad_output = torch.arange(1, 5).view(2, 2).type(dtype)
@@ -1349,7 +1350,7 @@ class TestNN(NNTestCase):
         if sparse:
             es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight, type2prec[dtype.__name__])
+        self.assertEqual(es_weight_grad, expected_grad_weight, type2prec[dtype.__name__])
 
         # check same example except as 2D (2 x 3)
         input = Variable(input.data.view(2, -1))
@@ -1361,7 +1362,7 @@ class TestNN(NNTestCase):
         if sparse:
             es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight, type2prec[dtype.__name__])
+        self.assertEqual(es_weight_grad, expected_grad_weight, type2prec[dtype.__name__])
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
@@ -1392,7 +1393,7 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.data
             if sparse:
                 es_weight_grad = es.weight.grad.data.to_dense()
-            self.assertEqual(es.weight.grad, e.weight.grad, type2prec[dtype.__name__])
+            self.assertEqual(es_weight_grad, e.weight.grad, type2prec[dtype.__name__])
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1465,11 +1466,13 @@ class TestNN(NNTestCase):
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @repeat_test_for_types(ALL_TENSORTYPES)
-    def test_EmbeddingBag_cuda(self, dtype=torch.FloatTensor):
+    def test_embedding_bag_cuda(self, dtype=torch.FloatTensor):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
         self._test_EmbeddingBag(True, 'mean', False, dtype)
-        self._test_EmbeddingBag(True, 'sum', True, dtype)
-        self._test_EmbeddingBag(True, 'mean', True, dtype)
+        if dtype != torch.HalfTensor:
+            # torch.cuda.sparse.HalfTensor is not enabled.
+            self._test_EmbeddingBag(True, 'sum', True, dtype)
+            self._test_EmbeddingBag(True, 'mean', True, dtype)
 
     def test_fractional_max_pool2d(self):
         x = Variable(torch.randn(1, 2, 7, 7), requires_grad=True)
