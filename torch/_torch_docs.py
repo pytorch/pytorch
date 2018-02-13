@@ -59,6 +59,8 @@ a real number, otherwise it should be an integer.
 Args:
     input (Tensor): the input tensor
     value (Number): the number to be added to each element of :attr:`input`
+
+Keyword arguments:
     out (Tensor, optional): the output tensor
 
 Example::
@@ -100,6 +102,8 @@ Args:
     input (Tensor): the first input tensor
     value (Number): the scalar multiplier for :attr:`other`
     other (Tensor): the second input tensor
+
+Keyword arguments:
     out (Tensor, optional): the output tensor
 
 Example::
