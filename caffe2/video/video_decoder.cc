@@ -44,19 +44,20 @@ VideoDecoder::VideoDecoder() {
 }
 
 void VideoDecoder::ResizeAndKeepAspectRatio(
-    const int origWidth,
     const int origHeight,
-    const int short_edge,
-    int& outWidth,
-    int& outHeight) {
-  if (origWidth < origHeight) {
-    float ratio = short_edge / float(origWidth);
-    outWidth = short_edge;
-    outHeight = (int)round(ratio * origHeight);
+    const int origWidth,
+    const int heightMin,
+    const int widthMin,
+    int& outHeight,
+    int& outWidth) {
+  float min_aspect = (float)heightMin / (float)widthMin;
+  float video_aspect = (float)origHeight / (float)origWidth;
+  if (video_aspect >= min_aspect) {
+    outWidth = widthMin;
+    outHeight = (int)ceil(video_aspect * outWidth);
   } else {
-    float ratio = short_edge / float(origHeight);
-    outHeight = short_edge;
-    outWidth = (int)round(ratio * origWidth);
+    outHeight = heightMin;
+    outWidth = (int)ceil(outHeight / video_aspect);
   }
 }
 
@@ -160,16 +161,27 @@ void VideoDecoder::decodeLoop(
 
     if (params.video_res_type_ == VideoResType::ORIGINAL_RES) {
       // if the original resolution is too low,
-      // make it at least the same size as crop_size_
-      if (params.crop_size_ > origWidth || params.crop_size_ > origHeight) {
+      // make its size at least (crop_height, crop_width)
+      if (params.crop_width_ > origWidth || params.crop_height_ > origHeight) {
         ResizeAndKeepAspectRatio(
-            origWidth, origHeight, params.crop_size_, outWidth, outHeight);
+            origHeight,
+            origWidth,
+            params.crop_height_,
+            params.crop_width_,
+            outHeight,
+            outWidth);
       }
-    } else if (params.video_res_type_ == VideoResType::USE_SHORT_EDGE) {
-      // resize the image to the predefined
-      // short_edge_ resolution while keep the aspect ratio
+    } else if (
+        params.video_res_type_ == VideoResType::USE_MINIMAL_WIDTH_HEIGHT) {
+      // resize the image to be at least
+      // (height_min, width_min) resolution while keep the aspect ratio
       ResizeAndKeepAspectRatio(
-          origWidth, origHeight, params.short_edge_, outWidth, outHeight);
+          origHeight,
+          origWidth,
+          params.height_min_,
+          params.width_min_,
+          outHeight,
+          outWidth);
     } else if (params.video_res_type_ == VideoResType::USE_WIDTH_HEIGHT) {
       // resize the image to the predefined
       // resolution and ignore the aspect ratio

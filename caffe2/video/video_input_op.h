@@ -84,12 +84,22 @@ class VideoInputOp final : public PrefetchOperator<Context> {
   std::vector<float> inv_std_of_;
   int channels_rgb_;
   int channels_of_;
-  int crop_size_;
+  int crop_height_;
+  int crop_width_;
   int scale_h_;
   int scale_w_;
-  int short_edge_;
+  int height_min_;
+  int width_min_;
   int length_rgb_;
   int sampling_rate_rgb_;
+  bool color_jitter_;
+  float img_saturation_;
+  float img_brightness_;
+  float img_contrast_;
+  bool color_lighting_;
+  float color_lighting_std_;
+  std::vector<std::vector<float>> color_lighting_eigvecs_;
+  std::vector<float> color_lighting_eigvals_;
   int num_of_required_frame_;
   int length_of_;
   int sampling_rate_of_;
@@ -98,6 +108,8 @@ class VideoInputOp final : public PrefetchOperator<Context> {
   int num_of_class_;
   bool use_local_file_;
   bool random_crop_;
+  bool multi_crop_;
+  int multi_crop_count_;
   int flow_data_type_;
   int flow_alg_type_;
   int decode_type_;
@@ -119,27 +131,34 @@ void VideoInputOp<Context>::CheckParamsAndPrint() {
   CAFFE_ENFORCE_GT(batch_size_, 0, "Batch size should be positive.");
   CAFFE_ENFORCE_GT(
       clip_per_video_, 0, "Number of clips per video should be positive.");
-  CAFFE_ENFORCE_GT(crop_size_, 0, "Must provide the cropping value.");
+  CAFFE_ENFORCE_GT(crop_height_, 0, "Must provide the cropping height value.");
+  CAFFE_ENFORCE_GT(crop_width_, 0, "Must provide the cropping width value.");
+
   CAFFE_ENFORCE_GT(
       num_of_required_frame_, 0, "Required number of frames must be positive.");
 
-  if (video_res_type_ == VideoResType::USE_SHORT_EDGE) {
-    CAFFE_ENFORCE_GT(short_edge_, 0, "Must provide the short edge value.");
+  if (video_res_type_ == VideoResType::USE_MINIMAL_WIDTH_HEIGHT) {
+    CAFFE_ENFORCE_GT(height_min_, 0, "Must provide the minimal height value.");
+    CAFFE_ENFORCE_GT(width_min_, 0, "Must provide the minimal width value.");
     CAFFE_ENFORCE_GE(
-        short_edge_,
-        crop_size_,
-        "The short edge must be no smaller than the crop value.");
+        height_min_,
+        crop_height_,
+        "The minimal height must be no smaller than the cropping height.");
+    CAFFE_ENFORCE_GE(
+        width_min_,
+        crop_width_,
+        "The minimal width must be no smaller than the cropping width.");
   } else if (video_res_type_ == VideoResType::USE_WIDTH_HEIGHT) {
     CAFFE_ENFORCE_GT(scale_h_, 0, "Must provide the scale height value.");
     CAFFE_ENFORCE_GT(scale_w_, 0, "Must provide the scale width value.");
     CAFFE_ENFORCE_GE(
         scale_h_,
-        crop_size_,
-        "The scaled height must be no smaller than the crop value.");
+        crop_height_,
+        "The scaled height must be no smaller than the cropping height.");
     CAFFE_ENFORCE_GE(
         scale_w_,
-        crop_size_,
-        "The scaled width must be no smaller than the crop value.");
+        crop_width_,
+        "The scaled width must be no smaller than the cropping width.");
   }
 
   if (get_rgb_) {
@@ -186,14 +205,20 @@ void VideoInputOp<Context>::CheckParamsAndPrint() {
   LOG(INFO) << "    Outputting in batches of " << batch_size_ << " videos;";
   LOG(INFO) << "    Each video has " << clip_per_video_ << " clips;";
   LOG(INFO) << "    Scaling image to " << scale_h_ << "x" << scale_w_;
-  LOG(INFO) << "    Cropping video frame to " << crop_size_
-            << (random_mirror_ ? " with " : " without ") << "random mirroring;";
+  LOG(INFO) << "    (Height, Width) is at least (" << height_min_ << ", "
+            << width_min_ << ")";
+  LOG(INFO) << "    Cropping video frame to " << crop_height_ << "x"
+            << crop_width_ << (random_mirror_ ? " with " : " without ")
+            << "random mirroring;";
   LOG(INFO) << "    Using " << (random_crop_ ? "random" : "center") << " crop";
+  LOG(INFO) << "    Is multi-cropping enabled: " << multi_crop_;
 
   if (get_rgb_) {
     LOG(INFO) << "    Using a clip of " << length_rgb_ << " rgb frames "
               << "with " << channels_rgb_ << " channels "
               << "and a sampling rate of 1:" << sampling_rate_rgb_;
+    LOG(INFO) << "    RGB data augmentation. Color jittering: " << color_jitter_
+              << ". Color lighting: " << color_lighting_;
     for (int i = 0; i < channels_rgb_; i++) {
       LOG(INFO) << "    RGB " << i << "-th channel mean: " << mean_rgb_[i]
                 << " std: " << 1.f / inv_std_rgb_[i];
@@ -215,8 +240,8 @@ void VideoInputOp<Context>::CheckParamsAndPrint() {
 
   if (video_res_type_ == VideoResType::ORIGINAL_RES) {
     LOG(INFO) << "    Use original resolution";
-  } else if (video_res_type_ == VideoResType::USE_SHORT_EDGE) {
-    LOG(INFO) << "    Resize and keep aspect ratio";
+  } else if (video_res_type_ == VideoResType::USE_MINIMAL_WIDTH_HEIGHT) {
+    LOG(INFO) << "    Resize with minimal size and keep aspect ratio";
   } else if (video_res_type_ == VideoResType::USE_WIDTH_HEIGHT) {
     LOG(INFO) << "    Resize and ignore aspect ratio";
   } else {
@@ -244,20 +269,58 @@ VideoInputOp<Context>::VideoInputOp(
           OperatorBase::template GetSingleArgument<int>("batch_size", 0)),
       clip_per_video_(
           OperatorBase::template GetSingleArgument<int>("clip_per_video", 1)),
+      mean_rgb_(OperatorBase::template GetRepeatedArgument<float>(
+          "mean_rgb_per_channel",
+          {OperatorBase::template GetSingleArgument<float>("mean_rgb", 128.)})),
+      inv_std_rgb_(OperatorBase::template GetRepeatedArgument<float>(
+          "std_rgb_per_channel",
+          {OperatorBase::template GetSingleArgument<float>("std_rgb", 1.)})),
+      mean_of_(OperatorBase::template GetRepeatedArgument<float>(
+          "mean_of_per_channel",
+          {OperatorBase::template GetSingleArgument<float>("mean_of", 0.)})),
+      inv_std_of_(OperatorBase::template GetRepeatedArgument<float>(
+          "std_of_per_channel",
+          {OperatorBase::template GetSingleArgument<float>("std_of", 1.)})),
       channels_rgb_(
           OperatorBase::template GetSingleArgument<int>("channels_rgb", 3)),
       channels_of_(
           OperatorBase::template GetSingleArgument<int>("channels_of", 2)),
-      crop_size_(OperatorBase::template GetSingleArgument<int>("crop_size", 0)),
+      crop_height_(OperatorBase::template GetSingleArgument<int>(
+          "crop_height",
+          {OperatorBase::template GetSingleArgument<int>("crop_size", 0.)})),
+      crop_width_(OperatorBase::template GetSingleArgument<int>(
+          "crop_width",
+          {OperatorBase::template GetSingleArgument<int>("crop_size", 0.)})),
       scale_h_(OperatorBase::template GetSingleArgument<int>("scale_h", 0)),
       scale_w_(OperatorBase::template GetSingleArgument<int>("scale_w", 0)),
-      short_edge_(
-          OperatorBase::template GetSingleArgument<int>("short_edge", 0)),
+      height_min_(OperatorBase::template GetSingleArgument<int>(
+          "height_min",
+          {OperatorBase::template GetSingleArgument<int>("short_edge", 0)})),
+      width_min_(OperatorBase::template GetSingleArgument<int>(
+          "width_min",
+          {OperatorBase::template GetSingleArgument<int>("short_edge", 0)})),
       length_rgb_(
           OperatorBase::template GetSingleArgument<int>("length_rgb", 0)),
       sampling_rate_rgb_(OperatorBase::template GetSingleArgument<int>(
           "sampling_rate_rgb",
           1)),
+      color_jitter_(OperatorBase::template GetSingleArgument<bool>(
+          "color_jitter",
+          false)),
+      img_saturation_(OperatorBase::template GetSingleArgument<float>(
+          "img_saturation",
+          0.4)),
+      img_brightness_(OperatorBase::template GetSingleArgument<float>(
+          "img_brightness",
+          0.4)),
+      img_contrast_(
+          OperatorBase::template GetSingleArgument<float>("img_contrast", 0.4)),
+      color_lighting_(OperatorBase::template GetSingleArgument<bool>(
+          "color_lighting",
+          false)),
+      color_lighting_std_(OperatorBase::template GetSingleArgument<float>(
+          "color_lighting_std",
+          0.1)),
       length_of_(OperatorBase::template GetSingleArgument<int>("length_of", 0)),
       sampling_rate_of_(
           OperatorBase::template GetSingleArgument<int>("sampling_rate_of", 1)),
@@ -273,6 +336,8 @@ VideoInputOp<Context>::VideoInputOp(
           false)),
       random_crop_(
           OperatorBase::template GetSingleArgument<bool>("random_crop", true)),
+      multi_crop_(
+          OperatorBase::template GetSingleArgument<bool>("multi_crop", false)),
       flow_data_type_(
           OperatorBase::template GetSingleArgument<int>("flow_data_type", 0)),
       flow_alg_type_(
@@ -297,9 +362,38 @@ VideoInputOp<Context>::VideoInputOp(
       num_decode_threads_(OperatorBase::template GetSingleArgument<int>(
           "num_decode_threads",
           4)),
-
       thread_pool_(std::make_shared<TaskThreadPool>(num_decode_threads_)) {
+  // hard-coded PCA eigenvectors and eigenvalues, based on RBG channel order
+  color_lighting_eigvecs_.push_back(
+      std::vector<float>{-144.7125, 183.396, 102.2295});
+  color_lighting_eigvecs_.push_back(
+      std::vector<float>{-148.104, -1.1475, -207.57});
+  color_lighting_eigvecs_.push_back(
+      std::vector<float>{-148.818, -177.174, 107.1765});
+
+  color_lighting_eigvals_ = std::vector<float>{0.2175, 0.0188, 0.0045};
+
+  // multi-cropping for testing
+  multi_crop_count_ = 1;
+  if (multi_crop_) {
+    // we take left-top, central-top, right-top, left-bottom, central-bottom,
+    // right-bottom and central-central croppings as well as their mirrorings
+    // In total, 14 croppings
+    multi_crop_count_ = 14;
+  }
+
   num_of_required_frame_ = 0;
+
+  // mean and std for normalizing different optical flow data type;
+  // Example statistics generated from SOA are shown below, and you may
+  // want to change them if you are running on a different dataset;
+
+  // 7 channels: (flow_x, flow_y, flow_magitude, gray, Red, Green, Blue)
+  // const std::vector<float> InputDataMean =
+  //     {0.0046635, 0.0046261, 0.963986, 102.976, 110.201, 100.64, 95.9966};
+  // const std::vector<float> InputDataStd =
+  //     {0.972347, 0.755146, 1.43588, 55.3691, 58.1489, 56.4701, 55.3324};
+
   // if we need RGB as an input
   if (get_rgb_) {
     // how many frames we need for RGB
@@ -307,12 +401,20 @@ VideoInputOp<Context>::VideoInputOp(
         num_of_required_frame_, (length_rgb_ - 1) * sampling_rate_rgb_ + 1);
 
     channels_rgb_ = 3;
-    for (int i = 4; i < 7; i++) {
-      mean_rgb_.push_back(InputDataMean[i]);
-      inv_std_rgb_.push_back(1.f / InputDataStd[i]);
+
+    CAFFE_ENFORCE_EQ(
+        mean_rgb_.size(),
+        inv_std_rgb_.size(),
+        "The mean and std. vectors for RGB must be of the same size.");
+    if (mean_rgb_.size() == 1) {
+      mean_rgb_.resize(3, mean_rgb_[0]);
+      inv_std_rgb_.resize(3, inv_std_rgb_[0]);
+    }
+    CAFFE_ENFORCE_EQ(mean_rgb_.size(), 3, "RGB should have 3 channels");
+    for (int i = 0; i < 3; ++i) {
+      inv_std_rgb_[i] = 1.f / inv_std_rgb_[i];
     }
   }
-
   // if we need optical flow as an input
   if (get_optical_flow_) {
     // how many frames we need for optical flow
@@ -320,51 +422,41 @@ VideoInputOp<Context>::VideoInputOp(
         num_of_required_frame_,
         (length_of_ - 1) * sampling_rate_of_ + frame_gap_of_ + 1);
 
+    CAFFE_ENFORCE_EQ(
+        mean_of_.size(),
+        inv_std_of_.size(),
+        "The mean and std. vectors for Optical Flow must be of the same size.");
     // set the parameters for different input data types
     switch (flow_data_type_) {
+      // (flow_x, flow_y)
       case FlowDataType::Flow2C:
         channels_of_ = 2;
-        for (int i = 0; i < channels_of_; i++) {
-          mean_of_.push_back(InputDataMean[i]);
-          inv_std_of_.push_back(1.f / InputDataStd[i]);
-        }
         break;
-
+      // (flow_x, flow_y, flow_magnitude)
       case FlowDataType::Flow3C:
         channels_of_ = 3;
-        for (int i = 0; i < channels_of_; i++) {
-          mean_of_.push_back(InputDataMean[i]);
-          inv_std_of_.push_back(1.f / InputDataStd[i]);
-        }
         break;
-
       // early fusion with gray
+      // (flow_x, flow_y, gray)
       case FlowDataType::FlowWithGray:
         channels_of_ = 3;
-        for (int i = 0; i < 2; i++) {
-          mean_of_.push_back(InputDataMean[i]);
-          inv_std_of_.push_back(1.f / InputDataStd[i]);
-        }
-        mean_of_.push_back(InputDataMean[3]);
-        inv_std_of_.push_back(1.f / InputDataStd[3]);
         break;
-
       // early fusion with RGB
+      // (flow_x, flow_y, Red, Green, Blue)
       case FlowDataType::FlowWithRGB:
         channels_of_ = 5;
-        for (int i = 0; i < 2; i++) {
-          mean_of_.push_back(InputDataMean[i]);
-          inv_std_of_.push_back(1.f / InputDataStd[i]);
-        }
-        for (int i = 4; i < 7; i++) {
-          mean_of_.push_back(InputDataMean[i]);
-          inv_std_of_.push_back(1.f / InputDataStd[i]);
-        }
         break;
-
       default:
         LOG(ERROR) << "Unknown optical flow type " << flow_data_type_;
         break;
+    }
+    LOG(INFO) << "channels_of_: " << channels_of_;
+    if (mean_of_.size() == 1) {
+      mean_of_.resize(channels_of_, mean_of_[0]);
+      inv_std_of_.resize(channels_of_, inv_std_of_[0]);
+    }
+    for (int i = 0; i < channels_of_; ++i) {
+      inv_std_of_[i] = 1.f / inv_std_of_[i];
     }
   }
 
@@ -377,11 +469,11 @@ VideoInputOp<Context>::VideoInputOp(
   vector<TIndex> label_shape(2);
 
   // for RGB data
-  data_shape[0] = batch_size_ * clip_per_video_;
+  data_shape[0] = batch_size_ * clip_per_video_ * multi_crop_count_;
   data_shape[1] = channels_rgb_;
   data_shape[2] = length_rgb_;
-  data_shape[3] = crop_size_;
-  data_shape[4] = crop_size_;
+  data_shape[3] = crop_height_;
+  data_shape[4] = crop_width_;
   prefetched_clip_rgb_.Resize(data_shape);
 
   // for optical flow data
@@ -392,14 +484,16 @@ VideoInputOp<Context>::VideoInputOp(
   // If do_multi_label is used, output label is a binary vector
   // of length num_of_class indicating which labels present
   if (do_multi_label_) {
-    label_shape[0] = batch_size_ * clip_per_video_;
+    label_shape[0] = batch_size_ * clip_per_video_ * multi_crop_count_;
     label_shape[1] = num_of_class_;
     prefetched_label_.Resize(label_shape);
   } else {
-    prefetched_label_.Resize(vector<TIndex>(1, batch_size_ * clip_per_video_));
+    prefetched_label_.Resize(
+        vector<TIndex>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
   }
 
-  prefetched_video_id_.Resize(vector<TIndex>(1, batch_size_ * clip_per_video_));
+  prefetched_video_id_.Resize(
+      vector<TIndex>(1, batch_size_ * clip_per_video_ * multi_crop_count_));
 }
 
 template <class Context>
@@ -420,29 +514,40 @@ bool VideoInputOp<Context>::GetClipsAndLabelsFromDBValue(
   // start_frm is only valid when sampling 1 clip per video without
   // temporal jitterring
   if (decode_type_ == DecodeType::USE_START_FRM) {
+    CAFFE_ENFORCE_LT(
+        curr_proto_idx,
+        protos.protos_size(),
+        "No proto is found for starting frame");
     const TensorProto& start_frm_proto = protos.protos(curr_proto_idx++);
     start_frm = start_frm_proto.int32_data(0);
   }
-
   if (get_video_id_) {
+    CAFFE_ENFORCE_LT(
+        curr_proto_idx, protos.protos_size(), "No proto is found for video id");
     const TensorProto& video_id_proto = protos.protos(curr_proto_idx);
-    for (int i = 0; i < clip_per_video_; i++) {
-      video_id_data[i] = video_id_proto.int32_data(0);
+    for (int i = 0; i < clip_per_video_ * multi_crop_count_; i++) {
+      video_id_data[i] = video_id_proto.int64_data(0);
     }
   }
-
   // assign labels
   if (!do_multi_label_) {
-    for (int i = 0; i < clip_per_video_; i++) {
+    for (int i = 0; i < clip_per_video_ * multi_crop_count_; i++) {
       label_data[i] = label_proto.int32_data(0);
     }
   } else {
     // For multiple label case, output label is a binary vector
     // where presented concepts are makred 1
-    memset(label_data, 0, sizeof(int) * num_of_class_ * clip_per_video_);
+    memset(
+        label_data,
+        0,
+        sizeof(int) * num_of_class_ * multi_crop_count_ * clip_per_video_);
     for (int i = 0; i < clip_per_video_; i++) {
-      for (int j = 0; j < label_proto.int32_data_size(); j++) {
-        label_data[i * num_of_class_ + label_proto.int32_data(j)] = 1;
+      for (int j = 0; j < multi_crop_count_; ++j) {
+        for (int k = 0; k < label_proto.int32_data_size(); k++) {
+          label_data
+              [(i * multi_crop_count_ + j) * num_of_class_ +
+               label_proto.int32_data(k)] = 1;
+        }
       }
     }
   }
@@ -458,8 +563,10 @@ bool VideoInputOp<Context>::GetClipsAndLabelsFromDBValue(
   Params params;
   params.maximumOutputFrames_ = MAX_DECODING_FRAMES;
   params.video_res_type_ = video_res_type_;
-  params.crop_size_ = crop_size_;
-  params.short_edge_ = short_edge_;
+  params.crop_height_ = crop_height_;
+  params.crop_width_ = crop_width_;
+  params.height_min_ = height_min_;
+  params.width_min_ = width_min_;
   params.scale_w_ = scale_w_;
   params.scale_h_ = scale_h_;
   params.decode_type_ = decode_type_;
@@ -519,31 +626,53 @@ void VideoInputOp<Context>::DecodeAndTransform(
   // Decode the video from memory or read from a local file
   CHECK(GetClipsAndLabelsFromDBValue(
       value, height, width, buffer_rgb, label_data, video_id_data));
-
-  int clip_offset_rgb = channels_rgb_ * length_rgb_ * crop_size_ * crop_size_;
-  int clip_offset_of = channels_of_ * length_of_ * crop_size_ * crop_size_;
+  int clip_offset_rgb = multi_crop_count_ * channels_rgb_ * length_rgb_ *
+      crop_height_ * crop_width_;
+  int clip_crop_offset_of =
+      channels_of_ * length_of_ * crop_height_ * crop_width_;
+  int clip_offset_of = multi_crop_count_ * clip_crop_offset_of;
   for (int i = 0; i < std::min(clip_per_video_, int(buffer_rgb.size())); i++) {
     // get the rectangle for cropping
     int h_off = 0;
     int w_off = 0;
     if (random_crop_) {
       // using random crop for training
-      h_off = std::uniform_int_distribution<>(0, height - crop_size_)(*randgen);
-      w_off = std::uniform_int_distribution<>(0, width - crop_size_)(*randgen);
+      h_off =
+          std::uniform_int_distribution<>(0, height - crop_height_)(*randgen);
+      w_off = std::uniform_int_distribution<>(0, width - crop_width_)(*randgen);
     } else {
       // using center crop for testing
-      h_off = (height - crop_size_) / 2;
-      w_off = (width - crop_size_) / 2;
+      h_off = (height - crop_height_) / 2;
+      w_off = (width - crop_width_) / 2;
     }
-    cv::Rect rect(w_off, h_off, crop_size_, crop_size_);
+    // cv::Rect rect(w_off, h_off, crop_width_, crop_height_);
+
+    // Multi cropping: we take left-top, central-top, right-top, left-bottom,
+    // central-bottom, right-bottom and central-central croppings as well as
+    // their mirrorings. In total, 14 croppings
+    int multi_crop_w_off[7] = {0,
+                               (width - crop_width_) / 2,
+                               width - crop_width_,
+                               (width - crop_width_) / 2,
+                               0,
+                               (width - crop_width_) / 2,
+                               width - crop_width_};
+    int multi_crop_h_off[7] = {0,
+                               0,
+                               0,
+                               (height - crop_height_) / 2,
+                               height - crop_height_,
+                               height - crop_height_,
+                               height - crop_height_};
 
     // randomly mirror the image or not
     bool mirror_me = random_mirror_ && (*mirror_this_clip)(*randgen);
-
     if (get_rgb_ && clip_rgb_data) {
       ClipTransformRGB(
           buffer_rgb[i],
-          crop_size_,
+          multi_crop_count_,
+          crop_height_,
+          crop_width_,
           length_rgb_,
           channels_rgb_,
           sampling_rate_rgb_,
@@ -551,31 +680,56 @@ void VideoInputOp<Context>::DecodeAndTransform(
           width,
           h_off,
           w_off,
+          multi_crop_h_off,
+          multi_crop_w_off,
           mirror_me,
+          color_jitter_,
+          img_saturation_,
+          img_brightness_,
+          img_contrast_,
+          color_lighting_,
+          color_lighting_std_,
+          color_lighting_eigvecs_,
+          color_lighting_eigvals_,
           mean_rgb_,
           inv_std_rgb_,
+          randgen,
           clip_rgb_data + (i * clip_offset_rgb));
     }
-
     if (get_optical_flow_ && clip_of_data) {
-      ClipTransformOpticalFlow(
-          buffer_rgb[i],
-          crop_size_,
-          length_of_,
-          channels_of_,
-          sampling_rate_of_,
-          height,
-          width,
-          rect,
-          channels_rgb_,
-          mirror_me,
-          flow_alg_type_,
-          flow_data_type_,
-          frame_gap_of_,
-          do_flow_aggregation_,
-          mean_of_,
-          inv_std_of_,
-          clip_of_data + (i * clip_offset_of));
+      cv::Rect rect;
+      for (int j = 0; j < multi_crop_count_; ++j) {
+        if (multi_crop_count_ == 1) {
+          rect = cv::Rect(w_off, h_off, crop_width_, crop_height_);
+        } else {
+          mirror_me = j / (multi_crop_count_ / 2);
+          int k = j % (multi_crop_count_ / 2);
+          rect = cv::Rect(
+              multi_crop_w_off[k],
+              multi_crop_h_off[k],
+              crop_width_,
+              crop_height_);
+        }
+        ClipTransformOpticalFlow(
+            buffer_rgb[i],
+            crop_height_,
+            crop_width_,
+            length_of_,
+            channels_of_,
+            sampling_rate_of_,
+            height,
+            width,
+            rect,
+            channels_rgb_,
+            mirror_me,
+            flow_alg_type_,
+            flow_data_type_,
+            frame_gap_of_,
+            do_flow_aggregation_,
+            mean_of_,
+            inv_std_of_,
+            clip_of_data + (i * clip_offset_of) + j * clip_crop_offset_of);
+      }
     }
   }
 
@@ -611,22 +765,25 @@ bool VideoInputOp<Context>::Prefetch() {
   for (int item_id = 0; item_id < batch_size_; ++item_id) {
     std::mt19937* randgen = &randgen_per_thread[item_id % num_decode_threads_];
 
-    int frame_size = crop_size_ * crop_size_;
+    int frame_size = crop_height_ * crop_width_;
     // get the clip data pointer for the item_id -th example
     float* clip_rgb_data = prefetched_clip_rgb_.mutable_data<float>() +
-        frame_size * length_rgb_ * channels_rgb_ * item_id * clip_per_video_;
+        frame_size * length_rgb_ * channels_rgb_ * item_id * clip_per_video_ *
+            multi_crop_count_;
 
     // get the optical flow data for the current clip
     float* clip_of_data = prefetched_clip_of_.mutable_data<float>() +
-        frame_size * length_of_ * channels_of_ * item_id * clip_per_video_;
+        frame_size * length_of_ * channels_of_ * item_id * clip_per_video_ *
+            multi_crop_count_;
 
     // get the label data pointer for the item_id -th example
     int* label_data = prefetched_label_.mutable_data<int>() +
-        (do_multi_label_ ? num_of_class_ : 1) * item_id * clip_per_video_;
+        (do_multi_label_ ? num_of_class_ : 1) * item_id * clip_per_video_ *
+            multi_crop_count_;
 
     // get the video id data pointer for the item_id -th example
-    int* video_id_data =
-        prefetched_video_id_.mutable_data<int>() + item_id * clip_per_video_;
+    int* video_id_data = prefetched_video_id_.mutable_data<int>() +
+        item_id * clip_per_video_ * multi_crop_count_;
 
     std::string key, value;
     // read data
@@ -673,7 +830,6 @@ bool VideoInputOp<Context>::CopyPrefetched() {
       clip_rgb_output->CopyFrom(prefetched_clip_rgb_on_device_, &context_);
     }
   }
-
   if (get_optical_flow_) {
     auto* clip_of_output = OperatorBase::Output<Tensor<Context>>(index++);
     if (std::is_same<Context, CPUContext>::value) {
@@ -682,14 +838,12 @@ bool VideoInputOp<Context>::CopyPrefetched() {
       clip_of_output->CopyFrom(prefetched_clip_of_on_device_, &context_);
     }
   }
-
   auto* label_output = OperatorBase::Output<Tensor<Context>>(index++);
   if (std::is_same<Context, CPUContext>::value) {
     label_output->CopyFrom(prefetched_label_, &context_);
   } else {
     label_output->CopyFrom(prefetched_label_on_device_, &context_);
   }
-
   if (get_video_id_) {
     auto* video_id_output = OperatorBase::Output<Tensor<Context>>(index);
     if (std::is_same<Context, CPUContext>::value) {
@@ -698,7 +852,6 @@ bool VideoInputOp<Context>::CopyPrefetched() {
       video_id_output->CopyFrom(prefetched_video_id_on_device_, &context_);
     }
   }
-
   return true;
 }
 
