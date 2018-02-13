@@ -233,7 +233,9 @@ struct to_ir {
   }
 
   void emitWhile(const While& stmt) {
-    // TODO: scan outputs
+    // Emits a loop operators conforming to the semantics specified at
+    // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop 
+    // TODO: implement scan_outputs
 
     Value* trip_count_dummy = emitConst(0, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
@@ -242,8 +244,12 @@ struct to_ir {
     n->addInput(trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
-
-    // TODO iteration num and condition
+    // Trip count required by spec. Since this is a while loop, we do not
+    // provide access to this from user code
+    // TODO: it seems like we should implement a `for` loop as well, otherwise
+    // we'll probably have to pattern match iteration number machinery in user
+    // code to conform to the spec
+    body_block->addInput();
 
     {
       environment_stack =
