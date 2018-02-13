@@ -36,6 +36,8 @@ __global__ void testIntDivider(const IntDivider<Value> *dividers,
     Value divisor = divider.divisor;
 
     for (int j = 0; j < tc.steps; j++) {
+      if (sizeof(Value) == 4 && dividend > INT32_MAX) return;
+
       DivMod<Value> qr = divider.divmod(dividend);
       assert(qr.div == dividend / divisor && qr.mod == dividend % divisor);
       dividend += divisor;
@@ -123,15 +125,15 @@ static void testUint32Divider()
 
   IntDividerTester<uint32_t> tester;
 
-  for (uint64_t divisor = 1; divisor <= UINT32_MAX; divisor++) {
+  for (uint64_t divisor = 1; divisor <= INT32_MAX; divisor++) {
     if (divisor < 1000000 && divisor % 10000 == 0) fprintf(stderr, ".");
     if (divisor % 10000000 == 0) fprintf(stderr, "-");
 
     // In order to save time, we only test when the remainder is zero or
     // (divisor - 1).
     uint64_t dividend = 0;
-    while (dividend <= UINT32_MAX) {
-      uint64_t steps = (UINT32_MAX - dividend) / divisor + 1;
+    while (dividend <= INT32_MAX) {
+      uint64_t steps = (INT32_MAX - dividend) / divisor + 1;
       if (steps > MAX_STEPS) steps = MAX_STEPS;
 
       tester.addTestCase(dividend, divisor, steps);
@@ -142,7 +144,7 @@ static void testUint32Divider()
 
     // Check the boundary cases.
     tester.addTestCase(1, divisor, 1);
-    tester.addTestCase(UINT32_MAX, divisor, 1);
+    tester.addTestCase(INT32_MAX, divisor, 1);
   }
 
   tester.flush();

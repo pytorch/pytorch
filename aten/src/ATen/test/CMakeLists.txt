@@ -31,9 +31,6 @@ target_link_libraries(verify_api_visibility ATen)
 if(NOT NO_CUDA)
   cuda_add_executable(integer_divider_test integer_divider_test.cu)
   target_link_libraries(integer_divider_test ATen)
-
-  cuda_add_executable(offset_info_test offset_info_test.cu)
-  target_link_libraries(offset_info_test ATen)
 endif()
 
 if (CUDNN_FOUND)
