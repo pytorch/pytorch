@@ -463,7 +463,7 @@ struct ADTestSpec {
   std::vector<Variable> make_vars() const {
     std::vector<Variable> out;
     for (const auto & m : input_meta) {
-      out.emplace_back(make_variable(at::CPU(at::kFloat).tensor(m).normal_(), true));
+      out.emplace_back(autograd::make_variable(at::CPU(at::kFloat).tensor(m).normal_(), /*requires_grad=*/true));
     }
     return out;
   }

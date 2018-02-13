@@ -478,7 +478,7 @@ Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & 
 #ifdef WITH_SCALARS
   grad_input.masked_fill_(input == value, grad);
 #else
-  auto grad_data = static_cast<Variable&>(grad).data();
+  auto grad_data = as_variable_ref(grad).data();
   grad_input.masked_fill_(input == value, Scalar(grad_data[0]));
 #endif
   return grad_input;
@@ -1088,9 +1088,9 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   for (auto s : input.sizes().slice(2)) {
     M *= s;
   }
-  auto mu = unsqueeze_dim1(make_variable(training ? save_mean : running_mean), input);
+  auto mu = unsqueeze_dim1(make_variable(training ? save_mean : running_mean, /*requires_grad=*/false), input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(make_variable(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5)), input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(make_variable(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5), /*requires_grad=*/false), input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 

@@ -323,7 +323,7 @@ static std::vector<PyObject*> _mark_dirty(THPFunction *self)
 
     dirty_inputs.push_back(obj);
     auto variable = (THPVariable*)obj;
-    variable->cdata.version_counter().increment();
+    variable->cdata.bump_version();
   }
   // We're not going to ever need this so let's remove references now
   Py_CLEAR(self->dirty_tensors);
@@ -368,14 +368,14 @@ static void _wrap_outputs(THPFunction *self,
     }
     if (THPModule_isTensor(obj)) {
       // temporarily wrap tensors as variables until the classes are merged
-      return make_variable(createTensor(obj));
+      return make_variable(createTensor(obj), /*requires_grad=*/false);
     }
     throw TypeError("%s.forward: expected Variable (got %s) for return value %d",
         Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
   };
 
   // Sets the grad_fn and output_nr of an output Variable.
-  auto set_history = [&](Variable& var, int output_nr, bool is_input, bool is_modified,
+  auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
     if (!is_differentiable) {
       if (!var.requires_grad()) return;
@@ -393,24 +393,22 @@ static void _wrap_outputs(THPFunction *self,
       }
       // If the input was modified, transplant the grad_fn in the graph:
       // grad_fn <- variable <- self  ==>  grad_fn <- self <- variable
-      var.get()->grad.reset();
-      var.get()->hooks.clear();
-      if (auto grad_acc_fn = var.get()->grad_accumulator.lock()) {
+      var.reset_grad();
+      var.clear_hooks();
+      if (auto grad_acc_fn = var.try_get_grad_accumulator()) {
         auto grad_acc = dynamic_cast<AccumulateGrad*>(grad_acc_fn.get());
         grad_acc->variable.reset();
       }
       if (cdata) {
-        var.rebase_history(output_nr, cdata);
+        var.rebase_history({cdata, output_nr});
       }
     } else if (is_input) {
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
       var = var.slice();
-      var.get()->output_nr = output_nr;
-      var.get()->_grad_fn = cdata;
+      var.set_gradient_edge({cdata, output_nr});
     } else if (cdata) {
-      var.get()->output_nr = output_nr;
-      var.get()->_grad_fn = cdata;
+      var.set_gradient_edge({cdata, output_nr});
     }
   };
 
@@ -457,7 +455,7 @@ static void _save_variables(THPFunction* self)
       self->saved_variables.emplace_back(variable->cdata, is_output);
     } else if (THPModule_isTensor(obj)) {
       // TODO: remove once Variable and Tensor classes are merged
-      auto var = make_variable(createTensor(obj), false);
+      auto var = make_variable(createTensor(obj), /*requires_grad=*/false);
       self->saved_variables.emplace_back(std::move(var), false);
     } else {
       throw TypeError(

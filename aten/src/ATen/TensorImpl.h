@@ -16,6 +16,7 @@ struct Storage;
 struct TensorImpl : public Retainable {
   explicit TensorImpl(Type * type)
   : is_scalar(false), type_(type) {}
+
   Type & type() const {
     return *type_;
   }
@@ -49,7 +50,7 @@ struct TensorImpl : public Retainable {
   void setScalar(bool s) {
     is_scalar = s;
   }
-private:
+protected:
   bool is_scalar;
   Type * type_;
 };

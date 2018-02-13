@@ -25,7 +25,7 @@ using namespace torch::autograd::utils;
 namespace torch { namespace autograd {
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<Variable&>(self).get()->_requires_grad = requires_grad;
+  as_variable_ref(self).set_requires_grad(requires_grad);
   return self;
 }
 
@@ -70,7 +70,7 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data)));
+  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
   END_HANDLE_TH_ERRORS
 }
 
