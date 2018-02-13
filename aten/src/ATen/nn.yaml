@@ -51,10 +51,10 @@
   scalar_check:
     output: reduce || self_->isScalar()
 
-- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true)
+- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: SoftMarginCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 # Activation functions
 

@@ -1117,14 +1117,17 @@ TH_API void THNN_(SoftMarginCriterion_updateOutput)(
                   THCTensor *input,
                   THCTensor *target,
                   THCTensor *output,
-                  bool sizeAverage);
+                  bool sizeAverage,
+                  bool reduce);
 
 TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *target,
+                  THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  bool sizeAverage);
+                  bool sizeAverage,
+                  bool reduce);
 
 TH_API void THNN_(SoftMax_updateOutput)(
                   THCState *state,
