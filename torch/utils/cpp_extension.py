@@ -1,8 +1,9 @@
+import glob
 import imp
 import os
 import re
-import subprocess
 import setuptools
+import subprocess
 import sys
 import sysconfig
 import tempfile
@@ -15,14 +16,23 @@ from setuptools.command.build_ext import build_ext
 
 def _find_cuda_home():
     '''Finds the CUDA install path.'''
+    # Guess #1
     cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
     if cuda_home is None:
-        try:
-            which = 'where' if sys.platform == 'win32' else 'which'
-            nvcc = subprocess.check_output([which, 'nvcc']).decode()
-            cuda_home = os.path.dirname(os.path.dirname(nvcc))
-        except Exception:
-            cuda_home = None
+        # Guess #2
+        if sys.platform in ['darwin', 'linux']:
+            cuda_home = '/usr/local/cuda'
+        elif sys.platform == 'win32':
+            cuda_home = glob.glob(
+                'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
+        if not os.path.exists(cuda_home):
+            # Guess #3
+            try:
+                which = 'where' if sys.platform == 'win32' else 'which'
+                nvcc = subprocess.check_output([which, 'nvcc']).decode()
+                cuda_home = os.path.dirname(os.path.dirname(nvcc))
+            except Exception:
+                cuda_home = None
     return cuda_home
 
 
