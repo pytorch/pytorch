@@ -826,7 +826,7 @@ void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *stor
       THCStorage_(retain)(state, self->storage);
     }
     else
-      self->storage = NULL;
+      self->storage = THCStorage_(new)(state);
   }
 
   /* storageOffset */

@@ -6,7 +6,7 @@ import torch
 import random
 
 __all__ = [
-    'make_non_contiguous', 'randn_like'
+    'make_non_contiguous', 'rand_like', 'randn_like'
 ]
 
 
@@ -37,4 +37,5 @@ def make_non_contiguous(tensor):
     return input
 
 
+rand_like = torch._C._VariableFunctions.rand_like
 randn_like = torch._C._VariableFunctions.randn_like

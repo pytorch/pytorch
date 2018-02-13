@@ -34,7 +34,8 @@ IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
 
-
+if 'WITH_SCALARS' not in os.environ:
+    os.environ['WITH_SCALARS'] = '1'
 WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
 try:
@@ -494,6 +495,9 @@ main_sources = [
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
+    "torch/csrc/jit/script/lexer.cpp",
+    "torch/csrc/jit/script/compiler.cpp",
+    "torch/csrc/jit/script/init.cpp",
     "torch/csrc/autograd/init.cpp",
     "torch/csrc/autograd/grad_mode.cpp",
     "torch/csrc/autograd/engine.cpp",

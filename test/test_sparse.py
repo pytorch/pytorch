@@ -488,6 +488,11 @@ class TestSparse(TestCase):
         self._test_spadd_shape([50, 30, 20], [2])
         self._test_spadd_shape([5, 5, 5, 5, 5, 5], [2])
 
+    def test_norm(self):
+        x, _, _ = self._gen_sparse(3, 10, 100)
+        y = x.coalesce()
+        self.assertEqual(x.norm(), y._values().norm())
+
     def _test_basic_ops_shape(self, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
@@ -704,6 +709,7 @@ class TestSparse(TestCase):
             'to_dense': lambda x: x.to_dense(),
             '_dimI': lambda x: x._dimI(),
             '_dimV': lambda x: x._dimV(),
+            'norm': lambda x: x.norm(),
         }
 
         for test_name, test_fn in to_test_one_arg.items():
@@ -714,6 +720,10 @@ class TestSparse(TestCase):
             out_tensor = test_fn(tensor1)
 
             if isinstance(out_tensor, int) or isinstance(out_tensor, bool):
+                if not isinstance(out_var, int) and not isinstance(out_var, bool):
+                    check_var = out_var.data[0]
+                else:
+                    check_var = out_var
                 self.assertEqual(out_var, out_tensor)
                 continue
 
@@ -741,10 +751,16 @@ class TestSparse(TestCase):
             self.assertEqual(test_fn(var1, var2).data,
                              test_fn(tensor1, tensor2), test_name)
 
-        to_test_mixed = {
-            'addmm': lambda sp, de: de.addmm(sp, de),
-            'addmm_': lambda sp, de: de.addmm(sp, de),
-        }
+        to_test_mixed = [
+            # test name, lambda expression, should_run_when_cuda
+            ('sspaddmm', lambda sp, de: sp.sspaddmm(sp, de), False),
+            ('sspaddmm_b', lambda sp, de: sp.sspaddmm(2, sp, de), False),
+            ('sspaddmm_b_a', lambda sp, de: sp.sspaddmm(3, 2, sp, de), False),
+            ('addmm', lambda sp, de: de.addmm(sp, de), True),
+            ('addmm_', lambda sp, de: de.addmm(sp, de), True),
+            ('mm', lambda sp, de: torch.mm(sp, de), True),
+            ('mm_out', lambda sp, de: torch.mm(sp, de, out=de), True),
+        ]
 
         i = self.IndexTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
         v = self.ValueTensor([3, 3, 4, 1, 2])
@@ -753,7 +769,9 @@ class TestSparse(TestCase):
         dense_mat = sparse_mat.to_dense().random_(0, 5)
         dense_var = Variable(dense_mat)
 
-        for test_name, test_fn in to_test_mixed.items():
+        for test_name, test_fn, test_cuda in to_test_mixed:
+            if sparse_var.is_cuda and not test_cuda:
+                continue
             sp_var = sparse_var.clone()
             de_var = dense_var.clone()
             sp_mat = sparse_mat.clone()
@@ -826,6 +844,21 @@ class TestSparse(TestCase):
         self._test_new_device((), 1)
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
+
+    def test_new(self):
+        def do_test(x, indices, values):
+            if not x.is_cuda:
+                # CUDA sparse tensors currently requires the size to be
+                # specified if nDimV > 0
+                self.assertEqual(x.new(indices, values), x)
+            self.assertEqual(x.new(indices, values, x.size()), x)
+
+        x, i, v = self._gen_sparse(3, 10, 100)
+        do_test(x, i, v)
+
+        # TODO: simplify once Variable and Tensor are merged
+        from torch.autograd import Variable
+        do_test(Variable(x), Variable(i), Variable(v))
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

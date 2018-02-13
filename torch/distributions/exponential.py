@@ -50,6 +50,14 @@ class Exponential(ExponentialFamily):
         self._validate_log_prob_arg(value)
         return self.rate.log() - self.rate * value
 
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        return 1 - torch.exp(-self.rate * value)
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        return -torch.log(1 - value) / self.rate
+
     def entropy(self):
         return 1.0 - torch.log(self.rate)
 

@@ -606,23 +606,27 @@ def relu_(input):
     return threshold_(input, 0, 0)
 
 
-glu = _add_docstr(torch._C._nn.glu, r"""
-glu(input, dim=-1) -> Variable
+def glu(input, dim=-1):
+    r"""
+    glu(input, dim=-1) -> Variable
 
-The gated linear unit. Computes:
+    The gated linear unit. Computes:
 
-.. math ::
+    .. math ::
 
-    H = A \times \sigma(B)
+        H = A \times \sigma(B)
 
-where `input` is split in half along `dim` to form `A` and `B`.
+    where `input` is split in half along `dim` to form `A` and `B`.
 
-See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
+    See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
 
-Args:
-    input (Variable): input variable
-    dim (int): dimension on which to split the input
-""")
+    Args:
+        input (Variable): input variable
+        dim (int): dimension on which to split the input
+    """
+    if input.dim() == 0:
+        raise RuntimeError("glu does not suppport scalars because halving size must be even")
+    return torch._C._nn.glu(input, dim)
 
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
@@ -1064,7 +1068,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
-                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean'):
+                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean', sparse=False):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
         intermediate embeddings.
 
@@ -1089,6 +1093,8 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                     the words in the dictionary.
             mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+            sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes
+                                        for more details regarding sparse gradients.
 
         Shape:
             - Embedding_matrix: FloatTensor `(V, embedding_dim)`,
@@ -1125,21 +1131,82 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
                              "offsets of type {}".format(type(offsets)))
         else:
             offsets = Variable(torch.arange(0, indices.numel(), indices.size(1),
-                               out=indices.data.new().long()))
+                                            out=indices.data.new().long()))
             indices = indices.view(-1)
-
-    elif indices.dim() != 1:
+    elif indices.dim() == 1:
+        if offsets is None:
+            raise ValueError("offsets has to be a 1D Tensor but got None")
+        if offsets.dim() != 1:
+            raise ValueError("offsets has to be a 1D Tensor")
+        if offsets[0] != 0:
+            raise ValueError("offsets[0] has to be 0, i.e. the first sequence"
+                             " in the mini-batch has to start from position 0."
+                             "However, got {}".format(offsets[0]))
+        if offsets[-1] > indices.size(0):
+            raise ValueError("offsets[-1] has to be smaller than indices's length"
+                             " ({}), but got offsets[-1] of {}"
+                             .format(indices.size(0), offsets[-1]))
+    else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(indices.dim()))
 
-    if offsets is None:
-        raise ValueError("offsets has to be a 1D Tensor but got None")
+    if mode == 'sum':
+        mode = 0
+    elif mode == 'mean':
+        mode = 1
+    else:
+        raise ValueError("mode has to be one of sum or mean")
 
-    return _functions.thnn.EmbeddingBag.apply(
-        embedding_matrix, indices, offsets,
-        max_norm, norm_type,
-        scale_grad_by_freq, mode
-    )
+    if max_norm is not None:
+        with torch.no_grad():
+            torch._C._VariableFunctions.embedding_renorm_(weight, input, max_norm, norm_type)
+
+    ret, _, _ = torch._C._VariableFunctions.embedding_bag(
+        embedding_matrix,
+        indices,
+        offsets,
+        scale_grad_by_freq,
+        mode,
+        sparse)
+    return ret
+
+
+def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
+                  training=False, momentum=0.1, eps=1e-5, affine=False):
+    """Applies instance normalization over an input. The implementation is
+    based on batch_norm, in which we do reshape, batchnorm, and reshape again.
+
+    See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
+    :class:`~torch.nn.InstanceNorm3d` for details.
+    """
+    import torch
+    import torch.onnx.symbolic
+
+    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
+    def _instance_norm(input, weight=None, bias=None, saved_running_mean=None,
+                       saved_running_var=None, training=False, momentum=0.1,
+                       eps=1e-5, affine=False):
+        b, c = input.size(0), input.size(1)
+
+        # Repeat stored stats and affine transform params
+        running_mean = saved_running_mean.repeat(b)
+        running_var = saved_running_var.repeat(b)
+
+        # Apply instance norm
+        input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
+
+        out = batch_norm(
+            input_reshaped, running_mean, running_var, weight=weight, bias=bias,
+            training=training, momentum=momentum, eps=eps)
+
+        # Reshape back
+        saved_running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
+        saved_running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
+
+        return out.view(b, c, *input.size()[2:])
+    return _instance_norm(input, weight=weight, bias=bias, saved_running_mean=saved_running_mean,
+                          saved_running_var=saved_running_var, training=training,
+                          momentum=momentum, eps=eps, affine=affine)
 
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
@@ -1464,15 +1531,18 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
+    if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
+        raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
+                            "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
     return _functions.loss.MarginRankingLoss.apply(input1, input2, target, margin, size_average)
 
 
-def hinge_embedding_loss(input, target, margin=1.0, size_average=True):
-    """hinge_embedding_loss(input, target, margin=1.0, size_average=True) -> Variable
+def hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True):
+    """hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True) -> Variable
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
-    return _functions.loss.HingeEmbeddingLoss.apply(input, target, margin, size_average)
+    return torch._C._VariableFunctions.hinge_embedding_loss(input, target, margin, size_average, reduce)
 
 
 multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""

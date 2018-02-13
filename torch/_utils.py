@@ -236,7 +236,7 @@ def _take_tensors(tensors, size_limit):
     """
     buf_dict = defaultdict(lambda: [[], 0])
     for tensor in tensors:
-        t = type(tensor)
+        t = tensor.type()
         if tensor.is_sparse:
             indices = tensor._indices()
             values = tensor._values()

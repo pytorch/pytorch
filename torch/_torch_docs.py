@@ -2788,7 +2788,7 @@ Indices are ordered from left to right according to when each was sampled
 If :attr:`input` is a vector, :attr:`out` is a vector of size `num_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
-`m \u00D7 n`.
+`m \u00D7 num_samples`.
 
 If replacement is ``True``, samples are drawn with replacement.
 
@@ -3310,7 +3310,7 @@ add_docstr(torch._C.potrs, r"""
 potrs(b, u, upper=True, out=None) -> Tensor
 
 Solves a linear system of equations with a positive semidefinite
-matrix to be inverted given its given a Cholesky factor
+matrix to be inverted given its Cholesky factor
 matrix :attr:`u`: returns matrix `c`
 If `upper` is ``True`` or not provided, `u` is and upper triangular
 such that :math:`c = (u^T u)^{-1} b`.

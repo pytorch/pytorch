@@ -19,7 +19,7 @@ _FINFO = {
 
 
 def _finfo(tensor):
-    """
+    r"""
     Return floating point info about a `Tensor` or `Variable`:
     - `.eps` is the smallest number that can be added to 1 without being lost.
     - `.tiny` is the smallest positive number greater than zero
@@ -44,7 +44,7 @@ def expand_n(v, n):
 
 
 def _broadcast_shape(shapes):
-    """
+    r"""
     Given a list of tensor sizes, returns the size of the resulting broadcasted
     tensor.
 
@@ -58,7 +58,7 @@ def _broadcast_shape(shapes):
 
 
 def broadcast_all(*values):
-    """
+    r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
       - `torch.Tensor` and `torch.autograd.Variable` instances are broadcasted as
@@ -101,7 +101,7 @@ def broadcast_all(*values):
 
 
 def _sum_rightmost(value, dim):
-    """
+    r"""
     Sum out ``dim`` many rightmost dimensions of a given tensor.
 
     Args:
@@ -114,7 +114,7 @@ def _sum_rightmost(value, dim):
 
 
 def softmax(tensor):
-    """
+    r"""
     Wrapper around softmax to make it work with both Tensors and Variables.
     TODO: Remove once https://github.com/pytorch/pytorch/issues/2633 is resolved.
     """
@@ -124,7 +124,7 @@ def softmax(tensor):
 
 
 def log_sum_exp(tensor, keepdim=True):
-    """
+    r"""
     Numerically stable implementation for the `LogSumExp` operation. The
     summing is done along the last dimension.
 
@@ -137,7 +137,7 @@ def log_sum_exp(tensor, keepdim=True):
 
 
 def logits_to_probs(logits, is_binary=False):
-    """
+    r"""
     Converts a tensor of logits into probabilities. Note that for the
     binary case, each value denotes log odds, whereas for the
     multi-dimensional case, the values along the last dimension denote
@@ -154,7 +154,7 @@ def clamp_probs(probs):
 
 
 def probs_to_logits(probs, is_binary=False):
-    """
+    r"""
     Converts a tensor of probabilities into logits. For the binary case,
     this denotes the probability of occurrence of the event indexed by `1`.
     For the multi-dimensional case, the values along the last dimension
@@ -167,7 +167,7 @@ def probs_to_logits(probs, is_binary=False):
 
 
 class lazy_property(object):
-    """
+    r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
     first call; thereafter replacing the wrapped method into an instance

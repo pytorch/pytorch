@@ -72,7 +72,7 @@ struct HandleBuilder {
   }
   at::Retainable* addOutput(const autograd::Variable & output) {
     if(handle) {
-      handle->forward_outputs.emplace_back(output.grad_fn(),output.output_nr());
+      handle->forward_outputs.push_back(output.gradient_edge());
     }
     at::Tensor tensor = output.data();
     return toRetainableShare(output.data());

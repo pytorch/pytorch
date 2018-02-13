@@ -155,28 +155,28 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
       real *old_data = storage->data;
       ptrdiff_t old_size = storage->size;
       if (size == 0) {
-	storage->data = NULL;
+        storage->data = NULL;
       } else {
-	storage->data = storage->allocator->malloc(
-						   storage->allocatorContext,
-						   sizeof(real)*size);
+        storage->data = storage->allocator->malloc(
+            storage->allocatorContext,
+            sizeof(real)*size);
       }
       storage->size = size;
       if (old_data != NULL) {
-	ptrdiff_t copy_size = old_size;
-	if (storage->size < copy_size) {
-	  copy_size = storage->size;
-	}
-	if (copy_size > 0) {
-	  memcpy(storage->data, old_data, sizeof(real)*copy_size);
-	}
-	storage->allocator->free(storage->allocatorContext, old_data);
+        ptrdiff_t copy_size = old_size;
+        if (storage->size < copy_size) {
+          copy_size = storage->size;
+        }
+        if (copy_size > 0) {
+          memcpy(storage->data, old_data, sizeof(real)*copy_size);
+        }
+        storage->allocator->free(storage->allocatorContext, old_data);
       }
     } else {
       storage->data = storage->allocator->realloc(
-						  storage->allocatorContext,
-						  storage->data,
-						  sizeof(real)*size);
+              storage->allocatorContext,
+              storage->data,
+              sizeof(real)*size);
       storage->size = size;
     }
   } else {

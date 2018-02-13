@@ -12,8 +12,8 @@
 namespace torch { namespace autograd {
 
 struct EvalOutput : Function {
-  EvalOutput(const edge_type& next_edge)
-    : next_edge(next_edge) {
+  explicit EvalOutput(const Edge& next_edge_)
+    : next_edge(next_edge_) {
     num_inputs = 1;
   }
 
@@ -21,12 +21,12 @@ struct EvalOutput : Function {
     throw std::logic_error("EvalOutput::apply() called");
   }
 
-  edge_type next_edge;
+  Edge next_edge;
 };
 
 struct Eval : Function {
-  using edge_set = std::unordered_set<edge_type, edge_hasher>;
-  using edge_order = std::unordered_map<edge_type, int, edge_hasher>;
+  using edge_set = std::unordered_set<Edge>;
+  using edge_order = std::unordered_map<Edge, int>;
   using placeholder_list = std::vector<std::shared_ptr<EvalOutput>>;
 
   // This struct has only one member, but it's useful to e.g. add a set of all
@@ -73,7 +73,7 @@ struct Eval : Function {
     return std::make_shared<Eval>();
   }
 
-  // Roots are empty if simple_graph is not NULL.
+  // Roots are empty if simple_graph is not nullptr.
   // simple_graph is an optimization of first backward stage - in this case
   // all Eval subgraphs contain only a single gradient function, and the
   // graph search on creation + call to the engine in apply can be elided

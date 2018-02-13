@@ -91,21 +91,29 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
 def _check_capability():
-    error_str = """
+    incorrect_binary_warn = """
     Found GPU%d %s which requires CUDA_VERSION >= %d for
      optimal performance and fast startup time, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from http://pytorch.org
     """
 
+    old_gpu_warn = """
+    Found GPU%d %s which is of cuda capability %d.%d.
+    PyTorch no longer supports this GPU because it is too old.
+    """
+
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
     for d in range(device_count()):
-        major = get_device_capability(d)[0]
+        capability = get_device_capability(d)
+        major = capability[0]
         name = get_device_name(d)
         if CUDA_VERSION < 8000 and major >= 6:
-            warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
+            warnings.warn(incorrect_binary_warn % (d, name, 8000, CUDA_VERSION))
         elif CUDA_VERSION < 9000 and major >= 7:
-            warnings.warn(error_str % (d, name, 9000, CUDA_VERSION))
+            warnings.warn(incorrect_binary_warn % (d, name, 9000, CUDA_VERSION))
+        elif capability == (3, 0) or capability == (5, 0) or major < 3:
+            warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
 
 
 def _lazy_call(callable):

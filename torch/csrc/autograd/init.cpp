@@ -81,9 +81,9 @@ static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = {
-  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, NULL},
-  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, NULL},
-  {NULL, NULL, 0, NULL}
+  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
+  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
+  {nullptr, nullptr, 0, nullptr}
 };
 
 PyMethodDef* python_functions() {

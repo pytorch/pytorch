@@ -176,14 +176,14 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
     for (int d = 0; d < nDimI; d++) {
       int64_t max_index_in_dim = THTensor_fastGet1d(max_indices, d);
       int64_t dim_size = sizes->data[d];
-      THArgCheck(max_index_in_dim <= dim_size, 2, 
+      THArgCheck(max_index_in_dim <= dim_size, 2,
           "sizes is inconsistent with indices: for dim %d, size is %lld but found index %lld",
           d, (long long)dim_size, (long long)max_index_in_dim);
     }
     for (int d = 0; d < nDimV; d++) {
       int64_t values_size = THTensor_(size)(values, d + 1);
       int64_t specified_size = sizes->data[nDimI + d];
-      THArgCheck(values_size <= specified_size, 2, 
+      THArgCheck(values_size <= specified_size, 2,
           "values and sizes are inconsistent: sizes[%d] is %lld but values.size(%d) is %lld",
           d + nDimI, (long long)specified_size, d + 1, (long long)values_size);
     }
@@ -353,7 +353,6 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
 // In place transpose
 void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   int64_t nDimI = THSTensor_(nDimensionI)(self);
-  int64_t nDimV = THSTensor_(nDimensionV)(self);
   THArgCheck(d1 < nDimI && d2 < nDimI, 0, "Transposed dimensions should be sparse. Got nDimI: %" PRId64 ", d1: %" PRId64 ", d2: %" PRId64, nDimI, d1, d2);
   THLongTensor *indices = THSTensor_(newIndices)(self);
   ptrdiff_t i;
@@ -497,7 +496,6 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   }
   int64_t nDim = THTensor_(nDimension)(t);
   int64_t nDimI = THSTensor_(nDimensionI)(mask);
-  int64_t nDimV = THSTensor_(nDimensionV)(mask);
   THLongTensor *mask_indices_ = THSTensor_(newIndices)(mask);
   THTensor *mask_values_ = THSTensor_(newValues)(mask);
   THTensor *r_values_ = THTensor_(new)();

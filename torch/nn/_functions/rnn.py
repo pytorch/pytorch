@@ -70,7 +70,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
     num_directions = len(inners)
     total_layers = num_layers * num_directions
 
-    def forward(input, hidden, weight):
+    def forward(input, hidden, weight, batch_sizes):
         assert(len(weight) == total_layers)
         next_hidden = []
 
@@ -82,7 +82,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
             for j, inner in enumerate(inners):
                 l = i * num_directions + j
 
-                hy, output = inner(input, hidden[l], weight[l])
+                hy, output = inner(input, hidden[l], weight[l], batch_sizes)
                 next_hidden.append(hy)
                 all_output.append(output)
 
@@ -107,7 +107,7 @@ def StackedRNN(inners, num_layers, lstm=False, dropout=0, train=True):
 
 
 def Recurrent(inner, reverse=False):
-    def forward(input, hidden, weight):
+    def forward(input, hidden, weight, batch_sizes):
         output = []
         steps = range(input.size(0) - 1, -1, -1) if reverse else range(input.size(0))
         for i in steps:
@@ -124,17 +124,16 @@ def Recurrent(inner, reverse=False):
     return forward
 
 
-def variable_recurrent_factory(batch_sizes):
-    def fac(inner, reverse=False):
-        if reverse:
-            return VariableRecurrentReverse(batch_sizes, inner)
-        else:
-            return VariableRecurrent(batch_sizes, inner)
-    return fac
+def variable_recurrent_factory(inner, reverse=False):
+    if reverse:
+        return VariableRecurrentReverse(inner)
+    else:
+        return VariableRecurrent(inner)
 
 
-def VariableRecurrent(batch_sizes, inner):
-    def forward(input, hidden, weight):
+def VariableRecurrent(inner):
+    def forward(input, hidden, weight, batch_sizes):
+
         output = []
         input_offset = 0
         last_batch_size = batch_sizes[0]
@@ -172,8 +171,8 @@ def VariableRecurrent(batch_sizes, inner):
     return forward
 
 
-def VariableRecurrentReverse(batch_sizes, inner):
-    def forward(input, hidden, weight):
+def VariableRecurrentReverse(inner):
+    def forward(input, hidden, weight, batch_sizes):
         output = []
         input_offset = input.size(0)
         last_batch_size = batch_sizes[-1]
@@ -183,7 +182,8 @@ def VariableRecurrentReverse(batch_sizes, inner):
             hidden = (hidden,)
             initial_hidden = (initial_hidden,)
         hidden = tuple(h[:batch_sizes[-1]] for h in hidden)
-        for batch_size in reversed(batch_sizes):
+        for i in reversed(range(len(batch_sizes))):
+            batch_size = batch_sizes[i]
             inc = batch_size - last_batch_size
             if inc > 0:
                 hidden = tuple(torch.cat((h, ih[last_batch_size:batch_size]), 0)
@@ -208,7 +208,7 @@ def VariableRecurrentReverse(batch_sizes, inner):
 
 
 def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
-                dropout=0, train=True, bidirectional=False, batch_sizes=None,
+                dropout=0, train=True, bidirectional=False, variable_length=False,
                 dropout_state=None, flat_weight=None):
 
     if mode == 'RNN_RELU':
@@ -222,10 +222,7 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
     else:
         raise Exception('Unknown mode: {}'.format(mode))
 
-    if batch_sizes is None:
-        rec_factory = Recurrent
-    else:
-        rec_factory = variable_recurrent_factory(batch_sizes)
+    rec_factory = variable_recurrent_factory if variable_length else Recurrent
 
     if bidirectional:
         layer = (rec_factory(cell), rec_factory(cell, reverse=True))
@@ -238,13 +235,13 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
                       dropout=dropout,
                       train=train)
 
-    def forward(input, weight, hidden):
-        if batch_first and batch_sizes is None:
+    def forward(input, weight, hidden, batch_sizes):
+        if batch_first and not variable_length:
             input = input.transpose(0, 1)
 
-        nexth, output = func(input, hidden, weight)
+        nexth, output = func(input, hidden, weight, batch_sizes)
 
-        if batch_first and batch_sizes is None:
+        if batch_first and not variable_length:
             output = output.transpose(0, 1)
 
         return output, nexth
@@ -254,7 +251,7 @@ def AutogradRNN(mode, input_size, hidden_size, num_layers=1, batch_first=False,
 
 def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
              batch_first=False, dropout=0, train=True, bidirectional=False,
-             batch_sizes=None, dropout_state=None, flat_weight=None):
+             variable_length=False, dropout_state=None, flat_weight=None):
     if dropout_state is None:
         dropout_state = {}
     mode = cudnn.rnn.get_cudnn_mode(mode)
@@ -265,7 +262,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
                       "at every call, possibly greatly increasing memory usage. "
                       "To compact weights again call flatten_parameters().", stacklevel=5)
 
-    def forward(input, weight, hx):
+    def forward(input, weight, hx, batch_sizes):
         if mode == cudnn.CUDNN_LSTM:
             hx, cx = hx
         else:
@@ -283,7 +280,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
             hx, cx,
             mode, hidden_size, num_layers,
             batch_first, dropout, train, bool(bidirectional),
-            batch_sizes if batch_sizes else (),
+            list(batch_sizes.data) if variable_length else (),
             Variable(dropout_desc.state) if dropout_desc.state is not None else None)
 
         if cx is not None:

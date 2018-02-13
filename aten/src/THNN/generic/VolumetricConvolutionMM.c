@@ -608,8 +608,6 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
           int pW,
           int pH)
 {
-  int nOutputPlane = (int)weight->size[0];
-
   THNN_(VolumetricConvolutionMM_shapeCheck)(
         state, input, gradOutput, weight, NULL,
         kT, kW, kH, dT, dW, dH, pT, pW, pH, 0);
@@ -720,7 +718,6 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-  int nOutputPlane = (int)gradWeight->size[0];
 
   THNN_(VolumetricConvolutionMM_shapeCheck)(
         state, input, gradOutput, gradWeight, gradBias,

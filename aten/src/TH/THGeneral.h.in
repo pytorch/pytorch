@@ -42,6 +42,12 @@
 # define TH_UNREACHABLE __builtin_unreachable();
 #endif
 
+#if defined(__GNUC__) && ((__GNUC__ > 2) || (__GNUC__ == 2 && __GNUC_MINOR__ > 4))
+# define TH_UNUSED __attribute__((unused))
+#else
+# define TH_UNUSED
+#endif
+
 #ifndef M_PI
 # define M_PI 3.14159265358979323846
 #endif

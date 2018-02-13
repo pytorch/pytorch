@@ -69,7 +69,7 @@ struct Gradient {
   //         outputs[offset].set_grad_fn(grad_fn, output_nr=i)
   //   - Use df_output_vjps to connect next_functions of grad_fn:
   //       for idx in df_output_vjps:
-  //         grad_fn.next_functions.push_back(inputs[idx].grad_fn(), inputs[idx].output_nr)
+  //         grad_fn.next_functions.push_back(inputs[idx].gradient_edge())
   //   - Save captures for df (care needs to be taken to use SavedVariables for inputs and
   //                           outputs that we will actually return)
   //   - Return outputs[:f_real_outputs]

@@ -77,6 +77,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, std::size
       std::vector<at::Tensor> broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
       for (std::size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
+        AutoGPU auto_gpu(devices[i]);
         auto & device_outputs = outputs[i];
         auto & inds = broadcast_indices[i];
         auto & vals = broadcast_values[i];

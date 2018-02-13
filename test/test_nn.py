@@ -22,13 +22,13 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.autograd import Variable, gradcheck
+from torch.autograd import Variable, variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file, IS_WINDOWS, PY3
 
@@ -788,6 +788,33 @@ class TestNN(NNTestCase):
         self.assertEqual(n[:-3], nn.Sequential(l1))
         self.assertEqual(n[::-1], nn.Sequential(l4, l3, l2, l1))
 
+    def test_Sequential_setitem(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(l1, l2, l3)
+        n[0] = l4
+        n[-1] = l4
+        self.assertEqual(n[0], l4)
+        self.assertEqual(n[2], l4)
+
+    def test_Sequential_setitem_named(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        n = nn.Sequential(OrderedDict([
+            ('linear1', l1),
+            ('linear2', l2),
+            ('linear3', l3),
+        ]))
+
+        n[0] = l4
+        n[-1] = l4
+        self.assertEqual(n.linear1, l4)
+        self.assertEqual(n.linear3, l4)
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
@@ -1178,10 +1205,11 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st_cuda(self):
         self._test_gumbel_softmax_st(True)
 
-    def _test_EmbeddingBag(self, cuda, mode):
+    def _test_EmbeddingBag(self, cuda, mode, sparse):
         # check a known test example
-        es = nn.EmbeddingBag(5, 2, mode=mode)
+        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
+
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4, 0]))
         offsets = Variable(torch.LongTensor([0, 3]))
         grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
@@ -1218,8 +1246,11 @@ class TestNN(NNTestCase):
         output = es(input, offsets)
         output.backward(grad_output)
 
+        es_weight_grad = es.weight.grad.data
+        if sparse:
+            es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+        self.assertEqual(es_weight_grad, expected_grad_weight)
 
         # check same example except as 2D (2 x 3)
         input = Variable(input.data.view(2, -1))
@@ -1227,12 +1258,15 @@ class TestNN(NNTestCase):
         output = es(input)
         output.backward(grad_output)
 
+        es_weight_grad = es.weight.grad.data
+        if sparse:
+            es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+        self.assertEqual(es_weight_grad, expected_grad_weight)
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
-            es = nn.EmbeddingBag(N, D, mode=mode)
+            es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse)
             e = nn.Embedding(N, D)
             e.weight.data.copy_(es.weight.data)
             input = Variable(torch.rand(B, L).mul(N).long())
@@ -1256,7 +1290,10 @@ class TestNN(NNTestCase):
 
             output.backward(grad_output)
             ref_output.backward(grad_output)
-            self.assertEqual(es.weight.grad, e.weight.grad)
+            es_weight_grad = es.weight.grad.data
+            if sparse:
+                es_weight_grad = es.weight.grad.data.to_dense()
+            self.assertEqual(es_weight_grad, e.weight.grad.data)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1264,7 +1301,7 @@ class TestNN(NNTestCase):
             _test_vs_Embedding(*p)
 
         # check that giving illegal input combos raises error
-        es = nn.EmbeddingBag(10, 20, mode=mode)
+        es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
         input = Variable(torch.ones(3, 4))
         offset = Variable(torch.arange(0, 3))
         self.assertRaises(ValueError, lambda: es(input, offset))
@@ -1321,14 +1358,18 @@ class TestNN(NNTestCase):
         F.conv_transpose2d(Variable(x), Variable(torch.randn(16, 1, 1, 1)).cuda())
         F.conv2d(Variable(x), Variable(torch.randn(1, 16, 1, 1)).cuda())
 
-    def test_EmbeddingBag(self):
-        self._test_EmbeddingBag(False, 'sum')
-        self._test_EmbeddingBag(False, 'mean')
+    def test_embedding_bag(self):
+        self._test_EmbeddingBag(False, 'sum', False)
+        self._test_EmbeddingBag(False, 'mean', False)
+        self._test_EmbeddingBag(False, 'sum', True)
+        self._test_EmbeddingBag(False, 'mean', True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_EmbeddingBag_cuda(self):
-        self._test_EmbeddingBag(True, 'sum')
-        self._test_EmbeddingBag(True, 'mean')
+    def test_embedding_bag_cuda(self):
+        self._test_EmbeddingBag(True, 'sum', False)
+        self._test_EmbeddingBag(True, 'mean', False)
+        self._test_EmbeddingBag(True, 'sum', True)
+        self._test_EmbeddingBag(True, 'mean', True)
 
     def test_fractional_max_pool2d(self):
         x = Variable(torch.randn(1, 2, 7, 7), requires_grad=True)
@@ -1454,10 +1495,19 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_pad_scalar_error(self):
+        inputs = variable(0, requires_grad=True)
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
+        self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
+
     def test_normalize(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=2, dim=-2), (inputs,)))
+
+        inputs = torch_randn((), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, type=torch.FloatTensor):
         def expected_indices(dim):
@@ -2463,6 +2513,24 @@ class TestNN(NNTestCase):
 
                 hx.sum().backward()
 
+    def _test_loss_equal_input_target_shape(self, cast):
+        # Tests losses whose inputs should have the same size.
+        losses = {
+            'mse_loss': lambda x, y: F.mse_loss(x, y),
+            'l1_loss': lambda x, y: F.l1_loss(x, y),
+            'smooth_l1_loss': lambda x, y: F.smooth_l1_loss(x, y),
+            'kl_div': lambda x, y: F.kl_div(x, y),
+            'poisson_nll_loss': lambda x, y: F.poisson_nll_loss(x, y),
+        }
+
+        input = Variable(cast(torch.randn(3, 5)))
+        target = Variable(cast(torch.randn(5, 3)))
+        for name, fn in losses.items():
+            self.assertRaises(Exception, lambda: fn(input, target))
+
+    def test_loss_equal_input_target_shape(self):
+        self._test_loss_equal_input_target_shape(lambda x: x)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
@@ -3008,7 +3076,9 @@ class TestNN(NNTestCase):
                     self.assertEqual(cpu_weight.grad.data, gpu_weight.grad.data, prec=5e-5)
 
         for module in (nn.RNN, nn.LSTM, nn.GRU):
-            for bias, bidirectional, batch_first, contig, variable_len in product((True, False), repeat=5):
+            for bias, bidirectional, batch_first, contig, variable_len, lens_as_variable \
+                    in product((True, False), repeat=6):
+
                 num_directions = 2 if bidirectional else 1
                 if batch_first:
                     input_val = torch.randn(batch, seq_length, input_size)
@@ -3027,9 +3097,13 @@ class TestNN(NNTestCase):
                 grad_hy = torch.randn(num_layers * num_directions, batch, hidden_size)
 
                 if variable_len:
-                    batch_sizes = [7, 5, 5, 2, 1, 1]
-                    input_val = rnn_utils.pack_padded_sequence(input_val, batch_sizes, batch_first=batch_first)
-                    grad_output = rnn_utils.pack_padded_sequence(grad_output, batch_sizes, batch_first=batch_first).data
+                    lengths = [7, 5, 5, 2, 1, 1]
+                    if lens_as_variable:
+                        lengths = Variable(torch.LongTensor(lengths))
+                    input_val = Variable(input_val)
+                    grad_output = Variable(grad_output)
+                    input_val = rnn_utils.pack_padded_sequence(input_val, lengths, batch_first=batch_first)
+                    grad_output = rnn_utils.pack_padded_sequence(grad_output, lengths, batch_first=batch_first).data
 
                 rnn = module(input_size,
                              hidden_size,
@@ -3474,6 +3548,11 @@ class TestNN(NNTestCase):
 
         input1 = Variable(torch.randn(4, 5, 6), requires_grad=True)
         input2 = Variable(torch.randn(4, 5, 6), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
+        self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
+
+        input1 = torch_randn((), requires_grad=True)
+        input2 = torch_randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
@@ -4265,7 +4344,7 @@ def add_test(test):
         raise RuntimeError('Found two tests with the same name: ' + cuda_test_name)
     setattr(TestNN, test_name, lambda self, test=test: test(self))
     # Hardshrink is not implemented in CUDA, so we must not test it.
-    if test_name != "test_Hardshrink":
+    if not test_name.startswith("test_Hardshrink"):
         setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
@@ -4288,6 +4367,13 @@ new_criterion_tests = [
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         desc='weights'
+    ),
+    dict(
+        module_name='BCEWithLogitsLoss',
+        constructor_args=(torch_rand(()),),
+        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch_randn(()).gt(0).double(),
+        desc='scalar_weights'
     ),
     dict(
         module_name='NLLLoss',
@@ -4372,6 +4458,18 @@ def bceloss_no_reduce_test():
         pickle=False)
 
 
+def bceloss_no_reduce_scalar_test():
+    t = torch_randn(()).gt(0).double()
+    return dict(
+        fullname='BCELoss_no_reduce_scalar',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch_rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
+        reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
+        check_gradgrad=False,
+        pickle=False)
+
+
 def bceloss_weights_no_reduce_test():
     t = Variable(torch.randn(15, 10).gt(0).double())
     weights = Variable(torch.rand(10))
@@ -4381,6 +4479,20 @@ def bceloss_weights_no_reduce_test():
             lambda i: F.binary_cross_entropy(i, t.type_as(i),
                                              weight=weights.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(15, 10).clamp_(2.8e-2, 1 - 2.8e-2),
+        reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def bceloss_weights_no_reduce_scalar_test():
+    t = torch_randn(()).double()
+    weights = torch_rand(())
+    return dict(
+        fullname='BCELoss_weights_no_reduce_scalar',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy(i, t.type_as(i),
+                                             weight=weights.type_as(i), reduce=False)),
+        input_fn=lambda: torch_rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
         pickle=False)
@@ -4399,6 +4511,19 @@ def bce_with_logistic_no_reduce_test():
         pickle=False)
 
 
+def bce_with_logistic_no_reduce_scalar_test():
+    t = torch_randn(()).gt(0).double()
+    sigmoid = nn.Sigmoid()
+    return dict(
+        fullname='BCEWithLogitsLoss_no_reduce_scalar',
+        constructor=wrap_functional(
+            lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch_rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
+        reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
+        check_gradgrad=False,
+        pickle=False)
+
+
 def kldivloss_no_reduce_test():
     t = Variable(torch.randn(10, 10))
     return dict(
@@ -4406,6 +4531,18 @@ def kldivloss_no_reduce_test():
         constructor=wrap_functional(
             lambda i: F.kl_div(i, t.type_as(i), reduce=False)),
         input_fn=lambda: torch.rand(10, 10).log(),
+        reference_fn=lambda i, _:
+            loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduce=False),
+        pickle=False)
+
+
+def kldivloss_no_reduce_scalar_test():
+    t = torch_randn(())
+    return dict(
+        fullname='KLDivLoss_no_reduce_scalar',
+        constructor=wrap_functional(
+            lambda i: F.kl_div(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch_rand(()).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduce=False),
         pickle=False)
@@ -4422,11 +4559,34 @@ def l1loss_no_reduce_test():
         pickle=False)
 
 
+def l1loss_no_reduce_scalar_test():
+    t = torch_randn(())
+    return dict(
+        fullname='L1Loss_no_reduce_scalar',
+        constructor=wrap_functional(
+            lambda i: F.l1_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch_randn(()),
+        reference_fn=lambda i, m: (i - t.type_as(i)).abs(),
+        pickle=False)
+
+
 def mseloss_no_reduce_test():
     input_size = (2, 3, 4, 5)
     target = Variable(torch.randn(*input_size))
     return dict(
         fullname='MSELoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.mse_loss(i, target.type_as(i), reduce=False)),
+        input_size=input_size,
+        reference_fn=lambda i, m: (i - target).pow(2),
+        pickle=False)
+
+
+def mseloss_no_reduce_scalar_test():
+    input_size = ()
+    target = torch_randn(input_size)
+    return dict(
+        fullname='MSELoss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.mse_loss(i, target.type_as(i), reduce=False)),
         input_size=input_size,
@@ -4611,10 +4771,22 @@ def smoothl1loss_no_reduce_test():
         pickle=False)
 
 
+def smoothl1loss_no_reduce_scalar_test():
+    t = torch_randn(())
+    return dict(
+        fullname='SmoothL1Loss_no_reduce_scalar',
+        constructor=wrap_functional(
+            lambda i: F.smooth_l1_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch_randn(()),
+        reference_fn=lambda i, _:
+            loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduce=False),
+        pickle=False)
+
+
 def multilabelmarginloss_1d_no_reduce_test():
     t = Variable(torch.rand(10).mul(10).floor().long())
     return dict(
-        fullname='MultiLabelMarginLoss_no_reduce',
+        fullname='MultiLabelMarginLoss_1d_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
         input_fn=lambda: torch.randn(10),
@@ -4642,7 +4814,7 @@ def multilabelmarginloss_index_neg_test():
 def multilabelmarginloss_no_reduce_test():
     t = Variable(torch.rand(5, 10).mul(10).floor().long())
     return dict(
-        fullname='MultiLabelMarginLoss_1d_no_reduce',
+        fullname='MultiLabelMarginLoss_no_reduce',
         constructor=wrap_functional(
             lambda i: F.multilabel_margin_loss(i, t.type_as(i).long(), reduce=False)),
         input_fn=lambda: torch.randn(5, 10),
@@ -4653,14 +4825,46 @@ def multilabelmarginloss_no_reduce_test():
         pickle=False)
 
 
+def hingeembeddingloss_no_reduce_test():
+    t = Variable(torch.randn(10).gt(0).double().mul_(2).sub(1))
+    return dict(
+        fullname='HingeEmbeddingLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.hinge_embedding_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['HingeEmbeddingLoss'](i, t.type_as(i), reduce=False),
+        check_no_size_average=True,
+        pickle=False)
+
+
+def hingeembeddingloss_margin_no_reduce_test():
+    t = Variable(torch.randn(10).gt(0).double().mul_(2).sub(1))
+    return dict(
+        fullname='HingeEmbeddingLoss_margin_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.hinge_embedding_loss(i, t.type_as(i), margin=0.5, reduce=False)),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['HingeEmbeddingLoss'](i, t.type_as(i), margin=0.5, reduce=False),
+        check_no_size_average=True,
+        pickle=False)
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
     bceloss_weights_no_reduce_test(),
     bce_with_logistic_no_reduce_test(),
+    bceloss_no_reduce_scalar_test(),
+    bceloss_weights_no_reduce_scalar_test(),
+    bce_with_logistic_no_reduce_scalar_test(),
     kldivloss_no_reduce_test(),
+    kldivloss_no_reduce_scalar_test(),
     l1loss_no_reduce_test(),
+    l1loss_no_reduce_scalar_test(),
     mseloss_no_reduce_test(),
+    mseloss_no_reduce_scalar_test(),
     nllloss_no_reduce_test(),
     nllloss_no_reduce_ignore_index_test(),
     nllloss_no_reduce_weights_test(),
@@ -4673,9 +4877,12 @@ new_module_tests = [
     nlllossNd_no_reduce_weights_test(),
     nlllossNd_no_reduce_ignore_index_test(),
     smoothl1loss_no_reduce_test(),
+    smoothl1loss_no_reduce_scalar_test(),
     multilabelmarginloss_1d_no_reduce_test(),
     multilabelmarginloss_index_neg_test(),
     multilabelmarginloss_no_reduce_test(),
+    hingeembeddingloss_no_reduce_test(),
+    hingeembeddingloss_margin_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -5194,6 +5401,20 @@ new_module_tests = [
         check_gradgrad=False,
     ),
     dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='EmbeddingBag_sparse',
+        constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        check_gradgrad=False,
+    ),
+    dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
         input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
@@ -5416,6 +5637,12 @@ new_module_tests = [
         check_inplace=True
     ),
     dict(
+        module_name='SELU',
+        input_size=(),
+        check_inplace=True,
+        desc='scalar'
+    ),
+    dict(
         module_name='GLU',
         input_size=(5, 6),
     ),
@@ -5458,6 +5685,13 @@ new_module_tests = [
         pickle=False,
     ),
     dict(
+        constructor=wrap_functional(F.softmax, dim=-1),
+        input_size=(),
+        fullname='softmax_functional_scalar',
+        test_cuda=False,
+        pickle=False,
+    ),
+    dict(
         constructor=wrap_functional(F.log_softmax, dim=-1),
         input_size=(2, 128),  # trigger the last-dim algo in CUDA
         fullname='log_softmax_lastdim',
@@ -5485,6 +5719,12 @@ new_module_tests = [
         constructor=wrap_functional(F.log_softmax, dim=3),
         input_size=(2, 3, 4, 5),
         fullname='log_softmax_dim3',
+        pickle=False,
+    ),
+    dict(
+        constructor=wrap_functional(F.log_softmax, dim=0),
+        input_size=(),
+        fullname='log_softmax_scalar',
         pickle=False,
     ),
     dict(

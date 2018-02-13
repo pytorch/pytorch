@@ -35,6 +35,16 @@
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
+- func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sspaddmm_out_only_sparse
+    CUDA: _sspaddmm_out_only_sparse
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
+
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
@@ -177,11 +187,32 @@
 - func: empty_like(Tensor self) -> Tensor
   variants: function
 
+- func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: embedding_bag_cpu
+    CUDA: embedding_bag_cuda
+
+- func: embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
+  variants: function
+
+- func: embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+
+- func: embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: embedding_bag_backward_cpu
+    CUDA: embedding_bag_backward_cuda
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+  variants: function
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
 
@@ -212,6 +243,11 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+- func: mm(Tensor self, Tensor mat2) -> Tensor
+
+- func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
 
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
@@ -237,6 +273,9 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pin_memory(Tensor self) -> Tensor
+
+- func: rand_like(Tensor self) -> Tensor
+  variants: function
 
 - func: randn_like(Tensor self) -> Tensor
   variants: function

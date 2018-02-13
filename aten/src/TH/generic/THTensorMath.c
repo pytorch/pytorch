@@ -3117,7 +3117,7 @@ Adapted similarly to the above Quicksort algorithm.
 This version does not produce indices along with values. */
 static void THTensor_(quickselectnoidx)(real *arr, int64_t k, int64_t elements, int64_t stride)
 {
-  int64_t P, L, R, i, j, swap;
+  int64_t P, L, R, i, j;
   real rswap, piv;
   L = 0;
   R = elements-1;
@@ -3163,7 +3163,7 @@ public domain implementation at http://ndevilla.free.fr/median/median/
 Adapted similarly to the above Quicksort algorithm. */
 static void THTensor_(quickselect)(real *arr, int64_t *idx, int64_t k, int64_t elements, int64_t stride)
 {
-  int64_t P, L, R, i, j, swap, pid;
+  int64_t P, L, R, i, j, swap;
   real rswap, piv;
   L = 0;
   R = elements-1;
@@ -3189,7 +3189,6 @@ static void THTensor_(quickselect)(real *arr, int64_t *idx, int64_t k, int64_t e
     i = L+1;
     j = R;
     piv = ARR(L);
-    pid = IDX(L);
     do {
       do i++; while(ARR(i) < piv);
       do j--; while(ARR(j) > piv);
@@ -4116,7 +4115,6 @@ void THTensor_(bhistc)(THTensor *hist, THTensor *tensor, int64_t nbins, real min
 
   real minval;
   real maxval;
-  real *h_data;
 
   THTensor_(resize2d)(hist, tensor->size[0], nbins);
   THTensor_(zero)(hist);

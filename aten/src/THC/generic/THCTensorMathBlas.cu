@@ -238,13 +238,23 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   THCTensor *r__, *m1_, *m2_;
 
   if( (m1->nDimension != 2) || (m2->nDimension != 2) )
-    THError("matrix and matrix expected");
+    THError("matrices expected, got %dD, %dD tensors", m1->nDimension, m2->nDimension);
 
   if(t->nDimension != 2)
-    THError("size mismatch");
+    THError("matrix expected, got %dD tensor for t", t->nDimension);
 
-  if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) || (m1->size[1] != m2->size[0]) )
-    THError("size mismatch");
+  if(m1->size[1] != m2->size[0]) {
+    THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
+    THCDescBuff bm2 = THCTensor_(sizeDesc)(state, m2);
+    THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
+  }
+
+  if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) ) {
+    THCDescBuff bt  = THCTensor_(sizeDesc)(state, t);
+    THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
+    THCDescBuff bm2 = THCTensor_(sizeDesc)(state, m2);
+    THError("size mismatch, t: %s, m1: %s, m2: %s", bt.str, bm1.str, bm2.str);
+  }
 
   if(t != r_)
   {
@@ -438,8 +448,8 @@ __global__ void createBatchGemmBuffer(const real** buffer, real* data,
 }
 
 __global__ void createBatchGemmBuffer3(const real** buffer1, const real ** buffer2, const real ** buffer3, real* data1,
-                                       real * data2, real * data3, long stride1, long stride2, long stride3, long num_batches) {
-  const long idx = blockIdx.x * blockDim.x + threadIdx.x;
+                                       real * data2, real * data3, int64_t stride1, int64_t stride2, int64_t stride3, int64_t num_batches) {
+  const int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < num_batches) {
     buffer1[idx] = data1 + idx * stride1;
     buffer2[idx] = data2 + idx * stride2;
@@ -671,7 +681,7 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
       THCTensor_(data)(state, result_), ldc, result_->stride[0],
       num_batches);
    } else {
-      for (long i = 0; i < num_batches; ++i) {
+      for (int64_t i = 0; i < num_batches; ++i) {
         THCudaBlas_Hgemm(
         state,
         transpose_batch1,

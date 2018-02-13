@@ -45,7 +45,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   if (input->nDimension == 2) {
     THTensor_(resize2d)(output,
 			THTensor_(size)(input, 0),
-      outputWidth);    
+      outputWidth);
   } else {
     THTensor_(resize3d)(output,
 			THTensor_(size)(input, 0),
@@ -60,7 +60,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   int idim = input->nDimension;
   int osz0 = output->size[0];
   int osz1 = output->size[1];
-  int osz2 = 1;  
+  int osz2 = 1;
   if (idim > 2) {
     osz2 = output->size[2];
   }
@@ -135,7 +135,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   real *pout = THTensor_(data)(gradOutput);
 
   // perform the upsampling
-  int i0, i1, i2, isrc, idst, x, y;
+  int i0, i1, i2, isrc, idst, x;
   int iin[3];  // Input indices
   int iout[3];  // Output indices
 

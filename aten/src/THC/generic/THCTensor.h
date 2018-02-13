@@ -73,6 +73,9 @@ THC_API THCTensor *THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THL
 THC_API void THCTensor_(expand)(THCState *state, THCTensor *r, THCTensor *tensor, THLongStorage *sizes);
 THC_API void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, int count);
 
+// resize* methods simply resize the storage. So they may not retain the current data at current indices.
+// This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
+// values, unless you are doing some size and stride tricks, do not use resize*.
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
 THC_API void THCTensor_(resizeAs)(THCState *state, THCTensor *tensor, THCTensor *src);
 THC_API void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0_);

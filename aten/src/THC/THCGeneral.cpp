@@ -827,12 +827,6 @@ void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line
   }
 }
 
-static ptrdiff_t heapSize = 0; // not thread-local
-static const ptrdiff_t heapMaxDelta = (ptrdiff_t)1e6;
-static const ptrdiff_t heapMinDelta = (ptrdiff_t)-1e6;
-static const double heapSoftmaxGrowthThresh = 0.8; // grow softmax if >80% max after GC
-static const double heapSoftmaxGrowthFactor = 1.4; // grow softmax by 40%
-
 void THCSetGCHandler(THCState *state, void (*cutorchGCFunction_)(void *data), void *data )
 {
   state->cutorchGCFunction = cutorchGCFunction_;
@@ -911,29 +905,6 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
   /* Adjust resulting free bytes number. largesBlock unused for now */
   *freeBytes += cachedBytes;
   return cudaSuccess;
-}
-
-static ptrdiff_t applyHeapDelta(THCState *state) {
-  ptrdiff_t newHeapSize = THAtomicAddPtrdiff(&heapSize, state->heapDelta) + state->heapDelta;
-  state->heapDelta = 0;
-  return newHeapSize;
-}
-
-// Here we maintain a dynamic softmax threshold for THC-allocated storages.
-// When THC heap size goes above this softmax, the GC hook is triggered.
-// If heap size is above 80% of the softmax after GC, then the softmax is
-// increased.
-static void maybeTriggerGC(THCState *state, ptrdiff_t curHeapSize) {
-  if (state->cutorchGCFunction != NULL && curHeapSize > state->heapSoftmax) {
-    (state->cutorchGCFunction)(state->cutorchGCData);
-
-    // ensure heapSize is accurate before updating heapSoftmax
-    ptrdiff_t newHeapSize = applyHeapDelta(state);
-
-    if (newHeapSize > state->heapSoftmax * heapSoftmaxGrowthThresh) {
-      state->heapSoftmax = (ptrdiff_t)state->heapSoftmax * heapSoftmaxGrowthFactor;
-    }
-  }
 }
 
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM

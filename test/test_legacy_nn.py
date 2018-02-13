@@ -43,7 +43,8 @@ class OldModuleTest(ModuleTest):
             test_case.assertEqual(input, input2)
             with freeze_rng_state():
                 output2 = module_ip.forward(input2)
-            test_case.assertNotEqual(input, input2)
+            if not torch.equal(output, input):
+                test_case.assertNotEqual(input, input2)
             test_case.assertEqual(output, input2)
 
 # TODO: hessian tests
