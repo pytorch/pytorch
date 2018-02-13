@@ -147,6 +147,9 @@ int main(int argc, char** argv) {
         for (const string& s : input_dims_str) {
           input_dims.push_back(caffe2::stoi(s));
         }
+        if (!workspace->HasBlob(input_names[i])) {
+          workspace->CreateBlob(input_names[i]);
+        }
         caffe2::TensorCPU* tensor =
             workspace->GetBlob(input_names[i])->GetMutable<caffe2::TensorCPU>();
         tensor->Resize(input_dims);
