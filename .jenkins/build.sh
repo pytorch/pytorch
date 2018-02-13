@@ -5,8 +5,31 @@ set -ex
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/.. && pwd)
 
-# Setup ccache symlinks
-if which ccache > /dev/null; then
+# Setup sccache if SCCACHE_BUCKET is set
+if [ -n "${SCCACHE_BUCKET}" ]; then
+  mkdir -p ./sccache
+
+  SCCACHE="$(which sccache)"
+  if [ -z "${SCCACHE}" ]; then
+    echo "Unable to find sccache..."
+    exit 1
+  fi
+
+  # Setup wrapper scripts
+  for compiler in cc c++ gcc g++; do
+    (
+      echo "#!/bin/sh"
+      echo "exec $SCCACHE $(which $compiler) \"\$@\""
+    ) > "./sccache/$compiler"
+    chmod +x "./sccache/$compiler"
+  done
+
+  # CMake must find these wrapper scripts
+  export PATH="$PWD/sccache:$PATH"
+fi
+
+# Setup ccache if configured to use it (and not sccache)
+if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   mkdir -p ./ccache
   ln -sf "$(which ccache)" ./ccache/cc
   ln -sf "$(which ccache)" ./ccache/c++
