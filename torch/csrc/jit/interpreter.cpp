@@ -62,11 +62,11 @@ struct HandleBuilder {
   }
   autograd::Variable addInput(at::Retainable* input, const VariableFlags & flags_) {
     if(handle && flags_.requires_grad) {
-      auto variable = autograd::make_variable(unsafeToTensorShare(input));
+      auto variable = autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
       autograd::add_gradient_edge(variable, handle->forward_inputs);
       return variable;
     } else {
-      return autograd::make_variable(unsafeToTensorShare(input));
+      return autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
     }
   }
   at::Retainable* addOutput(const autograd::Variable & output) {
@@ -171,12 +171,12 @@ Operation createEvalOperation(CppOp * op) {
     // and these functions will be executed in this run. Since these other handles
     // may still be alive, it is not safe to release the graph
     // TODO: we could cache this list in AutogradHandle (it's read only)
-    autograd::edge_list next_edges;
+    autograd::edge_list output_edges;
     const auto num_inputs = handle_in->forward_inputs->num_inputs();
-    next_edges.reserve(num_inputs);
+    output_edges.reserve(num_inputs);
     for (uint32_t i = 0; i < num_inputs; ++i)
-      next_edges.emplace_back(handle_in->forward_inputs, i);
-    auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, next_edges);
+      output_edges.emplace_back(handle_in->forward_inputs, i);
+    auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, output_edges);
     for(auto & v : values)
       outputs.push_back(builder.addOutput(v));
     builder.writeTo(outputs);

@@ -146,7 +146,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
-      auto variable = autograd::make_variable(toutputs[i]);
+      auto variable = autograd::make_variable(toutputs[i], /*requires_grad=*/false);
       autograd::add_gradient_edge(variable, grad_fn);
       result.push_back(std::move(variable));
     } else {
@@ -169,8 +169,8 @@ InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
       details.used_inputs.push_back((*inputs_it)->uses().size() > 0);
     }
     if (stage >= 1) {
-      auto & current_outputs = state->next_edges[stage];
-      auto & prev_outputs = state->next_edges[stage - 1];
+      auto & current_outputs = state->output_edges[stage];
+      auto & prev_outputs = state->output_edges[stage - 1];
       for (auto & output : current_outputs) {
         // Check if output appears in outputs of previous stage
         auto prev_it = std::find(prev_outputs.begin(), prev_outputs.end(), output);

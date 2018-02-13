@@ -164,7 +164,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    var = make_variable(torch::createTensor(data));
+    var = make_variable(torch::createTensor(data), /*requires_grad=*/false);
     add_gradient_edge(var, grad_fn_);
   } else {
     var = make_variable(torch::createTensor(data), requires_grad);
