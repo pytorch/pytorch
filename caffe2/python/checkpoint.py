@@ -178,6 +178,8 @@ class CheckpointManager(object):
         self._net = core.Net('!!checkpoint_mngr')
         self._blob_names = self._net.AddExternalInput('blob_names')
         self._names_output = None
+        self._path_prefix = None
+        self._path_type = None
 
     """
     Initialize the checkpoint manager. Determines all blobs that need to be saved
@@ -339,8 +341,10 @@ class CheckpointManager(object):
                 stored.
             path_type: Indicate the type of path where checkpoint files are stored.
         """
-        self._path_prefix = path_prefix
-        self._path_type = path_type
+        if path_prefix:
+            self._path_prefix = path_prefix
+        if path_type:
+            self._path_type = path_type
         if self._metadata_handler:
             self._metadata_handler.set_params(
                 db_prefix=self._db_prefix,
@@ -383,6 +387,8 @@ class MultiNodeCheckpointManager(object):
         self._db_prefix = db_prefix
         self._db_type = db_type
         self._metadata_handler = metadata_handler
+        self._path_prefix = None
+        self._path_type = None
 
     def _task_group(self, func, *args, **kw):
         assert self._node_managers is not None, 'init must be called first.'
@@ -523,9 +529,11 @@ class MultiNodeCheckpointManager(object):
                 stored.
             path_type: Indicate the type of path where checkpoint files are stored.
         """
-        self._path_prefix = path_prefix
-        self._path_type = path_type
         self._node_names = [str(node) for node in nodes]
+        if path_prefix:
+            self._path_prefix = path_prefix
+        if path_type:
+            self._path_type = path_type
         if self._metadata_handler:
             self._metadata_handler.set_params(
                 db_prefix=self._db_prefix,
