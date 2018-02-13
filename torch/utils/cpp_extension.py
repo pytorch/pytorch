@@ -1,19 +1,47 @@
+import glob
 import imp
 import os
 import re
+import setuptools
 import subprocess
 import sys
 import sysconfig
 import tempfile
 import warnings
 
+import torch
+
 from setuptools.command.build_ext import build_ext
+
+
+def _find_cuda_home():
+    '''Finds the CUDA install path.'''
+    # Guess #1
+    cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
+    if cuda_home is None:
+        # Guess #2
+        if sys.platform == 'win32':
+            cuda_home = glob.glob(
+                'C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v*.*')
+        else:
+            cuda_home = '/usr/local/cuda'
+        if not os.path.exists(cuda_home):
+            # Guess #3
+            try:
+                which = 'where' if sys.platform == 'win32' else 'which'
+                nvcc = subprocess.check_output([which, 'nvcc']).decode()
+                cuda_home = os.path.dirname(os.path.dirname(nvcc))
+            except Exception:
+                cuda_home = None
+    return cuda_home
+
 
 MINIMUM_GCC_VERSION = (4, 9)
 ABI_INCOMPATIBILITY_WARNING = '''
 Your compiler ({}) may be ABI-incompatible with PyTorch.
 Please use a compiler that is ABI-compatible with GCC 4.9 and above.
 See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.'''
+CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -51,7 +79,7 @@ def check_compiler_abi_compatibility(compiler):
 
 
 class BuildExtension(build_ext):
-    """A custom build extension for adding compiler-specific options."""
+    '''A custom build extension for adding compiler-specific options.'''
 
     def build_extensions(self):
         # On some platforms, like Windows, compiler_cxx is not available.
@@ -60,15 +88,96 @@ class BuildExtension(build_ext):
         else:
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
-        for extension in self.extensions:
-            extension.extra_compile_args = ['-std=c++11']
+
+        # Register .cu and .cuh as valid source extensions.
+        self.compiler.src_extensions += ['.cu', '.cuh']
+        # Save the original _compile method for later.
+        original_compile = self.compiler._compile
+
+        def wrap_compile(obj, src, ext, cc_args, cflags, pp_opts):
+            try:
+                original_compiler = self.compiler.compiler_so
+                if os.path.splitext(src)[1].startswith('.cu'):
+                    nvcc = _join_cuda_home('bin', 'nvcc')
+                    self.compiler.set_executable('compiler_so', nvcc)
+                    if isinstance(cflags, dict):
+                        cflags = cflags['nvcc']
+                    cflags += ['-c', '--compiler-options', "'-fPIC'"]
+                else:
+                    if isinstance(cflags, dict):
+                        cflags = cflags['cxx']
+                    cflags.append('-std=c++11')
+
+                original_compile(obj, src, ext, cc_args, cflags, pp_opts)
+            finally:
+                # Put the original compiler back in place.
+                self.compiler.set_executable('compiler_so', original_compiler)
+
+        # Monkey-patch the _compile method.
+        self.compiler._compile = wrap_compile
+
         build_ext.build_extensions(self)
 
 
-def include_paths():
+def CppExtension(name, sources, *args, **kwargs):
+    '''
+    Create a setuptools.Extension instance for C++.
+
+    Convenience method that creates a `setuptools.Extension` with the bare
+    minimum (but often sufficient) arguments to build a C++ extension.
+
+    All arguments are forwarded to the setuptools.Extension constructor.
+    '''
+    include_dirs = kwargs.get('include_dirs', [])
+    include_dirs += include_paths()
+    kwargs['include_dirs'] = include_dirs
+    kwargs['language'] = 'c++'
+    return setuptools.Extension(name, sources, *args, **kwargs)
+
+
+def CUDAExtension(name, sources, *args, **kwargs):
+    '''
+    Create a setuptools.Extension instance for CUDA/C++.
+
+    Convenience method that creates a `setuptools.Extension` with the bare
+    minimum (but often sufficient) arguments to build a CUDA/C++ extension.
+    This includes the CUDA include path, library path and runtime library.
+
+    All arguments are forwarded to the setuptools.Extension constructor.
+    '''
+    library_dirs = kwargs.get('library_dirs', [])
+    library_dirs.append(_join_cuda_home('lib64'))
+    kwargs['library_dirs'] = library_dirs
+
+    libraries = kwargs.get('libraries', [])
+    libraries.append('cudart')
+    kwargs['libraries'] = libraries
+
+    include_dirs = kwargs.get('include_dirs', [])
+    include_dirs += include_paths(cuda=True)
+    kwargs['include_dirs'] = include_dirs
+
+    kwargs['language'] = 'c++'
+
+    return setuptools.Extension(name, sources, *args, **kwargs)
+
+
+def include_paths(cuda=False):
+    '''
+    Return include paths required to build a C++ extension.
+
+    Args:
+        cuda: If `True`, includes CUDA include paths.
+
+    Returns:
+        A list of include path strings.
+    '''
     here = os.path.abspath(__file__)
     torch_path = os.path.dirname(os.path.dirname(here))
-    return [os.path.join(torch_path, 'lib', 'include')]
+    paths = [os.path.join(torch_path, 'lib', 'include')]
+    if cuda:
+        paths.append(_join_cuda_home('include'))
+    return paths
 
 
 def load(name,
@@ -250,3 +359,16 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
         for block in blocks:
             lines = '\n'.join(block)
             build_file.write('{}\n\n'.format(lines))
+
+
+def _join_cuda_home(*paths):
+    '''
+    Joins paths with CUDA_HOME, or raises an error if it CUDA_HOME is not set.
+
+    This is basically a lazy way of raising an error for missing $CUDA_HOME
+    only once we need to get any CUDA-specific path.
+    '''
+    if CUDA_HOME is None:
+        raise EnvironmentError('CUDA_HOME environment variable is not set. '
+                               'Please set it to your CUDA install root.')
+    return os.path.join(CUDA_HOME, *paths)
