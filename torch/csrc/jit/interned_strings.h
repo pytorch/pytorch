@@ -145,7 +145,9 @@ _(ReplaceIfUndef) \
 _(is_zero) \
 _(GraphExecutor) \
 _(mm) \
-_(t)
+_(t) \
+_(Loop) \
+_(If)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \

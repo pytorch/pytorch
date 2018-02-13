@@ -85,7 +85,7 @@ struct Environment {
 
   void setVar(const std::string& name, Value* value) {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
-        getBlockOwningKind() == Symbol("Loop"))
+        getBlockOwningKind() == kLoop)
       createCapturedInput(name);
     value_table[name] = value;
   }
@@ -98,7 +98,7 @@ struct Environment {
     Value* retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == Symbol("Loop"))
+        getBlockOwningKind() == kLoop)
       retval = createCapturedInput(ident);
 
     if (!retval) {
@@ -198,17 +198,16 @@ struct to_ir {
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(def.graph->create(Symbol("If"), 0));
+    Node* n = def.graph->insertNode(def.graph->create(kIf, 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
     // Emit both blocks once to get the union of all mutated values
     std::unordered_set<std::string> mutated_parent_values;
-    std::shared_ptr<Environment> save_true, save_false;
-    save_true = emitSingleIfBranch(
+    auto save_true = emitSingleIfBranch(
         true_block, stmt.trueBranch(), &mutated_parent_values);
-    save_false = emitSingleIfBranch(
+    auto save_false = emitSingleIfBranch(
         false_block, stmt.falseBranch(), &mutated_parent_values);
 
     std::vector<std::string> sorted_mutations(
@@ -216,15 +215,12 @@ struct to_ir {
     std::sort(sorted_mutations.begin(), sorted_mutations.end());
 
     // Register outputs in each block
-    environment_stack = save_true;
     for (const auto& x : sorted_mutations) {
-      true_block->registerOutput(environment_stack->getVar(x, stmt));
+      true_block->registerOutput(save_true->getVar(x, stmt));
     }
-    environment_stack = save_false;
     for (const auto& x : sorted_mutations) {
-      false_block->registerOutput(environment_stack->getVar(x, stmt));
+      false_block->registerOutput(save_false->getVar(x, stmt));
     }
-    environment_stack = environment_stack->next;
 
     // Add op outputs
     for (const auto& x : sorted_mutations) {
@@ -234,13 +230,13 @@ struct to_ir {
 
   void emitWhile(const While& stmt) {
     // Emits a loop operators conforming to the semantics specified at
-    // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop 
+    // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
     // TODO: implement scan_outputs
 
     Value* trip_count_dummy = emitConst(0, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(def.graph->create(Symbol("Loop"), 0));
+    Node* n = def.graph->insertNode(def.graph->create(kLoop, 0));
     n->addInput(trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
