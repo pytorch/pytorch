@@ -12,6 +12,8 @@ export PATH=/opt/conda/bin:$PATH
 if [[ "$JOB_NAME" == *cuda* ]]; then
    export LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:$LD_LIBRARY_PATH
    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+   # The ccache wrapper should be able to find the real nvcc
+   export PATH="/usr/local/cuda/bin:$PATH"
 else
    export PATH=/opt/python/${PYTHON_VERSION}/bin:$PATH
    export LD_LIBRARY_PATH=/opt/python/${PYTHON_VERSION}/lib:$LD_LIBRARY_PATH
