@@ -1,12 +1,20 @@
-from setuptools import setup, Extension
-import torch.utils.cpp_extension
+import torch.cuda
+from setuptools import setup
+from torch.utils.cpp_extension import CppExtension, CUDAExtension
 
 ext_modules = [
-    Extension(
+    CppExtension(
         'torch_test_cpp_extensions', ['extension.cpp'],
-        include_dirs=torch.utils.cpp_extension.include_paths(),
-        language='c++'),
+        extra_compile_args=['-g']),
 ]
+
+if torch.cuda.is_available():
+    extension = CUDAExtension(
+        'torch_test_cuda_extension',
+        ['cuda_extension.cpp', 'cuda_extension_kernel.cu'],
+        extra_compile_args={'cxx': ['-g'],
+                            'nvcc': ['-O2']})
+    ext_modules.append(extension)
 
 setup(
     name='torch_test_cpp_extensions',
