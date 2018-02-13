@@ -61,7 +61,7 @@ Args:
     value (Number): the number to be added to each element of :attr:`input`
 
 Keyword arguments:
-    out (Tensor): the output tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
