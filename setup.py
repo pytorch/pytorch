@@ -11,7 +11,10 @@ import setuptools.command.develop
 import setuptools.command.build_ext
 
 from collections import namedtuple
+from contextlib import contextmanager
+import glob
 import os
+import multiprocessing
 import shlex
 import subprocess
 import sys
@@ -19,6 +22,7 @@ from textwrap import dedent
 
 TOP_DIR = os.path.realpath(os.path.dirname(__file__))
 SRC_DIR = os.path.join(TOP_DIR, 'caffe2')
+CMAKE_BUILD_DIR = os.path.join(TOP_DIR, '.setuptools-cmake-build')
 
 install_requires = []
 setup_requires = []
@@ -29,7 +33,36 @@ tests_require = []
 ################################################################################
 
 assert find_executable('cmake'), 'Could not find "cmake" executable!'
-assert find_executable('make'), 'Could not find "make" executable!'
+
+# Prefer using ninja, if not found, then fallback to make.
+USE_NINJA = False
+try:
+    import ninja
+except ImportError:
+    NINJA = find_executable('ninja')
+    USE_NINJA = bool(NINJA)
+else:
+    NINJA = os.path.realpath(os.path.join(ninja.BIN_DIR, 'ninja'))
+    USE_NINJA = True
+
+if not USE_NINJA and not find_executable('make'):
+    raise RuntimeError('Could not find either "ninja" or "make" executable!')
+
+################################################################################
+# utils functions
+################################################################################
+
+
+@contextmanager
+def cd(path):
+    if not os.path.isabs(path):
+        raise RuntimeError('Can only cd to absolute path, got: {}'.format(path))
+    orig_path = os.getcwd()
+    os.chdir(path)
+    try:
+        yield
+    finally:
+        os.chdir(orig_path)
 
 ################################################################################
 # Version
@@ -71,18 +104,7 @@ class create_version(Caffe2Command):
             '''.format(**dict(VersionInfo._asdict()))))
 
 
-class build_py(setuptools.command.build_py.build_py):
-    def run(self):
-        self.run_command('create_version')
-        setuptools.command.build_py.build_py.run(self)
-
-
-class develop(setuptools.command.develop.develop):
-    def run(self):
-        raise RuntimeError('develop mode is not supported!')
-
-
-class build_ext(setuptools.command.build_ext.build_ext):
+class cmake_build(Caffe2Command):
     """
     Compiles everything when `python setup.py build` is run using cmake.
 
@@ -94,106 +116,131 @@ class build_ext(setuptools.command.build_ext.build_ext):
     to `setup.py build`.  By default all CPUs are used.
     """
     user_options = [
-        ('jobs=', 'j', 'Specifies the number of jobs to use with make')
+        (str('jobs='), str('j'), str('Specifies the number of jobs to use with make'))
     ]
 
+    built = False
+
     def initialize_options(self):
-        setuptools.command.build_ext.build_ext.initialize_options(self)
-        self.jobs = None
+        self.jobs = multiprocessing.cpu_count()
 
     def finalize_options(self):
-        setuptools.command.build_ext.build_ext.finalize_options(self)
-        # Check for the -j argument to make with a specific number of cpus
-        try:
-            self.jobs = int(self.jobs)
-        except Exception:
-            self.jobs = None
+        self.jobs = int(self.jobs)
 
-    def _build_with_cmake(self):
-        # build_temp resolves to something like: build/temp.linux-x86_64-3.5
-        # build_lib resolves to something like: build/lib.linux-x86_64-3.5
-        build_temp = os.path.realpath(self.build_temp)
-        build_lib = os.path.realpath(self.build_lib)
+    def run(self):
+        if cmake_build.built:
+            return
+        cmake_build.built = True
 
-        if 'CMAKE_INSTALL_DIR' not in os.environ:
-            cmake_install_dir = os.path.join(build_temp, 'cmake_install')
+        if not os.path.exists(CMAKE_BUILD_DIR):
+            os.makedirs(CMAKE_BUILD_DIR)
 
-            py_exe = sys.executable
-            py_inc = sysconfig.get_python_inc()
-
-            if 'CMAKE_ARGS' in os.environ:
-                cmake_args = shlex.split(os.environ['CMAKE_ARGS'])
-                # prevent crossfire with downstream scripts
-                del os.environ['CMAKE_ARGS']
-            else:
-                cmake_args = []
-            log.info('CMAKE_ARGS: {}'.format(cmake_args))
-
-            if self.jobs is not None:
-                # use envvars to pass information to `build_local.sh`
-                os.environ['CAFFE_MAKE_NCPUS'] = str(self.jobs)
-
-            self.compiler.spawn([
-                os.path.join(TOP_DIR, 'scripts', 'build_local.sh'),
+        with cd(CMAKE_BUILD_DIR):
+            # configure
+            cmake_args = [
+                find_executable('cmake'),
                 '-DBUILD_SHARED_LIBS=OFF',
-                # TODO: Investigate why BUILD_SHARED_LIBS=OFF USE_GLOO=ON
-                # will cause error 'target "gloo" that is not in the
-                # export set' in cmake.
-                '-DUSE_GLOO=OFF',
-                '-DCMAKE_INSTALL_PREFIX:PATH={}'.format(cmake_install_dir),
-                '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(py_exe),
-                '-DPYTHON_INCLUDE_DIR={}'.format(py_inc),
+                '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
+                '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_python_inc()),
                 '-DBUILD_TEST=OFF',
                 '-BUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
-            ] + cmake_args + [TOP_DIR])
-            # This is assuming build_local.sh will use TOP_DIR/build
-            # as the cmake build directory
-            self.compiler.spawn([
-                'make',
-                '-C', os.path.join(TOP_DIR, 'build'),
-                'install'
-            ])
-        else:
-            # if `CMAKE_INSTALL_DIR` is specified in the environment, assume
-            # cmake has been run and skip the build step.
-            cmake_install_dir = os.environ['CMAKE_INSTALL_DIR']
+            ]
+            if USE_NINJA:
+                cmake_args.extend(['-G', 'Ninja'])
+            if 'CMAKE_ARGS' in os.environ:
+                extra_cmake_args = shlex.split(os.environ['CMAKE_ARGS'])
+                # prevent crossfire with downstream scripts
+                del os.environ['CMAKE_ARGS']
+                log.info('Extra cmake args: {}'.format(extra_cmake_args))
+            cmake_args.append(TOP_DIR)
+            subprocess.check_call(cmake_args)
 
-        # CMake will install the python package to a directory that mirrors the
-        # standard site-packages name. This will vary slightly depending on the
-        # OS and python version.  (e.g. `lib/python3.5/site-packages`)
-        python_site_packages = sysconfig.get_python_lib(prefix='')
+            # build
+            if USE_NINJA:
+                build_args = [NINJA]
+            else:
+                build_args = [find_executable('make')]
+            # control the number of concurrent jobs
+            if self.jobs is not None:
+                build_args.extend(['-j', str(self.jobs)])
+            subprocess.check_call(build_args)
+
+
+class build_py(setuptools.command.build_py.build_py):
+    def run(self):
+        self.run_command('create_version')
+        self.run_command('cmake_build')
         for d in ['caffe', 'caffe2']:
-            src = os.path.join(cmake_install_dir, python_site_packages, d)
-            self.copy_tree(src, os.path.join(build_lib, d))
+            for src in glob.glob(
+                    os.path.join(CMAKE_BUILD_DIR, d, 'proto', '*.py')):
+                dst = os.path.join(
+                    TOP_DIR, os.path.relpath(src, CMAKE_BUILD_DIR))
+                self.copy_file(src, dst)
+        setuptools.command.build_py.build_py.run(self)
 
+
+class build_ext(setuptools.command.build_ext.build_ext):
     def get_outputs(self):
         return [os.path.join(self.build_lib, d)
                 for d in ['caffe', 'caffe2']]
 
+    def run(self):
+        self.run_command('cmake_build')
+        setuptools.command.build_ext.build_ext.run(self)
+
     def build_extensions(self):
-        assert len(self.extensions) == 1
-        self._build_with_cmake()
+        i = 0
+        while i < len(self.extensions):
+            ext = self.extensions[i]
+            fullname = self.get_ext_fullname(ext.name)
+            filename = self.get_ext_filename(fullname)
+
+            src = os.path.join(CMAKE_BUILD_DIR, filename)
+            if not os.path.exists(src):
+                del self.extensions[i]
+            else:
+                dst = os.path.join(os.path.realpath(self.build_lib), filename)
+                self.copy_file(src, dst)
+                i += 1
+
+
+class develop(setuptools.command.develop.develop):
+    def run(self):
+        if not USE_NINJA:
+            raise RuntimeError(
+                'Ninja is required for development mode. '
+                'You can install it via e.g. `pip install ninja`')
+        self.run_command('build_py')
+        setuptools.command.develop.develop.run(self)
 
 
 cmdclass = {
     'create_version': create_version,
+    'cmake_build': cmake_build,
     'build_py': build_py,
-    'develop': develop,
     'build_ext': build_ext,
+    'develop': develop,
 }
 
 ################################################################################
 # Extensions
 ################################################################################
 
-ext_modules = [setuptools.Extension(str('caffe2-ext'), [])]
+ext_modules = [
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state'),
+        sources=[]),
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+        sources=[]),
+]
 
 ################################################################################
 # Packages
 ################################################################################
 
-packages = []
+packages = setuptools.find_packages()
 
 install_requires.extend(['protobuf',
                          'numpy',
