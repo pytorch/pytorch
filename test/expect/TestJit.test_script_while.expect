@@ -3,16 +3,16 @@ graph(%a : UNKNOWN_TYPE
   %2 : UNKNOWN_TYPE = Constant[value={0}]()
   %3 : UNKNOWN_TYPE = Constant[value={10}]()
   %4 : UNKNOWN_TYPE = lt(%a, %3)
-  %14 : UNKNOWN_TYPE, %15 : UNKNOWN_TYPE = Loop(%2, %4, %a, %b)
-    block0(%5 : UNKNOWN_TYPE, %6 : UNKNOWN_TYPE, %9 : UNKNOWN_TYPE) {
-      %7 : UNKNOWN_TYPE = Constant[value={1}]()
-      %8 : UNKNOWN_TYPE = add[alpha={1}](%6, %7)
-      %10 : UNKNOWN_TYPE = Constant[value={1}]()
-      %11 : UNKNOWN_TYPE = add[alpha={1}](%9, %10)
-      %12 : UNKNOWN_TYPE = Constant[value={10}]()
-      %13 : UNKNOWN_TYPE = lt(%8, %12)
-      -> (%13, %8, %11)
+  %15 : UNKNOWN_TYPE, %16 : UNKNOWN_TYPE = Loop(%2, %4, %a, %b)
+    block0(%5 : UNKNOWN_TYPE, %6 : UNKNOWN_TYPE, %7 : UNKNOWN_TYPE, %10 : UNKNOWN_TYPE) {
+      %8 : UNKNOWN_TYPE = Constant[value={1}]()
+      %9 : UNKNOWN_TYPE = add[alpha={1}](%7, %8)
+      %11 : UNKNOWN_TYPE = Constant[value={1}]()
+      %12 : UNKNOWN_TYPE = add[alpha={1}](%10, %11)
+      %13 : UNKNOWN_TYPE = Constant[value={10}]()
+      %14 : UNKNOWN_TYPE = lt(%9, %13)
+      -> (%14, %9, %12)
     }
-  %16 : UNKNOWN_TYPE = add[alpha={1}](%14, %15)
-  return (%16);
+  %17 : UNKNOWN_TYPE = add[alpha={1}](%15, %16)
+  return (%17);
 }

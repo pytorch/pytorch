@@ -7,29 +7,29 @@ graph(%lim : UNKNOWN_TYPE) {
   %6 : UNKNOWN_TYPE = Constant[value={0}]()
   %7 : UNKNOWN_TYPE = Constant[value={0}]()
   %8 : UNKNOWN_TYPE = lt(%3, %lim)
-  %36 : UNKNOWN_TYPE, %37 : UNKNOWN_TYPE, %38 : UNKNOWN_TYPE, %39 : UNKNOWN_TYPE, %40 : UNKNOWN_TYPE, %41 : UNKNOWN_TYPE, %42 : UNKNOWN_TYPE = Loop(%7, %8, %1, %2, %6, %4, %3, %5, %lim)
-    block0(%9 : UNKNOWN_TYPE, %10 : UNKNOWN_TYPE, %11 : UNKNOWN_TYPE, %13 : UNKNOWN_TYPE, %27 : UNKNOWN_TYPE, %30 : UNKNOWN_TYPE, %32 : UNKNOWN_TYPE, %34 : UNKNOWN_TYPE) {
-      %12 : UNKNOWN_TYPE = add[alpha={1}](%10, %11)
-      %14 : UNKNOWN_TYPE = Constant[value={0}]()
+  %38 : UNKNOWN_TYPE, %39 : UNKNOWN_TYPE, %40 : UNKNOWN_TYPE, %41 : UNKNOWN_TYPE, %42 : UNKNOWN_TYPE = Loop(%7, %8, %1, %2, %6, %4, %3)
+    block0(%9 : UNKNOWN_TYPE, %10 : UNKNOWN_TYPE, %11 : UNKNOWN_TYPE, %12 : UNKNOWN_TYPE, %14 : UNKNOWN_TYPE, %29 : UNKNOWN_TYPE, %32 : UNKNOWN_TYPE) {
+      %13 : UNKNOWN_TYPE = add[alpha={1}](%11, %12)
       %15 : UNKNOWN_TYPE = Constant[value={0}]()
-      %16 : UNKNOWN_TYPE = Constant[value={10}]()
-      %17 : UNKNOWN_TYPE = lt(%14, %16)
-      %28 : UNKNOWN_TYPE, %29 : UNKNOWN_TYPE = Loop(%15, %17, %27, %14)
-        block0(%18 : UNKNOWN_TYPE, %19 : UNKNOWN_TYPE, %22 : UNKNOWN_TYPE) {
-          %20 : UNKNOWN_TYPE = Constant[value={2}]()
-          %21 : UNKNOWN_TYPE = mul(%19, %20)
-          %23 : UNKNOWN_TYPE = Constant[value={1}]()
-          %24 : UNKNOWN_TYPE = add[alpha={1}](%22, %23)
-          %25 : UNKNOWN_TYPE = Constant[value={10}]()
-          %26 : UNKNOWN_TYPE = lt(%24, %25)
-          -> (%26, %21, %24)
+      %16 : UNKNOWN_TYPE = Constant[value={0}]()
+      %17 : UNKNOWN_TYPE = Constant[value={10}]()
+      %18 : UNKNOWN_TYPE = lt(%15, %17)
+      %30 : UNKNOWN_TYPE, %31 : UNKNOWN_TYPE = Loop(%16, %18, %29, %15)
+        block0(%19 : UNKNOWN_TYPE, %20 : UNKNOWN_TYPE, %21 : UNKNOWN_TYPE, %24 : UNKNOWN_TYPE) {
+          %22 : UNKNOWN_TYPE = Constant[value={2}]()
+          %23 : UNKNOWN_TYPE = mul(%21, %22)
+          %25 : UNKNOWN_TYPE = Constant[value={1}]()
+          %26 : UNKNOWN_TYPE = add[alpha={1}](%24, %25)
+          %27 : UNKNOWN_TYPE = Constant[value={10}]()
+          %28 : UNKNOWN_TYPE = lt(%26, %27)
+          -> (%28, %23, %26)
         }
-      %31 : UNKNOWN_TYPE = add[alpha={1}](%30, %29)
-      %33 : UNKNOWN_TYPE = add[alpha={1}](%31, %32)
-      %35 : UNKNOWN_TYPE = lt(%33, %34)
-      -> (%35, %11, %12, %12, %28, %33, %32, %34)
+      %33 : UNKNOWN_TYPE = add[alpha={1}](%32, %31)
+      %35 : UNKNOWN_TYPE = add[alpha={1}](%33, %5)
+      %37 : UNKNOWN_TYPE = lt(%35, %lim)
+      -> (%37, %12, %13, %13, %30, %35)
     }
-  %43 : UNKNOWN_TYPE = add[alpha={1}](%37, %38)
-  %44 : UNKNOWN_TYPE = add[alpha={1}](%36, %37)
-  return (%38);
+  %43 : UNKNOWN_TYPE = add[alpha={1}](%39, %40)
+  %44 : UNKNOWN_TYPE = add[alpha={1}](%38, %39)
+  return (%40);
 }

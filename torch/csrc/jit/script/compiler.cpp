@@ -111,9 +111,9 @@ struct Environment {
   // Given that after emitting statements in a block, we've added block inputs
   // for all value references and assignments, delete inputs for which there was
   // no assignment, only references.
-  void deleteExtraInputs() {
+  void deleteExtraInputs(size_t skip_num = 0) {
     std::vector<size_t> inputs_to_delete;
-    int i = 0;
+    int i = skip_num;
     for (const auto& x : captured_inputs) {
       if (b->inputs()[i] == value_table[x]) {
         inputs_to_delete.push_back(i);
@@ -123,7 +123,7 @@ struct Environment {
 
     for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
          ++ritr) {
-      auto name = captured_inputs[*ritr];
+      auto name = captured_inputs[*ritr - skip_num];
       Value* v = value_table[name];
       Value* orig = findInParentFrame(name);
       // Replace all matching node inputs with original value
@@ -132,7 +132,7 @@ struct Environment {
 
       // Actually remove the input
       b->eraseInput(*ritr);
-      captured_inputs.erase(captured_inputs.begin() + *ritr);
+      captured_inputs.erase(captured_inputs.begin() + *ritr - skip_num);
     }
   }
 };
@@ -249,7 +249,9 @@ struct to_ir {
     // TODO: it seems like we should implement a `for` loop as well, otherwise
     // we'll probably have to pattern match iteration number machinery in user
     // code to conform to the spec
-    body_block->addInput();
+    body_block->addInput(); // Iteration num
+    body_block->addInput(); // Condition
+    size_t skip_inputs_num = 2;
 
     {
       environment_stack =
@@ -263,7 +265,7 @@ struct to_ir {
 
       // Remove inputs for values that did not mutate within the
       // block
-      environment_stack->deleteExtraInputs();
+      environment_stack->deleteExtraInputs(skip_inputs_num);
 
       // Add block outputs
       auto& curr_frame = *environment_stack;
