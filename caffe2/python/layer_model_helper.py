@@ -391,6 +391,10 @@ class LayerModelHelper(model_helper.ModelHelper):
             loss_struct = schema.Struct((prefix, loss))
             self._loss = self._loss + loss_struct
 
+    def add_trainer_extra_schema(self, trainer_extra_schema):
+        trainer_extra_record = schema.NewRecord(self.net, trainer_extra_schema)
+        self._trainer_extra_schema += trainer_extra_record
+
     def __getattr__(self, layer):
         if layer.startswith('__'):
             raise AttributeError(layer)
