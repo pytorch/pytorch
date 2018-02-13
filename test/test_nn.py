@@ -28,7 +28,8 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, \
+    torch_rand, torch_randn, params, apply_params
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file, IS_WINDOWS, PY3
 
@@ -160,7 +161,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             # check if the inplace variant of the module gives the same result
             # as the out-of-place
 
-            module_ip = self.constructor(*self.constructor_args, inplace=True)
+            module_ip = apply_params(self.constructor, self.constructor_args, inplace=True)
 
             input_version = input._version
             with freeze_rng_state():
