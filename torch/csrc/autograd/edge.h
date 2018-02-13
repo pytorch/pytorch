@@ -6,8 +6,7 @@
 
 #include "torch/csrc/utils/hash.h"
 
-namespace torch {
-namespace autograd {
+namespace torch { namespace autograd {
 
 struct Function;
 
@@ -15,8 +14,8 @@ struct Function;
 struct Edge {
   Edge() noexcept : function(nullptr), input_nr(0) {}
 
-  Edge(const std::shared_ptr<Function>& function_, uint32_t input_nr_) noexcept
-      : function(function_), input_nr(input_nr_) {}
+  Edge(std::shared_ptr<Function> function_, uint32_t input_nr_) noexcept
+      : function(std::move(function_)), input_nr(input_nr_) {}
 
   /// Convenience method to test if an edge is valid.
   bool is_valid() const noexcept {
@@ -38,8 +37,7 @@ struct Edge {
   /// The identifier of a particular input to the function.
   uint32_t input_nr;
 };
-} // namespace autograd
-} // namespace torch
+}} // namespace torch::autograd
 
 // The idiomatic way of enabling use of a custom type as the key of hash
 // containers in C++11. This method removes the requirement of having to pass

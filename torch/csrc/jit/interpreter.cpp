@@ -1,11 +1,13 @@
 #include "Python.h"
 #include "interpreter.h"
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/functions/special.h"
@@ -62,12 +64,12 @@ struct HandleBuilder {
   }
   autograd::Variable addInput(at::Retainable* input, const VariableFlags & flags_) {
     if(handle && flags_.requires_grad) {
+      auto gradient_edge = autograd::Edge(
+          handle->forward_inputs, handle->forward_inputs->num_inputs++);
       return autograd::make_variable(
-        unsafeToTensorShare(input),
-        handle->forward_inputs->num_inputs++,
-        handle->forward_inputs);
+          unsafeToTensorShare(input), std::move(gradient_edge));
     } else {
-      return autograd::make_variable(unsafeToTensorShare(input));
+      return autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
     }
   }
   at::Retainable* addOutput(const autograd::Variable & output) {

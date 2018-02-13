@@ -93,14 +93,14 @@ static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
   }
 #ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
-    return autograd::make_variable(tensor_from_numpy(data), false);
+    return autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
   }
 #endif
 
   auto sizes = compute_sizes(data);
-  auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), false);
   // TODO: we should pass tensor.sizes() rather than sizes, but this doesn't works
   // if scalars are disabled because the size changes without WITH_SCALARS.
+  auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), sizes, tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);
@@ -198,7 +198,7 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
 }
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<torch::autograd::Variable&>(self).get()->_requires_grad = requires_grad;
+  static_cast<torch::autograd::Variable&>(self).set_requires_grad(requires_grad);
   return self;
 }
 

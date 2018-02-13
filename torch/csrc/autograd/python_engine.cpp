@@ -142,10 +142,10 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
       THPUtils_assert(THPVariable_Check(input),
           "all inputs have to be Variables, but got %s", THPUtils_typename(input));
       THPVariable *input_var = (THPVariable*)input;
-      int output_nr = input_var->cdata.output_nr();
+      const auto output_nr = input_var->cdata.output_nr();
       auto grad_fn = input_var->cdata.grad_fn();
       if (!grad_fn) {
-          grad_fn = input_var->cdata.get()->grad_accumulator.lock();
+          grad_fn = input_var->cdata.try_get_grad_accumulator();
       }
       THPUtils_assert(input_var->cdata.requires_grad(),
           "One of the differentiated Variables does not require grad");

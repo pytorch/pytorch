@@ -113,7 +113,7 @@ struct CompiledFunction {
       std::size_t num_captured = fn_.captured_vars_.size();
       // Check that no captured Variables were replaced by enter. It's hard to handle that.
       for (std::size_t i = num_all_inputs - num_captured; i < num_all_inputs; ++i) {
-        TORCH_EXPECTM(input_info.vars[i].get() == new_vars[i].get(),
+        TORCH_EXPECTM(input_info.vars[i].is_same(new_vars[i]),
                       "Some of the Variables captured by the JIT are repeated");
       }
       // Now only arguments to this function could have changed. Slice their vars out, and

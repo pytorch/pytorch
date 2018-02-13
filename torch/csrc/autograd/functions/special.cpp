@@ -4,6 +4,7 @@
 #include "torch/csrc/autograd/python_engine.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/edge.h"
 
 #include <cstdint>
 #include <memory>
@@ -264,11 +265,10 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     // This output is already rebased. This happens when there
     // the same Variable has been returned multiple times, and
     // is repeated in this list.
-    if (output.get()->_grad_fn.get() == this) {
+    if (output.grad_fn_unsafe() == this) {
       auto replicate = std::make_shared<Replicate>();
       replicate->next_functions.emplace_back(this_shared, output.output_nr());
-      output.get()->_grad_fn = replicate;
-      output.get()->output_nr = 0;
+      output.set_gradient_edge({std::move(replicate), 0});
       repeated_outputs.emplace(&output);
     }
     // NOTE: this check should be fairly cheap, and the set shouldn't
@@ -277,8 +277,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
       auto & replicate = output.grad_fn();
       replicate->next_functions.emplace_back(this_shared, num_inputs++);
     } else {
-      output.get()->_grad_fn = this_shared;
-      output.get()->output_nr = num_inputs++;
+      output.set_gradient_edge(Edge(this_shared, num_inputs++));
     }
   }
 

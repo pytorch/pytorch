@@ -1,12 +1,11 @@
 #include "torch/csrc/autograd/python_variable.h"
 
-#include <structmember.h>
-
 #include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/python_variable_indexing.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
@@ -16,7 +15,15 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/jit/tracer_state.h"
+
+#include <ATen/ATen.h>
+
+#include <list>
+#include <memory>
+#include <structmember.h>
 
 using namespace at;
 using namespace torch::autograd;
@@ -35,11 +42,13 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
   if (obj) {
     auto v = (THPVariable*) obj;
     new (&v->cdata) Variable(std::move(var));
-    v->cdata.get()->pyobj = obj;
-    if (auto fn = dynamic_cast<PyFunction*>(v->cdata.get()->_grad_fn.get())) {
+    v->cdata.set_pyobj(obj);
+    if (auto fn = dynamic_cast<PyFunction*>(v->cdata.grad_fn_unsafe())) {
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
-      v->cdata.get()->_grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
+      const auto output_nr = v->cdata.output_nr();
+      v->cdata.set_gradient_edge(
+          {THPFunction_asFunction((THPFunction*)fn->obj), output_nr});
     }
   }
   return obj;
@@ -57,7 +66,7 @@ PyObject * THPVariable_Wrap(Variable var)
   }
 #endif
 
-  if (auto obj = var.get()->pyobj) {
+  if (auto obj = var.pyobj()) {
     Py_INCREF(obj);
     return obj;
   }
@@ -84,7 +93,7 @@ static int THPVariable_traverse(THPVariable *self, visitproc visit, void *arg)
   // for more details about the race condition involving traversing the grad_fn
   // and the python GC.
   if (self->cdata.defined()) {
-    for (auto& hook : self->cdata.hooks()) {
+    for (const auto& hook : self->cdata.hooks()) {
       if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
         Py_VISIT(pyhook->dict);
       }
@@ -98,10 +107,10 @@ static int THPVariable_clear(THPVariable *self)
   Py_CLEAR(self->data);
   Py_CLEAR(self->backward_hooks);
   if (self->cdata.defined()) {
-    if (auto grad_acc = self->cdata.get()->grad_accumulator.lock()) {
+    if (auto grad_acc = self->cdata.try_get_grad_accumulator()) {
       grad_acc->pre_hooks.clear();
     }
-    self->cdata.get()->pyobj = nullptr;
+    self->cdata.set_pyobj(nullptr);
   }
   self->cdata.reset();
   return 0;
@@ -154,13 +163,15 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    var = make_variable(torch::createTensor(data), grad_fn_);
+    Edge edge(grad_fn_, grad_fn_->num_inputs++);
+    var = make_variable(torch::createTensor(data), std::move(edge));
   } else {
     var = make_variable(torch::createTensor(data), requires_grad);
   }
 
-  if (name)
-    var.name() = std::string(name);
+  if (name) {
+    var.set_name(name);
+  }
 
   PyObject* self = THPVariable_NewWithVar(type, std::move(var));
   if (self) {
@@ -223,7 +234,7 @@ int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
-  self->cdata.get()->_grad_fn = nullptr;
+  self->cdata.set_gradient_edge(Edge());
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -246,30 +257,6 @@ PyObject * THPVariable_get_data(THPVariable *self)
   END_HANDLE_TH_ERRORS
 }
 
-namespace {
-
-// XXX: This is a hack to access private TensorImpl::type_
-// http://bloglitb.blogspot.com/2011/12/access-to-private-members-safer.html
-// This is currently needed because module.float() changes the type of the
-// data field of each variable. We should fix this and not allow changing the
-// type of var.data.
-
-template<typename Tag, typename Tag::type M>
-struct Rob {
-  friend typename Tag::type get(Tag) {
-    return M;
-  }
-};
-
-struct TensorImpl_Type {
-  typedef Type* TensorImpl::*type;
-  friend type get(TensorImpl_Type);
-};
-
-template struct Rob<TensorImpl_Type, &TensorImpl::type_>;
-
-}
-
 int THPVariable_set_data(THPVariable *self, PyObject *data)
 {
   HANDLE_TH_ERRORS
@@ -282,7 +269,7 @@ int THPVariable_set_data(THPVariable *self, PyObject *data)
   if (&self->cdata.data().type() != &tensor.type()) {
     // we change the type of var.data so we must change the type of var
     auto newType = VariableType::getType(tensor);
-    self->cdata.get()->*get(TensorImpl_Type()) = newType;
+    self->cdata.temporary_hack_set_type(newType);
   }
   self->cdata.data() = tensor;
   return 0;
@@ -301,7 +288,7 @@ int THPVariable_set_grad(THPVariable *self, PyObject *py_grad)
   HANDLE_TH_ERRORS
   auto& var = self->cdata;
   if (py_grad == Py_None) {
-    var.grad().reset();
+    var.reset_grad();
     return 0;
   }
 
@@ -342,7 +329,8 @@ int THPVariable_set_volatile(THPVariable *self, PyObject *obj)
 PyObject *THPVariable_get_output_nr(THPVariable *self)
 {
   HANDLE_TH_ERRORS
-  return PyInt_FromLong(self->cdata.output_nr());
+  const auto output_nr = static_cast<long>(self->cdata.output_nr());
+  return PyInt_FromLong(output_nr);
   END_HANDLE_TH_ERRORS
 }
 
@@ -368,7 +356,7 @@ int THPVariable_set_requires_grad(THPVariable *self, PyObject *obj)
     THPUtils_setError("you can only change requires_grad flags of leaf variables.%s", hint);
     return -1;
   }
-  var.get()->_requires_grad = (obj == Py_True);
+  var.set_requires_grad(obj == Py_True);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
@@ -400,9 +388,9 @@ int THPVariable_set_backwards_hooks(THPVariable *self, PyObject *obj)
   Py_XINCREF(obj);
   Py_XDECREF(self->backward_hooks);
   self->backward_hooks = obj;
-  self->cdata.hooks().clear();
+  self->cdata.clear_hooks();
   if (obj) {
-    self->cdata.hooks().emplace_back(new PyFunctionPreHook(obj, 0));
+    self->cdata.add_hook(std::make_shared<PyFunctionPreHook>(obj, 0));
   }
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)

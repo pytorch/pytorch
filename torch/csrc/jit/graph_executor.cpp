@@ -15,6 +15,7 @@
 #include "torch/csrc/jit/passes/batch_mm.h"
 
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/edge.h"
 
 #include <unordered_map>
 
@@ -82,26 +83,26 @@ private:
   // inplace to avoid allocations
   tensor_list unwrapVariables(variable_tensor_list && list) const {
     for(auto & v : list) {
-      v = v.defined() ? static_cast<Variable&>(v).data() : at::Tensor();
+      v = v.defined() ? autograd::as_variable_ref(v).data() : at::Tensor();
     }
     return std::move(list);
   }
   // inplace to avoid allocations
   variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
-      v = autograd::make_variable(v);
+      v = autograd::make_variable(v, /*requires_grad=*/false);
     }
     return variable_tensor_list(std::move(list));
   }
   // Capture (save) inputs that would be required to subsequently run backwards
   void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) const {
     for(auto offset : grad.df_input_captured_inputs) {
-      grad_fn.captures.emplace_back(static_cast<Variable&>(inputs[offset]), false);
+      grad_fn.captures.emplace_back(autograd::as_variable_ref(inputs[offset]), false);
     }
   }
   void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & outputs) const {
     for(auto offset : grad.df_input_captured_outputs) {
-      grad_fn.captures.emplace_back(static_cast<Variable&>(outputs[offset]), true);
+      grad_fn.captures.emplace_back(autograd::as_variable_ref(outputs[offset]), true);
     }
   }
 
@@ -111,7 +112,7 @@ private:
     // hook up the outputs of df to the gradient functions of the inputs that require
     // gradients
     for(auto idx : grad.df_output_vjps) {
-      auto & v = static_cast<Variable&>(inputs[idx]);
+      auto & v = autograd::as_variable_ref(inputs[idx]);
       // TODO: this kinda stuff is _way_ to low level to the public API of variable.
       // Why do I have to care here whether v has a grad_fn or grad accumulator?
       // Why do I have to care here about output_nr? I just want to say
@@ -133,15 +134,12 @@ private:
     // this is currently intentionally not done here so we can get an idea of our
     // perf before introducing overhead for correctness
     for(auto idx : grad.df_input_vjps) {
-      auto & o = static_cast<Variable&>(outputs[idx]);
-      auto impl = o.get();
-      // Note: we have to set this up in place, or we have to
-      // throw away and reallocate variables that were already created in
-      // wrapTensors. We should add an API for this, and more generally
-      // we need to clean up the fields of Variable.
-      impl->_grad_fn = grad_fn;
-      impl->output_nr = grad_fn->num_inputs++;
-      impl->_requires_grad = true;
+      // Note: we have to set this up in place, or we have to throw away and
+      // reallocate variables that were already created in wrapTensors. We
+      // should add an API for this.
+      auto& output = autograd::as_variable_ref(outputs[idx]);
+      output.set_gradient_edge(autograd::Edge(grad_fn, grad_fn->num_inputs++));
+      output.set_requires_grad(true);
     }
     captureOutputs(*grad_fn, outputs);
     // drop the temporary outputs so that we return the same number of

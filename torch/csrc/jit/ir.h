@@ -437,7 +437,7 @@ public:
     return outputs_.back();
   }
   void eraseOutput(size_t i);
-  
+
   Block * addBlock();
   void eraseBlock(size_t i);
 
