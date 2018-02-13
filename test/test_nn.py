@@ -1305,7 +1305,7 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st_cuda(self, dtype=torch.FloatTensor):
         self._test_gumbel_softmax_st(True, dtype=dtype)
 
-    def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.FloatTensor):
+    def _test_EmbeddingBag(self, cuda, mode, sparse, dtype=torch.DoubleTensor):
         # check a known test example
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
