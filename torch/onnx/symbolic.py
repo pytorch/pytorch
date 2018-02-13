@@ -534,6 +534,12 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
+def slice(g, self, dim, start, end, step):
+    if step != 1:
+        _unimplemented("slice", "step!=1 is currently not supported")
+    return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
 def instance_norm(g, input, **kwargs):
     input_type = input.type().scalarType()
     weight = kwargs.get("weight", None)
