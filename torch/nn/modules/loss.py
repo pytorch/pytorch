@@ -58,7 +58,7 @@ class L1Loss(_Loss):
            each minibatch. Ignored when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed
            for each minibatch. When reduce is ``False``, the loss function returns
-           a loss per batch element instead and ignores size_average.
+           a loss per input/target element instead and ignores size_average.
            Default: ``True``
 
     Shape:
@@ -145,7 +145,7 @@ class NLLLoss(_WeightedLoss):
             non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed
             for each minibatch. When :attr:`reduce` is ``False``, the loss
-            function returns a loss per batch element instead and
+            function returns a loss per batch instead and
             ignores :attr:`size_average`. Default: ``True``
 
     Shape:
@@ -229,7 +229,7 @@ class PoissonNLLLoss(_Loss):
             log_input==``False``. Default: 1e-8
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
-            size_average. When reduce is ``False``, returns a loss per batch
+            size_average. When reduce is ``False``, returns a loss per input/target
             element instead and ignores size_average. Default: ``True``
 
     Examples::
@@ -294,7 +294,7 @@ class KLDivLoss(_Loss):
             dimensions. However, if ``False`` the losses are instead summed.
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
-            size_average. When reduce is ``False``, returns a loss per batch
+            size_average. When reduce is ``False``, returns a loss per input/target
             element instead and ignores size_average. Default: ``True``
 
     Shape:
@@ -348,7 +348,7 @@ class MSELoss(_Loss):
            each minibatch. Only applies when reduce is ``True``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged
            over observations for each minibatch, or summed, depending on
-           size_average. When reduce is ``False``, returns a loss per batch
+           size_average. When reduce is ``False``, returns a loss per input/target
            element instead and ignores size_average. Default: ``True``
 
     Shape:
@@ -405,7 +405,7 @@ class BCELoss(_WeightedLoss):
             each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per batch element instead and ignores
+            is False, returns a loss per input/target element instead and ignores
             size_average. Default: True
 
     Shape:
@@ -470,7 +470,7 @@ class BCEWithLogitsLoss(Module):
             each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per batch element instead and ignores
+            is False, returns a loss per input/target element instead and ignores
             size_average. Default: True
 
      Shape:
@@ -624,7 +624,8 @@ class SmoothL1Loss(_Loss):
            the losses are instead summed. Ignored when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed
            over elements. When reduce is ``False``, the loss function returns
-           a loss per element instead and ignores size_average. Default: ``True``
+           a loss per input/target element instead and ignores size_average.
+           Default: ``True``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -716,7 +717,7 @@ class CrossEntropyLoss(_WeightedLoss):
             ``True``, the loss is averaged over non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
-            is ``False``, returns a loss per batch element instead and ignores
+            is ``False``, returns a loss per batch instead and ignores
             size_average. Default: ``True``
 
     Shape:
