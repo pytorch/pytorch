@@ -44,5 +44,6 @@ def image_input(
 
 
 def video_input(model, blob_in, blob_out, **kwargs):
-    data, label = model.net.VideoInput(blob_in, blob_out, **kwargs)
-    return data, label
+    # size of outputs can vary depending on kwargs
+    outputs = model.net.VideoInput(blob_in, blob_out, **kwargs)
+    return outputs

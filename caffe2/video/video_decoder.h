@@ -45,13 +45,14 @@ enum SpecialFps {
 
 // three different types of resolution when decoding the video
 // 0: resize to width x height and ignore the aspect ratio;
-// 1: resize to short_edge and keep the aspect ratio;
+// 1: resize to make size at least (width x height) and keep the aspect ratio;
 // 2: using the original resolution of the video; if resolution
-//    is smaller than crop_size x crop_size, resize to crop_size
+//    is smaller than crop_height x crop_width, resize to ensure
+//    new height >= crop_height and new width >= crop_width
 //    and keep the aspect ratio;
 enum VideoResType {
   USE_WIDTH_HEIGHT = 0,
-  USE_SHORT_EDGE = 1,
+  USE_MINIMAL_WIDTH_HEIGHT = 1,
   ORIGINAL_RES = 2,
 };
 
@@ -100,8 +101,10 @@ class Params {
 
   // params for video resolution
   int video_res_type_ = VideoResType::USE_WIDTH_HEIGHT;
-  int crop_size_ = -1;
-  int short_edge_ = -1;
+  int crop_height_ = -1;
+  int crop_width_ = -1;
+  int height_min_ = -1;
+  int width_min_ = -1;
   int scale_w_ = -1;
   int scale_h_ = -1;
 
@@ -396,11 +399,12 @@ class VideoDecoder {
   std::string ffmpegErrorStr(int result);
 
   void ResizeAndKeepAspectRatio(
-      const int origWidth,
       const int origHeight,
-      const int short_edge,
-      int& outWidth,
-      int& outHeight);
+      const int origWidth,
+      const int heightMin,
+      const int widthMin,
+      int& outHeight,
+      int& outWidth);
 
   void decodeLoop(
       const std::string& videoName,

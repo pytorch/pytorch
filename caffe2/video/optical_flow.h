@@ -48,14 +48,6 @@ enum FlowDataType {
   FlowWithRGB = 3,
 };
 
-// mean and std for normalizing different optical flow data type;
-// Note that the statistics are generated from SOA, and you may
-// want to change them if you are running on a different dataset;
-const std::vector<float> InputDataMean =
-    {0.0046635, 0.0046261, 0.963986, 102.976, 110.201, 100.64, 95.9966};
-const std::vector<float> InputDataStd =
-    {0.972347, 0.755146, 1.43588, 55.3691, 58.1489, 56.4701, 55.3324};
-
 void OpticalFlowExtractor(
     const cv::Mat& prev_gray,
     const cv::Mat& curr_gray,
