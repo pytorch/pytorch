@@ -376,8 +376,16 @@ static void _wrap_outputs(THPFunction *self,
 
   // Sets the grad_fn and output_nr of an output Variable.
   auto set_history = [&](Variable& var, int output_nr, bool is_input, bool is_modified,
-                         bool is_non_differentiable) {
-    if (is_non_differentiable) {
+                         bool is_differentiable) {
+    if (!is_differentiable) {
+      if (!var.requires_grad()) return;
+      // NB: we don't support returning non-differentiable views that could require grad
+      // (this could happen if someone were to return an input to the function).
+      if (var.is_view()) {
+        throw std::runtime_error("Returning Variables sharing storage with other Variables "
+                                 "that require grad is not supported in Python functions. "
+                                 "Please submit a feature request if you hit this error.");
+      }
       var.detach_();
     } else if (is_modified) {
       if (var.is_leaf() && var.requires_grad()) {
@@ -411,12 +419,12 @@ static void _wrap_outputs(THPFunction *self,
 
     bool is_input = inputs.count(obj) > 0;
     bool is_modified = std::find(dirty_inputs.begin(), dirty_inputs.end(), obj) != dirty_inputs.end();
-    bool is_non_differentiable = non_differentiable.count(obj) > 0;
+    bool is_differentiable = is_executable && non_differentiable.count(obj) == 0;
 
     // Note that output Variables may be repeated. In that case, the last call
     // to set_history wins.
     auto var = as_variable(obj, i);
-    set_history(var, i, is_input, is_modified, is_non_differentiable);
+    set_history(var, i, is_input, is_modified, is_differentiable);
 
     if (is_executable) {
       self->output_info.emplace_back(var);
@@ -528,7 +536,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
     PyTuple_SET_ITEM(unpacked.input_tuple.get(), i, arg);
   }
 
-  flags.is_executable = any_variable_requires_grad(unpacked.input_vars);
+  flags.is_executable = GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
   flags.next_functions = get_next_functions(unpacked.input_vars);
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
@@ -679,11 +687,14 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   _assert_not_tracing(Py_TYPE(self)->tp_name, unpacked_input.input_vars);
 
   // Now we're ready to call a forward (implemented in Python)
-  AutoGradMode grad_mode(false);
-  THPObjectPtr forward_fn(PyObject_GetAttrString((PyObject*)self, "forward"));
-  if (!forward_fn) return nullptr;
-  THPObjectPtr raw_output(PyObject_CallObject(forward_fn, unpacked_input.input_tuple));
-  if (!raw_output) return nullptr;
+  THPObjectPtr raw_output;
+  {
+    AutoGradMode grad_mode(false);
+    THPObjectPtr forward_fn(PyObject_GetAttrString((PyObject*)self, "forward"));
+    if (!forward_fn) return nullptr;
+    raw_output = PyObject_CallObject(forward_fn, unpacked_input.input_tuple);
+    if (!raw_output) return nullptr;
+  }
 
   return process_outputs(nullptr, self, unpacked_input, _inputs, std::move(raw_output),
                          is_executable, jit::tracer::PreTraceInfo());
@@ -730,11 +741,14 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
   }
 
   // Call forward
-  AutoGradMode grad_mode(false);
-  THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
-  if (!forward_fn) return nullptr;
-  THPObjectPtr tensor_outputs(PyObject_CallObject(forward_fn, ctx_input_tuple));
-  if (!tensor_outputs) return nullptr;
+  THPObjectPtr tensor_outputs;
+  {
+    AutoGradMode grad_mode(false);
+    THPObjectPtr forward_fn(PyObject_GetAttrString(cls, "forward"));
+    if (!forward_fn) return nullptr;
+    tensor_outputs = PyObject_CallObject(forward_fn, ctx_input_tuple);
+    if (!tensor_outputs) return nullptr;
+  }
 
   return process_outputs(cls, ctx, unpacked_input, inputs, std::move(tensor_outputs),
                          is_executable, trace_info);

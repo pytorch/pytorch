@@ -629,6 +629,23 @@ class TestAutograd(TestCase):
         self.assertRaises(RuntimeError, lambda: w.backward(torch.ones(5, 5)))
         self.assertIsNone(w.grad_fn)
 
+    def test_no_grad_python_function(self):
+        """Python Functions should respect grad mode."""
+        x = Variable(torch.ones(5, 5), requires_grad=True)
+
+        class MyOp(Function):
+            @staticmethod
+            def forward(self, x):
+                return x + 1
+
+            @staticmethod
+            def backward(self, dy):
+                return dy
+
+        with torch.no_grad():
+            y = MyOp.apply(x)
+        self.assertFalse(y.requires_grad)
+
     def test_indexing(self):
         x = torch.arange(1, 17).view(4, 4)
         y = Variable(x, requires_grad=True)
