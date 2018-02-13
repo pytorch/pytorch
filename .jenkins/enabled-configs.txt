@@ -1,0 +1,9 @@
+# This file contains a list of enabled configurations
+# to perform tests on.  If you want to run tests on CI on
+# a limited set of tests before enabling the full test suite,
+# you can delete lines from this file.  Any test that is not
+# in this file will report a failure (so you don't forget to
+# reenable the tests on merge ;)
+
+pytorch-linux-trusty-py3.5-build
+pytorch-linux-trusty-py3.5-test

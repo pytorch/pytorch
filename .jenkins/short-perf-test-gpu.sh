@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 cd .jenkins/perf_test
 
@@ -10,8 +10,6 @@ export LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:$LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 echo "Running GPU perf test for PyTorch..."
-
-echo "ENTERED_USER_LAND"
 
 # Include tests
 . ./test_gpu_speed_mnist.sh
@@ -26,5 +24,3 @@ run_test test_gpu_speed_word_language_model compare_with_baseline
 run_test test_gpu_speed_cudnn_lstm compare_with_baseline
 run_test test_gpu_speed_lstm compare_with_baseline
 run_test test_gpu_speed_mlstm compare_with_baseline
-
-echo "EXITED_USER_LAND"

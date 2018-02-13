@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
@@ -77,4 +77,4 @@ sh run_test.sh
 
 EOL
 
-echo "ENTERED_USER_LAND" && ci_scripts/test_pytorch.bat && echo "EXITED_USER_LAND" && echo "TEST PASSED"
+ci_scripts/test_pytorch.bat && echo "TEST PASSED"

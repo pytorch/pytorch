@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
@@ -80,4 +80,4 @@ python setup.py install && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\L
 
 EOL
 
-echo "ENTERED_USER_LAND" && ci_scripts/build_pytorch.bat && echo "EXITED_USER_LAND" && echo "BUILD PASSED"
+ci_scripts/build_pytorch.bat && echo "BUILD PASSED"

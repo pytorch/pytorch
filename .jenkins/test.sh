@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Required environment variables:
 #   $JOB_NAME
@@ -34,8 +34,6 @@ else
    pip install pillow
 fi
 
-echo "ENTERED_USER_LAND"
-
 echo "Testing pytorch"
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
@@ -54,5 +52,3 @@ rm -rf ninja
 pushd vision
 time python setup.py install
 popd
-
-echo "EXITED_USER_LAND"
