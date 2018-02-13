@@ -7,6 +7,7 @@ from .sampler import SequentialSampler, RandomSampler, BatchSampler
 import signal
 import functools
 import collections
+import itertools
 import re
 import sys
 import threading
@@ -198,7 +199,13 @@ class DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queue = multiprocessing.SimpleQueue()
+            self.ind_worker_queue = loader.ind_worker_queue
+            if self.ind_worker_queue:
+                self.index_queue = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
+                self.worker_queue_binding = itertools.cycle(range(self.num_workers))
+            else:
+                self.index_queue = [multiprocessing.SimpleQueue()]
+                self.worker_queue_binding = itertools.cycle([0])
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
@@ -211,8 +218,9 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
-                          base_seed + i, self.worker_init_fn, i))
+                    args=(self.dataset, self.index_queue[next(self.worker_queue_binding)],
+                          self.worker_result_queue, self.collate_fn, base_seed + i,
+                          self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
@@ -292,7 +300,7 @@ class DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue.put((self.send_idx, indices))
+        self.index_queue[next(self.worker_queue_binding)].put((self.send_idx, indices))
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -326,7 +334,8 @@ class DataLoaderIter(object):
                     # from the worker side (e.g. due to Python shutting down).
                     pass
                 for _ in self.workers:
-                    self.index_queue.put(None)
+                    for q in self.index_queue:
+                        q.put(None)
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
@@ -372,6 +381,8 @@ class DataLoader(object):
         worker_init_fn (callable, optional): If not None, this will be called on each
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: None)
+        ind_worker_queue (bool, optional): If ``True``, the worker will binded to invididual
+            processing queue. (default: False)
 
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
@@ -385,7 +396,7 @@ class DataLoader(object):
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
-                 timeout=0, worker_init_fn=None):
+                 timeout=0, worker_init_fn=None, ind_worker_queue=False):
         self.dataset = dataset
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -394,6 +405,7 @@ class DataLoader(object):
         self.drop_last = drop_last
         self.timeout = timeout
         self.worker_init_fn = worker_init_fn
+        self.ind_worker_queue = ind_worker_queue
 
         if timeout < 0:
             raise ValueError('timeout option should be non-negative')
