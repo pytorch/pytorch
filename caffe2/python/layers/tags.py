@@ -56,14 +56,28 @@ class Tags(object):
     PREFER_GPU = 'prefer_gpu'
     CPU_ONLY = 'cpu_only'
 
-    # The following two tags are hints to **distributed training framework**.
-    # The first tag is to determine a layer contains a sparse parameter and the
-    # parameter should be sharded and operators on those parameters should be
-    # done on distributed parameter servers. The second tag is to determine a
-    # layer contains a sparse parameters among others, and that the parameters
-    # should not be sharded (i.e. should be placed together on a node)
+    # The following three tags are hints to **distributed training framework**.
+    """
+    Indicates a layer contains a sparse shardable parameter.  The parameter
+    should be sharded nd operators on those parameters should be done on
+    distributed parameter servers.
+    """
     SPARSE_SHARDED = 'sparse_sharded'
+    """
+    Indicates a layer contains a sparse parameters among others, and that the
+    parameters should not be sharded (i.e. should be placed together on a node).
+    """
     SPARSE_DONT_SHARD = 'sparse_dont_shard'
+    """
+    Used to manually indicate a component for an operator.  Parameters for
+    all operators with the same component should be colocated on the same
+    parameter server.
+    """
+    COMPONENT = 'component:'
+    """
+    Valid tag prefixes for distributed training framework.
+    """
+    DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
 
     # In certain cases we want to have different schema for training and
     # prediction, as an example in prediction we might need to have only
