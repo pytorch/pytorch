@@ -619,6 +619,7 @@ criterion_tests = [
     dict(
         module_name='MultiMarginLoss',
         constructor_args=(1, 0.5),
+        legacy_constructor_args=(1, None, 0.5),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
@@ -630,6 +631,7 @@ criterion_tests = [
     dict(
         module_name='MultiMarginLoss',
         constructor_args=(1, 1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10)),
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:

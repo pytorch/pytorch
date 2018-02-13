@@ -4,7 +4,7 @@ from .Criterion import Criterion
 
 class MultiMarginCriterion(Criterion):
 
-    def __init__(self, p=1, margin=1, weights=None, sizeAverage=True):
+    def __init__(self, p=1, weights=None, margin=1, sizeAverage=True):
         super(MultiMarginCriterion, self).__init__()
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")

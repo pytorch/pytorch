@@ -853,7 +853,7 @@ class MultiMarginLoss(_WeightedLoss):
         loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] + x[i]))^p) / x.size(0)
                      where `i == 0` to `x.size(0)` and `i != y`.
 
-    Args:A
+    Args:
         p (int, optional): Has a default value of `1`. `1` and `2` are the only
             supported values
         margin (float, optional): Has a default value of `1`.
