@@ -7,6 +7,13 @@ if [ -z "$PYTHON_VERSION" ]; then
   exit 1
 fi
 
+install_ubuntu_deadsnakes() {
+  apt-get install -y --no-install-recommends software-properties-common
+  add-apt-repository ppa:deadsnakes/ppa
+  apt-get update
+  apt-get install -y --no-install-recommends "$1"
+}
+
 install_ubuntu() {
   apt-get update
 
@@ -17,17 +24,32 @@ install_ubuntu() {
               python-setuptools
       PYTHON=python2
       ;;
-    3*)
+    3.5)
       apt-get install -y --no-install-recommends \
               python3-dev \
               python3-setuptools
-      PYTHON=python3
+      PYTHON=python3.5
+      ;;
+    3.6)
+      install_ubuntu_deadsnakes python3.6-dev
+      PYTHON=python3.6
+      INSTALL_SETUPTOOLS=yes
+      ;;
+    3.7)
+      install_ubuntu_deadsnakes python3.7-dev
+      PYTHON=python3.7
+      INSTALL_SETUPTOOLS=yes
       ;;
     *)
       echo "Invalid PYTHON_VERSION..."
       exit 1
       ;;
   esac
+
+  # Have to install unzip if installing setuptools
+  if [ -n "${INSTALL_SETUPTOOLS}" ]; then
+    apt-get install -y --no-install-recommends unzip
+  fi
 
   # Clean up
   apt-get autoclean && apt-get clean
@@ -48,7 +70,7 @@ install_centos() {
           python-setuptools
       PYTHON=python2
       ;;
-    3*)
+    3.4)
       yum install -y \
           python34-devel \
           python34-setuptools
@@ -75,6 +97,18 @@ elif [ -f /etc/os-release ]; then
 else
   echo "Unable to determine OS..."
   exit 1
+fi
+
+# Optionally install setuptools from source.
+# This is required for the non-standard Python version
+# installed on Ubuntu. They
+if [ -n "${INSTALL_SETUPTOOLS}" ]; then
+  curl -O https://pypi.python.org/packages/6c/54/f7e9cea6897636a04e74c3954f0d8335cc38f7d01e27eec98026b049a300/setuptools-38.5.1.zip
+  unzip setuptools-38.5.1.zip
+  pushd setuptools-38.5.1
+  "$PYTHON" setup.py install
+  popd
+  rm -rf setuptools-38.5.1*
 fi
 
 # Install pip from source.
