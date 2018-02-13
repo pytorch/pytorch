@@ -16,8 +16,16 @@ export PATH=/opt/conda/bin:$PATH
 if [[ "$JOB_NAME" != *cuda* ]]; then
    export PATH=/opt/python/${PYTHON_VERSION}/bin:$PATH
    export LD_LIBRARY_PATH=/opt/python/${PYTHON_VERSION}/lib:$LD_LIBRARY_PATH
-   export CC="ccache /usr/bin/gcc-${GCC_VERSION}"
-   export CXX="ccache /usr/bin/g++-${GCC_VERSION}"
+   export CC="sccache /usr/bin/gcc-${GCC_VERSION}"
+   export CXX="sccache /usr/bin/g++-${GCC_VERSION}"
+
+   sccache --show-stats
+
+   function sccache_epilogue() {
+      sccache --show-stats
+   }
+   trap_add sccache_epilogue EXIT
+
 else
    # CMake should use ccache symlink for nvcc
    export CUDA_NVCC_EXECUTABLE=/usr/local/bin/nvcc
