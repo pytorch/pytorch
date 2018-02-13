@@ -13,11 +13,22 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH=/opt/conda/bin:$PATH
 
+# Install sccache binaries
+pushd /tmp
+SCCACHE_BASE_URL="https://github.com/mozilla/sccache/releases/download/"
+SCCACHE_VERSION="0.2.5"
+SCCACHE_BASE="sccache-${SCCACHE_VERSION}-x86_64-unknown-linux-musl"
+SCCACHE_FILE="$SCCACHE_BASE.tar.gz"
+wget -q "$SCCACHE_BASE_URL/$SCCACHE_VERSION/$SCCACHE_FILE"
+tar xzf $SCCACHE_FILE
+sudo mv "$SCCACHE_BASE/sccache" /usr/local/bin
+popd
+
 if [[ "$JOB_NAME" != *cuda* ]]; then
    export PATH=/opt/python/${PYTHON_VERSION}/bin:$PATH
    export LD_LIBRARY_PATH=/opt/python/${PYTHON_VERSION}/lib:$LD_LIBRARY_PATH
-   export CC="ccache /usr/bin/gcc-${GCC_VERSION}"
-   export CXX="ccache /usr/bin/g++-${GCC_VERSION}"
+   export CC="/usr/local/bin/sccache ccache /usr/bin/gcc-${GCC_VERSION}"
+   export CXX="/usr/local/bin/sccache ccache /usr/bin/g++-${GCC_VERSION}"
 else
    # CMake should use ccache symlink for nvcc
    export CUDA_NVCC_EXECUTABLE=/usr/local/bin/nvcc

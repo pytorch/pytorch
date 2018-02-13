@@ -5,26 +5,5 @@
 # in this file will report a failure (so you don't forget to
 # reenable the tests on merge ;)
 
-pytorch-linux-xenial-cuda8-cudnn6-py3-build
-pytorch-linux-xenial-cuda8-cudnn6-py3-test
-pytorch-linux-xenial-cuda9-cudnn7-py2-build
-pytorch-linux-xenial-cuda9-cudnn7-py2-test
-pytorch-linux-xenial-cuda9-cudnn7-py3-build
-pytorch-linux-xenial-cuda9-cudnn7-py3-test
-pytorch-linux-trusty-py2.7.9-build
-pytorch-linux-trusty-py2.7.9-test
-pytorch-linux-trusty-py2.7-build
-pytorch-linux-trusty-py2.7-test
 pytorch-linux-trusty-py3.5-build
 pytorch-linux-trusty-py3.5-test
-pytorch-linux-trusty-py3.6-gcc4.8-build
-pytorch-linux-trusty-py3.6-gcc4.8-test
-pytorch-linux-trusty-py3.6-gcc5.4-build
-pytorch-linux-trusty-py3.6-gcc5.4-test
-pytorch-linux-trusty-py3.6-gcc7.2-build
-pytorch-linux-trusty-py3.6-gcc7.2-test
-pytorch-linux-trusty-pynightly-build
-pytorch-linux-trusty-pynightly-test
-pytorch-win-ws2016-cuda9-cudnn7-py3-build
-pytorch-win-ws2016-cuda9-cudnn7-py3-test
-pytorch-macos-10.13-py3-build-test
