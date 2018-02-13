@@ -14,3 +14,12 @@ pushd ccache
 make "-j$(nproc)" install
 popd
 popd
+
+# Install sccache from binary release.
+# Note: this release does NOT yet work with nvcc.
+pushd /tmp
+curl -LOs https://github.com/mozilla/sccache/releases/download/0.2.5/sccache-0.2.5-x86_64-unknown-linux-musl.tar.gz
+tar -zxvf sccache-0.2.5-x86_64-unknown-linux-musl.tar.gz
+mv sccache-0.2.5-x86_64-unknown-linux-musl/sccache /usr/local/bin/sccache
+rm -rf sccache-0.2.5-x86_64-unknown-linux-musl*
+popd
