@@ -213,8 +213,9 @@ class LayerModelHelper(model_helper.ModelHelper):
         if shape != ref_shape:
             raise ValueError(
                 "Got inconsistent shapes between shared parameters "
-                "when trying to map a blob in scope {0} to {1}.".format(
-                    scope.CurrentNameScope(), param_name)
+                "when trying to map a blob in scope {0} to {1}. ref_shape : "
+                " {2}, shape : {3}".format(
+                    scope.CurrentNameScope(), param_name, ref_shape, shape)
             )
 
     def create_param(self, param_name, shape, initializer, optimizer=None,
