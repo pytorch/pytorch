@@ -1175,6 +1175,23 @@ class TestJit(TestCase):
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
 
+    def test_batch_mm(self):
+        total = ""
+        for maybe_t in [lambda x: x, lambda x: x.t()]:
+            As = [Variable(torch.randn(3, 5)) for _ in range(3)]
+            Bs = [Variable(torch.randn(5, 4)) for _ in range(3)]
+
+            @torch.jit.compile(nderivs=0)
+            def fn(*flat_inputs):
+                As = flat_inputs[:len(flat_inputs) // 2]
+                Bs = flat_inputs[len(flat_inputs) // 2:]
+                return sum((A.mm(B).t() for A, B in zip(As[1:], Bs[1:])), As[0].mm(Bs[0]).t())
+
+            inputs = As + Bs
+            fn(*inputs)
+            total += str(fn.graph_for(*inputs))
+        self.assertExpected(total)
+
     def test_nested_inplace(self):
         x = Variable(torch.randn(2, 2))
         trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)

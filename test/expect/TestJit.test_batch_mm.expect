@@ -1,0 +1,24 @@
+graph(%0 : Double(3, 5)
+      %1 : Double(3, 5)
+      %2 : Double(3, 5)
+      %3 : Double(5, 4)
+      %4 : Double(5, 4)
+      %5 : Double(5, 4)) {
+  %14 : Double(3, 15) = cat[dim=1](%2, %1, %0)
+  %15 : Double(15, 4) = cat[dim=0](%5, %4, %3)
+  %16 : Double(4, 3) = mm(%14, %15)
+  %17 : Double(3!, 4!) = t(%16)
+  return (%17);
+}
+graph(%0 : Double(3, 5)
+      %1 : Double(3, 5)
+      %2 : Double(3, 5)
+      %3 : Double(5, 4)
+      %4 : Double(5, 4)
+      %5 : Double(5, 4)) {
+  %14 : Double(3, 15) = cat[dim=1](%2, %1, %0)
+  %15 : Double(15, 4) = cat[dim=0](%5, %4, %3)
+  %16 : Double(4, 3) = mm(%14, %15)
+  %17 : Double(3!, 4!) = t(%16)
+  return (%17);
+}
