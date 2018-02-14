@@ -816,6 +816,18 @@ class TestNN(NNTestCase):
         self.assertEqual(n.linear1, l4)
         self.assertEqual(n.linear3, l4)
 
+    def test_Sequential_delitem(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        l5 = nn.Linear(50, 60)
+        n = nn.Sequential(l1, l2, l3, l4)
+        del n[-1]
+        self.assertEqual(n, nn.Sequential(l1, l2, l3))
+        del n[1::2]
+        self.assertEqual(n, nn.Sequential(l1, l3))
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
@@ -848,6 +860,10 @@ class TestNN(NNTestCase):
         self.assertEqual(module_list[:-1], nn.ModuleList(modules[:-1]))
         self.assertEqual(module_list[:-3], nn.ModuleList(modules[:-3]))
         self.assertEqual(module_list[::-1], nn.ModuleList(modules[::-1]))
+        del module_list[-1]
+        self.assertEqual(module_list, nn.ModuleList(modules[:-1]))
+        del module_list[1::2]
+        self.assertEqual(module_list, nn.ModuleList(modules[:-1][0::2]))
 
         with self.assertRaises(TypeError):
             module_list += nn.ReLU()
