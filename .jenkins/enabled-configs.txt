@@ -28,3 +28,5 @@ pytorch-linux-trusty-pynightly-test
 pytorch-win-ws2016-cuda9-cudnn7-py3-build
 pytorch-win-ws2016-cuda9-cudnn7-py3-test
 pytorch-macos-10.13-py3-build-test
+short-perf-test-cpu
+short-perf-test-gpu
