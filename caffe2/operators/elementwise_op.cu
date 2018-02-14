@@ -113,6 +113,16 @@ CUDA_FUNCTOR(Or, CUDA_OR, BoolTypes, FixedType<bool>);
 CUDA_FUNCTOR(Xor, CUDA_XOR, BoolTypes, FixedType<bool>);
 #undef CUDA_XOR
 
+// pow, log and other math functions are defined in CUDA math library
+// in header file math.h
+#define CUDA_POW(x, y) (pow(x, y))
+CUDA_FUNCTOR(
+    Pow,
+    CUDA_POW,
+    TensorTypes<float> /*NumericTypes*/,
+    SameTypeAsInput);
+#undef CUDA_POW
+
 __global__ void NotKernel(const int n, const bool* x, bool* y) {
   CUDA_1D_KERNEL_LOOP(i, n) {
     y[i] = !x[i];
