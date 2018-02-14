@@ -1107,27 +1107,6 @@ class TestOperators(hu.HypothesisTestCase):
             reference=log_ref)
         self.assertGradientChecks(gc, op, [input_tensor], 0, [0])
 
-    @given(input_tensors=hu.tensors(n=2, elements=st.floats(min_value=2.0, max_value=3.0, allow_nan=False, allow_infinity=False)),
-           **hu.gcs_cpu_only)
-    def test_powt(self, input_tensors, gc, dc):
-        X1, X2 = input_tensors
-
-        op = core.CreateOperator(
-            "Pow",
-            ["X1", "X2"],
-            ["output"]
-        )
-
-        def powt_ref(X1, X2):
-            return (np.power(X1,X2),)
-
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X1, X2],
-            reference=powt_ref)
-        self.assertGradientChecks(gc, op, [X1, X2], 0, [0])
-
     def test_blobs_dequeue_timeout(self):
         op = core.CreateOperator(
             "CreateBlobsQueue",
