@@ -72,7 +72,8 @@ class Bernoulli(ExponentialFamily):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        return torch.bernoulli(self.probs.expand(shape))
+        with torch.no_grad():
+            return torch.bernoulli(self.probs.expand(shape))
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
