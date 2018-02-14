@@ -67,6 +67,8 @@ struct TypeNameRegisterer {
   TypeNameRegisterer(CaffeTypeId id, const string& literal_name) {
     std::lock_guard<std::mutex> guard(gCaffe2TypeRegistrationMutex());
 #ifdef __GXX_RTTI
+    (void)literal_name;
+
     string name = Demangle(typeid(T).name());
     // If we are in RTTI mode, we will also use this opportunity to do sanity
     // check if there are duplicated ids registered for the same type. This
