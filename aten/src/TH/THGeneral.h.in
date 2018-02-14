@@ -1,6 +1,8 @@
 #ifndef TH_GENERAL_INC
 #define TH_GENERAL_INC
 
+#define __STDC_FORMAT_MACROS
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
