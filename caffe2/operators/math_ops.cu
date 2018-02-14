@@ -52,4 +52,7 @@ REGISTER_CUDA_OPERATOR(
 REGISTER_CUDA_OPERATOR(
     Sign,
     UnaryElementwiseOp<TensorTypes<float>, CUDAContext, SignCUDAFunctor>);
+REGISTER_CUDA_OPERATOR(
+    Pow,
+    UnaryElementwiseWithArgsOp<TensorTypes<float>, CUDAContext, PowFunctor>);
 }
