@@ -82,6 +82,22 @@ if(USE_NNPACK)
   endif()
 endif()
 
+
+# ---[ On Android, Caffe2 uses cpufeatures library in the thread pool
+if (ANDROID)
+  # ---[ Check if cpufeatures was already imported
+  if (NOT TARGET cpufeatures)
+    add_library(cpufeatures STATIC
+      "${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c")
+    target_include_directories(cpufeatures
+      PUBLIC "${ANDROID_NDK}/sources/android/cpufeatures")
+    target_link_libraries(cpufeatures PRIVATE dl)
+  endif()
+  list(APPEND Caffe2_DEPENDENCY_LIBS $<TARGET_FILE:cpufeatures>)
+  list(APPEND Caffe2_EXTERNAL_DEPENDENCIES cpufeatures)
+  caffe2_include_directories("${ANDROID_NDK}/sources/android/cpufeatures")
+endif()
+
 # ---[ gflags
 if(USE_GFLAGS)
   include(cmake/public/gflags.cmake)
