@@ -178,10 +178,10 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _testMath(self, torchfn, mathfn):
+    def _testMath(self, torchfn, mathfn, cast=lambda x: x):
         size = (10, 5)
         # contiguous
-        m1 = torch.randn(*size)
+        m1 = cast(torch.randn(*size))
         res1 = torchfn(m1[4])
         res2 = res1.clone().zero_()
         for i, v in enumerate(m1[4]):
@@ -189,7 +189,7 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
         # non-contiguous
-        m1 = torch.randn(*size)
+        m1 = cast(torch.randn(*size))
         res1 = torchfn(m1[:, 4])
         res2 = res1.clone().zero_()
         for i, v in enumerate(m1[:, 4]):
@@ -214,6 +214,7 @@ class TestTorch(TestCase):
     def test_digamma(self):
         from scipy.special import digamma
         self._testMath(torch.digamma, digamma)
+        self._testMath(torch.digamma, digamma, lambda x: x.double())
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_polygamma(self):
