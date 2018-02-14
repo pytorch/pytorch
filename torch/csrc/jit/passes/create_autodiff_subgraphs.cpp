@@ -28,7 +28,7 @@ void mergeNodes(Graph & g, Symbol group_node_kind, ArrayRef<Node*> nodes) {
     if(value_map.count(v) > 0) {
       return value_map[v];
     }
-    Value * nv = new_graph->addInput();
+    Value * nv = new_graph->addInput()->setType(v->typeOption());
     group_node->addInput(v);
     value_map[v] = nv;
     return nv;
@@ -54,7 +54,7 @@ void mergeNodes(Graph & g, Symbol group_node_kind, ArrayRef<Node*> nodes) {
       }
       if(to_replace.size() > 0) {
         new_graph->registerOutput(new_output);
-        Value * external_output = group_node->addOutput();
+        Value * external_output = group_node->addOutput()->setType(old_output->typeOption());
         for(auto u : to_replace) {
           u.user->replaceInput(u.offset, external_output);
         }
@@ -66,6 +66,7 @@ void mergeNodes(Graph & g, Symbol group_node_kind, ArrayRef<Node*> nodes) {
   for(size_t i = nodes.size(); i > 0; --i) {
     nodes[i - 1]->destroy();
   }
+  JIT_ASSERT(isDifferentiable(*new_graph));
 }
 
 }

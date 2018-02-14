@@ -63,6 +63,7 @@ GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::Tra
   }
   tracer::exit(outputs);
   auto graph = enter_info.first->graph;
+  EliminateDeadCode(graph);
   return createExecutorByGraph(std::move(graph), optimize);
 }
 

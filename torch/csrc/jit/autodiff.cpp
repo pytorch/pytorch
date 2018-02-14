@@ -5,19 +5,29 @@
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
+#include <algorithm>
+
 namespace torch { namespace jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
+// TODO: unsqueeze!
 std::unordered_set<Symbol> differentiable_kinds = {
   kadd, ksub, kmul, kConstant, kReplaceIfUndef,
-  ksigmoid, ktanh, kmm, kchunk, ksplit, kt
+  ksigmoid, ktanh, kmm, kchunk, ksplit, kt, kneg,
+  kunsqueeze
 };
 
 bool isDifferentiable(Node * n) {
   return differentiable_kinds.count(n->kind()) > 0;
 }
+
+bool isDifferentiable(Graph & g) {
+  return std::all_of(g.nodes().begin(), g.nodes().end(),
+                     static_cast<bool(*)(Node*)>(isDifferentiable));
+}
+
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
@@ -55,7 +65,13 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {SymbolicVariable::cat(grads, node->i(kdim))};
       case kt:
         return {grads.at(0).t()};
-      case kmm:
+      case kneg:
+        return {-grads.at(0)};
+      case kview:
+        return {grads.at(0).view(inputs.at(0).sizes())};
+      case kunsqueeze:
+        return {grads.at(0).squeeze(node->i(kdim))};
+      case kmm: {
         SymbolicVariable dmat1, dmat2;
         if (inputs.at(0).value()->hasType()) {
           auto type = inputs.at(0).value()->type()->expect<TensorType>();
@@ -80,10 +96,77 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           dmat2 = grads.at(0).mm(inputs.at(1).t());
         }
         return {dmat1, dmat2};
+      }
+      case kexpand: {
+        const auto& input_sizes = inputs.at(0).sizes();
+        if (input_sizes.size() == 0)
+          return {grads.at(0).sum()};
+        auto grad_sizes = node->is(ksize);
+        auto grad = grads.at(0);
+        while (grad_sizes.size() > input_sizes.size()) {
+          grad = grad.sum(0, false);
+          grad_sizes.erase(grad_sizes.begin());
+        }
+        for (size_t i = 0; i < input_sizes.size(); ++i) {
+          if (input_sizes[i] == 1 && grad_sizes[i] > 1) {
+            grad = grad.sum(i, true);
+          }
+        }
+        return {grad};
+      }
+      case ksqueeze: {
+        const auto& sizes = inputs.at(0).sizes();
+        if (node->hasAttribute(kdim)) {
+          int dim = node->i(kdim);
+          return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim)};
+        } else {
+          std::vector<size_t> squeezed_dims;
+          for (size_t i = 0; i < sizes.size(); ++i) {
+            if (sizes[i] != 1) continue;
+            squeezed_dims.push_back(i);
+          }
+          SymbolicVariable returned_grad = grads.at(0);
+          for (auto it = squeezed_dims.rbegin(); it != squeezed_dims.rend(); ++it)
+            returned_grad = returned_grad.unsqueeze(*it);
+          return {returned_grad};
+        }
+      }
+      case kcat: {
+        int dim = node->i(kdim);
+        const auto& first_sizes = inputs.at(0).sizes();
+        const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
+          return var.sizes() == first_sizes;
+        };
+        // NB: this is a specialization for the common case where all inputs are
+        // of equal sizes. We can use a single split operation to handle that.
+        if (std::all_of(inputs.begin(), inputs.end(), has_first_sizes)) {
+          return grads.at(0).chunk(inputs.size(), dim);
+        } else {
+          size_t offset = 0;
+          auto grad = grads.at(0);
+          std::vector<SymbolicVariable> returned_grads;
+          for (auto input : inputs) {
+            returned_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
+            offset += input.sizes()[dim];
+          }
+          return returned_grads;
+        }
+      }
     }
     throw std::runtime_error(std::string("don't support differentiation of `") +
                             node->kind().toString() + "`");
   };
+  const auto has_type = [](Value *v) { return v->hasType(); };
+  if (!isDifferentiable(node)) {
+    throw std::runtime_error(std::string("differentiation of ") + node->kind().toString() + " "
+                             "is not supported, or it is missing necessary type information");
+  }
+  if (!std::all_of(node->inputs().begin(), node->inputs().end(), has_type) ||
+      !std::all_of(node->outputs().begin(), node->outputs().end(), has_type)) {
+    throw std::runtime_error("differentiate should be called with a graph where every value "
+                             "has a type registered");
+
+  }
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }

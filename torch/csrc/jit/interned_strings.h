@@ -73,6 +73,7 @@ _(dilation) \
 _(broadcast) \
 _(axis) \
 _(size) \
+_(sizes) \
 _(dim) \
 _(perm) \
 _(shape) \
@@ -129,6 +130,13 @@ _(sqrt) \
 _(sub) \
 _(tan) \
 _(trunc) \
+_(squeeze) \
+_(unsqueeze) \
+_(view) \
+_(narrow) \
+_(sum) \
+_(length) \
+_(keepdim) \
 _(zeros) \
 _(zeros_like) \
 _(exponent) \
