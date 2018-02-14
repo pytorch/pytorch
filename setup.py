@@ -33,20 +33,7 @@ tests_require = []
 ################################################################################
 
 assert find_executable('cmake'), 'Could not find "cmake" executable!'
-
-# Prefer using ninja, if not found, then fallback to make.
-USE_NINJA = False
-try:
-    import ninja
-except ImportError:
-    NINJA = find_executable('ninja')
-    USE_NINJA = bool(NINJA)
-else:
-    NINJA = os.path.realpath(os.path.join(ninja.BIN_DIR, 'ninja'))
-    USE_NINJA = True
-
-if not USE_NINJA and not find_executable('make'):
-    raise RuntimeError('Could not find either "ninja" or "make" executable!')
+assert find_executable('make'), 'Could not find "make" executable!'
 
 ################################################################################
 # utils functions
@@ -146,8 +133,6 @@ class cmake_build(Caffe2Command):
                 '-BUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
             ]
-            if USE_NINJA:
-                cmake_args.extend(['-G', 'Ninja'])
             if 'CMAKE_ARGS' in os.environ:
                 extra_cmake_args = shlex.split(os.environ['CMAKE_ARGS'])
                 # prevent crossfire with downstream scripts
@@ -156,11 +141,7 @@ class cmake_build(Caffe2Command):
             cmake_args.append(TOP_DIR)
             subprocess.check_call(cmake_args)
 
-            # build
-            if USE_NINJA:
-                build_args = [NINJA]
-            else:
-                build_args = [find_executable('make')]
+            build_args = [find_executable('make')]
             # control the number of concurrent jobs
             if self.jobs is not None:
                 build_args.extend(['-j', str(self.jobs)])
@@ -207,10 +188,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
 class develop(setuptools.command.develop.develop):
     def run(self):
-        if not USE_NINJA:
-            raise RuntimeError(
-                'Ninja is required for development mode. '
-                'You can install it via e.g. `pip install ninja`')
         self.run_command('build_py')
         setuptools.command.develop.develop.run(self)
 
