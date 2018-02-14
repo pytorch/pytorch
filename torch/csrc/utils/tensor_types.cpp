@@ -10,7 +10,7 @@ using namespace at;
 
 namespace torch { namespace utils {
 
-const char* backend_to_string(const at::Type& type) {
+static const char* backend_to_string(const at::Type& type) {
   switch (type.backend()) {
     case at::kCPU: return "torch";
     case at::kCUDA: return "torch.cuda";
