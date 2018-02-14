@@ -70,8 +70,7 @@ class Sequential(Module):
 
     def __delitem__(self, idx):
         if isinstance(idx, slice):
-            del_keys = list(self._modules.keys())[idx]
-            for key in del_keys:
+            for key in list(self._modules.keys())[idx]:
                 delattr(self, key)
         else:
             key = self._get_item_by_idx(self._modules.keys(), idx)
