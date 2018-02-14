@@ -160,7 +160,6 @@ void THNN_(Col2Vol_updateOutput)(
       THTensor_(data)(input_n),
       nOutputPlane,
       outputDepth, outputHeight, outputWidth,
-      inputDepth, inputHeight, inputWidth,
       depth_col, height_col, width_col,
       kT, kH, kW,
       padT, padH, padW,
