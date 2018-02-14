@@ -5,6 +5,8 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include <sstream>
+
 namespace py = pybind11;
 
 namespace torch { namespace jit { namespace script {
@@ -19,6 +21,12 @@ struct SourceRangeFactory {
     } while ((pos = source_->find('\n', pos)) != std::string::npos);
   }
   SourceRange create(int line, int start_col, int end_col) {
+    // Python has a weird convention where col_offset points to the column *before*
+    // the token starts.
+    start_col++;
+    end_col++;
+    // Also, lines are counted from 1.
+    line--;
     auto line_start = line_len_prefix_sum_.at(line);
     return SourceRange(source_, line_start + start_col, line_start + end_col);
   }
@@ -38,10 +46,23 @@ void initTreeViewBindings(PyObject *module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_jit_tree_views");
 
-  py::class_<SourceRange>(m, "SourceRange");
+  py::class_<SourceRange>(m, "SourceRange")
+    .def("highlight", [](const SourceRange& self) {
+      std::ostringstream stream;
+      self.highlight(stream);
+      return stream.str();
+    })
+    .def_property_readonly("start", &SourceRange::start)
+    .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
     .def(py::init<std::string&&>())
-    .def("make_range", &SourceRangeFactory::create);
+    .def("make_range", &SourceRangeFactory::create)
+    .def("make_raw_range", [](const SourceRangeFactory& self, size_t start, size_t end) {
+      return SourceRange(self.source_, start, end);
+    })
+    .def_property_readonly("source", [](const SourceRangeFactory& self) {
+      return *self.source_;
+    });
 
   py::class_<TreeView>(m, "TreeView")
     .def("range", &TreeView::range)

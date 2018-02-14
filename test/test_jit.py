@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import unittest
 from contextlib import contextmanager
 from itertools import product
-import torch.jit.python_frontend
+import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
@@ -1399,7 +1399,7 @@ class TestJit(TestCase):
                 q = x
             return x
 
-        ast = torch.jit.python_frontend.get_jit_ast(fn)
+        ast = torch.jit.frontend.get_jit_ast(fn)
         self.assertExpected(str(ast))
 
 
