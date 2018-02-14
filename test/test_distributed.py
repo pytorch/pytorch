@@ -30,6 +30,7 @@ SKIP_IF_NO_CUDA_EXIT_CODE = 75
 SKIP_IF_NO_MULTIGPU_EXIT_CODE = 76
 SKIP_IF_SMALL_WORLDSIZE_EXIT_CODE = 77
 
+
 def skip_if_no_cuda_distributed(func):
     func.skip_if_no_cuda_distributed = True
 
@@ -56,6 +57,7 @@ def skip_if_no_multigpu(func):
         return func(*args, **kwargs)
     return wrapper
 
+
 def skip_if_small_worldsize(func):
     func.skip_if_small_worldsize = True
 
@@ -66,6 +68,7 @@ def skip_if_small_worldsize(func):
 
         return func(*args, **kwargs)
     return wrapper
+
 
 def apply_hack_for_nccl():
     # This is a hack for a known NCCL issue using multiprocess
