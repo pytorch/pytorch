@@ -28,7 +28,7 @@ if(EXISTS "/etc/os-release")
         if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0"
           AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "5.0.0")
             message(FATAL_ERROR
-              "Do not use GCC 5. GCC 5 has a known bug in Ubuntu 17.04"
+              "Do not use GCC 5. GCC 5 has a known bug in Ubuntu 17.10"
               " and higher, which won't be fixed. For more information, see: "
               "https://github.com/pytorch/pytorch/issues/5229"
               )
