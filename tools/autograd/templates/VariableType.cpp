@@ -327,17 +327,20 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
 static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
     auto& var = as_variable_ref(tensor);
-    autograd::add_gradient_edge(var, grad_fn);
+    autograd::add_gradient_edge(var, std::move(grad_fn));
   }
 }
 
 static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
+    grad_fn->set_num_inputs(tensors.size());
+    uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
         auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
-        autograd::add_gradient_edge(var, grad_fn);
+        autograd::add_gradient_edge(var, {grad_fn, output_nr});
       }
+      output_nr++;
     }
   }
 }
