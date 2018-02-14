@@ -1181,31 +1181,44 @@ class TestTorch(TestCase):
             n_row = 3
             for n_col in range(4, 5 + 1):
                 prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
-                zero_prob_idx = n_col - 2  # index that shouldn't be sampled
-                prob_dist.select(1, zero_prob_idx).fill_(0)
+                # indices that shouldn't be sampled (<0 means none)
+                zero_prob_indices = torch.LongTensor(n_row).random_(-2, n_col)
+                for i, j in enumerate(zero_prob_indices):
+                    if j >= 0:
+                        prob_dist[i, j] = 0
                 n_sample = n_col * 3
                 sample_indices = torch.multinomial(prob_dist, n_sample, True)
                 self.assertEqual(prob_dist.dim(), 2)
                 self.assertEqual(sample_indices.size(1), n_sample)
-                for index in product(range(n_row), range(n_sample)):
-                    self.assertNotEqual(sample_indices[index], zero_prob_idx, "sampled an index with zero probability")
+                for i in range(n_row):
+                    zero_prob_idx = zero_prob_indices[i]
+                    if zero_prob_idx < 0:
+                        continue
+                    for j in range(n_sample):
+                        self.assertNotEqual(sample_indices[i, j], zero_prob_idx,
+                                            "sampled an index with zero probability")
 
             # without replacement
             n_row = 3
-            for n_col in range(8, 10 + 1):
+            for n_col in range(2, 10 + 1, 2):
                 prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
-                zero_prob_idx = n_col - 2  # index that shouldn't be sampled
-                prob_dist.select(1, zero_prob_idx).fill_(0)
-                n_sample = n_col - 1
+                # indices that shouldn't be sampled (<0 means none)
+                zero_prob_indices = torch.LongTensor(n_row).random_(-1, n_col)
+                for i, j in enumerate(zero_prob_indices):
+                    if j >= 0:
+                        prob_dist[i, j] = 0
+                n_sample = max(1, n_col - 2)
                 sample_indices = torch.multinomial(prob_dist, n_sample, False)
                 self.assertEqual(prob_dist.dim(), 2)
                 self.assertEqual(sample_indices.size(1), n_sample)
                 for i in range(n_row):
                     row_samples = {}
+                    zero_prob_idx = zero_prob_indices[i]
                     for j in range(n_sample):
                         sample_idx = sample_indices[i, j]
-                        self.assertNotEqual(sample_idx, zero_prob_idx,
-                                            "sampled an index with zero probability")
+                        if zero_prob_idx >= 0:
+                            self.assertNotEqual(sample_idx, zero_prob_idx,
+                                                "sampled an index with zero probability")
                         self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
                         row_samples[sample_idx] = True
 

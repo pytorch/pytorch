@@ -22,6 +22,7 @@ __device__ __forceinline__ IndexType getLinearBlockId() {
 // Reduce N values concurrently, i.e. suppose N = 2, and there are 4 threads:
 // (1, 2), (3, 4), (5, 6), (7, 8), then the return in threadVals for thread 0
 // is (1 + 3 + 5 + 7, 2 + 4 + 6 + 8) = (16, 20)
+// no need to __syncthreads before this call
 template <typename T, typename ReduceOp, int N>
 __device__ void reduceNValuesInBlock(T *smem,
                              T threadVals[N],
@@ -95,6 +96,7 @@ __device__ void reduceNValuesInBlock(T *smem,
 
 // Block-wide reduction in shared memory helper; only threadIdx.x == 0 will
 // return the reduced value
+// no need to __syncthreads before this call
 template <typename T, typename ReduceOp>
 __device__ T reduceBlock(T* smem,
                          int numVals,
@@ -109,6 +111,7 @@ __device__ T reduceBlock(T* smem,
 // Block-wide reduction where each thread locally reduces N
 // values before letting a single warp take over - assumes
 // threadVals is in registers, not shared memory
+// no need to __syncthreads before this call
 template <typename T, typename ReduceOp, int N>
 __device__ T reduceBlockWithNThreadLocalReductions(T *smem,
                          T threadVals[N],
