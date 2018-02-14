@@ -4485,6 +4485,17 @@ new_criterion_tests = [
             smoothl1loss_reference(i, t, size_average=get_size_average(m)),
         desc='scalar',
     ),
+    dict(
+        module_name='MultiLabelSoftMarginLoss',
+        constructor_args=(torch.rand(10),),
+        input_fn=lambda: torch.randn(5, 10),
+        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
+        reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
+            (i.numel() if get_size_average(m) else 1),
+        desc='weights',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
 ]
 
 
@@ -4913,21 +4924,6 @@ def softmarginloss_no_reduce_test():
         reference_fn=lambda i, _:
             loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduce=False),
         check_no_size_average=True,
-        pickle=False)
-
-
-def multilabelsoftmarginloss_weights_test():
-    t = Variable(torch.rand(5, 10).mul(2).floor())
-    weights = Variable(torch.rand(10))
-    return dict(
-        fullname='MultiLabelSoftMarginLoss_weights',
-        constructor=wrap_functional(
-            lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i))),
-        input_fn=lambda: torch.randn(5, 10),
-        reference_fn=lambda i, m: (-((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights) /
-                                   (i.numel() if get_size_average(m) else 1)),
-        check_no_size_average=True,
-        check_gradgrad=False,
         pickle=False)
 
 
