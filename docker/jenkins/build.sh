@@ -1,33 +1,6 @@
 #!/bin/bash
 
-set -e
-
-declare -a valid_images
-valid_images=(
-  # Primary builds
-  py2-cuda8.0-cudnn7-ubuntu16.04
-  py3-cuda8.0-cudnn7-ubuntu16.04
-  py2-cuda9.0-cudnn7-ubuntu16.04
-  py3-cuda9.0-cudnn7-ubuntu16.04
-  py2-mkl-ubuntu16.04
-  py3-mkl-ubuntu16.04
-
-  # Compiler compatibility
-  py2-gcc5-ubuntu16.04
-  py2-gcc6-ubuntu16.04
-  py2-gcc7-ubuntu16.04
-  py2-clang3.8-ubuntu16.04
-  py2-clang3.9-ubuntu16.04
-
-  # Build for Android
-  py2-android-ubuntu16.04
-
-  # Builds for Anaconda
-  conda2-ubuntu16.04
-  conda2-cuda9.0-cudnn7-ubuntu16.04
-  conda3-ubuntu16.04
-  conda3-cuda9.0-cudnn7-ubuntu16.04
-)
+set -ex
 
 image="$1"
 shift
@@ -62,7 +35,8 @@ if [[ "$image" == *cuda* ]]; then
 fi
 
 if [[ "$image" == *conda* ]]; then
-  ANACONDA_VERSION=$PYTHON_VERSION
+  # Unlike python version, Anaconda version is either 2 or 3
+  ANACONDA_VERSION="$(echo "${image}" | perl -n -e'/conda(\d)/ && print $1')"
 fi
 
 if [[ "$image" == *-mkl-* ]]; then
