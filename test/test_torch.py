@@ -1196,7 +1196,7 @@ class TestTorch(TestCase):
                         continue
                     for j in range(n_sample):
                         self.assertNotEqual(sample_indices[i, j], zero_prob_idx,
-                                            "sampled an index with zero probability")
+                                            message="sampled an index with zero probability")
 
             # without replacement
             n_row = 3
@@ -1218,7 +1218,7 @@ class TestTorch(TestCase):
                         sample_idx = sample_indices[i, j]
                         if zero_prob_idx >= 0:
                             self.assertNotEqual(sample_idx, zero_prob_idx,
-                                                "sampled an index with zero probability")
+                                                message="sampled an index with zero probability")
                         self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
                         row_samples[sample_idx] = True
 
@@ -1230,7 +1230,8 @@ class TestTorch(TestCase):
             n_sample = 20
             sample_indices = torch.multinomial(prob_dist, n_sample, True)
             for sample_index in sample_indices:
-                self.assertNotEqual(sample_index, zero_prob_idx, "sampled an index with zero probability")
+                self.assertNotEqual(sample_index, zero_prob_idx,
+                                    message="sampled an index with zero probability")
             s_dim = sample_indices.dim()
             self.assertEqual(sample_indices.dim(), 1, "wrong number of dimensions")
             self.assertEqual(prob_dist.dim(), 1, "wrong number of prob_dist dimensions")
