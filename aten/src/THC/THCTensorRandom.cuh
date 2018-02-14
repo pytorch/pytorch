@@ -178,7 +178,7 @@ sampleMultinomialOnce(int64_t* dest,
     AccT sum = accZero;
     T val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
-      val = dist[curDist * categories * stride_dist + cat * stride_categories];
+      val = dist[curDist * stride_dist + cat * stride_categories];
       assert(THCNumerics<T>::ge(val, zero));
       sum = THCNumerics<AccT>::add(sum, ScalarConvert<T, AccT>::to(val));
     }
@@ -221,7 +221,7 @@ sampleMultinomialOnce(int64_t* dest,
       AccT val =
         cat < categories ?
           THCNumerics<AccT>::div(
-              ScalarConvert<T, AccT>::to(dist[curDist * categories * stride_dist + cat * stride_categories]),
+              ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
           accZero;
 
@@ -275,7 +275,7 @@ sampleMultinomialOnce(int64_t* dest,
       // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
       // rarity in which this occurs, this should not be an issue.
       for (int cat = categories - 1; cat >= 0; --cat) {
-        if (THCNumerics<T>::gt(dist[curDist * categories * stride_dist + cat * stride_categories], zero)) {
+        if (THCNumerics<T>::gt(dist[curDist * stride_dist + cat * stride_categories], zero)) {
           dest[curDist] = cat + TH_INDEX_BASE;
           break;
         }
