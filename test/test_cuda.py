@@ -1553,6 +1553,7 @@ def generate_tests():
 
 
 if __name__ == '__main__':
-    load_ignore_file()
-    generate_tests()
+    if HAS_CUDA:
+        load_ignore_file()
+        generate_tests()
     run_tests()
