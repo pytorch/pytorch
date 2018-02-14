@@ -81,25 +81,10 @@ struct SymbolicVariable {
   }
   SymbolicVariable mm(const SymbolicVariable rhs) const {
     auto r = create(s("mm"), {*this, rhs})[0];
-    if (v->hasType() && rhs.v->hasType()) {
-      auto lhs_type = v->type()->expect<TensorType>();
-      auto rhs_type = rhs.v->type()->expect<TensorType>();
-      r.v->setType(std::make_shared<TensorType>(
-        lhs_type->scalarType(), lhs_type->device(),
-        at::IntList{lhs_type->sizes()[0], rhs_type->sizes()[1]}));
-    }
     return r;
   }
   SymbolicVariable t() const {
     auto r = create(s("t"), {*this})[0];
-    if (v->hasType()) {
-      auto tp = v->type()->expect<TensorType>();
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
-      std::swap(sizes.at(0), sizes.at(1));
-      std::swap(strides.at(0), strides.at(1));
-      r.v->setType(tp->withSizesStrides(sizes, strides));
-    }
     return r;
   }
   SymbolicVariable sigmoid() const {
@@ -121,12 +106,6 @@ struct SymbolicVariable {
     n->i_(s("dim"), dim)
      ->i_(s("start"), start)
      ->i_(s("length"), length);
-    if (v->hasType()) {
-      auto tp = v->type()->expect<TensorType>();
-      auto sizes = tp->sizes();
-      sizes[dim] = length;
-      r.v->setType(tp->withSizes(sizes));
-    }
     return r;
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
@@ -137,9 +116,6 @@ struct SymbolicVariable {
   }
   SymbolicVariable sum() const {
     auto r = create(s("sum"), {*this})[0];
-    if (v->hasType()) {
-      r.v->setType(v->type()->expect<TensorType>()->withSizes({}));
-    }
     return r;
   }
   SymbolicVariable sum(int dim, bool keepdim) const {
@@ -147,59 +123,24 @@ struct SymbolicVariable {
     auto r = create(s("sum"), {*this}, 1, &n)[0];
     n->i_(s("dim"), dim)
      ->i_(s("keepdim"), keepdim);
-    if (v->hasType()) {
-      auto tp = v->type()->expect<TensorType>();
-      auto sizes = tp->sizes();
-      JIT_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
-      if (keepdim) {
-        sizes[dim] = 1;
-      } else {
-        sizes.erase(sizes.begin() + dim);
-      }
-      r.v->setType(tp->withSizes(sizes));
-    }
     return r;
   }
   SymbolicVariable squeeze(int dim) const {
     Node * n;
     auto r = create(s("squeeze"), {*this}, 1, &n)[0];
     n->i_(s("dim"), dim);
-    if (v->hasType()) {
-      auto tp = v->type()->expect<TensorType>();
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
-      JIT_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
-      if (sizes[dim] == 1) {
-        sizes.erase(sizes.begin() + dim);
-        strides.erase(strides.begin() + dim);
-      }
-      r.v->setType(tp->withSizesStrides(sizes, strides));
-    }
     return r;
   }
   SymbolicVariable unsqueeze(int dim) const {
     Node * n;
     auto r = create(s("unsqueeze"), {*this}, 1, &n)[0];
     n->i_(s("dim"), dim);
-    if (v->hasType()) {
-      auto tp = v->type()->expect<TensorType>();
-      auto sizes = tp->sizes();
-      auto strides = tp->strides();
-      JIT_ASSERT(dim >= 0 && static_cast<size_t>(dim) <= sizes.size());
-      sizes.insert(sizes.begin() + dim, 1);
-      strides.insert(strides.begin() + dim, 1);
-      r.v->setType(tp->withSizesStrides(sizes, strides));
-    }
     return r;
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
     Node *n;
     auto r =  create(kview, {*this}, 1, &n)[0];
     n->is_(s("size"), std::move(sizes));
-    if (v->hasType()) {
-      auto tp = v->type()->expect<TensorType>();
-      r.v->setType(tp->withSizes(sizes));
-    }
     return r;
   }
   Value * value() const {

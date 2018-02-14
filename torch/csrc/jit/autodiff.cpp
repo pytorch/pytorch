@@ -20,21 +20,7 @@ std::unordered_set<Symbol> differentiable_kinds = {
 };
 
 bool isDifferentiable(Node * n) {
-  if (differentiable_kinds.count(n->kind()) > 0)
-    return true;
-  auto inputs = n->inputs();
-  switch (n->kind()) {
-    case kexpand:
-      return inputs.at(0)->hasType();
-    case ksqueeze:
-      return inputs.at(0)->hasType();
-    case kview:
-      return inputs.at(0)->hasType();
-    case kcat:
-      return std::all_of(inputs.begin(), inputs.end(),
-                         [](Value *input) { return input->hasType(); });
-  }
-  return false;
+  return differentiable_kinds.count(n->kind()) > 0;
 }
 
 bool isDifferentiable(Graph & g) {
@@ -170,9 +156,16 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("don't support differentiation of `") +
                             node->kind().toString() + "`");
   };
+  const auto has_type = [](Value *v) { return v->hasType(); };
   if (!isDifferentiable(node)) {
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toString() + " "
                              "is not supported, or it is missing necessary type information");
+  }
+  if (!std::all_of(node->inputs().begin(), node->inputs().end(), has_type) ||
+      !std::all_of(node->outputs().begin(), node->outputs().end(), has_type)) {
+    throw std::runtime_error("differentiate should be called with a graph where every value "
+                             "has a type registered");
+
   }
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
