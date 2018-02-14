@@ -108,16 +108,6 @@ if (Caffe2_EXTERNAL_DEPENDENCIES)
   add_dependencies(caffe2 ${Caffe2_EXTERNAL_DEPENDENCIES})
 endif()
 
-# ---[ On Android, Caffe2 uses cpufeatures library in the thread pool
-if (ANDROID)
-  # ---[ Check if cpufeatures was already imported by NNPACK
-  if (NOT TARGET cpufeatures)
-    include(${CMAKE_SOURCE_DIR}/third_party/android-cmake/AndroidNdkModules.cmake)
-    android_ndk_import_module_cpufeatures()
-  endif()
-  target_link_libraries(caffe2 PRIVATE cpufeatures)
-endif()
-
 # ---[ CUDA library.
 if(USE_CUDA)
   # A hack to deal with cuda library dependencies and modern CMake: the
