@@ -147,10 +147,15 @@ inline at::Scalar PythonArgs::scalar(int i) {
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
-  if (PyFloat_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackDouble(args[i]));
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(args[i])) {
+    return at::Scalar(((THPVariable*)args[i])->cdata);
   }
-  return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  if (THPUtils_checkLong(args[i])) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+  return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {

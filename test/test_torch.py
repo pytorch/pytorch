@@ -1513,6 +1513,17 @@ class TestTorch(TestCase):
     def test_contiguous(self):
         return self._test_contiguous(self, lambda t: t)
 
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_scalars_as_floats(self):
+        "zero-dim variables that don't require grad should bind to scalar arguments"
+        x = torch.autograd.variable(2)
+        y = torch.autograd.variable(3)
+        # 3 + (3 * 3) * 2
+        self.assertEqual(y.addcmul(y, y, value=x), 21)
+
+        x = torch.autograd.variable(2, requires_grad=True)
+        self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
+
     @staticmethod
     def _test_broadcast_fallback(self, cast):
         # functions that should fallback to pointwise behavior
@@ -4958,6 +4969,10 @@ class TestTorch(TestCase):
         self.assertEqual(x.new([3, 4]).shape, [2])
         self.assertEqual(x.new([3, 4]).tolist(), [3, 4])
         self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
+        if TEST_NUMPY:
+            self.assertEqual(x.new([np.int32(3), np.float64(4)]).tolist(), [3, 4])
+        if torch._C._with_scalars():
+            self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
         self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
         self.assertEqual(x.new(tuple()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
