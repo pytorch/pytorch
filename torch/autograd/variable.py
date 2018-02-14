@@ -274,7 +274,7 @@ class Variable(_C._VariableBase):
 
     def split(self, split_size, dim=0):
         if isinstance(split_size, int):
-            return super().split(split_size, dim)
+            return super(Variable, self).split(split_size, dim)
         else:
             return torch.functional.split(self, split_size, dim)
 
