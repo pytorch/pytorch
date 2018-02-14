@@ -75,6 +75,31 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
+    @given(n=st.integers(2, 10), m=st.integers(4, 6),
+           d=st.integers(2, 3), **hu.gcs)
+    def test_powt(self, n, m, d, gc, dc):
+        X = np.random.rand(n, m, d).astype(np.float32)
+        Y = np.random.rand(n, m, d).astype(np.float32) + 2.0
+
+        def powt_op(X, Y):
+            return [np.power(X, Y)]
+
+        op = core.CreateOperator(
+            "Pow",
+            ["X", "Y"],
+            ["Z"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X, Y],
+            reference=powt_op,
+        )
+
+        self.assertGradientChecks(
+            gc, op, [X, Y], 0, [0], stepsize=1e-4, threshold=1e-2)
+
     @given(n=st.integers(5, 6), m=st.integers(4, 6), **hu.gcs)
     def test_sqr(self, n, m, gc, dc):
         X = np.random.rand(n, m).astype(np.float32)

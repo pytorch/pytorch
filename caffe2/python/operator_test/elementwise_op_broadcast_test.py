@@ -184,6 +184,58 @@ class TestElementwiseBroadcast(hu.HypothesisTestCase):
         self.assertGradientChecks(gc, op, [X, Y], 1, [0])
 
     @given(**hu.gcs)
+    def test_broadcast_powt(self, gc, dc):
+        # Set broadcast and no axis, i.e. broadcasting last dimensions.
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(4, 5).astype(np.float32) + 2.0
+
+        op = core.CreateOperator("Pow", ["X", "Y"], "out", broadcast=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, np.power(X, Y))
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # broadcasting intermediate dimensions
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(3, 4).astype(np.float32) + 2.0
+        op = core.CreateOperator("Pow", ["X", "Y"], "out", broadcast=1, axis=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, np.power(X, Y[:, :, np.newaxis]))
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # broadcasting the first dimension
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(2).astype(np.float32) + 2.0
+        op = core.CreateOperator("Pow", ["X", "Y"], "out", broadcast=1, axis=0)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(
+            out, np.power(X, Y[:, np.newaxis, np.newaxis, np.newaxis]))
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+        # broadcasting with single elem dimensions at both ends
+        X = np.random.rand(2, 3, 4, 5).astype(np.float32)
+        Y = np.random.rand(1, 4, 1).astype(np.float32) + 2.0
+        op = core.CreateOperator("Pow", ["X", "Y"], "out", broadcast=1, axis=1)
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("Y", Y)
+        workspace.RunOperatorOnce(op)
+        out = workspace.FetchBlob("out")
+        np.testing.assert_array_almost_equal(out, np.power(X, Y))
+        self.assertDeviceChecks(dc, op, [X, Y], [0])
+        self.assertGradientChecks(gc, op, [X, Y], 1, [0])
+
+    @given(**hu.gcs)
     def test_broadcast_scalar(self, gc, dc):
         # broadcasting constant
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)
