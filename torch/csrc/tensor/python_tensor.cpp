@@ -74,7 +74,7 @@ static struct PyMemberDef metaclass_members[] = {
 static PyTypeObject metaclass;
 
 static void py_initialize_metaclass(PyTypeObject& metaclass) {
-  metaclass.ob_base.ob_base.ob_refcnt = 1;
+  ((PyObject*)&metaclass)->ob_refcnt = 1;
   metaclass.tp_basicsize = sizeof(PyTypeObject);
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   metaclass.tp_methods = metaclass_methods;
@@ -87,9 +87,14 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 }
 
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
+  // NOTE: we don't use he typical static declaration of PyTypeObject because
+  // we need to initialize as many types as there are VariableType instances.
+  // The typical PyVarObject_HEAD_INIT(NULL, 0) is described in the Python
+  // documentation: it initializes the refcnt to 1 and the other object header
+  // fields to zero.
   memset(&type, 0, sizeof(PyTypeObject));
-  type.ob_base.ob_base.ob_refcnt = 1;
-  type.ob_base.ob_base.ob_type = &metaclass;
+  ((PyObject*)&type)->ob_refcnt = 1;
+  ((PyObject*)&type)->ob_type = &metaclass;
   type.tp_basicsize = sizeof(PyTensorType);
   type.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   type.tp_name = name;

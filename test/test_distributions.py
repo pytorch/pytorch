@@ -755,7 +755,7 @@ class TestDistributions(TestCase):
                                          failure_rate=1e-3)
 
         for probs in [0.001, 0.2, 0.999]:
-            equal_probs = torch.Tensor([0.5])
+            equal_probs = torch.variable(0.5)
             dist = RelaxedBernoulli(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
