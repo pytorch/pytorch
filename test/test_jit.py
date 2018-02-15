@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import unittest
 from contextlib import contextmanager
 from itertools import product
+import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
@@ -28,6 +29,8 @@ if torch.cuda.is_available():
             RUN_CUDA = False
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+
+PY2 = sys.version_info[0] == 2
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -1384,6 +1387,20 @@ class TestJit(TestCase):
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, 'to_int', [x], [outputs], False)
+
+    def test_python_frontend(self):
+        def fn(x, y, z):
+            q = x + y - z
+            w = -z
+            if not x and not y and z:
+                m = x if not z else y
+            while x < y > z:
+                q = x
+            return x
+
+        ast = torch.jit.frontend.get_jit_ast(fn)
+        self.assertExpected(str(ast))
+
 
 if __name__ == '__main__':
     run_tests()
