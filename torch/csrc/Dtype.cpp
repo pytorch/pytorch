@@ -16,9 +16,8 @@ PyObject * THPDtype_New(at::Type* cdata, const std::string& name, bool is_cuda, 
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
   self_->cdata = cdata;
-  char *name_cstr = new char[name.length() + 1];
-  std::strcpy (name_cstr, name.c_str());
-  self_->name = name_cstr;
+  std::strncpy (self_->name, name.c_str(), DTYPE_NAME_LEN);
+  self_->name[DTYPE_NAME_LEN] = '\0';
   self_->is_cuda = is_cuda;
   self_->is_sparse = is_sparse;
   return self.release();

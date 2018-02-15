@@ -4,10 +4,12 @@
 #include <Python.h>
 #include "ATen/ATen.h"
 
+const int DTYPE_NAME_LEN = 64;
+
 struct THPDtype {
   PyObject_HEAD
   at::Type *cdata;
-  const char* name;
+  char name[DTYPE_NAME_LEN + 1];
   bool is_cuda;
   bool is_sparse;
 };
