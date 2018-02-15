@@ -229,8 +229,8 @@ struct Function : std::enable_shared_from_this<Function> {
     return post_hooks_;
   }
 
-  void clear_post_hooks() {
-    post_hooks_.clear();
+  std::vector<std::unique_ptr<FunctionPostHook>>& post_hooks() noexcept {
+    return post_hooks_;
   }
 
   void add_pre_hook(std::unique_ptr<FunctionPreHook>&& pre_hook) {
@@ -242,8 +242,8 @@ struct Function : std::enable_shared_from_this<Function> {
     return pre_hooks_;
   }
 
-  void clear_pre_hooks() {
-    pre_hooks_.clear();
+  std::vector<std::unique_ptr<FunctionPreHook>>& pre_hooks() noexcept {
+    return pre_hooks_;
   }
 
   // Customization Points for Subclasses

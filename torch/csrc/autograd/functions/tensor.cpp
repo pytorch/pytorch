@@ -44,7 +44,7 @@ CopySlices::CopySlices(
   // to base instead of the view.
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
-  next_edges_.push_back(base_var.gradient_edge());
+  add_next_edge(base_var.gradient_edge());
   for (size_t i = 1; i < num_outputs; i++) {
     add_next_edge(fn->next_edge(i));
   }

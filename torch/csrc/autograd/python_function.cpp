@@ -261,8 +261,13 @@ static int THPFunction_clear(THPFunction *self)
   self->saved_variables.clear();
   self->is_variable_input.clear();
 
-  self->cdata.clear_pre_hooks();
-  self->cdata.clear_post_hooks();
+  // Moving the hooks out makes sure to first disassociate them from the
+  // function, but without destroying any of them. They will get deleted when
+  // exiting this scope. This is important, because deleting Python objects can
+  // trigger deletion of other objects, and they can reference this function,
+  // seeing it in a half-deleted state.
+  auto pre_hooks = std::move(self->cdata.pre_hooks());
+  auto post_hooks = std::move(self->cdata.post_hooks());
 
   return 0;
 }

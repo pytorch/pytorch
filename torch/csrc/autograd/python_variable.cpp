@@ -109,7 +109,7 @@ static int THPVariable_clear(THPVariable *self)
   Py_CLEAR(self->backward_hooks);
   if (self->cdata.defined()) {
     if (auto grad_acc = self->cdata.try_get_grad_accumulator()) {
-      grad_acc->clear_pre_hooks();
+      grad_acc->pre_hooks().clear();
     }
     self->cdata.set_pyobj(nullptr);
   }
