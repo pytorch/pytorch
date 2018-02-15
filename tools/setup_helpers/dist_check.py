@@ -1,16 +1,25 @@
 import os
+import sys
 import platform
 import subprocess
+import glob
+from itertools import chain
 
 from .env import check_env_flag
 
-IS_WINDOWS = (platform.system() == 'Windows')
+IS_WINDOWS = (platform.system() == "Windows")
+IS_CONDA = "conda" in sys.version or "Continuum" in sys.version
+CONDA_DIR = os.path.join(os.path.dirname(sys.executable), "..")
 
-WITH_DISTRIBUTED = not check_env_flag('NO_DISTRIBUTED') and not IS_WINDOWS
-WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag('WITH_DISTRIBUTED_MW')
+WITH_DISTRIBUTED = not check_env_flag("NO_DISTRIBUTED") and not IS_WINDOWS
+WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag("WITH_DISTRIBUTED_MW")
 WITH_GLOO_IBVERBS = False
 
 IB_DEVINFO_CMD = "ibv_devinfo"
+
+
+def gather_paths(env_vars):
+    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
 
 
 def get_command_path(command):
@@ -34,12 +43,16 @@ def should_build_ib():
     Helper function that detects the system's IB support and returns if we
     should build with IB support.
     """
+    ib_util_found = False
+    ib_lib_found = False
+    ib_header_found = False
+
     try:
         # If the command doesn't exist, we can directly return instead of
         # making a subprocess call
         full_cmd_path = get_command_path(IB_DEVINFO_CMD)
         if not full_cmd_path:
-            return False
+            ib_util_found = False
         subprocess.check_output([full_cmd_path, "--list"])
         # Here we just would like to simply run the command to test if IB
         # related tools / lib are installed without parsing the output. We
@@ -58,10 +71,46 @@ def should_build_ib():
         #   mlx5_2
         #   mlx5_1
         #   mlx5_0
-        return True
+        ib_util_found = True
     except Exception:
         # We just take all the exceptions here without affecting the build
-        return False
+        ib_util_found = False
+
+    lib_paths = list(filter(bool, [
+        "/usr/lib/",
+        "/usr/lib/x86_64-linux-gnu/",
+        "/usr/lib/powerpc64le-linux-gnu/",
+        "/usr/lib/aarch64-linux-gnu/",
+    ] + gather_paths([
+        "LIBRARY_PATH",
+    ]) + gather_paths([
+        "LD_LIBRARY_PATH",
+    ])))
+
+    include_paths = [
+        "/usr/include/",
+    ]
+
+    if IS_CONDA:
+        lib_paths.append(os.path.join(CONDA_DIR, "lib"))
+        include_paths.append(os.path.join(CONDA_DIR, "include"))
+
+    for path in lib_paths:
+        if path is None or not os.path.exists(path):
+            continue
+        ib_libraries = sorted(glob.glob(os.path.join(path, "libibverbs*")))
+        if ib_libraries:
+            ib_lib_found = True
+            break
+
+    for path in include_paths:
+        if path is None or not os.path.exists(path):
+            continue
+        if os.path.exists(os.path.join(path, "infiniband/verbs.h")):
+            ib_header_found = True
+            break
+
+    return ib_util_found and ib_lib_found and ib_lib_found
 
 
 WITH_GLOO_IBVERBS = WITH_DISTRIBUTED and (should_build_ib() or
