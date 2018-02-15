@@ -15,7 +15,7 @@ class Col2Row(Function):
         ctx.padding = padding
         ctx.stride = stride
 
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         output = input.new()
 
@@ -57,7 +57,7 @@ class Row2Col(Function):
         ctx.stride = stride
         ctx.input_size = (input.size(2), )
 
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         output = input.new()
 
@@ -179,7 +179,7 @@ class Col2Vol(Function):
         ctx.padding = padding
         ctx.stride = stride
 
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         output = input.new()
 
@@ -221,7 +221,7 @@ class Vol2Col(Function):
         ctx.stride = stride
         ctx.input_size = (input.size(2), input.size(3), input.size(4))
 
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         output = input.new()
 
