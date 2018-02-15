@@ -81,7 +81,7 @@ class DistributedDataParallel(Module):
         0, to all other replicas in the system in every iteration.
 
     .. warning::
-        Forward and backwrad hooks defined on :attr:`module` and its submodules
+        Forward and backward hooks defined on :attr:`module` and its submodules
         won't be invoked anymore, unless the hooks are initialized in the
         :meth:`forward` method.
 
