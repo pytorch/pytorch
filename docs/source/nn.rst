@@ -379,7 +379,7 @@ Normalization layers
     :members:
 
 :hidden:`LocalResponseNorm`
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: LocalResponseNorm
     :members:
@@ -944,7 +944,7 @@ Normalization functions
 .. autofunction:: batch_norm
 
 :hidden:`local_response_norm`
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: local_response_norm
 
