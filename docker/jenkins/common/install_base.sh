@@ -2,6 +2,23 @@
 
 set -ex
 
+# This function installs protobuf 2.6
+install_protobuf_26() {
+  pb_dir="/usr/temp_pb_install_dir"
+  mkdir -p $pb_dir
+
+  # On the nvidia/cuda:9-cudnn7-devel-centos7 image we need this symlink or
+  # else it will fail with
+  #   g++: error: ./../lib64/crti.o: No such file or directory
+  ln -s /usr/lib64 "$pb_dir/lib64"
+
+  curl -LO "https://github.com/google/protobuf/releases/download/v2.6.1/protobuf-2.6.1.tar.gz"
+  tar -xvz -C "$pb_dir" --strip-components 1 -f protobuf-2.6.1.tar.gz
+  pushd "$pb_dir" && ./configure && make && make check && sudo make install && sudo ldconfig
+  popd
+  rm -rf $pb_dir
+}
+
 install_ubuntu() {
   # Use AWS mirror if running in EC2
   if [ -n "${EC2:-}" ]; then
@@ -29,6 +46,12 @@ install_ubuntu() {
           libsnappy-dev \
           protobuf-compiler \
           sudo
+
+  # Ubuntu 14.04 ships with protobuf 2.5, but ONNX needs protobuf >= 2.6
+  # so we install that here if on 14.04
+  if [[ "$UBUNTU_VERSION" == 14.04 ]]; then
+    install_protobuf_26
+  fi
 
   # Cleanup
   apt-get autoclean && apt-get clean
@@ -62,10 +85,12 @@ install_centos() {
       lmdb-devel \
       make \
       opencv-devel \
-      protobuf-c-compiler \
-      protobuf-c-devel \
       snappy-devel \
       sudo
+
+  # Centos7 ships with protobuf 2.5, but ONNX needs protobuf >= 2.6
+  # so we always install install that here
+  install_protobuf_26
 
   # Cleanup
   yum clean all

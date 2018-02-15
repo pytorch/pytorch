@@ -3,6 +3,7 @@ FROM ubuntu:${UBUNTU_VERSION}
 
 # Install required packages to build Caffe2
 ARG EC2
+ARG UBUNTU_VERSION
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
