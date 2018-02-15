@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <vector>
+#include <functional>
 
 #include "torch/csrc/jit/script/lexer.h"
 
