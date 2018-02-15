@@ -42,7 +42,7 @@ set MAGMA_HOME=%cd%\\magma_cuda90_release
 aws s3 cp s3://ossci-windows/clcache.7z clcache.7z --quiet && 7z x -aoa clcache.7z -oclcache
 
 :: Install Miniconda3
-rm -rf C:\\Jenkins\\Miniconda3
+IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
 .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
