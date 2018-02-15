@@ -66,7 +66,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   Variable var;
   if (grad_fn) {
     var = make_variable(data_, /*requires_grad=*/false);
-    autograd::add_gradient_edge(var, Edge(std::move(grad_fn), output_nr_));
+    var.set_gradient_edge({std::move(grad_fn), output_nr_});
   } else {
     var = make_variable(data_, requires_grad_);
   }

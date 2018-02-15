@@ -135,7 +135,7 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   this->output_nr = gradient_edge.input_nr;
   auto copy_slices = std::make_shared<CopySlices>(
       base, at::TensorGeometry(data), std::move(gradient_edge.function));
-  add_gradient_edge(base, Edge(std::move(copy_slices), 0));
+  base.set_gradient_edge({std::move(copy_slices), 0});
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 

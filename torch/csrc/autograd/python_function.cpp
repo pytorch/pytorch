@@ -404,9 +404,9 @@ static void _wrap_outputs(THPFunction *self,
       // An input has been returned, but it wasn't modified. Return it as a view
       // so that we can attach a new grad_fn to the Variable.
       var = var.slice();
-      autograd::add_gradient_edge(var, {cdata, output_nr});
+      var.set_gradient_edge({cdata, output_nr});
     } else if (cdata) {
-      autograd::add_gradient_edge(var, {cdata, output_nr});
+      var.set_gradient_edge({cdata, output_nr});
     }
   };
 

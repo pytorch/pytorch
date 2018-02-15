@@ -288,7 +288,8 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
  protected:
-  /// Monotonically incrementing function counter to supply sequence numbers.
+  /// Monotonically incrementing (thread local!) counter to supply sequence
+  /// numbers.
   static thread_local uint64_t next_sequence_nr_;
 
   /// Performs the `Function`'s actual operation.
@@ -339,27 +340,19 @@ struct MakeNextFunctionList : IterArgs<MakeNextFunctionList> {
 /// Create an `Edge` between the given `variable` and the `function`, which is
 /// assumed to be the gradient function of this variable (i.e. the function
 /// through which this variable is backpropagated during the backward pass).
-/// This sets the `grad_fn` property of the `variable`. The particular input of
-/// the gradient function this variable will be sent to is determined by the
-/// `input_nr` argument. If this variable represents a new input to the gradient
-/// function, use the overload of `add_gradient_edge` that does not take an
-/// `input_nr` argument, as it will also update the `Function`'s information
-/// about the number of inputs it takes.
-inline void add_gradient_edge(Variable& variable, Edge edge) {
-  variable.set_gradient_edge(std::move(edge));
-}
-
-/// Like the previous overload, but assumes that the `Variable` is a new input
-/// to the gradient function and its `input_nr` thus equal to
-/// `function->num_inputs()`. Additionally, increments the `Function`'s number
-/// of inputs by one. Approximately equivalent to add_gradient_edge(variable,
-/// Edge(function, function->bump_inputs())).
+/// This sets the `grad_fn` property of the `variable`. This function assumes
+/// that the `Variable` is a new input to the gradient function and its
+/// `input_nr` thus equal to `function->num_inputs()`. Additionally, it
+/// increments the `Function`'s number of inputs by one. Approximately
+/// equivalent to `variable.set_gradient_edge(function,
+/// function->bump_inputs())`. If you don't want the `Function`'s `num_inputs`
+/// to be incremented, use `set_gradient_edge` directly.
 inline void add_gradient_edge(
     Variable& variable,
     std::shared_ptr<Function> function) {
   // Copy before move.
   const auto input_nr = function->bump_inputs();
-  add_gradient_edge(variable, {std::move(function), input_nr});
+  variable.set_gradient_edge({std::move(function), input_nr});
 }
 
 /// Return true if any of the variables in the list require a gradient.

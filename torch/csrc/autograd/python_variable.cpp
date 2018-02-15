@@ -49,7 +49,7 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
       // of the THPFunction is at least the number of referring THPVariables.
       const auto output_nr = v->cdata.output_nr();
       auto grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
-      add_gradient_edge(v->cdata, {std::move(grad_fn), output_nr});
+      v->cdata.set_gradient_edge({std::move(grad_fn), output_nr});
     }
   }
   return obj;

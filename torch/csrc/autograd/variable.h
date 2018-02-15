@@ -185,6 +185,14 @@ struct Variable : public at::Tensor {
     }
   }
 
+  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
+  /// `Variable`.
+  /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
+  /// and never the `grad_accumulator`. For the latter, use
+  /// `set_grad_accumulator`. This allows late construction of an interior
+  /// `Variable`.
+  void set_gradient_edge(Edge&& edge) noexcept;
+
   /// Unset the gradient edge of the `Variable`.
   /// This will unset either the gradient function or gradient accumulator,
   /// depending on whether this `Variable` is a leaf or interior node.
@@ -292,19 +300,6 @@ struct Variable : public at::Tensor {
   void temporary_hack_set_type(at::Type*) noexcept;
 
  private:
-  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
-  /// `Variable`.
-  ///
-  /// It is not part of the public API of Variable because users
-  /// should call `autograd::add_gradient_edge`, which in turn will call this
-  /// method (after some logic).
-  ///
-  /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
-  /// and never the `grad_accumulator`. For the latter, use
-  /// `set_grad_accumulator`. This allows late construction of an interior
-  /// `Variable`.
-  void set_gradient_edge(Edge&& edge) noexcept;
-
   /// Private implementation struct of the `Variable`. This struct declaration
   /// and the `get()` method which exposes it shall forever remain private and
   /// never be exposed to the public interface of this class.

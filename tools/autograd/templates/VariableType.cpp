@@ -338,7 +338,7 @@ static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
         auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
-        autograd::add_gradient_edge(var, {grad_fn, output_nr});
+        var.set_gradient_edge({grad_fn, output_nr});
       }
       output_nr++;
     }

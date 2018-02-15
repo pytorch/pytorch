@@ -268,7 +268,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
     if (output.grad_fn_unsafe() == this) {
       auto replicate = std::make_shared<Replicate>();
       replicate->add_next_edge({this_shared, output.output_nr()});
-      autograd::add_gradient_edge(output, Edge(std::move(replicate), 0));
+      output.set_gradient_edge({std::move(replicate), 0});
       repeated_outputs.emplace(&output);
     }
     // NOTE: this check should be fairly cheap, and the set shouldn't
