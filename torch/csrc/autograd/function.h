@@ -37,11 +37,11 @@ using IndexRange = std::pair<size_t, size_t>;
 ///                               Function
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// A `Function` is an abstract class that represents an operation taking zero
-/// or more inputs and producing zero or more outputs. A function that wants to
-/// interact with PyTorch's autograd machinery, i.e. take in `Variables` and be
-/// connected to further `Functions` in a graph, should derive from this class
-/// and override its `apply` method. Instances of such subclasses will then be
-/// invokeable via the call operator.
+/// or more input `Variable`s and producing zero or more output `Variable`s. A
+/// function that wants to interact with PyTorch's autograd machinery, i.e. take
+/// in `Variable`s and be connected to further `Functions` in a graph, should
+/// derive from this class and override its `apply` method. Instances of such
+/// subclasses will then be invokeable via the call operator.
 ///
 ///                    Functions in the Autograd Graph
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -76,7 +76,7 @@ using IndexRange = std::pair<size_t, size_t>;
 /// and iterate over them via the `next_edges()` method. Other methods exist
 /// for integration with the JIT and other parts of PyTorch. Every `Function`
 /// also has a *sequence number* which increases monotonically in the order of
-/// `Function` construction, which can be retrieved via the `sequence_number()`
+/// `Function` construction, which can be retrieved via the `sequence_nr()`
 /// getter.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct Function : std::enable_shared_from_this<Function> {
@@ -92,7 +92,7 @@ struct Function : std::enable_shared_from_this<Function> {
   explicit Function(
       uint32_t num_inputs = 0,
       edge_list&& next_edges = edge_list())
-      : sequence_number_(function_counter_++),
+      : sequence_nr_(next_sequence_nr_++),
         num_inputs_(num_inputs),
         next_edges_(std::move(next_edges)) {}
 
@@ -166,8 +166,8 @@ struct Function : std::enable_shared_from_this<Function> {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   /// The unique sequence number of this `Function`.
-  uint64_t sequence_number() const noexcept {
-    return sequence_number_;
+  uint64_t sequence_nr() const noexcept {
+    return sequence_nr_;
   }
 
   /// Returns a shared pointer to `this`. `PyFunction`s are not managed by
@@ -286,7 +286,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
  protected:
   /// Monotonically incrementing function counter to supply sequence numbers.
-  static thread_local uint64_t function_counter_;
+  static thread_local uint64_t next_sequence_nr_;
 
   /// Performs the `Function`'s actual operation.
   virtual variable_list apply(const variable_list& inputs) = 0;
@@ -296,7 +296,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   // Since `Function`s are neither copyable nor moveable, we can have const
   // fields.
-  const uint64_t sequence_number_;
+  const uint64_t sequence_nr_;
 
   uint32_t num_inputs_;
   edge_list next_edges_;

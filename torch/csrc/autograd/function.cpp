@@ -18,7 +18,7 @@
 
 namespace torch { namespace autograd {
 
-thread_local uint64_t Function::function_counter_ = 0;
+thread_local uint64_t Function::next_sequence_nr_ = 0;
 
 auto Function::name() -> std::string {
   return std::string(typeid(*this).name());
