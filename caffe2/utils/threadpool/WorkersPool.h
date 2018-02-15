@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+#pragma once
+
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 #include <atomic>

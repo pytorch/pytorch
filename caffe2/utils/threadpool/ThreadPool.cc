@@ -181,4 +181,9 @@ void ThreadPool::run(const std::function<void(int, size_t)>& fn, size_t range) {
   workersPool_->Execute(tasks_);
 }
 
+void ThreadPool::withPool(const std::function<void(WorkersPool*)>& f) {
+  std::lock_guard<std::mutex> guard(executionMutex_);
+  f(workersPool_.get());
+}
+
 } // namespace caffe2
