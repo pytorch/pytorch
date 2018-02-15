@@ -40,6 +40,29 @@ using ListAttributeMap = std::unordered_map<
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
 // scopes)
+//
+// The algorithm is roughly as follows:
+// 1) While emitting a block within a control operator, add inputs and outputs
+//      from the block for each value referenced (both "reads" and "writes").
+//      This sets the value up as a candidate loop carried dependency.
+// 2) When we reach the end of the block, examine all the values in the current
+//      scope's value map. If the name also resides in an outer scope with a
+//      different Value*, this is a true loop-carried dependency. If not, this
+//      value was not assigned to. Replace all references to the block input
+//      with the Value* pointed to in the tightest enclosing scope. Then delete
+//      that block input and output.
+// 3) When we emit the actual control operator, take all of the loop-carried
+//      dependency values as inputs and return them as outputs from the control
+//      op
+//
+//  Note that an alternative implementation could only add the loop-carried dep
+//      inputs and outputs when we see a value that is mutated. This, however
+//      requires replacing all references to that value *within the current
+//      block* with a new input. That is to say: we need to traverse the pre-
+//      decessor nodes and replace inputs that reference that value with the
+//      newly-created input. This could be made less expensive with a change to
+//      the IR API, but for now we choose to pessimisitically create inputs and
+//      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
   Environment(Block* b, std::shared_ptr<Environment> next = nullptr)
       : b(b), next(next) {}
@@ -273,8 +296,6 @@ struct to_ir {
       for (const auto& x : curr_frame->captured_inputs) {
         body_block->registerOutput(curr_frame->value_table[x]);
       }
-
-      auto preserve_captured_inputs = curr_frame->captured_inputs;
 
       auto next_frame = curr_frame->next;
       for (const auto& x : curr_frame->captured_inputs) {
