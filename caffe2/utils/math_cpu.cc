@@ -443,6 +443,8 @@ void GemmBatched<float, CPUContext>(
   const int c_stride = M * N;
 
 #ifdef CAFFE2_USE_MKL
+  (void)context;
+
   const int lda = (TransA == CblasNoTrans) ? K : M;
   const int ldb = (TransB == CblasNoTrans) ? N : K;
   std::vector<const float*> a_array(batch_size, nullptr);
