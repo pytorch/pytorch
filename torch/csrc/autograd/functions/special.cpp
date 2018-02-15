@@ -157,8 +157,8 @@ bool Eval::trySimpleEval(const variable_list& inputs, const variable_list& outpu
 
   // Success! We still need to set up placeholders for next stages and to drop
   // references to the graph.
-  next_edges_.reserve(num_inputs);
-  std::swap(grad_fn->next_edges(), next_edges_);
+  std::swap(next_edges_, grad_fn->next_edges());
+  grad_fn->next_edges().reserve(num_inputs);
   placeholders.reserve(num_inputs);
   for (const auto& input : next_edges_) {
     auto placeholder = std::make_shared<EvalOutput>(input);
