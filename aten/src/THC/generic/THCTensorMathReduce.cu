@@ -420,7 +420,7 @@ THCTensor_(max)(THCState *state,
   thrust::pair<typename TensorUtils<THCTensor>::DataType, int64_t>
     init =
     thrust::make_pair<typename TensorUtils<THCTensor>::DataType, int64_t>(
-      THCNumerics<typename TensorUtils<THCTensor>::DataType>::min(), 1);
+      THCNumerics<typename TensorUtils<THCTensor>::DataType>::min(), 0);
 
   return THC_reduceDimIndex(
     state, values, indices, src, dimension, keepdim, init,
@@ -439,7 +439,7 @@ THCTensor_(min)(THCState *state,
   thrust::pair<typename TensorUtils<THCTensor>::DataType, int64_t>
     init =
     thrust::make_pair<typename TensorUtils<THCTensor>::DataType, int64_t>(
-      THCNumerics<typename TensorUtils<THCTensor>::DataType>::max(), 1);
+      THCNumerics<typename TensorUtils<THCTensor>::DataType>::max(), 0);
 
   return THC_reduceDimIndex(
     state, values, indices, src, dimension, keepdim, init,

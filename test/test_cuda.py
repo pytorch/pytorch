@@ -1232,6 +1232,19 @@ class TestCuda(TestCase):
     def test_tensor_scatterFill(self):
         TestTorch._test_scatter_base(self, lambda t: t.cuda(), 'scatter_', True, test_bounds=False)
 
+    def test_min_max_inits(self):
+        # Testing if THC_reduceAll received the correct index initialization.
+        # This affects the result of THC_reduceAll operations at extreme values
+        x = torch.cuda.ByteTensor([0])
+        y = torch.cuda.ByteTensor([255])
+        expected = torch.cuda.LongTensor([0])
+
+        _, v = x.max(dim=0)
+        self.assertEqual(v, expected)
+
+        _, v = y.min(dim=0)
+        self.assertEqual(v, expected)
+
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
         gpu_tensor = cpu_tensor.cuda()
