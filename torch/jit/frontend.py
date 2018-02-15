@@ -76,6 +76,7 @@ if sys.version_info >= (3, 6):
     })
     # NB: no specific token for AnnAssign
 
+
 class FrontendError(Exception):
     def __init__(self, source_range, msg):
         self.source_range = source_range
