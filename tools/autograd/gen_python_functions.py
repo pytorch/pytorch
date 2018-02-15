@@ -91,7 +91,7 @@ inline ${return_type} ${dispatch_name}(${formal_args}) {
   ${initialize_cuda}
   ${AutoNoGIL}
   ${AutoGPU}
-  return ${dispatch_call}(${dispatch_args});
+  return ${dispatch_call}(${dispatch_args})${dispatch_type_conversion};
 }
 """)
 
@@ -334,6 +334,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['formal_args'] = formal_args
         env['actuals'] = actuals
         env['initialize_cuda'] = []
+        env['dispatch_type_conversion'] = []
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
         else:
@@ -343,6 +344,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
+            if dtype_formal_name:
+                env['initialize_cuda'] = 'const Type& type_initialized = maybe_initialize_cuda(type);'
+                env['dispatch_type_conversion'] = '.toType(type_initialized)'
         elif dtype_formal_name:
             env['initialize_cuda'] = 'const Type& type_initialized = maybe_initialize_cuda(type);'
             env['dispatch_call'] = 'type_initialized.{}'.format(declaration['name'])
