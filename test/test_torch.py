@@ -1091,6 +1091,8 @@ class TestTorch(TestCase):
             if dtype != torch.float16 and not (dtype == torch.cuda.float16 and IS_WINDOWS):
                 out = torch._C._VariableFunctions.eye(3, 3, dtype=dtype)
                 self.assertEqual(out.dtype, dtype)
+            self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
+            self.assertFalse(dtype.is_sparse)
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))

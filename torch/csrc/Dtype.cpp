@@ -9,7 +9,7 @@
 
 PyObject* THPDtypeClass = nullptr;
 
-PyObject * THPDtype_New(at::Type* cdata, const std::string& name)
+PyObject * THPDtype_New(at::Type* cdata, const std::string& name, bool is_cuda, bool is_sparse)
 {
   auto type = (PyTypeObject*)THPDtypeClass;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
@@ -19,16 +19,14 @@ PyObject * THPDtype_New(at::Type* cdata, const std::string& name)
   char *name_cstr = new char[name.length() + 1];
   std::strcpy (name_cstr, name.c_str());
   self_->name = name_cstr;
+  self_->is_cuda = is_cuda;
+  self_->is_sparse = is_sparse;
   return self.release();
 }
 
 PyObject *THPDtype_repr(THPDtype *self)
 {
   return THPUtils_packString(self->name);
-}
-
-static PyObject * THPDtype_element_size(THPDtype *self) {
-  return THPUtils_packInt64(self->cdata->elementSizeInBytes());
 }
 
 PyObject *THPDtype_get_cdata(THPDtype *self)
@@ -41,7 +39,7 @@ PyObject *THPDtype_get_cdata(THPDtype *self)
 
 PyObject *THPDtype_is_cuda(THPDtype *self)
 {
-  if (self->cdata->is_cuda()) {
+  if (self->is_cuda) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -50,7 +48,7 @@ PyObject *THPDtype_is_cuda(THPDtype *self)
 
 PyObject *THPDtype_is_sparse(THPDtype *self)
 {
-  if (self->cdata->is_sparse()) {
+  if (self->is_sparse) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -58,11 +56,6 @@ PyObject *THPDtype_is_sparse(THPDtype *self)
 }
 
 typedef PyObject *(*getter)(PyObject *, void *);
-
-static PyMethodDef  THPDtype_methods[] = {
-  {"element_size",    (PyCFunction)THPDtype_element_size,       METH_NOARGS,  nullptr},
-  {nullptr}
-};
 
 static struct PyGetSetDef THPDtype_properties[] = {
   {"_cdata",       (getter)THPDtype_get_cdata, nullptr, nullptr, nullptr},
@@ -99,7 +92,7 @@ PyTypeObject THPDtypeType = {
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  THPDtype_methods,                      /* tp_methods */
+  0,                                     /* tp_methods */
   0,                                     /* tp_members */
   THPDtype_properties,                   /* tp_getset */
   0,                                     /* tp_base */

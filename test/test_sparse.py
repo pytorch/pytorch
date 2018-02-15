@@ -873,6 +873,8 @@ class TestSparse(TestCase):
         for dtype in dtypes:
             out = torch._C._VariableFunctions.zeros((3, 3), dtype=dtype)
             self.assertEqual(out.dtype, dtype)
+            self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
+            self.assertTrue(dtype.is_sparse)
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)
