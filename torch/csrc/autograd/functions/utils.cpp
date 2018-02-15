@@ -26,7 +26,7 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
     for (auto& output : outputs) {
       if (output.defined()) {
         auto variable = autograd::make_variable(output, /*requires_grad=*/false);
-        autograd::add_gradient_edge(variable, grad_fn);
+        autograd::create_gradient_edge(variable, grad_fn);
         result.push_back(std::move(variable));
       } else {
         grad_fn->bump_inputs();

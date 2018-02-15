@@ -327,7 +327,7 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
 static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
     auto& var = as_variable_ref(tensor);
-    autograd::add_gradient_edge(var, std::move(grad_fn));
+    autograd::create_gradient_edge(var, std::move(grad_fn));
   }
 }
 

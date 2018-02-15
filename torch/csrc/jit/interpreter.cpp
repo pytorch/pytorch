@@ -63,7 +63,7 @@ struct HandleBuilder {
   autograd::Variable addInput(at::Retainable* input, const VariableFlags & flags_) {
     if(handle && flags_.requires_grad) {
       auto variable = autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
-      autograd::add_gradient_edge(variable, handle->forward_inputs);
+      autograd::create_gradient_edge(variable, handle->forward_inputs);
       return variable;
     } else {
       return autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);

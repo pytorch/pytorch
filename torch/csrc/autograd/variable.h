@@ -115,7 +115,7 @@ struct Variable : public at::Tensor {
   /// gradient function is stored in the `function` property of the edge.
   /// Defined with its variants in `autograd/function.h`. It is a friend
   /// function because it (alone) is allowed to call `set_gradient_edge()`.
-  friend void add_gradient_edge(Variable& variable, Edge edge);
+  friend void create_gradient_edge(Variable& variable, Edge edge);
 
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -151,7 +151,7 @@ struct Variable : public at::Tensor {
   Function* grad_fn_unsafe() const;
 
   /// Set the gradient accumulator of the `Variable`. This is only applicable to
-  /// leaf variables. Interior variables should call `add_gradient_edge()`.
+  /// leaf variables. Interior variables should call `set_gradient_edge()`.
   void set_grad_accumulator(std::weak_ptr<Function> grad_accumulator);
 
   /// Attempts to get a pointer to the gradient accumulator of the `Variable`,

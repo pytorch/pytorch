@@ -277,7 +277,7 @@ bool Eval::replaceSubgraph(const variable_list& inputs, const variable_list& _ou
       auto & replicate = output.grad_fn();
       replicate->add_next_edge({this_shared, num_inputs_++});
     } else {
-      autograd::add_gradient_edge(output, this_shared);
+      autograd::create_gradient_edge(output, this_shared);
     }
   }
 

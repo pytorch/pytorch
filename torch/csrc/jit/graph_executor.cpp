@@ -133,7 +133,7 @@ private:
       // reallocate variables that were already created in wrapTensors. We
       // should add an API for this.
       auto& output = autograd::as_variable_ref(outputs[idx]);
-      autograd::add_gradient_edge(output, grad_fn);
+      autograd::create_gradient_edge(output, grad_fn);
       output.set_requires_grad(true);
     }
     captureOutputs(*grad_fn, outputs);
