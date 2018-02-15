@@ -84,12 +84,6 @@ using IndexRange = std::pair<size_t, size_t>;
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct Function : std::enable_shared_from_this<Function> {
  public:
-  /// Create a context edge for the JIT.
-  static void set_up_context_edge(
-      jit::Node* this_node,
-      const variable_list& inputs,
-      const variable_list& outputs);
-
   /// Construct a new `Function` with `num_inputs` inputs and the given
   /// `next_edges`.
   explicit Function(
@@ -106,7 +100,7 @@ struct Function : std::enable_shared_from_this<Function> {
   Function& operator=(Function&& other) = delete;
   virtual ~Function() = default;
 
-  /// Evaluates the function on the given inputs and return the result of the
+  /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
   variable_list operator()(const variable_list& inputs) {
     profiler::RecordFunction rec(this);
@@ -153,11 +147,11 @@ struct Function : std::enable_shared_from_this<Function> {
     next_edges_ = std::move(next_edges);
   }
 
-  void swap_next_edges(edge_list& new_edges) noexcept {
-    std::swap(next_edges_, new_edges);
+  const edge_list& next_edges() const noexcept {
+    return next_edges_;
   }
 
-  const edge_list& next_edges() const noexcept {
+  edge_list& next_edges() noexcept {
     return next_edges_;
   }
 
@@ -216,6 +210,12 @@ struct Function : std::enable_shared_from_this<Function> {
   void set_pyobj(PyObject* pyobj) noexcept {
     pyobj_ = pyobj;
   }
+
+  /// Create a context edge for the JIT.
+  static void set_up_context_edge(
+      jit::Node* this_node,
+      const variable_list& inputs,
+      const variable_list& outputs);
 
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
