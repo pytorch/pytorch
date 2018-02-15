@@ -131,6 +131,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
         }
       }
     }
+    __syncthreads();
 
     // reduce sum
     Acctype totalSum = reduceBlock(sums, blockDim.x, sum, thrust::plus<Acctype>(), (Acctype)0);
