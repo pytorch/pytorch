@@ -57,7 +57,6 @@ if PY2:
     })
 else:
     pretty_node_names.update({
-        ast.AnnAssign: "annotated assignments",
         ast.AsyncFor: "async for loops",
         ast.AsyncWith: "async with statements",
         ast.Try: "try blocks",
@@ -65,12 +64,17 @@ else:
     })
 
     node_start_tokens.update({
-        # No specific token for AnnAssign
         ast.AsyncFor: "async for",
         ast.AsyncWith: "async with",
         ast.Try: "try",
         ast.Nonlocal: "nonlocal",
     })
+
+if sys.version_info >= (3, 6):
+    pretty_node_names.update({
+        ast.AnnAssign: "annotated assignments",
+    })
+    # NB: no specific token for AnnAssign
 
 class FrontendError(Exception):
     def __init__(self, source_range, msg):
