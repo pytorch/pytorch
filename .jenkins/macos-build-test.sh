@@ -22,5 +22,5 @@ export MAX_JOBS=3
 python setup.py install
 cd test/
 echo "Ninja version: $(ninja --version)"
-sh run_test.sh
+sh run_test.sh -- -v
 echo "BUILD PASSED"
