@@ -39,11 +39,10 @@ static void lazy_init_cuda() {
   });
 }
 
-static const at::Type& maybe_initialize_cuda(const at::Type &type) {
+static void maybe_initialize_cuda(const at::Type &type) {
   if(type.is_cuda()) {
     lazy_init_cuda();
   }
-  return type;
 }
 
 ${py_method_dispatch}

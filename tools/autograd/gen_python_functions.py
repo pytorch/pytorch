@@ -345,11 +345,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         elif 'namespace' in declaration['method_of']:
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
             if dtype_formal_name:
-                env['initialize_cuda'] = 'const Type& type_initialized = maybe_initialize_cuda(type);'
-                env['dispatch_type_conversion'] = '.toType(type_initialized)'
+                env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
+                env['dispatch_type_conversion'] = '.toType({})'.format (dtype_formal_name)
         elif dtype_formal_name:
-            env['initialize_cuda'] = 'const Type& type_initialized = maybe_initialize_cuda(type);'
-            env['dispatch_call'] = 'type_initialized.{}'.format(declaration['name'])
+            env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
+            env['dispatch_call'] = '{}.{}'.format(dtype_formal_name, declaration['name'])
         else:
             env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
