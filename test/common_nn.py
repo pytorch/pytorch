@@ -558,14 +558,7 @@ criterion_tests = [
         module_name='MultiLabelSoftMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        check_gradgrad=False,
-    ),
-    dict(
-        module_name='MultiLabelSoftMarginLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        input_size=(5, 10),
-        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        desc='weights',
+        reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
         check_gradgrad=False,
     ),
     dict(
