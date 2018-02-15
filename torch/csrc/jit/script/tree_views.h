@@ -2,6 +2,8 @@
 #include "error_report.h"
 #include "tree.h"
 
+#include <functional>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -493,6 +495,9 @@ struct UnaryOp : public Expr {
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid UnaryOp";
     }
   }
+  static UnaryOp create(const SourceRange& range, int kind, const Expr& expr) {
+    return UnaryOp(Compound::create(kind, range, {expr}));
+  }
 };
 
 struct Cast : public Expr {
@@ -601,12 +606,33 @@ struct Var : public Expr {
   explicit Var(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_VAR);
   };
-  Ident name() {
+  Ident name() const {
     return Ident(subtree(0));
   }
   static Var create(const SourceRange& range, const Ident& name) {
     return Var(Compound::create(TK_VAR, range, {name}));
   }
+};
+
+struct TernaryIf : public Expr {
+  explicit TernaryIf(const TreeRef& tree) : Expr(tree) {
+    tree_->matchNumSubtrees(TK_IF_EXPR, 3);
+  };
+  Expr cond() const {
+    return Expr(subtree(0));
+  }
+  Expr true_expr() const {
+    return Expr(subtree(1));
+  }
+  Expr false_expr() const {
+    return Expr(subtree(2));
+  }
+  static TernaryIf create(const SourceRange& range,
+                          const Expr& cond,
+                          const Expr& true_expr,
+                          const Expr& false_expr) {
+    return TernaryIf(Compound::create(TK_IF_EXPR, range, {cond, true_expr, false_expr}));
+  };
 };
 
 } // namespace script
