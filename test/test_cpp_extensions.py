@@ -50,6 +50,26 @@ class TestCppExtension(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_jit_cuda_extension(self):
+        # NOTE: The name of the extension must equal the name of the module.
+        module = torch.utils.cpp_extension.load(
+            name='torch_test_cuda_extension',
+            sources=[
+                'cpp_extensions/cuda_extension.cpp',
+                'cpp_extensions/cuda_extension_kernel.cu'
+            ],
+            extra_cuda_cflags=['-O2'],
+            verbose=True)
+
+        x = torch.FloatTensor(100).zero_().cuda()
+        y = torch.FloatTensor(100).zero_().cuda()
+
+        z = module.sigmoid_add(x, y).cpu()
+
+        # 2 * sigmoid(0) = 2 * 0.5 = 1
+        self.assertEqual(z, torch.ones_like(z))
+
 
 if __name__ == '__main__':
     common.run_tests()

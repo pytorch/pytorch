@@ -97,7 +97,7 @@ class BuildExtension(build_ext):
         def wrap_compile(obj, src, ext, cc_args, cflags, pp_opts):
             try:
                 original_compiler = self.compiler.compiler_so
-                if os.path.splitext(src)[1].startswith('.cu'):
+                if _is_cuda_file(src):
                     nvcc = _join_cuda_home('bin', 'nvcc')
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
@@ -183,6 +183,7 @@ def include_paths(cuda=False):
 def load(name,
          sources,
          extra_cflags=None,
+         extra_cuda_cflags=None,
          extra_ldflags=None,
          extra_include_paths=None,
          build_directory=None,
@@ -211,10 +212,21 @@ def load(name,
     with optimizations, pass `extra_cflags=['-O3']`. You can also use
     `extra_cflags` to pass further include directories (`-I`).
 
+    CUDA support with mixed compilation is provided. Simply pass CUDA source
+    files (`.cu` or `.cuh`) along with other sources. Such files will be
+    detected and compiled with nvcc rather than the C++ compiler. This includes
+    passing the CUDA lib64 directory as a library directory, and linking
+    `cudart`. You can pass additional flags to nvcc via `extra_cuda_cflags`,
+    just like with `extra_cflags` for C++. Various heuristics for finding the
+    CUDA install directory are used, which usually work fine. If not, setting
+    the `CUDA_HOME` environment variable is the safest option.
+
     Args:
         name: The name of the module to build.
         sources: A list of relative or absolute paths to C++ source files.
         extra_cflags: optional list of compiler flags to forward to the build.
+        extra_cuda_cflags: optional list of compiler flags to forward to nvcc
+            when building CUDA sources.
         extra_ldflags: optional list of linker flags to forward to the build.
         extra_include_paths: optional list of include directories to forward
             to the build.
@@ -234,13 +246,28 @@ def load(name,
     if build_directory is None:
         build_directory = _get_build_directory(name, verbose)
 
+    with_cuda = any(map(_is_cuda_file, sources))
+    if with_cuda:
+        if verbose:
+            print('Detected CUDA files, patching ldflags')
+        extra_ldflags = extra_ldflags or []
+        extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
+        extra_ldflags.append('-lcudart')
+
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         print('Emitting ninja build file {}...'.format(build_file_path))
     # NOTE: Emitting a new ninja build file does not cause re-compilation if
     # the sources did not change, so it's ok to re-emit (and it's fast).
-    _write_ninja_file(build_file_path, name, sources, extra_cflags or [],
-                      extra_ldflags or [], extra_include_paths or [])
+    _write_ninja_file(
+        path=build_file_path,
+        name=name,
+        sources=sources,
+        extra_cflags=extra_cflags or [],
+        extra_cuda_cflags=extra_cuda_cflags or [],
+        extra_ldflags=extra_ldflags or [],
+        extra_include_paths=extra_include_paths or [],
+        with_cuda=with_cuda)
 
     if verbose:
         print('Building extension module {}...'.format(name))
@@ -300,11 +327,19 @@ def _import_module_from_library(module_name, path):
         return imp.load_module(module_name, file, path, description)
 
 
-def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
-                      extra_include_paths):
+def _write_ninja_file(path,
+                      name,
+                      sources,
+                      extra_cflags,
+                      extra_cuda_cflags,
+                      extra_ldflags,
+                      extra_include_paths,
+                      with_cuda=False):
     # Version 1.3 is required for the `deps` directive.
     config = ['ninja_required_version = 1.3']
     config.append('cxx = {}'.format(os.environ.get('CXX', 'c++')))
+    if with_cuda:
+        config.append('nvcc = {}'.format(_join_cuda_home('bin', 'nvcc')))
 
     # Turn into absolute paths so we can emit them into the ninja build
     # file wherever it is.
@@ -312,7 +347,7 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
     includes = [os.path.abspath(file) for file in extra_include_paths]
 
     # include_paths() gives us the location of torch/torch.h
-    includes += include_paths()
+    includes += include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
 
@@ -320,6 +355,11 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
     cflags += ['-I{}'.format(include) for include in includes]
     cflags += extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
+
+    if with_cuda:
+        cuda_flags = "--compiler-options '-fPIC'"
+        extra_flags = ' '.join(extra_cuda_cflags)
+        flags.append('cuda_flags = {} {}'.format(cuda_flags, extra_flags))
 
     ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols
@@ -333,7 +373,11 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
         '  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out')
     compile_rule.append('  depfile = $out.d')
     compile_rule.append('  deps = gcc')
-    compile_rule.append('')
+
+    if with_cuda:
+        cuda_compile_rule = ['rule cuda_compile']
+        cuda_compile_rule.append(
+            '  command = $nvcc $cuda_flags -c $in -o $out')
 
     link_rule = ['rule link']
     link_rule.append('  command = $cxx $ldflags $in -o $out')
@@ -346,7 +390,8 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
         file_name = os.path.splitext(os.path.basename(source_file))[0]
         target = '{}.o'.format(file_name)
         object_files.append(target)
-        build.append('build {}: compile {}'.format(target, source_file))
+        rule = 'cuda_compile' if _is_cuda_file(source_file) else 'compile'
+        build.append('build {}: {} {}'.format(target, rule, source_file))
 
     library_target = '{}.so'.format(name)
     link = ['build {}: link {}'.format(library_target, ' '.join(object_files))]
@@ -354,7 +399,10 @@ def _write_ninja_file(path, name, sources, extra_cflags, extra_ldflags,
     default = ['default {}'.format(library_target)]
 
     # 'Blocks' should be separated by newlines, for visual benefit.
-    blocks = [config, flags, compile_rule, link_rule, build, link, default]
+    blocks = [config, flags, compile_rule]
+    if with_cuda:
+        blocks.append(cuda_compile_rule)
+    blocks += [link_rule, build, link, default]
     with open(path, 'w') as build_file:
         for block in blocks:
             lines = '\n'.join(block)
@@ -372,3 +420,7 @@ def _join_cuda_home(*paths):
         raise EnvironmentError('CUDA_HOME environment variable is not set. '
                                'Please set it to your CUDA install root.')
     return os.path.join(CUDA_HOME, *paths)
+
+
+def _is_cuda_file(path):
+    return os.path.splitext(path)[1] in ['.cu', '.cuh']
