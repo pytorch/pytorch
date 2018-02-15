@@ -130,7 +130,7 @@ class cmake_build(Caffe2Command):
                 '-DPYTHON_EXECUTABLE:FILEPATH={}'.format(sys.executable),
                 '-DPYTHON_INCLUDE_DIR={}'.format(sysconfig.get_python_inc()),
                 '-DBUILD_TEST=OFF',
-                '-BUILD_BENCHMARK=OFF',
+                '-DBUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
             ]
             if 'CMAKE_ARGS' in os.environ:
