@@ -247,11 +247,14 @@ struct DropoutDescriptor
 
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
-  void initialize_rng(cudnnHandle_t handle, float dropout, long long int seed) {
+  // NB: it takes a Type so that we can generate a Variable if necessary
+  void initialize_rng(const at::Type& ty, cudnnHandle_t handle, float dropout, long long int seed) {
     AT_ASSERT(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
-    state = at::CUDA(kByte).tensor({static_cast<int64_t>(state_size)});
+    AT_ASSERT(ty.is_cuda(), "dropout state type must be CUDA type");
+    AT_ASSERT(ty.scalarType() == kByte, "dropout state type must be byte");
+    state = ty.tensor({static_cast<int64_t>(state_size)});
     CUDNN_CHECK(cudnnSetDropoutDescriptor(mut_desc(), handle, dropout, state.data_ptr(), state_size, seed));
   }
 
