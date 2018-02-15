@@ -27,7 +27,6 @@
 #include "PtrWrapper.h"
 #include "Exceptions.h"
 #include "Generator.h"
-#include "Dtype.h"
 #include "Storage.h"
 #include "Tensor.h"
 #include "Size.h"

@@ -2,10 +2,11 @@
 
 #include <cstring>
 #include <structmember.h>
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/tensor_types.h"
-#include "THP.h"
 
 PyObject* THPDtypeClass = nullptr;
 
@@ -30,10 +31,7 @@ PyObject *THPDtype_repr(THPDtype *self)
 
 PyObject *THPDtype_get_cdata(THPDtype *self)
 {
-  HANDLE_TH_ERRORS
-  auto& type = self->cdata;
-  return PyLong_FromVoidPtr(&type);
-  END_HANDLE_TH_ERRORS
+  return PyLong_FromVoidPtr(self->cdata);
 }
 
 PyObject *THPDtype_is_cuda(THPDtype *self)

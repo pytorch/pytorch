@@ -37,9 +37,13 @@ static std::pair<std::string, std::string> getDtypeNames(at::ScalarType scalarTy
 
 void initializeDtypes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
+  if (!torch_module) python_error();
   auto cuda_module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
+  if (!cuda_module) python_error();
   auto sparse_module = THPObjectPtr(PyImport_ImportModule("torch.sparse"));
+  if (!sparse_module) python_error();
   auto cuda_sparse_module = THPObjectPtr(PyImport_ImportModule("torch.cuda.sparse"));
+  if (!cuda_sparse_module) python_error();
   auto& context = at::globalContext();
   for (auto type_pair : torch::utils::all_declared_types()) {
     at::Backend backend;
@@ -76,16 +80,23 @@ void initializeDtypes() {
       }
       default: throw std::runtime_error("Unimplemented backend");
     }
+    // use this rather than context.getType() because getType throws exceptions.
     auto baseType = context.type_registry[static_cast<int>(backend)][static_cast<int>(scalarType)].get();
     auto type = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
     std::string name = std::string(PyModule_GetName(module)) + '.' + primary_name;
-    THPDtype *dtype = (THPDtype*)THPDtype_New(type, name, is_cuda, is_sparse);
+    PyObject *dtype = THPDtype_New(type, name, is_cuda, is_sparse);
     if (type) {
-      torch::registerDtypeObject(dtype, *type);
+      torch::registerDtypeObject((THPDtype*)dtype, *type);
     }
-    PyModule_AddObject(module, primary_name.c_str(), (PyObject*)dtype);
+    Py_INCREF(dtype);
+    if (PyModule_AddObject(module, primary_name.c_str(), (PyObject*)dtype) != 0) {
+      throw python_error();
+    }
     if (legacy_name != "") {
-      PyModule_AddObject(module, legacy_name.c_str(), (PyObject*)dtype);
+      Py_INCREF(dtype);
+      if (PyModule_AddObject(module, legacy_name.c_str(), (PyObject*)dtype) != 0) {
+        throw python_error();
+      }
     }
   }
 }

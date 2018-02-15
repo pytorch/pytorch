@@ -272,9 +272,6 @@ inline bool PythonArgs::isNone(int i) {
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  if (!THPGenerator_Check(args[i])) {
-    throw TypeError("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
-  }
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
