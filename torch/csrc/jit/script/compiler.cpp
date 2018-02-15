@@ -2,6 +2,8 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
 
+#include <climits>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -34,8 +36,10 @@ using ListAttributeMap = std::unordered_map<
     std::string,
     std::pair<const std::vector<double>, std::string>>;
 
-// Keep track of environment as we descend down nested control
-// structures.
+// Auxiliary data structure for desugaring variable binding into our always
+// explicitly scoped language as we descend down
+// nested control structures in the frontend (which themselves don't introduce
+// scopes)
 struct Environment {
   Environment(Block* b, std::shared_ptr<Environment> next = nullptr)
       : b(b), next(next) {}
@@ -233,11 +237,12 @@ struct to_ir {
     // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
     // TODO: implement scan_outputs
 
-    Value* trip_count_dummy = emitConst(0, "i")[0];
+    // TODO: clarify that this is an optional input that isn't needed here
+    Value* max_trip_count_dummy = emitConst(INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
     Node* n = def.graph->insertNode(def.graph->create(kLoop, 0));
-    n->addInput(trip_count_dummy);
+    n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
     // Trip count required by spec. Since this is a while loop, we do not
@@ -264,21 +269,20 @@ struct to_ir {
       environment_stack->deleteExtraInputs(skip_inputs_num);
 
       // Add block outputs
-      auto& curr_frame = *environment_stack;
-      for (const auto& x : curr_frame.captured_inputs) {
-        body_block->registerOutput(curr_frame.value_table[x]);
+      auto curr_frame = environment_stack;
+      for (const auto& x : curr_frame->captured_inputs) {
+        body_block->registerOutput(curr_frame->value_table[x]);
       }
 
-      auto preserve_captured_inputs = curr_frame.captured_inputs;
+      auto preserve_captured_inputs = curr_frame->captured_inputs;
 
-      // Drop out of block environment
-      environment_stack = environment_stack->next;
-
-      // Add op inputs
-      for (const auto& x : preserve_captured_inputs) {
-        n->addInput(environment_stack->getVar(x, stmt));
-        environment_stack->setVar(x, n->addOutput());
+      auto next_frame = curr_frame->next;
+      for (const auto& x : curr_frame->captured_inputs) {
+        n->addInput(next_frame->getVar(x, stmt));
+        next_frame->setVar(x, n->addOutput());
       }
+
+      environment_stack = next_frame;
     }
   }
 

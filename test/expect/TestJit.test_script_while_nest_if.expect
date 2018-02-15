@@ -1,7 +1,7 @@
 graph(%a : UNKNOWN_TYPE
       %b : UNKNOWN_TYPE) {
   %2 : UNKNOWN_TYPE = Constant[value={0}]()
-  %3 : UNKNOWN_TYPE = Constant[value={0}]()
+  %3 : UNKNOWN_TYPE = Constant[value={2147483647}]()
   %4 : UNKNOWN_TYPE = Constant[value={10}]()
   %5 : UNKNOWN_TYPE = lt(%a, %4)
   %21 : UNKNOWN_TYPE, %22 : UNKNOWN_TYPE, %23 : UNKNOWN_TYPE = Loop(%3, %5, %a, %b, %2)

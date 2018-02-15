@@ -4,7 +4,7 @@ graph(%a : UNKNOWN_TYPE
   %3 : UNKNOWN_TYPE = gt(%a, %b)
   %17 : UNKNOWN_TYPE, %18 : UNKNOWN_TYPE = If(%3)
     block0() {
-      %4 : UNKNOWN_TYPE = Constant[value={0}]()
+      %4 : UNKNOWN_TYPE = Constant[value={2147483647}]()
       %5 : UNKNOWN_TYPE = gt(%a, %b)
       %15 : UNKNOWN_TYPE, %16 : UNKNOWN_TYPE = Loop(%4, %5, %b, %2)
         block0(%6 : UNKNOWN_TYPE, %7 : UNKNOWN_TYPE, %8 : UNKNOWN_TYPE, %12 : UNKNOWN_TYPE) {
