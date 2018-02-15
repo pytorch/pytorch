@@ -56,7 +56,11 @@ class alignas(kCacheLineSize) ThreadPool {
   size_t getMinWorkSize() const { return minWorkSize_; }
   void run(const std::function<void(int, size_t)>& fn, size_t range);
 
-private:
+  // Run an arbitrary function in a thread-safe manner accessing the Workers
+  // Pool
+  void withPool(const std::function<void(WorkersPool*)>& fn);
+
+ private:
   mutable std::mutex executionMutex_;
   size_t minWorkSize_;
   size_t numThreads_;
