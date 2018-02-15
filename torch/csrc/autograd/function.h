@@ -37,20 +37,20 @@ using IndexRange = std::pair<size_t, size_t>;
 ///                               Function
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 /// A `Function` is an abstract class that represents an operation taking zero
-/// or more input `Variable`s and producing zero or more output `Variable`s. A
-/// function that wants to interact with PyTorch's autograd machinery, i.e. take
-/// in `Variable`s and be connected to further `Functions` in a graph, should
-/// derive from this class and override its `apply` method. Instances of such
-/// subclasses will then be invokeable via the call operator.
+/// or more input `Variable`s and producing zero or more output `Variable`s. All
+/// functions in PyTorch's autograd machinery derive from this class and
+/// override its `apply` method. Instances of such subclasses will then be
+/// invokeable via the call operator.
 ///
 ///                    Functions in the Autograd Graph
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// When viewing the autograd system as a graph, `Function`s are the vertices
-/// or nodes, connected to each other via (directed) `Edge`s, which themselves
-/// are represented via the `Function` they are directed at and the particular
-/// index of the edge when the Function is multivariate. `Variable`s are the
-/// outputs to and inputs of `Function`s, and travel between these edges during
-/// execution of the graph.
+/// When viewing the autograd system as a graph, `Function`s are the vertices or
+/// nodes, connected to each other via (directed) `Edge`s, which themselves are
+/// represented via (`Function`, input_nr) pairs. `Variable`s are the outputs to
+/// and inputs of `Function`s, and travel between these edges during execution
+/// of the graph. When two or more `Edge`s (from different sources) point at the
+/// same input to a `Function`, the values produced along all of these edges are
+/// implicitly summed prior to being forwarded to the target `Function`.
 ///
 ///                              Hierarchy
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,22 +62,25 @@ using IndexRange = std::pair<size_t, size_t>;
 /// is a *sink*: it takes one input, but produces no outputs, instead adding
 /// the input to its internal accumulator as a side effect. At the other
 /// extreme, the `GraphRoot` function receives no inputs from other functions,
-/// but produces multiple outputs. Finally, the `Error` function takes neither
-/// inputs nor outputs.
+/// but produces multiple outputs.
 ///
 ///                              Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// The most important method on `Function` is the call operator, which takes
-/// in a list of variables and produces a list of variables. The precise size
-/// of these lists can be determined with `num_inputs()` and `num_outputs()`.
-/// `Function`s are stitched together via their `next_edge` interface, which
-/// let you manipulate the set of outgoing edges of a `Function`. You can add
-/// an edge with `add_next_edge()`, retrieve an edge with `next_edge(index)`
-/// and iterate over them via the `next_edges()` method. Other methods exist
-/// for integration with the JIT and other parts of PyTorch. Every `Function`
-/// also has a *sequence number* which increases monotonically in the order of
-/// `Function` construction, which can be retrieved via the `sequence_nr()`
-/// getter.
+/// The most important method on `Function` is the call operator, which takes in
+/// a list of variables and produces a list of variables. The precise size of
+/// these lists can be determined with `num_inputs()` and `num_outputs()`.
+/// `Function`s are stitched together via their `next_edge` interface, which let
+/// you manipulate the set of outgoing edges of a `Function`. You can add an
+/// edge with `add_next_edge()`, retrieve an edge with `next_edge(index)` and
+/// iterate over them via the `next_edges()` method. Other methods exist for
+/// integration with the JIT and other parts of PyTorch. Every `Function` has a
+/// *sequence number* that increases monotonically in the order of `Function`
+/// construction. It can be retrieved via the `sequence_nr()` method. Note that
+/// this sequence number is *thread local*. This means that when `Function`s
+/// `A`, `B` and `C` are created consecutively in the same thread, their
+/// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
+/// are created in one thread and `C` is created in a new thread, `C` will have
+/// a *lower* sequence number than `B`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct Function : std::enable_shared_from_this<Function> {
  public:
