@@ -47,7 +47,7 @@ python ./configure.py --bootstrap
 export PATH="$PWD:$PATH"
 popd
 
-time test/run_test.sh
+time test/run_test.sh -- -v
 
 rm -rf ninja
 

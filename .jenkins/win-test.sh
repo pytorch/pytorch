@@ -73,7 +73,7 @@ python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
 python ..\\ci_scripts\\delete_image.py
 
 7z x %IMAGE_COMMIT_TAG%.7z
-sh run_test.sh
+sh run_test.sh -- -v
 
 EOL
 
