@@ -101,7 +101,7 @@ CUDA_FUNCTOR(GT, CUDA_GT, NumericTypes, FixedType<bool>);
 CUDA_FUNCTOR(GE, CUDA_GE, NumericTypes, FixedType<bool>);
 #undef CUDA_GE
 #define CUDA_EQ(x, y) ((x) == (y))
-CUDA_FUNCTOR(EQ, CUDA_EQ, IntTypes, FixedType<bool>);
+CUDA_FUNCTOR(EQ, CUDA_EQ, IntBoolTypes, FixedType<bool>);
 #undef CUDA_EQ
 #define CUDA_AND(x, y) ((x) & (y))
 CUDA_FUNCTOR(And, CUDA_AND, BoolTypes, FixedType<bool>);

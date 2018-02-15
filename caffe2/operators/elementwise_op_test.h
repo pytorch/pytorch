@@ -239,6 +239,23 @@ void elementwiseEQ() {
       EXPECT_EQ(Z.template data<bool>()[i], result[i]);
     }
   }
+  { // boolean
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "X", {N}, {true, false, false, true});
+    FillTensor<Context, uint8_t, bool>(
+        &ws, "Y", {N}, {true, false, true, false});
+    std::unique_ptr<caffe2::OperatorBase> op(caffe2::CreateOperator(def, &ws));
+    EXPECT_NE(nullptr, op.get());
+    EXPECT_TRUE(op->Run());
+    auto* blob = ws.GetBlob("Z");
+    EXPECT_NE(nullptr, blob);
+    caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>());
+    EXPECT_EQ(Z.size(), N);
+    std::vector<bool> result{true, true, false, false};
+    for (size_t i = 0; i < Z.size(); ++i) {
+      EXPECT_EQ(Z.template data<bool>()[i], result[i]);
+    }
+  }
   { // broadcast
     auto* arg = def.add_arg();
     arg->set_name("broadcast");

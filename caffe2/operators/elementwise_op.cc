@@ -81,7 +81,7 @@ NAIVE_FUNCTOR(GT, NAIVE_GT, NumericTypes, FixedType<bool>);
 NAIVE_FUNCTOR(GE, NAIVE_GE, NumericTypes, FixedType<bool>);
 #undef NAIVE_GE
 #define NAIVE_EQ(x, y) ((x) == (y))
-NAIVE_FUNCTOR(EQ, NAIVE_EQ, IntTypes, FixedType<bool>);
+NAIVE_FUNCTOR(EQ, NAIVE_EQ, IntBoolTypes, FixedType<bool>);
 #undef NAIVE_EQ
 #define NAIVE_AND(x, y) ((x) & (y))
 NAIVE_FUNCTOR(And, NAIVE_AND, BoolTypes, FixedType<bool>);
