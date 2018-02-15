@@ -269,7 +269,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
             cx = None
 
         handle = cudnn.get_handle()
-        dropout_desc = cudnn.rnn.init_dropout_descriptor(handle, dropout, train, dropout_seed, dropout_state)
+        dropout_ts = cudnn.rnn.init_dropout_state(torch.cuda.uint8, dropout, train, dropout_seed, dropout_state)
 
         weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])
@@ -281,7 +281,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
             mode, hidden_size, num_layers,
             batch_first, dropout, train, bool(bidirectional),
             list(batch_sizes.data) if variable_length else (),
-            Variable(dropout_desc.state) if dropout_desc.state is not None else None)
+            dropout_ts)
 
         if cx is not None:
             return (output, (hy, cy))
