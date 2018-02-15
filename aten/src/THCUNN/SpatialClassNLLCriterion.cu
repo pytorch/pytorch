@@ -103,6 +103,8 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
     }
   }
 
+  __syncthreads();
+
   input_sum = reduceBlock(partial_sums, blockDim.x, input_sum, thrust::plus<AccumT>(), AccumT(0));
   acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
