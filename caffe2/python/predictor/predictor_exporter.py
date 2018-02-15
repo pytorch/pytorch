@@ -29,6 +29,7 @@ import caffe2.python.predictor.predictor_py_utils as utils
 from builtins import bytes
 import collections
 
+
 def get_predictor_exporter_helper(submodelNetName):
     """ constracting stub for the PredictorExportMeta
         Only used to construct names to subfields,
@@ -82,6 +83,12 @@ class PredictorExportMeta(collections.namedtuple(
         assert len(set(inputs)) == len(inputs), (
             "All inputs to the predictor should be unique")
         parameters = [str(p) for p in parameters]
+        assert set(parameters).isdisjoint(inputs), (
+            "Parameters and inputs are required to be disjoint. "
+            "Intersection: {}".format(set(parameters).intersection(inputs)))
+        assert set(parameters).isdisjoint(outputs), (
+            "Parameters and outputs are required to be disjoint. "
+            "Intersection: {}".format(set(parameters).intersection(outputs)))
         shapes = shapes or {}
 
         if isinstance(predict_net, (core.Net, core.Plan)):

@@ -70,6 +70,28 @@ class PredictorExporterTest(unittest.TestCase):
             shapes={"y": (1, 10), "data": (1, 5)},
         )
 
+    def test_param_intersection(self):
+        '''
+        Test that passes intersecting parameters and input/output blobs
+        '''
+        m = self._create_model()
+        with self.assertRaises(Exception):
+            pe.PredictorExportMeta(
+                predict_net=m.net,
+                parameters=m.params,
+                inputs=["data"] + m.params,
+                outputs=["y"],
+                shapes={"y": (1, 10), "data": (1, 5)},
+            )
+        with self.assertRaises(Exception):
+            pe.PredictorExportMeta(
+                predict_net=m.net,
+                parameters=m.params,
+                inputs=["data"],
+                outputs=["y"] + m.params,
+                shapes={"y": (1, 10), "data": (1, 5)},
+            )
+
     def test_meta_net_def_net_runs(self):
         for param, value in viewitems(self.params):
             workspace.FeedBlob(param, value)
