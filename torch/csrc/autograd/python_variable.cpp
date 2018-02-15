@@ -235,7 +235,7 @@ int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
-  self->cdata.remove_gradient_edge();
+  self->cdata.detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

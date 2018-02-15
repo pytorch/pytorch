@@ -193,11 +193,6 @@ struct Variable : public at::Tensor {
   /// `Variable`.
   void set_gradient_edge(Edge edge) noexcept;
 
-  /// Unset the gradient edge of the `Variable`.
-  /// This will unset either the gradient function or gradient accumulator,
-  /// depending on whether this `Variable` is a leaf or interior node.
-  void remove_gradient_edge();
-
   /// Returns the input index of the gradient `Function` to which this
   /// `Variable` is connected.
   uint32_t output_nr() const noexcept;
@@ -501,14 +496,6 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
 inline void Variable::set_gradient_edge(Edge edge) noexcept {
   get()->grad_fn = std::move(edge.function);
   get()->output_nr = edge.input_nr;
-}
-
-inline void Variable::remove_gradient_edge() {
-  if (is_leaf()) {
-    get()->grad_accumulator.reset();
-  } else {
-    get()->grad_fn.reset();
-  }
 }
 
 inline uint32_t Variable::output_nr() const noexcept {
