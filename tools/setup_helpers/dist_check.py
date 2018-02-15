@@ -1,25 +1,15 @@
 import os
-import sys
-import platform
 import subprocess
 import glob
-from itertools import chain
 
-from .env import check_env_flag
+from .env import IS_CONDA, IS_WINDOWS, CONDA_DIR, check_env_flag, gather_paths
 
-IS_WINDOWS = (platform.system() == "Windows")
-IS_CONDA = "conda" in sys.version or "Continuum" in sys.version
-CONDA_DIR = os.path.join(os.path.dirname(sys.executable), "..")
 
 WITH_DISTRIBUTED = not check_env_flag("NO_DISTRIBUTED") and not IS_WINDOWS
 WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag("WITH_DISTRIBUTED_MW")
 WITH_GLOO_IBVERBS = False
 
 IB_DEVINFO_CMD = "ibv_devinfo"
-
-
-def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
 
 
 def get_command_path(command):
@@ -112,6 +102,5 @@ def should_build_ib():
 
     return ib_util_found and ib_lib_found and ib_lib_found
 
-
-WITH_GLOO_IBVERBS = WITH_DISTRIBUTED and (should_build_ib() or
-                                          check_env_flag("WITH_GLOO_IBVERBS"))
+if WITH_DISTRIBUTED:
+    WITH_GLOO_IBVERBS = should_build_ib() or check_env_flag("WITH_GLOO_IBVERBS")
