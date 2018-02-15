@@ -162,7 +162,7 @@ class ExponentialLR(_LRScheduler):
 
 
 class CosineAnnealingLR(_LRScheduler):
-    """Set the learning rate of each parameter group using a cosine annealing
+    r"""Set the learning rate of each parameter group using a cosine annealing
     schedule, where :math:`\eta_{max}` is set to the initial lr and
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
