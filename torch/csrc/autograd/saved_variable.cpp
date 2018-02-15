@@ -65,8 +65,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   // in-place functions on unpacked variables.
   Variable var;
   if (grad_fn) {
-    var = make_variable(data_, /*requires_grad=*/false);
-    var.set_gradient_edge({std::move(grad_fn), output_nr_});
+    var = make_variable(data_, Edge(std::move(grad_fn), output_nr_));
   } else {
     var = make_variable(data_, requires_grad_);
   }

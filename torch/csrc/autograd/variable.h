@@ -191,7 +191,7 @@ struct Variable : public at::Tensor {
   /// and never the `grad_accumulator`. For the latter, use
   /// `set_grad_accumulator`. This allows late construction of an interior
   /// `Variable`.
-  void set_gradient_edge(Edge&& edge) noexcept;
+  void set_gradient_edge(Edge edge) noexcept;
 
   /// Unset the gradient edge of the `Variable`.
   /// This will unset either the gradient function or gradient accumulator,
@@ -498,7 +498,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
 }
 
-inline void Variable::set_gradient_edge(Edge&& edge) noexcept {
+inline void Variable::set_gradient_edge(Edge edge) noexcept {
   get()->grad_fn = std::move(edge.function);
   get()->output_nr = edge.input_nr;
 }
