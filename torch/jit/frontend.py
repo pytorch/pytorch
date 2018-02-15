@@ -12,14 +12,65 @@ PY2 = sys.version_info[0] == 2
 _reserved_prefix = '__jit'
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
 
+# TODO: populate those
 pretty_node_names = {
-    ast.For: "for"
+    ast.For: "for loops",
+    ast.Delete: "del statements",
+    ast.ClassDef: "class definitions",
+    ast.With: "with statements",
+    ast.Raise: "raise statements",
+    ast.Assert: "assertions",
+    ast.Import: "import statements",
+    ast.ImportFrom: "import statements",
+    ast.Global: "global variables",
+    ast.Break: "break statements",
+    ast.Continue: "continue statements",
 }
 
 node_start_tokens = {
-    ast.For: "for"
+    ast.For: "for",
+    ast.Delete: "del",
+    ast.ClassDef: "class",
+    ast.With: "with",
+    ast.Raise: "raise",
+    ast.Assert: "assert",
+    ast.Import: "import",
+    ast.ImportFrom: "from",
+    ast.Global: "global",
+    ast.Break: "break",
+    ast.Continue: "continue",
 }
 
+if PY2:
+    pretty_node_names.update({
+        ast.Print: "print statements",
+        ast.TryExcept: "try blocks",
+        ast.TryFinally: "try blocks",
+        ast.Exec: "exec statements",
+    })
+
+    node_start_tokens.update({
+        ast.Print: "print",
+        ast.TryExcept: "try",
+        ast.TryFinally: "try",
+        ast.Exec: "exec",
+    })
+else:
+    pretty_node_names.update({
+        ast.AnnAssign: "annotated assignments",
+        ast.AsyncFor: "async for loops",
+        ast.AsyncWith: "async with statements",
+        ast.Try: "try blocks",
+        ast.Nonlocal: "nonlocal variables",
+    })
+
+    node_start_tokens.update({
+        # No specific token for AnnAssign
+        ast.AsyncFor: "async for",
+        ast.AsyncWith: "async with",
+        ast.Try: "try",
+        ast.Nonlocal: "nonlocal",
+    })
 
 class FrontendError(Exception):
     def __init__(self, source_range, msg):
@@ -45,7 +96,7 @@ class UnsupportedNodeError(NotSupportedError):
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
         feature_name = pretty_node_names.get(node_type, node_type.__name__)
-        msg = "{} isn't a supported Python feature".format(feature_name)
+        msg = "{} aren't supported".format(feature_name)
         super(NotSupportedError, self).__init__(source_range, msg)
 
 
@@ -115,22 +166,24 @@ def build_def(ctx, py_def):
                [build_stmt(ctx, stmt) for stmt in body] + ret_body)
 
 
+_vararg_kwarg_err = ("Compiled functions can't take variable number of arguments, "
+                     "have default values for arguments, nor keyword-only arguments")
+
+
 def build_param_list(ctx, py_args):
-    assert py_args.vararg is None
-    assert py_args.kwarg is None
-    assert not py_args.defaults
-    if PY2:
-        # TODO: args are in py_args.args, but are expressions <sigh>
-        raise RuntimeError("PY2 not supported")
-    else:
-        assert not py_args.kwonlyargs
-        assert not py_args.kw_defaults
-        return [build_param(ctx, arg) for arg in py_args.args]
+    if py_args.vararg is not None or py_args.kwarg is not None or py_args.defaults:
+        raise ValueError(_vararg_kwarg_err)
+    if not PY2 and (py_args.kw_defaults or py_args.kwonlyargs):
+        raise ValueError(_vararg_kwarg_err)
+    return [build_param(ctx, arg) for arg in py_args.args]
 
 
 def build_param(ctx, py_arg):
-    assert py_arg.annotation is None  # TODO: handle annotations to get types
-    name = py_arg.arg
+    # NB: In Python3 py_arg is a pair of (str arg, expr? annotation)
+    #     In Python2 py_arg is a Name (Expr subclass)
+    if getattr(py_arg, 'annotation', None) is not None:
+        raise ValueError("Compiled functions don't support annotations")
+    name = py_arg.id if PY2 else py_arg.arg
     r = ctx.make_range(py_arg.lineno, py_arg.col_offset, py_arg.col_offset + len(name))
     return Param(TensorType(r), Ident(r, name))
 

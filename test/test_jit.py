@@ -1388,7 +1388,6 @@ class TestJit(TestCase):
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, 'to_int', [x], [outputs], False)
 
-    @unittest.skipIf(PY2, "Python 2 not supported yet")
     def test_python_frontend(self):
         def fn(x, y, z):
             q = x + y - z
