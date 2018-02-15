@@ -1,6 +1,4 @@
-FROM nvidia/cuda:9.1-cudnn7-devel-ubuntu16.04
-
-RUN echo "deb http://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu1604/x86_64 /" > /etc/apt/sources.list.d/nvidia-ml.list
+FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
          build-essential \
