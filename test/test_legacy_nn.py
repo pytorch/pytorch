@@ -634,7 +634,7 @@ def prepare_tests():
 
         # If legacy constructor args are specified, use them instead
         legacy_args = test_params.pop('legacy_constructor_args', None)
-        if legacy_args != None:
+        if legacy_args is not None:
             test_params['constructor_args'] = legacy_args
 
         test = CriterionTest(**test_params)
