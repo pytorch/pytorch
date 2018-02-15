@@ -27,7 +27,7 @@ class DataParallel(Module):
     the model's forward pass.
 
     .. warning::
-        Forward and backwrad hooks defined on :attr:`module` and its submodules
+        Forward and backward hooks defined on :attr:`module` and its submodules
         won't be invoked anymore, unless the hooks are initialized in the
         :meth:`forward` method.
 
