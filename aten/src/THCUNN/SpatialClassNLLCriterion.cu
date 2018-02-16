@@ -104,6 +104,7 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
   }
 
   input_sum = reduceBlock(partial_sums, blockDim.x, input_sum, thrust::plus<AccumT>(), AccumT(0));
+  __syncthreads();
   acc_weight = reduceBlock(partial_sums, blockDim.x, acc_weight, thrust::plus<AccumT>(), AccumT(0));
 
   if (threadIdx.x == 0) {
