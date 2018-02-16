@@ -177,7 +177,7 @@ class _Simplex(Constraint):
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
     def check(self, value):
-        return (value >= 0) & ((value.sum(-1, True) - 1).abs() < 1e-6)
+        return (value >= 0).all() & ((value.sum(-1, True) - 1).abs() < 1e-6).all()
 
 
 class _LowerTriangular(Constraint):
