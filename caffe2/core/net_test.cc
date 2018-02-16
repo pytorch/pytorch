@@ -591,7 +591,7 @@ TEST(NetTest, FailingOperator) {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
     for (int i = 0; i < 10; i++) {
       counter.exchange(0);
-      ASSERT_EQ(false, net.get()->Run());
+      ASSERT_FALSE(net.get()->Run());
       ASSERT_EQ(1, counter.load());
     }
   }
