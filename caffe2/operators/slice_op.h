@@ -63,10 +63,14 @@ bool SliceImpl(
       if (end < 0) {
         end = data.dims()[i] + 1 + end;
       }
+      if (start > data.dims()[i]) {
+        start = data.dims()[i];
+      }
+      if (end > data.dims()[i]) {
+        end = data.dims()[i];
+      }
       CAFFE_ENFORCE_GE(start, 0);
       CAFFE_ENFORCE_GE(end, 0);
-      CAFFE_ENFORCE_LT(start, data.dims()[i]);
-      CAFFE_ENFORCE_LE(end, data.dims()[i]);
       CAFFE_ENFORCE_GE(end, start);
       starts_idx[i] = start;
       ends_idx[i] = end;
