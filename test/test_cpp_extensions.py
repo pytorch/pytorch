@@ -2,7 +2,7 @@ import unittest
 
 import torch
 import torch.utils.cpp_extension
-import torch_test_cpp_extensions as cpp_extension
+import torch_test_cpp_extension as cpp_extension
 
 import common
 
@@ -79,18 +79,6 @@ class TestCppExtension(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
-
-    def test_throws_when_mismatched_module_name(self):
-        def load_wrong():
-            torch.utils.cpp_extension.load(
-                name='wrong_name',
-                sources=[
-                    'cpp_extensions/jit_extension.cpp',
-                    'cpp_extensions/jit_extension2.cpp'
-                ],
-                extra_include_paths=['cpp_extensions'])
-
-        self.assertRaises(NameError, load_wrong)
 
 
 if __name__ == '__main__':

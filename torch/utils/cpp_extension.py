@@ -42,7 +42,6 @@ Your compiler ({}) may be ABI-incompatible with PyTorch.
 Please use a compiler that is ABI-compatible with GCC 4.9 and above.
 See https://gcc.gnu.org/onlinedocs/libstdc++/manual/abi.html.'''
 CUDA_HOME = _find_cuda_home() if torch.cuda.is_available() else None
-PYBIND_MODULE_PATTERN = re.compile(r'PYBIND11_MODULE\(\s*(\w+)\s*,\s*\w+\s*\)')
 
 
 def check_compiler_abi_compatibility(compiler):
@@ -91,8 +90,8 @@ class BuildExtension(build_ext):
         check_compiler_abi_compatibility(compiler)
 
         for extension in self.extensions:
-            _check_extension_name_equals_module_name(extension.name,
-                                                     extension.sources)
+            define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+            extension.extra_compile_args = [define]
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
@@ -249,8 +248,6 @@ def load(name,
     if isinstance(sources, str):
         sources = [sources]
 
-    _check_extension_name_equals_module_name(name, sources)
-
     if build_directory is None:
         build_directory = _get_build_directory(name, verbose)
 
@@ -359,7 +356,7 @@ def _write_ninja_file(path,
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
 
-    cflags = ['-fPIC', '-std=c++11']
+    cflags = ['-fPIC', '-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
     cflags += ['-I{}'.format(include) for include in includes]
     cflags += extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
@@ -432,17 +429,3 @@ def _join_cuda_home(*paths):
 
 def _is_cuda_file(path):
     return os.path.splitext(path)[1] in ['.cu', '.cuh']
-
-
-def _check_extension_name_equals_module_name(extension_name, sources):
-    for filename in sources:
-        with open(filename) as file:
-            match = PYBIND_MODULE_PATTERN.search(file.read())
-        if match is None:
-            continue
-        module_name = match.group(1)
-        if module_name != extension_name:
-            message = "Expected extension name and module name to be the same,"
-            message += " but found '{}' vs. '{}' (found in {})"
-            raise NameError(
-                message.format(extension_name, module_name, filename))
