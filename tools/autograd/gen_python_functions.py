@@ -308,7 +308,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         requires_grad_idx = dtype_idx + 1
 
         for arg in declaration.get('python_binding_arguments', []):
-            if arg['name'] == 'dtype' and arg['type'] == 'dtype':
+            if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
                 # out(s) determines the dtype if it is present, so don't pass the dtype to the dispatch.
                 if len(outputs) == 0:
                     # we have to use out_idx if there is an out variant because the base variant
@@ -320,11 +320,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     formal_args.append(dtype_formal.replace(" dtype", " " + dtype_formal_name))
                 elif len(outputs) > 1:
                     raise RuntimeError("Not supported: dtype parameter with multiple outputs")
-            elif arg['name'] == 'requires_grad' and arg['type'] == 'bool':
+            elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
-                                   " \"bool requires_grad\" and \"dtype dtype\" are supported".format(arg)))
+                                   " \"bool requires_grad\" and \"Type dtype\" are supported".format(arg)))
 
         env['unpack_args'] = []
         env['formal_args'] = formal_args
@@ -401,11 +401,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             dtype_arg = {
                 'default': "{}",  # so the signature ends up with '=None'
                 'default_init': "{}",
-                'dynamic_type': 'dtype',
+                'dynamic_type': 'Type',
                 'kwarg_only': True,
                 'name': 'dtype',
-                'type': 'dtype',
-                'simple_type': 'dtype',
+                'type': 'const Type &',
+                'simple_type': 'Type',
             }
             python_binding_arguments.append(dtype_arg)
         if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
