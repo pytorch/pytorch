@@ -391,6 +391,25 @@ class AveragePool {
       runNeonAveragePool4x4p0s0NCHW(N, C, inputH, inputW, input, output);
       return true;
     }
+#else
+    (void)N;
+    (void)C;
+    (void)inputH;
+    (void)inputW;
+    (void)outputH;
+    (void)outputW;
+    (void)kH;
+    (void)kW;
+    (void)strideH;
+    (void)strideW;
+    (void)padT;
+    (void)padL;
+    (void)padB;
+    (void)padR;
+    (void)dilationH;
+    (void)dilationW;
+    (void)input;
+    (void)output;
 #endif
     return false;
   }
@@ -464,6 +483,25 @@ class MaxPool {
       runNeonMaxPool2x2p0s0NCHW(N, C, inputH, inputW, input, output);
       return true;
     }
+#else
+    (void)N;
+    (void)C;
+    (void)inputH;
+    (void)inputW;
+    (void)outputH;
+    (void)outputW;
+    (void)kH;
+    (void)kW;
+    (void)strideH;
+    (void)strideW;
+    (void)padT;
+    (void)padL;
+    (void)padB;
+    (void)padR;
+    (void)dilationH;
+    (void)dilationW;
+    (void)input;
+    (void)output;
 #endif
     return false;
   }
