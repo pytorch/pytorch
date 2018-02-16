@@ -113,7 +113,6 @@ TH_API void THTensor_(cat)(THTensor *r_, THTensor *ta, THTensor *tb, int dimensi
 TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int dimension);
 
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
-TH_API void THTensor_(isnan)(THByteTensor *r_, THTensor *t);
 
 TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, real value);
 TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, real value);

@@ -24,7 +24,6 @@ struct THCNumerics<uint8_t> {
   static inline __host__ __device__ bool ge(uint8_t a, uint8_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(uint8_t a, uint8_t b) { return a == b; }
   static inline __host__ __device__ bool ne(uint8_t a, uint8_t b) { return a != b; }
-  static inline __host__ __device__  bool isnan(uint8_t a) { return 0; }
 
   static inline __host__ __device__  uint8_t neg(int8_t a) { return -a; }
   static inline __host__ __device__  uint8_t add(uint8_t a, uint8_t b) { return a + b; }
@@ -45,7 +44,6 @@ struct THCNumerics<int8_t> {
   static inline __host__ __device__ bool ge(int8_t a, int8_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int8_t a, int8_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int8_t a, int8_t b) { return a != b; }
-  static inline __host__ __device__ bool isnan(int8_t a) { return 0; }
 
   static inline __host__ __device__  int8_t neg(int8_t a) { return -a; }
   static inline __host__ __device__  int8_t add(int8_t a, int8_t b) { return a + b; }
@@ -66,7 +64,6 @@ struct THCNumerics<int16_t> {
   static inline __host__ __device__ bool ge(int16_t a, int16_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int16_t a, int16_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int16_t a, int16_t b) { return a != b; }
-  static inline __host__ __device__ bool isnan(int16_t a) { return 0; }
 
   static inline __host__ __device__  int16_t neg(int16_t a) { return -a; }
   static inline __host__ __device__  int16_t add(int16_t a, int16_t b) { return a + b; }
@@ -87,7 +84,6 @@ struct THCNumerics<int32_t> {
   static inline __host__ __device__ bool ge(int32_t a, int32_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int32_t a, int32_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int32_t a, int32_t b) { return a != b; }
-  static inline __host__ __device__ bool isnan(int32_t a) { return 0; }
 
   static inline __host__ __device__  int32_t neg(int32_t a) { return -a; }
   static inline __host__ __device__  int32_t add(int32_t a, int32_t b) { return a + b; }
@@ -113,7 +109,7 @@ struct THCNumerics<int64_t> {
   static inline __host__ __device__ bool ge(int64_t a, int64_t b) { return a >= b; }
   static inline __host__ __device__ bool eq(int64_t a, int64_t b) { return a == b; }
   static inline __host__ __device__ bool ne(int64_t a, int64_t b) { return a != b; }
-  static inline __host__ __device__ bool isnan(int64_t a) { return 0; }
+
 
   static inline __host__ __device__  int64_t neg(int64_t a) { return -a; }
   static inline __host__ __device__  int64_t add(int64_t a, int64_t b) { return a + b; }
@@ -215,19 +211,6 @@ struct THCNumerics<half> {
 #endif
 #else // __CUDA_ARCH__
     return THC_half2float(a) != THC_half2float(b);
-#endif
-  }
-
-  static inline __host__ __device__ bool isnan(half a) {
-#ifdef __CUDA_ARCH__
-#ifdef CUDA_HALF_INSTRUCTIONS
-    return __hne(a, a);
-#else
-    float fa = __half2float(a);
-    return fa != fa;
-#endif
-#else // __CUDA_ARCH__
-    return THC_half2float(a) != THC_half2float(a);
 #endif
   }
 
@@ -607,7 +590,6 @@ struct THCNumerics<float> {
   static inline __host__ __device__ bool ge(float a, float b) { return a >= b; }
   static inline __host__ __device__ bool eq(float a, float b) { return a == b; }
   static inline __host__ __device__ bool ne(float a, float b) { return a != b; }
-  static inline __host__ __device__ bool isnan(float a) { return ::isnan(a); }
 
   static inline __host__ __device__  float lgamma(float a) { return lgammaf(a);}
   static inline __host__ __device__  float erfinv(float a) { return erfinvf(a);}
@@ -657,7 +639,6 @@ struct THCNumerics<double> {
   static inline __host__ __device__ bool ge(double a, double b) { return a >= b; }
   static inline __host__ __device__ bool eq(double a, double b) { return a == b; }
   static inline __host__ __device__ bool ne(double a, double b) { return a != b; }
-  static inline __host__ __device__ bool isnan(double a) { return ::isnan(a); }
 
   static inline __host__ __device__  double lgamma(double a) { return ::lgamma(a);}
   static inline __host__ __device__  double erfinv(double a) { return ::erfinv(a);}

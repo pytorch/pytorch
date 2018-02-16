@@ -437,19 +437,6 @@
 ]]
 
 [[
-  name: isnan
-  variants:
-    - function
-  return: argument 0
-  options:
-    - cname: isnan
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* tensor
-]]
-
-[[
   name: min
   variants:
     - method

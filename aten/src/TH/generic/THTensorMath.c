@@ -3616,13 +3616,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-void THTensor_(isnan)(THByteTensor *r_, THTensor* t)
-{
-  THByteTensor_resizeNd(r_, t->nDimension, t->size, NULL);
-  TH_TENSOR_APPLY2(unsigned char, r_, real, t,
-                   *r__data = th_isnan(*t_data););
-}
-
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
   {									\

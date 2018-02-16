@@ -39,7 +39,6 @@ THC_API void THCTensor_(cinv)(THCState *state, THCTensor *self, THCTensor *src);
 
 #endif
 
-THC_API void THCTensor_(isnan)(THCState *state, THCudaByteTensor *self, THCTensor *src);
 THC_API void THCTensor_(neg)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(abs)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(sign)(THCState *state, THCTensor *self, THCTensor *src);

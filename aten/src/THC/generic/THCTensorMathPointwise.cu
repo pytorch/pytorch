@@ -69,19 +69,6 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  abs, THCNumerics<real>::abs,   Real)
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC_
 #undef IMPLEMENT_CUDA_TENSOR_BASIC_FUNC
 
-void THCTensor_(isnan)(THCState* state, THCudaByteTensor* self_, THCTensor* src) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  THLongStorage* st = TensorUtils<THCTensor>::newSizeOf(state, src);
-  TensorUtils<THCudaByteTensor>::resize(state, self_, st, NULL);
-  THLongStorage_free(st);
-
-  if (!THC_pointwiseApply2(state, self_, src, TensorIsnanOp<real>())) {
-    THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 void THCTensor_(sign)(THCState* state, THCTensor* self_, THCTensor* src) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
   if (self_ == src) {

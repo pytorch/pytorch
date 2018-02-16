@@ -2881,27 +2881,6 @@ Example::
     [torch.ByteTensor of size 2x2]
 """)
 
-add_docstr(torch._C.isnan,
-           r"""
-isnan(input) -> Tensor
-
-Returns a new tensor with boolean elements representing if each element is NaN or not.
-
-Args:
-    input (Tensor): the tensor to compare
-
-Returns:
-    Tensor: A ``torch.ByteTensor`` containing a 1 at each location of NaN elements.
-
-Example::
-
-    >>> torch.isnan(torch.Tensor([1, float('nan'), 2]))
-     0
-     1
-     0
-    [torch.ByteTensor of size 3]
-""")
-
 add_docstr(torch._C.neg,
            r"""
 neg(input, out=None) -> Tensor
