@@ -254,18 +254,11 @@ class DistributedDataParallel(Module):
     def _sync_params(self):
         if len(self.device_ids) > 1:
             # intra-node parameter sync
-            for tp in self.param_type_buckets:
-                params = [p.data for p in self.param_type_buckets[tp][0]]
-                result = broadcast_coalesced(params,
-                                             self.device_ids,
-                                             self.broadcast_bucket_size)
-                for idx, tensors in enumerate(result[1:]):
-                    # Just to make it clear
-                    dev_idx = idx + 1
-                    for tensor, param in \
-                            zip(tensors,
-                                self.param_type_buckets[tp][dev_idx]):
-                        param.data.set_(tensor)
+            params = [p.data for p in self.module.parameters()]
+            result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
+            for tensors, module in zip(result[1:], self._module_copies[1:]):
+                for tensor, param in zip(tensors, module.parameters()):
+                    param.data.set_(tensor)
 
         # module buffer sync
         buffers = list(self.module._all_buffers())
@@ -275,10 +268,7 @@ class DistributedDataParallel(Module):
 
             if len(self.device_ids) > 1:
                 # intra-node buffer sync
-                result = broadcast_coalesced(buffers,
-                                             self.device_ids,
-                                             self.broadcast_bucket_size)
-
+                result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
                 for tensors, module in zip(result[1:], self._module_copies[1:]):
                     for tensor, buf in zip(tensors, module._all_buffers()):
                         buf.set_(tensor)
