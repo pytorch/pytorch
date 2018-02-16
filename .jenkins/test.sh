@@ -40,12 +40,22 @@ echo "Testing pytorch"
 export OMP_NUM_THREADS=4
 export MKL_NUM_THREADS=4
 
+if [[ "$JOB_NAME" == *asan* ]]; then
+    export PATH="/usr/lib/llvm-5.0/bin:$PATH"
+    export ASAN_OPTIONS=detect_leaks=0:symbolize=1
+    export PYTORCH_TEST_WITH_ASAN=1
+fi
+
 # JIT C++ extensions require ninja.
 git clone https://github.com/ninja-build/ninja --quiet
 pushd ninja
 python ./configure.py --bootstrap
 export PATH="$PWD:$PATH"
 popd
+
+if [[ "$JOB_NAME" == *asan* ]]; then
+    export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
+fi
 
 time test/run_test.sh -- -v
 
