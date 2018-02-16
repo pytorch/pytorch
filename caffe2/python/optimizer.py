@@ -619,14 +619,13 @@ class AdamOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
+        m1 = param_init_net.ConstantFill(
+            [param],
+            param + "_first_moment",
+            value=0.0
+        )
         if self.rowWise:
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
-            m1 = param_init_net.ConstantFill(
-                [],
-                param + "_avg_first_moment",
-                shape=[shapes[param][0]],
-                value=0.0
-            )
             m2 = param_init_net.ConstantFill(
                 [],
                 param + "_avg_second_moment",
@@ -635,11 +634,7 @@ class AdamOptimizer(Optimizer):
             )
 
         else:
-            m1 = param_init_net.ConstantFill(
-                [param],
-                param + "_first_moment",
-                value=0.0
-            )
+
             m2 = param_init_net.ConstantFill(
                 [param],
                 param + "_second_moment",

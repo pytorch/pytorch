@@ -242,7 +242,7 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     // Enforce shapes
-    CAFFE_ENFORCE_EQ(Input(PARAM).dims()[0], Input(MOMENT_1).size());
+    CAFFE_ENFORCE_EQ(Input(PARAM).size(), Input(MOMENT_1).size());
     CAFFE_ENFORCE_EQ(Input(PARAM).dims()[0], Input(MOMENT_2).size());
     CAFFE_ENFORCE_EQ(
         Input(PARAM).size_from_dim(1),
@@ -314,24 +314,21 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
 
         const float* w = paramIn + offsetIdx;
         const float* g = gradIn + offsetI;
-        const float* m1 = moment1In + idx;
+        const float* m1 = moment1In + offsetIdx;
         const float* m2 = moment2In + idx;
         float* nw = paramOut + offsetIdx;
-        float* nm1 = moment1Out + idx;
+        float* nm1 = moment1Out + offsetIdx;
         float* nm2 = moment2Out + idx;
 
-        float m1_sum = 0.;
         float m2_sum = 0.;
         for (auto j = 0; j < block_size; ++j) {
           float gj = g[j];
-          m1_sum += gj;
           m2_sum += gj * gj;
         }
-        float mi = nm1[0] =
-            m1[0] * beta1_ + (m1_sum / block_size) * (1 - beta1_);
         float vi = nm2[0] =
             m2[0] * beta2_ + (m2_sum / block_size) * (1 - beta2_);
         for (auto j = 0; j < block_size; ++j) {
+          float mi = nm1[j] = m1[j] * beta1_ + g[j] * (1 - beta1_);
           nw[j] = w[j] + lr[0] * correction * mi / (std::sqrt(vi) + epsilon_);
         }
       }
