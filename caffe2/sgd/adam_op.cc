@@ -93,10 +93,10 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
 Computes a modified Adam Update for the sparse case.
 Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the
 Adam update on (param, moment1[indices], moment2[indices], lr, iter) and returns
-(new_param, new_moment1, new_moment2), where moment1 and moment2 are 1D tensors
-with length equal to the number of rows in param: shape(moment1) ==
-shape(moment2) == shape(param)[0]. Each element of moment1 and moment2 is
-applied to an entire row of param, and the new moment1 and moment2 values are
+(new_param, new_moment1, new_moment2), where moment2 is a 1D tensor
+with length equal to the number of rows in param:
+shape(moment2) == shape(param)[0]. Each element of  moment2 is
+applied to an entire row of param, and the new moment2 values are
 calculated by averaging across the row.
 
 )DOC")

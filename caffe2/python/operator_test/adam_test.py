@@ -49,7 +49,7 @@ class TestAdam(hu.HypothesisTestCase):
         t = ITER + 1
         corrected_local_rate = LR * np.sqrt(1 - np.power(beta2, t)) / \
             (1 - np.power(beta1, t))
-        mom1_out = (beta1 * mom1) + (1 - beta1) * np.mean(grad)
+        mom1_out = (beta1 * mom1) + (1 - beta1) * grad
         mom2_out = (beta2 * mom2) + (1 - beta2) * np.mean(np.square(grad))
         param_out = param + corrected_local_rate * mom1_out / \
             (np.sqrt(mom2_out) + epsilon)
@@ -104,7 +104,6 @@ class TestAdam(hu.HypothesisTestCase):
     def test_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
                          data_strategy, gc, dc):
         param, mom1, mom2, grad = inputs
-        mom1 = np.absolute(mom1)
         mom2 = np.absolute(mom2)
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
@@ -155,7 +154,7 @@ class TestAdam(hu.HypothesisTestCase):
             ref_sparse,
             input_device_options=input_device_options)
 
-    @given(inputs=hu.tensors(n=2),
+    @given(inputs=hu.tensors(n=3),
            ITER=st.integers(min_value=0, max_value=10000),
            LR=st.floats(min_value=0.01, max_value=0.99,
                         allow_nan=False, allow_infinity=False),
@@ -169,20 +168,15 @@ class TestAdam(hu.HypothesisTestCase):
                **hu.gcs_cpu_only)
     def test_row_wise_sparse_adam(self, inputs, ITER, LR, beta1, beta2, epsilon,
                                   data_strategy, gc, dc):
-        param, grad = inputs
+        param, mom1, grad = inputs
         ITER = np.array([ITER], dtype=np.int64)
         LR = np.array([LR], dtype=np.float32)
 
-        # Create a 1D row-wise average sum of squared gradients tensor.
-        mom1 = data_strategy.draw(
-            hu.tensor1d(min_len=param.shape[0], max_len=param.shape[0],
-                        elements=hu.elements_of_type(dtype=np.float32))
-        )
+        # Create a 1D row-wise average 2nd moment tensor.
         mom2 = data_strategy.draw(
             hu.tensor1d(min_len=param.shape[0], max_len=param.shape[0],
                         elements=hu.elements_of_type(dtype=np.float32))
         )
-        mom1 = np.absolute(mom1)
         mom2 = np.absolute(mom2)
 
         # Create an indexing array containing values which index into grad
