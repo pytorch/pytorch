@@ -1,20 +1,9 @@
 import os
-import platform
-import sys
 import glob
-from itertools import chain
 
-from .env import check_env_flag
+from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_env_flag, gather_paths
 from .cuda import WITH_CUDA, CUDA_HOME
 
-
-def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
-
-
-IS_WINDOWS = (platform.system() == 'Windows')
-IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version
-CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
 WITH_CUDNN = False
 CUDNN_LIB_DIR = None
