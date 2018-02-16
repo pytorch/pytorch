@@ -52,15 +52,19 @@ void EventRecordCPU(
   //  SUCCESS/FAILED - terminal, no further changes to status_/err_msg_
 
   CAFFE_ENFORCE(
-      wrapper->status_ == EventStatus::EVENT_INITIALIZED,
+      wrapper->status_ != EventStatus::EVENT_SCHEDULED,
       "Calling Record multiple times");
 
-  if (!err_msg) {
-    wrapper->status_ = EventStatus::EVENT_SCHEDULED;
-  } else {
-    wrapper->err_msg_ = err_msg;
-    wrapper->status_ = EventStatus::EVENT_FAILED;
-    wrapper->cv_completed_.notify_all();
+  // Event might be in SUCCESS/FAILED state in case an op has
+  // finished async execution part first
+  if (wrapper->status_ == EventStatus::EVENT_INITIALIZED) {
+    if (!err_msg) {
+      wrapper->status_ = EventStatus::EVENT_SCHEDULED;
+    } else {
+      wrapper->err_msg_ = err_msg;
+      wrapper->status_ = EventStatus::EVENT_FAILED;
+      wrapper->cv_completed_.notify_all();
+    }
   }
 }
 
