@@ -87,7 +87,7 @@ class Binomial(Distribution):
             return torch.bernoulli(self.probs.unsqueeze(-1).expand(shape)).sum(dim=-1)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         log_factorial_n = math.lgamma(self.total_count + 1)
         log_factorial_k = torch.lgamma(value + 1)
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)

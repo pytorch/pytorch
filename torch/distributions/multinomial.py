@@ -93,7 +93,7 @@ class Multinomial(Distribution):
         return counts.type_as(self.probs)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         logits, value = broadcast_all(self.logits.clone(), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)

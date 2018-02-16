@@ -60,7 +60,7 @@ class Gamma(ExponentialFamily):
         return value
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         return (self.concentration * torch.log(self.rate) +
                 (self.concentration - 1) * torch.log(value) -
                 self.rate * value - torch.lgamma(self.concentration))

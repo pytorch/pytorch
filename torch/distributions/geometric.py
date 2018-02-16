@@ -68,7 +68,7 @@ class Geometric(Distribution):
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         value, probs = broadcast_all(value, self.probs.clone())
         probs[(probs == 1) & (value == 0)] = 0
         return value * (-probs).log1p() + self.probs.log()

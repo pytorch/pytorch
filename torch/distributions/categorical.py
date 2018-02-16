@@ -49,7 +49,7 @@ class Categorical(Distribution):
             self.logits = logits - log_sum_exp(logits)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
-        batch_shape = self._param.size()[:-1] if self._param.ndimension > 1 else torch.Size()
+        batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
         super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
@@ -97,7 +97,7 @@ class Categorical(Distribution):
         return sample_2d.contiguous().view(sample_shape)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         value_shape = torch._C._infer_size(value.size(), self.batch_shape) if self.batch_shape else value.size()
         param_shape = value_shape + (self._num_events,)
         value = value.expand(value_shape)

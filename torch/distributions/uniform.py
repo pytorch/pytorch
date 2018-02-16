@@ -61,18 +61,18 @@ class Uniform(Distribution):
         return self.low + rand * (self.high - self.low)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         lb = value.ge(self.low).type_as(self.low)
         ub = value.lt(self.high).type_as(self.low)
         return torch.log(lb.mul(ub)) - torch.log(self.high - self.low)
 
     def cdf(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         result = (value - self.low) / (self.high - self.low)
         return result
 
     def icdf(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         result = value * (self.high - self.low) + self.low
         return result
 

@@ -55,7 +55,7 @@ class Poisson(ExponentialFamily):
             return _poisson(self.rate.expand(shape))
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
         return (rate.log() * value) - rate - (value + 1).lgamma()
 

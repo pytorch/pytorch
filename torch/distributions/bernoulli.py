@@ -76,7 +76,7 @@ class Bernoulli(ExponentialFamily):
             return torch.bernoulli(self.probs.expand(shape))
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
         return -binary_cross_entropy_with_logits(logits, value, reduce=False)
 
