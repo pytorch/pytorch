@@ -139,7 +139,7 @@ class _Real(Constraint):
 
 class _GreaterThan(Constraint):
     """
-    Constrain to a real half line `[lower_bound, inf]`.
+    Constrain to a real half line `(lower_bound, inf]`.
     """
     def __init__(self, lower_bound):
         self.lower_bound = lower_bound
@@ -150,7 +150,7 @@ class _GreaterThan(Constraint):
 
 class _LessThan(Constraint):
     """
-    Constrain to a real half line `[inf, upper_bound]`.
+    Constrain to a real half line `[-inf, upper_bound)`.
     """
     def __init__(self, upper_bound):
         self.upper_bound = upper_bound

@@ -3047,6 +3047,15 @@ class TestConstraintRegistry(TestCase):
             y2 = t(x2)
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
+class TestValidation(TestCase):
+    def test_invalid(self):
+        for Dist, params in BAD_EXAMPLES:
+            for i, param in enumerate(params):
+                try:
+                    with self.assertRaises(ValueError):
+                       Dist(validate_args=True, **param)
+                except:
+                    raise AssertionError('ValueError not raised for {} example {}/{}'.format(Dist.__name__, i + 1, len(params)))
 
 class TestValidation(TestCase):
     def test_valid(self):
