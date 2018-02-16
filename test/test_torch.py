@@ -1079,20 +1079,26 @@ class TestTorch(TestCase):
         output = torch.ones_like(x)
         self.assertEqual(output, expected)
 
+    @staticmethod
+    def _test_dtypes(self, cpu_dtypes, cuda_dtypes, is_sparse):
+        dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
+
+        for dtype in dtypes:
+            # no ops on torch.float16 currently, cuda.float16 doesn't work on windows
+            if dtype != torch.float16:
+                out = torch._C._VariableFunctions.zeros((2, 3), dtype=dtype)
+                self.assertEqual(out.dtype, dtype)
+            self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
+            self.assertEqual(is_sparse, dtype.is_sparse)
+
     def test_dtypes(self):
         cpu_dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
                       torch.float16, torch.float32, torch.float64]
         cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
-                       torch.cuda.float16, torch.cuda.float32, torch.cuda.float64]
-        dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
-
-        for dtype in dtypes:
-            # no ops on float16 currently, cuda.float16 doesn't work on windows
-            if dtype != torch.float16 and not (dtype == torch.cuda.float16 and IS_WINDOWS):
-                out = torch._C._VariableFunctions.eye(3, 3, dtype=dtype)
-                self.assertEqual(out.dtype, dtype)
-            self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
-            self.assertFalse(dtype.is_sparse)
+                       torch.cuda.float32, torch.cuda.float64]
+        if not IS_WINDOWS:  # cuda.float16 doesn't work on windows
+            cuda_dtypes.append(torch.cuda.float16)
+        self._test_dtypes(self, cpu_dtypes, cuda_dtypes, False)
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))

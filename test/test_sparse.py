@@ -6,6 +6,7 @@ import random
 import unittest
 from common import TestCase, run_tests
 from common_nn import TEST_CUDA
+from test_torch import TestTorch
 from numbers import Number
 
 
@@ -868,13 +869,7 @@ class TestSparse(TestCase):
         cudam = torch.cuda.sparse
         cuda_dtypes = [cudam.uint8, cudam.int8, cudam.int16, cudam.int32, cudam.int64,
                        cudam.float32, cudam.float64]
-        dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
-
-        for dtype in dtypes:
-            out = torch._C._VariableFunctions.zeros((3, 3), dtype=dtype)
-            self.assertEqual(out.dtype, dtype)
-            self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
-            self.assertTrue(dtype.is_sparse)
+        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, True)
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

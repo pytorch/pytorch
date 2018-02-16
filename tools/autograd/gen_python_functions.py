@@ -346,7 +346,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
             if dtype_formal_name:
                 env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
-                env['dispatch_type_conversion'] = '.toType({})'.format (dtype_formal_name)
+                env['dispatch_type_conversion'] = '.toType({})'.format(dtype_formal_name)
         elif dtype_formal_name:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
             env['dispatch_call'] = '{}.{}'.format(dtype_formal_name, declaration['name'])
