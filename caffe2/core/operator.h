@@ -407,7 +407,7 @@ class Operator : public OperatorBase {
           event().SetFinished();
         }
       } else {
-        RecordEvent(getErrorMsg().c_str());
+        event().SetFinished(getErrorMsg().c_str());
         this->RecordLastFailedOpNetPosition();
       }
       return result;
@@ -417,11 +417,15 @@ class Operator : public OperatorBase {
             "Error from operator: \n" + ProtoDebugString(debug_def()));
         AddRelatedBlobInfo(&err);
       }
-      RecordEvent(err.what());
+      event().SetFinished(err.what());
+      this->RecordLastFailedOpNetPosition();
+      throw;
+    } catch (const std::exception& err) {
+      event().SetFinished(err.what());
       this->RecordLastFailedOpNetPosition();
       throw;
     } catch (...) {
-      RecordEvent(getErrorMsg().c_str());
+      event().SetFinished(getErrorMsg().c_str());
       this->RecordLastFailedOpNetPosition();
       throw;
     }
