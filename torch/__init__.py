@@ -136,6 +136,9 @@ def set_default_tensor_type(t):
 
     _C._set_default_tensor_type(Tensor)
 
+def set_default_arg_validation(check):
+    global check_dist_args
+    check_dist_args = check
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
@@ -303,6 +306,7 @@ _C._initExtension(manager_path())
 del manager_path
 
 set_default_tensor_type('torch.FloatTensor')
+set_default_arg_validation(False)
 
 ################################################################################
 # Remove unnecessary members

@@ -11,9 +11,14 @@ class Distribution(object):
     has_rsample = False
     has_enumerate_support = False
 
-    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size()):
+    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=False):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
+        self.validate_args = validate_args or torch.check_dist_args
+        if self.validate_args:
+            for param, constraint in self.params.items():
+                if not constraint.check(self.__getattribute__(param)).all():
+                    raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):

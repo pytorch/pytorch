@@ -307,6 +307,24 @@ EXAMPLES = [
     ]),
 ]
 
+BAD_EXAMPLES =[
+    Example(Bernoulli, [
+        {'probs': Variable(torch.Tensor([1.1, 0.2, 0.4]), requires_grad=True)},
+        {'probs': Variable(torch.Tensor([-0.5]), requires_grad=True)},
+        {'probs': 1.00001},
+    ]),
+    Example(Beta, [
+        {
+            'concentration1': Variable(torch.Tensor([0.0]), requires_grad=True),
+            'concentration0': Variable(torch.Tensor([0.0]), requires_grad=True),
+        },
+        {
+            'concentration1': Variable(torch.Tensor([-1.0]), requires_grad=True),
+            'concentration0': Variable(torch.Tensor([-2.0]), requires_grad=True),
+        },
+    ])
+]
+
 
 def unwrap(value):
     if isinstance(value, Variable):
@@ -2865,6 +2883,15 @@ class TestConstraintRegistry(TestCase):
             y2 = t(x2)
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
+class TestValidation(TestCase):
+    def test_invalid(self):
+        for Dist, params in BAD_EXAMPLES:
+            for i, param in enumerate(params):
+                try:
+                    with self.assertRaises(ValueError):
+                       Dist(validate_args=True, **param)
+                except:
+                    raise AssertionError('ValueError not raised for {} example {}/{}'.format(Dist.__name__, i + 1, len(params)))
 
 if __name__ == '__main__':
     run_tests()
