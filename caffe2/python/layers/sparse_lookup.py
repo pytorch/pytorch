@@ -136,6 +136,10 @@ class SparseLookup(ModelLayer):
         return [self.w]
 
     def get_8bits_compatible_parameters(self, fused=True):
+        # Rowwise quantization makes sense only if shape it's 2D matrix with
+        # second dimension >= 8
+        if len(self.shape) != 2 or self.shape[1] < 8:
+            return []
         if fused:
             RowwiseQuantized8BitsWeight = collections.namedtuple(
                 'RowwiseQuantized8BitsWeight', 'w'
