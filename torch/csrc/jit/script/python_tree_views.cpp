@@ -130,7 +130,7 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const Ident& name) {
       return Var::create(name.range(), name);
     }))
-    .def("name", [](const Var& var) { return var.name(); });
+    .def_property_readonly("name", [](const Var& var) { return var.name(); });
   py::class_<BinOp, Expr>(m, "BinOp")
     .def(py::init([](std::string kind, const Expr& lhs, const Expr& rhs) {
       return BinOp::create(lhs.range(), stringToKind(kind), lhs, rhs);

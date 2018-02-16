@@ -16,7 +16,15 @@
         (+
           (variable (ident x))
           (variable (ident y)))
-        (variable (ident z))))
+        (apply
+          (ident sigmoid)
+          (list (variable (ident z)))
+          (list))))
+    (expression statement
+      (apply
+        (ident print)
+        (list (variable (ident q)))
+        (list)))
     (assign
       (list (ident w))
       (=)
