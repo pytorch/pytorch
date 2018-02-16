@@ -2,6 +2,8 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
 
+#include <climits>
+
 namespace torch {
 namespace jit {
 namespace script {
@@ -34,23 +36,152 @@ using ListAttributeMap = std::unordered_map<
     std::string,
     std::pair<const std::vector<double>, std::string>>;
 
+// Auxiliary data structure for desugaring variable binding into our always
+// explicitly scoped language as we descend down
+// nested control structures in the frontend (which themselves don't introduce
+// scopes)
+//
+// The algorithm is roughly as follows:
+// 1) While emitting a block within a control operator, add inputs and outputs
+//      from the block for each value referenced (both "reads" and "writes").
+//      This sets the value up as a candidate loop carried dependency.
+// 2) When we reach the end of the block, examine all the values in the current
+//      scope's value map. If the name also resides in an outer scope with a
+//      different Value*, this is a true loop-carried dependency. If not, this
+//      value was not assigned to. Replace all references to the block input
+//      with the Value* pointed to in the tightest enclosing scope. Then delete
+//      that block input and output.
+// 3) When we emit the actual control operator, take all of the loop-carried
+//      dependency values as inputs and return them as outputs from the control
+//      op
+//
+//  Note that an alternative implementation could only add the loop-carried dep
+//      inputs and outputs when we see a value that is mutated. This, however
+//      requires replacing all references to that value *within the current
+//      block* with a new input. That is to say: we need to traverse the pre-
+//      decessor nodes and replace inputs that reference that value with the
+//      newly-created input. This could be made less expensive with a change to
+//      the IR API, but for now we choose to pessimisitically create inputs and
+//      delete unnecessary ones later with replaceAllusesWith().
+struct Environment {
+  Environment(Block* b, std::shared_ptr<Environment> next = nullptr)
+      : b(b), next(next) {}
+
+  std::vector<std::string> captured_inputs;
+  ValueTable value_table;
+  Block* b;
+
+  std::shared_ptr<Environment> next;
+
+  Value* findInThisFrame(const std::string& name) {
+    if (value_table.count(name)) {
+      return value_table.at(name);
+    }
+    return nullptr;
+  }
+
+  Value* findInParentFrame(const std::string& name) {
+    for (auto runner = next; runner; runner = runner->next) {
+      if (runner->value_table.count(name)) {
+        return runner->value_table.at(name);
+      }
+    }
+    return nullptr;
+  }
+
+  Value* createCapturedInput(const std::string& name) {
+    // Create the input
+    Value* new_input = b->addInput();
+
+    // Associate this name with this value
+    value_table[name] = new_input;
+
+    // List as a positional input
+    captured_inputs.push_back(name);
+
+    return new_input;
+  }
+
+  Symbol getBlockOwningKind() {
+    Symbol owning_kind = Symbol();
+    if (b->owningNode()) {
+      owning_kind = b->owningNode()->kind();
+    }
+    return owning_kind;
+  }
+
+  void setVar(const std::string& name, Value* value) {
+    if (!findInThisFrame(name) && findInParentFrame(name) &&
+        getBlockOwningKind() == kLoop)
+      createCapturedInput(name);
+    value_table[name] = value;
+  }
+
+  Value* getVar(const Ident& ident) {
+    return getVar(ident.name(), ident);
+  }
+
+  Value* getVar(const std::string& ident, const TreeView& tv) {
+    Value* retval = findInThisFrame(ident);
+
+    if (!retval && (retval = findInParentFrame(ident)) &&
+        getBlockOwningKind() == kLoop)
+      retval = createCapturedInput(ident);
+
+    if (!retval) {
+      throw ErrorReport(tv) << "undefined value " << ident;
+    }
+
+    return retval;
+  }
+
+  // Given that after emitting statements in a block, we've added block inputs
+  // for all value references and assignments, delete inputs for which there was
+  // no assignment, only references.
+  void deleteExtraInputs(size_t skip_num = 0) {
+    std::vector<size_t> inputs_to_delete;
+    int i = skip_num;
+    for (const auto& x : captured_inputs) {
+      if (b->inputs()[i] == value_table[x]) {
+        inputs_to_delete.push_back(i);
+      }
+      i++;
+    }
+
+    for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
+         ++ritr) {
+      auto name = captured_inputs[*ritr - skip_num];
+      Value* v = value_table[name];
+      Value* orig = findInParentFrame(name);
+      // Replace all matching node inputs with original value
+      // from an enclosing scope
+      v->replaceAllUsesWith(orig);
+
+      // Actually remove the input
+      b->eraseInput(*ritr);
+      captured_inputs.erase(captured_inputs.begin() + *ritr - skip_num);
+    }
+  }
+};
+
 struct to_ir {
   to_ir(FunctionDefinition& def, FunctionTable& function_table)
       : def(def), function_table(function_table) {
+    environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
     for (auto input : tree.params()) {
       auto& name = input.ident().name();
-      setVar(name, def.graph->addInput(name));
+      environment_stack->setVar(name, def.graph->addInput(name));
     }
     emitStatements(tree.statements());
     for (auto output : tree.returns()) {
-      def.graph->registerOutput(getVar(output.ident()));
+      def.graph->registerOutput(environment_stack->getVar(output.ident()));
     }
   }
-  void emitStatements(const List<TreeRef>& statements) {
+  void emitStatements(const List<Stmt>& statements) {
     for (auto stmt : statements) {
-      switch (stmt->kind()) {
+      switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
           break;
@@ -61,9 +192,9 @@ struct to_ir {
           emitAssignment(Assign(stmt));
           break;
         case TK_GLOBAL:
-          for (auto ident : stmt->trees()) {
+          for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
-            setVar(name, def.graph->addInput(name));
+            environment_stack->setVar(name, def.graph->addInput(name));
           }
           break;
         case TK_EXPR_STMT:
@@ -72,14 +203,108 @@ struct to_ir {
       }
     }
   }
+
+  std::shared_ptr<Environment> emitSingleIfBranch(
+      Block* b,
+      const List<Stmt> branch,
+      std::unordered_set<std::string>* mutated_parent_values) {
+    environment_stack = std::make_shared<Environment>(b, environment_stack);
+    WithInsertPoint guard(*def.graph, b);
+    emitStatements(branch);
+
+    for (const auto& kv : environment_stack->value_table) {
+      if (environment_stack->findInParentFrame(kv.first)) {
+        mutated_parent_values->insert(kv.first);
+      }
+    }
+    auto save_env = environment_stack;
+    environment_stack = environment_stack->next;
+    return save_env;
+  }
+
   void emitIf(const If& stmt) {
-    // TODO: add support for control flow ops
-    throw ErrorReport(stmt) << "Control flow is not supported yet.";
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(kIf, 0));
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    // Emit both blocks once to get the union of all mutated values
+    std::unordered_set<std::string> mutated_parent_values;
+    auto save_true = emitSingleIfBranch(
+        true_block, stmt.trueBranch(), &mutated_parent_values);
+    auto save_false = emitSingleIfBranch(
+        false_block, stmt.falseBranch(), &mutated_parent_values);
+
+    std::vector<std::string> sorted_mutations(
+        mutated_parent_values.begin(), mutated_parent_values.end());
+    std::sort(sorted_mutations.begin(), sorted_mutations.end());
+
+    // Register outputs in each block
+    for (const auto& x : sorted_mutations) {
+      true_block->registerOutput(save_true->getVar(x, stmt));
+    }
+    for (const auto& x : sorted_mutations) {
+      false_block->registerOutput(save_false->getVar(x, stmt));
+    }
+
+    // Add op outputs
+    for (const auto& x : sorted_mutations) {
+      environment_stack->setVar(x, n->addOutput());
+    }
   }
 
   void emitWhile(const While& stmt) {
-    // TODO: add support for control flow ops
-    throw ErrorReport(stmt) << "Control flow is not supported yet.";
+    // Emits a loop operators conforming to the semantics specified at
+    // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
+    // TODO: implement scan_outputs
+
+    // TODO: clarify that this is an optional input that isn't needed here
+    Value* max_trip_count_dummy = emitConst(INT_MAX, "i")[0];
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(kLoop, 0));
+    n->addInput(max_trip_count_dummy);
+    n->addInput(cond_value);
+    auto* body_block = n->addBlock();
+    // Trip count required by spec. Since this is a while loop, we do not
+    // provide access to this from user code
+    // TODO: it seems like we should implement a `for` loop as well, otherwise
+    // we'll probably have to pattern match iteration number machinery in user
+    // code to conform to the spec
+    body_block->addInput(); // Iteration num
+    body_block->addInput(); // Condition
+    size_t skip_inputs_num = 2;
+
+    {
+      environment_stack =
+          std::make_shared<Environment>(body_block, environment_stack);
+      WithInsertPoint guard(*def.graph, body_block);
+      emitStatements(stmt.body());
+
+      // Also emit the conditional
+      Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
+      body_block->registerOutput(body_cond_value);
+
+      // Remove inputs for values that did not mutate within the
+      // block
+      environment_stack->deleteExtraInputs(skip_inputs_num);
+
+      // Add block outputs
+      auto curr_frame = environment_stack;
+      for (const auto& x : curr_frame->captured_inputs) {
+        body_block->registerOutput(curr_frame->value_table[x]);
+      }
+
+      auto next_frame = curr_frame->next;
+      for (const auto& x : curr_frame->captured_inputs) {
+        n->addInput(next_frame->getVar(x, stmt));
+        next_frame->setVar(x, n->addOutput());
+      }
+
+      environment_stack = next_frame;
+    }
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -98,21 +323,11 @@ struct to_ir {
       outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
     }
     int i = 0;
-    for (const Ident& ident : stmt.lhs()) {
-      setVar(ident.name(), outputs.at(i));
+    for (auto ident : stmt.lhs()) {
+      environment_stack->setVar(Ident(ident).name(), outputs.at(i));
       i++;
     }
     return outputs;
-  }
-
-  void setVar(const std::string& name, Value* value) {
-    value_table[name] = value;
-  }
-
-  Value* getVar(const Ident& ident) {
-    if (value_table.count(ident.name()) == 0)
-      throw ErrorReport(ident) << "undefined value " << ident.name();
-    return value_table[ident.name()];
   }
 
   NodeKind getNodeKind(int kind, int ninputs) {
@@ -173,7 +388,7 @@ struct to_ir {
     }
     for (auto* node : fn.graph->nodes()) {
       auto* new_node =
-          def.graph->appendNode(def.graph->createClone(node, value_map_func));
+          def.graph->insertNode(def.graph->createClone(node, value_map_func));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         value_map[node->outputs()[i]] = new_node->outputs()[i];
         new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
@@ -206,7 +421,7 @@ struct to_ir {
     switch (tree->kind()) {
       case TK_VAR: {
         expectOutputs(tree, output_size, 1);
-        return {getVar(Var(tree).name())};
+        return {environment_stack->getVar(Var(tree).name())};
       } break;
       case TK_NE:
       case TK_EQ:
@@ -348,7 +563,7 @@ struct to_ir {
       const size_t output_size,
       const AttributeMap& attributes = AttributeMap{},
       const ListAttributeMap& list_attributes = ListAttributeMap{}) {
-    Node* n = def.graph->appendNode(def.graph->create(kind, output_size));
+    Node* n = def.graph->insertNode(def.graph->create(kind, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -418,11 +633,14 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  ValueTable value_table;
+
+  // Singly-linked list of environments. This top element contains a member
+  // `next` that points to the most immediate enclosing scope's value.
+  std::shared_ptr<Environment> environment_stack;
 
  private:
   Value* createConstant(const at::Tensor& val) {
-    return def.graph->appendNode(def.graph->createConstant(val))->output();
+    return def.graph->insertNode(def.graph->createConstant(val))->output();
   }
 };
 
