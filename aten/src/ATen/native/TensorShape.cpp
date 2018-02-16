@@ -343,6 +343,20 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
+// _unsafe_view() differs from view() in that the returned tensor isn't treated
+// as a view for the purposes of automatic differentiation. (It's not listed in
+// VIEW_FUNCTIONS in gen_autograd.py).  It's only safe to use if the `self` tensor
+// is temporary. For example, the viewed tensor here is discarded immediately
+// after viewing:
+//
+//  res = at::_unsafe_view(a + b, size);
+//
+// This is a hack because in-place operations on tensors treated like views
+// can be much more expensive than the same operations on non-view tensors.
+Tensor _unsafe_view(const Tensor& self, IntList size) {
+  return self.view(size);
+}
+
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
@@ -356,7 +370,6 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   auto g = inferUnsqueezeGeometry(self, dim);
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
-
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
