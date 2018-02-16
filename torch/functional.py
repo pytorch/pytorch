@@ -520,7 +520,7 @@ def isnan(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is NaN or not.
 
     Arguments:
-        input (Tensor): A tensor to check
+        tensor (Tensor): A tensor to check
 
     Returns:
         Tensor: A ``torch.ByteTensor`` containing a 1 at each location of NaN elements.
