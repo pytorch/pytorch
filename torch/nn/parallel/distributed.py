@@ -119,7 +119,7 @@ class DistributedDataParallel(Module):
         MB = 1024 * 1024
         # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = 10 * MB
-        self.nccl_reduce_bucket_size = 128 * MB
+        self.nccl_reduce_bucket_size = 256 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -309,13 +309,12 @@ class DistributedDataParallel(Module):
             # This function only needs to be called once
             if not self.need_reduction:
                 return
+
             self.need_reduction = False
             all_grads = [[] for _ in range(len(self._module_copies))]
-            all_grads_coalesced = []
-            # The gradient bucket for the first device of self.device_ids
-            mst_dev_grads_buckets = []
+            all_grads_buckets_iters = []
 
-            # Coalesce all the gradients
+            # Bucketing all the gradients
             for dev_idx, module in enumerate(self._module_copies):
                 for param in module.parameters():
                     if not param.requires_grad or param.grad is None:
@@ -330,47 +329,42 @@ class DistributedDataParallel(Module):
                 # Now bucketing the parameters
                 dev_grads_buckets = _take_tensors(all_grads[dev_idx],
                                                   self.nccl_reduce_bucket_size)
-                if dev_idx == 0:
-                    mst_dev_grads_buckets = list(dev_grads_buckets)
-                    all_grads_coalesced = \
-                        [[] for _ in range(len(mst_dev_grads_buckets))]
 
-                for bkt_idx, dev_grads in enumerate(dev_grads_buckets):
-                    # Coalescing the bucket
+                all_grads_buckets_iters.append(dev_grads_buckets)
+
+            # Now reduce each bucket one after another
+            for grads_batch in zip(*all_grads_buckets_iters):
+                grads_batch_coalesced = []
+                # Coalesce each bucket
+                for dev_idx, dev_grads_batch in enumerate(grads_batch):
                     dev_id = self.device_ids[dev_idx]
                     with torch.cuda.device(dev_id):
-                        dev_grads_coalesced = _flatten_dense_tensors(dev_grads)
-                        all_grads_coalesced[bkt_idx].append(dev_grads_coalesced)
+                        dev_grads_batch_coalesced = _flatten_dense_tensors(dev_grads_batch)
+                        grads_batch_coalesced.append(dev_grads_batch_coalesced)
 
-            # Reduce all the gradients first
-            # This single op will do all-reduce on all GPUs utilizing multiple
-            # all reduce rings when we have more than one fast IB interfaces.
-            # We will only use device 0's results, but this single op should be
-            # faster than doing the following two operation sequentially:
-            # (1) intra-node reduce to lead GPU, followed by
-            # (2) inter-node allreduce for all the first lead GPUs in all nodes
-            for grads_coalesced in all_grads_coalesced:
-                dist.all_reduce_multigpu(grads_coalesced,
+                # We will only use device 0's results, but this single op should be
+                # faster than doing the following two operation sequentially:
+                # (1) intra-node reduce to lead GPU, followed by
+                # (2) inter-node allreduce for all the first lead GPUs in all nodes
+                dist.all_reduce_multigpu(grads_batch_coalesced,
                                          group=self.nccl_reduction_group_id)
 
-            # Now only work on the first device of self.device_ids, uncoalesce
-            # the gradients for each bucket
-            for grads_coalesced, mst_dev_grads in zip(all_grads_coalesced,
-                                                      mst_dev_grads_buckets):
-                grads_coalesced[0] /= dist.get_world_size()
-                grads_reduced = _unflatten_dense_tensors(grads_coalesced[0],
-                                                         mst_dev_grads)
-                for grad, reduced in zip(mst_dev_grads, grads_reduced):
+                # Now only work on the first device of self.device_ids, uncoalesce
+                # the gradients for each bucket
+                grads_batch_coalesced[0] /= dist.get_world_size()
+                grads_batch_reduced = _unflatten_dense_tensors(grads_batch_coalesced[0], grads_batch[0])
+                for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
                     grad.copy_(reduced)
 
-        # Now register the reduction function in the execution engine
-        for module in self._module_copies:
-            for p in module.parameters():
-                if not p.requires_grad:
-                    continue
-                def allreduce_hook(*unused):
-                    Variable._execution_engine.queue_callback(reduction_fn_nccl)
-                p.register_hook(allreduce_hook)
+        # Now register the reduction hook on the parameters
+        for p in self.module.parameters():
+            if not p.requires_grad:
+                continue
+
+            def allreduce_hook(*unused):
+                Variable._execution_engine.queue_callback(reduction_fn_nccl)
+
+            p.register_hook(allreduce_hook)
 
     def _make_param_hook(self, param, device_idx):
 
