@@ -12,6 +12,8 @@ class Distribution(object):
     _validate_args = False
     has_rsample = False
     has_enumerate_support = False
+    support = None
+    params = {}
 
     def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=None):
         self._batch_shape = batch_shape
@@ -192,6 +194,9 @@ class Distribution(object):
         """
         if not (torch.is_tensor(value) or isinstance(value, Variable)):
             raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
+
+        if not self.support.check(value):
+            raise ValueError('The value argument to log_prob must be within the support')
 
         event_dim_start = len(value.size()) - len(self._event_shape)
         if value.size()[event_dim_start:] != self._event_shape:
