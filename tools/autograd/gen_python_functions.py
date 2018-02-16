@@ -91,7 +91,7 @@ inline ${return_type} ${dispatch_name}(${formal_args}) {
   ${initialize_cuda}
   ${AutoNoGIL}
   ${AutoGPU}
-  return ${dispatch_call}(${dispatch_args})${dispatch_type_conversion};
+  return ${dispatch_call}(${dispatch_args});
 }
 """)
 
@@ -199,6 +199,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
+        'const Type &': 'dtype',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -306,11 +307,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         dtype_idx = arg_idx if out_idx is None else out_idx + 1
         requires_grad_idx = dtype_idx + 1
 
-        python_binding_args = declaration.get('python_binding_arguments', [])
-        python_binding_arg_count = len(python_binding_args)
-        if python_binding_arg_count != 0 and python_binding_arg_count != 2:
-            raise RuntimeError("found {} entries in python_binding_arguments, expected 0 or 2",
-                               python_binding_arg_count)
         for arg in declaration.get('python_binding_arguments', []):
             if arg['name'] == 'dtype' and arg['type'] == 'dtype':
                 # out(s) determines the dtype if it is present, so don't pass the dtype to the dispatch.
@@ -334,7 +330,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['formal_args'] = formal_args
         env['actuals'] = actuals
         env['initialize_cuda'] = []
-        env['dispatch_type_conversion'] = []
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
         else:
@@ -343,10 +338,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
-            env['dispatch_call'] = 'at::{}'.format(declaration['name'])
             if dtype_formal_name:
-                env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
-                env['dispatch_type_conversion'] = '.toType({})'.format(dtype_formal_name)
+                raise RuntimeError(("dtype with namespace dispatch currently not supported, "
+                                   "consider writing as a native function"))
+            env['dispatch_call'] = 'at::{}'.format(declaration['name'])
         elif dtype_formal_name:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
             env['dispatch_call'] = '{}.{}'.format(dtype_formal_name, declaration['name'])
@@ -394,8 +389,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_input_arg = True
             if arg['name'] == 'requires_grad':
                 raise ValueError("argument named requires_grad not supported")
-            if arg['name'] == 'dtype':
-                raise ValueError("argument named dtype not supported")
 
         has_tensor_return = False
         for ret in declaration['returns']:
@@ -404,7 +397,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
 
-        if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
+        if has_tensor_return and not has_tensor_input_arg:
             dtype_arg = {
                 'default': "{}",  # so the signature ends up with '=None'
                 'default_init': "{}",
@@ -414,6 +407,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'type': 'dtype',
                 'simple_type': 'dtype',
             }
+            python_binding_arguments.append(dtype_arg)
+        if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
             requires_grad_arg = {
                 'default': False,
                 'default_init': False,
@@ -423,7 +418,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'type': 'bool',
                 'simple_type': 'bool',
             }
-            python_binding_arguments.append(dtype_arg)
             python_binding_arguments.append(requires_grad_arg)
         return python_binding_arguments
 
@@ -522,6 +516,8 @@ def get_python_signature(declaration, include_out):
 
     def get_typed_arg(arg):
         typename = arg['simple_type']
+        if typename == 'Type':
+            typename = 'dtype'
         if arg.get('is_nullable'):
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:

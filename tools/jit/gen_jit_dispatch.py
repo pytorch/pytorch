@@ -54,6 +54,7 @@ def is_jit_op(decl):
             not any(arg['simple_type'] == 'Generator' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'SparseTensor' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'Storage' for arg in decl['arguments']) and
+            not any(arg['simple_type'] == 'Type' for arg in decl['arguments']) and
             any(arg['simple_type'] in {'Tensor', 'TensorList'} for arg in decl['arguments']) and
             'Tensor' in decl['return_type'])
 
