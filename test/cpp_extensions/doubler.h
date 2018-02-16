@@ -7,6 +7,9 @@ struct Doubler {
   at::Tensor forward() {
     return tensor_ * 2;
   }
+  at::Tensor get() const {
+    return tensor_;
+  }
 
 private:
   at::Tensor tensor_;

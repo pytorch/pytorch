@@ -35,8 +35,18 @@ class TestCppExtension(common.TestCase):
             verbose=True)
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
+
         z = module.tanh_add(x, y)
         self.assertEqual(z, x.tanh() + y.tanh())
+
+        # Checking we can call a method defined not in the main C++ file.
+        z = module.exp_add(x, y)
+        self.assertEqual(z, x.exp() + y.exp())
+
+        # Checking we can use this JIT-compiled class.
+        doubler = module.Doubler(2, 2)
+        self.assertEqual(doubler.get().sum(), 4)
+        self.assertEqual(doubler.forward().sum(), 8)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):
@@ -69,6 +79,18 @@ class TestCppExtension(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    def test_throws_when_mismatched_module_name(self):
+        def load_wrong():
+            torch.utils.cpp_extension.load(
+                name='wrong_name',
+                sources=[
+                    'cpp_extensions/jit_extension.cpp',
+                    'cpp_extensions/jit_extension2.cpp'
+                ],
+                extra_include_paths=['cpp_extensions'])
+
+        self.assertRaises(NameError, load_wrong)
 
 
 if __name__ == '__main__':
