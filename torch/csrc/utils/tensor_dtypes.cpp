@@ -89,12 +89,12 @@ void initializeDtypes() {
       torch::registerDtypeObject((THPDtype*)dtype, *type);
     }
     Py_INCREF(dtype);
-    if (PyModule_AddObject(module, primary_name.c_str(), (PyObject*)dtype) != 0) {
+    if (PyModule_AddObject(module, primary_name.c_str(), dtype) != 0) {
       throw python_error();
     }
     if (legacy_name != "") {
       Py_INCREF(dtype);
-      if (PyModule_AddObject(module, legacy_name.c_str(), (PyObject*)dtype) != 0) {
+      if (PyModule_AddObject(module, legacy_name.c_str(), dtype) != 0) {
         throw python_error();
       }
     }

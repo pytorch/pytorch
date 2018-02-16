@@ -13,10 +13,10 @@ struct THPDtype {
   bool is_sparse;
 };
 
-extern PyObject *THPDtypeClass;
+extern PyTypeObject THPDtypeType;
 
 inline bool THPDtype_Check(PyObject *obj) {
-  return (PyObject*)Py_TYPE(obj) == THPDtypeClass;
+  return Py_TYPE(obj) == &THPDtypeType;
 }
 
 PyObject * THPDtype_New(at::Type* cdata, const std::string& name, bool is_cuda, bool is_sparse);

@@ -8,11 +8,9 @@
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/tensor_types.h"
 
-PyObject* THPDtypeClass = nullptr;
-
 PyObject * THPDtype_New(at::Type* cdata, const std::string& name, bool is_cuda, bool is_sparse)
 {
-  auto type = (PyTypeObject*)THPDtypeClass;
+  auto type = (PyTypeObject*)&THPDtypeType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPDtype*>(self.get());
@@ -104,7 +102,6 @@ PyTypeObject THPDtypeType = {
 
 bool THPDtype_init(PyObject *module)
 {
-  THPDtypeClass = (PyObject*)&THPDtypeType;
   if (PyType_Ready(&THPDtypeType) < 0)
     return false;
   Py_INCREF(&THPDtypeType);

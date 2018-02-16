@@ -232,11 +232,7 @@ static at::Type& default_type() {
 
 inline const at::Type& PythonArgs::dtype(int i) {
   if (!args[i]) return default_type();
-  PyObject *arg = args[i];
-  if (!THPDtype_Check(arg)) {
-    throw TypeError("expected dtype as argument %d, but got %s", i, THPUtils_typename(args[i]));
-  }
-  return *reinterpret_cast<THPDtype*>(arg)->cdata;
+  return *reinterpret_cast<THPDtype*>(args[i])->cdata;
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
