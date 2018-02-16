@@ -57,6 +57,17 @@ struct TensorSigmoidOp<half> {
 #endif
 
 template <typename T>
+struct TensorIsnanOp {
+  __device__ __forceinline__ void operator()(uint8_t* out, T* in) const {
+    *out = THCNumerics<T>::isnan(*in);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) const {
+    *v= THCNumerics<T>::isnan(*v);
+  }
+};
+
+template <typename T>
 struct TensorSignOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
     T orig = *in;

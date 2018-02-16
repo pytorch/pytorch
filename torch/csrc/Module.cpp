@@ -263,6 +263,7 @@ IMPLEMENT_STATELESS(eye)
 IMPLEMENT_STATELESS(diag)
 IMPLEMENT_STATELESS(numel)
 IMPLEMENT_STATELESS(sign)
+IMPLEMENT_STATELESS(isnan)
 IMPLEMENT_STATELESS(trace)
 IMPLEMENT_STATELESS(tril)
 IMPLEMENT_STATELESS(triu)
@@ -671,6 +672,7 @@ static PyMethodDef TorchMethods[] = {
   {"diag",            (PyCFunction)THPModule_diag,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"numel",           (PyCFunction)THPModule_numel,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"sign",            (PyCFunction)THPModule_sign,              METH_VARARGS | METH_KEYWORDS, NULL},
+  {"isnan",           (PyCFunction)THPModule_isnan,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"trace",           (PyCFunction)THPModule_trace,             METH_VARARGS | METH_KEYWORDS, NULL},
   {"tril",            (PyCFunction)THPModule_tril,              METH_VARARGS | METH_KEYWORDS, NULL},
   {"triu",            (PyCFunction)THPModule_triu,              METH_VARARGS | METH_KEYWORDS, NULL},
