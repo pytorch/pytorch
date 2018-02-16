@@ -604,7 +604,7 @@ class TestIndividualWorkerQueue(TestCase):
     def _run_ind_worker_queue_test(self, batch_size, num_workers):
         loader = DataLoader(
             self.dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
-            worker_init_fn=self.dataset.worker_init_fn, ind_worker_queue=True
+            worker_init_fn=self.dataset.worker_init_fn
         )
         current_worker_idx = 0
         for i, (worker_ids, sample) in enumerate(loader):
