@@ -6,7 +6,7 @@
 # called standalone to compile the libraries outside of the overall PyTorch
 # build process.
 
-set -e
+set -ex
 
 # Options for building only a subset of the libraries
 WITH_CUDA=0
@@ -72,6 +72,9 @@ CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ $CUDA_DEBUG -eq 1 ]]; then
   CUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS -g -G"
 fi
+if [ -z "$NUM_JOBS" ]; then
+  NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
+fi
 
 # Used to build an individual library, e.g. build TH
 function build() {
@@ -119,7 +122,7 @@ function build() {
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
               ${@:2} \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
-  ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   cd ../..
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
@@ -178,7 +181,7 @@ function build_aten() {
   -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=1
   # purpusefully not passing C_FLAGS for the same reason as above
-  ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   cd ../..
 }
 
