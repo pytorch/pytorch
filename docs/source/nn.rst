@@ -658,6 +658,12 @@ Loss functions
 .. autoclass:: TripletMarginLoss
     :members:
 
+:hidden:`AdaptiveLogSoftmax`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveLogSoftmax
+    :members:
+
 
 Vision layers
 ----------------
