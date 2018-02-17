@@ -42,6 +42,7 @@ from collections import OrderedDict, namedtuple
 from past.builtins import basestring
 from future.utils import viewitems, viewkeys, viewvalues
 from itertools import islice
+from six import StringIO
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -197,6 +198,16 @@ class Field(object):
             (self.field_metadata() == other.field_metadata())
         )
 
+    def _pprint_impl(self, indent, str_buffer):
+        raise NotImplementedError('Field is an abstrct class.')
+
+    def __repr__(self):
+        str_buffer = StringIO()
+        self._pprint_impl(0, str_buffer)
+        contents = str_buffer.getvalue()
+        str_buffer.close()
+        return contents
+
 
 class List(Field):
     """Represents a variable-length list.
@@ -245,9 +256,13 @@ class List(Field):
             _normalize_field(self.lengths, keep_blobs=keep_blobs)
         )
 
-    def __repr__(self):
-        return "List(lengths={!r}, _items={!r})".format(
-            self.lengths, self._items)
+    def _pprint_impl(self, indent, str_buffer):
+        str_buffer.write('  ' * indent + "List(\n")
+        str_buffer.write('  ' * (indent + 1) + "lengths=\n")
+        self.lengths._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * (indent + 1) + "_items=\n")
+        self._items._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * indent + ")\n")
 
     def __getattr__(self, item):
         """If the value of this list is a struct,
@@ -399,13 +414,12 @@ class Struct(Field):
         except (KeyError, TypeError):
             return None
 
-    def __repr__(self):
-        return "Struct({})".format(
-            ', '.join(
-                "{}={!r}".format(name, field)
-               for name, field in viewitems(self.fields)
-            )
-        )
+    def _pprint_impl(self, indent, str_buffer):
+        str_buffer.write('  ' * indent + "Struct( \n")
+        for name, field in viewitems(self.fields):
+            str_buffer.write('  ' * (indent + 1) + "{}=".format(name) + "\n")
+            field._pprint_impl(indent=indent + 2, str_buffer=str_buffer)
+        str_buffer.write('  ' * indent + ") \n")
 
     def __contains__(self, item):
         field = self._get_field_by_nested_name(item)
@@ -767,9 +781,10 @@ class Scalar(Field):
             self.dtype = np.dtype(np.void)
         self._validate_metadata()
 
-    def __repr__(self):
-        return 'Scalar({!r}, {!r}, {!r})'.format(
-            self.dtype, self._blob, self._metadata)
+    def _pprint_impl(self, indent, str_buffer):
+        str_buffer.write('  ' * (indent) +
+            'Scalar({!r}, {!r}, {!r})'.format(
+            self.dtype, self._blob, self._metadata) + "\n")
 
     def id(self):
         """
