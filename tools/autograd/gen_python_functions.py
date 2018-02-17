@@ -304,10 +304,14 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         # check python_binding_arguments
         dtype_formal_name = None
         requires_grad = None
-        dtype_idx = arg_idx if out_idx is None else out_idx + 1
-        requires_grad_idx = dtype_idx + 1
+        python_binding_arguments = declaration.get('python_binding_arguments', [])
+        if 'dtype' in (a['name'] for a in python_binding_arguments):
+            dtype_idx = arg_idx if out_idx is None else out_idx + 1
+            requires_grad_idx = dtype_idx + 1
+        else:
+            requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
 
-        for arg in declaration.get('python_binding_arguments', []):
+        for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
                 # out(s) determines the dtype if it is present, so don't pass the dtype to the dispatch.
                 if len(outputs) == 0:
