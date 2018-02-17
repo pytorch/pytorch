@@ -73,16 +73,16 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
     }
     return;
   }
-  const float rheight =(outputHeight > 1) ? (float)(inputHeight - 1)/(outputHeight - 1) : 0.f;
-  const float rwidth = (outputWidth > 1) ? (float)(inputWidth - 1) / (outputWidth - 1) : 0.f;
+  const float rheight =(outputHeight > 1) ? (float)inputHeight / outputHeight : 0.f;
+  const float rwidth = (outputWidth > 1) ? (float)inputWidth / outputWidth : 0.f;
   for (int h2 = 0; h2 < outputHeight; ++h2) {
-    const float h1r = rheight * h2;
+    const float h1r = (h2 > 0) ? rheight * (h2 - 0.5f) : 0.f;
     const int h1 = h1r;
     const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
     const real h1lambda = h1r - h1;
     const real h0lambda = (real)1. - h1lambda;
     for (int w2 = 0; w2 < outputWidth; ++w2) {
-      const float w1r = rwidth * w2;
+      const float w1r = (w2 > 0) ? rwidth * (w2 - 0.5f) : 0.f;
       const int w1 = w1r;
       const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
       const real w1lambda = w1r - w1;
@@ -142,16 +142,16 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
     }
     return;
   }
-  const float rheight =(outputHeight > 1) ? (float)(inputHeight - 1)/(outputHeight - 1) : 0.f;
-  const float rwidth = (outputWidth > 1) ? (float)(inputWidth - 1)/(outputWidth - 1) : 0.f;
+  const float rheight =(outputHeight > 1) ? (float)inputHeight / outputHeight : 0.f;
+  const float rwidth = (outputWidth > 1) ? (float)inputWidth / outputWidth : 0.f;
   for (int h2 = 0; h2 < outputHeight; ++h2) {
-    const float h1r = rheight * h2;
+    const float h1r = (h2 > 0) ? rheight * (h2 - 0.5f) : 0.f;
     const int h1 = h1r;
     const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
     const real h1lambda = h1r - h1;
     const real h0lambda = (real)1. - h1lambda;
     for (int w2 = 0; w2 < outputWidth; ++w2) {
-      const float w1r = rwidth * w2;
+      const float w1r = (w2 > 0) ? rwidth * (w2 - 0.5f) : 0.f;
       const int w1 = w1r;
       const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
       const real w1lambda = w1r - w1;
