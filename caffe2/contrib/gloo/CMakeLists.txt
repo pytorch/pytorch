@@ -7,6 +7,7 @@ if(USE_GLOO)
     "${CMAKE_CURRENT_SOURCE_DIR}/common.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/common_world_ops.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/context.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/reduce_scatter_ops.cc"
     "${CMAKE_CURRENT_SOURCE_DIR}/store_handler.cc"
     )
 
