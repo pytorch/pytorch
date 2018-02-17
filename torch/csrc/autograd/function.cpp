@@ -1,5 +1,3 @@
-#include <Python.h>
-
 #include "torch/csrc/autograd/function.h"
 
 #include "torch/csrc/autograd/functions/special.h"
@@ -43,9 +41,11 @@ variable_list Function::traced_apply(variable_list inputs) {
     var_flags.push_back(VariableFlags::of(input));
   }
   auto* this_node = graph->createCppOp(get_shared_ptr(), std::move(var_flags));
+#ifndef NO_PYTHON
   this_node->setSourceLocation(std::make_shared<StringSourceLocation>(
         jit::tracer::getPythonInterpreterStackTrace()
   ));
+#endif
   for (auto& input: inputs) {
     this_node->addInput(tracer::getValueTrace(state, input));
   }

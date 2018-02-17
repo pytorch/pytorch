@@ -97,3 +97,12 @@ if [[ "$JOB_NAME" == *xenial-cuda8-cudnn6-py3* ]]; then
   make html
   popd
 fi
+
+# Test no-Python build
+if [[ "$JOB_NAME" == *pytorch-linux-xenial-cuda9-cudnn7-py3-build ]] || \
+   [[ "$JOB_NAME" == *pytorch-linux-trusty-py3.6-gcc7.2-build ]]; then
+   echo "Building libtorch with NO_PYTHON"
+   pushd tools/cpp_build || exit 1
+   bash build_all.sh
+   popd
+fi
