@@ -52,8 +52,8 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   THCDeviceTensor<real, 4> idata = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> odata = toDeviceTensor<real, 4>(state, output);
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
-  const accreal rheight= (outputHeight > 1) ? (accreal)(inputHeight - 1)/(outputHeight - 1) : accreal(0);
-  const accreal rwidth = (outputWidth > 1) ? (accreal)(inputWidth - 1)/(outputWidth - 1) : accreal(0);
+  const accreal rheight= (outputHeight > 1) ? (accreal)inputHeight / outputHeight : accreal(0);
+  const accreal rwidth = (outputWidth > 1) ? (accreal)inputWidth / outputWidth : accreal(0);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
@@ -93,8 +93,8 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   int height2 = data2.getSize(2);
   int width2 = data2.getSize(3);
   assert(height1 > 0 && width1 > 0 && height2 > 0 && width2 > 0);
-  const accreal rheight= (height2 > 1) ? (accreal)(height1 - 1)/(height2 - 1) : accreal(0);
-  const accreal rwidth = (width2 > 1) ? (accreal)(width1 - 1) / (width2 - 1) : accreal(0);
+  const accreal rheight= (height2 > 1) ? (accreal)height1 / height2 : accreal(0);
+  const accreal rwidth = (width2 > 1) ? (accreal)width1 / width2 : accreal(0);
   const int num_kernels = height2 * width2;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
