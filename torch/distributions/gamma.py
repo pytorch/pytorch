@@ -44,13 +44,13 @@ class Gamma(ExponentialFamily):
     def variance(self):
         return self.concentration / self.rate.pow(2)
 
-    def __init__(self, concentration, rate):
+    def __init__(self, concentration, rate, **kwargs):
         self.concentration, self.rate = broadcast_all(concentration, rate)
         if isinstance(concentration, Number) and isinstance(rate, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.concentration.size()
-        super(Gamma, self).__init__(batch_shape)
+        super(Gamma, self).__init__(batch_shape, **kwargs)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

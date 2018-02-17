@@ -18,7 +18,7 @@ class TransformedDistribution(Distribution):
     maximum shape of its base distribution and its transforms, since transforms
     can introduce correlations among events.
     """
-    def __init__(self, base_distribution, transforms):
+    def __init__(self, base_distribution, transforms, **kwargs):
         self.base_dist = base_distribution
         if isinstance(transforms, Transform):
             self.transforms = [transforms, ]
@@ -32,7 +32,7 @@ class TransformedDistribution(Distribution):
         event_dim = max([len(self.base_dist.event_shape)] + [t.event_dim for t in self.transforms])
         batch_shape = shape[:len(shape) - event_dim]
         event_shape = shape[len(shape) - event_dim:]
-        super(TransformedDistribution, self).__init__(batch_shape, event_shape)
+        super(TransformedDistribution, self).__init__(batch_shape, event_shape, **kwargs)
 
     @constraints.dependent_property
     def params(self):

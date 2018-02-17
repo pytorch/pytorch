@@ -40,7 +40,7 @@ class Categorical(Distribution):
     params = {'probs': constraints.simplex}
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, **kwargs):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
@@ -50,7 +50,7 @@ class Categorical(Distribution):
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1]
-        super(Categorical, self).__init__(batch_shape)
+        super(Categorical, self).__init__(batch_shape, **kwargs)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)

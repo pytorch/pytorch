@@ -31,7 +31,7 @@ class Bernoulli(ExponentialFamily):
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
-    def __init__(self, probs=None, logits=None, *args, **kwargs):
+    def __init__(self, probs=None, logits=None, **kwargs):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
@@ -45,7 +45,7 @@ class Bernoulli(ExponentialFamily):
             batch_shape = torch.Size()
         else:
             batch_shape = self._param.size()
-        super(Bernoulli, self).__init__(batch_shape, *args, **kwargs)
+        super(Bernoulli, self).__init__(batch_shape, **kwargs)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)

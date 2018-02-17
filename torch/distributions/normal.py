@@ -41,13 +41,13 @@ class Normal(ExponentialFamily):
     def variance(self):
         return self.stddev.pow(2)
 
-    def __init__(self, loc, scale):
+    def __init__(self, loc, scale, **kwargs):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Normal, self).__init__(batch_shape)
+        super(Normal, self).__init__(batch_shape, **kwargs)
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

@@ -29,7 +29,7 @@ class LogitRelaxedBernoulli(Distribution):
     params = {'probs': constraints.unit_interval}
     support = constraints.real
 
-    def __init__(self, temperature, probs=None, logits=None):
+    def __init__(self, temperature, probs=None, logits=None, **kwargs):
         self.temperature = temperature
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
@@ -44,7 +44,7 @@ class LogitRelaxedBernoulli(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self._param.size()
-        super(LogitRelaxedBernoulli, self).__init__(batch_shape)
+        super(LogitRelaxedBernoulli, self).__init__(batch_shape, **kwargs)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -100,9 +100,9 @@ class RelaxedBernoulli(TransformedDistribution):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None):
+    def __init__(self, temperature, probs=None, logits=None, **kwargs):
         super(RelaxedBernoulli, self).__init__(LogitRelaxedBernoulli(temperature, probs, logits),
-                                               SigmoidTransform())
+                                               SigmoidTransform(), **kwargs)
 
     @property
     def temperature(self):

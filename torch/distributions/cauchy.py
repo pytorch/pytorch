@@ -28,13 +28,13 @@ class Cauchy(Distribution):
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, loc, scale):
+    def __init__(self, loc, scale, **kwargs):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Cauchy, self).__init__(batch_shape)
+        super(Cauchy, self).__init__(batch_shape, **kwargs)
 
     @property
     def mean(self):

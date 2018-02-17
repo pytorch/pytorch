@@ -37,10 +37,10 @@ class Exponential(ExponentialFamily):
     def variance(self):
         return self.rate.pow(-2)
 
-    def __init__(self, rate):
+    def __init__(self, rate, **kwargs):
         self.rate, = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
-        super(Exponential, self).__init__(batch_shape)
+        super(Exponential, self).__init__(batch_shape, **kwargs)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

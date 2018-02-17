@@ -40,13 +40,13 @@ class Uniform(Distribution):
     def variance(self):
         return (self.high - self.low).pow(2) / 12
 
-    def __init__(self, low, high, *args, **kwargs):
+    def __init__(self, low, high, **kwargs):
         self.low, self.high = broadcast_all(low, high)
         if isinstance(low, Number) and isinstance(high, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()
-        super(Uniform, self).__init__(batch_shape, *args, **kwargs)
+        super(Uniform, self).__init__(batch_shape, **kwargs)
 
     @constraints.dependent_property
     def support(self):
