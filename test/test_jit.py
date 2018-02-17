@@ -1401,6 +1401,22 @@ class TestJit(TestCase):
         ast = torch.jit.frontend.get_jit_ast(fn)
         self.assertExpected(str(ast))
 
+    def test_e2e_compilation(self):
+        def fn(x, y, z):
+            q = x + y - z
+            w = -z
+            m = y
+            if not x and not y and z:
+                m = x
+            while x < y > z:
+                q = x
+            return x
+
+        ast = torch.jit.frontend.get_jit_ast(fn)
+        cu = torch.jit._jit_script_compile('')
+        cu.define_function(ast)
+        self.assertExpected(str(cu.get_graph('fn')))
+
     def test_script_while(self):
         cu = torch.jit._jit_script_compile('''
         def test_while(a, b) -> (c):

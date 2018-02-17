@@ -3,6 +3,7 @@
 #include <string>
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/script/tree_views.h"
 
 namespace torch {
 namespace jit {
@@ -12,6 +13,7 @@ struct CompilationUnitImpl;
 struct CompilationUnit {
   CompilationUnit();
   void define(const std::string& str);
+  void defineFunction(const Def& fn_def);
   std::shared_ptr<Graph> getGraph(const std::string& func_name);
   ~CompilationUnit();
 
