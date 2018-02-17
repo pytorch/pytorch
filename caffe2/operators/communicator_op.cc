@@ -90,6 +90,20 @@ Does an allreduce operation among the nodes. Currently only Sum is supported.
     .Input(1, "X", "A tensor to be allreduced.")
     .Output(0, "Y", "The allreduced tensor, same on all nodes.");
 
+OPERATOR_SCHEMA(ReduceScatter)
+    .NumInputsOutputs([](int in, int out) {
+      return in >= 2 && out == (in - 1);
+    })
+    .EnforceInplace([](int in, int out) { return (in - 1) == out; })
+    .IdenticalTypeAndShapeOfInput(0)
+    .InputsCanCrossDevices()
+    .SetDoc(R"DOC(
+Does reduce-scatter operation among the nodes. Currently only Sum is supported.
+)DOC")
+    .Input(0, "comm_world", "The common world.")
+    .Input(1, "X", "A tensor to be reduce-scattered.")
+    .Output(0, "Y", "The reduced tensor, scattered on all nodes.");
+
 OPERATOR_SCHEMA(Allgather)
     .NumInputs(2, INT_MAX)
     .NumOutputs(1)
@@ -184,6 +198,7 @@ SHOULD_NOT_DO_GRADIENT(Broadcast);
 SHOULD_NOT_DO_GRADIENT(Reduce);
 SHOULD_NOT_DO_GRADIENT(Allgather);
 SHOULD_NOT_DO_GRADIENT(Allreduce);
+SHOULD_NOT_DO_GRADIENT(ReduceScatter);
 SHOULD_NOT_DO_GRADIENT(Barrier);
 SHOULD_NOT_DO_GRADIENT(SendTensor);
 SHOULD_NOT_DO_GRADIENT(ReceiveTensor);
@@ -196,6 +211,7 @@ REGISTER_CPU_OPERATOR(Broadcast, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Reduce, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Allgather, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Allreduce, NoDefaultEngineOp<CPUContext>);
+REGISTER_CPU_OPERATOR(ReduceScatter, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(Barrier, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(SendTensor, NoDefaultEngineOp<CPUContext>);
 REGISTER_CPU_OPERATOR(ReceiveTensor, NoDefaultEngineOp<CPUContext>);
