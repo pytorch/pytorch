@@ -2,7 +2,7 @@ import unittest
 
 import torch
 import torch.utils.cpp_extension
-import torch_test_cpp_extensions as cpp_extension
+import torch_test_cpp_extension as cpp_extension
 
 import common
 
@@ -35,8 +35,18 @@ class TestCppExtension(common.TestCase):
             verbose=True)
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
+
         z = module.tanh_add(x, y)
         self.assertEqual(z, x.tanh() + y.tanh())
+
+        # Checking we can call a method defined not in the main C++ file.
+        z = module.exp_add(x, y)
+        self.assertEqual(z, x.exp() + y.exp())
+
+        # Checking we can use this JIT-compiled class.
+        doubler = module.Doubler(2, 2)
+        self.assertEqual(doubler.get().sum(), 4)
+        self.assertEqual(doubler.forward().sum(), 8)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not found")
     def test_cuda_extension(self):

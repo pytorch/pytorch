@@ -89,6 +89,10 @@ class BuildExtension(build_ext):
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
 
+        for extension in self.extensions:
+            define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+            extension.extra_compile_args = [define]
+
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
         # Save the original _compile method for later.
@@ -222,7 +226,8 @@ def load(name,
     the `CUDA_HOME` environment variable is the safest option.
 
     Args:
-        name: The name of the module to build.
+        name: The name of the extension to build. This MUST be the same as the
+            name of the pybind11 module!
         sources: A list of relative or absolute paths to C++ source files.
         extra_cflags: optional list of compiler flags to forward to the build.
         extra_cuda_cflags: optional list of compiler flags to forward to nvcc
@@ -351,7 +356,7 @@ def _write_ninja_file(path,
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
 
-    cflags = ['-fPIC', '-std=c++11']
+    cflags = ['-fPIC', '-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
     cflags += ['-I{}'.format(include) for include in includes]
     cflags += extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]

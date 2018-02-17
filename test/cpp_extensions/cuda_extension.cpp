@@ -14,6 +14,6 @@ at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
   return output;
 }
 
-PYBIND11_MODULE(torch_test_cuda_extension, m) {
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("sigmoid_add", &sigmoid_add, "sigmoid(x) + sigmoid(y)");
 }

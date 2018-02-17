@@ -21,7 +21,7 @@ private:
   Tensor tensor_;
 };
 
-PYBIND11_MODULE(torch_test_cpp_extensions, m) {
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("sigmoid_add", &sigmoid_add, "sigmoid(x) + sigmoid(y)");
   py::class_<MatrixMultiplier>(m, "MatrixMultiplier")
       .def(py::init<int, int>())
