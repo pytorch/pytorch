@@ -1,3 +1,4 @@
+#pragma once
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/autograd/function.h"
 
@@ -10,7 +11,7 @@ namespace torch { namespace jit {
 
 
 using Stack = std::vector<at::Tensor>;
-using Operation = std::function<void(Stack&)>; // outputs
+using Operation = std::function<int(Stack&)>;
 // An operation with N inputs and M outputs pops the last N inputs off
 // the stack and pushes its M inputs onto the stack
 // before: <other stack items> I0, I1, ... IN <- stack.back()
@@ -19,6 +20,9 @@ using Operation = std::function<void(Stack&)>; // outputs
 // to the operation and it can incrementally drop ownership of tensors
 // when they become unneeded. For large operations, like 'run an entire subgraph',
 // this functionality is very important for minimizing gpu memory usage
+// return value is the relative 'offset' to jump to for the next operation:
+// pc += 1 + offset
+// so a return value of 0 goes to the next instruction
 
 static inline at::Tensor & fromLast(Stack & stack, size_t n) {
   return *(stack.end() - n);

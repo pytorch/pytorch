@@ -19,7 +19,9 @@ struct TensorType;
 struct Code {
   Code()
   : pImpl(nullptr) {}
-  Code(std::shared_ptr<Graph> & graph);
+  Code(std::shared_ptr<Graph> & graph, bool constants_are_variables);
+  // constants_are_variables = true means that all constants in the
+  // code will have VariableType rather than a base tensor type
   ~Code();
   operator bool() const {
     return pImpl != nullptr;
@@ -27,6 +29,7 @@ struct Code {
 private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
+  friend std::ostream & operator<<(std::ostream & out, const Code & code);
 };
 
 struct InterpreterState {

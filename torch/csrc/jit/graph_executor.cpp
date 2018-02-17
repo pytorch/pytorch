@@ -65,9 +65,11 @@ private:
 // to the output Variables if present.
 struct ExecutionPlan {
   ExecutionPlan(std::shared_ptr<Graph> & graph)
-  : f(graph) {}
+  : f(graph, /*constants_are_variables=*/false) {}
   ExecutionPlan(std::shared_ptr<Graph> & graph, Gradient grad)
-  : f(graph), grad(std::move(grad)), grad_executor(this->grad.df) {}
+  : f(graph, /*constants_are_variables=*/false)
+  , grad(std::move(grad))
+  , grad_executor(this->grad.df) {}
 
   variable_tensor_list run(variable_tensor_list&& inputs) const {
     if(grad) {
@@ -232,7 +234,7 @@ private:
       CreateAutodiffSubgraphs(*graph_);
       runOptimization(graph_, /*graphMustSupportVariables=*/true);
     }
-    autograd_fallback = Code(graph_);
+    autograd_fallback = Code(graph_, /*constants_are_variables=*/true);
     return autograd_fallback;
   }
   const ExecutionPlan & getOrCompile(const variable_tensor_list & inputs) {

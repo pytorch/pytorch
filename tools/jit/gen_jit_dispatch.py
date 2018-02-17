@@ -44,6 +44,7 @@ CONSTRUCTOR = CodeTemplate("""\
     auto result = ${call};
     drop(stack, ${num_inputs});
     pack(stack, std::move(result));
+    return 0;
   }, "${name}", ${num_inputs});
 }},
 """)
@@ -113,9 +114,6 @@ def gen_jit_dispatch(declarations, out):
 
         constructor = CONSTRUCTOR.substitute(descriptor=descriptor, name=name, call=call,
                                              assignments=assignments,
-                                             # num_inputs is only used in AutogradClosure, which
-                                             # is going to be removed soon anyway. There's no good value
-                                             # we can provide for cat.
                                              num_inputs=num_inputs)
         assert descriptor not in ops, descriptor
         ops[descriptor] = constructor

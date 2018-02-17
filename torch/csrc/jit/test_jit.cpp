@@ -22,6 +22,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/jit/graph_executor.h"
+#include "torch/csrc/jit/script/compiler.h"
 
 #include <vector>
 #include <iostream>
@@ -406,7 +407,7 @@ void interpTest() {
     auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
 
     auto lstm_g = build_lstm();
-    Code  lstm_function(lstm_g);
+    Code  lstm_function(lstm_g, /*constants_are_variables=*/false);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -432,7 +433,7 @@ void interpStageTest() {
 
 
     auto lstm_g = build_lstm_stages();
-    Code lstm_function(lstm_g);
+    Code lstm_function(lstm_g,  /*constants_are_variables=*/false);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -510,7 +511,7 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
                                                 tensor_list& tensors_in,
                                                 tensor_list& tensor_grads_in) {
   tensor_list tensors_out, tensor_grads_out;
-  Code f_code { grad_spec.f }, df_code { grad_spec.df };
+  Code f_code { grad_spec.f,  /*constants_are_variables=*/false }, df_code { grad_spec.df,  /*constants_are_variables=*/false };
   InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
 
   runOneStage(f_interpreter, tensors_in, tensors_out);
@@ -778,7 +779,7 @@ void testBlocks(std::ostream & out) {
   auto a = Var::asNewInput(g, "a");
   auto b = Var::asNewInput(g, "b");
   auto c = a + b;
-  auto r = g.appendNode(g.create("If"_sym, {Var::asNewInput(g, "c").value()}));
+  auto r = g.appendNode(g.create(kIf, {Var::asNewInput(g, "c").value()}));
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
@@ -803,8 +804,50 @@ void testBlocks(std::ostream & out) {
   out << *g2 << "\n";
 }
 
+
+const static auto cf_examples = R"JIT(
+  def if_test(a, b) -> (c):
+      c = 0
+      if a < b:
+        c = b
+      else:
+        c = a
+  def if_one(a, b) -> (c):
+    c = b
+    if a < b:
+      c = a
+  def while_test(a, i) -> (c):
+    while i < 3:
+      a *= a
+      i += 1
+    c = a
+)JIT";
+void testControlFlow() {
+  script::CompilationUnit cu;
+  cu.define(cf_examples);
+  auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
+    auto graph = cu.getGraph(name);
+    Code code(graph,  /*constants_are_variables=*/false);
+    InterpreterState interp(code);
+    interp.runOneStage(stack);
+    return stack;
+  };
+
+  auto F = [](float f) { return at::Scalar(f).toTensor(); };
+  auto V = [](at::Tensor t) { return at::Scalar(t).toFloat(); };
+  auto run_binary = [&](const std::string & name, float a, float b) {
+    return V(run(name, {F(a), F(b)})[0]);
+  };
+  JIT_ASSERT(2 == run_binary("if_test", 1, 2));
+  JIT_ASSERT(3 == run_binary("if_test", 3, 2));
+  JIT_ASSERT(2 == run_binary("if_one", 2, 3));
+  JIT_ASSERT(2 == run_binary("if_one", 3, 2));
+  JIT_ASSERT(256 == run_binary("while_test",2,0));
+}
+
 std::string runJITCPPTests() {
   std::stringstream out;
+  testControlFlow();
   testGraphExecutor();
   testBlocks(out);
   testCreateAutodiffSubgraphs(out);
