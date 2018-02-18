@@ -2,7 +2,6 @@ import sys
 import math
 import threading
 import copy
-from collections import defaultdict
 
 import torch
 from torch.autograd import Variable
@@ -136,61 +135,47 @@ class DistributedDataParallel(Module):
         else:
             self._module_copies = [self.module]
 
-        # Split parameters into type buckets so that parameter sync (broadcast)
-        # can operates on mixed parameter types. (e.g. mixed half and float)
-        self.param_type_buckets = \
-            defaultdict(lambda: [[] for _ in range(len(self.device_ids))])
-
-        for device_idx, module in enumerate(self._module_copies):
-            for p in module.parameters():
-                tp = p.type()
-                if tp == torch.cuda.HalfTensor and \
-                        dist._backend != dist.dist_backend.NCCL and \
-                        dist._backend != dist.dist_backend.GLOO:
-                    raise RuntimeError("DistributedDataParallel currently only "
-                                       "supports half precision parameters "
-                                       "with NCCL backend")
-                # Add the parameter into the type bucket
-                self.param_type_buckets[tp][device_idx].append(p)
-
-        # TODO, adding mixed precision support in NCCL reduction code path
-        # This is because NCCL backend doesn't support multiple reduction
-        # bucket
-        if len(self.param_type_buckets) > 1 and \
-                dist._backend == dist.dist_backend.NCCL:
-            raise RuntimeError("DistributedDataParallel currently doesn't "
-                               "support mixed precision type for NCCL backend")
-
-        # Split parameters into buckets that will coalesce reductions
-        #
-        # Note that previously we have already splitted parameters by the type.
-        # Here, for each type, we further split each type of parameters into
-        # reduction buckets so that each bucket will only have a single type
-        # of parameters. Therefore subsequent all-reduce can be successful since
-        # the reduction operation needs to operate on the same kind of data type
-        self.bucket_sizes = []
-        self.bucket_map = {}
-
         # Currently NCCL backend only supports single reduction thread/bucket
         if dist._backend == dist.dist_backend.NCCL:
             bucket_bytes_cap = float('inf')
         else:
             bucket_bytes_cap = 1 * MB
 
-        for tp in self.param_type_buckets:
-            # to init the first bucket immediately for each type
-            bucket_bytes = bucket_bytes_cap
-            for param_idx, param in enumerate(self.param_type_buckets[tp][0]):
-                if not param.requires_grad:
+        param_buckets = []
+        # Split the parameters into buckets and by types as well
+        for dev_idx, module in enumerate(self._module_copies):
+            param_buckets.append(list(_take_tensors(module.parameters(), bucket_bytes_cap)))
+
+        self.bucket_sizes = []
+        self.bucket_map = {}
+        param_types = set()
+
+        for bucket_idx, param_buckets_tuple in enumerate(zip(*param_buckets)):
+            self.bucket_sizes.append(0)
+            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+                if idx == 0:
+                    # Bucket parameter type tracking
+                    bucket_param_type = param_tuple[0].type()
+                    param_types.add(bucket_param_type)
+                    # Gloo is not supported due to fp16 performance
+                    if bucket_param_type == torch.cuda.HalfTensor and \
+                            dist._backend != dist.dist_backend.NCCL and \
+                            dist._backend != dist.dist_backend.GLOO:
+                        raise RuntimeError("DistributedDataParallel currently only "
+                                           "supports half precision parameters "
+                                           "with Nccl and Gloo backend")
+                if not param_tuple[0].requires_grad:
                     continue
-                if bucket_bytes >= bucket_bytes_cap:
-                    self.bucket_sizes.append(0)
-                    bucket_bytes = 0
-                for dev_idx in range(len(self.device_ids)):
-                    dev_param = self.param_type_buckets[tp][dev_idx][param_idx]
-                    self.bucket_map[dev_param] = len(self.bucket_sizes) - 1
-                bucket_bytes += param.numel() * param.element_size()
-                self.bucket_sizes[-1] += 1
+                for p in param_tuple:
+                    self.bucket_map[p] = bucket_idx
+                self.bucket_sizes[bucket_idx] += 1
+
+        # TODO, adding mixed precision support in NCCL reduction code path
+        # This is because NCCL backend doesn't support multiple reduction
+        # bucket.
+        if len(param_types) > 1 and dist._backend == dist.dist_backend.NCCL:
+            raise RuntimeError("DistributedDataParallel currently doesn't "
+                               "support mixed precision type for NCCL backend")
 
         self.buckets = [[[] for _ in range(len(self.device_ids))] for _ in range(len(self.bucket_sizes))]
         self.bucket_events = [[None] * len(self.device_ids) for _ in range(len(self.bucket_sizes))]
