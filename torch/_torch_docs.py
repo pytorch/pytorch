@@ -3932,6 +3932,38 @@ Example::
 
 """)
 
+add_docstr(torch._C.set_flush_denormal,
+           r"""
+set_flush_denormal(on) -> bool
+
+Returns ``True`` if it successfully configures flush denormal mode.
+
+Disables denormal floating numbers on CPU.
+
+.. note:: :meth:`~torch.set_flush_denormal` is only supported on x86
+architectures supporting SSE3.
+
+Args:
+    on (bool): Controls whether to enable flush denormal mode or not
+
+Example::
+
+    >>> torch.set_flush_denormal(True)
+    True
+    >>> torch.DoubleTensor([1e-323])
+
+     0
+    [torch.DoubleTensor of size 1]
+
+    >>> torch.set_flush_denormal(False)
+    True
+    >>> torch.DoubleTensor([1e-323])
+
+    9.88131e-324 *
+      1.0000
+    [torch.DoubleTensor of size 1]
+""")
+
 add_docstr(torch._C.set_num_threads,
            r"""
 set_num_threads(int)

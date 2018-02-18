@@ -15,6 +15,10 @@
 #endif
 #include "ATen/CPUGenerator.h"
 
+#ifdef USE_SSE3
+#include <pmmintrin.h>
+#endif
+
 namespace at {
 
 static inline void errorHandler(const char * msg, void * data) {
@@ -116,6 +120,21 @@ int64_t Context::current_device() const {
   }
 #endif
   return -1;
+}
+
+bool Context::setFlushDenormal(bool on) {
+#ifdef USE_SSE3
+  // Setting flush-to-zero (FTZ) flag
+  _MM_SET_FLUSH_ZERO_MODE(on ? _MM_FLUSH_ZERO_ON
+                             : _MM_FLUSH_ZERO_OFF);
+
+  // Setting denormals-are-zero (DAZ) flag
+  _MM_SET_DENORMALS_ZERO_MODE(on ? _MM_DENORMALS_ZERO_ON
+                                 : _MM_DENORMALS_ZERO_OFF);
+  return true;
+#else
+  return false;
+#endif
 }
 
 }
