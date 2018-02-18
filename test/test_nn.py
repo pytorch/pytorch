@@ -1428,7 +1428,7 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=2, dim=-2), (inputs,)))
     
     def test_to_one_hot(self):
-        y = Variable(torch.LongTensor([3,2,1,2,3]))
+        y = Variable(torch.LongTensor([3, 2, 1, 2, 3]))
         y_onehot = F.to_one_hot(y, depth=5)
         reference = torch.FloatTensor([
             [0, 0, 0, 1, 0],
@@ -1438,12 +1438,10 @@ class TestNN(NNTestCase):
             [0, 0, 0, 1, 0]
         ])
         self.assertTrue((y_onehot.data == reference).all())
-
-        y = Variable(torch.LongTensor([3,2,1,2,3]))
-        y_onehot = F.to_one_hot(y, depth=5)
+        
         y = torch.LongTensor([
-            [1,2,3,2,1,2],
-            [4,3,2,2,1,0]
+            [1, 2, 3, 2, 1, 2],
+            [4, 3, 2, 2, 1, 0]
         ])
         y_onehot = F.to_one_hot(y)
         self.assertTrue((torch.max(y_onehot, -1)[1] == y).all())
