@@ -2,6 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 
+#include "ATen/Config.h"
 namespace at {
 namespace native {
 

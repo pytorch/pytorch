@@ -1,0 +1,16 @@
+graph(%a : UNKNOWN_TYPE
+      %b : UNKNOWN_TYPE) {
+  %2 : UNKNOWN_TYPE = Constant[value={10}]()
+  %3 : UNKNOWN_TYPE = gt(%a, %2)
+  %6 : UNKNOWN_TYPE = If(%3)
+    block0() {
+      %4 : UNKNOWN_TYPE = Constant[value={3}]()
+      %5 : UNKNOWN_TYPE = add[alpha={1}](%4, %b)
+      -> (%5)
+    }
+    block1() {
+      -> (%a)
+    }
+  %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %b)
+  return (%7);
+}

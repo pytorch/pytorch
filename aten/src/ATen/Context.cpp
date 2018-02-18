@@ -5,8 +5,11 @@
 #include <thread>
 #include <mutex>
 #include <sstream>
+#include <string>
+#include <stdexcept>
 
 #if AT_CUDA_ENABLED()
+#include <cuda.h>
 #include "THC/THC.h"
 #include "ATen/CUDAGenerator.h"
 #endif

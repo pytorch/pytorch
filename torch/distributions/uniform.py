@@ -28,6 +28,18 @@ class Uniform(Distribution):
     params = {'low': constraints.dependent, 'high': constraints.dependent}
     has_rsample = True
 
+    @property
+    def mean(self):
+        return (self.high + self.low) / 2
+
+    @property
+    def stddev(self):
+        return (self.high - self.low) / 12**0.5
+
+    @property
+    def variance(self):
+        return (self.high - self.low).pow(2) / 12
+
     def __init__(self, low, high):
         self.low, self.high = broadcast_all(low, high)
         if isinstance(low, Number) and isinstance(high, Number):
@@ -50,6 +62,16 @@ class Uniform(Distribution):
         lb = value.ge(self.low).type_as(self.low)
         ub = value.lt(self.high).type_as(self.low)
         return torch.log(lb.mul(ub)) - torch.log(self.high - self.low)
+
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        result = (value - self.low) / (self.high - self.low)
+        return result
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        result = value * (self.high - self.low) + self.low
+        return result
 
     def entropy(self):
         return torch.log(self.high - self.low)

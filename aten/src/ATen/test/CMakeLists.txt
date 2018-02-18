@@ -24,3 +24,11 @@ target_link_libraries(scalar_tensor_test ATen)
 
 add_executable(undefined_tensor_test undefined_tensor_test.cpp)
 target_link_libraries(undefined_tensor_test ATen)
+
+add_executable(verify_api_visibility verify_api_visibility.cpp)
+target_link_libraries(verify_api_visibility ATen)
+
+if (CUDNN_FOUND)
+  add_executable(cudnn_test cudnn_test.cpp)
+  target_link_libraries(cudnn_test ATen)
+endif()

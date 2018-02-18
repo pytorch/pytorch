@@ -1,11 +1,15 @@
 #pragma once
 
 #include <Python.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/THP.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/tracer.h"
+
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace py = pybind11;
 
@@ -95,3 +99,15 @@ template<> struct type_caster<std::vector<torch::jit::Node *>> : ListCasterBase 
 };
 
 }} // namespace pybind11::detail
+
+namespace torch { namespace jit {
+
+static inline py::tuple tuple_tail(const py::tuple & tup) {
+  py::tuple r(tup.size() - 1);
+  for(std::size_t i = 1; i < tup.size(); i++) {
+    r[i-1] = tup[i];
+  }
+  return r;
+}
+
+}}

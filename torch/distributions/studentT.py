@@ -25,6 +25,20 @@ class StudentT(Distribution):
     support = constraints.real
     has_rsample = True
 
+    @property
+    def mean(self):
+        m = self.loc.clone()
+        m[self.df <= 1] = float('nan')
+        return m
+
+    @property
+    def variance(self):
+        m = self.df.clone()
+        m[self.df > 2] = self.scale[self.df > 2].pow(2) * self.df[self.df > 2] / (self.df[self.df > 2] - 2)
+        m[(self.df <= 2) & (self.df > 1)] = float('inf')
+        m[self.df <= 1] = float('nan')
+        return m
+
     def __init__(self, df, loc=0., scale=1.):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(df)
@@ -40,7 +54,7 @@ class StudentT(Distribution):
         #   Z ~ Chi2(df)
         #   Y = X / sqrt(Z / df) ~ StudentT(df)
         shape = self._extended_shape(sample_shape)
-        X = self.df.new(*shape).normal_()
+        X = self.df.new(shape).normal_()
         Z = self._chi2.rsample(sample_shape)
         Y = X * torch.rsqrt(Z / self.df)
         return self.loc + self.scale * Y

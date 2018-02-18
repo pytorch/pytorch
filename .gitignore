@@ -40,6 +40,7 @@ test/.coverage
 */**/*.dylib*
 test/data/legacy_serialized.pt
 test/data/linear.pt
+.mypy_cache
 
 # IPython notebook checkpoints
 .ipynb_checkpoints
@@ -57,3 +58,4 @@ test/data/linear.pt
 .ninja_deps
 .ninja_log
 compile_commands.json
+*.egg-info/

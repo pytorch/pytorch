@@ -36,6 +36,14 @@ class Cauchy(Distribution):
             batch_shape = self.loc.size()
         super(Cauchy, self).__init__(batch_shape)
 
+    @property
+    def mean(self):
+        return self.loc.new([float('nan')]).expand(self._extended_shape())
+
+    @property
+    def variance(self):
+        return self.loc.new([float('inf')]).expand(self._extended_shape())
+
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(shape).cauchy_()
@@ -44,6 +52,14 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
         return -math.log(math.pi) - self.scale.log() - (1 + ((value - self.loc) / self.scale)**2).log()
+
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
 
     def entropy(self):
         return math.log(4 * math.pi) + self.scale.log()

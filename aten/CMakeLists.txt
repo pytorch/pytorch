@@ -10,6 +10,34 @@ project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
 
+# ---[ If running on Ubuntu, check system version and compiler version.
+if(EXISTS "/etc/os-release")
+  execute_process(COMMAND
+    "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
+    OUTPUT_VARIABLE OS_RELEASE_ID
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+  execute_process(COMMAND
+    "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
+    OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+  if(OS_RELEASE_ID STREQUAL "ubuntu")
+    if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
+      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0"
+          AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "5.0.0")
+            message(FATAL_ERROR
+              "Do not use GCC 5. GCC 5 has a known bug in Ubuntu 17.10"
+              " and higher, which won't be fixed. For more information, see: "
+              "https://github.com/pytorch/pytorch/issues/5229"
+              )
+        endif()
+      endif()
+    endif()
+  endif()
+endif()
+
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
 if(APPLE)
@@ -26,7 +54,7 @@ if("${isSystemDir}" STREQUAL "-1")
 endif()
 
 IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
 ENDIF(NOT MSVC)
 
@@ -127,7 +155,7 @@ ENDIF ()
 IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
   FIND_PACKAGE(OpenMP)
   SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-  
+
   # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
   # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
   SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
@@ -245,6 +273,7 @@ ENDIF(C_AVX_FOUND)
 IF(C_AVX2_FOUND)
   MESSAGE(STATUS "AVX2 Found")
   SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "-DUSE_AVX2 ${CMAKE_CXX_FLAGS}")
 ENDIF(C_AVX2_FOUND)
 
 CHECK_C_SOURCE_RUNS("
@@ -388,7 +417,7 @@ IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
   MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
   set(AT_CUDNN_ENABLED 0)
 ELSE()
-  INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIRS})
+  INCLUDE_DIRECTORIES(BEFORE ${CUDNN_INCLUDE_DIRS})
   set(AT_CUDNN_ENABLED 1)
 ENDIF()
 

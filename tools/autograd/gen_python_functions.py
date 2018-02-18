@@ -16,6 +16,7 @@ CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_out', '.*_forward', '.*_forward_out',
+    'sparse_raw_resize_',
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -66,7 +67,13 @@ if (r.isNone(${out_idx})) {
 """)
 
 PY_VARIABLE_CALL_DISPATCH = CodeTemplate("""\
-return wrap(${dispatch_name}(${actuals}));""")
+${dispatch_name}(${actuals})""")
+
+PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
+set_requires_grad(${call_dispatch}, ${requires_grad})""")
+
+PY_VARIABLE_WRAP = CodeTemplate("""\
+return wrap(${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${return_type} ${dispatch_name}(${formal_args}) {
@@ -91,6 +98,7 @@ SUPPORTED_RETURN_TYPES = {
     'Tensor', 'std::tuple<Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor>',
+    'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*'
 }
@@ -204,7 +212,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             return ''
         return 'AutoGPU auto_gpu({});'.format(tensor_arg)
 
-    def emit_single_dispatch(declaration, base_env):
+    def emit_single_dispatch(declaration, out_idx, base_env):
         env = {}
         simple_return_type = declaration['return_type'].replace(' &', '')
         assert simple_return_type in SUPPORTED_RETURN_TYPES, \
@@ -221,7 +229,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
 
-        def parse_arg(arg, unpack_args=False):
+        def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
             typename = arg['type']
             if typename.startswith('IntList['):
@@ -234,10 +242,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     '`{}` type is not supported in python_default_init'.format(typename)
                 unpack_with_default = unpack_with_default_methods.get(typename)
                 default_expr = arg.get('python_default_init')
-                expr = 'r.{}({}, {})'.format(unpack_with_default, arg_idx, default_expr)
+                expr = 'r.{}({}, {})'.format(unpack_with_default, arg_index, default_expr)
             else:
                 unpack = unpack_methods.get(typename, typename.lower())
-                expr = 'r.{}({})'.format(unpack, arg_idx)
+                expr = 'r.{}({})'.format(unpack, arg_index)
 
             if unpack_args:
                 body.append('auto {} = {};'.format(name, expr))
@@ -248,13 +256,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             if typename == 'SparseTensor':
                 expr = 'SparseTensor({})'.format(expr)
 
-            actuals.append(expr)
             dispatch_type = typename
             if dispatch_type == 'Tensor':
                 dispatch_type = 'const Tensor &'
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
-            formal_args.append('{} {}'.format(dispatch_type, name))
+            formal = '{} {}'.format(dispatch_type, name)
+            return expr, formal
+
+        def append_actuals_formals(actual, formal):
+            actuals.append(actual)
+            formal_args.append(formal)
 
         unpack = any(arg.get('python_default_init') for arg in inputs)
         for arg in inputs:
@@ -262,11 +274,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 formal_args.append('Tensor & self')
                 actuals.append('self_')
                 continue
-            parse_arg(arg, unpack)
+            append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
             arg_idx += 1
 
         if len(outputs) == 1:
-            parse_arg(outputs[0])
+            append_actuals_formals(*parse_arg(outputs[0], arg_idx))
         elif len(outputs) > 1:
             N = len(outputs)
             body.append('auto results = r.tensorlist_n<{}>({});'.format(N, arg_idx))
@@ -290,8 +302,25 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
         env['AutoGPU'] = auto_gpu(declaration)
+
+        requires_grad = None
+        if len(declaration.get('python_binding_arguments', [])) > 1:
+            raise RuntimeError("found more than 1 entry in python_binding_arguments")
+        for arg in declaration.get('python_binding_arguments', []):
+            if not arg['name'] == 'requires_grad' or not arg['type'] == 'bool':
+                raise RuntimeError(("found {} in python_binding_arguments but only "
+                                    "bool requires_grad is supported".format(arg)))
+            # we have to use out_idx if there is an out variant because the base variant
+            # won't have the full arg_idx count
+            requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
+            requires_grad = parse_arg(arg, requires_grad_idx)[0]
+
         env = nested_dict(env, nested_dict(base_env, declaration))
-        body.append(PY_VARIABLE_CALL_DISPATCH.substitute(env))
+        call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
+        if requires_grad:
+            call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
+                                                                     requires_grad=requires_grad)
+        body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
         return body
 
@@ -300,22 +329,57 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             out_idx = len([arg for arg in dictionary['out']['arguments']
                            if not arg.get('output', False)])
             env = {}
-            env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], base_env)
-            env['call_dispatch'] = emit_single_dispatch(dictionary['base'], base_env)
+            env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
+            env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
             body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
         else:
-            body = emit_single_dispatch(dictionary['base'], base_env)
+            body = emit_single_dispatch(dictionary['base'], None, base_env)
 
         cond = 'if' if i == 0 else '} else if'
         return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body)
 
+    def get_requires_grad_argument(declaration):
+        requires_grad_arg = []
+        has_tensor_input_arg = False
+        for arg in declaration['arguments']:
+            if arg.get('output', False):
+                continue
+            typename = arg['simple_type']
+            if typename in ['Tensor', 'TensorList']:
+                has_tensor_input_arg = True
+            if arg['name'] == 'requires_grad':
+                raise ValueError("argument named requires_grad not supported")
+
+        has_tensor_return = False
+        for ret in declaration['returns']:
+            if ret['dynamic_type'] in ['Tensor', 'TensorList']:
+                # this probably won't work if one of the returns is not a tensor, but it will
+                # produce a compile-time error that is obvious
+                has_tensor_return = True
+
+        if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
+            arg = {
+                'default': False,
+                'default_init': False,
+                'dynamic_type': 'bool',
+                'kwarg_only': True,
+                'name': 'requires_grad',
+                'type': 'bool',
+                'simple_type': 'bool',
+            }
+            requires_grad_arg.append(arg),
+        return requires_grad_arg
+
     def process_function(name, declarations):
+        for declaration in declarations:
+            declaration['python_binding_arguments'] = get_requires_grad_argument(declaration)
+
         env = {
             'name': name,
             'dispatch_name': 'dispatch_{}'.format(name),
             'pycname': 'THPVariable_{}'.format(name),
             'signatures': [],
-            'max_args': max(len(o['arguments']) for o in declarations),
+            'max_args': max(len(o['arguments']) + len(o['python_binding_arguments']) for o in declarations),
             'unpack_self': [],
             'dispatch': [],
         }
@@ -394,21 +458,12 @@ def group_declarations(declarations):
 
 
 def get_python_signature(declaration, include_out):
-    # Use the saved signature for deprecated pseudo-declarations
-    if 'python_signature' in declaration:
-        return declaration['python_signature']
-
     # Compute the Python function signature for argument parsing
     typed_args = []
     output_args = []
     positional = True
-    for arg in declaration['arguments']:
-        if arg.get('output', False):
-            output_args.append(arg)
-            continue
-        if arg.get('kwarg_only', False) and positional:
-            typed_args.append('*')
-            positional = False
+
+    def get_typed_arg(arg):
         typename = arg['simple_type']
         if arg.get('is_nullable'):
             typename = '{}?'.format(typename)
@@ -424,6 +479,16 @@ def get_python_signature(declaration, include_out):
             default = 'None'
         if default is not None:
             param += '=' + str(default)
+        return param
+
+    for arg in declaration['arguments']:
+        if arg.get('output', False):
+            output_args.append(arg)
+            continue
+        if arg.get('kwarg_only', False) and positional:
+            typed_args.append('*')
+            positional = False
+        param = get_typed_arg(arg)
         typed_args.append(param)
 
     # add output arguments
@@ -442,6 +507,14 @@ def get_python_signature(declaration, include_out):
         else:
             typename = typenames[0]
         typed_args.append(typename + ' out=None')
+
+    # we could put this in the loop above but we want to ensure it is after the out argument
+    if len(declaration['python_binding_arguments']) > 0:
+        for arg in declaration['python_binding_arguments']:
+            if arg.get('kwarg_only', False) and positional:
+                typed_args.append('*')
+                positional = False
+            typed_args.append(get_typed_arg(arg))
 
     # Python function signature.
     # This is the string that we give to FunctionParameter, which is

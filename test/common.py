@@ -37,6 +37,8 @@ torch.manual_seed(SEED)
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+PY3 = sys.version_info > (3, 0)
+
 IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
@@ -91,7 +93,9 @@ def to_gpu(obj, type_map={}):
     elif isinstance(obj, Variable):
         assert obj.is_leaf
         t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
-        return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
+        o = obj.type(t).detach()
+        o.requires_grad = obj.requires_grad
+        return o
     elif isinstance(obj, list):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):
@@ -237,6 +241,8 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
+        elif isinstance(x, bool) and isinstance(y, bool):
+            super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == float('inf') or abs(y) == float('inf'):
                 if allow_inf:
@@ -255,6 +261,9 @@ class TestCase(unittest.TestCase):
         self.assertEqual(x, y, prec, msg, allow_inf)
 
     def assertNotEqual(self, x, y, prec=None, message=''):
+        if isinstance(prec, str) and message == '':
+            message = prec
+            prec = None
         if prec is None:
             prec = self.precision
 
@@ -378,6 +387,8 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
+        # assertRegexpMatches renamed assertRegex in 3.2
+        assertRegex = unittest.TestCase.assertRegexpMatches
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 

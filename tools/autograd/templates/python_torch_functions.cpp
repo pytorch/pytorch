@@ -11,6 +11,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
+#include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 
 #include "python_torch_functions_dispatch.h"
@@ -22,6 +23,11 @@ using at::Backend;
 using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
+
+static Tensor set_requires_grad(Tensor self, bool requires_grad) {
+  as_variable_ref(self).set_requires_grad(requires_grad);
+  return self;
+}
 
 static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
   AutoNoGIL no_gil;
@@ -64,7 +70,14 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data)));
+  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_variable(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::new_tensor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -75,6 +88,7 @@ ${py_methods}
 static PyMethodDef torch_functions[] = {
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
+  {"variable", (PyCFunction)THPVariable_variable, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };

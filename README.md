@@ -174,7 +174,7 @@ export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root direct
 conda install numpy pyyaml mkl setuptools cmake cffi
 
 # Add LAPACK support for the GPU
-conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
+conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 ```
 
 On macOS
@@ -200,16 +200,11 @@ MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v6. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
 ```
 docker build -t pytorch .
 ```
 
-Dockerfile to build with cuda 9 and cudnn v7 (with Volta support) is in tools/docker, the build command is
-
-```
-docker build -t pytorch_cuda9 -f tools/docker/Dockerfile9 .
-```
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest

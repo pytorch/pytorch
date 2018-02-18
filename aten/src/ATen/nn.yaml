@@ -25,11 +25,11 @@
   scalar_check:
     output: 'true'
 
-- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true)
+- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true, bool reduce=true)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
     is_target: target_->isScalar()
 
 - name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
@@ -51,10 +51,10 @@
   scalar_check:
     output: reduce || self_->isScalar()
 
-- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true)
+- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: SoftMarginCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 # Activation functions
 
@@ -264,7 +264,7 @@
   cname: SpatialFullDilatedConvolution
   buffers: [columns, ones]
 
-- name: thnn_conv_transpose3d(Tensor self, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
+- name: thnn_conv_transpose3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, IntList[3] dilation=1)
   cname: VolumetricFullDilatedConvolution
   buffers: [finput, fgrad_input]
 

@@ -46,13 +46,34 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    @property
+    def mean(self):
+        """
+        Returns the mean of the distribution.
+        """
+        raise NotImplementedError
+
+    @property
+    def variance(self):
+        """
+        Returns the variance of the distribution.
+        """
+        raise NotImplementedError
+
+    @property
+    def stddev(self):
+        """
+        Returns the standard deviation of the distribution.
+        """
+        return self.variance.sqrt()
+
     def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
         """
-        z = self.rsample(sample_shape)
-        return z.detach() if hasattr(z, 'detach') else z
+        with torch.no_grad():
+            return self.rsample(sample_shape)
 
     def rsample(self, sample_shape=torch.Size()):
         """
@@ -73,6 +94,26 @@ class Distribution(object):
     def log_prob(self, value):
         """
         Returns the log of the probability density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor or Variable):
+        """
+        raise NotImplementedError
+
+    def cdf(self, value):
+        """
+        Returns the cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor or Variable):
+        """
+        raise NotImplementedError
+
+    def icdf(self, value):
+        """
+        Returns the inverse cumulative density/mass function evaluated at
         `value`.
 
         Args:
@@ -116,7 +157,7 @@ class Distribution(object):
             sample_shape (torch.Size): the size of the sample to be drawn.
         """
         shape = torch.Size(sample_shape + self._batch_shape + self._event_shape)
-        if not shape:
+        if not shape and not torch._C._with_scalars():
             shape = torch.Size((1,))
         return shape
 

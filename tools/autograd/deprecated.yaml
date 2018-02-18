@@ -4,6 +4,9 @@
 - name: add(Tensor self, Scalar alpha, Tensor other)
   aten: add(self, other, alpha)
 
+- name: add(Tensor self, Scalar alpha, Tensor other, *, Tensor out)
+  aten: add_out(out, self, other, alpha)
+
 - name: addbmm(Scalar beta, Tensor self, Scalar alpha, Tensor batch1, Tensor batch2)
   aten: addbmm(self, batch1, batch2, beta, alpha)
 
@@ -21,6 +24,12 @@
 
 - name: addmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
   aten: addmm(self, mat1, mat2, beta, 1)
+
+- name: sspaddmm(Scalar beta, Tensor self, Scalar alpha, Tensor mat1, Tensor mat2)
+  aten: sspaddmm(self, mat1, mat2, beta, alpha)
+
+- name: sspaddmm(Scalar beta, Tensor self, Tensor mat1, Tensor mat2)
+  aten: sspaddmm(self, mat1, mat2, beta, 1)
 
 - name: addmv(Scalar beta, Tensor self, Scalar alpha, Tensor mat, Tensor vec)
   aten: addmv(self, mat, vec, beta, alpha)

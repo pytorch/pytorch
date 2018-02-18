@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import unittest
 from contextlib import contextmanager
 from itertools import product
+import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
@@ -28,6 +29,8 @@ if torch.cuda.is_available():
             RUN_CUDA = False
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+
+PY2 = sys.version_info[0] == 2
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -290,7 +293,6 @@ class TestJit(TestCase):
         torch._C._jit_pass_fuse(trace)
         self.assertExpectedTrace(trace)
 
-    @unittest.skipIf(IS_WINDOWS, "Mysteriously fails on Windows")
     def test_arg_configurations(self):
         """Different arg configurations should trigger different traces"""
         x = Variable(torch.FloatTensor(4, 4).uniform_())
@@ -592,6 +594,7 @@ class TestJit(TestCase):
             return y
         y = fn(*inputs)
         torch._C._tracer_exit((y,))
+        torch._C._jit_pass_dce(trace)
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
             self.assertTrue(op.hasAttribute('inplace'))
@@ -731,7 +734,6 @@ class TestJit(TestCase):
         del z
         check(False, True)
 
-    @unittest.skipIf(IS_WINDOWS, "Mysteriously fails on Windows")
     def test_multiuse_fn(self):
         x = Variable(torch.randn(2, 2), requires_grad=True)
         w = Variable(torch.randn(2, 2), requires_grad=True)
@@ -748,7 +750,6 @@ class TestJit(TestCase):
 
         torch.jit.verify(cell, (x, w), devices=[])
 
-    @unittest.skipIf(IS_WINDOWS, "Mysteriously fails on Windows")
     def test_output_unflatten(self):
         """Check that outputs of traced functions retain the original structure and nesting"""
         x = Variable(torch.randn(2, 2), requires_grad=True)
@@ -881,7 +882,9 @@ class TestJit(TestCase):
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_cpp(self):
-        torch._C._jit_run_cpp_tests()
+        # rather than rebuild assertExpected in cpp,
+        # just glob all the cpp outputs into one file for now
+        self.assertExpected(torch._C._jit_run_cpp_tests())
 
     def test_batchnorm(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
@@ -1150,6 +1153,16 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
 
+    def test_saved_output(self):
+        x = Variable(torch.randn(4, 4), requires_grad=True)
+
+        @torch.jit.compile(nderivs=1)
+        def fn(x):
+            return x.sigmoid()
+
+        fn(x).sum().backward()
+        self.assertExpected(str(fn.graph_for(x)))
+
     def test_shared_param(self):
 
         class MyModule(torch.nn.Module):
@@ -1165,6 +1178,361 @@ class TestJit(TestCase):
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
 
+    def test_nested_inplace(self):
+        x = Variable(torch.randn(2, 2))
+        trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        self.assertExpectedTrace(trace)
+
+    def checkGraphExecutor(self, func, reference_tensors, input_tensors=None, optimize=True, drop=None):
+        def allSum(vs):
+            # drop allows us to remove some values from ever being used
+            # to test unused outputs
+            if drop is not None:
+                vs = vs[:-drop]
+            # we don't want all the grad for all the outputs to be the same
+            # so we multiply each by a constant
+            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
+        if input_tensors is None:
+            input_tensors = reference_tensors
+
+        nograd_inputs = [Variable(t) for t in reference_tensors]
+        recording_inputs = [Variable(t, requires_grad=True)
+                            for t in reference_tensors]
+
+        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], optimize)
+
+        # test no gradients case
+
+        outputs = func(*nograd_inputs)
+        outputs_ge = ge(*nograd_inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+        # test single grad case
+
+        outputs = func(*recording_inputs)
+        grads = torch.autograd.grad(allSum(outputs), recording_inputs)
+
+        outputs_ge = ge(*recording_inputs)
+        grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs)
+        self.assertEqual(outputs, outputs_ge)
+        self.assertEqual(grads, grads_ge)
+
+        # test the grad grad case
+
+        outputs = func(*recording_inputs)
+        l1 = allSum(outputs)
+        grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
+        l2 = (allSum(grads) * l1)
+        grads2 = torch.autograd.grad(l2, recording_inputs)
+
+        recording_inputs = [Variable(t, requires_grad=True)
+                            for t in reference_tensors]
+
+        outputs_ge = ge(*recording_inputs)
+        l1_ge = allSum(outputs_ge)
+        grads_ge = torch.autograd.grad(
+            l1_ge, recording_inputs, create_graph=True)
+        l2_ge = (allSum(grads_ge) * l1_ge)
+        grads2_ge = torch.autograd.grad(l2_ge, recording_inputs)
+
+        self.assertEqual(outputs, outputs_ge)
+        self.assertEqual(grads, grads_ge)
+        self.assertEqual(grads2, grads2_ge)
+
+    def run_ge_tests(self, optimize, use_cuda):
+        def rand(*args):
+            t = torch.rand(*args).float()
+            if use_cuda:
+                t = t.cuda()
+            return t
+        self.checkGraphExecutor(lambda a, b: a * b + b,
+                                [rand(1), rand(1)], [rand(2, 3), rand(2, 3)],
+                                optimize=optimize)
+        # trivial identity
+        self.checkGraphExecutor(lambda a, b: (
+            b, a), [rand(1), rand(1)], optimize=optimize)
+
+        def foo(a):
+            t = a * a
+            return t * t, 4 * t
+        self.checkGraphExecutor(foo, [rand(1)], optimize=optimize)
+        # unused input
+        self.checkGraphExecutor(
+            lambda a, b: a * a, [rand(1), rand(1)], optimize=optimize)
+        # test outputs that do not get used in grad
+        self.checkGraphExecutor(foo, [rand(1)], drop=1, optimize=optimize)
+        # test autograd fallback
+        self.checkGraphExecutor(lambda a, b: a * b /
+                                (a - 2 * b) + b, [rand(1), rand(1)],
+                                optimize=optimize)
+
+    def test_ge_unoptimized(self):
+        self.run_ge_tests(False, False)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    def test_ge_optimized(self):
+        self.run_ge_tests(True, False)
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "requires CUDA")
+    def test_ge_cuda(self):
+        self.run_ge_tests(True, True)
+
+    # more manual test of graph executor that can be used as a scratchpad
+    def test_ge(self):
+        def foo(a, b):
+            return a * b / (a - b) + b
+        V = Variable
+        a, b = V(torch.rand(1)), V(torch.rand(1))
+        ge = torch._C.GraphExecutor(foo, (a, b))
+        a, b = V(torch.rand(1), requires_grad=True), V(
+            torch.rand(1), requires_grad=True)
+        r, = ge(a, b)
+        da, db = torch.autograd.grad(r + 3, [a, b], create_graph=True)
+
+        l2 = (da * db + db * db)
+        g2result = torch.autograd.grad(l2, [da, db])
+
+        r = foo(a, b)
+        da2, db2 = torch.autograd.grad(r + 3, [a, b], create_graph=True)
+        self.assertEqual(da, da2)
+        self.assertEqual(db, db2)
+        l3 = (da2 * db2 + db2 * db2)
+        g2result2 = torch.autograd.grad(l3, [da2, db2])
+        self.assertEqual(g2result, g2result2)
+
+    def checkScript(self, script, inputs, outputs, optimize, name='func'):
+        cu = torch.jit._jit_script_compile(script)
+        graph = cu.get_graph(name)
+        ge = torch._C.GraphExecutor(graph, optimize)
+        outputs_ge = ge(*inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+    def test_script_add(self):
+        script = '''
+        def func(a, b) -> (c):
+            c = a + b
+            c += a
+        '''
+
+        a = Variable(torch.rand(1), requires_grad=True)
+        b = Variable(torch.rand(1), requires_grad=True)
+        outputs = a + b + a
+        self.checkScript(script, [a, b], [outputs], False)
+
+    def test_script_mul(self):
+        script = '''
+        def func(a, b) -> (c):
+            c = a * b
+        '''
+
+        a = Variable(torch.rand(1), requires_grad=True)
+        b = Variable(torch.rand(1), requires_grad=True)
+        outputs = a * b
+        self.checkScript(script, [a, b], [outputs], False)
+
+    @unittest.skip("RuntimeError: Expected object of type CPUFloatType "
+                   "but found type Variable[CPUFloatType] for argument #2 'other'")
+    def test_script_triple(self):
+        script = '''
+        def func(x) -> (y):
+            y = 3f * x
+        '''
+        x = Variable(torch.rand(1).float(), requires_grad=True)
+        outputs = 3 * x
+        self.checkScript(script, [x], [outputs], False)
+
+    def test_script_slice(self):
+        script = '''
+        def func(x) -> (head):
+            head = x[:5]
+        '''
+        x = Variable(torch.rand(10).float(), requires_grad=True)
+        outputs = x[:5]
+        self.checkScript(script, [x], [outputs], False)
+
+    def test_script_gather(self):
+        script = '''
+        def func(x) -> (y):
+            y = x[0]
+        '''
+        x = Variable(torch.rand(10).float(), requires_grad=True)
+        outputs = x[0]
+        self.checkScript(script, [x], [outputs], False)
+
+    def test_script_func_call(self):
+        script = '''
+        def add(a, b) -> (c):
+            c = a + b
+
+        def mul(a, x) -> (y):
+            y = a * x
+
+        def func(alpha, beta, x, y) -> (z):
+            z = add(mul(alpha, x), mul(beta, y))
+        '''
+        alpha = Variable(torch.rand(1).float(), requires_grad=True)
+        beta = Variable(torch.rand(1).float(), requires_grad=True)
+        x = Variable(torch.rand(3).float(), requires_grad=True)
+        y = Variable(torch.rand(3).float(), requires_grad=True)
+        outputs = alpha * x + beta * y
+        self.checkScript(script, [alpha, beta, x, y], [outputs], False)
+
+    @unittest.skip("RuntimeError: VariableType::ID() not implemented")
+    def test_script_cast(self):
+        script = '''
+        def to_int(x) -> (y):
+            y = int(x)
+        '''
+        x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
+        outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
+        self.checkScript(script, 'to_int', [x], [outputs], False)
+
+    def test_python_frontend(self):
+        def fn(x, y, z):
+            q = x + y - z
+            w = -z
+            if not x and not y and z:
+                m = x if not z else y
+            while x < y > z:
+                q = x
+            return x
+
+        ast = torch.jit.frontend.get_jit_ast(fn)
+        self.assertExpected(str(ast))
+
+    def test_script_while(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + 1
+                b = b + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_fibb(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(lim) -> (third):
+            first = 1
+            second = 1
+            i = 1
+            somenum = 5
+            dontmutateme = 3
+            third = 0 # TODO: python lexical scoping
+            while i < lim:
+                third = first + second
+                first = second
+                second = third
+                j = 0
+                while j < 10:
+                    somenum = somenum * 2
+                    j = j + 1
+                i = i + j
+                i = i + dontmutateme
+
+            st = second + third
+            fs = first + second
+
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_if(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if(a, b) -> (c):
+            d = 3
+            if a > 10:
+                a = 3 + d
+            else:
+                b = 3 + d
+                d = 4
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if')))
+
+    def test_script_if_noelse(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if_noelse(a, b) -> (c):
+            if a > 10:
+                a = 3 + b
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if_noelse')))
+
+    def test_script_while_nonexistant_value(self):
+        with self.assertRaisesRegex(RuntimeError, "undefined value x"):
+            cu = torch.jit._jit_script_compile('''
+            def test_while(a, b) -> (c):
+                while a < 10:
+                    a = a + x
+                    b = b + 1
+                c = a + b
+            ''')
+
+    def test_script_while_nonexistant_cond_value(self):
+        with self.assertRaisesRegex(RuntimeError, "undefined value x"):
+            cu = torch.jit._jit_script_compile('''
+            def test_while(a, b) -> (c):
+                while a < x:
+                    a = a + 1
+                    b = b + 1
+                c = a + b
+            ''')
+
+    def test_script_while_write_outer_then_read(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + 1
+                b = a + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_while_nest_if(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while_if(a, b) -> (c):
+            c = 0
+            while a < 10:
+                a = a + 1
+                b = b + 1
+                if a > b:
+                    c = -a
+                else:
+                    c = -b
+            c = c + 1
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while_if')))
+
+    def test_script_if_nest_while(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if_while(a, b) -> (c):
+            c = 0
+            if a > b:
+                while a > b:
+                    b = b + 1
+                    c = -b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if_while')))
+
+    def test_script_ternary(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_ternary_control(a, b) -> (c):
+            c = 3
+            if a > 3:
+                c = a + b
+            else:
+                c = b
+        ''')
+        cu2 = torch.jit._jit_script_compile('''
+        def test_ternary(a, b) -> (c):
+            c = 3
+            c = a + b if a > 3 else b
+        ''')
+        self.assertEqual(
+            str(cu.get_graph('test_ternary_control')),
+            str(cu2.get_graph('test_ternary')),
+        )
 
 if __name__ == '__main__':
     run_tests()

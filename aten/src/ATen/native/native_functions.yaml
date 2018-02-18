@@ -1,36 +1,4 @@
-# ATen native functions are a mechanism to write ATen methods which only
-# make use of other ATen operations (e.g., it is not necessary to bind into
-# TH/THC code).  These functions are declared in this file and then folded
-# into the ATen code generation process.
-#
-# The simple format is as follows:
-# - func: func_name(ArgType arg0[=default], ArgType arg1[=default], ...) -> ReturnType
-# ArgType(s) are allowed to be simple types understood by ATen
-# (e.g. Tensor, TensorList, IntList, int64_t, double).
-# ReturnType is allowed to be any ArgType or tuple combination of ArgTypes(s), e.g. (Tensor, Tensor)
-# defaults are optional and are only allowed to be numbers (e.g. '0' for int64_t, '5.0' for double)
-#
-# The declarations also support the following attributes:
-# variants: [function, method] by default; controls whether Tensor method or namespace Function is generated
-#           as a result of this declaration.
-# dispatch: equal to the func_name by default; this can be overridden by providing a
-#           backend-specific name to dispatch to, e.g.:
-#           CPU: func_cpu
-#           CUDA: func_cuda
-# python_default_init: a map from argument names to default initialize expressions in C++. Such default
-#                      expressions will only be used in Python API. This allows us to write argument with
-#                      a default value that can either cause ambiguity in c++ (e.g., `Scalar p` argument
-#                      in `norm`) or have a type that doesn't allow default value None/NULL/nullptr (e.g.,
-#                      `int64_t fft_size` argument in stft, which we want to default to value of another
-#                      argument if not provided).
-#
-# In addition to the variants generation, these declarations will also generate a C++ function declaration
-# in NativeFunctions.h; it is up to you to write the corresponding definitions in the correct file under /native
-# (the exact file depends on if you are writing a generic (all backend), or CPU/CUDA specific implementation).
-# Note that these generated C++ function declarations won't match the declaration here because they will
-# undergo the standard ATen C++ transformations, e.g. use of const-ref for non-inplace Tensor arguments.  It is
-# recommended that you copy the generated C++ function declaration to your definition so that the two
-# match.
+# See README.md in this directory for more guidance
 
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
@@ -40,12 +8,32 @@
 
 - func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
 
+- func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addmv_(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addmv_out(Tensor result, Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addr_(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
 
-- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+- func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+
+- func: cat(TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
@@ -88,7 +76,6 @@
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
   variants: function
-
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
@@ -163,6 +150,8 @@
 - func: det(Tensor self) -> Tensor
 - func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
 
+- func: dot(Tensor self, Tensor tensor) -> Tensor
+
 - func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor
   variants: function
 
@@ -187,9 +176,37 @@
 - func: empty_like(Tensor self) -> Tensor
   variants: function
 
+- func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: embedding_bag_cpu
+    CUDA: embedding_bag_cuda
+
+- func: embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
+  variants: function
+
+- func: embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+
+- func: embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: embedding_bag_backward_cpu
+    CUDA: embedding_bag_backward_cuda
+
 - func: expand(Tensor self, IntList size) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+  variants: function
+
+- func: ger(Tensor self, Tensor vec2) -> Tensor
+
+- func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
+  variants: function
 
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
@@ -215,6 +232,16 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+- func: mm(Tensor self, Tensor mat2) -> Tensor
+
+- func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
+- func: mv(Tensor self, Tensor vec) -> Tensor
+
+- func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
+  variants: function
+
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
 
 # TODO: Why does kW come before kH?  Hella confusing, because it
@@ -232,11 +259,18 @@
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: rand_like(Tensor self) -> Tensor
+  variants: function
+
 - func: randn_like(Tensor self) -> Tensor
   variants: function
+
+- func: repeat(Tensor self, IntList repeats) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
@@ -268,6 +302,8 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
+- func: smm(Tensor self, Tensor mat2) -> Tensor
+
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
 - func: squeeze(Tensor self) -> Tensor
@@ -278,7 +314,20 @@
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
 
+- func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sspaddmm_out_only_sparse
+    CUDA: _sspaddmm_out_only_sparse
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
+
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
+  variants: function
+
+- func: stack_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
 - func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool return_onesided=true, Tensor window={}, int64_t pad_end=0) -> Tensor
@@ -286,6 +335,10 @@
     fft_size: frame_length
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
+
+- func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+
+- func: t_(Tensor self) -> Tensor
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
 
@@ -308,3 +361,18 @@
   dispatch:
     CPU: _standard_gamma_grad_cpu
     CUDA: _standard_gamma_grad_cuda
+
+- func: poisson(Tensor self, Generator* generator=nullptr) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _s_poisson_cpu
+    CUDA: _s_poisson_cuda
+
+- func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
+  variants: function
+
+- func: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  variants: function
+
+- func: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state, Tensor reserve, std::array<bool,4> output_mask) -> (Tensor, Tensor, Tensor, TensorList)
+  variants: function

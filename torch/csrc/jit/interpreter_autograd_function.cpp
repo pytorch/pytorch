@@ -1,5 +1,18 @@
 #include "Python.h"
-#include "interpreter_autograd_function.h"
+
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/jit/interpreter_autograd_function.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
+
+#include <ATen/ATen.h>
+
+#include <algorithm>
+#include <memory>
+#include <tuple>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -40,7 +53,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     // because we won't have a trace containing computation of either
     // the tensor itself (not defined) or the stage for its gradient (requires_grad=False)
     if(!traced_flags.defined && actual_flags.defined) {
-      throw std::runtime_error("JIT intepreter received a defined input, but the"
+      throw std::runtime_error("JIT interpreter received a defined input, but the"
         " trace was compiled with the input being undefined.");
     }
     if(!traced_flags.requires_grad && actual_flags.requires_grad) {
@@ -115,9 +128,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
         grad_fn->next_functions.emplace_back();
         continue;
       }
-      grad_fn->next_functions.emplace_back(
-        input.grad_fn() ? input.grad_fn() : input.grad_accumulator(),
-        input.output_nr());
+      grad_fn->next_functions.push_back(input.gradient_edge());
     }
   };
 
@@ -130,9 +141,10 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
-      result.push_back(autograd::make_variable(toutputs[i], grad_fn));
+      autograd::Edge edge(grad_fn, grad_fn->num_inputs++);
+      result.push_back(autograd::make_variable(toutputs[i], std::move(edge)));
     } else {
-      result.push_back(autograd::make_variable(toutputs[i], false));
+      result.push_back(autograd::make_variable(toutputs[i], /*requires_grad=*/false));
     }
   }
 

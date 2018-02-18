@@ -83,6 +83,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
   if (THCTensor_(nDimension)(state, input) == 4)
   {
     /* sizes */
@@ -92,7 +93,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (fiveDimensionalInput)
   {
     /* sizes */
     batchSize   = THCTensor_(size)(state, input, 0);
@@ -102,7 +103,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
     inputWidth  = THCTensor_(size)(state, input, 4);
   }
 
-  if (input->nDimension == 4) /* 4D */
+  if (!fiveDimensionalInput) /* 4D */
   {
     /* resize output */
     THCTensor_(resize4d)(state, output, inputSlices,
@@ -118,23 +119,28 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   indices = THCIndexTensor_(newContiguous)(state, indices);
   THCTensor_(zero)(state, output);
 
-  // Collapse batch and feature dimensions
+  if (fiveDimensionalInput) {
+    // Collapse batch and feature dimensions
+    output = THCTensor_(newFoldBatchDim)(state, output);
+
+    THCTensor *old_input = input;
+    input = THCTensor_(newFoldBatchDim)(state, input);
+    THCTensor_(free)(state, old_input);
+    
+    THCIndexTensor *old_indices = indices;
+    indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
+    THCIndexTensor_(free)(state, old_indices);
+  } else {
+    THCTensor_(retain)(state, output);
+  }
+
   THCDeviceTensor<real, 4> cudaInput;
   THCDeviceTensor<real, 4> cudaOutput;
   THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
-  if (THCTensor_(nDimension)(state, input) == 4)
-  {
-    cudaInput  = toDeviceTensor<real, 4>(state, input);
-    cudaOutput = toDeviceTensor<real, 4>(state, output);
-    cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
-  }
-  else
-  {
-    cudaInput  = toDeviceTensor<real, 5>(state, input).downcastOuter<4>();
-    cudaOutput = toDeviceTensor<real, 5>(state, output).downcastOuter<4>();
-    cudaIndices = toDeviceTensor<THCIndex_t, 5>(state, indices).downcastOuter<4>();
-  }
+  cudaInput  = toDeviceTensor<real, 4>(state, input);
+  cudaOutput = toDeviceTensor<real, 4>(state, output);
+  cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -156,6 +162,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   }
 
   THCTensor_(free)(state, input);
+  THCTensor_(free)(state, output);
   THCIndexTensor_(free)(state, indices);
 }
 
@@ -182,7 +189,8 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
-  if (THCTensor_(nDimension)(state, input) == 4) /* 4D */
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
     inputSlices  = THCTensor_(size)(state, input, 0);
@@ -200,31 +208,33 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   }
 
   input = THCTensor_(newContiguous)(state, input);
-  indices = THCIndexTensor_(newContiguous)(state, indices);
-  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
+  indices = THCIndexTensor_(newContiguous)(state, indices);
+  gradOutput = THCTensor_(newContiguous)(state, gradOutput);
+
+  if (fiveDimensionalInput) {
+    gradInput = THCTensor_(newFoldBatchDim)(state, gradInput);
+
+    THCIndexTensor *old_indices = indices;
+    indices = THCIndexTensor_(newFoldBatchDim)(state, indices);
+    THCIndexTensor_(free)(state, old_indices);
+  
+    THCTensor *old_gradOutput = gradOutput;
+    gradOutput = THCTensor_(newFoldBatchDim)(state, gradOutput);
+    THCTensor_(free)(state, old_gradOutput);
+  } else {
+    THCTensor_(retain)(state, gradInput);
+  }
 
   // Collapse batch and feature dimensions
   THCDeviceTensor<real, 4> cudaGradInput;
   THCDeviceTensor<real, 4> cudaGradOutput;
   THCDeviceTensor<THCIndex_t, 4> cudaIndices;
 
-  if (THCTensor_(nDimension)(state, input) == 4)
-  {
-    cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
-    cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
-    cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
-  }
-  else
-  {
-    cudaGradInput =
-      toDeviceTensor<real, 5>(state, gradInput).downcastOuter<4>();
-    cudaGradOutput =
-      toDeviceTensor<real, 5>(state, gradOutput).downcastOuter<4>();
-    cudaIndices =
-      toDeviceTensor<THCIndex_t, 5>(state, indices).downcastOuter<4>();
-  }
+  cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
+  cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
+  cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
   int totalZ = inputTime * inputSlices * batchSize;
   int offsetZ = 0;
@@ -248,9 +258,10 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   }
 
   // cleanup
-  THCTensor_(free)(state, input);
   THCTensor_(free)(state, gradOutput);
+  THCTensor_(free)(state, gradInput);
   THCIndexTensor_(free)(state, indices);
+  THCTensor_(free)(state, input);
 }
 
 #endif

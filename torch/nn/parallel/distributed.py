@@ -5,7 +5,9 @@ import copy
 
 import torch
 from torch.autograd import Variable
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
+    _take_tensors
+
 from torch.cuda.comm import broadcast_coalesced
 from torch.cuda import nccl
 import torch.distributed as dist
@@ -42,7 +44,7 @@ class DistributedDataParallel(Module):
     (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
-        This module works only with the ``gloo`` backend.
+        This module works only with the ``nccl`` and ``gloo`` backends.
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
@@ -63,12 +65,25 @@ class DistributedDataParallel(Module):
         only work if gradients are to be accumulated in ``.grad`` attributes of
         parameters).
 
+    .. warning::
+        If you plan on using this module with a ``nccl`` backend or a ``gloo``
+        backend (that uses Infiniband), together with a DataLoader that uses
+        multiple workers, please change the multiprocessing start method to
+        ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
+        likely experience deadlocks if you don't change this setting.
+
     .. note::
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
         by the optimizer in all processes in the same way. Buffers
         (e.g. BatchNorm stats) are broadcast form the module in process of rank
         0, to all other replicas in the system in every iteration.
+
+    .. warning::
+        Forward and backward hooks defined on :attr:`module` and its submodules
+        won't be invoked anymore, unless the hooks are initialized in the
+        :meth:`forward` method.
 
     Args:
         module: module to be parallelized
@@ -92,15 +107,15 @@ class DistributedDataParallel(Module):
         self.device_ids = device_ids
         self.output_device = output_device
 
-        # Sync params and buffers
-        for p in self.module.state_dict().values():
-            dist.broadcast(p, 0)
+        MB = 1024 * 1024
+        # used for intra-node param sync and inter-node sync as well
+        self.broadcast_bucket_size = 10 * MB
 
-        # Clear NCCL communicator and CUDA event cache of the default group ID,
-        # These cache will be recreated at the later call. This is currently a
-        # work-around for a potential NCCL deadlock.
-        if dist._backend == dist.dist_backend.NCCL:
-            dist._clear_group_cache()
+        # Sync params and buffers
+        module_states = list(self.module.state_dict().values())
+        if len(module_states) > 0:
+            self._dist_broadcast_coalesced(module_states,
+                                           self.broadcast_bucket_size)
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -126,8 +141,6 @@ class DistributedDataParallel(Module):
 
         self.bucket_sizes = []
         self.bucket_map = {}
-        MB = 1024 * 1024
-        self.broadcast_bucket_size = 10 * MB  # used for param sync before forward
         # Currently NCCL backend only supports single reduction thread/bucket
         if dist._backend == dist.dist_backend.NCCL:
             bucket_bytes_cap = float('inf')
@@ -182,35 +195,47 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        # Clear NCCL communicator and CUDA event cache of the default group ID,
-        # These cache will be recreated at the later call. This is currently a
-        # work-around for a potential NCCL deadlock.
-        if dist._backend == dist.dist_backend.NCCL:
-            dist._clear_group_cache()
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
 
+    def _dist_broadcast_coalesced(self, tensors, buffer_size):
+        """
+        Broadcast a sequence of tensors to the default group from rank 0.
+        Small tensors are first coalesced into a buffer to reduce the number of
+        broadcasts.
+
+        tensors (sequence): tensors to broadcast. Each tensor needs to be on the
+                            same GPU.
+        buffer_size (int): maximum size of the buffer for coalescing
+        """
+        for tensors in _take_tensors(tensors, buffer_size):
+            flat_tensors = _flatten_dense_tensors(tensors)
+            dist.broadcast(flat_tensors, 0)
+            for tensor, synced in zip(tensors,
+                                      _unflatten_dense_tensors(flat_tensors, tensors)):
+                tensor.copy_(synced)
+
     def _sync_params(self):
-        params = [p.data for p in self.module.parameters()]
-        result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
-        for tensors, module in zip(result[1:], self._module_copies[1:]):
-            for tensor, param in zip(tensors, module.parameters()):
-                param.data.set_(tensor)
+        if len(self.device_ids) > 1:
+            # intra-node parameter sync
+            params = [p.data for p in self.module.parameters()]
+            result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
+            for tensors, module in zip(result[1:], self._module_copies[1:]):
+                for tensor, param in zip(tensors, module.parameters()):
+                    param.data.set_(tensor)
 
         buffers = list(self.module._all_buffers())
         if len(buffers) > 0:
             # cross-node buffer sync
-            flat_buffers = _flatten_dense_tensors(buffers)
-            dist.broadcast(flat_buffers, 0)
-            for buf, synced in zip(buffers, _unflatten_dense_tensors(flat_buffers, buffers)):
-                buf.copy_(synced)
+            self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
 
-            # intra-node buffer sync
-            result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
-            for tensors, module in zip(result[1:], self._module_copies[1:]):
-                for tensor, buf in zip(tensors, module._all_buffers()):
-                    buf.set_(tensor)
+            if len(self.device_ids) > 1:
+                # intra-node buffer sync
+                result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+                for tensors, module in zip(result[1:], self._module_copies[1:]):
+                    for tensor, buf in zip(tensors, module._all_buffers()):
+                        buf.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope

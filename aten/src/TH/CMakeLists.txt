@@ -17,7 +17,7 @@ IF(C_AVX_FOUND)
 ENDIF(C_AVX_FOUND)
 
 IF(C_AVX2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX2.c)
+  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX2.cpp)
 ENDIF(C_AVX2_FOUND)
 
 SET(hdr
@@ -30,16 +30,16 @@ set(ATen_CPU_SRCS ${ATen_CPU_SRCS}
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.c
   ${CMAKE_CURRENT_SOURCE_DIR}/THSize.c
   ${CMAKE_CURRENT_SOURCE_DIR}/THStorage.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLogAdd.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THRandom.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/THRandom.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THFile.c
   ${CMAKE_CURRENT_SOURCE_DIR}/THDiskFile.c
   ${CMAKE_CURRENT_SOURCE_DIR}/THMemoryFile.c
   ${CMAKE_CURRENT_SOURCE_DIR}/THAtomic.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THVector.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
   ${extra_src}
 PARENT_SCOPE)
 ######################################################
@@ -90,20 +90,21 @@ INSTALL(FILES
 INSTALL(FILES
   vector/AVX.h
   vector/AVX2.h
+  vector/avx_mathfun.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
 
 INSTALL(FILES
   generic/THBlas.c
   generic/THBlas.h
-  generic/THLapack.c
+  generic/THLapack.cpp
   generic/THLapack.h
   generic/THStorage.c
   generic/THStorage.h
   generic/THStorageCopy.c
   generic/THStorageCopy.h
-  generic/THTensor.c
+  generic/THTensor.cpp
   generic/THTensor.h
-  generic/THTensorConv.c
+  generic/THTensorConv.cpp
   generic/THTensorConv.h
   generic/THTensorCopy.c
   generic/THTensorCopy.h
@@ -111,8 +112,8 @@ INSTALL(FILES
   generic/THTensorLapack.h
   generic/THTensorMath.c
   generic/THTensorMath.h
-  generic/THTensorRandom.c
+  generic/THTensorRandom.cpp
   generic/THTensorRandom.h
-  generic/THVectorDispatch.c
+  generic/THVectorDispatch.cpp
   generic/THVector.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/generic")

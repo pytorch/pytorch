@@ -8,6 +8,10 @@ Tensor empty_like(const Tensor& self) {
   return self.type().tensor(self.sizes());
 }
 
+Tensor rand_like(const Tensor& self) {
+  return self.type().rand(self.sizes());
+}
+
 Tensor randn_like(const Tensor& self) {
   return self.type().randn(self.sizes());
 }
