@@ -197,8 +197,8 @@ class Variable(_C._VariableBase):
 
     .. note::
 
-      Returned Variable uses the same data tensor, as the original one, and
-      in-place modifications on either of them will be seen, and may trigger
+      Returned Variable uses the same data tensor as the original one.
+      In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
     """)
 
