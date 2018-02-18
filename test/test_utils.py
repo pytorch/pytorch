@@ -18,6 +18,7 @@ from torch.utils.trainer.plugins.plugin import Plugin
 from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
+from common import IS_WINDOWS
 
 HAS_CUDA = torch.cuda.is_available()
 
@@ -139,6 +140,7 @@ class TestDataLoader(TestCase):
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 2)
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_multi_drop(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
