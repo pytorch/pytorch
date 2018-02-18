@@ -1426,6 +1426,27 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=2, dim=-2), (inputs,)))
+    
+    def test_to_one_hot(self):
+        y = Variable(torch.LongTensor([3,2,1,2,3]))
+        y_onehot = F.to_one_hot(y, depth=5)
+        reference = torch.FloatTensor([
+            [0, 0, 0, 1, 0],
+            [0, 0, 1, 0, 0],
+            [0, 1, 0, 0, 0],
+            [0, 0, 1, 0, 0],
+            [0, 0, 0, 1, 0]
+        ])
+        self.assertTrue((y_onehot.data == reference).all())
+
+        y = Variable(torch.LongTensor([3,2,1,2,3]))
+        y_onehot = F.to_one_hot(y, depth=5)
+        y = torch.LongTensor([
+            [1,2,3,2,1,2],
+            [4,3,2,2,1,0]
+        ])
+        y_onehot = F.to_one_hot(y)
+        self.assertTrue((torch.max(y_onehot, -1)[1] == y).all())
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, type=torch.FloatTensor):
         def expected_indices(dim):
