@@ -222,6 +222,32 @@ struct to_ir {
     return save_env;
   }
 
+  std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
+    Value* cond_value = emitExpr(expr.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(kIf, 0));
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    auto emit_if_expr = [this](Block* b, const Expr& expr) {
+      environment_stack = std::make_shared<Environment>(b, environment_stack);
+      WithInsertPoint guard(*def.graph, b);
+      Value* out_val = emitExpr(expr, 1)[0];
+      b->registerOutput(out_val);
+
+      environment_stack = environment_stack->next;
+    };
+
+    emit_if_expr(true_block, expr.true_expr());
+    emit_if_expr(false_block, expr.false_expr());
+
+    // Add op outputs
+    auto expr_value = n->addOutput(); // Resulting value
+
+    return {expr_value};
+  }
+
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
@@ -510,8 +536,10 @@ struct to_ir {
       } break;
       case '.':
         // TODO: add support for "."
-      case TK_IF_EXPR:
-        // TODO: add support for conditional
+      case TK_IF_EXPR: {
+        expectOutputs(tree, output_size, 1);
+        return emitTernaryIf(TernaryIf(tree));
+      } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
