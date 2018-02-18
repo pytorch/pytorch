@@ -307,7 +307,7 @@ EXAMPLES = [
     ]),
 ]
 
-BAD_EXAMPLES =[
+BAD_EXAMPLES = [
     Example(Bernoulli, [
         {'probs': Variable(torch.Tensor([1.1, 0.2, 0.4]), requires_grad=True)},
         {'probs': Variable(torch.Tensor([-0.5]), requires_grad=True)},
@@ -333,8 +333,10 @@ BAD_EXAMPLES =[
         {'probs': Variable(torch.Tensor([[-1.0, 10.0], [0.0, -1.0]]), requires_grad=True)},
     ]),
     Example(Binomial, [
-        {'probs': Variable(torch.Tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
-        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 2.0]]), requires_grad=True), 'total_count': 10},
+        {'probs': Variable(torch.Tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True),
+         'total_count': 10},
+        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 2.0]]), requires_grad=True),
+         'total_count': 10},
     ]),
     Example(Cauchy, [
         {'loc': 0.0, 'scale': -1.0},
@@ -3043,15 +3045,21 @@ class TestConstraintRegistry(TestCase):
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
 class TestValidation(TestCase):
+    def test_valid(self):
+        for Dist, params in EXAMPLES:
+            if Dist is not TransformedDistribution:
+                for i, param in enumerate(params):
+                    Dist(validate_args=True, **param)
+
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
                 try:
                     with self.assertRaises(ValueError):
-                        param['validate_args'] = True
-                        Dist(**param)
-                except:
-                    raise AssertionError('ValueError not raised for {} example {}/{}'.format(Dist.__name__, i + 1, len(params)))
+                        Dist(validate_args=True, **param)
+                except Exception:
+                    raise AssertionError(
+                        'ValueError not raised for {} example {}/{}'.format(Dist.__name__, i + 1, len(params)))
 
 if __name__ == '__main__':
     run_tests()

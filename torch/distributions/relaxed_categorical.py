@@ -98,9 +98,9 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, **kwargs):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=False):
         super(RelaxedOneHotCategorical, self).__init__(ExpRelaxedCategorical(temperature, probs, logits),
-                                                       ExpTransform(), **kwargs)
+                                                       ExpTransform(), validate_args=validate_args)
 
     @property
     def temperature(self):

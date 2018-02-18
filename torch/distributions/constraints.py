@@ -147,16 +147,6 @@ class _GreaterThan(Constraint):
     def check(self, value):
         return self.lower_bound < value
 
-class _GreaterEqual(Constraint):
-    """
-    Constrain to a real half line `[lower_bound, inf]`.
-    """
-    def __init__(self, lower_bound):
-        self.lower_bound = lower_bound
-
-    def check(self, value):
-        return self.lower_bound <= value
-
 
 class _LessThan(Constraint):
     """
@@ -167,16 +157,6 @@ class _LessThan(Constraint):
 
     def check(self, value):
         return value < self.upper_bound
-
-class _LessEqual(Constraint):
-    """
-    Constrain to a real half line `[inf, upper_bound]`.
-    """
-    def __init__(self, upper_bound):
-        self.upper_bound = upper_bound
-
-    def check(self, value):
-        return value <= self.upper_bound
 
 
 class _Interval(Constraint):
@@ -230,9 +210,7 @@ integer_interval = _IntegerInterval
 real = _Real()
 positive = _GreaterThan(0)
 greater_than = _GreaterThan
-greater_equal = _GreaterEqual
 less_than = _LessThan
-less_equal = _LessEqual
 unit_interval = _Interval(0, 1)
 interval = _Interval
 simplex = _Simplex()

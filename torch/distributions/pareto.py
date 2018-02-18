@@ -27,11 +27,11 @@ class Pareto(TransformedDistribution):
     """
     params = {'alpha': constraints.positive, 'scale': constraints.positive}
 
-    def __init__(self, scale, alpha, **kwargs):
+    def __init__(self, scale, alpha, validate_args=False):
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
-        super(Pareto, self).__init__(base_dist, transforms, **kwargs)
+        super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
 
     @property
     def mean(self):

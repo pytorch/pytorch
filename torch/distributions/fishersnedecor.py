@@ -26,7 +26,7 @@ class FisherSnedecor(Distribution):
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, df1, df2, **kwargs):
+    def __init__(self, df1, df2, validate_args=False):
         self.df1, self.df2 = broadcast_all(df1, df2)
         self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
         self._gamma2 = Gamma(self.df2 * 0.5, self.df2)
@@ -35,7 +35,7 @@ class FisherSnedecor(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.df1.size()
-        super(FisherSnedecor, self).__init__(batch_shape, **kwargs)
+        super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
 
     @property
     def mean(self):

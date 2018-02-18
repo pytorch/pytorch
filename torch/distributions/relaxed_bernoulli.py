@@ -100,9 +100,9 @@ class RelaxedBernoulli(TransformedDistribution):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, **kwargs):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=False):
         super(RelaxedBernoulli, self).__init__(LogitRelaxedBernoulli(temperature, probs, logits),
-                                               SigmoidTransform(), **kwargs)
+                                               SigmoidTransform(), validate_args=validate_args)
 
     @property
     def temperature(self):

@@ -19,6 +19,6 @@ class Chi2(Gamma):
     """
     params = {'df': constraints.positive}
 
-    def __init__(self, df, **kwargs):
+    def __init__(self, df, validate_args=False):
         self.df = df
-        super(Chi2, self).__init__(0.5 * df, 0.5, **kwargs)
+        super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)

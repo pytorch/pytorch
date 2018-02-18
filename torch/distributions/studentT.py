@@ -39,11 +39,11 @@ class StudentT(Distribution):
         m[self.df <= 1] = float('nan')
         return m
 
-    def __init__(self, df, loc=0., scale=1., **kwargs):
+    def __init__(self, df, loc=0., scale=1., validate_args=False):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(df)
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()
-        super(StudentT, self).__init__(batch_shape, **kwargs)
+        super(StudentT, self).__init__(batch_shape, validate_args=validate_args)
 
     def rsample(self, sample_shape=torch.Size()):
         # NOTE: This does not agree with scipy implementation as much as other distributions.

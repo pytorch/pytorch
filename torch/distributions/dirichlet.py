@@ -56,10 +56,10 @@ class Dirichlet(ExponentialFamily):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, concentration, *args, **kwargs):
+    def __init__(self, concentration, validate_args=False):
         self.concentration, = broadcast_all(concentration)
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
-        super(Dirichlet, self).__init__(batch_shape, event_shape, *args, **kwargs)
+        super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)

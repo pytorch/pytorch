@@ -34,7 +34,7 @@ class Binomial(Distribution):
     params = {'probs': constraints.unit_interval}
     has_enumerate_support = True
 
-    def __init__(self, total_count=1, probs=None, logits=None, **kwargs):
+    def __init__(self, total_count=1, probs=None, logits=None, validate_args=False):
         if not isinstance(total_count, Number):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count
@@ -52,7 +52,7 @@ class Binomial(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self._param.size()
-        super(Binomial, self).__init__(batch_shape, **kwargs)
+        super(Binomial, self).__init__(batch_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)

@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import warnings
+from torch.distributions import constraints
 
 
 class Distribution(object):
@@ -14,14 +15,11 @@ class Distribution(object):
     def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=False):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
-        self.validate_args = validate_args or torch.check_dist_args
-        if self.validate_args:
-            if isinstance(self, torch.distributions.Uniform):
-                if not self.low < self.high:
-                    raise ValueError("Uniform is not defined when low>= high")
-            else:
-                for param, constraint in self.params.items():
-                    if not constraint.check(self.__getattribute__(param)).all():
+        if validate_args or torch.check_dist_args:
+            for param, constraint in self.params.items():
+                if constraints.is_dependent(constraint):
+                    continue
+                if not constraint.check(self.__getattribute__(param)).all():
                         raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
