@@ -953,6 +953,11 @@ Normalization functions
 
 .. autofunction:: normalize
 
+:hidden:`to_one_hot`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: to_one_hot
+
 Linear functions
 ----------------
 
