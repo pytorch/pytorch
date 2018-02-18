@@ -1515,5 +1515,24 @@ class TestJit(TestCase):
         ''')
         self.assertExpected(str(cu.get_graph('test_if_while')))
 
+    def test_script_ternary(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_ternary_control(a, b) -> (c):
+            c = 3
+            if a > 3:
+                c = a + b
+            else:
+                c = b
+        ''')
+        cu2 = torch.jit._jit_script_compile('''
+        def test_ternary(a, b) -> (c):
+            c = 3
+            c = a + b if a > 3 else b
+        ''')
+        self.assertEqual(
+            str(cu.get_graph('test_ternary_control')),
+            str(cu2.get_graph('test_ternary')),
+        )
+
 if __name__ == '__main__':
     run_tests()
