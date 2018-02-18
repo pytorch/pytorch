@@ -140,17 +140,6 @@ class DistributedDataParallel(Module):
         else:
             self._module_copies = [self.module]
 
-<<<<<<< 314d632e04ee8ce4bc35a9bfc181cf2def3d5fab
-=======
-        # TODO: different types need different buckets
-        t = None
-        for p in self.module.parameters():
-            tp = type(p.data)
-            if t is not None and t is not tp:
-                raise ValueError("DistributedDataParallel requires all parameters' data to be of the same type")
-            t = tp
-
->>>>>>> Added mixed precision support with nccl reduction bucketing
         # For NCCL backend, since every single NCCL call is asynchoronous, we
         # therefore directly enqueue all the NCCL reduction calls to the
         # default CUDA stream without spawning up other reduction threads.
@@ -159,7 +148,6 @@ class DistributedDataParallel(Module):
             self._register_nccl_grad_hook()
             return
 
-<<<<<<< 314d632e04ee8ce4bc35a9bfc181cf2def3d5fab
         bucket_bytes_cap = 1 * MB
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
@@ -168,9 +156,6 @@ class DistributedDataParallel(Module):
         for dev_idx, module in enumerate(self._module_copies):
             param_buckets.append(list(_take_tensors(module.parameters(), bucket_bytes_cap)))
 
-=======
-        # Split parameters into buckets that will coalesce reductions
->>>>>>> Added mixed precision support with nccl reduction bucketing
         self.bucket_sizes = []
         self.bucket_map = {}
 
@@ -186,7 +171,6 @@ class DistributedDataParallel(Module):
                     bucket_param_type = param_tuple[0].type()
                     # Only gloo and nccl support half-precision
                     if bucket_param_type == torch.cuda.HalfTensor and \
-                            dist._backend != dist.dist_backend.NCCL and \
                             dist._backend != dist.dist_backend.GLOO:
                         raise RuntimeError("DistributedDataParallel currently only "
                                            "supports half precision parameters "
@@ -355,6 +339,13 @@ class DistributedDataParallel(Module):
                 grads_batch_reduced = _unflatten_dense_tensors(grads_batch_coalesced[0], grads_batch[0])
                 for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
                     grad.copy_(reduced)
+
+            # clear the gradients and save memory for replicas
+            for module in self._module_copies[1:]:
+                for param in module.parameters():
+                    if param.requires_grad:
+                        param.grad = None
+                        param.data.set_()
 
         # Now register the reduction hook on the parameters
         for p in self.module.parameters():
