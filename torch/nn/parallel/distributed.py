@@ -141,6 +141,7 @@ class DistributedDataParallel(Module):
         else:
             bucket_bytes_cap = 1 * MB
 
+        # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
         # Split the parameters into buckets and by types as well
         for dev_idx, module in enumerate(self._module_copies):
@@ -150,8 +151,12 @@ class DistributedDataParallel(Module):
         self.bucket_map = {}
         param_types = set()
 
+        # We transpose param_buckets, so the loop is over buckets.
+        # param_buckets_tuple is a doubly-nested list with "dims": devices, bucket_elems
         for bucket_idx, param_buckets_tuple in enumerate(zip(*param_buckets)):
             self.bucket_sizes.append(0)
+            # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
+            # of params from each device.
             for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
                 if idx == 0:
                     # Bucket parameter type tracking
