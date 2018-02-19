@@ -302,7 +302,6 @@ _C._initExtension(manager_path())
 del manager_path
 
 set_default_tensor_type('torch.FloatTensor')
-set_default_arg_validation(False)
 
 ################################################################################
 # Remove unnecessary members

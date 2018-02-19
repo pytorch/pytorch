@@ -68,7 +68,8 @@ class LogitRelaxedBernoulli(Distribution):
         return (uniforms.log() - (-uniforms).log1p() + probs.log() - (-probs).log1p()) / self.temperature
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
         diff = logits - value.mul(self.temperature)
         return self.temperature.log() + diff - 2 * diff.exp().log1p()

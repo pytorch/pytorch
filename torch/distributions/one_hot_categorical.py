@@ -74,7 +74,8 @@ class OneHotCategorical(Distribution):
         return one_hot.scatter_(-1, indices, 1)
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         indices = value.max(-1)[1]
         return self._categorical.log_prob(indices)
 

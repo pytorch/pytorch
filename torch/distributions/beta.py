@@ -55,7 +55,8 @@ class Beta(ExponentialFamily):
         return value
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         heads_tails = torch.stack([value, 1.0 - value], -1)
         return self._dirichlet.log_prob(heads_tails)
 

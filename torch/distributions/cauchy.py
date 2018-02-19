@@ -50,15 +50,18 @@ class Cauchy(Distribution):
         return self.loc + eps * self.scale
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return -math.log(math.pi) - self.scale.log() - (1 + ((value - self.loc) / self.scale)**2).log()
 
     def cdf(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
 
     def icdf(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
 
     def entropy(self):

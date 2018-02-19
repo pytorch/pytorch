@@ -52,15 +52,18 @@ class Laplace(Distribution):
         return self.loc - self.scale * u.sign() * torch.log1p(-u.abs())
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return -torch.log(2 * self.scale) - torch.abs(value - self.loc) / self.scale
 
     def cdf(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return 0.5 - 0.5 * (value - self.loc).sign() * torch.expm1(-(value - self.loc).abs() / self.scale)
 
     def icdf(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         term = value - 0.5
         return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
 

@@ -47,15 +47,18 @@ class Exponential(ExponentialFamily):
         return self.rate.new(shape).exponential_() / self.rate
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return self.rate.log() - self.rate * value
 
     def cdf(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return 1 - torch.exp(-self.rate * value)
 
     def icdf(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return -torch.log(1 - value) / self.rate
 
     def entropy(self):

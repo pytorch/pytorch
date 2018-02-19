@@ -97,7 +97,8 @@ class Categorical(Distribution):
         return sample_2d.contiguous().view(sample_shape)
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         value_shape = torch._C._infer_size(value.size(), self.batch_shape) if self.batch_shape else value.size()
         param_shape = value_shape + (self._num_events,)
         value = value.expand(value_shape)

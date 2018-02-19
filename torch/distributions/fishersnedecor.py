@@ -61,7 +61,8 @@ class FisherSnedecor(Distribution):
         return Y
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         ct1 = self.df1 * 0.5
         ct2 = self.df2 * 0.5
         ct3 = self.df1 / self.df2

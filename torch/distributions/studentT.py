@@ -60,7 +60,8 @@ class StudentT(Distribution):
         return self.loc + self.scale * Y
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         y = (value - self.loc) / self.scale
         Z = (self.scale.log() +
              0.5 * self.df.log() +

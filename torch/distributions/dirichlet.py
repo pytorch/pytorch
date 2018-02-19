@@ -69,7 +69,8 @@ class Dirichlet(ExponentialFamily):
         return _dirichlet_sample_nograd(concentration)
 
     def log_prob(self, value):
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return ((torch.log(value) * (self.concentration - 1.0)).sum(-1) +
                 torch.lgamma(self.concentration.sum(-1)) -
                 torch.lgamma(self.concentration).sum(-1))

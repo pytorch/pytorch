@@ -63,7 +63,8 @@ class ExpRelaxedCategorical(Distribution):
 
     def log_prob(self, value):
         K = self._categorical._num_events
-        self._validate_sample(value)
+        if self._validate_args:
+            self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
         log_scale = (self.temperature.new(self.temperature.shape).fill_(K).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
