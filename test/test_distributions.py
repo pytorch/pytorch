@@ -1910,7 +1910,7 @@ class TestDistributionShapes(TestCase):
                     continue
 
     def test_bernoulli_shape_scalar_params(self):
-        bernoulli = Bernoulli(0.3)
+        bernoulli = Bernoulli(0.3, validate_args=True)
         self.assertEqual(bernoulli._batch_shape, torch.Size())
         self.assertEqual(bernoulli._event_shape, torch.Size())
         self.assertEqual(bernoulli.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -1920,7 +1920,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(bernoulli.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_bernoulli_shape_tensor_params(self):
-        bernoulli = Bernoulli(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        bernoulli = Bernoulli(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]), validate_args=True)
         self.assertEqual(bernoulli._batch_shape, torch.Size((3, 2)))
         self.assertEqual(bernoulli._event_shape, torch.Size(()))
         self.assertEqual(bernoulli.sample().size(), torch.Size((3, 2)))
@@ -1930,7 +1930,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(bernoulli.log_prob(Variable(torch.ones(3, 1, 1))).size(), torch.Size((3, 3, 2)))
 
     def test_geometric_shape_scalar_params(self):
-        geometric = Geometric(0.3)
+        geometric = Geometric(0.3, validate_args=True)
         self.assertEqual(geometric._batch_shape, torch.Size())
         self.assertEqual(geometric._event_shape, torch.Size())
         self.assertEqual(geometric.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -1940,7 +1940,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(geometric.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_geometric_shape_tensor_params(self):
-        geometric = Geometric(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        geometric = Geometric(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]), validate_args=True)
         self.assertEqual(geometric._batch_shape, torch.Size((3, 2)))
         self.assertEqual(geometric._event_shape, torch.Size(()))
         self.assertEqual(geometric.sample().size(), torch.Size((3, 2)))
@@ -1950,7 +1950,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(geometric.log_prob(Variable(torch.ones(3, 1, 1))).size(), torch.Size((3, 3, 2)))
 
     def test_beta_shape_scalar_params(self):
-        dist = Beta(0.1, 0.1)
+        dist = Beta(0.1, 0.1, validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size())
         self.assertEqual(dist._event_shape, torch.Size())
         self.assertEqual(dist.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -1961,7 +1961,7 @@ class TestDistributionShapes(TestCase):
 
     def test_beta_shape_tensor_params(self):
         dist = Beta(variable([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]),
-                    variable([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]))
+                    variable([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3, 2)))
         self.assertEqual(dist._event_shape, torch.Size(()))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
@@ -1971,7 +1971,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(Variable(torch.ones(3, 1, 1))).size(), torch.Size((3, 3, 2)))
 
     def test_binomial_shape(self):
-        dist = Binomial(10, variable([0.6, 0.3]))
+        dist = Binomial(10, variable([0.6, 0.3]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((2,)))
         self.assertEqual(dist._event_shape, torch.Size(()))
         self.assertEqual(dist.sample().size(), torch.Size((2,)))
@@ -1980,7 +1980,7 @@ class TestDistributionShapes(TestCase):
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
 
     def test_multinomial_shape(self):
-        dist = Multinomial(10, variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        dist = Multinomial(10, variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
@@ -1991,7 +1991,7 @@ class TestDistributionShapes(TestCase):
 
     def test_categorical_shape(self):
         # unbatched
-        dist = Categorical(variable([0.6, 0.3, 0.1]))
+        dist = Categorical(variable([0.6, 0.3, 0.1]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size(()))
         self.assertEqual(dist._event_shape, torch.Size(()))
         self.assertEqual(dist.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2000,7 +2000,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
         self.assertEqual(dist.log_prob(Variable(torch.ones(3, 1))).size(), torch.Size((3, 1)))
         # batched
-        dist = Categorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        dist = Categorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size(()))
         self.assertEqual(dist.sample().size(), torch.Size((3,)))
@@ -2011,7 +2011,7 @@ class TestDistributionShapes(TestCase):
 
     def test_one_hot_categorical_shape(self):
         # unbatched
-        dist = OneHotCategorical(variable([0.6, 0.3, 0.1]))
+        dist = OneHotCategorical(variable([0.6, 0.3, 0.1]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size(()))
         self.assertEqual(dist._event_shape, torch.Size((3,)))
         self.assertEqual(dist.sample().size(), torch.Size((3,)))
@@ -2021,7 +2021,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((3,)))
         self.assertEqual(dist.log_prob(Variable(torch.ones(3, 3))).size(), torch.Size((3,)))
         # batched
-        dist = OneHotCategorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]))
+        dist = OneHotCategorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
@@ -2032,7 +2032,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(Variable(torch.ones((3, 1, 2)))).size(), torch.Size((3, 3)))
 
     def test_cauchy_shape_scalar_params(self):
-        cauchy = Cauchy(0, 1)
+        cauchy = Cauchy(0, 1, validate_args=True)
         self.assertEqual(cauchy._batch_shape, torch.Size())
         self.assertEqual(cauchy._event_shape, torch.Size())
         self.assertEqual(cauchy.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2042,7 +2042,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_cauchy_shape_tensor_params(self):
-        cauchy = Cauchy(variable([0, 0]), variable([1, 1]))
+        cauchy = Cauchy(variable([0, 0]), variable([1, 1]), validate_args=True)
         self.assertEqual(cauchy._batch_shape, torch.Size((2,)))
         self.assertEqual(cauchy._event_shape, torch.Size(()))
         self.assertEqual(cauchy.sample().size(), torch.Size((2,)))
@@ -2052,7 +2052,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_dirichlet_shape(self):
-        dist = Dirichlet(variable([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]))
+        dist = Dirichlet(variable([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
@@ -2062,7 +2062,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.log_prob(Variable(torch.ones((3, 1, 2)))).size(), torch.Size((3, 3)))
 
     def test_gamma_shape_scalar_params(self):
-        gamma = Gamma(1, 1)
+        gamma = Gamma(1, 1, validate_args=True)
         self.assertEqual(gamma._batch_shape, torch.Size())
         self.assertEqual(gamma._event_shape, torch.Size())
         self.assertEqual(gamma.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2072,7 +2072,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gamma.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_gamma_shape_tensor_params(self):
-        gamma = Gamma(variable([1, 1]), variable([1, 1]))
+        gamma = Gamma(variable([1, 1]), variable([1, 1]), validate_args=True)
         self.assertEqual(gamma._batch_shape, torch.Size((2,)))
         self.assertEqual(gamma._event_shape, torch.Size(()))
         self.assertEqual(gamma.sample().size(), torch.Size((2,)))
@@ -2082,7 +2082,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gamma.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_chi2_shape_scalar_params(self):
-        chi2 = Chi2(1)
+        chi2 = Chi2(1, validate_args=True)
         self.assertEqual(chi2._batch_shape, torch.Size())
         self.assertEqual(chi2._event_shape, torch.Size())
         self.assertEqual(chi2.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2092,7 +2092,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_chi2_shape_tensor_params(self):
-        chi2 = Chi2(variable([1, 1]))
+        chi2 = Chi2(variable([1, 1]), validate_args=True)
         self.assertEqual(chi2._batch_shape, torch.Size((2,)))
         self.assertEqual(chi2._event_shape, torch.Size(()))
         self.assertEqual(chi2.sample().size(), torch.Size((2,)))
@@ -2102,7 +2102,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(chi2.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_studentT_shape_scalar_params(self):
-        st = StudentT(1)
+        st = StudentT(1, validate_args=True)
         self.assertEqual(st._batch_shape, torch.Size())
         self.assertEqual(st._event_shape, torch.Size())
         self.assertEqual(st.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2112,7 +2112,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(st.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_studentT_shape_tensor_params(self):
-        st = StudentT(variable([1, 1]))
+        st = StudentT(variable([1, 1]), validate_args=True)
         self.assertEqual(st._batch_shape, torch.Size((2,)))
         self.assertEqual(st._event_shape, torch.Size(()))
         self.assertEqual(st.sample().size(), torch.Size((2,)))
@@ -2122,7 +2122,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(st.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_pareto_shape_scalar_params(self):
-        pareto = Pareto(1, 1)
+        pareto = Pareto(1, 1, validate_args=True)
         self.assertEqual(pareto._batch_shape, torch.Size(SCALAR_SHAPE))
         self.assertEqual(pareto._event_shape, torch.Size())
         self.assertEqual(pareto.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2132,7 +2132,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(pareto.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_gumbel_shape_scalar_params(self):
-        gumbel = Gumbel(1, 1)
+        gumbel = Gumbel(1, 1, validate_args=True)
         self.assertEqual(gumbel._batch_shape, torch.Size())
         self.assertEqual(gumbel._event_shape, torch.Size())
         self.assertEqual(gumbel.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2142,7 +2142,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_normal_shape_scalar_params(self):
-        normal = Normal(0, 1)
+        normal = Normal(0, 1, validate_args=True)
         self.assertEqual(normal._batch_shape, torch.Size())
         self.assertEqual(normal._event_shape, torch.Size())
         self.assertEqual(normal.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2152,7 +2152,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_normal_shape_tensor_params(self):
-        normal = Normal(variable([0, 0]), variable([1, 1]))
+        normal = Normal(variable([0, 0]), variable([1, 1]), validate_args=True)
         self.assertEqual(normal._batch_shape, torch.Size((2,)))
         self.assertEqual(normal._event_shape, torch.Size(()))
         self.assertEqual(normal.sample().size(), torch.Size((2,)))
@@ -2162,7 +2162,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(normal.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_uniform_shape_scalar_params(self):
-        uniform = Uniform(0, 1)
+        uniform = Uniform(0, 1, validate_args=True)
         self.assertEqual(uniform._batch_shape, torch.Size())
         self.assertEqual(uniform._event_shape, torch.Size())
         self.assertEqual(uniform.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2172,7 +2172,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(uniform.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_uniform_shape_tensor_params(self):
-        uniform = Uniform(variable([0, 0]), variable([1, 1]))
+        uniform = Uniform(variable([0, 0]), variable([1, 1]), validate_args=True)
         self.assertEqual(uniform._batch_shape, torch.Size((2,)))
         self.assertEqual(uniform._event_shape, torch.Size(()))
         self.assertEqual(uniform.sample().size(), torch.Size((2,)))
@@ -2182,7 +2182,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(uniform.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_exponential_shape_scalar_param(self):
-        expon = Exponential(1.)
+        expon = Exponential(1., validate_args=True)
         self.assertEqual(expon._batch_shape, torch.Size())
         self.assertEqual(expon._event_shape, torch.Size())
         self.assertEqual(expon.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2192,7 +2192,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(expon.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_exponential_shape_tensor_param(self):
-        expon = Exponential(variable([1, 1]))
+        expon = Exponential(variable([1, 1]), validate_args=True)
         self.assertEqual(expon._batch_shape, torch.Size((2,)))
         self.assertEqual(expon._event_shape, torch.Size(()))
         self.assertEqual(expon.sample().size(), torch.Size((2,)))
@@ -2202,7 +2202,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(expon.log_prob(Variable(torch.ones(2, 2))).size(), torch.Size((2, 2)))
 
     def test_laplace_shape_scalar_params(self):
-        laplace = Laplace(0, 1)
+        laplace = Laplace(0, 1, validate_args=True)
         self.assertEqual(laplace._batch_shape, torch.Size())
         self.assertEqual(laplace._event_shape, torch.Size())
         self.assertEqual(laplace.sample().size(), torch.Size(SCALAR_SHAPE))
@@ -2212,7 +2212,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
     def test_laplace_shape_tensor_params(self):
-        laplace = Laplace(variable([0, 0]), variable([1, 1]))
+        laplace = Laplace(variable([0, 0]), variable([1, 1]), validate_args=True)
         self.assertEqual(laplace._batch_shape, torch.Size((2,)))
         self.assertEqual(laplace._event_shape, torch.Size(()))
         self.assertEqual(laplace.sample().size(), torch.Size((2,)))
