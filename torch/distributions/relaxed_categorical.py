@@ -32,12 +32,12 @@ class ExpRelaxedCategorical(Distribution):
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, **kwargs):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=False):
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, **kwargs)
+        super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
