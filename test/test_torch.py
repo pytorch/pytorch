@@ -1181,31 +1181,44 @@ class TestTorch(TestCase):
             n_row = 3
             for n_col in range(4, 5 + 1):
                 prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
-                zero_prob_idx = n_col - 2  # index that shouldn't be sampled
-                prob_dist.select(1, zero_prob_idx).fill_(0)
+                # indices that shouldn't be sampled (<0 means none)
+                zero_prob_indices = torch.LongTensor(n_row).random_(-2, n_col)
+                for i, j in enumerate(zero_prob_indices):
+                    if j >= 0:
+                        prob_dist[i, j] = 0
                 n_sample = n_col * 3
                 sample_indices = torch.multinomial(prob_dist, n_sample, True)
                 self.assertEqual(prob_dist.dim(), 2)
                 self.assertEqual(sample_indices.size(1), n_sample)
-                for index in product(range(n_row), range(n_sample)):
-                    self.assertNotEqual(sample_indices[index], zero_prob_idx, "sampled an index with zero probability")
+                for i in range(n_row):
+                    zero_prob_idx = zero_prob_indices[i]
+                    if zero_prob_idx < 0:
+                        continue
+                    for j in range(n_sample):
+                        self.assertNotEqual(sample_indices[i, j], zero_prob_idx,
+                                            "sampled an index with zero probability")
 
             # without replacement
             n_row = 3
-            for n_col in range(8, 10 + 1):
+            for n_col in range(2, 10 + 1, 2):
                 prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
-                zero_prob_idx = n_col - 2  # index that shouldn't be sampled
-                prob_dist.select(1, zero_prob_idx).fill_(0)
-                n_sample = n_col - 1
+                # indices that shouldn't be sampled (<0 means none)
+                zero_prob_indices = torch.LongTensor(n_row).random_(-1, n_col)
+                for i, j in enumerate(zero_prob_indices):
+                    if j >= 0:
+                        prob_dist[i, j] = 0
+                n_sample = max(1, n_col - 2)
                 sample_indices = torch.multinomial(prob_dist, n_sample, False)
                 self.assertEqual(prob_dist.dim(), 2)
                 self.assertEqual(sample_indices.size(1), n_sample)
                 for i in range(n_row):
                     row_samples = {}
+                    zero_prob_idx = zero_prob_indices[i]
                     for j in range(n_sample):
                         sample_idx = sample_indices[i, j]
-                        self.assertNotEqual(sample_idx, zero_prob_idx,
-                                            "sampled an index with zero probability")
+                        if zero_prob_idx >= 0:
+                            self.assertNotEqual(sample_idx, zero_prob_idx,
+                                                "sampled an index with zero probability")
                         self.assertNotIn(sample_idx, row_samples, "sampled an index twice")
                         row_samples[sample_idx] = True
 
@@ -1512,6 +1525,17 @@ class TestTorch(TestCase):
 
     def test_contiguous(self):
         return self._test_contiguous(self, lambda t: t)
+
+    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
+    def test_scalars_as_floats(self):
+        "zero-dim variables that don't require grad should bind to scalar arguments"
+        x = torch.autograd.variable(2)
+        y = torch.autograd.variable(3)
+        # 3 + (3 * 3) * 2
+        self.assertEqual(y.addcmul(y, y, value=x), 21)
+
+        x = torch.autograd.variable(2, requires_grad=True)
+        self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
     @staticmethod
     def _test_broadcast_fallback(self, cast):
@@ -4958,6 +4982,10 @@ class TestTorch(TestCase):
         self.assertEqual(x.new([3, 4]).shape, [2])
         self.assertEqual(x.new([3, 4]).tolist(), [3, 4])
         self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
+        if TEST_NUMPY:
+            self.assertEqual(x.new([np.int32(3), np.float64(4)]).tolist(), [3, 4])
+        if torch._C._with_scalars():
+            self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
         self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
         self.assertEqual(x.new(tuple()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())

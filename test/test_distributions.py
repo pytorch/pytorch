@@ -301,9 +301,9 @@ EXAMPLES = [
             'transforms': ExpTransform(),
         },
         {
-            'base_distribution': Normal(Variable(torch.randn(2, 3), requires_grad=True),
-                                        Variable(torch.randn(2, 3).abs(), requires_grad=True)),
-            'transforms': [AffineTransform(Variable(torch.randn(1)), Variable(torch.randn(1))),
+            'base_distribution': Normal(Variable(torch.randn(2, 3, 5), requires_grad=True),
+                                        Variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
+            'transforms': [AffineTransform(Variable(torch.randn(3, 5)), Variable(torch.randn(3, 5))),
                            ExpTransform()],
         },
     ]),
@@ -408,6 +408,31 @@ class TestDistributions(TestCase):
             expected = Variable(expected)
             actual = dist(param).enumerate_support()
             self.assertEqual(actual, expected)
+
+    def test_sample_detached(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                variable_params = [p for p in param.values() if getattr(p, 'requires_grad', False)]
+                if not variable_params:
+                    continue
+                dist = Dist(**param)
+                sample = dist.sample()
+                self.assertFalse(sample.requires_grad,
+                                 msg='{} example {}/{}, .sample() is not detached'.format(
+                                     Dist.__name__, i + 1, len(params)))
+
+    def test_rsample_requires_grad(self):
+        for Dist, params in EXAMPLES:
+            for i, param in enumerate(params):
+                if not any(getattr(p, 'requires_grad', False) for p in param.values()):
+                    continue
+                dist = Dist(**param)
+                if not dist.has_rsample:
+                    continue
+                sample = dist.rsample()
+                self.assertTrue(sample.requires_grad,
+                                msg='{} example {}/{}, .rsample() does not require grad'.format(
+                                    Dist.__name__, i + 1, len(params)))
 
     def test_enumerate_support_type(self):
         for Dist, params in EXAMPLES:
@@ -1442,7 +1467,7 @@ class TestDistributions(TestCase):
                     pdfs = dist.log_prob(samples).exp()
                 except NotImplementedError:
                     continue
-                cdfs_derivative = torch.abs(grad(cdfs.sum(), [samples])[0])
+                cdfs_derivative = grad(cdfs.sum(), [samples])[0]  # this should not be wrapped in torch.abs()
                 self.assertEqual(cdfs_derivative, pdfs, message='\n'.join([
                     '{} example {}/{}, d(cdf)/dx != pdf(x)'.format(Dist.__name__, i + 1, len(params)),
                     'x = {}'.format(samples),

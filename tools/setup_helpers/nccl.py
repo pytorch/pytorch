@@ -1,22 +1,13 @@
 import os
-import sys
 import glob
-import platform
 import warnings
 from itertools import chain
 
-from .env import check_env_flag
+from .env import IS_WINDOWS, IS_DARWIN, IS_CONDA, CONDA_DIR, check_env_flag, \
+    gather_paths
+
 from .cuda import WITH_CUDA, CUDA_HOME
 
-
-def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
-
-is_conda = 'conda' in sys.version or 'Continuum' in sys.version
-conda_dir = os.path.join(os.path.dirname(sys.executable), '..')
-
-IS_WINDOWS = (platform.system() == 'Windows')
-IS_DARWIN = (platform.system() == 'Darwin')
 
 WITH_NCCL = WITH_CUDA and not IS_DARWIN and not IS_WINDOWS
 WITH_SYSTEM_NCCL = False
@@ -52,8 +43,8 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
         '/usr/include'
     ]))
 
-    if is_conda:
-        lib_paths.append(os.path.join(conda_dir, 'lib'))
+    if IS_CONDA:
+        lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
     for path in lib_paths:
         path = os.path.expanduser(path)
         if path is None or not os.path.exists(path):

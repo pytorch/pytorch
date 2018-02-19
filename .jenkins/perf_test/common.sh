@@ -9,6 +9,9 @@ get_runtime_of_command () {
 
   # runtime=$( { time ($1 &> /dev/null); } 2>&1 1>/dev/null)
   runtime=$( { time $1; } 2>&1 1>/dev/null)
+  if [[ $runtime == *"Warning"* ]] || [[ $runtime == *"Error"* ]]; then
+    exit 1
+  fi
   runtime=${runtime#+++ $1}
   runtime=$(python -c "print($runtime)")
 

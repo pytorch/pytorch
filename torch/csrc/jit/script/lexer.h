@@ -89,6 +89,7 @@ enum TokenKind {
 };
 
 std::string kindToString(int kind);
+int stringToKind(std::string str);
 
 // nested hash tables that indicate char-by-char what is a valid token.
 struct TokenTrie;

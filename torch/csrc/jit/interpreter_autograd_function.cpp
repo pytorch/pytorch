@@ -1,7 +1,13 @@
 #include "Python.h"
 
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/interpreter_autograd_function.h"
+#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer_state.h"
+
+#include <ATen/ATen.h>
 
 #include <algorithm>
 #include <memory>
@@ -135,9 +141,10 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
-      result.push_back(autograd::make_variable(toutputs[i], grad_fn));
+      autograd::Edge edge(grad_fn, grad_fn->num_inputs++);
+      result.push_back(autograd::make_variable(toutputs[i], std::move(edge)));
     } else {
-      result.push_back(autograd::make_variable(toutputs[i], false));
+      result.push_back(autograd::make_variable(toutputs[i], /*requires_grad=*/false));
     }
   }
 

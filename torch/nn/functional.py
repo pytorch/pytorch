@@ -1068,7 +1068,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
-                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean'):
+                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean', sparse=False):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
         intermediate embeddings.
 
@@ -1093,6 +1093,8 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                     the words in the dictionary.
             mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+            sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes
+                                        for more details regarding sparse gradients.
 
         Shape:
             - Embedding_matrix: FloatTensor `(V, embedding_dim)`,
@@ -1129,21 +1131,44 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
                              "offsets of type {}".format(type(offsets)))
         else:
             offsets = Variable(torch.arange(0, indices.numel(), indices.size(1),
-                               out=indices.data.new().long()))
+                                            out=indices.data.new().long()))
             indices = indices.view(-1)
-
-    elif indices.dim() != 1:
+    elif indices.dim() == 1:
+        if offsets is None:
+            raise ValueError("offsets has to be a 1D Tensor but got None")
+        if offsets.dim() != 1:
+            raise ValueError("offsets has to be a 1D Tensor")
+        if offsets[0] != 0:
+            raise ValueError("offsets[0] has to be 0, i.e. the first sequence"
+                             " in the mini-batch has to start from position 0."
+                             "However, got {}".format(offsets[0]))
+        if offsets[-1] > indices.size(0):
+            raise ValueError("offsets[-1] has to be smaller than indices's length"
+                             " ({}), but got offsets[-1] of {}"
+                             .format(indices.size(0), offsets[-1]))
+    else:
         raise ValueError("input has to be 1D or 2D Tensor,"
                          " but got Tensor of dimension {}".format(indices.dim()))
 
-    if offsets is None:
-        raise ValueError("offsets has to be a 1D Tensor but got None")
+    if mode == 'sum':
+        mode = 0
+    elif mode == 'mean':
+        mode = 1
+    else:
+        raise ValueError("mode has to be one of sum or mean")
 
-    return _functions.thnn.EmbeddingBag.apply(
-        embedding_matrix, indices, offsets,
-        max_norm, norm_type,
-        scale_grad_by_freq, mode
-    )
+    if max_norm is not None:
+        with torch.no_grad():
+            torch._C._VariableFunctions.embedding_renorm_(weight, input, max_norm, norm_type)
+
+    ret, _, _ = torch._C._VariableFunctions.embedding_bag(
+        embedding_matrix,
+        indices,
+        offsets,
+        scale_grad_by_freq,
+        mode,
+        sparse)
+    return ret
 
 
 def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
@@ -1300,7 +1325,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
             size_average. When reduce is ``False``, returns a loss per batch
-            element instead and ignores size_average. Default: ``True``
+            instead and ignores size_average. Default: ``True``
     """
     if log_input:
         loss = torch.exp(input) - target * input
@@ -1330,7 +1355,7 @@ Args:
         in input tensor. Default: ``True``
     reduce (bool, optional): By default, the losses are averaged
         over observations for each minibatch, or summed, depending on
-        size_average. When reduce is False, returns a loss per batch
+        size_average. When reduce is False, returns a loss per input/target
         element instead and ignores size_average. Default: ``True``
 
 """)
@@ -1357,7 +1382,7 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
                 True, the loss is averaged over non-ignored targets. Default: -100
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
+                is False, returns a loss per batch instead and ignores
                 size_average. Default: ``True``
 
     Examples::
@@ -1387,7 +1412,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
                 for each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
+                is False, returns a loss per input/target element instead and ignores
                 size_average. Default: True
 
     Examples::
@@ -1430,7 +1455,7 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 for each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
                 observations for each minibatch depending on size_average. When reduce
-                is False, returns a loss per batch element instead and ignores
+                is False, returns a loss per input/target element instead and ignores
                 size_average. Default: True
 
     Examples::
@@ -1527,19 +1552,19 @@ See :class:`~torch.nn.MultiLabelMarginLoss` for details.
 """)
 
 soft_margin_loss = _add_docstr(torch._C._nn.soft_margin_loss, r"""
-soft_margin_loss(input, target, size_average=True) -> Variable
+soft_margin_loss(input, target, size_average=True, reduce=True) -> Variable
 
 See :class:`~torch.nn.SoftMarginLoss` for details.
 """)
 
 
-def multilabel_soft_margin_loss(input, target, weight=None, size_average=True):
+def multilabel_soft_margin_loss(input, target, weight=None, size_average=True, reduce=True):
     """multilabel_soft_margin_loss(input, target, weight=None, size_average=True) -> Variable
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
     input = torch.sigmoid(input)
-    return binary_cross_entropy(input, target, weight, size_average)
+    return binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):

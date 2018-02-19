@@ -15,6 +15,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
+#include "torch/csrc/jit/script/python_tree_views.h"
 
 
 namespace torch  { namespace jit {
@@ -63,6 +64,7 @@ GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::Tra
   }
   tracer::exit(outputs);
   auto graph = enter_info.first->graph;
+  EliminateDeadCode(graph);
   return createExecutorByGraph(std::move(graph), optimize);
 }
 
@@ -133,6 +135,7 @@ void initJITBindings(PyObject *module) {
   initPythonTracerBindings(module);
   python::initCompilerMixin(module);
   script::initJitScriptBindings(module);
+  script::initTreeViewBindings(module);
 }
 
 }}

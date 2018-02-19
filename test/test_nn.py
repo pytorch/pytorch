@@ -28,7 +28,8 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn, \
+    smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, download_file, IS_WINDOWS, PY3
 
@@ -815,6 +816,18 @@ class TestNN(NNTestCase):
         self.assertEqual(n.linear1, l4)
         self.assertEqual(n.linear3, l4)
 
+    def test_Sequential_delitem(self):
+        l1 = nn.Linear(10, 20)
+        l2 = nn.Linear(20, 30)
+        l3 = nn.Linear(30, 40)
+        l4 = nn.Linear(40, 50)
+        l5 = nn.Linear(50, 60)
+        n = nn.Sequential(l1, l2, l3, l4)
+        del n[-1]
+        self.assertEqual(n, nn.Sequential(l1, l2, l3))
+        del n[1::2]
+        self.assertEqual(n, nn.Sequential(l1, l3))
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
@@ -847,6 +860,10 @@ class TestNN(NNTestCase):
         self.assertEqual(module_list[:-1], nn.ModuleList(modules[:-1]))
         self.assertEqual(module_list[:-3], nn.ModuleList(modules[:-3]))
         self.assertEqual(module_list[::-1], nn.ModuleList(modules[::-1]))
+        del module_list[-1]
+        self.assertEqual(module_list, nn.ModuleList(modules[:-1]))
+        del module_list[1::2]
+        self.assertEqual(module_list, nn.ModuleList(modules[:-1][0::2]))
 
         with self.assertRaises(TypeError):
             module_list += nn.ReLU()
@@ -1205,10 +1222,11 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st_cuda(self):
         self._test_gumbel_softmax_st(True)
 
-    def _test_EmbeddingBag(self, cuda, mode):
+    def _test_EmbeddingBag(self, cuda, mode, sparse):
         # check a known test example
-        es = nn.EmbeddingBag(5, 2, mode=mode)
+        es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse)
         es.weight.data.copy_(torch.arange(1, 11).resize_as_(es.weight.data))
+
         input = Variable(torch.LongTensor([3, 1, 1, 1, 4, 0]))
         offsets = Variable(torch.LongTensor([0, 3]))
         grad_output = torch.arange(1, 5).view(2, 2).type(torch.Tensor)
@@ -1245,8 +1263,11 @@ class TestNN(NNTestCase):
         output = es(input, offsets)
         output.backward(grad_output)
 
+        es_weight_grad = es.weight.grad.data
+        if sparse:
+            es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+        self.assertEqual(es_weight_grad, expected_grad_weight)
 
         # check same example except as 2D (2 x 3)
         input = Variable(input.data.view(2, -1))
@@ -1254,12 +1275,15 @@ class TestNN(NNTestCase):
         output = es(input)
         output.backward(grad_output)
 
+        es_weight_grad = es.weight.grad.data
+        if sparse:
+            es_weight_grad = es.weight.grad.data.to_dense()
         self.assertEqual(output.data, expected_output)
-        self.assertEqual(es.weight.grad.data, expected_grad_weight)
+        self.assertEqual(es_weight_grad, expected_grad_weight)
 
         # now compare EmbeddingBag vs Embedding + Sum/Mean, for constant bag length
         def _test_vs_Embedding(N, D, B, L):
-            es = nn.EmbeddingBag(N, D, mode=mode)
+            es = nn.EmbeddingBag(N, D, mode=mode, sparse=sparse)
             e = nn.Embedding(N, D)
             e.weight.data.copy_(es.weight.data)
             input = Variable(torch.rand(B, L).mul(N).long())
@@ -1283,7 +1307,10 @@ class TestNN(NNTestCase):
 
             output.backward(grad_output)
             ref_output.backward(grad_output)
-            self.assertEqual(es.weight.grad, e.weight.grad)
+            es_weight_grad = es.weight.grad.data
+            if sparse:
+                es_weight_grad = es.weight.grad.data.to_dense()
+            self.assertEqual(es_weight_grad, e.weight.grad.data)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
@@ -1291,7 +1318,7 @@ class TestNN(NNTestCase):
             _test_vs_Embedding(*p)
 
         # check that giving illegal input combos raises error
-        es = nn.EmbeddingBag(10, 20, mode=mode)
+        es = nn.EmbeddingBag(10, 20, mode=mode, sparse=sparse)
         input = Variable(torch.ones(3, 4))
         offset = Variable(torch.arange(0, 3))
         self.assertRaises(ValueError, lambda: es(input, offset))
@@ -1348,14 +1375,18 @@ class TestNN(NNTestCase):
         F.conv_transpose2d(Variable(x), Variable(torch.randn(16, 1, 1, 1)).cuda())
         F.conv2d(Variable(x), Variable(torch.randn(1, 16, 1, 1)).cuda())
 
-    def test_EmbeddingBag(self):
-        self._test_EmbeddingBag(False, 'sum')
-        self._test_EmbeddingBag(False, 'mean')
+    def test_embedding_bag(self):
+        self._test_EmbeddingBag(False, 'sum', False)
+        self._test_EmbeddingBag(False, 'mean', False)
+        self._test_EmbeddingBag(False, 'sum', True)
+        self._test_EmbeddingBag(False, 'mean', True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-    def test_EmbeddingBag_cuda(self):
-        self._test_EmbeddingBag(True, 'sum')
-        self._test_EmbeddingBag(True, 'mean')
+    def test_embedding_bag_cuda(self):
+        self._test_EmbeddingBag(True, 'sum', False)
+        self._test_EmbeddingBag(True, 'mean', False)
+        self._test_EmbeddingBag(True, 'sum', True)
+        self._test_EmbeddingBag(True, 'mean', True)
 
     def test_fractional_max_pool2d(self):
         x = Variable(torch.randn(1, 2, 7, 7), requires_grad=True)
@@ -4419,6 +4450,68 @@ new_criterion_tests = [
         target_fn=lambda: torch.randn(2, 3, 4, 5).floor_().abs_(),
         desc='full_loss',  # with sterling approx
     ),
+    dict(
+        module_name='L1Loss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, _: 1. / i.numel() * (i - t).abs().sum(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='KLDivLoss',
+        input_fn=lambda: torch_rand(()).log(),
+        target_fn=lambda: torch_rand(()),
+        reference_fn=lambda i, t, m:
+            kldivloss_reference(i, t, get_size_average(m), reduce=True),
+        check_no_size_average=True,
+        desc='scalar',
+    ),
+    dict(
+        module_name='MSELoss',
+        input_size=(),
+        target_size=(),
+        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
+        check_no_size_average=True,
+        desc='scalar'
+    ),
+    dict(
+        module_name='BCELoss',
+        constructor_args_fn=lambda: (torch_rand(()),),
+        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch_rand(()).gt(0).double(),
+        reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
+            (i.numel() if get_size_average(m) else 1),
+        desc='scalar_weights',
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='HingeEmbeddingLoss',
+        constructor_args=(0.5,),
+        input_size=(),
+        target_fn=lambda: torch_randn(()).gt(0).double().mul_(2).sub(1),
+        desc='scalar_margin',
+        check_no_size_average=True,
+    ),
+    dict(
+        module_name='SmoothL1Loss',
+        input_size=(),
+        target_size=(),
+        check_no_size_average=True,
+        reference_fn=lambda i, t, m:
+            smoothl1loss_reference(i, t, size_average=get_size_average(m)),
+        desc='scalar',
+    ),
+    dict(
+        module_name='MultiLabelSoftMarginLoss',
+        constructor_args=(torch.rand(10),),
+        input_fn=lambda: torch.randn(5, 10),
+        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
+        reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
+            (i.numel() if get_size_average(m) else 1),
+        desc='weights',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
 ]
 
 
@@ -4837,6 +4930,49 @@ def hingeembeddingloss_margin_no_reduce_test():
         pickle=False)
 
 
+def softmarginloss_no_reduce_test():
+    t = Variable(torch.randn(5, 5))
+    return dict(
+        fullname='SoftMarginLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.soft_margin_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(5, 5),
+        reference_fn=lambda i, _:
+            loss_reference_fns['SoftMarginLoss'](i, t.type_as(i), reduce=False),
+        check_no_size_average=True,
+        pickle=False)
+
+
+def multilabelsoftmarginloss_no_reduce_test():
+    t = Variable(torch.rand(5, 10).mul(2).floor())
+    return dict(
+        fullname='MultiLabelSoftMarginLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, m: (-(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) /
+                                   (i.numel() if get_size_average(m) else 1)),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multilabelsoftmarginloss_weights_no_reduce_test():
+    t = Variable(torch.rand(5, 10).mul(2).floor())
+    weights = Variable(torch.rand(10))
+    return dict(
+        fullname='MultiLabelSoftMarginLoss_weights_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multilabel_soft_margin_loss(i, t.type_as(i),
+                                                    weight=weights.type_as(i), reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, m: (-((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * weights) /
+                                   (i.numel() if get_size_average(m) else 1)),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -4869,6 +5005,9 @@ new_module_tests = [
     multilabelmarginloss_no_reduce_test(),
     hingeembeddingloss_no_reduce_test(),
     hingeembeddingloss_margin_no_reduce_test(),
+    softmarginloss_no_reduce_test(),
+    multilabelsoftmarginloss_no_reduce_test(),
+    multilabelsoftmarginloss_weights_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),
@@ -5387,6 +5526,20 @@ new_module_tests = [
         check_gradgrad=False,
     ),
     dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='EmbeddingBag_sparse',
+        constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
+        input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
+        jacobian_input=False,
+        check_gradgrad=False,
+    ),
+    dict(
         constructor=lambda: nn.Embedding(4, 3, sparse=True),
         input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,
@@ -5726,6 +5879,125 @@ new_module_tests = [
         input_size=(2, 16, 4),
         check_gradgrad=False,
         test_cuda=True,
+    ),
+    dict(
+        module_name='Threshold',
+        constructor_args=(2, 1),
+        input_size=(),
+        check_inplace=True,
+        desc='threshold_value_scalar'
+    ),
+
+    dict(
+        module_name='ReLU',
+        input_size=(),
+        check_inplace=True,
+        desc='scalar'
+    ),
+    dict(
+        module_name='ReLU6',
+        input_size=(),
+        check_inplace=True,
+        desc='scalar'
+    ),
+    dict(
+        module_name='RReLU',
+        constructor_args=(0.1, 0.9),
+        input_size=(),
+        desc='with_up_down_scalar',
+        test_cuda=False,
+    ),
+    dict(
+        module_name='Hardtanh',
+        input_size=(),
+        reference_fn=lambda i, _: i.clamp(-1, 1),
+        desc='scalar'
+    ),
+    dict(
+        module_name='Sigmoid',
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='Tanh',
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='Softmax',
+        constructor_args=(0,),
+        input_size=(),
+        reference_fn=lambda i, _: torch.exp(i).div(torch.exp(i).sum(0, True)),
+        desc='scalar',
+    ),
+    dict(
+        module_name='LogSoftmax',
+        constructor_args=(0,),
+        input_size=(),
+        reference_fn=lambda i, _: torch.exp(i).div_(torch.exp(i).sum(0, False)).log_(),
+        desc='multiparam_scalar',
+    ),
+    dict(
+        module_name='ELU',
+        constructor_args=(2.,),
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='Hardshrink',
+        constructor_args=(2.,),
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='LeakyReLU',
+        constructor_args=(0.5,),
+        input_size=(),
+        check_inplace=True,
+        desc='with_negval_scalar'
+    ),
+    dict(
+        module_name='LogSigmoid',
+        input_size=(),
+        reference_fn=lambda i, _: i.sigmoid().log(),
+        desc='scalar'
+    ),
+    dict(
+        module_name='Softplus',
+        constructor_args=(2, -100),
+        input_size=(),
+        reference_fn=(lambda i, _: ((i * 2) > -100).type_as(i) * i +
+                                   ((i * 2) <= -100).type_as(i) * 1. / 2. * torch.log(1 + torch.exp(2 * i))),
+        desc='beta_threshold_scalar',
+    ),
+    dict(
+        module_name='Softshrink',
+        constructor_args=(1,),
+        input_size=(),
+        desc='lambda_scalar',
+    ),
+    dict(
+        module_name='PReLU',
+        input_size=(),
+        reference_fn=lambda i, p: torch.clamp(i, min=0) + torch.clamp(i, max=0) * p[0][0],
+        desc='scalar',
+    ),
+    dict(
+        module_name='Softsign',
+        input_size=(),
+        reference_fn=lambda i, _: i.div(1 + torch.abs(i)),
+        desc='scalar',
+    ),
+    dict(
+        module_name='Softmin',
+        constructor_args=(0,),
+        input_size=(),
+        desc='scalar',
+    ),
+    dict(
+        module_name='Tanhshrink',
+        input_size=(),
+        desc='scalar',
     ),
 ]
 

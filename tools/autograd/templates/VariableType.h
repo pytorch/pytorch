@@ -3,6 +3,10 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
+
+#include <cstdint> // for size_t
+#include <functional> // for function
+#include <memory> // for unique_ptr
 #include <string>
 #include <vector>
 
@@ -56,7 +60,6 @@ private:
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 
-private:
   at::Type* baseType;
   std::string str;
 };

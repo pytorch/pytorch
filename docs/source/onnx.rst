@@ -15,7 +15,13 @@ saves the resulting traced model to ``alexnet.proto``::
 
     dummy_input = Variable(torch.randn(10, 3, 224, 224)).cuda()
     model = torchvision.models.alexnet(pretrained=True).cuda()
-    torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True)
+
+    # providing these is optional, but makes working with the
+    # converted model nicer.
+    input_names = [ "learned_%d" % i for i in range(16) ] + [ "actual_input_1" ]
+    output_names = [ "output1" ]
+
+    torch.onnx.export(model, dummy_input, "alexnet.proto", verbose=True, input_names=input_names, output_names=output_names)
 
 The resulting ``alexnet.proto`` is a binary protobuf file which contains both
 the network structure and parameters of the model you exported
@@ -25,29 +31,34 @@ exporter to print out a human-readable representation of the network::
     # All parameters are encoded explicitly as inputs.  By convention,
     # learned parameters (ala nn.Module.state_dict) are first, and the
     # actual inputs are last.
-    graph(%1 : Float(64, 3, 11, 11)
-          %2 : Float(64)
+    graph(%learned_0 : Float(10, 3, 224, 224)
+          %learned_1 : Float(64, 3, 11, 11)
           # The definition sites of all variables are annotated with type
           # information, specifying the type and size of tensors.
-          # For example, %3 is a 192 x 64 x 5 x 5 tensor of floats.
-          %3 : Float(192, 64, 5, 5)
-          %4 : Float(192)
+          # For example, %learned_2 is a 192 x 64 x 5 x 5 tensor of floats.
+          %learned_2 : Float(64)
+          %learned_3 : Float(192, 64, 5, 5)
           # ---- omitted for brevity ----
-          %15 : Float(1000, 4096)
-          %16 : Float(1000)
-          %17 : Float(10, 3, 224, 224)) { # the actual input!
+          %learned_14 : Float(4096)
+          %learned_15 : Float(1000, 4096)
+          %actual_input_1 : Float(1000)) {
       # Every statement consists of some output tensors (and their types),
       # the operator to be run (with its attributes, e.g., kernels, strides,
-      # etc.), its input tensors (%17, %1)
-      %19 : UNKNOWN_TYPE = Conv[kernels=[11, 11], strides=[4, 4], pads=[2, 2, 2, 2], dilations=[1, 1], group=1](%17, %1), uses = [[%20.i0]];
+      # etc.), its input tensors (%learned_0, %learned_1, %learned_2)
+      %17 : Float(10, 64, 55, 55) = Conv[dilations=[1, 1], group=1, kernel_shape=[11, 11], pads=[2, 2, 2, 2], strides=[4, 4]](%learned_0, %learned_1, %learned_2), scope: AlexNet/Sequential[features]/Conv2d[0]
+      %18 : Float(10, 64, 55, 55) = Relu(%17), scope: AlexNet/Sequential[features]/ReLU[1]
+      %19 : Float(10, 64, 27, 27) = MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+      # ---- omitted for brevity ----
+      %29 : Float(10, 256, 6, 6) = MaxPool[kernel_shape=[3, 3], pads=[0, 0, 0, 0], strides=[2, 2]](%28), scope: AlexNet/Sequential[features]/MaxPool2d[12]
+      %30 : Float(10, 9216) = Flatten[axis=1](%29), scope: AlexNet
       # UNKNOWN_TYPE: sometimes type information is not known.  We hope to eliminate
       # all such cases in a later release.
-      %20 : Float(10, 64, 55, 55) = Add[broadcast=1, axis=1](%19, %2), uses = [%21.i0];
-      %21 : Float(10, 64, 55, 55) = Relu(%20), uses = [%22.i0];
-      %22 : Float(10, 64, 27, 27) = MaxPool[kernels=[3, 3], pads=[0, 0, 0, 0], dilations=[1, 1], strides=[2, 2]](%21), uses = [%23.i0];
-      # ...
+      %31 : Float(10, 9216), %32 : UNKNOWN_TYPE = Dropout[is_test=1, ratio=0.5](%30), scope: AlexNet/Sequential[classifier]/Dropout[0]
+      %33 : Float(10, 4096) = Gemm[alpha=1, beta=1, broadcast=1, transB=1](%31, %learned_11, %learned_12), scope: AlexNet/Sequential[classifier]/Linear[1]
+      # ---- omitted for brevity ----
+      %output1 : Float(10, 1000) = Gemm[alpha=1, beta=1, broadcast=1, transB=1](%38, %learned_15, %actual_input_1), scope: AlexNet/Sequential[classifier]/Linear[6]
       # Finally, a network returns some tensors
-      return (%58);
+      return (%output1);
     }
 
 You can also verify the protobuf using the `onnx <https://github.com/onnx/onnx/>`_ library.

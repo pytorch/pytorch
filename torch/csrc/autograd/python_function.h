@@ -66,15 +66,15 @@ struct THPFunction {
     PyObject *needs_input_grad;
 
     // Python tuple of tensors whose variables we should save.  Set
-    // by Python with 'save_for_backward'.  If NULL, no tensors were
+    // by Python with 'save_for_backward'.  If nullptr, no tensors were
     // saved.
     PyObject *to_save;
     // Python tuple of tensors which are not differentiable.  Set by
-    // Python with 'mark_non_differentiable'.  If NULL, no tensors were
+    // Python with 'mark_non_differentiable'.  If nullptr, no tensors were
     // non-differentiable.
     PyObject *non_differentiable;
     // Python tuple of tensors which had inplace updates in the forward()
-    // pass.  Set by Python with 'mark_dirty'.  If NULL, no tensors were
+    // pass.  Set by Python with 'mark_dirty'.  If nullptr, no tensors were
     // modified inplace.
     PyObject *dirty_tensors;
 

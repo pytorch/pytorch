@@ -1,28 +1,28 @@
 #pragma once
 
-#include "torch/csrc/jit/ir.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/variable.h"
 
-#include <memory>
-#include <mutex>
-#include <vector>
+#include <atomic>
 #include <cstdint>
 #include <list>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
-namespace torch { namespace autograd {
-
-struct Variable;
-struct Function;
-
-}}
+namespace torch { namespace jit {
+struct Graph;
+struct Value;
+struct VariableFlags;
+}} // namespace torch::jit
 
 namespace torch { namespace jit { namespace tracer {
 
-using torch::autograd::Variable;
-using torch::autograd::Function;
 using edge_list = std::vector<autograd::Edge>;
-using variable_list = std::vector<Variable>;
+using variable_list = std::vector<autograd::Variable>;
 
 // TracingState tracks the necessary state when we are tracing the execution of
 // autograd code; most importantly, it holds a reference to the actual IR
@@ -34,26 +34,19 @@ using variable_list = std::vector<Variable>;
 // from arising when a variable that participated in a trace outlives the
 // actual trace itself.
 
-using io_variable_flags_list =
-  std::vector<std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>>;
+using io_variable_flags_list = std::vector<
+    std::pair<std::vector<VariableFlags>, std::vector<VariableFlags>>>;
 
 struct TracingState : public std::enable_shared_from_this<TracingState> {
-  TracingState(std::size_t num_stages)
-    : graph(new Graph())
-    , active(false)
-    , num_stages(num_stages)
-    , eval_count(0)
-    , var_flags(num_stages)
-    , output_edges(num_stages) {}
+  explicit TracingState(size_t num_stages);
+  ~TracingState();
 
-  // XXX: graph can be NULL if it's a failed trace (failed = didn't capture all
-  // the stages we care about)
   std::shared_ptr<Graph> graph;
   bool active;
 
   // Used to free the Graph as soon as we know this trace will fail
-  std::size_t num_stages;
-  std::atomic<std::size_t> eval_count;
+  size_t num_stages;
+  std::atomic<size_t> eval_count;
 
   // void* is an unsafe TH.  NON-OWNING, so it might get invalidated.
   // TODO: Perhaps, turn this into an owning reference.  The buffers
@@ -66,23 +59,17 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
 
-  std::unique_lock<std::mutex> lock() { return std::unique_lock<std::mutex>(mutex); };
+  std::unique_lock<std::mutex> lock() {
+    return std::unique_lock<std::mutex>(mutex);
+  }
 
-  bool is_expired() const {
+  bool is_expired() const noexcept {
     return !graph;
   }
 
-  bool is_complete() const {
-    return !is_expired() && graph->stage() == num_stages - 1;
-  }
-
-  void push_scope(const std::string& scope_name) {
-    graph->push_scope(scope_name);
-  }
-
-  void pop_scope() {
-    graph->pop_scope();
-  }
+  bool is_complete() const;
+  void push_scope(const std::string& scope_name);
+  void pop_scope();
 };
 
 struct ValueTracingStateElem {
@@ -102,4 +89,4 @@ struct FunctionTracingState {
   bool in_eval_subgraph = false;
 };
 
-}}}
+}}} // namespace torch::jit::tracer

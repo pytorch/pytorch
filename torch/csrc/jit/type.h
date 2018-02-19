@@ -64,6 +64,8 @@ struct TensorType : public Type {
     , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
     , sizes_(tensor.sizes())
     , strides_(tensor.strides()) {}
+  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
+    : TensorType(scalar_type, device, sizes, TensorType::contiguousStridesOf(sizes)) {}
   TensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
     : Type(TypeKind::TensorType)
     , scalar_type_(scalar_type)
@@ -84,16 +86,16 @@ struct TensorType : public Type {
   }
 
   TypePtr withSizes(at::IntList sizes) const {
-    return withSizesStrides(sizes, contiguousStridesOf(sizes));
+    return withSizesStrides(sizes, TensorType::contiguousStridesOf(sizes));
   }
 
   TypePtr contiguous() const {
     auto t = std::make_shared<TensorType>(*this);
-    t->strides_ = contiguousStridesOf(sizes_);
+    t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
   }
 private:
-  std::vector<int64_t> contiguousStridesOf(at::IntList sizes) const {
+  static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
     strides.back() = 1;
     for(std::size_t i = strides.size() - 1; i > 0; i--) {

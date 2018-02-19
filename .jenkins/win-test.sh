@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -ex
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
 if [[ ${JOB_NAME} == *"develop"* ]]; then
@@ -53,11 +53,11 @@ cat >ci_scripts/test_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install Miniconda3
-rm -rf C:\\Jenkins\\Miniconda3
+IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
 .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-call conda install -y numpy mkl cffi pyyaml boto3
+call conda install -y -q numpy mkl cffi pyyaml boto3
 
 set PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\bin;C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0\\libnvvp;%PATH%
 set CUDA_PATH=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
@@ -73,8 +73,8 @@ python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
 python ..\\ci_scripts\\delete_image.py
 
 7z x %IMAGE_COMMIT_TAG%.7z
-sh run_test.sh
+sh run_test.sh -- -v
 
 EOL
 
-echo "ENTERED_USER_LAND" && ci_scripts/test_pytorch.bat && echo "EXITED_USER_LAND" && echo "TEST PASSED"
+ci_scripts/test_pytorch.bat && echo "TEST PASSED"

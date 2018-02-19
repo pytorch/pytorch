@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import unittest
 from contextlib import contextmanager
 from itertools import product
+import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
@@ -28,6 +29,8 @@ if torch.cuda.is_available():
             RUN_CUDA = False
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
+
+PY2 = sys.version_info[0] == 2
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -1309,11 +1312,12 @@ class TestJit(TestCase):
         script = '''
         def func(a, b) -> (c):
             c = a + b
+            c += a
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
-        outputs = a + b
+        outputs = a + b + a
         self.checkScript(script, [a, b], [outputs], False)
 
     def test_script_mul(self):
@@ -1383,6 +1387,133 @@ class TestJit(TestCase):
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
         self.checkScript(script, 'to_int', [x], [outputs], False)
+
+    def test_python_frontend(self):
+        def fn(x, y, z):
+            q = x + y - z
+            w = -z
+            if not x and not y and z:
+                m = x if not z else y
+            while x < y > z:
+                q = x
+            return x
+
+        ast = torch.jit.frontend.get_jit_ast(fn)
+        self.assertExpected(str(ast))
+
+    def test_script_while(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + 1
+                b = b + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_fibb(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(lim) -> (third):
+            first = 1
+            second = 1
+            i = 1
+            somenum = 5
+            dontmutateme = 3
+            third = 0 # TODO: python lexical scoping
+            while i < lim:
+                third = first + second
+                first = second
+                second = third
+                j = 0
+                while j < 10:
+                    somenum = somenum * 2
+                    j = j + 1
+                i = i + j
+                i = i + dontmutateme
+
+            st = second + third
+            fs = first + second
+
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_if(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if(a, b) -> (c):
+            d = 3
+            if a > 10:
+                a = 3 + d
+            else:
+                b = 3 + d
+                d = 4
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if')))
+
+    def test_script_if_noelse(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if_noelse(a, b) -> (c):
+            if a > 10:
+                a = 3 + b
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if_noelse')))
+
+    def test_script_while_nonexistant_value(self):
+        with self.assertRaisesRegex(RuntimeError, "undefined value x"):
+            cu = torch.jit._jit_script_compile('''
+            def test_while(a, b) -> (c):
+                while a < 10:
+                    a = a + x
+                    b = b + 1
+                c = a + b
+            ''')
+
+    def test_script_while_nonexistant_cond_value(self):
+        with self.assertRaisesRegex(RuntimeError, "undefined value x"):
+            cu = torch.jit._jit_script_compile('''
+            def test_while(a, b) -> (c):
+                while a < x:
+                    a = a + 1
+                    b = b + 1
+                c = a + b
+            ''')
+
+    def test_script_while_write_outer_then_read(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while(a, b) -> (c):
+            while a < 10:
+                a = a + 1
+                b = a + 1
+            c = a + b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while')))
+
+    def test_script_while_nest_if(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_while_if(a, b) -> (c):
+            c = 0
+            while a < 10:
+                a = a + 1
+                b = b + 1
+                if a > b:
+                    c = -a
+                else:
+                    c = -b
+            c = c + 1
+        ''')
+        self.assertExpected(str(cu.get_graph('test_while_if')))
+
+    def test_script_if_nest_while(self):
+        cu = torch.jit._jit_script_compile('''
+        def test_if_while(a, b) -> (c):
+            c = 0
+            if a > b:
+                while a > b:
+                    b = b + 1
+                    c = -b
+        ''')
+        self.assertExpected(str(cu.get_graph('test_if_while')))
 
 if __name__ == '__main__':
     run_tests()

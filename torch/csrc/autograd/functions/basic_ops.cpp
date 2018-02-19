@@ -5,6 +5,8 @@
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
+#include <ATen/ATen.h>
+
 #include <memory>
 #include <utility>
 
@@ -19,7 +21,7 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
     // FIXME: share version counters
-    outputs.emplace_back(var.defined() ? var.data() : Tensor());
+    outputs.emplace_back(var.defined() ? var.data() : at::Tensor());
   }
   return wrap_outputs(inputs, std::move(outputs), [&](function_list&& next_functions) {
     return std::make_shared<Error>(msg, std::move(next_functions));

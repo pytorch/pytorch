@@ -46,7 +46,7 @@ void PropagateShapeOnNode(Node * node) {
     if(!input->hasType()) {
       return SetUnknownType(node);
     }
-    if(TensorType * t = input->type()->expect<TensorType>()) {
+    if(TensorType * t = input->type()->cast<TensorType>()) {
       types.push_back(t);
     } else {
       return SetUnknownType(node);
@@ -59,6 +59,70 @@ void PropagateShapeOnNode(Node * node) {
     // to get a quick and dirty propagation
     case kneg: {
       node->output()->setType(types[0]->contiguous());
+    } break;
+    case kmm: {
+      auto lhs_type = types.at(0);
+      auto rhs_type = types.at(1);
+      node->output()->setType(std::make_shared<TensorType>(
+        lhs_type->scalarType(), lhs_type->device(),
+        at::IntList{lhs_type->sizes()[0], rhs_type->sizes()[1]}));
+    } break;
+    case kt: {
+      auto tp = types.at(0);
+      auto sizes = tp->sizes();
+      auto strides = tp->strides();
+      std::swap(sizes.at(0), sizes.at(1));
+      std::swap(strides.at(0), strides.at(1));
+      node->output()->setType(tp->withSizesStrides(sizes, strides));
+    } break;
+    case knarrow: {
+      auto tp = types.at(0);
+      auto sizes = tp->sizes();
+      int64_t dim = node->i(kdim);
+      int64_t length = node->i(klength);
+      sizes.at(dim) = length;
+      node->output()->setType(tp->withSizes(sizes));
+    } break;
+    case ksum: {
+      if (node->hasAttribute(kdim)) {
+        auto tp = types.at(0);
+        auto sizes = tp->sizes();
+        int64_t dim = node->i(kdim);
+        JIT_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
+        if (node->i(kkeepdim)) {
+          sizes[dim] = 1;
+        } else {
+          sizes.erase(sizes.begin() + dim);
+        }
+        node->output()->setType(tp->withSizes(sizes));
+      } else {
+        node->output()->setType(types.at(0)->withSizes({}));
+      }
+    } break;
+    case ksqueeze: {
+      auto tp = types.at(0);
+      auto sizes = tp->sizes();
+      auto strides = tp->strides();
+      int64_t dim = node->i(kdim);
+      JIT_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
+      if (sizes[dim] == 1) {
+        sizes.erase(sizes.begin() + dim);
+        strides.erase(strides.begin() + dim);
+      }
+      node->output()->setType(tp->withSizesStrides(sizes, strides));
+    } break;
+    case kunsqueeze: {
+      auto tp = types.at(0);
+      auto sizes = tp->sizes();
+      auto strides = tp->strides();
+      int64_t dim = node->i(kdim);
+      JIT_ASSERT(dim >= 0 && static_cast<size_t>(dim) <= sizes.size());
+      sizes.insert(sizes.begin() + dim, 1);
+      strides.insert(strides.begin() + dim, 1);
+      node->output()->setType(tp->withSizesStrides(sizes, strides));
+    } break;
+    case kview: {
+      node->output()->setType(types.at(0)->withSizes(node->is(ksizes)));
     } break;
     case kReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
@@ -73,7 +137,6 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(nullptr);
     } break;
     default: {
-
       auto op = getTensorOp(node);
       std::vector<at::Tensor> inputs;
       for(auto & type : types) {

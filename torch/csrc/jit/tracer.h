@@ -7,6 +7,7 @@
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <memory>
 #include <mutex>
@@ -26,12 +27,13 @@ std::string getPythonInterpreterStackTrace();
 namespace detail {
 
 inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>& state, const Variable& var, bool alloc = true) {
-  for (auto it = var.tracing_state()->begin(); it != var.tracing_state()->end();) {
+  auto& tracing_state = var.tracing_state();
+  for (auto it = tracing_state.begin(); it != tracing_state.end();) {
     auto ts = it->state.lock();
     // GC of invalidated tracing states
     if (!ts) {
       auto current_it = it++;
-      var.tracing_state()->erase(current_it);
+      tracing_state.erase(current_it);
       continue;
     } else if (ts == state) {
       return &(*it);
@@ -39,8 +41,8 @@ inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>&
     ++it;
   }
   if (alloc) {
-    var.tracing_state()->emplace_front();
-    auto & vts = var.tracing_state()->front();
+    tracing_state.emplace_front();
+    auto & vts = tracing_state.front();
     vts.state = state;
     return &vts;
   } else {
@@ -70,8 +72,8 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 // need it (in most cases if we have a variable_list it is already
 // flattened).
 inline bool isTracingVar(const Variable& var) {
-  if (!var.defined() || !var.tracing_state()) return false;
-  return std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive);
+  if (!var.defined() || !var.has_tracing_state()) return false;
+  return std::any_of(var.tracing_state().begin(), var.tracing_state().end(), detail::isElemActive);
 }
 
 inline bool isTracingVar(at::ArrayRef<Variable> vars) {
@@ -104,8 +106,8 @@ inline bool isTracing(Args&&... args) {
 inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) {
   std::shared_ptr<TracingState> state;
   for (auto& var : vars) {
-    if (!var.defined() || !var.tracing_state()) continue;
-    for (auto & vts : *var.tracing_state()) {
+    if (!var.defined() || !var.has_tracing_state()) continue;
+    for (auto & vts : var.tracing_state()) {
       auto var_state = vts.state.lock();
       if (!var_state || !var_state->active) continue;
       if (!state) state = var_state;

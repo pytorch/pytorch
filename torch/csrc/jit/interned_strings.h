@@ -73,6 +73,7 @@ _(dilation) \
 _(broadcast) \
 _(axis) \
 _(size) \
+_(sizes) \
 _(dim) \
 _(perm) \
 _(shape) \
@@ -129,6 +130,13 @@ _(sqrt) \
 _(sub) \
 _(tan) \
 _(trunc) \
+_(squeeze) \
+_(unsqueeze) \
+_(view) \
+_(narrow) \
+_(sum) \
+_(length) \
+_(keepdim) \
 _(zeros) \
 _(zeros_like) \
 _(exponent) \
@@ -137,7 +145,9 @@ _(ReplaceIfUndef) \
 _(is_zero) \
 _(GraphExecutor) \
 _(mm) \
-_(t)
+_(t) \
+_(Loop) \
+_(If)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \
