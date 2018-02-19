@@ -339,7 +339,6 @@ class ReduceLROnPlateau(object):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             return a > best + threshold
 
-
     def _init_is_better(self, mode, threshold, threshold_mode):
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
