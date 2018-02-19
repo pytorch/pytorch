@@ -29,7 +29,7 @@ class Beta(ExponentialFamily):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0, validate_args=False):
+    def __init__(self, concentration1, concentration0, validate_args=None):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
             concentration1_concentration0 = variable([concentration1, concentration0])
         else:

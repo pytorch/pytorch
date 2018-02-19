@@ -40,7 +40,7 @@ class Categorical(Distribution):
     params = {'probs': constraints.simplex}
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None, validate_args=False):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:

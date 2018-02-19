@@ -18,7 +18,7 @@ class TransformedDistribution(Distribution):
     maximum shape of its base distribution and its transforms, since transforms
     can introduce correlations among events.
     """
-    def __init__(self, base_distribution, transforms, validate_args=False):
+    def __init__(self, base_distribution, transforms, validate_args=None):
         self.base_dist = base_distribution
         if isinstance(transforms, Transform):
             self.transforms = [transforms, ]

@@ -37,7 +37,7 @@ class Exponential(ExponentialFamily):
     def variance(self):
         return self.rate.pow(-2)
 
-    def __init__(self, rate, validate_args=False):
+    def __init__(self, rate, validate_args=None):
         self.rate, = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
         super(Exponential, self).__init__(batch_shape, validate_args=validate_args)

@@ -41,7 +41,7 @@ class Poisson(ExponentialFamily):
     def variance(self):
         return self.rate
 
-    def __init__(self, rate, validate_args=False):
+    def __init__(self, rate, validate_args=None):
         self.rate, = broadcast_all(rate)
         if isinstance(rate, Number):
             batch_shape = torch.Size()

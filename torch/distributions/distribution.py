@@ -9,13 +9,16 @@ class Distribution(object):
     Distribution is the abstract base class for probability distributions.
     """
 
+    _validate_args = False
     has_rsample = False
     has_enumerate_support = False
 
-    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=False):
+    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=None):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
-        if validate_args or torch.check_dist_args:
+        if validate_args is not None:
+            self._validate_args = validate_args
+        if self._validate_args:
             for param, constraint in self.params.items():
                 if constraints.is_dependent(constraint):
                     continue

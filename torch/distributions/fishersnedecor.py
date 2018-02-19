@@ -26,7 +26,7 @@ class FisherSnedecor(Distribution):
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, df1, df2, validate_args=False):
+    def __init__(self, df1, df2, validate_args=None):
         self.df1, self.df2 = broadcast_all(df1, df2)
         self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
         self._gamma2 = Gamma(self.df2 * 0.5, self.df2)

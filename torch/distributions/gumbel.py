@@ -28,7 +28,7 @@ class Gumbel(TransformedDistribution):
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
 
-    def __init__(self, loc, scale, validate_args=False):
+    def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
         finfo = _finfo(self.loc)
         if isinstance(loc, Number) and isinstance(scale, Number):

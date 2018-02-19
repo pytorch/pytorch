@@ -29,7 +29,7 @@ class Geometric(Distribution):
     params = {'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer
 
-    def __init__(self, probs=None, logits=None, validate_args=False):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:

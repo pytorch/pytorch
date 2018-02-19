@@ -32,7 +32,7 @@ class ExpRelaxedCategorical(Distribution):
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, validate_args=False):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
@@ -98,7 +98,7 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None, validate_args=False):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         super(RelaxedOneHotCategorical, self).__init__(ExpRelaxedCategorical(temperature, probs, logits),
                                                        ExpTransform(), validate_args=validate_args)
 

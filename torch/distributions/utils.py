@@ -166,6 +166,12 @@ def probs_to_logits(probs, is_binary=False):
     return torch.log(ps_clamped)
 
 
+def set_default_validate_args(value):
+    if value not in [True, False]:
+        raise ValueError
+    torch.distributions.Distribution._validate_args = value
+
+
 class lazy_property(object):
     r"""
     Used as a decorator for lazy loading of class attributes. This uses a

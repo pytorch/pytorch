@@ -34,7 +34,7 @@ class Binomial(Distribution):
     params = {'probs': constraints.unit_interval}
     has_enumerate_support = True
 
-    def __init__(self, total_count=1, probs=None, logits=None, validate_args=False):
+    def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if not isinstance(total_count, Number):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count

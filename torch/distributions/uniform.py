@@ -40,10 +40,10 @@ class Uniform(Distribution):
     def variance(self):
         return (self.high - self.low).pow(2) / 12
 
-    def __init__(self, low, high, validate_args=False):
+    def __init__(self, low, high, validate_args=None):
         self.low, self.high = broadcast_all(low, high)
 
-        if validate_args and not torch.lt(self.low, self.high).all():
+        if (self._validate_args or validate_args) and not torch.lt(self.low, self.high).all():
             raise ValueError("Uniform is not defined when low>= high")
         if isinstance(low, Number) and isinstance(high, Number):
             batch_shape = torch.Size()

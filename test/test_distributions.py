@@ -52,7 +52,7 @@ from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             SigmoidTransform,
                                             StickBreakingTransform,
                                             identity_transform)
-from torch.distributions.utils import _finfo, probs_to_logits, softmax
+from torch.distributions.utils import _finfo, probs_to_logits, softmax, set_default_validate_args
 
 TEST_NUMPY = True
 try:

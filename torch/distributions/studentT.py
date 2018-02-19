@@ -39,7 +39,7 @@ class StudentT(Distribution):
         m[self.df <= 1] = float('nan')
         return m
 
-    def __init__(self, df, loc=0., scale=1., validate_args=False):
+    def __init__(self, df, loc=0., scale=1., validate_args=None):
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)
         self._chi2 = Chi2(df)
         batch_shape = torch.Size() if isinstance(df, Number) else self.df.size()

@@ -35,7 +35,7 @@ class OneHotCategorical(Distribution):
     support = constraints.simplex
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None, validate_args=False):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]

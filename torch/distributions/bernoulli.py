@@ -31,7 +31,7 @@ class Bernoulli(ExponentialFamily):
     has_enumerate_support = True
     _mean_carrier_measure = 0
 
-    def __init__(self, probs=None, logits=None, validate_args=False):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
