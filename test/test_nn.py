@@ -7353,7 +7353,7 @@ add_test(NewModuleTest(
 class _AdaptiveLogSoftmax(nn.AdaptiveLogSoftmax):
     def __call__(self, input):
         t = Variable(torch.LongTensor([0, 1, 4, 8]).type_as(input).long())
-        return super().__call__(input, t)
+        return nn.AdaptiveLogSoftmax.__call__(self, input, t)
 
 
 add_test(NewModuleTest(
