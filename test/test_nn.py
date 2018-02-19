@@ -828,6 +828,72 @@ class TestNN(NNTestCase):
         del n[1::2]
         self.assertEqual(n, nn.Sequential(l1, l3))
 
+    def test_ModuleDict(self):
+        modules = {'0' : nn.ReLU(), '1' : nn.Linear(5, 5)}
+        module_dict = nn.ModuleDict(modules)
+
+        def check():
+            self.assertEqual(len(module_dict), len(modules))
+
+            for k in module_dict:
+                self.assertIs(modules[k], module_dict[k])
+            keys = [k for k in module_dict.keys()]
+            assert set(keys) == set(modules.keys())
+            for k in keys:
+                self.assertIs(modules[k], module_dict[k])
+            for k, m in module_dict.items():
+                self.assertIs(modules[k], m)
+            for k, m in zip(keys, module_dict.values()):
+                self.assertIs(modules[k], m)
+            for k, m in module_dict.named_children():
+                self.assertIs(modules[k], m)
+
+        check()
+        modules[1337] = nn.Conv2d(3, 4, 3)
+        module_dict[1337] = modules[1337]
+        check()
+        modules['tanh'] = nn.Tanh()
+        module_dict['tanh'] = modules['tanh']
+        check()
+
+        next_modules = {'py' : nn.Linear(5, 5), 'torch' : nn.Sigmoid()}
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+        modules[1337] = nn.Conv2d(5, 3, 2)
+        module_dict[1337] = modules[1337]
+        check()
+
+        self.assertIs(modules['0'], module_dict.get('0'))
+        self.assertIs(None, module_dict.get('AGI_module'))
+        self.assertIs(1337, module_dict.get('AGI_module', 1337))
+
+        with self.assertRaises(TypeError):
+            module_dict += nn.ReLU()
+        with self.assertRaises(TypeError):
+            module_dict.update(nn.ReLU())
+        with self.assertRaises(TypeError):
+            module_dict.update([nn.ReLU()])
+
+        l1 = nn.Linear(1, 2)
+        l2 = nn.Linear(2, 3)
+        l3 = nn.Linear(3, 2)
+        l4 = nn.Linear(2, 3)
+        subnet = nn.Sequential(l3, l4)
+        s = nn.Sequential(
+            OrderedDict([
+                ("layer1", l1),
+                ("layer2", l2),
+                ("layer3", l3),
+                ("layer4", l4),
+                ("subnet_layer", subnet)
+            ])
+        )
+        modules = dict(s.named_modules())
+        module_dict = nn.ModuleDict()
+        module_dict.update(s.named_modules())
+        check()
+
     def test_ModuleList(self):
         modules = [nn.ReLU(), nn.Linear(5, 5)]
         module_list = nn.ModuleList(modules)
