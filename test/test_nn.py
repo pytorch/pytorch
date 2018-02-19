@@ -829,7 +829,7 @@ class TestNN(NNTestCase):
         self.assertEqual(n, nn.Sequential(l1, l3))
 
     def test_ModuleDict(self):
-        modules = {'0' : nn.ReLU(), '1' : nn.Linear(5, 5)}
+        modules = {'0': nn.ReLU(), '1': nn.Linear(5, 5)}
         module_dict = nn.ModuleDict(modules)
 
         def check():
@@ -856,7 +856,7 @@ class TestNN(NNTestCase):
         module_dict['tanh'] = modules['tanh']
         check()
 
-        next_modules = {'py' : nn.Linear(5, 5), 'torch' : nn.Sigmoid()}
+        next_modules = {'py': nn.Linear(5, 5), 'torch': nn.Sigmoid()}
         modules.update(next_modules)
         module_dict.update(next_modules)
         check()
