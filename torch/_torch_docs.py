@@ -3936,12 +3936,11 @@ add_docstr(torch._C.set_flush_denormal,
            r"""
 set_flush_denormal(on) -> bool
 
-Returns ``True`` if it successfully configures flush denormal mode.
+Returns ``True`` if your system supports flushing denormal numbers and it
+successfully configures flush denormal mode.  :meth:`~torch.set_flush_denormal`
+is only supported on x86 architectures supporting SSE3.
 
 Disables denormal floating numbers on CPU.
-
-.. note:: :meth:`~torch.set_flush_denormal` is only supported on x86
-architectures supporting SSE3.
 
 Args:
     on (bool): Controls whether to enable flush denormal mode or not
