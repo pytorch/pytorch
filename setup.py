@@ -18,7 +18,9 @@
 #     and cmake build systems.)
 #
 #   CC
-#     the C/C++ compiler to use
+#     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
+#     compiles, because distutils always uses CC to compile, even for C++
+#     files.
 #
 # Environment variables for feature toggles:
 #
@@ -35,7 +37,6 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in torch/lib/nccl)
 #
-#   WITH_DISTRIBUTED_MW
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
@@ -69,7 +70,7 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
-#   NVTOOLSEXT_PATH
+#   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
 #   LIBRARY_PATH

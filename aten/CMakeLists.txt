@@ -220,7 +220,10 @@ INCLUDE (CheckIncludeFile)
 INCLUDE (CheckCSourceCompiles)
 INCLUDE (CheckCSourceRuns)
 
-# Check that our compiler builds and links at all
+# Check that our programs run.  This is different from the native CMake compiler
+# check, which just tests if the program compiles and links.  This is important
+# because with ASAN you might need to help the compiled library find some
+# dynamic libraries.
 CHECK_C_SOURCE_RUNS("
 int main() { return 0; }
 " COMPILER_WORKS)
