@@ -111,12 +111,6 @@ struct Variable : public at::Tensor {
   /// variable is connected to.
   friend Variable make_variable(at::Tensor data, Edge gradient_edge);
 
-  /// Create an `Edge` between a `Variable` and its gradient function. The
-  /// gradient function is stored in the `function` property of the edge.
-  /// Defined with its variants in `autograd/function.h`. It is a friend
-  /// function because it (alone) is allowed to call `set_gradient_edge()`.
-  friend void create_gradient_edge(Variable& variable, Edge edge);
-
   // Tensor Conversions
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -54,15 +54,14 @@ using IndexRange = std::pair<size_t, size_t>;
 ///
 ///                              Hierarchy
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// Subclasses will often represent forward passes (functions) or backward
-/// passes (derivatives). Note, however, that due to the very general
-/// definition of a `Function` taking *zero* or more inputs and producing
-/// *zero* or more outputs, uses of `Function`s are flexible and extend beyond
-/// purely mathematical operations. For example, the `AccumulateGrad` function
-/// is a *sink*: it takes one input, but produces no outputs, instead adding
-/// the input to its internal accumulator as a side effect. At the other
-/// extreme, the `GraphRoot` function receives no inputs from other functions,
-/// but produces multiple outputs.
+/// Subclasses usually represent differentiable functions as well as their
+/// gradient operators. Note, however, that due to the very general definition
+/// of a `Function` taking *zero* or more inputs and producing *zero* or more
+/// outputs, uses of `Function`s are flexible and extend beyond purely
+/// mathematical operations. For example, the `AccumulateGrad` function is a
+/// *sink*: it takes one input, but produces no outputs, instead accumulating
+/// the input as a side effect. At the other extreme, the `GraphRoot` function
+/// receives no inputs from other functions, but produces multiple outputs.
 ///
 ///                              Interface
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -79,8 +78,8 @@ using IndexRange = std::pair<size_t, size_t>;
 /// this sequence number is *thread local*. This means that when `Function`s
 /// `A`, `B` and `C` are created consecutively in the same thread, their
 /// sequence numbers will be ordered `A` < `B` < `C`. If, however, `A` and `B`
-/// are created in one thread and `C` is created in a new thread, `C` will have
-/// a *lower* sequence number than `B`.
+/// are created in one thread and `C` is created in a new thread, there are *no
+/// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 struct Function : std::enable_shared_from_this<Function> {
  public:
@@ -162,7 +161,7 @@ struct Function : std::enable_shared_from_this<Function> {
   // Miscellaneous Methods
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  /// The unique sequence number of this `Function`.
+  /// The sequence number of this `Function`.
   uint64_t sequence_nr() const noexcept {
     return sequence_nr_;
   }
