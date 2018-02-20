@@ -23,7 +23,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
-  {"dtype", ParameterType::DTYPE},
+  {"Type", ParameterType::TYPE},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -108,7 +108,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
-    case ParameterType::DTYPE: return THPDtype_Check(obj);
+    case ParameterType::TYPE: return THPDtype_Check(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -125,7 +125,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
-    case ParameterType::DTYPE: return "torch.dtype";
+    case ParameterType::TYPE: return "torch.dtype";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -156,9 +156,9 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_intlist.assign(size, std::stoi(str));
     }
-  } else if (type_ == ParameterType::DTYPE) {
+  } else if (type_ == ParameterType::TYPE) {
     if (str != "None") {
-      throw std::runtime_error("default value for dtype must be none, got: " + str);
+      throw std::runtime_error("default value for Type must be none, got: " + str);
     }
   }
 }
