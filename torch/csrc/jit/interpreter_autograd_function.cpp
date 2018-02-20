@@ -40,8 +40,8 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   const auto & details = stage_details_[stage_];
 
   // Validate inputs
-  std::vector<at::Tensor> tinputs;
-  tinputs.reserve(inputs.size());
+  std::vector<at::Tensor> stack;
+  stack.reserve(inputs.size());
   TORCH_ASSERT(inputs.size() == static_cast<std::size_t>(num_inputs));
   TORCH_ASSERT(inputs.size() == details.input_flags.size());
   for (std::size_t i = 0; i < (std::size_t)inputs.size(); ++i) {
@@ -78,19 +78,18 @@ autograd::variable_list InterpreterAutogradFunction::apply(
       // will be undefined. To ensure we can continue, we create a 0 gradient,
       // using trace information to figure out what shape it should be
       if(traced_flags.defined) {
-        tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
+        stack.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
       } else {
-        tinputs.push_back(at::Tensor());
+        stack.push_back(at::Tensor());
       }
     } else {
-      tinputs.push_back(inputs[i].data());
+      stack.push_back(inputs[i].data());
     }
   }
 
   // Run the interpreter
-  std::vector<at::Tensor> toutputs;
   InterpreterState interp = (keep_graph_) ? interp_.clone() : interp_;
-  interp.runOneStage(tinputs, toutputs);
+  interp.runOneStage(stack);
 
   // Lazily create grad_fn
   std::shared_ptr<Function> grad_fn;
@@ -135,16 +134,16 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   // Wrap the outputs
   // TODO: handle views
   autograd::variable_list result;
-  JIT_ASSERT(toutputs.size() == details.output_flags.size());
-  auto num_outputs = toutputs.size();
+  JIT_ASSERT(stack.size() == details.output_flags.size());
+  auto num_outputs = stack.size();
   for (std::size_t i = 0; i < num_outputs; ++i) {
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
       autograd::Edge edge(grad_fn, grad_fn->num_inputs++);
-      result.push_back(autograd::make_variable(toutputs[i], std::move(edge)));
+      result.push_back(autograd::make_variable(stack[i], std::move(edge)));
     } else {
-      result.push_back(autograd::make_variable(toutputs[i], /*requires_grad=*/false));
+      result.push_back(autograd::make_variable(stack[i], /*requires_grad=*/false));
     }
   }
 

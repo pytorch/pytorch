@@ -147,7 +147,11 @@ _(GraphExecutor) \
 _(mm) \
 _(t) \
 _(Loop) \
-_(If)
+_(If) \
+_(Store) \
+_(Load) \
+_(Drop) \
+_(Copy)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \
