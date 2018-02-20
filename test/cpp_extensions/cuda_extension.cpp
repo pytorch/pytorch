@@ -1,6 +1,6 @@
 #include <torch/torch.h>
 
-// Declare the function from cuda_extension_kernel.cu. It will be compiled
+// Declare the function from cuda_extension.cu. It will be compiled
 // separately with nvcc and linked with the object file of cuda_extension.cpp
 // into one shared library.
 void sigmoid_add_cuda(const float* x, const float* y, float* output, int size);

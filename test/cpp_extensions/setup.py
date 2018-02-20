@@ -11,7 +11,7 @@ ext_modules = [
 if torch.cuda.is_available():
     extension = CUDAExtension(
         'torch_test_cuda_extension',
-        ['cuda_extension.cpp', 'cuda_extension_kernel.cu'],
+        ['cuda_extension.cpp', 'cuda_extension.cu'],
         extra_compile_args={'cxx': ['-g'],
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
