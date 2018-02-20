@@ -132,6 +132,7 @@ class TestDataLoader(TestCase):
         dataiter = iter(dataloader)
         self.assertEqual(len(list(dataiter)), 1)
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_multi_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
