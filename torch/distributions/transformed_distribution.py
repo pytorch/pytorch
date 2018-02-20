@@ -74,7 +74,7 @@ class TransformedDistribution(Distribution):
         Scores the sample by inverting the transform(s) and computing the score
         using the score of the base distribution and the log abs det jacobian.
         """
-        if self.base_dist._validate_args:
+        if self._validate_args:
             self.base_dist._validate_sample(value)
         event_dim = len(self.event_shape)
         log_prob = 0.0
@@ -107,6 +107,8 @@ class TransformedDistribution(Distribution):
         """
         for transform in self.transforms[::-1]:
             value = transform.inv(value)
+        if self._validate_args:
+            self.base_dist._validate_sample(value)
         value = self.base_dist.cdf(value)
         value = self._monotonize_cdf(value)
         return value
@@ -117,6 +119,8 @@ class TransformedDistribution(Distribution):
         transform(s) and computing the score of the base distribution.
         """
         value = self._monotonize_cdf(value)
+        if self._validate_args:
+            self.base_dist._validate_sample(value)
         value = self.base_dist.icdf(value)
         for transform in self.transforms:
             value = transform(value)

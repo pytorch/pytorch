@@ -29,6 +29,8 @@ from collections import namedtuple
 from itertools import product
 from random import shuffle
 
+import sys
+del sys.path[sys.path.index('/media/vishwak/Official/Projects/probtorch/pytorch')]
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck, variable
@@ -2017,19 +2019,23 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample().size(), torch.Size((3,)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
-        self.assertEqual(dist.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2,)))
+        simplex_sample = self.tensor_sample_2 / self.tensor_sample_2.sum(-1).unsqueeze(-1)
+        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 2,)))
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((3,)))
-        self.assertEqual(dist.log_prob(Variable(torch.ones(3, 3))).size(), torch.Size((3,)))
+        simplex_sample = Variable(torch.ones(3, 3)) / 3
+        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
         # batched
         dist = OneHotCategorical(variable([[0.6, 0.3], [0.6, 0.3], [0.6, 0.3]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
-        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
+        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1).unsqueeze(-1)
+        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
-        self.assertEqual(dist.log_prob(Variable(torch.ones((3, 1, 2)))).size(), torch.Size((3, 3)))
+        simplex_sample = Variable(torch.ones(3, 1, 2)) / 2
+        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
 
     def test_cauchy_shape_scalar_params(self):
         cauchy = Cauchy(0, 1, validate_args=True)
@@ -2052,14 +2058,17 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_dirichlet_shape(self):
-        dist = Dirichlet(variable([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]), validate_args=True)
+        dist = Dirichlet(variable([[0.6, 0.1], [0.3, 0.3], [0.1, 0.6]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
         self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4, 3, 2)))
-        self.assertEqual(dist.log_prob(self.tensor_sample_1).size(), torch.Size((3,)))
+        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1).unsqueeze(-1)
+        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
-        self.assertEqual(dist.log_prob(Variable(torch.ones((3, 1, 2)))).size(), torch.Size((3, 3)))
+        simplex_sample = Variable(torch.ones((3, 1, 2)))
+        simplex_sample = simplex_sample / simplex_sample.sum(-1).unsqueeze(-1)
+        self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
 
     def test_gamma_shape_scalar_params(self):
         gamma = Gamma(1, 1, validate_args=True)

@@ -1,5 +1,6 @@
 import torch
 from torch.autograd import Variable
+from torch.distributions.constraints import _Dependent
 import warnings
 from torch.distributions import constraints
 
@@ -9,9 +10,9 @@ class Distribution(object):
     Distribution is the abstract base class for probability distributions.
     """
 
-    _validate_args = False
     has_rsample = False
     has_enumerate_support = False
+    _validate_args = False
     support = None
     params = {}
 
@@ -196,10 +197,6 @@ class Distribution(object):
         if not (torch.is_tensor(value) or isinstance(value, Variable)):
             raise ValueError('The value argument must be a Tensor or Variable instance.')
 
-        if self._validate_args:
-            if not self.support.check(value).all():
-                raise ValueError('The value argument must be within the support')
-
         event_dim_start = len(value.size()) - len(self._event_shape)
         if value.size()[event_dim_start:] != self._event_shape:
             raise ValueError('The right-most size of value must match event_shape: {} vs {}.'.
@@ -211,6 +208,10 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
+
+        if self._validate_args:
+            if not self.support.check(value).all():
+                raise ValueError('The value argument must be within the support')
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
