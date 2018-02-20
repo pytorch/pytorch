@@ -162,7 +162,7 @@ class DistributedDataParallel(Module):
                     # Bucket parameter type tracking
                     bucket_param_type = param_tuple[0].type()
                     param_types.add(bucket_param_type)
-                    # Gloo is not supported due to fp16 performance
+                    # Only gloo and nccl support half-precision
                     if bucket_param_type == torch.cuda.HalfTensor and \
                             dist._backend != dist.dist_backend.NCCL and \
                             dist._backend != dist.dist_backend.GLOO:
@@ -251,17 +251,18 @@ class DistributedDataParallel(Module):
                     param.data.set_(tensor)
 
         # module buffer sync
-        buffers = list(self.module._all_buffers())
-        if self.broadcast_buffers and len(buffers) > 0:
-            # cross-node buffer sync
-            self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
+        if self.broadcast_buffers:
+            buffers = list(self.module._all_buffers())
+            if len(buffers) > 0:
+                # cross-node buffer sync
+                self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
 
-            if len(self.device_ids) > 1:
-                # intra-node buffer sync
-                result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
-                for tensors, module in zip(result[1:], self._module_copies[1:]):
-                    for tensor, buf in zip(tensors, module._all_buffers()):
-                        buf.set_(tensor)
+                if len(self.device_ids) > 1:
+                    # intra-node buffer sync
+                    result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+                    for tensors, module in zip(result[1:], self._module_copies[1:]):
+                        for tensor, buf in zip(tensors, module._all_buffers()):
+                            buf.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
