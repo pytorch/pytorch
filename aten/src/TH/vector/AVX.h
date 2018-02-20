@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 void THDoubleVector_copy_AVX(double *y, const double *x, const ptrdiff_t n);
 void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n);
 void THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n);
@@ -19,5 +22,7 @@ void THFloatVector_cmul_AVX(float *z, const float *x, const float *y, const ptrd
 void THFloatVector_muls_AVX(float *y, const float *x, const float c, const ptrdiff_t n);
 void THFloatVector_cadd_AVX(float *z, const float *x, const float *y, const float c, const ptrdiff_t n);
 void THFloatVector_adds_AVX(float *y, const float *x, const float c, const ptrdiff_t n);
-
+#ifdef __cplusplus
+}
+#endif
 #endif
