@@ -6,6 +6,7 @@ import random
 import unittest
 from common import TestCase, run_tests
 from common_nn import TEST_CUDA
+from test_torch import TestTorch
 from numbers import Number
 
 
@@ -859,6 +860,16 @@ class TestSparse(TestCase):
         # TODO: simplify once Variable and Tensor are merged
         from torch.autograd import Variable
         do_test(Variable(x), Variable(i), Variable(v))
+
+    @cpu_only  # not really, but we only really want to run this once
+    def test_dtypes(self):
+        cpum = torch.sparse
+        cpu_dtypes = [cpum.uint8, cpum.int8, cpum.int16, cpum.int32, cpum.int64,
+                      cpum.float32, cpum.float64]
+        cudam = torch.cuda.sparse
+        cuda_dtypes = [cudam.uint8, cudam.int8, cudam.int16, cudam.int32, cudam.int64,
+                       cudam.float32, cudam.float64]
+        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, True)
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

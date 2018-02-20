@@ -32,12 +32,16 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
+
+extern at::Type* THPDefaultATenType;
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT
+  BOOL, STORAGE, PYOBJECT, DTYPE
 };
 
 struct FunctionParameter;
@@ -78,6 +82,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
+  inline const at::Type& dtype(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -223,6 +228,18 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
+static at::Type& default_type() {
+  if (!THPDefaultATenType) {
+    throw std::runtime_error("THPDefaultATenType not initialized");
+  }
+  return *torch::autograd::VariableType::getType(*THPDefaultATenType);
+}
+
+inline const at::Type& PythonArgs::dtype(int i) {
+  if (!args[i]) return default_type();
+  return *reinterpret_cast<THPDtype*>(args[i])->cdata;
+}
+
 inline int64_t PythonArgs::toInt64(int i) {
   return toInt64WithDefault(i, signature.params[i].default_int);
 }
@@ -256,9 +273,6 @@ inline bool PythonArgs::isNone(int i) {
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  if (!THPGenerator_Check(args[i])) {
-    throw TypeError("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
-  }
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 

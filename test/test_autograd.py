@@ -834,9 +834,13 @@ class TestAutograd(TestCase):
     def test_requires_grad_factory(self):
         x = Variable(torch.randn(2, 3))
         fns = [torch.ones_like, torch.testing.randn_like]
+        dtypes = [torch.float32, torch.float64]
         for fn in fns:
-            for val in [True, False]:
-                self.assertEqual(val, fn(x, requires_grad=val).requires_grad)
+            for requires_grad in [True, False]:
+                for dtype in dtypes:
+                    output = fn(x, dtype=dtype, requires_grad=requires_grad)
+                    self.assertEqual(requires_grad, output.requires_grad)
+                    self.assertEqual(dtype, output.dtype)
 
     def test_grad_assignment(self):
         x = Variable(torch.randn(5, 5))

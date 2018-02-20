@@ -30,6 +30,7 @@ static std::unordered_map<PyTypeObject*, at::Type*> pytype_to_attype;
 static std::unordered_map<at::Type*, PyTypeObject*> attype_to_pytype;
 static std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
 static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
+static std::unordered_map<const at::Type*, THPDtype*> attype_to_dtype;
 
 static at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
@@ -73,6 +74,10 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, 
   }
 }
 
+void registerDtypeObject(THPDtype *dtype, at::Type& type) {
+  attype_to_dtype[&type] = dtype;
+}
+
 PyTypeObject* getPyTypeObject(const at::Tensor& tensor)
 {
   if(!tensor.defined())
@@ -97,7 +102,15 @@ at::Type& getATenType(PyTypeObject* type)
   if (it != pytype_to_attype.end()) {
     return *it->second;
   }
-  throw std::invalid_argument("unsupported Python type");
+  throw std::invalid_argument("getDtype(): unsupported Python type");
+}
+
+THPDtype* getDtype(const at::Type& type) {
+  auto it = attype_to_dtype.find(&type);
+  if (it != attype_to_dtype.end()) {
+    return it->second;
+  }
+  throw std::invalid_argument("unsupported at::Type");
 }
 
 at::Tensor createTensor(PyObject *data)
