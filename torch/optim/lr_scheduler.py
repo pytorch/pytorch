@@ -1,5 +1,7 @@
 import math
 from bisect import bisect_right
+from functools import partial
+
 from .optimizer import Optimizer
 
 
@@ -322,22 +324,30 @@ class ReduceLROnPlateau(object):
     def in_cooldown(self):
         return self.cooldown_counter > 0
 
+    def _cmp(self, mode, threshold_mode, threshold, a, best):
+        if mode == 'min' and threshold_mode == 'rel':
+            rel_epsilon = 1. - threshold
+            return a < best * rel_epsilon
+
+        elif mode == 'min' and threshold_mode == 'abs':
+            return a < best - threshold
+
+        elif mode == 'max' and threshold_mode == 'rel':
+            rel_epsilon = threshold + 1.
+            return a > best * rel_epsilon
+
+        else:  # mode == 'max' and epsilon_mode == 'abs':
+            return a > best + threshold
+
     def _init_is_better(self, mode, threshold, threshold_mode):
         if mode not in {'min', 'max'}:
             raise ValueError('mode ' + mode + ' is unknown!')
         if threshold_mode not in {'rel', 'abs'}:
             raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
-        if mode == 'min' and threshold_mode == 'rel':
-            rel_epsilon = 1. - threshold
-            self.is_better = lambda a, best: a < best * rel_epsilon
-            self.mode_worse = float('Inf')
-        elif mode == 'min' and threshold_mode == 'abs':
-            self.is_better = lambda a, best: a < best - threshold
-            self.mode_worse = float('Inf')
-        elif mode == 'max' and threshold_mode == 'rel':
-            rel_epsilon = threshold + 1.
-            self.is_better = lambda a, best: a > best * rel_epsilon
-            self.mode_worse = -float('Inf')
-        else:  # mode == 'max' and epsilon_mode == 'abs':
-            self.is_better = lambda a, best: a > best + threshold
-            self.mode_worse = -float('Inf')
+
+        if mode == 'min':
+            self.mode_worse = float('inf')
+        else:  # mode == 'max':
+            self.mode_worse = (-float('inf'))
+
+        self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
