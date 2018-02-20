@@ -261,6 +261,7 @@ ENDIF()
 IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_CXX_FLAGS}")
 ENDIF(C_SSE3_FOUND)
 
 # we don't set -mavx and -mavx2 flags globally, but only for specific files

@@ -5471,6 +5471,29 @@ class TestTorch(TestCase):
         y = x[2:]
         self.assertEqual(int(y), 3)
 
+    @unittest.skipIf(torch.set_flush_denormal(False),
+                     "flush_denormal not supported")
+    def test_set_flush_denormal(self):
+        tiny_float = 1e-42
+        tiny_double = 1e-320
+        float_tensor = torch.FloatTensor([1.0, tiny_float])
+        double_tensor = torch.DoubleTensor([1.0, tiny_float, tiny_double])
+
+        self.assertEqual(float_tensor[0], 1.0, prec=0.0)
+        self.assertEqual(float_tensor[1], tiny_float, prec=tiny_float / 16)
+        self.assertEqual(double_tensor[0], 1.0, prec=0.0)
+        self.assertEqual(double_tensor[1], tiny_float, prec=0.0)
+        self.assertEqual(double_tensor[2], tiny_double, prec=0.0)
+
+        torch.set_flush_denormal(True)
+        self.assertEqual(float_tensor[0], 1.0, prec=0.0)
+        self.assertEqual(float_tensor[1], 0.0, prec=0.0)  # tiny_float to zero
+        self.assertEqual(double_tensor[0], 1.0, prec=0.0)
+        # tiny_float is not converted to zero in double type
+        self.assertEqual(double_tensor[1], tiny_float, prec=0.0)
+        self.assertEqual(double_tensor[2], 0.0, prec=0.0)  # tiny_double to zero
+        torch.set_flush_denormal(False)
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

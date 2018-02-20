@@ -586,6 +586,15 @@ PyObject *THPModule_benchmarkCuDNN(PyObject *_unused)
   else Py_RETURN_FALSE;
 }
 
+PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
+  THPUtils_assert(PyBool_Check(arg), "flush_denormal expects a bool, "
+          "but got %s", THPUtils_typename(arg));
+  if (!at::globalContext().setFlushDenormal(arg == Py_True)) {
+    Py_RETURN_FALSE;
+  };
+  Py_RETURN_TRUE;
+}
+
 #ifdef WITH_CUDA
 extern PyObject * THCSPModule_initExtension(PyObject *self);
 #endif
@@ -619,6 +628,7 @@ static PyMethodDef TorchMethods[] = {
   {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
+  {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
 
   {"sigmoid",         (PyCFunction)THPModule_sigmoid,           METH_VARARGS | METH_KEYWORDS, NULL},
   {"log",             (PyCFunction)THPModule_log,               METH_VARARGS | METH_KEYWORDS, NULL},
