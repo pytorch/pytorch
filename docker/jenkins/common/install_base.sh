@@ -41,16 +41,18 @@ install_ubuntu() {
           libleveldb-dev \
           liblmdb-dev \
           libopencv-dev \
-          libprotobuf-dev \
           libpthread-stubs0-dev \
           libsnappy-dev \
-          protobuf-compiler \
           sudo
 
   # Ubuntu 14.04 ships with protobuf 2.5, but ONNX needs protobuf >= 2.6
   # so we install that here if on 14.04
   if [[ "$UBUNTU_VERSION" == 14.04 ]]; then
     install_protobuf_26
+  else
+    apt-get install -y --no-install-recommends \
+            libprotobuf-dev \
+            protobuf-compiler
   fi
 
   # Cleanup
