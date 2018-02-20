@@ -15,7 +15,7 @@ By default, computations involving variables that require gradients
 will keep history.  This means that you should avoid using such
 variables in computations which will live beyond your training loops,
 e.g., when tracking statistics. Instead, you should detach the variable
-or access its underlyhing data.
+or access its underlying data.
 
 Sometimes, it can be non-obvious when differentiable variables can
 occur.  Consider the following training loop (abridged from `source
