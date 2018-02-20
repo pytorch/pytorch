@@ -152,6 +152,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
 .. autofunction:: lt
