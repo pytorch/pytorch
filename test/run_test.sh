@@ -89,6 +89,7 @@ if [[ "$OSTYPE" != "msys" ]]; then
 
     distributed_tear_down() {
       rm -rf "$TEMP_DIR"
+      unset WORLD_SIZE
     }
 
     gloo_multigpu_set_up() {

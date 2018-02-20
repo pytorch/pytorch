@@ -735,13 +735,11 @@ class _DistTestBase(object):
                                               rankToGPUMapping)
 
     # END TO END TEST FOR DISTRIBUTEDDATAPARALLEL
-    def _test_DDP_helper(self, model, input_var, target, loss, optimizer):
+    def _test_DDP_helper(self, model, input_var, target, loss):
         model.train()
         output = model(input_var)
         l = loss(output, target)
         l.backward()
-        optimizer.step()
-        return model
 
     @unittest.skipIf(BACKEND != 'nccl' and BACKEND != 'gloo',
                      "Only Nccl & Gloo backend support DistributedDataParallel")
@@ -765,15 +763,16 @@ class _DistTestBase(object):
         # cpu training setup
         model = Net()
         model_cpu = copy.deepcopy(model)
-        optimizer_cpu = torch.optim.SGD(model_cpu.parameters(), 0.1)
+
+        # single gpu training setup
+        model_gpu = copy.deepcopy(model)
+        gpu_subset = list(rankToGPUMapping[rank])
+        model_gpu.cuda(gpu_subset[0])
 
         # DDP training setup
         model_DDP = copy.deepcopy(model)
-        gpu_subset = list(rankToGPUMapping[rank])
         model_DDP.cuda(gpu_subset[0])
-        model_DDP = nn.parallel.DistributedDataParallel(model_DDP,
-                                                        device_ids=gpu_subset)
-        optimizer_DDP = torch.optim.SGD(model_DDP.parameters(), 0.1)
+        model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpu_subset)
 
         # batch_size for DDP should be divisible by #GPU per node.
         batch_size = len(gpu_subset) * int(WORLD_SIZE)
@@ -781,23 +780,26 @@ class _DistTestBase(object):
         target = torch.randn(batch_size, 1, 4)
         loss = nn.MSELoss()
 
-        model_cpu = self._test_DDP_helper(
-            model_cpu,
-            Variable(input_cpu, requires_grad=True),
-            Variable(target),
-            loss,
-            optimizer_cpu)
+        # cpu training
+        self._test_DDP_helper(model_cpu,
+                              Variable(input_cpu, requires_grad=True),
+                              Variable(target),
+                              loss)
 
-        # DDP scatters subsets of input_cpu to GPUs
-        model_DDP = self._test_DDP_helper(
-            model_DDP,
-            Variable(input_cpu, requires_grad=True),
-            Variable(target.cuda(gpu_subset[0], non_blocking=True)),
-            loss,
-            optimizer_DDP)
+        # single gpu training
+        self._test_DDP_helper(model_gpu,
+                              Variable(input_cpu.cuda(gpu_subset[0]), requires_grad=True),
+                              Variable(target.cuda(gpu_subset[0], non_blocking=True)),
+                              loss)
 
-        self.assertEqual(model_cpu.features.weight,
-                         model_DDP.module.features.weight)
+        # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+        self._test_DDP_helper(model_DDP,
+                              Variable(input_cpu, requires_grad=True),
+                              Variable(target.cuda(gpu_subset[0], non_blocking=True)),
+                              loss)
+
+        self.assertEqual(model_cpu.features.weight.grad, model_gpu.features.weight.grad)
+        self.assertEqual(model_cpu.features.weight.grad, model_DDP.module.features.weight.grad)
         self._barrier()
 
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
@@ -806,7 +808,8 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     class TestDistBackend(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
-        JOIN_TIMEOUT = 18
+        # DDP test on 8GPU machine takes about 21s
+        JOIN_TIMEOUT = 25
 
         @staticmethod
         def manager_join(fn):
