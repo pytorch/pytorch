@@ -178,7 +178,10 @@ def include_paths(cuda=False):
     '''
     here = os.path.abspath(__file__)
     torch_path = os.path.dirname(os.path.dirname(here))
-    paths = [os.path.join(torch_path, 'lib', 'include')]
+    lib_include = os.path.join(torch_path, 'lib', 'include')
+    # Some internal (old) Torch headers don't properly prefix their includes,
+    # so we need to pass -Itorch/lib/include/TH as well.
+    paths = [lib_include, os.path.join(lib_include, 'TH')]
     if cuda:
         paths.append(_join_cuda_home('include'))
     return paths
@@ -355,16 +358,18 @@ def _write_ninja_file(path,
     includes += include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
+    include_flags = ['-I{}'.format(include) for include in includes]
 
     cflags = ['-fPIC', '-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
-    cflags += ['-I{}'.format(include) for include in includes]
+    cflags += include_flags
     cflags += extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
-        cuda_flags = "--compiler-options '-fPIC'"
-        extra_flags = ' '.join(extra_cuda_cflags)
-        flags.append('cuda_flags = {} {}'.format(cuda_flags, extra_flags))
+        cuda_flags = ['--compiler-options', "'-fPIC'"]
+        cuda_flags += include_flags
+        cuda_flags += extra_cuda_cflags
+        flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
     ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols
