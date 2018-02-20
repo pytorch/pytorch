@@ -22,13 +22,14 @@ if HAS_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     HAS_MAGMA = torch.cuda.has_magma
 
+floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
+                torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
+
 
 def is_floating(t):
     if not isinstance(t, type):
         raise TypeError('t should be an instance of type')
-    return t in [torch.FloatTensor, torch.DoubleTensor,
-                 torch.cuda.FloatTensor, torch.cuda.DoubleTensor,
-                 torch.HalfTensor, torch.cuda.HalfTensor]
+    return t in floating_set
 
 
 def is_half(t):
