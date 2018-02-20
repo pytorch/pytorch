@@ -3,6 +3,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/autograd/profiler.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -450,15 +451,43 @@ Operation createEvalOperation(CppOp * op) {
 }
 
 
+template<typename T>
+T tensor_as(const at::Tensor& t) {
+  throw std::runtime_error("Invalid tensor_as overload");
+}
+
+template<>
+int64_t tensor_as(const at::Tensor& t) {
+  if (t.numel() > 1)
+    throw std::runtime_error("Trying to convert a tensor with more than 1 element into a scalar");
+  // TODO: transfer to CPU
+  switch (t.type().scalarType()) {
+    case at::ScalarType::Long:
+      return *t.data<int64_t>();
+    case at::ScalarType::Int:
+      return *t.data<int32_t>();
+    case at::ScalarType::Short:
+      return *t.data<int16_t>();
+    case at::ScalarType::Char:
+      return *t.data<int8_t>();
+    case at::ScalarType::Byte:
+      return *t.data<uint8_t>();
+    default:
+      throw std::runtime_error("Trying to convert a floating point tensor "
+                               "into an integral scalar value");
+  }
+}
+
+
 Operation createConditionalJump(int offset, bool jump_when_cond_is) {
   if(jump_when_cond_is/*=true*/) {
     return [offset](Stack & stack) {
-      auto t = at::Scalar(pop(stack)).toLong();
+      auto t = tensor_as<int64_t>(pop(stack));
       return (t != 0) ? offset : 0;
     };
   } else {
     return [offset](Stack & stack) {
-      auto t = at::Scalar(pop(stack)).toLong();
+      auto t = tensor_as<int64_t>(pop(stack));
       return (t != 0) ? 0 : offset;
     };
   }
@@ -502,7 +531,7 @@ Operation getOperation(jit::Node *node) {
   IR_ELSEIF(Constant)
     auto t = value->t(kvalue);
     return [t](Stack & stack) {
-      stack.push_back(t);
+      stack.push_back(torch::autograd::make_variable(t, true));
       return 0;
     };
   IR_ELSEIF(Undefined)
@@ -774,23 +803,23 @@ struct InterpreterStateImpl {
     registers(function->register_size) {
   }
   void runOneStage(Stack & stack) {
-    std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
-    std::cout << *function->graph << "\n";
-    function->dump(std::cout);
+    // std::cout << "running stage: " << current_stage << " of " << function->stage_end.size() << "\n";
+    // std::cout << *function->graph << "\n";
+    // function->dump(std::cout);
     size_t pc = current_pc;
     size_t last = function->stage_end[current_stage];
     auto & instructions = function->instructions;
     while(pc < last) {
-        std::cout << "executing " << pc << ": ";
-        function->dumpInstruction(std::cout, pc);
-        std::cout << "\n";
+        // std::cout << "executing " << pc << ": ";
+        // function->dumpInstruction(std::cout, pc);
+        // std::cout << "\n";
         auto & inst = instructions[pc];
         loadTensorsFromRegisters(inst.inputs, stack);
         pc += 1 + inst.callback(stack);
         for(int i = inst.outputs.size - 1; i >= 0; i--) {
           int reg = get(inst.outputs,i);
           registers[reg] = pop(stack);
-          std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+          // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
         }
     }
     current_pc = pc;
