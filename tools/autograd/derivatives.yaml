@@ -637,6 +637,9 @@
 - name: uniform_(Tensor self, double from, double to, Generator generator)
   self: zeros_like(grad)
 
+- name: _unsafe_view(Tensor self, IntList size)
+  self: grad.contiguous().view(self.sizes())
+
 - name: unsqueeze(Tensor self, int64_t dim)
   self: grad.squeeze(dim)
 

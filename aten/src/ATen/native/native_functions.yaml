@@ -342,6 +342,9 @@
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
 
+- func: _unsafe_view(Tensor self, IntList size) -> Tensor
+  variants: function
+
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
