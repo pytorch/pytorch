@@ -349,6 +349,7 @@ import torch.testing
 from torch.autograd import no_grad, enable_grad
 
 _C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
+_C._initialize_dtypes()
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs

@@ -66,6 +66,17 @@ if (r.isNone(${out_idx})) {
 }
 """)
 
+PY_VARIABLE_OUT_CHECK_DTYPE = CodeTemplate("""\
+if (r.isNone(${out_idx})) {
+  ${call_dispatch}
+} else {
+  if (!r.isNone(${dtype_idx})) {
+    check_out_dtype_matches(r.tensor(${out_idx}), r.dtype(${dtype_idx}));
+  }
+  ${call_dispatch_out}
+}
+""")
+
 PY_VARIABLE_CALL_DISPATCH = CodeTemplate("""\
 ${dispatch_name}(${actuals})""")
 
@@ -77,6 +88,7 @@ return wrap(${call_dispatch});""")
 
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${return_type} ${dispatch_name}(${formal_args}) {
+  ${initialize_cuda}
   ${AutoNoGIL}
   ${AutoGPU}
   return ${dispatch_call}(${dispatch_args});
@@ -187,6 +199,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
+        'const Type &': 'dtype',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -261,6 +274,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 dispatch_type = 'const Tensor &'
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
+            elif dispatch_type == 'dtype':
+                dispatch_type = 'const Type &'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -286,9 +301,39 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 formal_args.append('Tensor & {}'.format(arg['name']))
                 actuals.append('results[{}]'.format(i))
 
+        # check python_binding_arguments
+        dtype_formal_name = None
+        requires_grad = None
+        python_binding_arguments = declaration.get('python_binding_arguments', [])
+        if 'dtype' in (a['name'] for a in python_binding_arguments):
+            dtype_idx = arg_idx if out_idx is None else out_idx + 1
+            requires_grad_idx = dtype_idx + 1
+        else:
+            requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
+
+        for arg in python_binding_arguments:
+            if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
+                # out(s) determines the dtype if it is present, so don't pass the dtype to the dispatch.
+                if len(outputs) == 0:
+                    # we have to use out_idx if there is an out variant because the base variant
+                    # won't have the full arg_idx count
+                    dtype_actual, dtype_formal = parse_arg(arg, dtype_idx)
+                    actuals.append(dtype_actual)
+                    dtype_formal_name = "type"
+                    # rename formal argument from dtype to type, since we convert it to an at::Type
+                    formal_args.append(dtype_formal.replace(" dtype", " " + dtype_formal_name))
+                elif len(outputs) > 1:
+                    raise RuntimeError("Not supported: dtype parameter with multiple outputs")
+            elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
+                requires_grad = parse_arg(arg, requires_grad_idx)[0]
+            else:
+                raise RuntimeError(("found {} in python_binding_arguments but only "
+                                   " \"bool requires_grad\" and \"Type dtype\" are supported".format(arg)))
+
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
+        env['initialize_cuda'] = []
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
         else:
@@ -297,23 +342,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
+            if dtype_formal_name:
+                raise RuntimeError(("dtype with namespace dispatch currently not supported, "
+                                   "consider writing as a native function"))
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
+        elif dtype_formal_name:
+            env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
+            env['dispatch_call'] = '{}.{}'.format(dtype_formal_name, declaration['name'])
         else:
             env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
         env['AutoGPU'] = auto_gpu(declaration)
-
-        requires_grad = None
-        if len(declaration.get('python_binding_arguments', [])) > 1:
-            raise RuntimeError("found more than 1 entry in python_binding_arguments")
-        for arg in declaration.get('python_binding_arguments', []):
-            if not arg['name'] == 'requires_grad' or not arg['type'] == 'bool':
-                raise RuntimeError(("found {} in python_binding_arguments but only "
-                                    "bool requires_grad is supported".format(arg)))
-            # we have to use out_idx if there is an out variant because the base variant
-            # won't have the full arg_idx count
-            requires_grad_idx = arg_idx if out_idx is None else out_idx + 1
-            requires_grad = parse_arg(arg, requires_grad_idx)[0]
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
@@ -331,15 +370,20 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env = {}
             env['call_dispatch_out'] = emit_single_dispatch(dictionary['out'], out_idx, base_env)
             env['call_dispatch'] = emit_single_dispatch(dictionary['base'], out_idx, base_env)
-            body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
+
+            has_dtype = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
+            if has_dtype:
+                body = PY_VARIABLE_OUT_CHECK_DTYPE.substitute(env, out_idx=out_idx, dtype_idx=out_idx + 1).split('\n')
+            else:
+                body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
         else:
             body = emit_single_dispatch(dictionary['base'], None, base_env)
 
         cond = 'if' if i == 0 else '} else if'
         return PY_VARIABLE_CASE.substitute(i=i, cond=cond, call_dispatch=body)
 
-    def get_requires_grad_argument(declaration):
-        requires_grad_arg = []
+    def get_python_binding_arguments(declaration):
+        python_binding_arguments = []
         has_tensor_input_arg = False
         for arg in declaration['arguments']:
             if arg.get('output', False):
@@ -357,8 +401,19 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
 
+        if has_tensor_return and not has_tensor_input_arg:
+            dtype_arg = {
+                'default': "{}",  # so the signature ends up with '=None'
+                'default_init': "{}",
+                'dynamic_type': 'Type',
+                'kwarg_only': True,
+                'name': 'dtype',
+                'type': 'const Type &',
+                'simple_type': 'Type',
+            }
+            python_binding_arguments.append(dtype_arg)
         if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
-            arg = {
+            requires_grad_arg = {
                 'default': False,
                 'default_init': False,
                 'dynamic_type': 'bool',
@@ -367,12 +422,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'type': 'bool',
                 'simple_type': 'bool',
             }
-            requires_grad_arg.append(arg),
-        return requires_grad_arg
+            python_binding_arguments.append(requires_grad_arg)
+        return python_binding_arguments
 
     def process_function(name, declarations):
         for declaration in declarations:
-            declaration['python_binding_arguments'] = get_requires_grad_argument(declaration)
+            declaration['python_binding_arguments'] = get_python_binding_arguments(declaration)
 
         env = {
             'name': name,
@@ -465,6 +520,8 @@ def get_python_signature(declaration, include_out):
 
     def get_typed_arg(arg):
         typename = arg['simple_type']
+        if typename == 'Type':
+            typename = 'dtype'
         if arg.get('is_nullable'):
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:

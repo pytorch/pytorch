@@ -45,18 +45,6 @@
       long_args: True
 ]]
 [[
-  name: zeros_like
-  cname: zerosLike
-  aten_sparse: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
-]]
-[[
   name: ones
   variants:
     - function
@@ -67,17 +55,6 @@
       output: True
     - arg: THSize* size
       long_args: True
-]]
-[[
-  name: ones_like
-  cname: onesLike
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
 ]]
 [[
   name: numel

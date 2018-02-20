@@ -18,6 +18,7 @@
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
+#include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_numpy.h"
 #include "torch/csrc/jit/python_tracer.h"
@@ -511,6 +512,11 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+PyObject * THPModule_initializeDtypes(PyObject *_unused) {
+  torch::utils::initializeDtypes();
+  Py_RETURN_NONE;
+}
+
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   THPUtils_assert(THPModule_isTensor(data), "data must be a Tensor");
@@ -606,6 +612,7 @@ static PyMethodDef TorchMethods[] = {
   {"_sparse_init",    (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
+  {"_initialize_dtypes",(PyCFunction)THPModule_initializeDtypes,  METH_NOARGS,  NULL},
 #ifdef WITH_CUDA
   {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
 #endif
@@ -881,6 +888,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
   ASSERT_TRUE(THPSize_init(module));
+  ASSERT_TRUE(THPDtype_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));
