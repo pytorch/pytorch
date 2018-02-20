@@ -29,8 +29,6 @@ from collections import namedtuple
 from itertools import product
 from random import shuffle
 
-import sys
-del sys.path[sys.path.index('/media/vishwak/Official/Projects/probtorch/pytorch')]
 import torch
 from common import TestCase, run_tests, set_rng_seed
 from torch.autograd import Variable, grad, gradcheck, variable
@@ -3056,15 +3054,17 @@ class TestConstraintRegistry(TestCase):
             y2 = t(x2)
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
 
+
 class TestValidation(TestCase):
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):
                 try:
                     with self.assertRaises(ValueError):
-                       Dist(validate_args=True, **param)
-                except:
-                    raise AssertionError('ValueError not raised for {} example {}/{}'.format(Dist.__name__, i + 1, len(params)))
+                        Dist(validate_args=True, **param)
+                except AssertionError:
+                    fail_string = 'ValueError not raised for {} example {}/{}'
+                    raise AssertionError(fail_string.format(Dist.__name__, i + 1, len(params)))
 
 class TestValidation(TestCase):
     def test_valid(self):
