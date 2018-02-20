@@ -358,16 +358,16 @@ def _write_ninja_file(path,
     includes += include_paths(with_cuda)
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
-    include_flags = ['-I{}'.format(include) for include in includes]
 
-    cflags = ['-fPIC', '-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
-    cflags += include_flags
-    cflags += extra_cflags
+    common_cflags = ['-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
+    common_cflags += ['-I{}'.format(include) for include in includes]
+
+    cflags = common_cflags + ['-fPIC'] + extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
-        cuda_flags = ['--compiler-options', "'-fPIC'"]
-        cuda_flags += include_flags
+        cuda_flags = common_cflags
+        cuda_flags += ['--compiler-options', "'-fPIC'"]
         cuda_flags += extra_cuda_cflags
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
@@ -398,9 +398,15 @@ def _write_ninja_file(path,
     for source_file in sources:
         # '/path/to/file.cpp' -> 'file'
         file_name = os.path.splitext(os.path.basename(source_file))[0]
-        target = '{}.o'.format(file_name)
+        if _is_cuda_file(source_file):
+            rule = 'cuda_compile'
+            # Use a different object filename in case a C++ and CUDA file have
+            # the same filename but different extension (.cpp vs. .cu).
+            target = '{}_cuda.o'.format(file_name)
+        else:
+            rule = 'compile'
+            target = '{}.o'.format(file_name)
         object_files.append(target)
-        rule = 'cuda_compile' if _is_cuda_file(source_file) else 'compile'
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
     library_target = '{}.so'.format(name)
