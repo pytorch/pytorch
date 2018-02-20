@@ -49,8 +49,8 @@ class InstanceNorm1d(_InstanceNorm):
         new observed value.
 
     Args:
-        num_features: num_features from an expected input of size
-            :math:`(N, C, L)` or :math:`(N, L)`
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
@@ -112,7 +112,7 @@ class InstanceNorm2d(_InstanceNorm):
         new observed value.
 
     Args:
-        num_features: num_features from an expected input of size
+        num_features: :math:`C` from an expected input of size
             :math:`(N, C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
@@ -175,7 +175,7 @@ class InstanceNorm3d(_InstanceNorm):
         new observed value.
 
     Args:
-        num_features: num_features from an expected input of size
+        num_features: :math:`C` from an expected input of size
             :math:`(N, C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1

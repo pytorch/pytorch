@@ -1173,7 +1173,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
 
 def batch_norm(input, running_mean, running_var, weight=None, bias=None,
                training=False, momentum=0.1, eps=1e-5):
-    """Applies Batch Normalization for each channel across a batch of data.
+    r"""Applies Batch Normalization for each channel across a batch of data.
 
     See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
     :class:`~torch.nn.BatchNorm3d` for details.
@@ -1194,7 +1194,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
 
 def instance_norm(input, running_mean, running_var, weight=None, bias=None,
                   use_input_stats=True, momentum=0.1, eps=1e-5):
-    """Applies Instance Normalization for each channel in each data sample in a
+    r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
@@ -1245,7 +1245,7 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
 def layer_norm(input, normalized_shape, running_mean, running_var,
                weight=None, bias=None, use_input_stats=True,
                momentum=0.1, eps=1e-5):
-    """Applies Layer Normalization for last certain number of dimensions.
+    r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """

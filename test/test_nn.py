@@ -1584,6 +1584,7 @@ class TestNN(NNTestCase):
             normalized_shape = shape[-normalized_ndim:]
             unnormalized_shape = shape[:-normalized_ndim]
 
+            # test that LN normalizes to mean 0 and stddev 1
             ln = nn.LayerNorm(normalized_shape, eps=0).type(type)
             ln.weight.data.fill_(1)
             ln.bias.data.fill_(0)
@@ -1594,6 +1595,7 @@ class TestNN(NNTestCase):
             self.assertAlmostEqual(torch.abs(mean.data).mean(), 0, delta=1e-5)
             self.assertAlmostEqual(torch.abs(var.data).mean(), 1, delta=1e-5)
 
+            # test that LN applies weight and bias correctly
             scale, bias = torch.FloatTensor(2).uniform_(0.2, 2).tolist()
             ln.weight.data.fill_(scale)
             ln.bias.data.fill_(bias)
@@ -1604,12 +1606,24 @@ class TestNN(NNTestCase):
             self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=1e-5)
             self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=1e-5)
 
+            # test that LN with track_running_stats=True
             ln = nn.LayerNorm(normalized_shape, momentum=1, eps=0,
                               elementwise_affine=False, track_running_stats=True).type(type)
             output_ref = ln(x).data.clone()
+            input_reshaped = x.view(*(unnormalized_shape + [-1]))
+            # make sure that running mean and var update correctly when training
+            mean = input_reshaped.mean(-1).mean()
+            var = input_reshaped.var(-1, unbiased=True).mean()
+            self.assertAlmostEqual(torch.abs(mean.data - ln.running_mean).mean(), 0, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var.data - ln.running_var).mean(), 0, delta=1e-5)
             ln.eval()
+            old_running_mean = ln.running_mean.clone()
+            old_running_var = ln.running_var.clone()
             output_new = ln(x + ln.running_var.sqrt()[0] * scale).data
             self.assertAlmostEqual((output_new - output_ref).mean(), scale, delta=1e-5)
+            # make sure that running mean and var don't change in eval
+            self.assertEqual(old_running_mean, ln.running_mean)
+            self.assertEqual(old_running_var, ln.running_var)
 
     def _test_LayerNorm_cuda_half(self):
         # just THNN, LayerNorm has no cuDNN path
@@ -3619,6 +3633,33 @@ class TestNN(NNTestCase):
             self.assertEqual(cudnn_output.type(), input.type())
             self.assertEqual(cudnn_output, thnn_output)
             self.assertAlmostEqual(cudnn_input_grad, thnn_input_grad, delta=1e-3)
+
+    def _test_batchnorm_update_stats(self, test_type=torch.FloatTensor):
+        module = nn.BatchNorm1d(3).type(test_type)
+
+        data = Variable(torch.rand(4, 3).type(test_type))
+
+        # training pass
+        old_running_mean = module.running_mean.clone()
+        old_running_var = module.running_var.clone()
+        module(data)
+        self.assertNotEqual(old_running_mean, module.running_mean)
+        self.assertNotEqual(old_running_var, module.running_var)
+
+        # eval pass
+        module.eval()
+        old_running_mean = module.running_mean.clone()
+        old_running_var = module.running_var.clone()
+        module(data)
+        self.assertEqual(old_running_mean, module.running_mean)
+        self.assertEqual(old_running_var, module.running_var)
+
+    def test_batchnorm_update_stats(self):
+        self._test_batchnorm_update_stats()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_update_stats_cuda(self):
+        self._test_batchnorm_update_stats(torch.cuda.FloatTensor)
 
     def test_batchnorm_raises_error_if_running_mean_is_not_same_size_as_input(self):
         input = Variable(torch.rand(2, 10))

@@ -85,11 +85,11 @@ class BatchNorm1d(_BatchNorm):
         new observed value.
 
     Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, L)` slices, it's common terminology to call this Temporal BatchNorm
+    on `(N, L)` slices, it's common terminology to call this Temporal BatchNorm.
 
     Args:
-        num_features: num_features from an expected input of size
-            :math:`(N, C, L)` or :math:`(N, L)`
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
         momentum: the value used for the running_mean and running_var
@@ -154,10 +154,10 @@ class BatchNorm2d(_BatchNorm):
         new observed value.
 
     Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, H, W)` slices, it's common terminology to call this Spatial BatchNorm
+    on `(N, H, W)` slices, it's common terminology to call this Spatial BatchNorm.
 
     Args:
-        num_features: num_features from an expected input of size
+        num_features: :math:`C` from an expected input of size
             :math:`(N, C, H, W)`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
@@ -224,10 +224,10 @@ class BatchNorm3d(_BatchNorm):
 
     Because the BatchNorm is done over the `C` dimension, computing statistics
     on `(N, D, H, W)` slices, it's common terminology to call this Volumetric BatchNorm
-    or Spatio-temporal BatchNorm
+    or Spatio-temporal BatchNorm.
 
     Args:
-        num_features: num_features from an expected input of size
+        num_features: :math:`C` from an expected input of size
             :math:`(N, C, D, H, W)`
         eps: a value added to the denominator for numerical stability.
             Default: 1e-5
