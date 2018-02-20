@@ -13,6 +13,12 @@ RUN bash ./install_base.sh && rm install_base.sh
 ADD ./install_ccache.sh install_ccache.sh
 RUN bash ./install_ccache.sh && rm install_ccache.sh
 
+# Install NCCL for all CUDA builds
+ARG UBUNTU_VERSION
+ARG CUDA_VERSION
+ADD ./install_nccl.sh install_nccl.sh
+RUN bash ./install_nccl.sh && rm install_nccl.sh
+
 # Install Python
 ARG PYTHON_VERSION
 ADD ./install_python.sh install_python.sh
