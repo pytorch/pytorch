@@ -8,7 +8,7 @@
 
 namespace at {
 
-// The follwing are utility functions for checking that arguments
+// The following are utility functions for checking that arguments
 // make sense.  These are particularly useful for native functions,
 // which do NO argument checking by default.
 
