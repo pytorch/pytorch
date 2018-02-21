@@ -860,6 +860,7 @@ if __name__ == '__main__':
                 'lib/include/TH/*.h',
                 'lib/include/TH/generic/*.h',
                 'lib/include/THC/*.h',
+                'lib/include/THC/*.cuh',
                 'lib/include/THC/generic/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/autograd/*.h',
