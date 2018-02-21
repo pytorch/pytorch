@@ -132,7 +132,7 @@ pip install networkx==2.0
 
 # We need a fixed version of onnx which is newer than current release to test 
 # onnx-caffe2 
-pip install --no-cache-dir -v git+https://github.com/onnx/onnx.git@a43f015
+pip install --no-cache-dir -v git+https://github.com/onnx/onnx.git@cc9b6e6
 
 pip install --no-cache-dir \
     click \
