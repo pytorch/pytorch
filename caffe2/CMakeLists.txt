@@ -190,10 +190,13 @@ if (BUILD_PYTHON)
   # Python site-packages
   # Get canonical directory for python site packages (relative to install
   # location).  It varys from system to system.
-  pycmd(python_site_packages "
+  pycmd(PYTHON_SITE_PACKAGES "
       from distutils import sysconfig
       print(sysconfig.get_python_lib(prefix=''))
   ")
+  # ---[ Options.
+  SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+  message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
   # Python extension suffix
   # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
   # fallback to ".pyd" if windows and ".so" for all others.
@@ -225,7 +228,7 @@ if (BUILD_PYTHON)
   target_link_libraries(
       caffe2_pybind11_state ${Caffe2_CPU_LINK} ${Caffe2_DEPENDENCY_LIBS}
       ${Caffe2_PYTHON_DEPENDENCY_LIBS})
-  install(TARGETS caffe2_pybind11_state DESTINATION "${python_site_packages}/caffe2/python")
+  install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
 
   if(USE_CUDA)
     add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
@@ -242,7 +245,7 @@ if (BUILD_PYTHON)
     target_link_libraries(
         caffe2_pybind11_state_gpu ${Caffe2_CPU_LINK} ${Caffe2_GPU_LINK} ${Caffe2_DEPENDENCY_LIBS}
         ${Caffe2_CUDA_DEPENDENCY_LIBS} ${Caffe2_PYTHON_DEPENDENCY_LIBS})
-    install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${python_site_packages}/caffe2/python")
+    install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
   endif()
 
   if (MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")
@@ -301,13 +304,13 @@ if (BUILD_PYTHON)
 
   # Install commands
   # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${python_site_packages}
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
   # Caffe proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${python_site_packages}
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
   # Caffe2 proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${python_site_packages}
+  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
 endif()
 
