@@ -446,6 +446,32 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+- func: sum(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sum_cpu
+    CUDA: _sum_cuda
+
+- func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sum_out_cpu
+    CUDA: _sum_out_cuda
+
+- func: prod(Tensor self) -> Tensor
+  dispatch:
+    CPU: _prod_cpu
+    CUDA: _prod_cuda
+
+- func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _prod_out_cpu
+    CUDA: _prod_out_cuda
+
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
 
