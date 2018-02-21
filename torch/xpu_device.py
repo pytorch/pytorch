@@ -10,6 +10,18 @@ import torch
 import six
 
 
+class DataSerial(torch.nn.Module):
+    """
+    Wraper to create consistent API with DataParallel
+    """
+    def __init__(self, module):
+        super(DataSerial, self).__init__()
+        self.module = module
+
+    def forward(self, *inputs, **kwargs):
+        return self.module.forward(*inputs, **kwargs)
+
+
 class XPU(ub.NiceRepr):
     """
     A processing device or devices: either a CPU, GPU, or multiple GPUS.
@@ -94,6 +106,25 @@ class XPU(ub.NiceRepr):
             raise TypeError(type(item))
 
     @classmethod
+    def from_data(xpu, item, **kwargs):
+        """
+        Creates an XPU to represent the processing device a Tensor or Variable
+        is on
+
+        Example:
+            >>> xpu = XPU(torch.randn(3))
+            >>> assert not xpu.is_gpu()
+            >>> xpu = XPU(torch.randn(3).cuda())
+            >>> assert xpu.is_gpu()
+            >>> xpu = XPU(torch.randn(3).cuda(1))
+            >>> assert xpu.main_device == 1
+        """
+        if item.is_cuda:
+            return XPU(item.get_device())
+        else:
+            return XPU(None)
+
+    @classmethod
     def cast(xpu, item, **kwargs):
         """
         Converts objects of many different types into an XPU.
@@ -103,12 +134,37 @@ class XPU(ub.NiceRepr):
         """
         if isinstance(item, XPU):
             return item
-        elif item == 'auto':
-            return XPU.from_auto(**kwargs)
-        elif item == 'argv':
-            return XPU.from_argv(**kwargs)
-        else:
+        elif isinstance(item, (torch._TensorBase, torch.autograd.Variable)):
+            return XPU.from_data(item)
+        elif isinstance(item, int):
             return XPU(item)
+        elif isinstance(item, (list, tuple)):
+            return XPU(item)
+        elif isinstance(item, six.string_types):
+            if item == 'auto':
+                return XPU.from_auto(**kwargs)
+            elif item == 'argv':
+                return XPU.from_argv(**kwargs)
+            if item == 'cpu' or item is None:
+                return XPU(None)
+            elif item == 'cpu' or item is None:
+                return XPU(None)
+            else:
+                item = item.lower()
+                item = item.replace('cpu', '')
+                item = item.replace('gpu', '')
+                item = item.replace('cuda', '')
+                if ',' in item:
+                    item = list(map(int, ','.split(item)))
+                if item == '':
+                    item = 0
+                if item == 'none':
+                    item = None
+                else:
+                    item = int(item)
+                return XPU(item)
+        else:
+            raise ValueError('cannot cast to XPU. item={}'.format(item))
 
     @classmethod
     def from_auto(XPU, min_memory=6000):
@@ -135,6 +191,9 @@ class XPU(ub.NiceRepr):
         else:
             if gpu_num.lower() == 'none':
                 xpu = XPU(None)
+            if isinstance(gpu_num, six.string_types) and ',' in gpu_num:
+                devices = list(map(int, gpu_num.split(',')))
+                xpu = XPU(devices)
             else:
                 xpu = XPU(int(gpu_num))
         return xpu
@@ -171,7 +230,7 @@ class XPU(ub.NiceRepr):
 
     def is_gpu(xpu):
         """ True if running in single or parallel gpu mode """
-        return 'gpu' in xpu.mode
+        return xpu.main_device is not None
 
     def mount(xpu, model):
         """
@@ -184,12 +243,15 @@ class XPU(ub.NiceRepr):
             >>> model = torch.nn.Conv2d(1, 1, 1)
             >>> xpu = XPU()
         """
-        if isinstance(model, torch.nn.DataParallel):
-            raise ValueError('Model is already in parallel mode.')
+        if isinstance(model, (torch.nn.DataParallel, DataSerial)):
+            # raise ValueError('Model is already in parallel mode.')
+            model = model.module
         model = xpu.move(model)
         if xpu.devices:
             model = torch.nn.DataParallel(model, device_ids=xpu.devices,
                                           output_device=xpu.main_device)
+        else:
+            model = DataSerial(model)
         return model
 
     def move(xpu, data, **kwargs):
@@ -214,33 +276,40 @@ class XPU(ub.NiceRepr):
         else:
             return data.cpu()
 
-    def variable(xpu, *args, **kw):
+    def variable(xpu, item, **kw):
         """
         Moves data to this XPU and wraps it inside a `torch.autograd.Variable`
 
         Args:
-            *args: sequence of tensors
+            item (Tensor): a of tensors
             **kwargs: forwarded to `xpu.move` and `torch.autograd.Variable`
 
-        Yeilds:
-            variables on the xpu
+        Returns:
+            torch.autograd.Variable: variable on the xpu
 
         Example:
             >>> from clab.xpu_device import *
             >>> xpu = XPU(None)
             >>> data = torch.FloatTensor([0])
-            >>> data, = xpu.variable(data)
-            >>> assert isinstance(data, torch.autograd.Variable)
+            >>> vari = xpu.variable(data)
+            >>> assert isinstance(vari, torch.autograd.Variable)
         """
-        # torch version 0.4 replace the volatile keyword with a context manager
         assert 'volatile' not in kw, 'volatile is removed'
         cukw = {}
         if 'async' in kw:
-            cukw['async'] = kw.pop('async')
+            cukw['non_blocking'] = kw.pop('async')
+        if 'non_blocking' in kw:
+            cukw['non_blocking'] = kw.pop('non_blocking')
+        item = xpu.move(item, **cukw)
+        item = torch.autograd.Variable(item, **kw)
+        return item
+
+    def variables(xpu, *args, **kw):
+        """
+        Convinience function to wrap multiple Tensors in Variables at once
+        """
         for item in args:
-            item = xpu.move(item, **cukw)
-            item = torch.autograd.Variable(item)
-            yield item
+            yield xpu.variable(item, **kw)
 
     def set_as_default(xpu):
         """
@@ -274,8 +343,6 @@ class XPU(ub.NiceRepr):
             >>> loaded = cpu.load(fpath)
             >>> assert all(data == loaded)
         """
-        print('Loading data onto {} from {}'.format(xpu, fpath))
-        xpu._pickle_fixes()
         return torch.load(fpath, map_location=xpu._map_location)
 
     def _map_location(xpu, storage, location):
@@ -295,13 +362,6 @@ class XPU(ub.NiceRepr):
             return storage.cuda(xpu.main_device)
         else:
             return storage
-
-    def _pickle_fixes(xpu):
-        # HACK: remove this and put in custom code
-        # HACK because we moved metrics module and we should have done that
-        from clab import metrics
-        import sys
-        sys.modules['clab.torch.metrics'] = metrics
 
 
 def find_unused_gpu(min_memory=0):
@@ -433,7 +493,7 @@ class XPUUnitTests(object):
                 pytest.skip()
         xpu = XPU(item)
         data = torch.FloatTensor([0])
-        data, = xpu.variable(data)
+        data = xpu.variable(data)
         assert isinstance(data, torch.autograd.Variable)
 
 
