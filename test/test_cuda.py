@@ -29,11 +29,17 @@ floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
 def is_floating(t):
     if not isinstance(t, type):
         raise TypeError('t should be an instance of type')
+    assert t != torch.autograd.Variable
     return t in floating_set
 
 
 def is_half(t):
+    if isinstance(t, torch.Tensor):
+        return t.dtype in [torch.float16, torch.cuda.float16]
+    assert isinstance(t, type)
+    assert t != torch.autograd.Variable
     return t in [torch.HalfTensor, torch.cuda.HalfTensor]
+
 
 types = [
     torch.FloatTensor,
@@ -98,21 +104,21 @@ def make_sparse_tensor(t, n, *sizes):
 
 
 def tensor_clamp(t, min, max):
-    if is_half(type(t)):
+    if is_half(t):
         return t.float().clamp(min, max).half()
     else:
         return t.clamp(min, max)
 
 
 def tensor_mul(t, scale):
-    if is_half(type(t)):
+    if is_half(t):
         return t.float().mul(scale).half()
     else:
         return t.mul(scale)
 
 
 def tensor_abs_(t):
-    if is_half(type(t)):
+    if is_half(t):
         return t.float().abs_().half()
     else:
         return t.abs_()
@@ -121,7 +127,7 @@ def tensor_abs_(t):
 def constant_tensor_sub(a, b):
     # helper function to address const - torch.HalfTensor where it doesn't
     # have resize_as()
-    if is_half(type(b)):
+    if is_half(b):
         return (a - b.float()).half()
     else:
         return a - b
@@ -130,7 +136,7 @@ def constant_tensor_sub(a, b):
 def constant_tensor_add(a, b):
     # helper function to address const + torch.HalfTensor where it doesn't
     # have add()
-    if is_half(type(b)):
+    if is_half(b):
         return (a + b.float()).half()
     else:
         return a + b
@@ -164,10 +170,7 @@ def medium_2d(t):
 
 
 def medium_2d_expanded(t):
-    if is_half(t):
-        return t(1).float().expand(M, M).half()
-    else:
-        return t(1).expand(M, M)
+    return t(1).expand(M, M)
 
 
 def medium_2d_scaled(t, scale=10):
@@ -440,6 +443,7 @@ custom_half_precision = {
     'cross': 1e-2,
     'cumprod': 1e-2,
     'cumsum': 1e-2,
+    'dist': 1e-2,
     'div': 1e-3,
     'dot': 1e-2,
     'erf': 1e-3,
@@ -452,7 +456,7 @@ custom_half_precision = {
     'log1p': 1e-3,
     'mean': 1e-3,
     'mul': 1e-2,
-    'norm': 1e-2,
+    'norm': 1e-1,
     'pow': 1e-1,
     'prod': 1e-3,
     'reciprocal': 1e-1,
@@ -468,6 +472,7 @@ custom_half_precision = {
     'sum': 1e-2,
     'tan': 1e-3,
     'tanh': 1e-3,
+    'trace': 1e-3,
     'var': 1e-3,
 }
 
@@ -534,7 +539,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_args = [to_gpu(arg) for arg in cpu_args]
         if t.__name__ == 'HalfTensor':
             cpu_tensor = cpu_tensor.float()
-            cpu_args = [arg.float() if torch.is_tensor(arg) and is_half(type(arg)) else arg for arg in cpu_args]
+            cpu_args = [arg.float() if torch.is_tensor(arg) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -1361,7 +1366,7 @@ class TestCuda(TestCase):
         # This affects the result of THC_reduceAll operations at extreme values
         x = torch.cuda.ByteTensor([0])
         y = torch.cuda.ByteTensor([255])
-        expected = torch.cuda.LongTensor([0])
+        expected = torch.cuda.LongTensor([0])[0]
 
         _, v = x.max(dim=0)
         self.assertEqual(v, expected)

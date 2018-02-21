@@ -94,11 +94,7 @@ def to_gpu(obj, type_map={}):
         assert obj.is_leaf
         t = type_map.get(obj.type(), get_gpu_type(obj.type()))
         with torch.no_grad():
-            # Workaround since torch.HalfTensor doesn't support clone()
-            if type(obj) == torch.HalfTensor:
-                res = obj.new().resize_(obj.shape).copy_(obj).type(t)
-            else:
-                res = obj.clone().type(t)
+            res = obj.clone().type(t)
             res.requires_grad = obj.requires_grad
         return res
     elif torch.is_storage(obj):

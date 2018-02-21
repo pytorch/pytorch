@@ -1221,7 +1221,7 @@ class TestTorch(TestCase):
             for n_col in range(4, 5 + 1):
                 prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
                 # indices that shouldn't be sampled (<0 means none)
-                zero_prob_indices = torch.LongTensor(n_row).random_(-2, n_col)
+                zero_prob_indices = torch.LongTensor(n_row).random_(-2, n_col).tolist()
                 for i, j in enumerate(zero_prob_indices):
                     if j >= 0:
                         prob_dist[i, j] = 0
@@ -1242,7 +1242,7 @@ class TestTorch(TestCase):
             for n_col in range(2, 10 + 1, 2):
                 prob_dist = make_prob_dist([n_row, n_col], is_contiguous)
                 # indices that shouldn't be sampled (<0 means none)
-                zero_prob_indices = torch.LongTensor(n_row).random_(-1, n_col)
+                zero_prob_indices = torch.LongTensor(n_row).random_(-1, n_col).tolist()
                 for i, j in enumerate(zero_prob_indices):
                     if j >= 0:
                         prob_dist[i, j] = 0
