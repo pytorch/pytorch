@@ -43,11 +43,11 @@ void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
 }
 
 variable_list PythonEngine::execute(
-    const function_list& roots,
+    const edge_list& roots,
     const variable_list& inputs,
     bool keep_graph,
     bool create_graph,
-    const function_list& outputs) {
+    const edge_list& outputs) {
   try {
     return Engine::execute(roots, inputs, keep_graph, create_graph, outputs);
   } catch (python_error& e) {
@@ -108,7 +108,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
   THPUtils_assert(num_variables == num_gradients, "got %ld variables and %ld "
       "gradients", num_variables, num_gradients);
 
-  function_list roots;
+  edge_list roots;
   roots.reserve(num_variables);
   variable_list grads;
   grads.reserve(num_variables);
@@ -133,7 +133,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
-  function_list output_edges;
+  edge_list output_edges;
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);

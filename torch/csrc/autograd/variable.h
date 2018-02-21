@@ -105,10 +105,10 @@ struct Variable : public at::Tensor {
   /// type *must* be `Tensor`.
   friend Variable make_variable(at::Tensor data, bool requires_grad);
 
-  /// Creates a `Variable` from the given `Tensor` and specify a `gradient_edge`,
-  /// i.e. a (function, input_nr) pair specifying the function in the autograd
-  /// graph, and what particular input of that function, this variable is
-  /// connected to.
+  /// Creates a `Variable` from the given `Tensor` and specify a
+  /// `gradient_edge`, i.e. a (function, input_nr) pair specifying the function
+  /// in the autograd graph, and what particular input of that function, this
+  /// variable is connected to.
   friend Variable make_variable(at::Tensor data, Edge gradient_edge);
 
   // Tensor Conversions
@@ -144,8 +144,8 @@ struct Variable : public at::Tensor {
   /// Gets the raw gradient function pointer, whatever it currently is.
   Function* grad_fn_unsafe() const;
 
-  /// Sets the gradient accumulator of the `Variable`. This is only applicable
-  /// to leaf variables. Interior variables should call `set_gradient_edge()`.
+  /// Set the gradient accumulator of the `Variable`. This is only applicable to
+  /// leaf variables. Interior variables should call `set_gradient_edge()`.
   void set_grad_accumulator(std::weak_ptr<Function> grad_accumulator);
 
   /// Attempts to get a pointer to the gradient accumulator of the `Variable`,
@@ -156,16 +156,6 @@ struct Variable : public at::Tensor {
   /// Gets the gradient accumulator of the `Variable` if it has one, or else
   /// create one on the fly and return it.
   std::shared_ptr<Function> grad_accumulator() const;
-
-  /// Sets the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
-  /// `Variable`.
-  /// NOTE: This will always set the `grad_fn`, even if this is a leaf
-  /// variable, and never the `grad_accumulator`. For the latter, use
-  /// `set_grad_accumulator`. This allows late construction of an interior
-  /// `Variable`.
-  /// You will likely want to call `rebase_history()` if this call is involved
-  /// in an in-place modification of a `Variable`.
-  void set_gradient_edge(Edge&& edge) noexcept;
 
   /// Returns the "canonical" gradient edge of this `Variable`, i.e. either the
   /// gradient function if this is an interior `Variable`, or the gradient
@@ -189,8 +179,16 @@ struct Variable : public at::Tensor {
     }
   }
 
-  /// Returns the input index of the gradient `Function` to which this `Variable`
-  /// is connected.
+  /// Set the gradient edge -- i.e. `grad_fn` and `input_nr` -- of the
+  /// `Variable`.
+  /// NOTE: This will always set the `grad_fn`, even if this is a leaf variable,
+  /// and never the `grad_accumulator`. For the latter, use
+  /// `set_grad_accumulator`. This allows late construction of an interior
+  /// `Variable`.
+  void set_gradient_edge(Edge edge) noexcept;
+
+  /// Returns the input index of the gradient `Function` to which this
+  /// `Variable` is connected.
   uint32_t output_nr() const noexcept;
 
   /// True if this `Variable` is a leaf and thus does not have a `grad_fn`.
@@ -424,7 +422,7 @@ inline Variable make_variable_view(
   return Variable();
 }
 
-inline Variable make_variable(at::Tensor data, bool requires_grad) {
+inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
   if (data.defined()) {
     auto impl = new Variable::Impl(detail::handle_scalars(data), requires_grad);
     return Variable(impl, /*retain=*/false);
@@ -489,7 +487,7 @@ inline std::shared_ptr<Function> Variable::grad_accumulator() const {
   return get()->get_grad_accumulator();
 }
 
-inline void Variable::set_gradient_edge(Edge&& edge) noexcept {
+inline void Variable::set_gradient_edge(Edge edge) noexcept {
   get()->grad_fn = std::move(edge.function);
   get()->output_nr = edge.input_nr;
 }
@@ -618,5 +616,4 @@ inline Variable::Variable(Variable::Impl* self, bool retain)
 inline Variable::Impl* Variable::get() const noexcept {
   return static_cast<Variable::Impl*>(pImpl);
 }
-
 }} // namespace torch::autograd

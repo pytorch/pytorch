@@ -90,9 +90,9 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   return wrap_outputs(
       inputs,
       std::move(tensor_results),
-      [this](function_list&& next_functions) {
+      [this](edge_list&& next_edges) {
         return std::make_shared<Error>(
-            name() + " is not differentiable twice", std::move(next_functions));
+            name() + " is not differentiable twice", std::move(next_edges));
       });
 }
 
@@ -203,7 +203,7 @@ auto PyFunction::is_traceable() -> bool {
   return traceable_py_bool == Py_True;
 }
 
-auto PyFunction::releaseVariables() -> void {
+auto PyFunction::release_variables() -> void {
   AutoGIL gil;
   auto f = (THPFunction*) obj;
   f->saved_variables.clear();
@@ -221,7 +221,7 @@ auto PyFunction::name() -> std::string {
   return name;
 }
 
-auto PyFunction::getSharedPtr() -> std::shared_ptr<Function> {
+auto PyFunction::get_shared_ptr() -> std::shared_ptr<Function> {
   return THPFunction_asFunction((THPFunction*)obj);
 }
 
@@ -230,12 +230,12 @@ auto PyFunction::getSharedPtr() -> std::shared_ptr<Function> {
 // Traverse and clear are required for supporting Python's GC cycle handling.
 static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 {
-  for (auto& hook : self->cdata.pre_hooks) {
+  for (const auto& hook : self->cdata.pre_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionPreHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
   }
-  for (auto& hook : self->cdata.post_hooks) {
+  for (const auto& hook : self->cdata.post_hooks()) {
     if (auto pyhook = dynamic_cast<PyFunctionPostHook*>(hook.get())) {
       Py_VISIT(pyhook->dict);
     }
@@ -248,7 +248,7 @@ static int THPFunction_traverse(THPFunction *self, visitproc visit, void *arg)
 
 static int THPFunction_clear(THPFunction *self)
 {
-  self->cdata.num_inputs = 0;
+  self->cdata.set_num_inputs(0);
 
   Py_CLEAR(self->needs_input_grad);
 
@@ -261,10 +261,13 @@ static int THPFunction_clear(THPFunction *self)
   self->saved_variables.clear();
   self->is_variable_input.clear();
 
-  // XXX: this will clear all hooks (not only Python ones)
-  // I guess it's ok to leave it as is for now.
-  auto pre_hooks = std::move(self->cdata.pre_hooks);
-  auto post_hooks = std::move(self->cdata.post_hooks);
+  // Moving the hooks out makes sure to first disassociate them from the
+  // function, but without destroying any of them. They will get deleted when
+  // exiting this scope. This is important, because deleting Python objects can
+  // trigger deletion of other objects, and they can reference this function,
+  // seeing it in a half-deleted state.
+  auto pre_hooks = std::move(self->cdata.pre_hooks());
+  auto post_hooks = std::move(self->cdata.post_hooks());
 
   return 0;
 }
@@ -293,7 +296,7 @@ PyObject *THPFunction_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   new (&self->input_info) std::vector<VariableInfo>();
   new (&self->saved_variables) std::vector<SavedVariable>();
   new (&self->is_variable_input) std::vector<bool>();
-  self->cdata.num_inputs = -1;
+  self->cdata.set_num_inputs(0);
   return obj;
 }
 
@@ -496,7 +499,7 @@ struct UnpackedInput {
 
 struct InputFlags {
   bool is_executable = false;
-  function_list next_functions;
+  edge_list next_edges;
   THPObjectPtr needs_input_grad;
   std::vector<bool> is_variable_input;
 };
@@ -535,7 +538,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
   }
 
   flags.is_executable = GradMode::is_enabled() && any_variable_requires_grad(unpacked.input_vars);
-  flags.next_functions = get_next_functions(unpacked.input_vars);
+  flags.next_edges = collect_next_edges(unpacked.input_vars);
   return std::make_pair(std::move(unpacked), std::move(flags));
 }
 
@@ -615,7 +618,7 @@ static void _trace_post_record(
   if (!passes_state_transparently) {
     // TODO: sgross and ezyang don't know if this is right
     tracer::nontraceableBackwardSubgraph(input_vars, output_vars);
-    Function::setUpContextEdge(trace_info.n, input_vars, output_vars);
+    Function::set_up_context_edge(trace_info.n, input_vars, output_vars);
   }
 }
 
@@ -629,7 +632,7 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
   THPObjectPtr outputs(PyTuple_New(num_outputs));
   if (!outputs) throw python_error();
 
-  grad_fn->cdata.num_inputs = num_outputs;
+  grad_fn->cdata.set_num_inputs(num_outputs);
 
   // Record type, device, and size information about inputs
   if (is_executable) {
@@ -678,7 +681,7 @@ PyObject *THPFunction_do_forward(THPFunction *self, PyObject *_inputs)
   auto& unpacked_input = info_pair.first;
   auto& input_info = info_pair.second;
   bool is_executable = input_info.is_executable;
-  self->cdata.set_next_functions(std::move(input_info.next_functions));
+  self->cdata.set_next_edges(std::move(input_info.next_edges));
   self->needs_input_grad = input_info.needs_input_grad.release();
 
   // We don't support tracing in the legacy code path
@@ -724,7 +727,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
-  ctx->cdata.set_next_functions(std::move(input_info.next_functions));
+  ctx->cdata.set_next_edges(std::move(input_info.next_edges));
   ctx->needs_input_grad = input_info.needs_input_grad.release();
   ctx->is_variable_input = std::move(input_info.is_variable_input);
 
@@ -793,17 +796,17 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 static void _trim_grad_input(THPFunction *self, THPObjectPtr& grad_input)
 {
   int num_grads = PyTuple_GET_SIZE(grad_input.get());
-  const int num_next_fns = self->cdata.next_functions.size();
-  if (num_grads > num_next_fns) {
+  const int num_outputs = self->cdata.num_outputs();
+  if (num_grads > num_outputs) {
     // Check that all extra grads are none
     bool all_none = true;
-    for (int i = num_next_fns; i < num_grads; i++) {
+    for (int i = num_outputs; i < num_grads; i++) {
       all_none = (PyTuple_GET_ITEM(grad_input.get(), i) == Py_None);
       if (!all_none) break;
     }
     // If yes, slice the tuple
     if (all_none) {
-      num_grads = num_next_fns;
+      num_grads = num_outputs;
       grad_input = PyTuple_GetSlice(grad_input.get(), 0, num_grads);
       if (!grad_input) throw python_error();
     }
@@ -821,9 +824,9 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
       THPUtils_invalidArguments(args, nullptr, "_do_backward", 1, "(tuple, bool)");
       return nullptr;
     }
-    THPUtils_assert(PyTuple_GET_SIZE(raw_grad_output) == self->cdata.num_inputs,
+    THPUtils_assert(PyTuple_GET_SIZE(raw_grad_output) == self->cdata.num_inputs(),
                     "%s got an invalid number of gradients (expected %d got %d)",
-                    THPUtils_typename(self), self->cdata.num_inputs,
+                    THPUtils_typename(self), self->cdata.num_inputs(),
                     PyTuple_GET_SIZE(raw_grad_output));
 
     // Some of the output might have been unused, so we have to allocate
@@ -844,10 +847,10 @@ PyObject * THPFunction_do_backward(THPFunction *self, PyObject *args)
     // if and only if the additional ones are all None
     _trim_grad_input(self, grad_input);
     int num_grads = PyTuple_GET_SIZE(grad_input.get());
-    int num_next_fns = self->cdata.next_functions.size();
-    THPUtils_assert(num_grads == num_next_fns, "%s returned an invalid number of "
+    int num_outputs = self->cdata.num_outputs();
+    THPUtils_assert(num_grads == num_outputs, "%s returned an invalid number of "
         "gradient tensors (expected %d, but got %d)", THPUtils_typename(self),
-        num_next_fns, num_grads);
+        num_outputs, num_grads);
 
     // If any of the remaining grad_inputs are None, zero them.
     _prepare_grads(self, grad_input, false);
@@ -869,7 +872,9 @@ PyObject* THPFunction__register_hook_dict(THPFunction *self, PyObject *_var)
 {
   THPUtils_assert(THPVariable_Check(_var), "_register_hook_dict expected a variable");
   THPVariable *var = (THPVariable*)_var;
-  self->cdata.pre_hooks.emplace_back(new PyFunctionPreHook(var->backward_hooks, var->cdata.output_nr()));
+  std::unique_ptr<FunctionPreHook> hook(new PyFunctionPreHook(
+      var->backward_hooks, var->cdata.output_nr()));
+  self->cdata.add_pre_hook(std::move(hook));
   Py_RETURN_NONE;
 }
 
@@ -926,18 +931,18 @@ PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 
 PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
 {
-  auto& next_fns = self->cdata.next_functions;
-  int size = next_fns.size();
-  THPObjectPtr result(PyTuple_New(size));
+  const auto num_outputs = self->cdata.num_outputs();
+  THPObjectPtr result(PyTuple_New(num_outputs));
   if (!result)
     return nullptr;
-  for (int i = 0; i < size; i++) {
+  for (uint32_t i = 0; i < num_outputs; i++) {
     THPObjectPtr fn_tuple(PyTuple_New(2));
     if (!fn_tuple) return nullptr;
-    PyObject* fn = functionToPyObject(next_fns[i].function);
+    const auto& edge = self->cdata.next_edge(i);
+    PyObject* fn = functionToPyObject(edge.function);
     if (!fn) return nullptr;
     PyTuple_SET_ITEM(fn_tuple.get(), 0, fn);
-    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(next_fns[i].input_nr));
+    PyTuple_SET_ITEM(fn_tuple.get(), 1, THPUtils_packInt64(edge.input_nr));
     PyTuple_SET_ITEM(result.get(), i, fn_tuple.release());
   }
   return result.release();

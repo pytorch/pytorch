@@ -1,4 +1,4 @@
-#include "basic_ops.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -23,8 +23,8 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
     // FIXME: share version counters
     outputs.emplace_back(var.defined() ? var.data() : at::Tensor());
   }
-  return wrap_outputs(inputs, std::move(outputs), [&](function_list&& next_functions) {
-    return std::make_shared<Error>(msg, std::move(next_functions));
+  return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
+    return std::make_shared<Error>(msg, std::move(next_edges));
   });
 };
 

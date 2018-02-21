@@ -1,18 +1,19 @@
 #include "Python.h"
 #include "interpreter.h"
 
-#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
+#include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/graph_executor.h"
+#include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/autograd/python_engine.h"
-#include "torch/csrc/autograd/functions/special.h"
-#include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/graph_executor.h"
 
 namespace py = pybind11;
 
@@ -24,9 +25,6 @@ namespace torch { namespace jit {
 // We interscept these values using an Autograd callback. So the function itself
 // never runs.
 struct DummyFunction : autograd::Function {
-  DummyFunction() {
-    num_inputs = 0;
-  }
   virtual autograd::variable_list apply(const autograd::variable_list& inputs) override {
     throw std::logic_error("DummyFunction::apply() called, but it should be blocked by a callback returning false");
   }
@@ -46,7 +44,7 @@ struct AutogradHandle : at::Retainable {
   // there is one entry in this list for each output of the forward pass
   // that represents the location in the backwaard pass where the gradient
   // of this output should be inserted at the beginning of the backward pass
-  autograd::function_list forward_outputs;
+  autograd::edge_list forward_outputs;
 };
 
 // HandleBuilder is used to construct the correct Autograd Handle objects
@@ -64,10 +62,9 @@ struct HandleBuilder {
   }
   autograd::Variable addInput(at::Retainable* input, const VariableFlags & flags_) {
     if(handle && flags_.requires_grad) {
-      auto gradient_edge = autograd::Edge(
-          handle->forward_inputs, handle->forward_inputs->num_inputs++);
-      return autograd::make_variable(
-          unsafeToTensorShare(input), std::move(gradient_edge));
+      auto variable = autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
+      autograd::create_gradient_edge(variable, handle->forward_inputs);
+      return variable;
     } else {
       return autograd::make_variable(unsafeToTensorShare(input), /*requires_grad=*/false);
     }
@@ -174,10 +171,10 @@ Operation createEvalOperation(CppOp * op) {
     // and these functions will be executed in this run. Since these other handles
     // may still be alive, it is not safe to release the graph
     // TODO: we could cache this list in AutogradHandle (it's read only)
-    autograd::function_list output_edges;
-    int num_inputs = handle_in->forward_inputs->num_inputs;
+    autograd::edge_list output_edges;
+    const auto num_inputs = handle_in->forward_inputs->num_inputs();
     output_edges.reserve(num_inputs);
-    for (int i = 0; i < num_inputs; ++i)
+    for (uint32_t i = 0; i < num_inputs; ++i)
       output_edges.emplace_back(handle_in->forward_inputs, i);
     auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, output_edges);
     for(auto & v : values)

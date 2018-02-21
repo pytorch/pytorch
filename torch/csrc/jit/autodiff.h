@@ -28,7 +28,7 @@ using value_list = std::vector<Value*>;
 //                    y  t    // with y's output_nr = 0 and t's output_nr = 1
 //   df_input_captures = {I0, O2, O0} // Order matches the prefix of inputs to df
 //                        x   t   y
-//   df_output_vjps = {0}     // i.e. connect next_function[0] of grad_fn to x's (grad_fn, output_nr).
+//   df_output_vjps = {0}     // i.e. connect next_edge[0] of grad_fn to x's (grad_fn, output_nr).
 struct Gradient {
   operator bool() const {
     return df != nullptr;
@@ -67,9 +67,9 @@ struct Gradient {
   //       outputs = map(Variable, tensor_output)
   //       for i, offset in enumerate(df_input_vjps):
   //         outputs[offset].set_grad_fn(grad_fn, output_nr=i)
-  //   - Use df_output_vjps to connect next_functions of grad_fn:
+  //   - Use df_output_vjps to connect next_edges of grad_fn:
   //       for idx in df_output_vjps:
-  //         grad_fn.next_functions.push_back(inputs[idx].gradient_edge())
+  //         grad_fn.add_next_edge(inputs[idx].gradient_edge())
   //   - Save captures for df (care needs to be taken to use SavedVariables for inputs and
   //                           outputs that we will actually return)
   //   - Return outputs[:f_real_outputs]

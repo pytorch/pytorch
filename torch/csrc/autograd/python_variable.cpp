@@ -8,6 +8,7 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/python_variable_indexing.h"
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -47,8 +48,8 @@ static PyObject* THPVariable_NewWithVar(PyTypeObject* type, Variable var)
       // Create a new reference to the THPFunction. This ensures that ref count
       // of the THPFunction is at least the number of referring THPVariables.
       const auto output_nr = v->cdata.output_nr();
-      v->cdata.set_gradient_edge(
-          {THPFunction_asFunction((THPFunction*)fn->obj), output_nr});
+      auto grad_fn = THPFunction_asFunction((THPFunction*)fn->obj);
+      v->cdata.set_gradient_edge({std::move(grad_fn), output_nr});
     }
   }
   return obj;
@@ -108,7 +109,7 @@ static int THPVariable_clear(THPVariable *self)
   Py_CLEAR(self->backward_hooks);
   if (self->cdata.defined()) {
     if (auto grad_acc = self->cdata.try_get_grad_accumulator()) {
-      grad_acc->pre_hooks.clear();
+      grad_acc->pre_hooks().clear();
     }
     self->cdata.set_pyobj(nullptr);
   }
@@ -163,7 +164,7 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
   Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    Edge edge(grad_fn_, grad_fn_->num_inputs++);
+    Edge edge(grad_fn_, grad_fn_->bump_inputs());
     var = make_variable(torch::createTensor(data), std::move(edge));
   } else {
     var = make_variable(torch::createTensor(data), requires_grad);
@@ -234,7 +235,7 @@ int THPVariable_set_grad_fn(THPVariable *self, PyObject *obj)
 {
   HANDLE_TH_ERRORS
   THPUtils_assertRet(-1, obj == Py_None, "_grad_fn can be only set to None");
-  self->cdata.set_gradient_edge(Edge());
+  self->cdata.detach_();
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)
 }
