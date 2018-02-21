@@ -16,6 +16,12 @@ class Distribution(object):
     support = None
     params = {}
 
+    @staticmethod
+    def set_default_validate_args(value):
+        if value not in [True, False]:
+            raise ValueError
+        Distribution._validate_args = value
+
     def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=None):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
