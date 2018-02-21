@@ -296,6 +296,22 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
 
+                # test double()
+                input = input.double().cuda()
+                module.double().cuda()
+                module(input)
+                for p in module.parameters():
+                    test_case.assertEqual(type(p.data), torch.cuda.DoubleTensor)
+                    test_case.assertEqual(p.get_device(), 0)
+
+                # test half()
+                input = input.half().cuda()
+                module.half().cuda()
+                module(input)
+                for o in module.parameters():
+                    test_case.assertEqual(type(p.data), torch.cuda.HalfTensor)
+                    test_case.assertEqual(p.get_device(), 0)
+
     def _get_target(self):
         return self._get_arg('target', False)
 
