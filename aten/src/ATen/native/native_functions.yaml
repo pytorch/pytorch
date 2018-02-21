@@ -264,9 +264,6 @@
 - func: ones_like(Tensor self) -> Tensor
   variants: function
 
-- func: ones_like_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-
 - func: ones_like(Tensor self, Type dtype) -> Tensor
   variants: function
 
@@ -278,16 +275,10 @@
 - func: rand_like(Tensor self) -> Tensor
   variants: function
 
-- func: rand_like_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-
 - func: rand_like(Tensor self, Type dtype) -> Tensor
   variants: function
 
 - func: randn_like(Tensor self) -> Tensor
-  variants: function
-
-- func: randn_like_out(Tensor result, Tensor self) -> Tensor
   variants: function
 
 - func: randn_like(Tensor self, Type dtype) -> Tensor
@@ -385,9 +376,6 @@
     CUDA: _s_where_cuda
 
 - func: zeros_like(Tensor self) -> Tensor
-  variants: function
-
-- func: zeros_like_out(Tensor result, Tensor self) -> Tensor
   variants: function
 
 - func: zeros_like(Tensor self, Type dtype) -> Tensor
