@@ -1,3 +1,83 @@
+# Welcome to the PyTorch setup.py.
+#
+# Environment variables you are probably interestd in:
+#
+#   DEBUG
+#     build with -O0 and -g (debug symbols)
+#
+#   MAX_JOBS
+#     maximum number of compile jobs we should use to compile your code
+#
+#   NO_CUDA
+#     disables CUDA build
+#
+#   CFLAGS
+#     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
+#     which we have faithfully adhered to in our build system is that CFLAGS
+#     also applies to C++ files, in contrast to the default behavior of autogoo
+#     and cmake build systems.)
+#
+#   CC
+#     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
+#     compiles, because distutils always uses CC to compile, even for C++
+#     files.
+#
+# Environment variables for feature toggles:
+#
+#   NO_CUDNN
+#     disables the cuDNN build
+#
+#   NO_NNPACK
+#     disables NNPACK build
+#
+#   NO_DISTRIBUTED
+#     disables THD (distributed) build
+#
+#   NO_SYSTEM_NCCL
+#     disables use of system-wide nccl (we will use our submoduled
+#     copy in torch/lib/nccl)
+#
+#   WITH_GLOO_IBVERBS
+#     toggle features related to distributed support
+#
+#   WITH_SCALARS
+#     build with native support for scalars (zero-dim tensors)
+#
+#   PYTORCH_BINARY_BUILD
+#     toggle static linking against libstdc++, used when we're building
+#     binaries for distribution
+#
+#   PYTORCH_BUILD_VERSION
+#   PYTORCH_BUILD_NUMBER
+#     specify the version of PyTorch, rather than the hard-coded version
+#     in this file; used when we're building binaries for distribution
+#
+# Environment variables we respect (these environment variables are
+# conventional and are often understood/set by other software.)
+#
+#   CUDA_HOME (Linux/OS X)
+#   CUDA_PATH (Windows)
+#     specify where CUDA is installed; usually /usr/local/cuda or
+#     /usr/local/cuda-x.y
+#
+#   CUDNN_LIB_DIR
+#   CUDNN_INCLUDE_DIR
+#   CUDNN_LIBRARY
+#     specify where cuDNN is installed
+#
+#   NCCL_ROOT_DIR
+#   NCCL_LIB_DIR
+#   NCCL_INCLUDE_DIR
+#     specify where nccl is installed
+#
+#   NVTOOLSEXT_PATH (Windows only)
+#     specify where nvtoolsext is installed
+#
+#   LIBRARY_PATH
+#   LD_LIBRARY_PATH
+#     we will search for libraries in these paths
+
+
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -9,6 +89,7 @@ import distutils.command.clean
 import platform
 import subprocess
 import shutil
+import multiprocessing
 import sys
 import os
 import json
@@ -38,6 +119,11 @@ if 'WITH_SCALARS' not in os.environ:
     os.environ['WITH_SCALARS'] = '1'
 WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
+NUM_JOBS = multiprocessing.cpu_count()
+max_jobs = os.getenv("MAX_JOBS")
+if max_jobs is not None:
+    NUM_JOBS = min(NUM_JOBS, int(max_jobs))
+
 try:
     import ninja
     WITH_NINJA = True
@@ -63,11 +149,7 @@ if not WITH_NINJA:
         def _single_compile(obj):
             src, ext = build[obj]
             self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
-        num_jobs = multiprocessing.cpu_count()
-        max_jobs = os.getenv("MAX_JOBS")
-        if max_jobs is not None:
-            num_jobs = min(num_jobs, int(max_jobs))
-        multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
+        multiprocessing.pool.ThreadPool(NUM_JOBS).map(_single_compile, objects)
 
         return objects
     distutils.ccompiler.CCompiler.compile = parallelCCompile
@@ -120,6 +202,7 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["NUM_JOBS"] = str(NUM_JOBS)
     if not IS_WINDOWS:
         if WITH_NINJA:
             my_env["CMAKE_GENERATOR"] = '-GNinja'
