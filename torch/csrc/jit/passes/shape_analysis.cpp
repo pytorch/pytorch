@@ -21,23 +21,6 @@ at::Tensor representativeTensor(const TensorType * type) {
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }
 
-std::vector<at::Tensor> runNode(Node * n, ArrayRef<at::Tensor> inputs) {
-  // this is verbose because ATen dispatch works with raw retainable pointers
-  // if we end up no longer needing retainable versions after the JIT changes
-  // this code could be simplified
-  list_of_retainable rinputs;
-  list_of_retainable routputs;
-  for(auto i : inputs) {
-    rinputs.push_back(i.get());
-  }
-  getTensorOp(n).op(rinputs, routputs);
-  std::vector<at::Tensor> outputs;
-  for(auto & i : routputs) {
-    outputs.push_back(unsafeToTensorSteal(std::move(i)));
-  }
-  return outputs;
-}
-
 void PropagateShapeOnNode(Node * node) {
   std::vector<TensorType*> types;
   // get all the input types, propagate unknown types if we don't have
@@ -137,14 +120,14 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(nullptr);
     } break;
     default: {
-      auto op = getTensorOp(node);
-      std::vector<at::Tensor> inputs;
+      auto op_info = getTensorOp(node);
+      std::vector<at::Tensor> stack;
       for(auto & type : types) {
-        inputs.push_back(representativeTensor(type));
+        stack.push_back(representativeTensor(type));
       }
-      auto outputs = runNode(node, inputs);
-      for(size_t i = 0; i < outputs.size(); ++i) {
-        node->outputs()[i]->inferTypeFrom(outputs[i]);
+      op_info.op(stack);
+      for(size_t i = 0; i < stack.size(); ++i) {
+        node->outputs()[i]->inferTypeFrom(stack[i]);
       }
     }
   }

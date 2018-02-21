@@ -471,7 +471,8 @@ struct to_ir {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, getValues(inputs), output_size);
-        node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        if (kind != kneg)
+          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {

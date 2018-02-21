@@ -696,6 +696,9 @@ struct Block {
     output_->addInput(n);
     return outputs().size() - 1;
   }
+  void eraseOutput(size_t i) {
+    output_->removeInput(i);
+  }
   Node * appendNode(Node * n) {
     JIT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
@@ -833,6 +836,9 @@ public:
   }
   void eraseInput(size_t i) {
     block_->eraseInput(i);
+  }
+  void eraseOutput(size_t i) {
+    block_->eraseOutput(i);
   }
   void advanceStage() {
     new_node_stage_++;
