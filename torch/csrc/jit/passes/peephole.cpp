@@ -10,8 +10,8 @@ namespace torch { namespace jit {
 //    - Simply x.t().t() to x
 //
 // TODO: Decide what kind of fixed point strategy we will have
-void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+void PeepholeOptimize(Block * block) {
+  for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* n = *it;
 
     switch (n->kind()) {
@@ -40,7 +40,15 @@ void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
         }
         break;
     }
+
+    for (Block * sub_block : n->blocks()) {
+      PeepholeOptimize(sub_block);
+    }
   }
+}
+
+void PeepholeOptimize(std::shared_ptr<Graph>& graph) {
+  PeepholeOptimize(graph->block());
 }
 
 }}
