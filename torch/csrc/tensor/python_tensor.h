@@ -10,7 +10,10 @@ namespace torch { namespace tensor {
 void initialize_python_bindings(PyObject* module);
 
 // Sets the concrete type constructed by calls to torch.Tensor()
-void set_default_tensor_type(PyObject* type_obj);
+void set_default_tensor_type(const at::Type& type);
+
+// Same as set_default_tensor_type() but takes a PyObject*
+void py_set_default_tensor_type(PyObject* type_obj);
 
 // Gets the ATen type object for the default tensor type. Note that the
 // returned value will be a VariableType instance.

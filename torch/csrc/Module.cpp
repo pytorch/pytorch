@@ -169,8 +169,8 @@ bool THPModule_isTensor(PyObject *obj)
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
+  torch::tensor::py_set_default_tensor_type(type);
   THPDefaultTensorClass = type;
-  torch::tensor::set_default_tensor_type(type);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
