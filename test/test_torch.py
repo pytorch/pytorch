@@ -1024,20 +1024,12 @@ class TestTorch(TestCase):
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
 
-        res2 = torch.Tensor()
-        torch.zeros_like(expected, out=res2)
-        self.assertEqual(res2, expected)
-
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_zeros_like_cuda(self):
         expected = torch.zeros(100, 100).cuda()
 
         res1 = torch.zeros_like(expected)
         self.assertEqual(res1, expected)
-
-        res2 = torch.Tensor().cuda()
-        torch.zeros_like(expected, out=res2)
-        self.assertEqual(res2, expected)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_zeros_like_multiple_device(self):
@@ -1064,20 +1056,12 @@ class TestTorch(TestCase):
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
 
-        res2 = torch.Tensor()
-        torch.ones_like(expected, out=res2)
-        self.assertEqual(res2, expected)
-
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_ones_like_cuda(self):
         expected = torch.ones(100, 100).cuda()
 
         res1 = torch.ones_like(expected)
         self.assertEqual(res1, expected)
-
-        res2 = torch.Tensor().cuda()
-        torch.ones_like(expected, out=res2)
-        self.assertEqual(res2, expected)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, 'only one GPU detected')
     def test_ones_like_multiple_device(self):
