@@ -91,6 +91,13 @@ if [ "$(uname)" == "Linux" ]; then
   CMAKE_ARGS+=("-DUSE_REDIS=ON")
 fi
 
+# Currently, on Jenkins mac os, we will use custom protobuf. Mac OS
+# contbuild at the moment is minimal dependency - it doesn't use glog
+# or gflags either.
+if [ "$(uname)" == "Darwin" ]; then
+  CMAKE_ARGS+=("-DBUILD_CUSTOM_PROTOBUF=ON")
+fi
+
 # Configure
 cmake "${ROOT_DIR}" ${CMAKE_ARGS[*]} "$@"
 
