@@ -93,6 +93,7 @@ class BuildExtension(build_ext):
         original_compile = self.compiler._compile
 
         def wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
+            # Copy before we make any modifications.
             cflags = copy.deepcopy(extra_postargs)
             try:
                 original_compiler = self.compiler.compiler_so
