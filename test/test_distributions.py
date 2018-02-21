@@ -2056,7 +2056,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(cauchy.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
 
     def test_dirichlet_shape(self):
-        dist = Dirichlet(variable([[0.6, 0.1], [0.3, 0.3], [0.1, 0.6]]), validate_args=True)
+        dist = Dirichlet(variable([[0.6, 0.3], [1.6, 1.3], [2.6, 2.3]]), validate_args=True)
         self.assertEqual(dist._batch_shape, torch.Size((3,)))
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
