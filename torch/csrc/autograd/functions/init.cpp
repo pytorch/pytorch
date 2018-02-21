@@ -138,7 +138,7 @@ namespace torch { namespace autograd {
 void initAutogradClosureBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<jit::InterpreterFunctionFactory,std::shared_ptr<jit::InterpreterFunctionFactory>>(m, "InterpreterFunctionFactory")
-    .def("__call__", &jit::InterpreterFunctionFactory::construct)
+    .def("__call__", &jit::InterpreterFunctionFactory::construct_function)
     ;
 
   m.def("_jit_createInterpreterFactory", [](jit::tracer::TracingState* tracing_state) {

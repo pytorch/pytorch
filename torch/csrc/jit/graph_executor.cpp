@@ -113,12 +113,7 @@ private:
     // gradients
     for(auto idx : grad.df_output_vjps) {
       auto & v = autograd::as_variable_ref(inputs[idx]);
-      // TODO: this kinda stuff is _way_ to low level to the public API of variable.
-      // Why do I have to care here whether v has a grad_fn or grad accumulator?
-      // Why do I have to care here about output_nr? I just want to say
-      // grad_fn->setOutputTo(i, v.input_port());
-      // TODO(psag): remove above rant once Function API is improved.
-      grad_fn->next_functions.push_back(v.gradient_edge());
+      grad_fn->add_next_edge(v.gradient_edge());
     }
     captureInputs(*grad_fn, inputs);
 
@@ -138,7 +133,7 @@ private:
       // reallocate variables that were already created in wrapTensors. We
       // should add an API for this.
       auto& output = autograd::as_variable_ref(outputs[idx]);
-      output.set_gradient_edge(autograd::Edge(grad_fn, grad_fn->num_inputs++));
+      autograd::create_gradient_edge(output, grad_fn);
       output.set_requires_grad(true);
     }
     captureOutputs(*grad_fn, outputs);

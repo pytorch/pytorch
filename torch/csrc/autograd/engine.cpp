@@ -1,7 +1,9 @@
 #include "torch/csrc/autograd/engine.h"
 
-#include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
+#include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
 #include <atomic>
@@ -54,7 +56,7 @@ struct FunctionTask {
 
 struct CompareFunctionTaskTime {
   bool operator()(FunctionTask const & t1, FunctionTask const & t2) {
-    return t1.fn->time < t2.fn->time;
+    return t1.fn->sequence_nr() < t2.fn->sequence_nr();
   }
 };
 
@@ -98,13 +100,13 @@ struct GraphTask {
     std::unique_ptr<std::vector<Capture>> captures;
   };
   // Exec info has a bit complicated semantics. If it's empty, it means the task is
-  // run in a "default" mode, which means that all next_functions we encounter should
+  // run in a "default" mode, which means that all next_edges we encounter should
   // get executed. If it's not empty, only functions that have an entry and this entry
   // has needed == True should be executed.
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
-  void init_to_execute(Function& graph_root, const function_list& captures);
+  void init_to_execute(Function& graph_root, const edge_list& captures);
 
   int owner;
 
@@ -212,14 +214,14 @@ auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void 
 }
 
 static variable_list call_pre_hooks(Function& fn, variable_list inputs) {
-  for (auto& hook : fn.pre_hooks) {
+  for (const auto& hook : fn.pre_hooks()) {
     inputs = (*hook)(inputs);
   }
   return inputs;
 }
 
 static variable_list call_post_hooks(Function& fn, variable_list outputs, variable_list inputs) {
-  for (auto& hook : fn.post_hooks) {
+  for (const auto& hook : fn.post_hooks()) {
     outputs = (*hook)(outputs, inputs);
   }
   return outputs;
@@ -230,7 +232,7 @@ static variable_list call_function(FunctionTask& task) {
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
   if(!task.base->keep_graph) {
-    fn.willReleaseVariables();
+    fn.will_release_variables();
   }
   auto outputs = fn(inputs);
 
@@ -255,13 +257,13 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 
   auto& fn = *task.fn;
   if (!task.base->keep_graph) {
-    fn.releaseVariables();
+    fn.release_variables();
   }
 
-  if (outputs.size() != fn.next_functions.size()) {
+  if (outputs.size() != fn.num_outputs()) {
     std::stringstream ss;
     ss << "Function '" << fn.name() << "' returned an invalid number of outputs - expected ";
-    ss << fn.next_functions.size() << ", but got " << outputs.size();
+    ss << fn.num_outputs() << ", but got " << outputs.size();
     throw std::runtime_error(ss.str());
   }
 
@@ -270,7 +272,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
   std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
-    const auto& next = fn.next_functions[i];
+    const auto& next = fn.next_edge(i);
 
     if (!next.is_valid()) continue;
 
@@ -297,7 +299,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
         }
       }
       // No buffers have been allocated for the function
-      InputBuffer input_buffer(next.function->num_inputs);
+      InputBuffer input_buffer(next.function->num_inputs());
       input_buffer.add(next.input_nr, std::move(output));
       if (is_ready) {
         auto& queue = ready_queue(input_buffer.device());
@@ -329,7 +331,7 @@ auto Engine::compute_dependencies(Function* root, GraphTask& task) -> void {
   auto& dependencies = task.dependencies;
   while (queue.size() > 0) {
     auto fn = queue.back(); queue.pop_back();
-    for (auto& edge : fn->next_functions) {
+    for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
         dependencies[next_ptr] += 1;
         const bool was_inserted = seen.insert(next_ptr).second;
@@ -355,11 +357,11 @@ struct ClearCallbacks {
   std::mutex& callbacks_lock;
 };
 
-auto Engine::execute(const function_list& input_roots,
+auto Engine::execute(const edge_list& input_roots,
                      const variable_list& inputs,
                      bool keep_graph,
                      bool create_graph,
-                     const function_list& outputs) -> variable_list {
+                     const edge_list& outputs) -> variable_list {
   std::call_once(start_threads_flag, &Engine::start_threads, this);
   // Callbacks are only valid for the duration of this run and should always be cleared
   ClearCallbacks _cb_guard(final_callbacks, post_callbacks_lock);
@@ -438,7 +440,7 @@ auto Engine::start_threads() -> void {
   }
 }
 
-void GraphTask::init_to_execute(Function& graph_root, const function_list& outputs) {
+void GraphTask::init_to_execute(Function& graph_root, const edge_list& outputs) {
   exec_info[&graph_root].needed = true;
 
   int output_idx = 0;
@@ -455,8 +457,8 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
   // is_needed = {}
   // def compute_is_needed(fn):
   //   if fn not in is_needed:
-  //     is_needed[fn] = any(compute_is_needed(next_fn)
-  //                         for next_fn in fn.next_functions)
+  //     is_needed[fn] = any(compute_is_needed(next_edge)
+  //                         for next_edge in fn.next_edges)
   //   return is_needed[fn]
   struct Frame {
     Frame (Function *fn) : fn(fn), next_next_fn(0) {}
@@ -464,7 +466,7 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
     std::size_t next_next_fn;
 
     Function* get_next_fn() {
-      auto & next = fn->next_functions;
+      const auto & next = fn->next_edges();
       auto num_next = next.size();
       while (next_next_fn < num_next) {
         auto fn = next[next_next_fn++].function.get();
@@ -475,7 +477,7 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
   };
   std::vector<Frame> stack;
   std::unordered_set<Function*> seen;
-  for (const auto & input : graph_root.next_functions) {
+  for (const auto & input : graph_root.next_edges()) {
     if (seen.count(input.function.get()) > 0) continue;
     stack.emplace_back(input.function.get());
     while (!stack.empty()) {
@@ -489,10 +491,10 @@ void GraphTask::init_to_execute(Function& graph_root, const function_list& outpu
         // NB: if we were using real recursion we could have saved some lookups
         // using a return value from recursive call. It would make this manually unrolled
         // version a lot more complicated, so I skipped that.
-        auto & next_fns = frame.fn->next_functions;
+        const auto & next_edges = frame.fn->next_edges();
         const bool needed = std::any_of(
-            next_fns.begin(), next_fns.end(), [&](const Edge& port) {
-              auto it = exec_info.find(port.function.get());
+            next_edges.begin(), next_edges.end(), [&](const Edge& edge) {
+              auto it = exec_info.find(edge.function.get());
               return it != exec_info.end() && it->second.should_execute();
             });
         exec_info[frame.fn].needed = needed;
