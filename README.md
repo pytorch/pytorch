@@ -195,7 +195,8 @@ python setup.py install
 
 On macOS
 ```bash
-os=$(sw_vers -productVersion | cut -d '.' -f 1,2) | MACOSX_DEPLOYMENT_TARGET=$os CC=clang CXX=clang++ python setup.py install
+os=$(sw_vers -productVersion | cut -d '.' -f 1,2)
+MACOSX_DEPLOYMENT_TARGET="$os" CC=clang CXX=clang++ python setup.py install
 ```
 
 ### Docker image
