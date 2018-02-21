@@ -104,6 +104,8 @@ class BuildExtension(build_ext):
                     cflags += ['--compiler-options', "'-fPIC'"]
                 elif isinstance(cflags, dict):
                         cflags = cflags['cxx']
+                # NVCC does not allow multiple -std to be passed, so we avoid
+                # overriding the option if the user explicitly passed it.
                 if not any(flag.startswith('-std=') for flag in cflags):
                     cflags.append('-std=c++11')
 
@@ -370,16 +372,18 @@ def _write_ninja_file(path,
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
 
-    common_cflags = ['-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
+    common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
     common_cflags += ['-I{}'.format(include) for include in includes]
 
-    cflags = common_cflags + ['-fPIC'] + extra_cflags
+    cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
         cuda_flags = common_cflags
         cuda_flags += ['--compiler-options', "'-fPIC'"]
         cuda_flags += extra_cuda_cflags
+        if not any(flag.startswith('-std=') for flag in cuda_flags):
+            cuda_flags.append('-std=c++11')
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
     ldflags = ['-shared'] + extra_ldflags
