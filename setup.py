@@ -854,6 +854,7 @@ if __name__ == '__main__':
                 'lib/*.h',
                 'lib/include/ATen/*.h',
                 'lib/include/ATen/cuda/*.cuh',
+                'lib/include/ATen/cudnn/*.h',
                 'lib/include/ATen/cuda/detail/*.cuh',
                 'lib/include/pybind11/*.h',
                 'lib/include/pybind11/detail/*.h',
