@@ -82,16 +82,9 @@ class BuildExtension(build_ext):
     '''A custom build extension for adding compiler-specific options.'''
 
     def build_extensions(self):
-        # On some platforms, like Windows, compiler_cxx is not available.
-        if hasattr(self.compiler, 'compiler_cxx'):
-            compiler = self.compiler.compiler_cxx[0]
-        else:
-            compiler = os.environ.get('CXX', 'c++')
-        check_compiler_abi_compatibility(compiler)
-
+        self._check_abi()
         for extension in self.extensions:
-            define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
-            extension.extra_compile_args = [define]
+            self._define_torch_extension_name(extension)
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
@@ -106,11 +99,12 @@ class BuildExtension(build_ext):
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    cflags += ['-c', '--compiler-options', "'-fPIC'"]
-                else:
-                    if isinstance(cflags, dict):
+                    # We're copying cflags here to avoid modifying the argument
+                    cflags = ['--compiler-options', "'-fPIC'"] + cflags
+                elif isinstance(cflags, dict):
                         cflags = cflags['cxx']
-                    cflags.append('-std=c++11')
+                if not any(flag.startswith('-std=') for flag in cflags):
+                    cflags = ['-std=c++11'] + cflags
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
@@ -121,6 +115,22 @@ class BuildExtension(build_ext):
         self.compiler._compile = wrap_compile
 
         build_ext.build_extensions(self)
+
+    def _check_abi(self):
+        # On some platforms, like Windows, compiler_cxx is not available.
+        if hasattr(self.compiler, 'compiler_cxx'):
+            compiler = self.compiler.compiler_cxx[0]
+        else:
+            compiler = os.environ.get('CXX', 'c++')
+        check_compiler_abi_compatibility(compiler)
+
+    def _define_torch_extension_name(self, extension):
+        define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+        if isinstance(extension.extra_compile_args, dict):
+            for args in extension.extra_compile_args.values():
+                args.append(define)
+        else:
+            extension.extra_compile_args.append(define)
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -372,7 +382,7 @@ def _write_ninja_file(path,
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
     ldflags = ['-shared'] + extra_ldflags
-    # The darwin linker needs explicit consent to ignore unresolved symbols
+    # The darwin linker needs explicit consent to ignore unresolved symbols.
     if sys.platform == 'darwin':
         ldflags.append('-undefined dynamic_lookup')
     flags.append('ldflags = {}'.format(' '.join(ldflags)))
@@ -402,7 +412,7 @@ def _write_ninja_file(path,
             rule = 'cuda_compile'
             # Use a different object filename in case a C++ and CUDA file have
             # the same filename but different extension (.cpp vs. .cu).
-            target = '{}_cuda.o'.format(file_name)
+            target = '{}.cuda.o'.format(file_name)
         else:
             rule = 'compile'
             target = '{}.o'.format(file_name)
