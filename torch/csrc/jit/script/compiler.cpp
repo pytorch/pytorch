@@ -494,16 +494,18 @@ struct to_ir {
                 const auto& type = value.get()->tree(1)->stringValue();
                 attributes.insert({name, {v, type}});
               } break;
-              case TK_LIST:
+              case TK_LIST: {
                 std::vector<double> vs{};
                 for (const auto& tree : value.get()->trees()) {
                   vs.push_back(tree->tree(0)->doubleValue());
                 }
                 const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
                 list_attributes.insert({name, {std::move(vs), type}});
+              } break;
+            default:
+                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+                break;
             }
-            break;
-            break;
           }
           return emitNode(
                      kind, inputs, output_size, attributes, list_attributes)
