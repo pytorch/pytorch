@@ -1076,8 +1076,13 @@ class TestTorch(TestCase):
         for dtype in dtypes:
             # no ops on torch.float16 currently, cuda.float16 doesn't work on windows
             if dtype != torch.float16:
-                out = torch._C._VariableFunctions.zeros((2, 3), dtype=dtype)
-                self.assertEqual(out.dtype, dtype)
+                if dtype.is_cuda and torch.cuda.device_count() > 1:
+                    out = torch._C._VariableFunctions.zeros((2, 3), device=1, dtype=dtype)
+                    self.assertIs(dtype, out.dtype)
+                    self.assertEqual(1, out.get_device())
+                else:
+                    out = torch._C._VariableFunctions.zeros((2, 3), dtype=dtype)
+                    self.assertIs(dtype, out.dtype)
             self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
             self.assertEqual(is_sparse, dtype.is_sparse)
 
