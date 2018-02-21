@@ -1,3 +1,9 @@
+// NOTE: This is a copy of cuda_extension_kernel.cu. It's kept here to test
+// collision handling when a C++ file and CUDA file share the same filename.
+// Setuptools can't deal with this at all, so the setup.py-based test uses
+// cuda_extension_kernel.cu and the JIT test uses this file. Symlinks don't
+// work well on Windows, so this is the most thorough solution right now.
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 
