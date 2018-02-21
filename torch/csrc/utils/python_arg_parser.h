@@ -41,7 +41,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, DTYPE
+  BOOL, STORAGE, PYOBJECT, TYPE
 };
 
 struct FunctionParameter;
@@ -82,7 +82,8 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
-  inline const at::Type& dtype(int i);
+  inline const at::Type& type(int i);
+  inline const at::Type& typeWithDefault(int i, const at::Type& default_type);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -235,9 +236,22 @@ static at::Type& default_type() {
   return *torch::autograd::VariableType::getType(*THPDefaultATenType);
 }
 
-inline const at::Type& PythonArgs::dtype(int i) {
-  if (!args[i]) return default_type();
-  return *reinterpret_cast<THPDtype*>(args[i])->cdata;
+inline const at::Type& PythonArgs::type(int i) {
+  return typeWithDefault(i, default_type());
+}
+
+inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& default_type) {
+  if (!args[i]) return default_type;
+  THPDtype* dtype = reinterpret_cast<THPDtype*>(args[i]);
+  if (dtype->cdata == nullptr) {
+    std::ostringstream oss;
+    oss << "Error attempting to use dtype " << dtype->name << ".";
+    if (dtype->is_cuda) {
+      oss << "  Torch not compiled with CUDA enabled." << std::endl;
+    }
+    throw std::runtime_error(oss.str());
+  }
+  return *(dtype->cdata);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {

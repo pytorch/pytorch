@@ -3,6 +3,7 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
+#include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
@@ -29,19 +30,9 @@ static at::Type& default_type() {
   return *VariableType::getType(*THPDefaultATenType);
 }
 
-static void lazy_init_cuda() {
-  static std::once_flag once;
-  std::call_once(once, []() {
-    auto module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
-    if (!module) throw python_error();
-    auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
-    if (!res) throw python_error();
-  });
-}
-
 static void maybe_initialize_cuda(const at::Type &type) {
   if (type.is_cuda()) {
-    lazy_init_cuda();
+    torch::cuda::lazy_init();
   }
 }
 

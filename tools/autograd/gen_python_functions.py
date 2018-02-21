@@ -71,7 +71,7 @@ if (r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
   if (!r.isNone(${dtype_idx})) {
-    check_out_dtype_matches(r.tensor(${out_idx}), r.dtype(${dtype_idx}));
+    check_out_dtype_matches(r.tensor(${out_idx}), r.type(${dtype_idx}));
   }
   ${call_dispatch_out}
 }
@@ -199,7 +199,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
-        'const Type &': 'dtype',
+        'const Type &': 'type',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -274,8 +274,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 dispatch_type = 'const Tensor &'
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
-            elif dispatch_type == 'dtype':
-                dispatch_type = 'const Type &'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -520,8 +518,6 @@ def get_python_signature(declaration, include_out):
 
     def get_typed_arg(arg):
         typename = arg['simple_type']
-        if typename == 'Type':
-            typename = 'dtype'
         if arg.get('is_nullable'):
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:
