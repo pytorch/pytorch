@@ -87,6 +87,9 @@ def get_gpu_type(t):
 def to_gpu(obj, type_map={}):
     if torch.is_tensor(obj):
         t = type_map.get(type(obj), get_gpu_type(type(obj)))
+        # Workaround since torch.HalfTensor doesn't support clone()
+        if type(obj) == torch.HalfTensor:
+            return obj.new().resize_(obj.size()).copy_(obj).type(t)
         return obj.clone().type(t)
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
