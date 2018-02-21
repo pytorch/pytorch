@@ -356,8 +356,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         elif dtype_formal_name:
             env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(dtype_formal_name)
             env['dispatch_call'] = '{}.{}'.format(dtype_formal_name, declaration['name'])
-        elif declaration['name'] == 'randperm':
-            env['dispatch_call'] = 'long_type().{}'.format(declaration['name'])
         else:
             env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
@@ -411,9 +409,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_return = True
 
         if has_tensor_return and not has_tensor_input_arg:
+            if declaration['name'].startswith('randperm'):
+                default_type = 'torch.int64'
+            else:
+                default_type = 'None'
             dtype_arg = {
-                'default': "{}",  # so the signature ends up with '=None'
-                'default_init': "{}",
+                'default': default_type,
                 'dynamic_type': 'Type',
                 'kwarg_only': True,
                 'name': 'dtype',
@@ -424,7 +425,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
             requires_grad_arg = {
                 'default': False,
-                'default_init': False,
                 'dynamic_type': 'bool',
                 'kwarg_only': True,
                 'name': 'requires_grad',

@@ -297,7 +297,6 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
 
     def nll_loss_helper(input, target, weight, ignore_index):
         if target == ignore_index:
-            # TODO: remove once Variable and Tensor are merged
             return (0, 0)
         norm = 1 if weight is None else weight[target]
         result = -input[target] * norm

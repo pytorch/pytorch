@@ -5863,7 +5863,7 @@ new_module_tests = [
         check_gradgrad=False,
     ),
     dict(
-        module_name='EmbeddingBag_sparse',
+        fullname='EmbeddingBag_sparse',
         constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
         input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,

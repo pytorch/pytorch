@@ -26,10 +26,6 @@ static at::Type& default_type() {
   return torch::tensor::get_default_tensor_type();
 }
 
-static at::Type& long_type() {
-  return default_type().toScalarType(at::kLong);
-}
-
 static void maybe_initialize_cuda(const at::Type &type) {
 #ifdef WITH_CUDA
   if (type.is_cuda()) {

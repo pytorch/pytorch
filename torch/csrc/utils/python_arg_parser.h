@@ -34,8 +34,7 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
-
-extern at::Type* THPDefaultATenType;
+#include "torch/csrc/tensor/python_tensor.h"
 
 namespace torch {
 
@@ -131,6 +130,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    at::Type* default_type;
   };
 };
 
@@ -229,19 +229,11 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
-static at::Type& default_type() {
-  if (!THPDefaultATenType) {
-    throw std::runtime_error("THPDefaultATenType not initialized");
-  }
-  return *torch::autograd::VariableType::getType(*THPDefaultATenType);
-}
-
 inline const at::Type& PythonArgs::type(int i) {
-  return typeWithDefault(i, default_type());
-}
-
-inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& default_type) {
-  if (!args[i]) return default_type;
+  if (!args[i]) {
+    auto type = signature.params[i].default_type;
+    return type ? *type : torch::tensor::get_default_tensor_type();
+  }
   THPDtype* dtype = reinterpret_cast<THPDtype*>(args[i]);
   if (dtype->cdata == nullptr) {
     std::ostringstream oss;
@@ -252,6 +244,11 @@ inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& defaul
     throw std::runtime_error(oss.str());
   }
   return *(dtype->cdata);
+}
+
+inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& default_type) {
+  if (!args[i]) return default_type;
+  return type(i);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
