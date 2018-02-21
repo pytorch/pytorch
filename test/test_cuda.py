@@ -22,10 +22,18 @@ if HAS_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     HAS_MAGMA = torch.cuda.has_magma
 
+floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
+                torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
+
 
 def is_floating(t):
-    return type(t) in [torch.FloatTensor, torch.DoubleTensor,
-                       torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
+    if not isinstance(t, type):
+        raise TypeError('t should be an instance of type')
+    return t in floating_set
+
+
+def is_half(t):
+    return t in [torch.HalfTensor, torch.cuda.HalfTensor]
 
 types = [
     torch.FloatTensor,
@@ -35,12 +43,19 @@ types = [
     torch.ShortTensor,
     torch.CharTensor,
     torch.ByteTensor,
+    torch.HalfTensor,
 ]
 
 float_types = [
     torch.FloatTensor,
-    torch.DoubleTensor
-]  # TODO: add half...
+    torch.DoubleTensor,
+    torch.HalfTensor,
+]
+
+float_types_no_half = [
+    torch.FloatTensor,
+    torch.DoubleTensor,
+]
 
 
 def number(floating, integer, t):
@@ -49,7 +64,6 @@ def number(floating, integer, t):
         return floating
     else:
         return integer
-# TODO: check HalfTensor
 
 S = 10
 M = 50
@@ -70,17 +84,56 @@ def make_sparse_tensor(t, n, *sizes):
     return t(i, v, torch.Size(sizes))
 
 
+def tensor_clamp(t, min, max):
+    if is_half(type(t)):
+        return t.float().clamp(min, max).half()
+    else:
+        return t.clamp(min, max)
+
+
+def tensor_mul(t, scale):
+    if is_half(type(t)):
+        return t.float().mul(scale).half()
+    else:
+        return t.mul(scale)
+
+
+def tensor_abs_(t):
+    if is_half(type(t)):
+        return t.float().abs_().half()
+    else:
+        return t.abs_()
+
+
+def constant_tensor_sub(a, b):
+    # helper function to address const - torch.HalfTensor where it doesn't
+    # have resize_as()
+    if is_half(type(b)):
+        return (a - b.float()).half()
+    else:
+        return a - b
+
+
+def constant_tensor_add(a, b):
+    # helper function to address const + torch.HalfTensor where it doesn't
+    # have add()
+    if is_half(type(b)):
+        return (a + b.float()).half()
+    else:
+        return a + b
+
+
 def small_2d(t):
     return make_tensor(t, S, S)
 
 
 def small_2d_scaled(t, scale=10):
-    return make_tensor(t, S, S).mul(scale)
+    return tensor_mul(make_tensor(t, S, S), scale)
 
 
 def small_2d_oneish(t):
     if is_floating(t):
-        return make_tensor(t, S, S).clamp(min=0.99, max=1.01)
+        return tensor_clamp(make_tensor(t, S, S), min=0.99, max=1.01)
     else:
         return t(S, S).fill_(1)
 
@@ -98,11 +151,14 @@ def medium_2d(t):
 
 
 def medium_2d_expanded(t):
-    return t(1).expand(M, M)
+    if is_half(t):
+        return t(1).float().expand(M, M).half()
+    else:
+        return t(1).expand(M, M)
 
 
 def medium_2d_scaled(t, scale=10):
-    return make_tensor(t, M, M).mul(scale)
+    return tensor_mul(make_tensor(t, M, M), scale)
 
 
 def small_3d_ones(t):
@@ -110,8 +166,9 @@ def small_3d_ones(t):
 
 
 def small_3d_positive(t):
-    min_val = 1e-3 if is_floating(t) else 2
-    return make_tensor(t, S, S, S).clamp_(min_val, 120)
+    # In div_tensor(), half cannot achieve float precision
+    min_val = 1e-3 if is_floating(t) and not is_half(t) else 2
+    return tensor_clamp(make_tensor(t, S, S, S), min_val, 120)
 
 
 def small_3d_unique(t):
@@ -169,17 +226,18 @@ tests = [
     ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', float_types),
     ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', float_types),
     ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
-    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types),
-    ('pow', small_3d, lambda t: [small_3d(t).abs_()], 'tensor', float_types),
+    # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
+    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half),
+    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types),
     ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types),
     ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('addbmm', small_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
     ('baddbmm', small_3d, lambda t: [small_3d(t), small_3d(t)],),
     ('baddbmm', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
-    ('addcdiv', small_2d_lapack, lambda t: [small_2d_lapack(t).mul(2), small_2d_lapack(t)],),
+    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],),
     ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t),
-                                            small_2d_lapack(t).mul(2), small_2d_lapack(t)], 'scalar'),
+                                            tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], 'scalar'),
     ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)],),
     ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)],),
@@ -251,7 +309,7 @@ tests = [
     ('remainder', small_3d, lambda t: [3], 'value'),
     ('remainder', small_3d, lambda t: [-3], 'negative_value'),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('remainder', small_3d, lambda t: [0 - small_3d_positive(t)], 'negative_tensor'),
+    ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor'),
     ('std', small_3d, lambda t: [],),
     ('std', small_3d, lambda t: [1], 'dim'),
     ('std', small_3d, lambda t: [-1], 'neg_dim'),
@@ -321,9 +379,9 @@ tests = [
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
-    ('rsqrt', lambda t: small_3d(t) + 1, lambda t: [], None, float_types),
-    ('sinh', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
-    ('tan', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
+    ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
+    ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
+    ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
@@ -349,6 +407,54 @@ custom_precision = {
     'cumprod': 1e-4,
     'qr': 3e-4,
     'digamma': 1e0,  # large values lead to large absolute error but small relative error
+}
+
+custom_half_precision = {
+    'add': 1e-2,
+    'acos': 1e-3,
+    'addbmm': 1e-1,
+    'addcmul': 1e-2,
+    'addmm': 1e-1,
+    'addmv': 1e-2,
+    'addr': 1e-2,
+    'asin': 1e-3,
+    'atan2': 1e-3,
+    'atan': 1e-3,
+    'baddbmm': 1e-2,
+    'cos': 1e-3,
+    'cosh': 1e-2,
+    'cross': 1e-2,
+    'cumprod': 1e-2,
+    'cumsum': 1e-2,
+    'div': 1e-3,
+    'dot': 1e-2,
+    'erf': 1e-3,
+    'erfinv': 1e-3,
+    'exp': 1e-2,
+    'expm1': 1e-2,
+    'lerp': 1e-2,
+    'lgamma': 1e-2,
+    'log': 1e-2,
+    'log1p': 1e-3,
+    'mean': 1e-3,
+    'mul': 1e-2,
+    'norm': 1e-2,
+    'pow': 1e-1,
+    'prod': 1e-3,
+    'reciprocal': 1e-1,
+    'remainder': 1e-3,
+    'renorm': 1e-3,
+    'rsqrt': 1e-2,
+    'sigmoid': 1e-3,
+    'sin': 1e-3,
+    'sinh': 1e-3,
+    'sqrt': 1e-3,
+    'std': 1e-3,
+    'sub': 1e-2,
+    'sum': 1e-2,
+    'tan': 1e-3,
+    'tanh': 1e-3,
+    'var': 1e-3,
 }
 
 simple_pointwise = [
@@ -412,6 +518,9 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
         gpu_args = [to_gpu(arg) for arg in cpu_args]
+        if t.__name__ == 'HalfTensor':
+            cpu_tensor = cpu_tensor.float()
+            cpu_args = [arg.float() if torch.is_tensor(arg) and is_half(type(arg)) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -429,7 +538,11 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         self.assertEqual(cpu_tensor, gpu_tensor, precision)
         self.assertEqual(cpu_args, gpu_args, precision)
         # Compare results
-        self.assertEqual(cpu_result, gpu_result, precision)
+        if fn == 'element_size' and t.__name__ == 'HalfTensor':
+            # Workaround since cpu_result is float
+            self.assertEqual(2, gpu_result)
+        else:
+            self.assertEqual(cpu_result, gpu_result, precision)
     return tmp
 
 
@@ -1392,6 +1505,9 @@ if HAS_CUDA:
                 continue
 
             precision = custom_precision.get(name, TestCuda.precision)
+            if t == torch.HalfTensor:
+                precision = custom_half_precision.get(name, precision)
+
             for inplace in (True, False):
                 if inplace and no_inplace:
                     continue
@@ -1399,7 +1515,10 @@ if HAS_CUDA:
                     name_inner = name + '_'
                 else:
                     name_inner = name
-                if not hasattr(tensor, name_inner):
+
+                if t != torch.HalfTensor and not hasattr(tensor, name_inner):
+                    # torch.HalfTensor doesn't support most operations,
+                    # but we use torch.FloatTensor as cpu baseline
                     continue
                 if not hasattr(gpu_tensor, name_inner):
                     print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(
