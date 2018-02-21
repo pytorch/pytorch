@@ -32,6 +32,11 @@ ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
 
+# windef.h will define max/min macros if NOMINMAX is not defined
+IF(MSVC)
+  add_definitions(/DNOMINMAX)
+ENDIF(MSVC)
+
 #Check if certain std functions are supported. Sometimes
 #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
 CHECK_CXX_SOURCE_COMPILES("

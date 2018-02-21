@@ -253,6 +253,8 @@ class build_deps(Command):
         check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'cpuinfo', 'CMakeLists.txt'))
+        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'tbb', 'tbb_remote', 'Makefile'))
 
         check_pydep('yaml', 'pyyaml')
         check_pydep('typing', 'typing')
