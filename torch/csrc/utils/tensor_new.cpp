@@ -212,7 +212,7 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
     "new_tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
-  PyObject* parsed_args[3];
+  PyObject* parsed_args[4];
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0)), r.toBool(2));
