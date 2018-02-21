@@ -176,7 +176,7 @@
 - func: empty_like(Tensor self) -> Tensor
   variants: function
 
-- func: empty_like(Tensor self, Type dtype) -> Tensor
+- func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
@@ -264,7 +264,7 @@
 - func: ones_like(Tensor self) -> Tensor
   variants: function
 
-- func: ones_like(Tensor self, Type dtype) -> Tensor
+- func: ones_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
@@ -275,13 +275,13 @@
 - func: rand_like(Tensor self) -> Tensor
   variants: function
 
-- func: rand_like(Tensor self, Type dtype) -> Tensor
+- func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
 - func: randn_like(Tensor self) -> Tensor
   variants: function
 
-- func: randn_like(Tensor self, Type dtype) -> Tensor
+- func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
@@ -378,7 +378,7 @@
 - func: zeros_like(Tensor self) -> Tensor
   variants: function
 
-- func: zeros_like(Tensor self, Type dtype) -> Tensor
+- func: zeros_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
