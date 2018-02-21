@@ -2,7 +2,7 @@ import torch
 
 from . import Sequential, ModuleList, Linear
 from .module import Module
-from ..functional import log_softmax
+from ..functional import log_softmax, cross_entropy
 
 
 class AdaptiveLogSoftmax(Module):
@@ -75,7 +75,8 @@ class AdaptiveLogSoftmax(Module):
         https://en.wikipedia.org/wiki/Zipf%27s_law
     """
 
-    def __init__(self, in_features, n_classes, cutoffs, div_value=2.):
+    def __init__(self, in_features, n_classes, cutoffs, div_value=2.,
+                 return_logprob=False):
         super(AdaptiveLogSoftmax, self).__init__()
 
         cutoffs = list(cutoffs)
@@ -91,6 +92,7 @@ class AdaptiveLogSoftmax(Module):
                              "integers sorted in an increasing order, where "
                              "each value is between 1 and n_classes-1")
 
+        self.return_logprob = return_logprob
         self.in_features = in_features
         self.n_classes = n_classes
         self.cutoffs = cutoffs + [n_classes]
@@ -128,10 +130,10 @@ class AdaptiveLogSoftmax(Module):
 
         used_rows = 0
         batch_size = target.size(0)
+        out_size = batch_size if (self.return_logprob) else 1
 
-        output = input.new(batch_size).zero_()
+        output = input.new(out_size).zero_()
         gather_inds = target.new(batch_size).zero_()
-        head_logprob = log_softmax(self.head(input), dim=1)
 
         cutoff_values = [0] + self.cutoffs
         for i in range(len(cutoff_values) - 1):
@@ -153,12 +155,17 @@ class AdaptiveLogSoftmax(Module):
             else:
                 input_subset = input.index_select(0, row_indices)
                 cluster_output = self.tail[i - 1](input_subset)
-                cluster_logprob = log_softmax(cluster_output, dim=1)
-                local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1))
-
                 cluster_index = self.shortlist_size + i - 1
+
                 gather_inds.index_fill_(0, row_indices, cluster_index)
-                output.index_copy_(0, row_indices, local_logprob.squeeze(1))
+
+                if self.return_logprob:
+                    cluster_logprob = log_softmax(cluster_output, dim=1)
+                    local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1))
+                    output.index_copy_(0, row_indices, local_logprob.squeeze(1))
+
+                else:
+                    output += cross_entropy(cluster_output, relative_target, size_average=False)
 
             used_rows += row_indices.numel()
 
@@ -169,7 +176,16 @@ class AdaptiveLogSoftmax(Module):
                                                      int(target.min()),
                                                      int(target.max())))
 
-        output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze()
+        head_output = self.head(input)
+
+        if self.return_logprob:
+            head_logprob = log_softmax(head_output, dim=1)
+            output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze()
+
+        else:
+            output += cross_entropy(head_output, gather_inds, size_average=False)
+            output /= batch_size
+
         return output
 
     def get_log_proba(self, input):
