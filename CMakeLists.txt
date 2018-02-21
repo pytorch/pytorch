@@ -17,6 +17,7 @@ set(CAFFE2_VERSION
 include(CMakeDependentOption)
 option(BUILD_BINARY "Build C++ binaries" ON)
 option(BUILD_DOCS "Build documentation" OFF)
+option(BUILD_CUSTOM_PROTOBUF "If set, build Caffe2's own protobuf under third_party" OFF)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
@@ -207,23 +208,20 @@ endif()
 if (USE_GFLAGS)
   list(APPEND CAFFE2_INTERFACE_LIBS gflags)
 endif()
-if (NOT CAFFE2_USE_CUSTOM_PROTOBUF)
-  list(APPEND CAFFE2_INTERFACE_LIBS ${PROTOBUF_LIBRARIES})
-else()
-  # TODO(jiayq): this is not ideal, as during installation one will not
-  # have the libprotobuf target ready. It is here only so that we can
-  # make in-house cmake builds run (link) properly.
-  list(APPEND CAFFE2_INTERFACE_LIBS libprotobuf)
-endif()
+list(APPEND CAFFE2_INTERFACE_LIBS protobuf::libprotobuf)
+
+# TODO: figure out how we should remove this public dependency.
 if (USE_OPENCV)
   list(APPEND CAFFE2_INTERFACE_LIBS ${OpenCV_LIBS})
 endif()
 
-if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR CAFFE2_USE_CUSTOM_PROTOBUF)
+if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING
       "Generated cmake files are only fully tested if one builds "
-      "with system glog, gflags, and protobuf.")
+      "with system glog, gflags, and protobuf. Other settings may "
+      "generate files that are not well tested.")
 endif()
+
 target_link_libraries(caffe2 INTERFACE ${CAFFE2_INTERFACE_LIBS})
 if (USE_CUDA)
   target_link_libraries(caffe2_gpu INTERFACE ${CAFFE2_INTERFACE_LIBS})
@@ -252,6 +250,7 @@ if (BUILD_SHARED_LIBS)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2

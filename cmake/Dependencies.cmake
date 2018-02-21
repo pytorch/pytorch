@@ -82,7 +82,6 @@ if(USE_NNPACK)
   endif()
 endif()
 
-
 # ---[ On Android, Caffe2 uses cpufeatures library in the thread pool
 if (ANDROID)
   # ---[ Check if cpufeatures was already imported
