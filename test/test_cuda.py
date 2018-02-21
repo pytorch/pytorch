@@ -1496,9 +1496,9 @@ class TestCuda(TestCase):
 def load_ignore_file():
     from os.path import join, dirname
     global ignores
-    path = join(dirname(__file__), 'data', 'cuda_test_ignores.txt')
+    path = join(dirname(__file__), 'data', 'test_cuda_ignores.txt')
     with open(path, 'r') as f:
-        ignores = set(f.read().splitlines())
+        ignores = {l for l in f.read().splitlines() if not l.startswith('#')}
 
 
 def generate_tests():

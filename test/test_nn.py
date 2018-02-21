@@ -296,8 +296,8 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             def apply_fn(input1, input2, *params):
                 return module(input1, input2, target)
 
-        # We don't pass `target` as part of inputs because we don't currently
-        # compute the gradient w.r.t. target for loss functions.
+        # TODO: we don't pass `target` as part of inputs because we don't
+        # currently compute the gradient w.r.t. target for loss functions.
         gradcheck(apply_fn, inputs)
         gradgradcheck(apply_fn, inputs)
 

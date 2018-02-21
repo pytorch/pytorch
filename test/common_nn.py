@@ -264,29 +264,20 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
     output = torch.zeros(out_size).type_as(input)
-    if isinstance(target, Variable):
-        target = target.data
-    if isinstance(input, Variable):
-        input = input.data
 
     if weight is None:
-        weight = Variable(torch.ones(C).type_as(input))
-    if torch.is_tensor(weight):
-        # TODO: remove this once Variables and tensors merge
-        weight = Variable(weight)
-    total_weight_data = 0
+        weight = torch.ones(C).type_as(input)
+    total_weight = 0
     for tup in product(*[range(size) for size in out_size]):
         t_nx = target[tup]
-        norm = 0. if ignore_index == t_nx else weight[t_nx]
-        if isinstance(norm, Variable):
-            norm = norm.item()
+        norm = 0. if ignore_index == t_nx else weight[t_nx].item()
         input_index = list(tup)
         input_index.insert(1, t_nx)
         output[tup] = -input[tuple(input_index)] * norm
-        total_weight_data += norm
+        total_weight += norm
 
     if reduce and size_average:
-        return output.sum() / total_weight_data
+        return output.sum() / total_weight
     elif reduce:
         return output.sum()
     return output
@@ -308,7 +299,7 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
-    losses_tensor = torch.Tensor(losses).type_as(input)
+    losses_tensor = input.new_tensor(losses)
     if reduce and size_average:
         return sum(losses_tensor) / sum(weights)
     elif reduce:
@@ -848,8 +839,6 @@ class ModuleTest(TestBase):
 
         if self.reference_fn is not None:
             out = test_case._forward(module, input)
-            if isinstance(out, Variable):
-                out = out.data
             ref_input = deepcopy(input)
             expected_out = self.reference_fn(ref_input, test_case._get_parameters(module)[0])
             test_case.assertEqual(out, expected_out)

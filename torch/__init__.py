@@ -270,7 +270,6 @@ _storage_classes = {
 }
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_types()
-# which calls torch::tensor::initialize_python_bindings()
 _tensor_classes = set()
 
 _integer_tensor_classes = {

@@ -303,12 +303,7 @@ def _str(self, include_footer=True):
         strt = _tensor_str(self)
 
     if include_footer:
-        if empty:
-            size_str = '(0)'
-        elif dim == 0:
-            size_str = '()'
-        else:
-            size_str = 'x'.join(str(dim) for dim in self.shape)
+        size_str = '({})'.format(','.join(str(size) for size in self.shape))
         device_str = '' if not self.is_cuda else \
             ' (GPU {})'.format(self.get_device())
         strt += '[{} of size {}{}]\n'.format(self.type(), size_str, device_str)

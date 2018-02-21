@@ -1,3 +1,5 @@
+# List of functions that are not implemented on CUDA tensors
+# These are skipped by test_cuda.py
 torch.ByteTensor.abs
 torch.ByteTensor.abs_
 torch.ByteTensor.dist

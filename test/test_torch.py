@@ -3879,7 +3879,7 @@ class TestTorch(TestCase):
         dest = torch.index_select(src, 0, idx)
         self.assertEqual(dest.shape, (5, 4, 5))
         for i in range(idx.size(0)):
-            self.assertEqual(dest[i], src[idx[i].item()])
+            self.assertEqual(dest[i], src[idx[i]])
 
         # Check that 'out' is used correctly.
         out = torch.randn(5 * 4 * 5)
@@ -4205,7 +4205,7 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: tensor2.expand(-1, -1))
 
         # test expanding empty to empty
-        self.assertEqual(torch.Tensor(0).expand((0,)), torch.Tensor(0))
+        self.assertEqual(torch.zeros(0).expand((0,)), torch.zeros(0))
 
     def test_repeat(self):
 
