@@ -1,3 +1,4 @@
+import copy
 import glob
 import imp
 import os
@@ -91,7 +92,8 @@ class BuildExtension(build_ext):
         # Save the original _compile method for later.
         original_compile = self.compiler._compile
 
-        def wrap_compile(obj, src, ext, cc_args, cflags, pp_opts):
+        def wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
+            cflags = copy.deepcopy(extra_postargs)
             try:
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
@@ -99,12 +101,11 @@ class BuildExtension(build_ext):
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    # We're copying cflags here to avoid modifying the argument
-                    cflags = ['--compiler-options', "'-fPIC'"] + cflags
+                    cflags += ['--compiler-options', "'-fPIC'"]
                 elif isinstance(cflags, dict):
                         cflags = cflags['cxx']
                 if not any(flag.startswith('-std=') for flag in cflags):
-                    cflags = ['-std=c++11'] + cflags
+                    cflags.append('-std=c++11')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
             finally:
