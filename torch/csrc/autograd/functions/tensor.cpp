@@ -1,4 +1,4 @@
-#include "tensor.h"
+#include "torch/csrc/autograd/functions/tensor.h"
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
