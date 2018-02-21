@@ -5,6 +5,13 @@ import re
 from collections import OrderedDict
 from code_template import CodeTemplate
 
+try:
+    import typing
+except ImportError:
+    raise RuntimeError(
+        'Missing build dependency: Unable to import the `typing` module. '
+        'Please install it via `conda install typing` or `pip install typing`')
+
 from typing import Any, Dict, List, Generic, Optional, Set, Tuple, \
     Union, TypeVar, NamedTuple
 
