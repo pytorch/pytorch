@@ -750,9 +750,8 @@ class TestTorch(TestCase):
 
         # test deprecated info argument
         info = cast(torch.IntTensor())
-        with warnings.catch_warnings(record=True) as w:
+        with warnings.catch_warnings(record=True):
             a_LU, pivots = a.btrifact(info=info)
-            self.assertEqual(len(w), 1)
         self.assertEqual(info.abs().sum(), 0)
 
         a_LU_, pivots_, info_ = a.btrifact_with_info()
