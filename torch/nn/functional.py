@@ -1611,15 +1611,15 @@ def mse_loss(input, target, size_average=True, reduce=True):
                            input, target, size_average, reduce)
 
 
-def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
-    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=True) -> Tensor
+def margin_ranking_loss(input1, input2, target, margin=0, size_average=True, reduce=True):
+    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=True, reduce=True) -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
     if input1.dim() == 0 or input2.dim() == 0 or target.dim() == 0:
         raise RuntimeError(("margin_ranking_loss does not support scalars, got sizes: "
                             "input1: {}, input2: {}, target: {} ".format(input1.size(), input2.size(), target.size())))
-    return _functions.loss.MarginRankingLoss.apply(input1, input2, target, margin, size_average)
+    return torch._C._VariableFunctions.margin_ranking_loss(input1, input2, target, margin, size_average, reduce)
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True):

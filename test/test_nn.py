@@ -3824,6 +3824,22 @@ class TestNN(NNTestCase):
         self.assertEqual(F.cosine_embedding_loss(input1, input2, target, margin=0.5, reduce=False),
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, margin=0.5, reduce=False))
 
+    def test_margin_ranking_loss_no_reduce(self):
+        input1 = Variable(torch.randn(15).mul(10), requires_grad=True)
+        input2 = Variable(torch.randn(15).mul(10), requires_grad=True)
+        target = Variable(torch.randn(15).sign())
+        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(x, y, z), (input1, input2, target)))
+        self.assertEqual(F.margin_ranking_loss(input1, input2, target),
+                         loss_reference_fns['MarginRankingLoss'](input1, input2, target))
+
+    def test_margin_ranking_loss_margin_no_reduce(self):
+        input1 = Variable(torch.randn(15).mul(10), requires_grad=True)
+        input2 = Variable(torch.randn(15).mul(10), requires_grad=True)
+        target = Variable(torch.randn(15).sign())
+        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(x, y, z, margin=0.5), (input1, input2, target)))
+        self.assertEqual(F.margin_ranking_loss(input1, input2, target, margin=0.5),
+                         loss_reference_fns['MarginRankingLoss'](input1, input2, target, margin=0.5))
+
     def test_triplet_margin_loss(self):
         input1 = Variable(torch.randn(5, 10), requires_grad=True)
         input2 = Variable(torch.randn(5, 10), requires_grad=True)
@@ -4894,6 +4910,16 @@ new_criterion_tests = [
         desc='weights',
         check_no_size_average=True,
         check_gradgrad=False,
+    ),
+    dict(
+        module_name='MarginRankingLoss',
+        constructor_args=(True, ),
+        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
+        target_fn=lambda: torch.randn(50).sign(),
+        reference_fn=lambda i, t, m:
+            marginrankingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
+        desc='reduce',
+        check_no_size_average=True,
     ),
 ]
 

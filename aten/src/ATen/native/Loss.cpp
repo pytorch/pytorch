@@ -60,4 +60,15 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
   }
   return output;
 }
+
+Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, bool size_average, bool reduce) {
+  auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
+
+  if (reduce && size_average) {
+    return output.sum() / output.numel();
+  } else if (reduce) {
+    return output.sum();
+  }
+  return output;
+}
 }}  // namespace at::native

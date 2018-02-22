@@ -838,7 +838,7 @@ class CosineEmbeddingLoss(_Loss):
                                        self.reduce)
 
 
-class MarginRankingLoss(Module):
+class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
     inputs `x1`, `x2`, two 1D mini-batch `Tensor`s,
     and a label 1D mini-batch tensor `y` with values (`1` or `-1`).
@@ -858,13 +858,14 @@ class MarginRankingLoss(Module):
     By default, `size_average` equals to ``True``.
     """
 
-    def __init__(self, margin=0, size_average=True):
-        super(MarginRankingLoss, self).__init__()
+    def __init__(self, margin=0, size_average=True, reduce=True):
+        super(MarginRankingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input1, input2, target):
-        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average)
+        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average,
+                                     self.reduce)
 
 
 class MultiMarginLoss(_WeightedLoss):
