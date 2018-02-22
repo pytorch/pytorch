@@ -4,6 +4,7 @@ import re
 import argparse
 import unittest
 import warnings
+import random
 import contextlib
 from functools import wraps
 from itertools import product
@@ -109,6 +110,7 @@ def to_gpu(obj, type_map={}):
 
 def set_rng_seed(seed):
     torch.manual_seed(seed)
+    random.seed(seed)
     if TEST_NUMPY:
         numpy.random.seed(seed)
 

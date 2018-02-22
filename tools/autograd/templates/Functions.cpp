@@ -1053,12 +1053,13 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & ggG,
     const Tensor & ggB,
     const Tensor & gO,
+    const Tensor & running_mean_v,
+    const Tensor & running_var_v,
+    bool training,
     double eps,
     const Tensor & save_mean_v,
     const Tensor & save_std_v,
-    const Tensor & running_mean_v,
-    const Tensor & running_var_v,
-    bool training) {
+    std::array<bool,3> output_mask) {
 
   // NB: In the original design of BatchNorm, save_mean, save_std, running_mean
   // and running_var are unconditionally tensor "buffers", and never get wrapped
@@ -1172,6 +1173,13 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     auto ggO_B_term = ggB_expanded;
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
   }
+
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
+  if (output_mask[1] && !gG.defined()) {
+    AT_ASSERT(affine, "gamma should always be defined when it requires grad");
+    gG = at::zeros_like(gamma);
+  }
+  if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input);
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 

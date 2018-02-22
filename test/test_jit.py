@@ -887,7 +887,7 @@ class TestJit(TestCase):
         self.assertExpected(torch._C._jit_run_cpp_tests())
 
     def test_batchnorm(self):
-        x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
+        x = Variable(torch.randn(2, 2, 2, 2).fill_(1.0), requires_grad=True)
         trace, _ = torch.jit.trace(nn.BatchNorm2d(2), x)
         self.assertExpectedTrace(trace)
 
@@ -902,7 +902,7 @@ class TestJit(TestCase):
             pass
 
         bn = MyBatchNorm2d(1)
-        x = Variable(torch.randn(5, 1))
+        x = Variable(torch.randn(5, 1, 2, 1))
         z = bn(x)
         with self.assertCompiled(bn):
             z2 = bn(x)
