@@ -700,7 +700,7 @@ if WITH_NCCL:
     ]
 if WITH_CUDNN:
     main_libraries += ['cudnn']
-    library_dirs.append(CUDNN_LIB_DIR)
+    library_dirs.insert(0, CUDNN_LIB_DIR)
     # NOTE: these are at the front, in case there's another cuDNN in CUDA path
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
     if not IS_WINDOWS:
