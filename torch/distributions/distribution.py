@@ -25,6 +25,12 @@ class Distribution(object):
                         if not constraint.check(self.__getattribute__(param)).all():
                             raise ValueError("The parameter {} has invalid values".format(param))
 
+    @staticmethod
+    def set_default_validate_args(value):
+        if value not in [True, False]:
+            raise ValueError
+        Distribution._validate_args = value
+
     @property
     def batch_shape(self):
         """
