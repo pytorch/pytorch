@@ -434,21 +434,15 @@ PyObject *THPModule_addDocStr(PyObject *_unused, PyObject *args)
   if (Py_TYPE(obj) == &PyCFunction_Type) {
     PyCFunctionObject* f = (PyCFunctionObject *)obj;
     if (f->m_ml->ml_doc) {
-      // temporary workaround
-      Py_INCREF(obj);
-      return obj;
-      // return PyErr_Format(PyExc_RuntimeError,
-      //     "function '%s' already has a docstring", f->m_ml->ml_name);
+      return PyErr_Format(PyExc_RuntimeError,
+          "function '%s' already has a docstring", f->m_ml->ml_name);
     }
     f->m_ml->ml_doc = doc_str;
   } else if (strcmp(Py_TYPE(obj)->tp_name, "method_descriptor") == 0) {
     PyMethodDescrObject* m = (PyMethodDescrObject *)obj;
     if (m->d_method->ml_doc) {
-      // temporary workaround
-      Py_INCREF(obj);
-      return obj;
-      // return PyErr_Format(PyExc_RuntimeError,
-      //     "method '%s' already has a docstring", m->d_method->ml_name);
+      return PyErr_Format(PyExc_RuntimeError,
+          "method '%s' already has a docstring", m->d_method->ml_name);
     }
     m->d_method->ml_doc = doc_str;
   } else {

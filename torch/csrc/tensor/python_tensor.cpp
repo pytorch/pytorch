@@ -141,14 +141,27 @@ static void set_name(PyTensorType& type_obj, const std::string& name) {
   type_obj.name[n - 1] = '\0';
 }
 
-static PyObject* get_variable_dict() {
+static THPObjectPtr get_variable_dict() {
   auto autograd = THPObjectPtr(PyImport_ImportModule("torch.autograd"));
   if (!autograd) throw python_error();
 
   auto variable_class = THPObjectPtr(PyObject_GetAttrString(autograd.get(), "Variable"));
   if (!variable_class) throw python_error();
 
-  return ((PyTypeObject*)variable_class.get())->tp_dict;
+  auto variable_type = (PyTypeObject*)variable_class.get();
+  TORCH_ASSERTM(variable_type->tp_base, "missing base type for Variable");
+
+  auto res = THPObjectPtr(PyDict_New());
+  if (!res) throw python_error();
+
+  if (PyDict_Merge(res.get(), variable_type->tp_dict, 0) < 0) {
+    throw python_error();
+  }
+  if (PyDict_Merge(res.get(), variable_type->tp_base->tp_dict, 0) < 0) {
+    throw python_error();
+  }
+
+  return res;
 }
 
 static std::vector<PyTensorType> tensor_types;
@@ -181,15 +194,15 @@ void initialize_python_bindings(PyObject* module) {
   // propeties is_cuda and is_sparse on the type objects.
   py_initialize_metaclass(metaclass);
 
-  // Get the tp_dict of the Variable Python class. We copy function definitions
+  // Get the tp_dict of the Variable class. We copy function definitions
   // onto each Tensor type object so that they can be accessed via e.g.
   // `torch.Tensor.add`.
-  PyObject* var_dict = get_variable_dict();
+  auto var_dict = get_variable_dict();
 
   // Initialize each Python type object torch.FloatTensor, torch.DoubleTensor,
   // etc. and the "default" type object torch.Tensor.
   for (auto& tensor_type : tensor_types) {
-    py_initialize_tensor_type(tensor_type.py_type, tensor_type.name, var_dict);
+    py_initialize_tensor_type(tensor_type.py_type, tensor_type.name, var_dict.get());
   }
 
   // The type object for torch.Tensor is at the end.

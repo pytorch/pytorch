@@ -4,24 +4,8 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 
 
-tensor_classes = [
-    'DoubleTensorBase',
-    'FloatTensorBase',
-    'LongTensorBase',
-    'IntTensorBase',
-    'ShortTensorBase',
-    'CharTensorBase',
-    'ByteTensorBase',
-]
-
-
 def add_docstr_all(method, docstr):
-    for cls_name in tensor_classes:
-        cls = getattr(torch._C, cls_name)
-        try:
-            add_docstr(getattr(cls, method), docstr)
-        except AttributeError:
-            pass
+    add_docstr(getattr(torch._C._VariableBase, method), docstr)
 
 
 add_docstr_all('abs',
