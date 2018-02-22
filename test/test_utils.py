@@ -425,7 +425,7 @@ class TestBottleneck(TestCase):
 
         # This assumes that after the cProfile output section we have
         # the autograd profiler output
-        results = re.search(r'cProfile output.*(\n.*){6,50}\nautograd profiler output', output)
+        results = re.search(r'cProfile output.*(\n.*){6,50}\n.*autograd profiler output', output)
         self.assertIsNotNone(results, self._fail_msg(
             'Distance between cProfile and autograd prof out not in [6, 50] lines', output))
 
@@ -435,17 +435,17 @@ class TestBottleneck(TestCase):
 
         # This assumes that after the autograd profiler output is the end of the
         # output.
-        results = re.search(r'autograd profiler output.*(\n.*){6,50}', output)
+        results = re.search(r'autograd profiler output.*(\n.*){6,100}', output)
         self.assertIsNotNone(results, self._fail_msg(
-            'Distance between autograd prof output and end of output not in [6, 50] lines', output))
+            'Distance between autograd prof output and end of output not in [6, 100] lines', output))
 
-    def _check_cuda_env_vars(self, output):
+    def _check_cuda(self, output):
         if torch.cuda.is_available():
-            results = re.search('CUDA_LAUNCH_BLOCKING=1', output)
-            self.assertIsNotNone(results, self._fail_msg('Should tell users about CUDA_LAUNCH_BLOCKING', output))
+            results = re.search('CUDA', output)
+            self.assertIsNotNone(results, self._fail_msg('Should tell users CUDA', output))
         else:
-            results = re.search('CUDA_LAUNCH_BLOCKING=1', output)
-            self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA_LAUNCH_BLOCKING', output))
+            results = re.search('CUDA', output)
+            self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA', output))
 
     @unittest.skipIf(torch.cuda.is_available(), 'CPU-only test')
     def test_cpu_only(self):
@@ -455,7 +455,7 @@ class TestBottleneck(TestCase):
         self._check_environment_summary(out)
         self._check_autograd_summary(out)
         self._check_cprof_summary(out)
-        self._check_cuda_env_vars(out)
+        self._check_cuda(out)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'No CUDA')
     def test_cuda(self):
@@ -465,7 +465,7 @@ class TestBottleneck(TestCase):
         self._check_environment_summary(out)
         self._check_autograd_summary(out)
         self._check_cprof_summary(out)
-        self._check_cuda_env_vars(out)
+        self._check_cuda(out)
 
 
 class TestONNXUtils(TestCase):
