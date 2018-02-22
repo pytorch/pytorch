@@ -33,8 +33,9 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         'CPLUS_INCLUDE_PATH',
     ])))
     if IS_CONDA:
-        lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
-        include_paths.append(os.path.join(CONDA_DIR, 'include'))
+        # Prefer conda libs over system ones.
+        lib_paths.insert(0, os.path.join(CONDA_DIR, 'lib'))
+        include_paths.insert(0, os.path.join(CONDA_DIR, 'include'))
     for path in lib_paths:
         if path is None or not os.path.exists(path):
             continue
@@ -47,6 +48,7 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
         else:
             libraries = sorted(glob.glob(os.path.join(path, 'libcudnn*')))
             if libraries:
+                # Prefer, e.g., 'libcudnn.so' without a version number.
                 CUDNN_LIBRARY = libraries[0]
                 CUDNN_LIB_DIR = path
                 break
