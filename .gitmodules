@@ -61,3 +61,6 @@
 [submodule "third_party/python-six"]
 	path = third_party/python-six
 	url = https://github.com/benjaminp/six.git
+[submodule "third_party/onnx"]
+	path = third_party/onnx
+	url = https://github.com/onnx/onnx.git
