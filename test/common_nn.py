@@ -407,11 +407,11 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_av
         for x in range(0, n):
             output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
-    if reduce and size_average:
-        return output.mean() / dim
-    elif reduce:
-        return output.sum() / dim
-    return output / dim
+        if reduce and size_average:
+            return output.mean() / dim
+        elif reduce:
+            return output.sum() / dim
+        return output / dim
 
 
 loss_reference_fns = {
