@@ -80,7 +80,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCTensor_(data)(state, input),
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
-          input->size[0], input->size[1],
+          nframe, input->size[1],
           false,
           margin
         );

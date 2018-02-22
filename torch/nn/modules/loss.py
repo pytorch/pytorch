@@ -848,7 +848,8 @@ class MultiMarginLoss(_WeightedLoss):
     output `y` (which is a 1D tensor of target class indices,
     `0` <= `y` <= `x.size(1)`):
 
-    For each mini-batch sample::
+    For each mini-batch sample, the loss in terms of the 1D input `x` and scalar
+    output `y` is::
 
         loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] + x[i]))^p) / x.size(0)
                      where `i == 0` to `x.size(0)` and `i != y`.

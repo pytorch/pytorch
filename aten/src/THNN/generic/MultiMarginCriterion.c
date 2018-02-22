@@ -161,7 +161,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   input_data = THTensor_(data)(input);
 
   THTensor_(resizeAs)(gradInput, input);
-  gradInput = THTensor_(newContiguous)(gradInput);
+  THArgCheck(THTensor_(isContiguous)(gradInput), 5, "gradInput must be contiguous");
   gradInput_data = THTensor_(data)(gradInput);
 
   target_data = THIndexTensor_(data)(target);
