@@ -2494,6 +2494,9 @@ class TestConstraints(TestCase):
                         constraint = dist.params[name]
                     except KeyError:
                         continue  # ignore optional parameters
+                    except TypeError:
+                        continue
+
                     if is_dependent(constraint):
                         continue
                     message = '{} example {}/{} parameter {} = {}'.format(
