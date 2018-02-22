@@ -58,6 +58,16 @@ if (NOT (${Protobuf_VERSION} VERSION_EQUAL @CAFFE2_BUILT_PROTOBUF_VERSION@))
       "version.")
 endif()
 
+# Cuda
+if (@USE_CUDA@)
+  include("${CMAKE_CURRENT_LIST_DIR}/public/cuda.cmake")
+  if (NOT CAFFE2_FOUND_CUDA)
+    message(FATAL_ERROR
+        "Your installed Caffe2 version uses cuda but I cannot find the cuda "
+        "libraries. Please set the proper cuda prefixes and / or install "
+        "cuda.")
+endif()
+
 # import targets
 include ("${CMAKE_CURRENT_LIST_DIR}/Caffe2Targets.cmake")
 

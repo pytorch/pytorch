@@ -1,6 +1,148 @@
-# Caffe2 cmake utility to prepare for cuda build.
-# This cmake file is called from Dependencies.cmake. You do not need to
-# manually invoke it.
+# ---[ cuda
+
+set(CAFFE2_FOUND_CUDA FALSE)
+
+# Find Cuda.
+find_package(CUDA 7.0)
+if(NOT CUDA_FOUND)
+  message(WARNING
+      "Caffe2: Cuda cannot be found. Depending on whether you are building "
+      "Caffe2 or a Caffe2 dependent library, the next warning / error will "
+      "give you more info.")
+  return()
+endif()
+
+# Find cudnn.
+include(FindPackageHandleStandardArgs)
+set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+find_path(CUDNN_INCLUDE_DIR cudnn.h
+    HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES cuda/include include)
+find_library(CUDNN_LIBRARY cudnn
+    HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
+find_package_handle_standard_args(
+    CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
+
+if(NOT CUDNN_FOUND)
+  message(WARNING
+      "Caffe2: cudnn cannot be found. Caffe2 CUDA depends explicitly "
+      "on cudnn so you should consider installing it.")
+  return()
+endif()
+
+# After both cuda and cudnn are found, we can safely proceed.
+set(CAFFE2_FOUND_CUDA TRUE)
+message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
+# get cuDNN version
+file(READ ${CUDNN_INCLUDE_DIR}/cudnn.h CUDNN_HEADER_CONTENTS)
+string(REGEX MATCH "define CUDNN_MAJOR * +([0-9]+)"
+             CUDNN_VERSION_MAJOR "${CUDNN_HEADER_CONTENTS}")
+string(REGEX REPLACE "define CUDNN_MAJOR * +([0-9]+)" "\\1"
+             CUDNN_VERSION_MAJOR "${CUDNN_VERSION_MAJOR}")
+string(REGEX MATCH "define CUDNN_MINOR * +([0-9]+)"
+             CUDNN_VERSION_MINOR "${CUDNN_HEADER_CONTENTS}")
+string(REGEX REPLACE "define CUDNN_MINOR * +([0-9]+)" "\\1"
+             CUDNN_VERSION_MINOR "${CUDNN_VERSION_MINOR}")
+string(REGEX MATCH "define CUDNN_PATCHLEVEL * +([0-9]+)"
+             CUDNN_VERSION_PATCH "${CUDNN_HEADER_CONTENTS}")
+string(REGEX REPLACE "define CUDNN_PATCHLEVEL * +([0-9]+)" "\\1"
+             CUDNN_VERSION_PATCH "${CUDNN_VERSION_PATCH}")
+# Assemble cuDNN version
+if(NOT CUDNN_VERSION_MAJOR)
+  set(CUDNN_VERSION "?")
+else()
+  set(CUDNN_VERSION
+      "${CUDNN_VERSION_MAJOR}.${CUDNN_VERSION_MINOR}.${CUDNN_VERSION_PATCH}")
+endif()
+
+message(STATUS "Found cuDNN: v${CUDNN_VERSION}  (include: ${CUDNN_INCLUDE_DIR}, library: ${CUDNN_LIBRARY})")
+# ---[ Cuda Libraries wrapper
+
+# find libcuda.so and lbnvrtc.so
+# For libcuda.so, we will find it under lib, lib64, and then the
+# stubs folder, in case we are building on a system that does not
+# have cuda driver installed. On windows, we also search under the
+# folder lib/x64.
+find_library(CUDA_CUDA_LIB cuda
+    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/stubs lib64/stubs lib/x64)
+find_library(CUDA_NVRTC_LIB nvrtc
+    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
+    PATH_SUFFIXES lib lib64 lib/x64)
+
+# Create new style imported libraries.
+
+# cuda
+add_library(caffe2::cuda UNKNOWN IMPORTED)
+set_property(
+    TARGET caffe2::cuda PROPERTY IMPORTED_LOCATION
+    ${CUDA_CUDA_LIB})
+set_property(
+    TARGET caffe2::cuda PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cudart. CUDA_LIBRARIES is actually a list, so we will do a little bit of
+# trick to get it in place.
+add_library(caffe2::cudart UNKNOWN IMPORTED)
+set(__tmp ${CUDA_LIBRARIES})
+list(GET __tmp 0 __cudart_file)
+set_property(
+    TARGET caffe2::cudart PROPERTY IMPORTED_LOCATION
+    ${__cudart_file})
+list(REMOVE_AT __tmp 0)
+set_property(
+    TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
+    ${__tmp})
+set_property(
+    TARGET caffe2::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cudnn
+add_library(caffe2::cudnn UNKNOWN IMPORTED)
+set_property(
+    TARGET caffe2::cudnn PROPERTY IMPORTED_LOCATION
+    ${CUDNN_LIBRARY})
+set_property(
+    TARGET caffe2::cudnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDNN_INCLUDE_DIR})
+
+# curand
+add_library(caffe2::curand UNKNOWN IMPORTED)
+set_property(
+    TARGET caffe2::curand PROPERTY IMPORTED_LOCATION
+    ${CUDA_curand_LIBRARY})
+set_property(
+    TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# cublas
+add_library(caffe2::cublas UNKNOWN IMPORTED)
+set_property(
+    TARGET caffe2::cublas PROPERTY IMPORTED_LOCATION
+    ${CUDA_CUBLAS_LIBRARIES})
+set_property(
+    TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# nvrtc
+add_library(caffe2::nvrtc UNKNOWN IMPORTED)
+set_property(
+    TARGET caffe2::nvrtc PROPERTY IMPORTED_LOCATION
+    ${CUDA_NVRTC_LIB})
+set_property(
+    TARGET caffe2::nvrtc PROPERTY INTERFACE_INCLUDE_DIRECTORIES
+    ${CUDA_INCLUDE_DIRS})
+
+# Note: in theory, we can add similar dependent library wrappers. For
+# now, Caffe2 only uses the above libraries, so we will only wrap
+# these.
+# A helper variable recording the list of Caffe2 dependent librareis
+set(Caffe2_CUDA_DEPENDENCY_LIBS
+    caffe2::cuda caffe2::cudart caffe2::curand
+    caffe2::cublas caffe2::cudnn caffe2::nvrtc)
+
+# ---[ Cuda flags
 
 # Known NVIDIA GPU achitectures Caffe2 can be compiled for.
 # Default is set to cuda 9. If we detect the cuda architectores to be less than
@@ -147,7 +289,8 @@ endfunction()
 ###  Non macro section
 ################################################################################################
 
-# Special care for windows platform: we know that 32-bit windows does not support cuda.
+# Special care for windows platform: we know that 32-bit windows does not
+# support cuda.
 if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   if(NOT (CMAKE_SIZEOF_VOID_P EQUAL 8))
     message(FATAL_ERROR
@@ -157,17 +300,7 @@ if(${CMAKE_SYSTEM_NAME} STREQUAL "Windows")
   endif()
 endif()
 
-find_package(CUDA 7.0)
-
-if(NOT CUDA_FOUND)
-  return()
-endif()
-
-set(HAVE_CUDA TRUE)
-message(STATUS "CUDA detected: " ${CUDA_VERSION})
-if (${CUDA_VERSION} LESS 7.0)
-  message(FATAL_ERROR "Caffe2 requires CUDA 7.0 or later version")
-elseif (${CUDA_VERSION} LESS 8.0) # CUDA 7.x
+if (${CUDA_VERSION} LESS 8.0) # CUDA 7.x
   set(Caffe2_known_gpu_archs ${Caffe2_known_gpu_archs7})
   list(APPEND CUDA_NVCC_FLAGS "-D_MWAITXINTRIN_H_INCLUDED")
   list(APPEND CUDA_NVCC_FLAGS "-D__STRICT_ANSI__")
@@ -180,40 +313,33 @@ elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
   list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
 endif()
 
-caffe2_include_directories(${CUDA_INCLUDE_DIRS})
-list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDA_CUDART_LIBRARY}
-                              ${CUDA_curand_LIBRARY} ${CUDA_CUBLAS_LIBRARIES})
-
-# find libcuda.so and lbnvrtc.so
-# For libcuda.so, we will find it under lib, lib64, and then the
-# stubs folder, in case we are building on a system that does not
-# have cuda driver installed. On windows, we also search under the
-# folder lib/x64.
-
-find_library(CUDA_CUDA_LIB cuda
-    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/stubs lib64/stubs lib/x64)
-find_library(CUDA_NVRTC_LIB nvrtc
-    PATHS ${CUDA_TOOLKIT_ROOT_DIR}
-    PATH_SUFFIXES lib lib64 lib/x64)
+# CUDA 9.x requires GCC version <= 6
+if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
+    (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 10.0))
+  if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
+      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0 AND
+      CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
+    message(FATAL_ERROR
+      "CUDA ${CUDA_VERSION} is not compatible with GCC version >= 7. "
+      "Use the following option to use another version (for example): \n"
+      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-6\n")
+  endif()
+elseif (CUDA_VERSION VERSION_EQUAL 8.0)
+  # CUDA 8.0 requires GCC version <= 5
+  if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
+      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
+      CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
+    message(FATAL_ERROR
+      "CUDA 8.0 is not compatible with GCC version >= 6. "
+      "Use the following option to use another version (for example): \n"
+      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
+  endif()
+endif()
 
 # setting nvcc arch flags
 caffe2_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA_readable}")
-
-if(CUDA_CUDA_LIB)
-    message(STATUS "Found libcuda: ${CUDA_CUDA_LIB}")
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDA_CUDA_LIB})
-else()
-    message(FATAL_ERROR "Cannot find libcuda.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
-endif()
-if(CUDA_NVRTC_LIB)
-  message(STATUS "Found libnvrtc: ${CUDA_NVRTC_LIB}")
-  list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDA_NVRTC_LIB})
-else()
-    message(FATAL_ERROR "Cannot find libnvrtc.so. Please file an issue on https://github.com/caffe2/caffe2 with your build output.")
-endif()
 
 # disable some nvcc diagnostic that apears in boost, glog, glags, opencv, etc.
 foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration set_but_not_used)
@@ -250,13 +376,5 @@ if (MSVC)
   endif()
 endif()
 
-
-if(OpenMP_FOUND)
-  list(APPEND CUDA_NVCC_FLAGS "-Xcompiler ${OpenMP_CXX_FLAGS}")
-endif()
-
-# Set :expt-relaxed-constexpr to suppress Eigen warnings
+# Set expt-relaxed-constexpr to suppress Eigen warnings
 list(APPEND CUDA_NVCC_FLAGS "--expt-relaxed-constexpr")
-
-mark_as_advanced(CUDA_BUILD_CUBIN CUDA_BUILD_EMULATION CUDA_VERBOSE_BUILD)
-mark_as_advanced(CUDA_SDK_ROOT_DIR CUDA_SEPARABLE_COMPILATION)
