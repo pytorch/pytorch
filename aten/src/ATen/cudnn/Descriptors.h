@@ -4,7 +4,7 @@
 
 #include "cudnn-wrapper.h"
 #include <ATen/ATen.h>
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 #if CUDNN_VERSION < 7000
 

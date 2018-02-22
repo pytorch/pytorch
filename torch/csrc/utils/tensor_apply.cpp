@@ -1,6 +1,6 @@
 #include "tensor_apply.h"
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 #include <ATen/ExpandUtils.h>
 
 #include "torch/csrc/Exceptions.h"

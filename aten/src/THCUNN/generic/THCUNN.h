@@ -36,8 +36,8 @@ TH_API void THNN_(BatchNormalization_updateOutput)(
                   THCTensor *output_,
                   THCTensor *weight_,        // [OPTIONAL]
                   THCTensor *bias_,          // [OPTIONAL]
-                  THCTensor *runningMean_,
-                  THCTensor *runningVar_,
+                  THCTensor *runningMean_,   // [OPTIONAL] if train
+                  THCTensor *runningVar_,    // [OPTIONAL] if train
                   THCTensor *saveMean_,
                   THCTensor *saveStd_,
                   bool train,
@@ -52,10 +52,10 @@ TH_API void THNN_(BatchNormalization_backward)(
                   THCTensor *gradWeight_,       // [OPTIONAL]
                   THCTensor *gradBias_,         // [OPTIONAL]
                   THCTensor *weight_,           // [OPTIONAL]
-                  THCTensor *runningMean_,
-                  THCTensor *runningVar_,
-                  THCTensor *saveMean_,
-                  THCTensor *saveStd_,
+                  THCTensor *runningMean_,      // [OPTIONAL] if train
+                  THCTensor *runningVar_,       // [OPTIONAL] if train
+                  THCTensor *saveMean_,         // [OPTIONAL] if !train
+                  THCTensor *saveStd_,          // [OPTIONAL] if !train
                   bool train,
                   double scale,
                   double eps);
