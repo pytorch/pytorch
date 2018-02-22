@@ -122,6 +122,7 @@ struct GraphFuser {
     return true;
   }
   bool isFusable(Node * node) {
+    if (node->owningBlock() != block) return false;
     if (node->kind() == kFusionGroup) return true;
     return isSimpleMap(node) && allFloatIO(node);
   }
