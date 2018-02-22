@@ -72,9 +72,16 @@ trap_add cleanup EXIT
 # you will have to adjust this.
 COMPACT_JOB_NAME="$(echo "$JOB_NAME" | perl -pe 's{^(?:.+/)?(.+)$}{$1}o')"
 
+if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/disabled-configs.txt"; then
+  echo "Test is explicitly disabled, SKIPPING"
+  exit 0
+else
+  echo "Test is not disabled, proceeding"
+fi
+
 if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/enabled-configs.txt"; then
   echo "Test is enabled, proceeding"
 else
-  echo "Test is disabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
+  echo "Test not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
   exit 1
 fi
