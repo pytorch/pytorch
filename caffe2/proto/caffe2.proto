@@ -170,6 +170,11 @@ message OperatorDef {
   // is_gradient_op argument is only used as a hint in shape inference
   // and has no runtime significance
   optional bool is_gradient_op = 9 [default = false];
+
+  // debug information associated with the construction of the operator.
+  // This is an optional string with no assumed characteristics as
+  // operators can be constructed in any language.
+  optional string debug_info = 10;
 }
 
 // Network definition.
