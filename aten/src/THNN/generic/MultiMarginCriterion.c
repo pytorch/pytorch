@@ -218,7 +218,6 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
   THTensor_(free)(input);
   THIndexTensor_(free)(target);
-  THTensor_(free)(gradInput);
   if(weights)
     THTensor_(free)(weights);
 }
