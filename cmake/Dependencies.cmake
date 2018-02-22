@@ -342,40 +342,11 @@ endif()
 
 # ---[ CUDA
 if(USE_CUDA)
-  include(cmake/Cuda.cmake)
-  if(HAVE_CUDA)
-    # CUDA 9.x requires GCC version <= 6
-    if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
-        (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 10.0))
-      if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-          NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0 AND
-          CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
-        message(FATAL_ERROR
-          "CUDA ${CUDA_VERSION} is not compatible with GCC version >= 7. "
-          "Use the following option to use another version (for example): \n"
-          "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-6\n")
-      endif()
-    # CUDA 8.0 requires GCC version <= 5
-    elseif (CUDA_VERSION VERSION_EQUAL 8.0)
-      if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-          NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
-          CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
-        message(FATAL_ERROR
-          "CUDA 8.0 is not compatible with GCC version >= 6. "
-          "Use the following option to use another version (for example): \n"
-          "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
-      endif()
-    endif()
-  endif()
-  # ---[ CUDNN
-  if(HAVE_CUDA)
-    find_package(CuDNN REQUIRED)
-    if(CUDNN_FOUND)
-      caffe2_include_directories(${CUDNN_INCLUDE_DIRS})
-      list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${CUDNN_LIBRARIES})
-    endif()
-  else()
-    message(WARNING "Not compiling with CUDA. Suppress this warning with -DUSE_CUDA=OFF")
+  include(cmake/public/cuda.cmake)
+  if(NOT CAFFE2_FOUND_CUDA)
+    message(WARNING
+        "Not compiling with CUDA. Suppress this warning with "
+        "-DUSE_CUDA=OFF.")
     set(USE_CUDA OFF)
   endif()
 endif()

@@ -224,7 +224,10 @@ endif()
 
 target_link_libraries(caffe2 INTERFACE ${CAFFE2_INTERFACE_LIBS})
 if (USE_CUDA)
-  target_link_libraries(caffe2_gpu INTERFACE ${CAFFE2_INTERFACE_LIBS})
+  # TODO: check if we should include other cuda dependency libraries
+  # to the interface as well.
+  target_link_libraries(caffe2_gpu INTERFACE
+      ${CAFFE2_INTERFACE_LIBS} caffe2::cudart)
 endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
@@ -248,6 +251,7 @@ if (BUILD_SHARED_LIBS)
       DESTINATION share/cmake/Caffe2
       COMPONENT dev)
   install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
