@@ -10,7 +10,7 @@ test_cpu_speed_mini_sequence_labeler () {
 
   cd benchmark/
 
-  git checkout 80afabc258994bbe43845d2ee7acf8498c294777
+  git checkout 726567a455edbfda6199445922a8cfee82535664
 
   cd scripts/mini_sequence_labeler
 
