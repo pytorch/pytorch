@@ -93,7 +93,6 @@ class Embedding(Module):
             self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
-            assert weight.dim() == 2, 'Weight must be 2-dimensional'
             assert list(weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
             self.weight = Parameter(weight)
