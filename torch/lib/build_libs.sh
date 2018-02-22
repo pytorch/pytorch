@@ -70,7 +70,7 @@ else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
 CPP_FLAGS=" -std=c++11 "
-GLOO_FLAGS=""
+GLOO_FLAGS=" -DBUILD_SHARED_LIBS=1"
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $WITH_CUDA -eq 1 ]]; then
@@ -78,7 +78,7 @@ if [[ $WITH_CUDA -eq 1 ]]; then
 fi
 # Gloo infiniband support
 if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
-    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
+    GLOO_FLAGS+=" -DUSE_IBVERBS=1"
     THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
