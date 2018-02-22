@@ -44,7 +44,8 @@ if WITH_CUDA and not check_env_flag('NO_SYSTEM_NCCL'):
     ]))
 
     if IS_CONDA:
-        lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
+        # Prefer conda libs over system ones.
+        lib_paths.insert(0, os.path.join(CONDA_DIR, 'lib'))
     for path in lib_paths:
         path = os.path.expanduser(path)
         if path is None or not os.path.exists(path):

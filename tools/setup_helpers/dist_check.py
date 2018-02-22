@@ -82,8 +82,9 @@ def should_build_ib():
     ]
 
     if IS_CONDA:
-        lib_paths.append(os.path.join(CONDA_DIR, "lib"))
-        include_paths.append(os.path.join(CONDA_DIR, "include"))
+        # Prefer conda libs over system ones.
+        lib_paths.insert(0, os.path.join(CONDA_DIR, 'lib'))
+        include_paths.insert(0, os.path.join(CONDA_DIR, "include"))
 
     for path in lib_paths:
         if path is None or not os.path.exists(path):
