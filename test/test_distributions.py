@@ -3048,9 +3048,8 @@ class TestConstraintRegistry(TestCase):
 class TestValidation(TestCase):
     def test_valid(self):
         for Dist, params in EXAMPLES:
-            if Dist is not TransformedDistribution:
-                for i, param in enumerate(params):
-                    Dist(validate_args=True, **param)
+            for i, param in enumerate(params):
+                Dist(validate_args=True, **param)
 
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:

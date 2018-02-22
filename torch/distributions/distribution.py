@@ -19,11 +19,11 @@ class Distribution(object):
         if validate_args is not None:
             self._validate_args = validate_args
         if self._validate_args:
-            for param, constraint in self.params.items():
-                if constraints.is_dependent(constraint):
-                    continue
-                if not constraint.check(self.__getattribute__(param)).all():
-                        raise ValueError("The parameter {} has invalid values".format(param))
+            if not constraints.is_dependent(self.params):
+                for param, constraint in self.params.items():
+                    if not constraints.is_dependent(constraint):
+                        if not constraint.check(self.__getattribute__(param)).all():
+                            raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
