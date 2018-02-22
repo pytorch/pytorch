@@ -81,6 +81,9 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
   Workspace* ws_;
   // Per-group transformed filters
   std::vector<TensorCPU*> transformedFilters_;
+  // Zero-filled bias for convolutions without bias
+  // This may be needed because NNPACK interface always expects conv with bias
+  std::vector<float> dummyBias_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -142,21 +145,33 @@ NNPACKConvOp::getConvolutionTransformStrategy() const {
 bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
   auto& X = Input(0);
   auto& filter = Input(1);
-  auto& bias = Input(2);
   auto* Y = Output(0);
   CAFFE_ENFORCE(X.ndim() == 4, "Input dim should be 4");
   const int N = X.dim32(0), C = X.dim32(1), H = X.dim32(2), W = X.dim32(3);
-  CAFFE_ENFORCE(filter.ndim(), 4);
+  CAFFE_ENFORCE(filter.ndim() == 4, "");
   const int M = filter.dim32(0);
   CAFFE_ENFORCE(C % this->group_ == 0, "");
   CAFFE_ENFORCE(M % this->group_ == 0, "");
   CAFFE_ENFORCE(filter.dim32(1) == C / this->group_, "");
   CAFFE_ENFORCE(filter.dim32(2) == kernel_h(), "");
   CAFFE_ENFORCE(filter.dim32(3) == kernel_w(), "");
-  CAFFE_ENFORCE(bias.ndim() == 1, "");
-  CAFFE_ENFORCE(bias.dim32(0) == M, "");
   ConvPoolOpBase<CPUContext>::SetOutputSize(X, Y, filter.dim32(0));
   const int oH = Y->dim32(2), oW = Y->dim32(3);
+
+  const float* biasData = NULL;
+  if (InputSize() == 3) {
+    /* Convolution with bias */
+    auto& bias = Input(2);
+    CAFFE_ENFORCE(bias.ndim() == 1, "");
+    CAFFE_ENFORCE(bias.dim32(0) == M, "");
+    biasData = bias.template data<float>();
+  } else {
+    /* NNPACK interface requires bias. Use a dummy zero-filled vector. */
+    if (dummyBias_.size() != M) {
+      dummyBias_.resize(M);
+    }
+    biasData = dummyBias_.data();
+  }
 
   const size_t batch_size = X.dim32(0);
   const size_t input_channels = X.dim32(1);
@@ -291,7 +306,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
             transformStrategy_ == nnp_convolution_transform_strategy_reuse
                 ? transformedFilters_[g]->template data<float>()
                 : filter.template data<float>() + filter.size() / group_ * g,
-            bias.template data<float>() + bias.size() / group_ * g,
+            biasData + M / group_ * g,
             Y->template mutable_data<float>() + n * oH * oW * M +
                 g * oH * oW * (M / group_),
             static_cast<void*>(buffer->template mutable_data<float>()),
@@ -345,7 +360,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                     ? transformedFilters_[g]->template data<float>()
                     : filter.template data<float>() +
                         filter.size() / group_ * g,
-                bias.template data<float>() + bias.size() / group_ * g,
+                biasData + M / group_ * g,
                 Y->template mutable_data<float>() + n * oH * oW * M +
                     g * oH * oW * (M / group_),
                 static_cast<void*>(buffer->template mutable_data<float>()),
