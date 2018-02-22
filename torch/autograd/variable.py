@@ -342,6 +342,8 @@ class Variable(_C._VariableBase):
     __abs__ = _C._VariableBase.abs
 
     def __len__(self):
+        if self.dim() == 0:
+            raise TypeError("len() of a 0-d tensor")
         return self.shape[0]
 
     def __iter__(self):
