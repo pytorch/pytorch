@@ -24,7 +24,9 @@ struct PyTensorType {
   at::Type* aten_type;
   bool is_cuda;
   bool is_sparse;
-  bool is_default;
+  // The base tensor type i.e. `torch.Tensor`. All tensors are pass isinstance
+  // checks on the base type.
+  bool is_base_type;
   char name[64];
 };
 
@@ -50,7 +52,8 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
 static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (THPVariable_Check(arg)) {
-    if (self->is_default) {
+    if (self->is_base_type) {
+      // Every tensor is treated as an instance of torch.Tensor
       Py_RETURN_TRUE;
     }
     auto& var = ((THPVariable*)arg)->cdata;
@@ -89,7 +92,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
 }
 
 static void py_initialize_tensor_type(PyTypeObject& type, const char* name, PyObject* tp_dict) {
-  // NOTE: we don't use he typical static declaration of PyTypeObject because
+  // NOTE: we don't use the typical static declaration of PyTypeObject because
   // we need to initialize as many types as there are VariableType instances.
   // The typical PyVarObject_HEAD_INIT(NULL, 0) is described in the Python
   // documentation: it initializes the refcnt to 1 and the other object header
@@ -180,7 +183,7 @@ static void initialize_aten_types(std::vector<PyTensorType>& tensor_types) {
   default_tensor_type = &tensor_types.back();
   set_type(*default_tensor_type, kCPU, kFloat);
   set_name(*default_tensor_type, "torch.Tensor");
-  default_tensor_type->is_default = true;
+  default_tensor_type->is_base_type = true;
 }
 
 void initialize_python_bindings(PyObject* module) {
@@ -228,8 +231,9 @@ static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) 
 
     PyObject* type_obj = (PyObject*)&tensor_type;
     Py_INCREF(type_obj);
-    PyModule_AddObject(module_obj.get(), type_name.c_str(), type_obj);
-
+    if (PyModule_AddObject(module_obj.get(), type_name.c_str(), type_obj) < 0) {
+      throw python_error();
+    }
     if (PySet_Add(tensor_classes.get(), type_obj) < 0) {
       throw python_error();
     }
