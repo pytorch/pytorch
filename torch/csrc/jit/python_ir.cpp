@@ -70,8 +70,6 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .VS(type)
-    .VS(typeOption)
-    .VS(hasType)
     .VS(setType)
     .VS(inferTypeFrom)
     // skip owningGraph because it returns a raw pointer to a otherwise
@@ -87,7 +85,7 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(replaceAllUsesWith)
     .def("node",[](Value &v) { return v.node(); })
     .def("setTypeAs", [](Value * node, Value * other) {
-      node->setType(other->typeOption());
+      node->setType(other->type());
       return node;
     })
     .VS(copyMetadata)
@@ -207,13 +205,17 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
-      TYPE_IF(t, HandleType)
-        return "HandleType";
-      TYPE_ELSEIF(TensorType)
-        return "TensorType";
-      TYPE_END()
-      torch::barf("unknown type kind");
-      return "";
+      switch(t->kind()) {
+        case TypeKind::HandleType:
+          return "HandleType";
+        case TypeKind::DynamicType:
+          return "DynamicType";
+        case TypeKind::TensorType:
+          return "TensorType";
+        default:
+          torch::barf("unknown type kind");
+          return "";
+        }
     })
     .def("sizes",[](Type& t) {
       return t.expect<TensorType>()->sizes();

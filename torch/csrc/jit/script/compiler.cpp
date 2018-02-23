@@ -300,8 +300,7 @@ struct to_ir {
     // we'll probably have to pattern match iteration number machinery in user
     // code to conform to the spec
     body_block->addInput(); // Iteration num
-    body_block->addInput(); // Condition
-    size_t skip_inputs_num = 2;
+    size_t skip_inputs_num = 1;
 
     {
       environment_stack =

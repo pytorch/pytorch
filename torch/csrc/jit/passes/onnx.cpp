@@ -12,7 +12,7 @@ namespace {
 
 bool hasHandleOutput(Node *node) {
   auto last_output = node->outputs().back();
-  return last_output->typeOption() && last_output->typeOption()->kind() == TypeKind::HandleType;
+  return last_output->isHandle();
 }
 
 bool hasUsedHandle(Node *node) {
@@ -80,9 +80,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        if (!outputs[i]->hasType()) {
-          outputs[i]->setType(old->typeOption());
-        }
+        outputs[i]->setType(old->type());
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());

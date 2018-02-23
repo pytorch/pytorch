@@ -159,10 +159,8 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  bool hasType() const {
-    return type_ != nullptr;
-  }
   Value* setType(const TypePtr type) {
+    JIT_ASSERT(type);
     type_ = type;
     return this;
   }
@@ -173,11 +171,11 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
-  const TypePtr & typeOption() const {
-    return type_;
-  }
   bool isHandle() const {
-    return hasType() && type()->kind() == TypeKind::HandleType;
+    return type()->kind() == TypeKind::HandleType;
+  }
+  bool isTensor() const {
+    return type()->kind() == TypeKind::TensorType;
   }
   size_t unique() const {
     return unique_;
@@ -225,7 +223,7 @@ public:
   void replaceAllUsesWith(Value * newValue);
 
   Value* copyMetadata(Value * from) {
-    if(from->hasType()) setType(from->type());
+    setType(from->type());
     if (from->unique_name_ != "")
       setUniqueName(from->uniqueName());
     return this;
@@ -1027,7 +1025,8 @@ inline Value::Value(Node * node_, size_t offset_)
 : node_(node_),
   offset_(offset_),
   unique_(node_->graph_->next_unique_++),
-  stage_(node_->graph_->new_node_stage_) {
+  stage_(node_->graph_->new_node_stage_),
+  type_(DynamicType::get()) {
   node_->graph_->all_values.emplace(this);
 }
 
@@ -1104,15 +1103,19 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Value* Value::setUniqueName(const std::string & name) {
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + name);
+inline Value* Value::setUniqueName(const std::string & orig_name) {
+  if (orig_name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + orig_name);
   }
-  if (node_->graph_->unique_names_.find(name) != node_->graph_->unique_names_.end()) {
-    throw std::runtime_error("name is already in use in this graph: " + name);
+  auto & names = node()->owningGraph()->unique_names_;
+  auto name = orig_name;
+  for(size_t i = 1; names.find(name) != names.end(); i++) {
+    std::stringstream ss;
+    ss << orig_name << "." << i;
+    name = ss.str();
   }
-  node_->graph_->unique_names_.insert(name);
-  unique_name_ = name;
+  names.insert(name);
+  unique_name_ = std::move(name);
   return this;
 }
 

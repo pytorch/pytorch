@@ -125,10 +125,7 @@ std::ostream& operator<<(std::ostream & out, const_value_list_with_types l) {
     }
     printValueRef(out, n);
     out << " : ";
-    if(n->hasType())
-      out << *n->type();
-    else
-      out << "UNKNOWN_TYPE";
+    out << *n->type();
   }
   return out;
 }
@@ -305,14 +302,12 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(v->hasType()) {
-      if(TensorType* type = v->type()->cast<TensorType>()) {
-        if(!has_device) {
-          has_device = true;
-          device = type->device();
-        } else {
-          JIT_ASSERT(device == type->device());
-        }
+    if(TensorType* type = v->type()->cast<TensorType>()) {
+      if(!has_device) {
+        has_device = true;
+        device = type->device();
+      } else {
+        JIT_ASSERT(device == type->device());
       }
     }
   };
@@ -355,7 +350,7 @@ void Node::lint() const {
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
       // Handle invariant
       if (i != inputs_.size() - 1) {
-        JIT_ASSERT(!input->hasType() || input->type()->kind() != TypeKind::HandleType);
+        JIT_ASSERT(input->type()->kind() != TypeKind::HandleType);
       }
       i++;
     }

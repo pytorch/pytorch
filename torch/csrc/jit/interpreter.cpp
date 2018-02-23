@@ -58,12 +58,6 @@ void desugarTripCounts(Block * b) {
       n->removeInput(0);
       JIT_ASSERT(n->blocks()[0]->inputs()[0]->uses().size() == 0 &&
         "NYI - use of trip count variable");
-      JIT_ASSERT(n->blocks()[0]->inputs()[1]->uses().size() == 0 &&
-        "NYI - use of cond variable in loop");
-
-      // TODO: remove cond as input to loop carries, it just complicates this
-      // implementation
-      n->blocks()[0]->eraseInput(1);
       n->blocks()[0]->eraseInput(0);
     }
     for(auto sb : n->blocks()) {
@@ -87,7 +81,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
-      stage_input_types[i].push_back(old_node->typeOption());
+      stage_input_types[i].push_back(old_node->type());
       old_node->replaceAllUsesWith(nv);
       input_pos++;
     }

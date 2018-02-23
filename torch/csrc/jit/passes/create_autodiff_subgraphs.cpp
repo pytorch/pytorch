@@ -29,7 +29,7 @@ void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
     if(value_map.count(v) > 0) {
       return value_map[v];
     }
-    Value * nv = new_graph->addInput()->setType(v->typeOption());
+    Value * nv = new_graph->addInput()->setType(v->type());
     group_node->addInput(v);
     value_map[v] = nv;
     return nv;
@@ -55,7 +55,7 @@ void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
       }
       if(to_replace.size() > 0) {
         new_graph->registerOutput(new_output);
-        Value * external_output = group_node->addOutput()->setType(old_output->typeOption());
+        Value * external_output = group_node->addOutput()->setType(old_output->type());
         for(auto u : to_replace) {
           u.user->replaceInput(u.offset, external_output);
         }
