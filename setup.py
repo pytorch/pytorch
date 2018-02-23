@@ -389,6 +389,29 @@ class build_ext(build_ext_parent):
 
             _C_LIB = os.path.join(build_temp, build_dir, lib_filename).replace('\\', '/')
 
+            THNN.extra_link_args += [_C_LIB]
+            if WITH_CUDA:
+                THCUNN.extra_link_args += [_C_LIB]
+            else:
+                # To generate .obj files for those .h files for the export class
+                # a header file cannot build, so it has to be copied to someplace as a source file
+                temp_dir = 'torch/csrc/generated'
+                hfile_list = ['torch/csrc/cuda/AutoGPU.h']
+                hname_list = [os.path.basename(hfile) for hfile in hfile_list]
+                rname_list = [os.path.splitext(hname)[0]
+                              for hname in hname_list]
+                cfile_list = [temp_dir + '/' + rname +
+                              '_cpu_win.cpp' for rname in rname_list]
+
+                if not os.path.exists(temp_dir):
+                    os.mkdir(temp_dir)
+
+                for hfile, cfile in zip(hfile_list, cfile_list):
+                    if os.path.exists(cfile):
+                        os.remove(cfile)
+                    shutil.copyfile(hfile, cfile)
+
+                C.main_sources += cfile_list
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
