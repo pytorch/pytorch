@@ -211,7 +211,7 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
         return _compile(arg)
 
 
-def legacy_trace(f, args=tuple(), kwargs=None, nderivs=0):
+def create_trace(f, args=tuple(), kwargs=None, nderivs=0):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -457,6 +457,30 @@ def trace(*args, **kwargs):
         >>>     return x * 2
     """
     return lambda func: torch._C.GraphExecutor(func, args, kwargs.pop('optimize', True))
+
+
+class CompilationUnit(object):
+    def __init__(self, lang=None, optimize=True):
+        self.cu = torch._C.CompilationUnit()
+        if lang is not None:
+            self.define(lang)
+        self.execution_engines = {}
+        self.optimize = optimize
+
+    def define(self, lang):
+        self.cu.define(lang)
+
+    def __getattr__(self, attr):
+        if attr not in self.execution_engines:
+            graph = self.cu.get_graph(attr)
+            self.execution_engines[attr] = torch._C.GraphExecutor(graph, self.optimize)
+        return self.execution_engines[attr]
+
+
+def script(fn):
+    ast = torch.jit.frontend.get_jit_ast(fn)
+    graph = _jit_script_compile(ast)
+    return torch._C.GraphExecutor(graph, True)
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
