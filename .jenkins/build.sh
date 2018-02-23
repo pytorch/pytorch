@@ -16,7 +16,7 @@ if [ -n "${SCCACHE_BUCKET}" ]; then
   fi
 
   # Setup wrapper scripts
-  for compiler in cc c++ gcc g++; do
+  for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
     (
       echo "#!/bin/sh"
       echo "exec $SCCACHE $(which $compiler) \"\$@\""
@@ -35,6 +35,7 @@ if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
   ln -sf "$(which ccache)" ./ccache/c++
   ln -sf "$(which ccache)" ./ccache/gcc
   ln -sf "$(which ccache)" ./ccache/g++
+  ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
   export CCACHE_WRAPPER_DIR="$PWD/ccache"
   export PATH="$CCACHE_WRAPPER_DIR:$PATH"
 fi
@@ -109,6 +110,10 @@ else
   exit 1
 fi
 
+# Install ONNX into a local directory
+ONNX_INSTALL_PATH="/usr/local/onnx"
+pip install "${ROOT_DIR}/third_party/onnx" -t "${ONNX_INSTALL_PATH}"
+
 # Symlink the caffe2 base python path into the system python path,
 # so that we can import caffe2 without having to change $PYTHONPATH.
 # Run in a subshell to contain environment set by /etc/os-release.
@@ -128,12 +133,14 @@ if [ -n "${JENKINS_URL}" ]; then
     if [[ "$ID_LIKE" == *debian* ]]; then
       python_path="/usr/local/lib/$(python_version)/dist-packages"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
+      sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
     fi
 
     # RHEL/CentOS
     if [[ "$ID_LIKE" == *rhel* ]]; then
       python_path="/usr/lib64/$(python_version)/site-packages/"
       sudo ln -sf "${INSTALL_PREFIX}/caffe2" "${python_path}"
+      sudo ln -sf "${ONNX_INSTALL_PATH}/onnx" "${python_path}"
     fi
 
     # /etc/ld.so.conf.d is used on both Debian and RHEL
