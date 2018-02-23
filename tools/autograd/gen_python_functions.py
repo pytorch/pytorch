@@ -161,10 +161,13 @@ def gen_py_nn_functions(out, declarations):
 
 
 def gen_py_torch_functions(out, declarations):
-    def is_namespace_or_type_function(declaration):
-        # True if function is on the at namespace or only on the type object.
-        # This includes things like at::add and Type::randperm, but excludes
-        # methods which are on both the Tensor and the Type.
+    def is_namespace_or_type_api_function(declaration):
+        # These are functions that should end up on the torch module. This
+        # includes functions on the at:: namespace and ones that are typically
+        # called via the type (e.g. Type::randn()). Since every function is
+        # implemented on the Type, we exclude functions that are also declared
+        # as methods on Tensor, since one shouldn't generally call these from
+        # the Type object.
         if 'namespace' in declaration['method_of']:
             return True
         if 'Tensor' in declaration['method_of']:
@@ -174,7 +177,7 @@ def gen_py_torch_functions(out, declarations):
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
-                is_namespace_or_type_function(declaration))
+                is_namespace_or_type_api_function(declaration))
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
