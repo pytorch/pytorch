@@ -130,7 +130,6 @@ static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
   return new_from_data(type, device, data);
 }
 
-
 static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, int64_t? device=-1)",
@@ -156,8 +155,10 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
+    AutoGPU auto_gpu(r.toInt64(2));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 4) {
+    AutoGPU auto_gpu(r.toInt64(3));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   }
   throw std::runtime_error("new(): invalid arguments");

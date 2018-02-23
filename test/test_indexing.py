@@ -377,10 +377,10 @@ class NumpyTests(TestCase):
 
         # In NumPy, slicing with ellipsis results in a 0-dim array. In PyTorch
         # we don't have separate 0-dim arrays and scalars.
-        self.assertEqual(a[0, ..., 1], variable(2))
+        self.assertEqual(a[0, ..., 1], torch.variable(2))
 
         # Assignment with `(Ellipsis,)` on 0-d arrays
-        b = variable(1)
+        b = torch.variable(1)
         b[(Ellipsis,)] = 2
         self.assertEqual(b, 2)
 

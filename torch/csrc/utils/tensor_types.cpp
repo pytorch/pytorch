@@ -5,6 +5,7 @@
 
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/tensor/python_tensor.h"
 
 using namespace at;
 
@@ -34,6 +35,10 @@ at::Type& type_from_string(const std::string& str) {
       map.emplace(type_to_string(*type), type);
     }
   });
+
+  if (str == "torch.Tensor") {
+    return torch::tensor::get_default_tensor_type();
+  }
 
   auto it = map.find(str);
   if (it == map.end()) {

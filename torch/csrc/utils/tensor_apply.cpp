@@ -5,38 +5,11 @@
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_scalars.h"
 
 using namespace at;
 
 namespace torch { namespace utils {
-
-static PyObject* load_scalar(void* data, ScalarType scalarType) {
-  switch (scalarType) {
-    case kByte: return THPUtils_packInt64(*(uint8_t*)data);
-    case kChar: return THPUtils_packInt64(*(char*)data);
-    case kShort: return THPUtils_packInt64(*(int16_t*)data);
-    case kInt: return THPUtils_packInt64(*(int32_t*)data);
-    case kLong: return THPUtils_packInt64(*(int64_t*)data);
-    case kHalf: return PyFloat_FromDouble(at::convert<double, Half>(*(at::Half*)data));
-    case kFloat: return PyFloat_FromDouble(*(float*)data);
-    case kDouble: return PyFloat_FromDouble(*(double*)data);
-    default: throw TypeError("invalid type");
-  }
-}
-
-static void store_scalar(void* data, ScalarType scalarType, PyObject* obj) {
-  switch (scalarType) {
-    case kByte: *(uint8_t*)data = (uint8_t)THPUtils_unpackLong(obj); break;
-    case kChar: *(char*)data = (char)THPUtils_unpackLong(obj); break;
-    case kShort: *(int16_t*)data = (int16_t)THPUtils_unpackLong(obj); break;
-    case kInt: *(int32_t*)data = (int32_t)THPUtils_unpackLong(obj); break;
-    case kLong: *(int64_t*)data = THPUtils_unpackLong(obj); break;
-    case kHalf: *(Half*)data = at::convert<Half, double>(THPUtils_unpackDouble(obj)); break;
-    case kFloat: *(float*)data = (float)THPUtils_unpackDouble(obj); break;
-    case kDouble: *(double*)data = THPUtils_unpackDouble(obj); break;
-    default: throw TypeError("invalid type");
-  }
-}
 
 struct StridedData {
   StridedData(const Tensor & tensor)

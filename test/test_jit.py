@@ -1196,6 +1196,12 @@ class TestJit(TestCase):
         if input_tensors is None:
             input_tensors = reference_tensors
 
+        def wrapped(*inputs):
+            res = func(*inputs)
+            if isinstance(res, torch.Tensor):
+                return (res,)
+            return res
+
         nograd_inputs = [Variable(t) for t in reference_tensors]
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
@@ -1204,13 +1210,13 @@ class TestJit(TestCase):
 
         # test no gradients case
 
-        outputs = func(*nograd_inputs)
+        outputs = wrapped(*nograd_inputs)
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)
 
         # test single grad case
 
-        outputs = func(*recording_inputs)
+        outputs = wrapped(*recording_inputs)
         grads = torch.autograd.grad(allSum(outputs), recording_inputs)
 
         outputs_ge = ge(*recording_inputs)
@@ -1220,7 +1226,7 @@ class TestJit(TestCase):
 
         # test the grad grad case
 
-        outputs = func(*recording_inputs)
+        outputs = wrapped(*recording_inputs)
         l1 = allSum(outputs)
         grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
         l2 = (allSum(grads) * l1)
@@ -1403,7 +1409,7 @@ class TestJit(TestCase):
     def _make_scalar_vars(self, arr, dtype):
         out = []
         for inp in arr:
-            out.append(Variable(torch.from_numpy(np.array([inp], dtype=dtype))))
+            out.append(torch.from_numpy(np.array(inp, dtype=dtype)))
         return out
 
     def test_script_while(self):

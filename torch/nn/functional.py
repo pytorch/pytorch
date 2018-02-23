@@ -1182,10 +1182,6 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         size = list(input.size())
         if reduce(mul, size[2:], size[0]) == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-    if running_mean is not None:
-        running_mean = Variable(running_mean)
-    if running_var is not None:
-        running_var = Variable(running_var)
     return torch._C._VariableFunctions.batch_norm(
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
