@@ -54,13 +54,6 @@ class DataParallel(Module):
 
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
-
-        devices_memory = [torch.cuda.max_memory_allocated(i) for i in device_ids]
-        if max(devices_memory) / min(devices_memory) >= 3.0:
-            warn = """One GPU has >= 3 times less memory than another. You should probably exclude it using the
-            device_ids argument of DataParallel, or by setting the CUDA_VISIBLE_DEVICES environment variable."""
-            raise UserWarning(warn)
-
         if output_device is None:
             output_device = device_ids[0]
         self.dim = dim
