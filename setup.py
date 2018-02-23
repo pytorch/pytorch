@@ -405,13 +405,26 @@ class build_ext(build_ext_parent):
             if WITH_CUDA:
                 THCUNN.extra_link_args += [_C_LIB]
             else:
-                # To generate .obj files for AutoGPU for the export class
+                # To generate .obj files for those .h files for the export class
                 # a header file cannot build, so it has to be copied to someplace as a source file
-                if not os.path.exists("torch/csrc/generated"):
-                    os.mkdir("torch/csrc/generated")
-                if os.path.exists("torch/csrc/generated/AutoGPU_cpu_win.cpp"):
-                    os.remove("torch/csrc/generated/AutoGPU_cpu_win.cpp")
-                shutil.copyfile("torch/csrc/cuda/AutoGPU.h", "torch/csrc/generated/AutoGPU_cpu_win.cpp")
+                temp_dir = 'torch/csrc/generated'
+                hfile_list = ['torch/csrc/cuda/AutoGPU.h',
+                              'torch/csrc/cuda/lazy_init.h']
+                hname_list = [os.path.basename(hfile) for hfile in hfile_list]
+                rname_list = [os.path.splitext(hname)[0]
+                              for hname in hname_list]
+                cfile_list = [temp_dir + '/' + rname +
+                              '_cpu_win.cpp' for rname in rname_list]
+
+                if not os.path.exists(temp_dir):
+                    os.mkdir(temp_dir)
+
+                for hfile, cfile in zip(hfile_list, cfile_list):
+                    if os.path.exists(cfile):
+                        os.remove(cfile)
+                    shutil.copyfile(hfile, cfile)
+
+                C.main_sources += cfile_list
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
@@ -637,9 +650,6 @@ if WITH_DISTRIBUTED:
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-
-if IS_WINDOWS and not WITH_CUDA:
-    main_sources += ["torch/csrc/generated/AutoGPU_cpu_win.cpp"]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
