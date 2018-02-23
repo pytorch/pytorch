@@ -6,7 +6,7 @@
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
-#include "torch/csrc/utils/lazy_init.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_scalars.h"

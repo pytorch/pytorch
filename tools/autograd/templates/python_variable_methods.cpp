@@ -10,7 +10,7 @@
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
-#include "torch/csrc/utils/lazy_init.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
