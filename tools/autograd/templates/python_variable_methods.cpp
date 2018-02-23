@@ -7,10 +7,10 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/cuda/lazy_init.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
+#include "torch/csrc/utils/lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"

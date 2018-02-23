@@ -3,9 +3,9 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
-#include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/utils/lazy_init.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/tensor/python_tensor.h"
 
