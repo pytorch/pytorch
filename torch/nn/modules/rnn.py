@@ -55,9 +55,9 @@ class RNNBase(Module):
                     setattr(self, name, param)
                 self._all_weights.append(param_names)
 
-        self.weight_init = getattr(init, weight_init)
-        self.hidden_init = getattr(init, hidden_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.hidden_init = init.get(hidden_init)
+        self.bias_init = init.get(bias_init)
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -582,9 +582,9 @@ class RNNCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
-        self.weight_init = getattr(init, weight_init)
-        self.hidden_init = getattr(init, hidden_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.hidden_init = init.get(hidden_init)
+        self.bias_init = init.get(bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -689,9 +689,9 @@ class LSTMCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
-        self.weight_init = getattr(init, weight_init)
-        self.hidden_init = getattr(init, hidden_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.hidden_init = init.get(hidden_init)
+        self.bias_init = init.get(bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -782,9 +782,9 @@ class GRUCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
-        self.weight_init = getattr(init, weight_init)
-        self.hidden_init = getattr(init, hidden_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.hidden_init = init.get(hidden_init)
+        self.bias_init = init.get(bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):

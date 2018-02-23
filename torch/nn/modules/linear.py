@@ -1,5 +1,5 @@
 import math
-
+import torch
 from torch.nn.parameter import Parameter
 from .. import init
 from .. import functional as F
@@ -48,14 +48,14 @@ class Linear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
-        self.weight_init = getattr(init, weight_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.bias_init = init.get(bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        self.weight_init(self.weight.data)
+        self.weight_init(self.weight)
         if self.bias is not None:
-            self.bias_init(self.bias.data)
+            self.bias_init(self.bias)
 
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
@@ -112,8 +112,8 @@ class Bilinear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
-        self.weight_init = getattr(init, weight_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.bias_init = init.get(bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):

@@ -37,8 +37,8 @@ class _ConvNd(Module):
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
             self.register_parameter('bias', None)
-        self.weight_init = getattr(init, weight_init)
-        self.bias_init = getattr(init, bias_init)
+        self.weight_init = init.get(weight_init)
+        self.bias_init = init.get(bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):

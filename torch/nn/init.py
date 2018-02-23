@@ -1,4 +1,5 @@
 import math
+import types
 import random
 
 import torch
@@ -300,3 +301,9 @@ def _calculate_fan_in_and_fan_out(tensor):
         fan_out = num_output_fmaps * receptive_field_size
 
     return fan_in, fan_out
+
+def get(identifier):
+    func = globals()[identifier]
+    if not isinstance(func, types.FunctionType):
+        return func()
+    return func
