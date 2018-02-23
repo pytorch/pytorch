@@ -21,9 +21,11 @@ using namespace at;
 namespace torch { namespace utils {
 
 static void maybe_initialize_cuda(const at::Type &type) {
+#ifdef WITH_CUDA
   if (type.is_cuda()) {
     torch::cuda::lazy_init();
   }
+#endif
 }
 
 static Tensor new_with_sizes(const Type& type, int device, IntList sizes) {
