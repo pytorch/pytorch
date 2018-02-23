@@ -261,6 +261,12 @@ class RNN(RNNBase):
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        weight_init: string specifying initialization strategy for the i2h weights.
+            Default: ``xavier_uniform``
+        hidden_init: string specifying initialization strategy for the h2h weights.
+            Default: ``orthogonal``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -351,6 +357,12 @@ class LSTM(RNNBase):
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        weight_init: string specifying initialization strategy for the i2h weights.
+            Default: ``xavier_uniform``
+        hidden_init: string specifying initialization strategy for the h2h weights.
+            Default: ``orthogonal``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Inputs: input, (h_0, c_0)
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -431,6 +443,12 @@ class GRU(RNNBase):
         dropout: If non-zero, introduces a dropout layer on the outputs of each
             RNN layer except the last layer
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        weight_init: string specifying initialization strategy for the i2h weights.
+            Default: ``xavier_uniform``
+        hidden_init: string specifying initialization strategy for the h2h weights.
+            Default: ``orthogonal``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Inputs: input, h_0
         - **input** (seq_len, batch, input_size): tensor containing the features
@@ -514,6 +532,12 @@ class RNNCell(RNNCellBase):
         bias: If ``False``, then the layer does not use bias weights b_ih and b_hh.
             Default: ``True``
         nonlinearity: The non-linearity to use ['tanh'|'relu']. Default: 'tanh'
+        weight_init: string specifying initialization strategy for the i2h weights.
+            Default: ``xavier_uniform``
+        hidden_init: string specifying initialization strategy for the h2h weights.
+            Default: ``orthogonal``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Inputs: input, hidden
         - **input** (batch, input_size): tensor containing input features
@@ -611,6 +635,12 @@ class LSTMCell(RNNCellBase):
         hidden_size: The number of features in the hidden state h
         bias: If `False`, then the layer does not use bias weights `b_ih` and
             `b_hh`. Default: ``True``
+        weight_init: string specifying initialization strategy for the i2h weights.
+            Default: ``xavier_uniform``
+        hidden_init: string specifying initialization strategy for the h2h weights.
+            Default: ``orthogonal``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Inputs: input, (h_0, c_0)
         - **input** (batch, input_size): tensor containing input features
@@ -703,6 +733,12 @@ class GRUCell(RNNCellBase):
         hidden_size: The number of features in the hidden state h
         bias: If `False`, then the layer does not use bias weights `b_ih` and
             `b_hh`. Default: `True`
+        weight_init: string specifying initialization strategy for the i2h weights.
+            Default: ``xavier_uniform``
+        hidden_init: string specifying initialization strategy for the h2h weights.
+            Default: ``orthogonal``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Inputs: input, hidden
         - **input** (batch, input_size): tensor containing input features

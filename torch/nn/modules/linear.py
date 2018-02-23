@@ -14,6 +14,10 @@ class Linear(Module):
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
             Default: ``True``
+        weight_init: string specifying initialization strategy for the weights.
+            Default: ``xavier_uniform``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Shape:
         - Input: :math:`(N, *, in\_features)` where `*` means any number of
@@ -73,6 +77,10 @@ class Bilinear(Module):
         out_features: size of each output sample
         bias: If set to False, the layer will not learn an additive bias.
             Default: ``True``
+        weight_init: string specifying initialization strategy for the weights.
+            Default: ``xavier_uniform``
+        bias_init: string specifying initialization strategy for the bias.
+            Default: ``zeros``
 
     Shape:
         - Input: :math:`(N, in1\_features)`, :math:`(N, in2\_features)`
