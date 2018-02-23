@@ -27,11 +27,9 @@ static at::Type& default_type() {
 }
 
 static void maybe_initialize_cuda(const at::Type &type) {
-#ifdef WITH_CUDA
   if (type.is_cuda()) {
     torch::cuda::lazy_init();
   }
-#endif
 }
 
 ${py_method_dispatch}
