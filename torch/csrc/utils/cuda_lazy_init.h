@@ -1,9 +1,12 @@
 #pragma once
 
-namespace torch {
-namespace cuda {
+// It initially lies in torch/csrc/cuda, but to unconditionlly compile it
+// we have to put it here.
 
-void lazy_init();
+namespace torch {
+namespace utils {
+
+void cuda_lazy_init();
 
 }
 }

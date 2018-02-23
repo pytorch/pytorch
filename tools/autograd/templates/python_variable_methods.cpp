@@ -299,7 +299,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool non_blocking) {
   if (type.is_cuda()) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);

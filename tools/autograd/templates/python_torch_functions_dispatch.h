@@ -28,7 +28,7 @@ static at::Type& default_type() {
 
 static void maybe_initialize_cuda(const at::Type &type) {
   if (type.is_cuda()) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
 }
 
