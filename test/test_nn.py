@@ -4949,7 +4949,7 @@ class TestNN(NNTestCase):
             asfm(x, y)
 
         # cluster sizes
-        asfm = nn.AdaptiveLogSoftmax(16, 20, [5, 10, 15])
+        asfm = nn.AdaptiveLogSoftmax(16, 20, [5, 10, 15], return_logprob=True)
         x = Variable(torch.randn(2, 16))
         y = Variable(torch.LongTensor([0, 17]))
 
@@ -4961,7 +4961,7 @@ class TestNN(NNTestCase):
         self.assertEqual(asfm(x, y).size(), (2, ))
 
         # get_log_proba actually returns log_proba
-        asfm = nn.AdaptiveLogSoftmax(8, 4, [2])
+        asfm = nn.AdaptiveLogSoftmax(8, 4, [2], return_logprob=True)
         x = Variable(torch.randn(4, 8))
         logprob_out = asfm.get_log_proba(x)
 
@@ -4973,6 +4973,18 @@ class TestNN(NNTestCase):
             out = asfm(x, y)
 
             self.assertEqual(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze())
+
+        # reduction
+        x = Variable(torch.randn(4, 8))
+        y = Variable(torch.LongTensor([0, 1, 2, 3]))
+
+        asfm = nn.AdaptiveLogSoftmax(8, 4, [2], return_logprob=False)
+        reduced = asfm(x, y)
+
+        asfm.return_logprob = True
+        logprob = -(asfm(x, y).mean())
+
+        self.assertEqual(reduced, logprob)
 
 
 class TestNNInit(TestCase):
@@ -7360,6 +7372,11 @@ add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmax(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
+
+add_test(NewModuleTest(
+    constructor=lambda: _AdaptiveLogSoftmax(16, 10, [2, 6], return_logprob=True),
+    input_size=(4, 16),
+    fullname='AdaptiveLogSoftmaxLogprob'))
 
 
 if __name__ == '__main__':
