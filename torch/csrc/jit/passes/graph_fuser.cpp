@@ -78,7 +78,7 @@ bool isSimpleMap(Node *node) {
 }
 
 struct GraphFuser {
-  std::shared_ptr<Graph>& graph;
+  Block * block;
 
   // Used to order nodes so we always consider producer-consumer fusions
   // in reverse topological order.
@@ -87,8 +87,8 @@ struct GraphFuser {
   // Newly generated nodes will copy the location where they are inserted.
   std::unordered_map<Node*,size_t> topological_index;
 
-  GraphFuser(std::shared_ptr<Graph>& graph)
-  : graph(graph) {}
+  GraphFuser(Block * block)
+  : block(block) {}
 
   int getDevice(Node * node) {
     if(node->kind() == kFusionGroup) {
@@ -122,6 +122,7 @@ struct GraphFuser {
     return true;
   }
   bool isFusable(Node * node) {
+    if (node->owningBlock() != block) return false;
     if (node->kind() == kFusionGroup) return true;
     return isSimpleMap(node) && allFloatIO(node);
   }
@@ -210,7 +211,7 @@ struct GraphFuser {
 
     // Clone all nodes
     for (auto inner : producer_subgraph->nodes()) {
-      Node * outer = graph->createClone(inner, [&](Value * k) -> Value* {
+      Node * outer = block->owningGraph()->createClone(inner, [&](Value * k) -> Value* {
         return inner_to_outer.at(k);
       });
       outer->insertBefore(producer_group);
@@ -291,7 +292,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = graph->createFusionGroup(getDevice(n));
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n));
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
@@ -397,7 +398,7 @@ struct GraphFuser {
       // TODO: Perhaps we should use cloneFrom now, as it seems unlikely
       // to copy select nodes now that we have refactored to have a Value
       // distinct from Node.
-      Node * input_chunk = graph->create(chunk->kind(), 0);
+      Node * input_chunk = block->owningGraph()->create(chunk->kind(), 0);
       input_chunk->copyAttributes(*chunk);
       input_chunk->addInput(input);
       insertAt(&insertion_point, input_chunk);
@@ -416,7 +417,7 @@ struct GraphFuser {
     // apply the op to each chunk of the chunked operands,
     // and then rewrite the graph to use them!
     for (auto chunk_sel : chunk->outputs()) {
-      Node * chunked_op = graph->create(producer_for_chunk_node->kind());
+      Node * chunked_op = block->owningGraph()->create(producer_for_chunk_node->kind());
       chunked_op->copyAttributes(*producer_for_chunk_node);
       // Invariant: mappable operators always produce contiguous output
       chunked_op->output()->setType(chunk_sel->type()->cast<TensorType>()->contiguous());
@@ -433,7 +434,7 @@ struct GraphFuser {
 
   // returns where to continue scanning, and whether any fusion was made
   std::pair<graph_node_list::iterator, bool> scanNode(Node * consumer) {
-    auto stage_guard = graph->setStageTemporary(consumer->stage());
+    auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
     if(isFusableAsExitNode(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
@@ -465,15 +466,14 @@ struct GraphFuser {
   }
 
   void run() {
-    for(auto p : graph->inputs()) {
+    for(auto p : block->inputs()) {
       topological_index[p->node()] = 0;
     }
     size_t i = 1;
-    auto nodes = graph->nodes();
-    for(auto consumer : nodes) {
+    for(auto consumer : block->nodes()) {
       topological_index[consumer] = i++;
     }
-    topological_index[graph->return_node()] = i++;
+    topological_index[block->return_node()] = i++;
 
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -494,10 +494,15 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      for (auto it = nodes.rbegin(); it != nodes.rend();) {
+      for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
+      }
+    }
+    for (Node * node : block->nodes()) {
+      for (Block * sub_block : node->blocks()) {
+        GraphFuser(sub_block).run();
       }
     }
   }
@@ -506,7 +511,7 @@ struct GraphFuser {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph).run();
+  GraphFuser(graph->block()).run();
 }
 
 }}

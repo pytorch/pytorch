@@ -151,6 +151,15 @@ void PropagateShapeOnNode(Node * node) {
 
 }
 
+void PropagateShapeOnBlock(Block * block) {
+  for (Node * node : block->nodes()) {
+    PropagateShapeOnNode(node);
+    for (Block * sub_block : node->blocks()) {
+      PropagateShapeOnBlock(sub_block);
+    }
+  }
+}
+
 }
 
 void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
@@ -158,9 +167,7 @@ void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   for(size_t i = 0; i < spec.size(); ++i) {
     graph.inputs()[i]->setType(spec.tensorInfo(i));
   }
-  for(auto n : graph.nodes()) {
-    PropagateShapeOnNode(n);
-  }
+  PropagateShapeOnBlock(graph.block());
 }
 
 }}

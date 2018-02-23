@@ -12,7 +12,6 @@ PY2 = sys.version_info[0] == 2
 _reserved_prefix = '__jit'
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
 
-# TODO: populate those
 pretty_node_names = {
     ast.For: "for loops",
     ast.Delete: "del statements",

@@ -16,12 +16,13 @@ namespace {
 // right before nodes[0] (i.e. it will not create cycles and all uses of
 // new node will be after this position).
 // prereq: nodes are in topological order
-void mergeNodes(Graph & g, Symbol group_node_kind, ArrayRef<Node*> nodes) {
+void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
   JIT_ASSERT(nodes.size() > 0);
   std::unordered_map<Value*, Value*> value_map;
+  Graph * graph = block->owningGraph();
 
   auto new_graph = std::make_shared<Graph>();
-  Node * group_node = g.create(group_node_kind, 0);
+  Node * group_node = graph->create(group_node_kind, 0);
   group_node->g_(kSubgraph, new_graph);
 
   auto getOrCreateInput = [&](Value * v) {
@@ -71,8 +72,7 @@ void mergeNodes(Graph & g, Symbol group_node_kind, ArrayRef<Node*> nodes) {
 
 }
 
-void CreateAutodiffSubgraphs(Graph & g, size_t threshold) {
-
+void CreateAutodiffSubgraphs(Block * block, size_t threshold) {
   // This implementation is not optimal, but it is simple.
   // It just scans through the list in order looking for runs of
   // differentiable ops, and then grouping them together when
@@ -88,21 +88,28 @@ void CreateAutodiffSubgraphs(Graph & g, size_t threshold) {
   // and group maximal groups
 
   std::vector<Node*> groupable;
-  for(auto n : g.nodes()) { // Note: nodes() iterator stays valid since it is
+  for(Node * node : block->nodes()) { // Note: nodes() iterator stays valid since it is
                             // always pointing _after_ the nodes that mergeNodes
                             // mutates.
-    if(isDifferentiable(n)) {
-      groupable.push_back(n);
+    if(isDifferentiable(node)) {
+      groupable.push_back(node);
     } else {
       if(groupable.size() >= threshold) {
-        mergeNodes(g, kGraphExecutor, groupable);
+        mergeNodes(block, kGraphExecutor, groupable);
       }
       groupable.clear();
+      for (Block * sub_block : node->blocks()) {
+        CreateAutodiffSubgraphs(sub_block, threshold);
+      }
     }
   }
   if(groupable.size() >= threshold) {
-    mergeNodes(g, kGraphExecutor, groupable);
+    mergeNodes(block, kGraphExecutor, groupable);
   }
+}
+
+void CreateAutodiffSubgraphs(Graph & graph, size_t threshold) {
+  CreateAutodiffSubgraphs(graph.block(), threshold);
 }
 
 
