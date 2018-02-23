@@ -5523,8 +5523,8 @@ class TestTorch(TestCase):
         y = x[2:]
         self.assertEqual(int(y), 3)
 
-    @unittest.skipIf(torch.set_flush_denormal(False),
-                     "flush_denormal not supported")
+    # skip this test for now as it affects all tests
+    @unittest.skipIf(True, "flush_denormal not supported")
     def test_set_flush_denormal(self):
         tiny_float = 1e-42
         tiny_double = 1e-320
