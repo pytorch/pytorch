@@ -14,7 +14,7 @@
 ##############################################################################
 
 ## @package onnx
-# Module caffe2.python.onnx.tests.caffe2_ref_test
+# Module caffe2.python.onnx.tests.c2_ref_test
 
 from __future__ import absolute_import
 from __future__ import division
