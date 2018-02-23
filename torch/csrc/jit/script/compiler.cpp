@@ -160,6 +160,11 @@ struct Environment {
       // Actually remove the input
       b->eraseInput(*ritr);
       captured_inputs.erase(captured_inputs.begin() + *ritr - skip_num);
+      for (const auto& kv : value_table) {
+        if (kv.second == v) {
+          value_table[kv.first] = orig;
+        }
+      }
     }
   }
 };
@@ -319,6 +324,7 @@ struct to_ir {
 
       // Add block outputs
       auto curr_frame = environment_stack;
+
       for (const auto& x : curr_frame->captured_inputs) {
         body_block->registerOutput(curr_frame->value_table[x]);
       }
@@ -709,6 +715,10 @@ CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
 void CompilationUnit::define(const std::string& script) {
   return pImpl->define(script);
+}
+
+void CompilationUnit::defineFunction(const Def& fn_def) {
+  pImpl->defineFunction(fn_def);
 }
 
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
