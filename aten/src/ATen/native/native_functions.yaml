@@ -11,6 +11,7 @@
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addmv_(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
 
 - func: addmv_out(Tensor result, Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
@@ -26,8 +27,10 @@
   variants: function
 
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+  variants: method
 
 - func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+  variants: method
 
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
@@ -215,6 +218,7 @@
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+  variants: method
 
 - func: is_cuda(Tensor self) -> bool
 

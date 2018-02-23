@@ -165,7 +165,10 @@ def gen_py_torch_functions(out, declarations):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
                 ('namespace' in declaration['method_of'] or
-                 'Type' in declaration['method_of']))
+                 'Type' in declaration['method_of']) and not
+                # don't bind actual inplace tensor methods; we have some "fake" inplace Functions
+                # that aren't actually methods that are logically NN functions (e.g. rrelu_).
+                ('Tensor' in declaration['method_of'] and declaration['inplace']))
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
