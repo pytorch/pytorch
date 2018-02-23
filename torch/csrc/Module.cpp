@@ -608,7 +608,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   Py_RETURN_TRUE;
 }
 
-static PyObject* THPModule_initializeTensorTypes(PyObject *_unused)
+static PyObject* THPModule_initializeTensorTypeBindings(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
   torch::tensor::initialize_python_bindings(nullptr);
@@ -628,7 +628,7 @@ static PyMethodDef TorchMethods[] = {
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
   {"_initialize_dtypes",(PyCFunction)THPModule_initializeDtypes,  METH_NOARGS,  NULL},
-  {"_initialize_tensor_types",(PyCFunction)THPModule_initializeTensorTypes,  METH_NOARGS,  NULL},
+  {"_initialize_tensor_type_bindings", (PyCFunction)THPModule_initializeTensorTypeBindings, METH_NOARGS, NULL},
 #ifdef WITH_CUDA
   {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
 #endif

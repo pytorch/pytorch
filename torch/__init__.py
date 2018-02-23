@@ -269,7 +269,7 @@ _storage_classes = {
     CharStorage, ByteStorage, HalfStorage
 }
 
-# The _tensor_classes set is initialized by the call to _C._initialize_tensor_types()
+# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes = set()
 
 _integer_tensor_classes = {
@@ -302,7 +302,7 @@ def manager_path():
 _C._initExtension(manager_path())
 del manager_path
 
-_C._initialize_tensor_types()
+_C._initialize_tensor_type_bindings()
 
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
