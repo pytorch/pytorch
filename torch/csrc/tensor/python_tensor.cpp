@@ -47,9 +47,12 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (!tensor_type.aten_type) {
     throw unavailable_type(tensor_type);
   }
+  // TODO: fix Windows issues and remove WITH_CUDA
+#ifdef WITH_CUDA
   if (tensor_type.is_cuda) {
     torch::cuda::lazy_init();
   }
+#endif
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*tensor_type.aten_type, args, kwargs));
   END_HANDLE_TH_ERRORS
 }
