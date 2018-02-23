@@ -1,13 +1,16 @@
 import math
 import random
 import unittest
+import collections
 from copy import deepcopy
 
 import torch
 import torch.legacy.nn as nn
 from common_nn import NNTestCase, ModuleTest, CriterionTest, iter_tensors, \
     module_tests, criterion_tests, TEST_CUDA, PRECISION
+from torch.autograd.gradcheck import get_numerical_jacobian, contiguous
 from common import to_gpu, freeze_rng_state, run_tests
+from torch.autograd import Variable
 
 
 class OldModuleTest(ModuleTest):
@@ -22,9 +25,11 @@ class OldModuleTest(ModuleTest):
         # TODO: check update parameters
         # TODO: test IO
         module.training()
-        test_case.check_jacobian(module, input, self.jacobian_input)
+        with torch.no_grad():
+            test_case.check_jacobian(module, input, self.jacobian_input)
         module.evaluate()
-        test_case.check_jacobian(module, input, self.jacobian_input)
+        with torch.no_grad():
+            test_case.check_jacobian(module, input, self.jacobian_input)
 
         # Test .type()
         module.float().double().forward(input)
@@ -630,20 +635,58 @@ def prepare_tests():
         add_test(test)
 
 
+def require_grad(input):
+    if isinstance(input, torch.Tensor):
+        input = input.detach()
+        input.requires_grad = True
+        return input
+    elif isinstance(input, collections.Iterable):
+        return type(input)(require_grad(e) for e in input)
+    return input
+
+
 class TestNN(NNTestCase):
+
+    def _numerical_jacobian(self, module, input, jacobian_input=True, jacobian_parameters=True):
+        def fw(input):
+            out = self._forward(module, input)
+            if isinstance(out, Variable):
+                return out.data
+            return out
+
+        res = tuple()
+        input = contiguous(input)
+        if jacobian_input:
+            input = require_grad(input)
+            res += get_numerical_jacobian(fw, input, input, eps=1e-6),
+        if jacobian_parameters:
+            params, _ = self._get_parameters(module)
+            jacobians = []
+            for p in params:
+                p = p.detach()
+                p.requires_grad = True
+                jacobians.append(get_numerical_jacobian(fw, input, p, eps=1e-6))
+            res += torch.cat(jacobians, 0),
+        return res
 
     def _forward(self, module, input):
         with freeze_rng_state():
-            return module.forward(input)
+            with torch.no_grad():
+                return module.forward(input)
 
     def _backward(self, module, input, output, grad_output, create_graph=False):
+        if isinstance(input, Variable):
+            input = input.data
+
         return module.backward(input, grad_output)
 
     def _forward_criterion(self, criterion, input, target):
-        return criterion.forward(input, target)
+        with torch.no_grad():
+            return criterion.forward(input, target)
 
     def _backward_criterion(self, criterion, input, target):
-        return criterion.backward(input, target)
+        with torch.no_grad():
+            return criterion.backward(input, target)
 
     def _zero_grad_parameters(self, module):
         return module.zeroGradParameters()
@@ -726,14 +769,14 @@ class TestNN(NNTestCase):
         input = torch.randn(3, 4).double()
         c = nn.Copy(torch.DoubleTensor, torch.FloatTensor)
         output = c.forward(input)
-        self.assertEqual(torch.typename(output), 'torch.FloatTensor')
+        self.assertIsInstance(output, torch.FloatTensor)
         self.assertEqual(output, input.float(), 1e-6)
         gradInput = c.backward(input, output.fill_(1))
-        self.assertEqual(torch.typename(gradInput), 'torch.DoubleTensor')
+        self.assertIsInstance(gradInput, torch.DoubleTensor)
         self.assertEqual(gradInput, output.double(), 1e-6)
         c.dontCast = True
         c.double()
-        self.assertEqual(torch.typename(output), 'torch.FloatTensor')
+        self.assertIsInstance(output, torch.FloatTensor)
 
         # Check that these don't raise errors
         c.__repr__()
@@ -924,9 +967,9 @@ class TestNN(NNTestCase):
         self.assertEqual(go2, 1)
 
     def test_DepthConcat(self):
-        outputSize = torch.IntTensor((5, 6, 7, 8))
+        outputSize = [5, 6, 7, 8]
         input = torch.randn(2, 3, 12, 12)
-        gradOutput = torch.randn(2, int(outputSize.sum()), 12, 12)
+        gradOutput = torch.randn(2, sum(outputSize), 12, 12)
         concat = nn.DepthConcat(1)
         concat.add(nn.SpatialConvolution(3, outputSize[0], 1, 1, 1, 1))  # > 2, 5, 12, 12
         concat.add(nn.SpatialConvolution(3, outputSize[1], 3, 3, 1, 1))  # > 2, 6, 10, 10
@@ -937,7 +980,7 @@ class TestNN(NNTestCase):
         outputConcat = concat.forward(input)
         gradInputConcat = concat.backward(input, gradOutput)
         # the spatial dims are the largest, the nFilters is the sum
-        output = torch.Tensor(2, int(outputSize.sum()), 12, 12).zero_()  # zero for padding
+        output = torch.Tensor(2, sum(outputSize), 12, 12).zero_()  # zero for padding
         narrows = ((slice(None), slice(0, 5), slice(None), slice(None)),
                    (slice(None), slice(5, 11), slice(1, 11), slice(1, 11)),
                    (slice(None), slice(11, 18), slice(1, 10), slice(1, 10)),

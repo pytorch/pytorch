@@ -126,10 +126,10 @@ class TestOptim(TestCase):
             loss.backward()
             return loss
 
-        initial_value = fn().data[0]
+        initial_value = fn().item()
         for i in range(200):
             optimizer.step(fn)
-        self.assertLess(fn().data[0], initial_value)
+        self.assertLess(fn().item(), initial_value)
 
     def _test_state_dict(self, weight, bias, input, constructor):
         weight = Variable(weight, requires_grad=True)
@@ -292,7 +292,7 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3, amsgrad=True)
         )
-        with self.assertRaisesRegexp(ValueError, "Invalid beta parameter at index 0: 1.0"):
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
             optim.Adam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_sparse_adam(self):

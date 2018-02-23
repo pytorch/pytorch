@@ -102,7 +102,7 @@ def default_tensor_type(type):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            old_type = torch.typename(torch.Tensor())
+            old_type = torch.Tensor().type()
             torch.set_default_tensor_type(type_str)
             try:
                 return fn(*args, **kwargs)
@@ -126,12 +126,10 @@ class InputVariableMixin(object):
         input = TestBase._get_input(self, False)
 
         def map_variables(i):
-            if isinstance(i, Variable):
+            if isinstance(i, torch.Tensor):
                 if i.is_floating_point():
                     i.requires_grad = True
                 return i
-            elif torch.is_tensor(i):
-                return Variable(i, requires_grad=True)
             else:
                 return type(i)(map_variables(elem) for elem in i)
 
@@ -180,7 +178,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             output_ip.backward(grad)
             test_case.assertEqual(input.grad, input_ip.grad)
 
-        if type(input.data) == torch.LongTensor and TEST_CUDA:
+        if isinstance(input, torch.LongTensor) and TEST_CUDA:
             # check that cuda() moves module parameters to correct GPU device,
             # and that float() casts parameters correctly
 
@@ -188,7 +186,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             module.float().cuda()
             module(input)
             for p in module.parameters():
-                test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                 test_case.assertEqual(p.get_device(), 0)
 
             if torch.cuda.device_count() > 1:
@@ -197,26 +195,26 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 with torch.cuda.device(1):
                     module(input)
                 for p in module.parameters():
-                    test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 1)
         else:
             # check that float()/double() casters work correctly
 
             # to float
-            if type(input.data) != torch.LongTensor:
+            if not isinstance(input, torch.LongTensor):
                 input = input.float()
             module.float()
             module(input)
             for p in module.parameters():
-                test_case.assertEqual(type(p.data), torch.FloatTensor)
+                test_case.assertIsInstance(p, torch.FloatTensor)
 
             # and back to double
-            if type(input.data) != torch.LongTensor:
+            if not isinstance(input, torch.LongTensor):
                 input = input.double()
             module.double()
             module(input)
             for p in module.parameters():
-                test_case.assertEqual(type(p.data), torch.DoubleTensor)
+                test_case.assertIsInstance(p, torch.DoubleTensor)
 
             # TODO: Hardshrink is lacking a CUDA implementation
             if TEST_CUDA and self.should_test_cuda and type(module) != nn.Hardshrink:
@@ -228,7 +226,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 module.float().cuda()
                 module(input)
                 for p in module.parameters():
-                    test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
 
                 # to CPU
@@ -236,14 +234,14 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 module.cpu()
                 module(input)
                 for p in module.parameters():
-                    test_case.assertEqual(type(p.data), torch.FloatTensor)
+                    test_case.assertIsInstance(p, torch.FloatTensor)
 
                 # back to GPU0
                 input = input.cuda()
                 module.cuda()
                 module(input)
                 for p in module.parameters():
-                    test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                    test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                     test_case.assertEqual(p.get_device(), 0)
 
                 # test that forwards of module runs correctly without cuDNN
@@ -251,7 +249,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     with torch.backends.cudnn.flags(enabled=False):
                         module(input)
                         for p in module.parameters():
-                            test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                            test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                             test_case.assertEqual(p.get_device(), 0)
 
                 if torch.cuda.device_count() >= 2:
@@ -262,7 +260,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                     with torch.cuda.device(1):
                         module(input)
                     for p in module.parameters():
-                        test_case.assertEqual(type(p.data), torch.cuda.FloatTensor)
+                        test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
 
     def _get_target(self):
@@ -281,14 +279,27 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
 
     def _do_extra_tests(self, test_case, module, input, target):
-        if self.check_gradgrad:
-            params = tuple(x for x in module.parameters())
-            if not isinstance(input, tuple):
-                _assertGradAndGradgradChecks(test_case, lambda x, y, *args, **kw: module(x, y),
-                                             (input, target) + params)
-            else:
-                _assertGradAndGradgradChecks(test_case, lambda x, y, z, *args, **kw: module(x, y, z),
-                                             input + (target,) + params)
+        if not self.check_gradgrad:
+            return
+
+        test_case.assertFalse(target.requires_grad)
+
+        params = tuple(x for x in module.parameters())
+        if not isinstance(input, tuple):
+            inputs = (input,) + params
+
+            def apply_fn(input, *params):
+                return module(input, target)
+        else:
+            inputs = input + params
+
+            def apply_fn(input1, input2, *params):
+                return module(input1, input2, target)
+
+        # TODO: we don't pass `target` as part of inputs because we don't
+        # currently compute the gradient w.r.t. target for loss functions.
+        gradcheck(apply_fn, inputs)
+        gradgradcheck(apply_fn, inputs)
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -315,7 +326,7 @@ class TestNN(NNTestCase):
             output = criterion(*args)
         else:
             output = criterion(input, target)
-        return output
+        return output.item()
 
     def _backward_criterion(self, criterion, input, target):
         input_tuple = input if isinstance(input, tuple) else (input,)
@@ -1110,28 +1121,28 @@ class TestNN(NNTestCase):
         embedding = nn.Embedding(10, 20, padding_idx=0)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
         output = embedding(input)
-        self.assertEqual(output[0][0].sum().data[0], 0)
-        self.assertEqual(output[1][2].sum().data[0], 0)
+        self.assertEqual(output[0][0].sum(), 0)
+        self.assertEqual(output[1][2].sum(), 0)
 
         embedding = nn.Embedding(10, 20, padding_idx=0, sparse=True)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
         output = embedding(input)
-        self.assertEqual(output[0][0].sum().data[0], 0)
-        self.assertEqual(output[1][2].sum().data[0], 0)
+        self.assertEqual(output[0][0].sum(), 0)
+        self.assertEqual(output[1][2].sum(), 0)
 
         # negative indexing check for padding_idx
         # padding_idx=-2, num_embeddings=10 ==> index 8 padded
         embedding = nn.Embedding(10, 20, padding_idx=-2)
         input = Variable(torch.LongTensor([[0, 2, 8, 5], [4, 8, 0, 9]]))
         output = embedding(input)
-        self.assertEqual(output[0][2].sum().data[0], 0)
-        self.assertEqual(output[1][1].sum().data[0], 0)
+        self.assertEqual(output[0][2].sum(), 0)
+        self.assertEqual(output[1][1].sum(), 0)
 
         embedding = nn.Embedding(10, 20, padding_idx=-2, sparse=True)
         input = Variable(torch.LongTensor([[0, 2, 8, 5], [4, 8, 0, 9]]))
         output = embedding(input)
-        self.assertEqual(output[0][2].sum().data[0], 0)
-        self.assertEqual(output[1][1].sum().data[0], 0)
+        self.assertEqual(output[0][2].sum(), 0)
+        self.assertEqual(output[1][1].sum(), 0)
 
         # out of bounds check for padding_idx
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
@@ -1905,7 +1916,7 @@ class TestNN(NNTestCase):
         var2 = Variable(torch.randn(5, 5).float(), requires_grad=True)
         var3 = Variable(torch.randn(5, 5).float(), requires_grad=False)
 
-        float1 = torch.randn(1)[0]
+        float1 = torch.randn(1).item()
 
         expected = m(var1, var2, float1)
         loss = expected.sum()
@@ -2205,13 +2216,13 @@ class TestNN(NNTestCase):
                 param = getattr(param, component)
                 if isinstance(param, Parameter):
                     param = param.data
-            self.assertIs(v, param)
+            self.assertEqual(v.data_ptr(), param.data_ptr())
 
         l = nn.Linear(5, 5)
         state_dict = l.state_dict()
         self.assertEqual(len(state_dict), 2)
-        self.assertIs(state_dict['weight'], l.weight.data)
-        self.assertIs(state_dict['bias'], l.bias.data)
+        self.assertEqual(state_dict['weight'].data_ptr(), l.weight.data_ptr())
+        self.assertEqual(state_dict['bias'].data_ptr(), l.bias.data_ptr())
 
     def test_load_state_dict(self):
         l = nn.Linear(5, 5)
@@ -5852,7 +5863,7 @@ new_module_tests = [
         check_gradgrad=False,
     ),
     dict(
-        module_name='EmbeddingBag_sparse',
+        fullname='EmbeddingBag_sparse',
         constructor=lambda: nn.EmbeddingBag(4, 3, sparse=True),
         input_fn=lambda: Variable(torch.randperm(2).repeat(1, 2)),
         jacobian_input=False,

@@ -49,38 +49,6 @@ static bool THCPModule_loadClasses(PyObject *torch_module)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Tensor stateless methods
-////////////////////////////////////////////////////////////////////////////////
-
-static bool THCPModule_assignStateless()
-{
-#define INIT_STATELESS(type) INIT_STATELESS_DETAIL(type, TH_CONCAT_2(Cuda, type))
-#define INIT_STATELESS_DETAIL(type,ctype)                                      \
-  stateless = PyObject_Call((PyObject*)&TH_CONCAT_2(ctype, TensorStatelessType), arg, NULL); \
-  if (!stateless) {                                                            \
-    THPUtils_setError("stateless method initialization error");                \
-    return false;                                                              \
-  }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THCP,type,TensorClass), THP_STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
-    THPUtils_setError("stateless method initialization error (on assignment)");\
-  }
-  PyObject *arg = PyTuple_New(0);
-  PyObject *stateless;
-  INIT_STATELESS(Double);
-  INIT_STATELESS_DETAIL(Float, Cuda);
-  INIT_STATELESS(Half);
-  INIT_STATELESS(Long);
-  INIT_STATELESS(Int);
-  INIT_STATELESS(Short);
-  INIT_STATELESS(Char);
-  INIT_STATELESS(Byte);
-  Py_DECREF(arg);
-  return true;
-#undef INIT_STATELESS_DETAIL
-#undef INIT_STATELESS
-}
-
-////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -388,7 +356,6 @@ bool THCPModule_initCuda(PyObject *torch_module) {
 #endif
 
   ASSERT_TRUE(THCPModule_loadClasses(torch_module));
-  ASSERT_TRUE(THCPModule_assignStateless());
 
   ASSERT_TRUE(PyObject_SetAttrString(torch_module, "_state_cdata", PyLong_FromVoidPtr(state)) != -1);
 

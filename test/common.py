@@ -75,31 +75,30 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def get_cpu_type(t):
-    assert t.__module__ == 'torch.cuda'
-    return getattr(torch, t.__class__.__name__)
+def get_cpu_type(type_name):
+    module, name = type_name.rsplit('.', 1)
+    assert module == 'torch.cuda'
+    return getattr(torch, name)
 
 
-def get_gpu_type(t):
-    assert t.__module__ == 'torch'
-    return getattr(torch.cuda, t.__name__)
+def get_gpu_type(type_name):
+    if isinstance(type_name, type):
+        type_name = '{}.{}'.format(type_name.__module__, type_name.__name__)
+    module, name = type_name.rsplit('.', 1)
+    assert module == 'torch'
+    return getattr(torch.cuda, name)
 
 
 def to_gpu(obj, type_map={}):
-    if torch.is_tensor(obj):
-        t = type_map.get(type(obj), get_gpu_type(type(obj)))
-        # Workaround since torch.HalfTensor doesn't support clone()
-        if type(obj) == torch.HalfTensor:
-            return obj.new().resize_(obj.size()).copy_(obj).type(t)
-        return obj.clone().type(t)
+    if isinstance(obj, torch.Tensor):
+        assert obj.is_leaf
+        t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        with torch.no_grad():
+            res = obj.clone().type(t)
+            res.requires_grad = obj.requires_grad
+        return res
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
-    elif isinstance(obj, Variable):
-        assert obj.is_leaf
-        t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
-        o = obj.type(t).detach()
-        o.requires_grad = obj.requires_grad
-        return o
     elif isinstance(obj, list):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):
@@ -174,7 +173,7 @@ class TestCase(unittest.TestCase):
 
         value_map = {}
         for idx, val in zip(t._indices().t(), t._values()):
-            idx_tup = tuple(idx)
+            idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
                 value_map[idx_tup] += val
             else:
@@ -215,7 +214,11 @@ class TestCase(unittest.TestCase):
 
         x, y = self.unwrapVariables(x, y)
 
-        if torch.is_tensor(x) and torch.is_tensor(y):
+        if isinstance(x, torch.Tensor) and isinstance(y, Number):
+            self.assertEqual(x.item(), y, prec, message, allow_inf)
+        elif isinstance(y, torch.Tensor) and isinstance(x, Number):
+            self.assertEqual(x, y.item(), prec, message, allow_inf)
+        elif torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
@@ -226,7 +229,8 @@ class TestCase(unittest.TestCase):
                     self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
-                    if diff.is_signed():
+                    # TODO: implement abs on CharTensor
+                    if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)

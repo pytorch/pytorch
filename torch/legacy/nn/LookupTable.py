@@ -48,7 +48,7 @@ class LookupTable(Module):
 
     def _makeInputContiguous(self, input):
         # make sure input is a contiguous torch.LongTensor
-        if not input.is_contiguous() or not type(input) is type(self._input):
+        if not input.is_contiguous() or input.type() != self._input.type():
             self.copiedInput = True
             self._input.resize_(input.size()).copy_(input)
             return self._input
@@ -73,7 +73,7 @@ class LookupTable(Module):
         # the input can be of any type (as in the forward it's
         # converted anyway to LongTensor) thus, need to allocate
         # new memory each time the user changes the input type
-        if type(self.gradInput) != type(input):
+        if self.gradInput.type() != input.type():
             self.gradInput = input.new()
 
         if not self.gradInput.is_same_size(input):

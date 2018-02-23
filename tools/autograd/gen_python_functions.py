@@ -161,11 +161,23 @@ def gen_py_nn_functions(out, declarations):
 
 
 def gen_py_torch_functions(out, declarations):
+    def is_namespace_or_type_api_function(declaration):
+        # These are functions that should end up on the torch module. This
+        # includes functions on the at:: namespace and ones that are typically
+        # called via the type (e.g. Type::randn()). Since every function is
+        # implemented on the Type, we exclude functions that are also declared
+        # as methods on Tensor, since one shouldn't generally call these from
+        # the Type object.
+        if 'namespace' in declaration['method_of']:
+            return True
+        if 'Tensor' in declaration['method_of']:
+            return False
+        return 'Type' in declaration['method_of']
+
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
-                ('namespace' in declaration['method_of'] or
-                 'Type' in declaration['method_of']))
+                is_namespace_or_type_api_function(declaration))
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
@@ -400,9 +412,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_return = True
 
         if has_tensor_return and not has_tensor_input_arg:
+            if declaration['name'].startswith('randperm'):
+                default_type = 'torch.int64'
+            else:
+                default_type = 'None'
             dtype_arg = {
-                'default': "{}",  # so the signature ends up with '=None'
-                'default_init': "{}",
+                'default': default_type,
                 'dynamic_type': 'Type',
                 'kwarg_only': True,
                 'name': 'dtype',
@@ -413,7 +428,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
             requires_grad_arg = {
                 'default': False,
-                'default_init': False,
                 'dynamic_type': 'bool',
                 'kwarg_only': True,
                 'name': 'requires_grad',

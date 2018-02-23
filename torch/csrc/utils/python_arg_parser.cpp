@@ -157,8 +157,12 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_intlist.assign(size, std::stoi(str));
     }
   } else if (type_ == ParameterType::TYPE) {
-    if (str != "None") {
-      throw std::runtime_error("default value for Type must be none, got: " + str);
+    if (str == "None") {
+      default_type = nullptr;
+    } else if (str == "torch.int64") {
+      default_type = torch::autograd::VariableType::getType(CPU(kLong));
+    } else {
+      throw std::runtime_error("invalid default value for dtype: " + str);
     }
   }
 }

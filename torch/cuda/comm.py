@@ -190,12 +190,7 @@ def gather(tensors, dim=0, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     if destination == -1:
-        # TODO (sgross): clean-up once Variable and Tensor are merged
-        if isinstance(tensors[0], torch.autograd.Variable):
-            data = getattr(torch, type(tensors[0].data).__name__)(expected_size)
-            result = torch.autograd.Variable(data)
-        else:
-            result = getattr(torch, type(tensors[0]).__name__)(expected_size)
+        result = tensors[0].new().cpu().resize_(expected_size)
     else:
         result = tensors[0].new(expected_size, device=destination)
 

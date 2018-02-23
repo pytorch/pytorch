@@ -176,7 +176,6 @@ _sparse_tensor_classes.add(IntTensor)
 _sparse_tensor_classes.add(ShortTensor)
 _sparse_tensor_classes.add(CharTensor)
 _sparse_tensor_classes.add(ByteTensor)
-torch._tensor_classes.update(_sparse_tensor_classes)
 
 torch._integer_tensor_classes.add(LongTensor)
 torch._integer_tensor_classes.add(IntTensor)

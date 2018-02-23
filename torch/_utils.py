@@ -94,6 +94,13 @@ def _rebuild_tensor(storage, storage_offset, size, stride):
     return tensor_class().set_(storage, storage_offset, size, stride)
 
 
+def _rebuild_tensor_v2(storage, storage_offset, size, stride, requires_grad, backward_hooks):
+    tensor = _rebuild_tensor(storage, storage_offset, size, stride)
+    tensor.requires_grad = requires_grad
+    tensor._backward_hooks = backward_hooks
+    return tensor
+
+
 def _import_dotted_name(name):
     components = name.split('.')
     obj = __import__(components[0])
@@ -217,9 +224,9 @@ def _reorder_tensors_as(tensors, ordered_tensors):
     """
     type_dict = defaultdict(list)
     for tensor in tensors:
-        type_dict[type(tensor)].append(tensor)
+        type_dict[tensor.type()].append(tensor)
     type_dict = {t: iter(coll) for t, coll in type_dict.items()}
-    return tuple(next(type_dict[type(tensor)]) for tensor in ordered_tensors)
+    return tuple(next(type_dict[tensor.type()]) for tensor in ordered_tensors)
 
 
 def _take_tensors(tensors, size_limit):
