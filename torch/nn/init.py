@@ -302,8 +302,7 @@ def _calculate_fan_in_and_fan_out(tensor):
 
     return fan_in, fan_out
 
+
 def get(identifier):
     func = globals()[identifier]
-    if not isinstance(func, types.FunctionType):
-        return func()
-    return func
+    return func if isinstance(func, types.FunctionType) else func()
