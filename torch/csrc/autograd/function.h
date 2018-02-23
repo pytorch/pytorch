@@ -358,7 +358,7 @@ inline void create_gradient_edge(
 inline bool any_variable_requires_grad(const variable_list& variables) {
   return std::any_of(
       variables.begin(), variables.end(), [](const Variable& variable) {
-        return variable.requires_grad();
+        return variable.defined() && variable.requires_grad();
       });
 }
 
