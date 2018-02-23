@@ -288,6 +288,11 @@ def _vector_str(self):
 
 
 def _str(self, include_footer=True):
+    if self.is_sparse:
+        size_str = str(tuple(self.shape)).replace(' ', '')
+        return '{} of size {} with indices:\n{}and values:\n{}'.format(
+            self.type(), size_str, self._indices(), self._values())
+
     empty = self.numel() == 0
     dim = self.dim()
 
@@ -303,7 +308,7 @@ def _str(self, include_footer=True):
         strt = _tensor_str(self)
 
     if include_footer:
-        size_str = '({})'.format(','.join(str(size) for size in self.shape))
+        size_str = str(tuple(self.shape)).replace(' ', '')
         device_str = '' if not self.is_cuda else \
             ' (GPU {})'.format(self.get_device())
         strt += '[{} of size {}{}]\n'.format(self.type(), size_str, device_str)
