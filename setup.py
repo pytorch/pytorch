@@ -424,7 +424,7 @@ class build_ext(build_ext_parent):
                         os.remove(cfile)
                     shutil.copyfile(hfile, cfile)
 
-                C.sources += cfile_list
+                C.main_sources += cfile_list
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
