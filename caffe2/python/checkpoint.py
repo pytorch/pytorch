@@ -745,7 +745,9 @@ def epoch_limiter(num_epochs):
         init_net = core.Net('epoch_counter_init')
         counter = init_net.CreateCounter([], init_count=num_epochs - 1)
         Task(step=init_net)
-    epoch_net = core.Net('epoch_countdown')
-    finished = epoch_net.CountDown(counter)
-    output = Task(step=epoch_net, outputs=finished).outputs()[0]
+
+    with Job.current().epoch_group:
+        epoch_net = core.Net('epoch_countdown')
+        finished = epoch_net.CountDown(counter)
+        output = Task(step=epoch_net, outputs=finished).outputs()[0]
     Job.current().add_stop_signal(output)
