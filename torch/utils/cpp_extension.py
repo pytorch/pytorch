@@ -1,3 +1,4 @@
+import copy
 import glob
 import imp
 import os
@@ -82,23 +83,18 @@ class BuildExtension(build_ext):
     '''A custom build extension for adding compiler-specific options.'''
 
     def build_extensions(self):
-        # On some platforms, like Windows, compiler_cxx is not available.
-        if hasattr(self.compiler, 'compiler_cxx'):
-            compiler = self.compiler.compiler_cxx[0]
-        else:
-            compiler = os.environ.get('CXX', 'c++')
-        check_compiler_abi_compatibility(compiler)
-
+        self._check_abi()
         for extension in self.extensions:
-            define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
-            extension.extra_compile_args = [define]
+            self._define_torch_extension_name(extension)
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
         # Save the original _compile method for later.
         original_compile = self.compiler._compile
 
-        def wrap_compile(obj, src, ext, cc_args, cflags, pp_opts):
+        def wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
+            # Copy before we make any modifications.
+            cflags = copy.deepcopy(extra_postargs)
             try:
                 original_compiler = self.compiler.compiler_so
                 if _is_cuda_file(src):
@@ -106,10 +102,12 @@ class BuildExtension(build_ext):
                     self.compiler.set_executable('compiler_so', nvcc)
                     if isinstance(cflags, dict):
                         cflags = cflags['nvcc']
-                    cflags += ['-c', '--compiler-options', "'-fPIC'"]
-                else:
-                    if isinstance(cflags, dict):
+                    cflags += ['--compiler-options', "'-fPIC'"]
+                elif isinstance(cflags, dict):
                         cflags = cflags['cxx']
+                # NVCC does not allow multiple -std to be passed, so we avoid
+                # overriding the option if the user explicitly passed it.
+                if not any(flag.startswith('-std=') for flag in cflags):
                     cflags.append('-std=c++11')
 
                 original_compile(obj, src, ext, cc_args, cflags, pp_opts)
@@ -121,6 +119,22 @@ class BuildExtension(build_ext):
         self.compiler._compile = wrap_compile
 
         build_ext.build_extensions(self)
+
+    def _check_abi(self):
+        # On some platforms, like Windows, compiler_cxx is not available.
+        if hasattr(self.compiler, 'compiler_cxx'):
+            compiler = self.compiler.compiler_cxx[0]
+        else:
+            compiler = os.environ.get('CXX', 'c++')
+        check_compiler_abi_compatibility(compiler)
+
+    def _define_torch_extension_name(self, extension):
+        define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+        if isinstance(extension.extra_compile_args, dict):
+            for args in extension.extra_compile_args.values():
+                args.append(define)
+        else:
+            extension.extra_compile_args.append(define)
 
 
 def CppExtension(name, sources, *args, **kwargs):
@@ -178,7 +192,10 @@ def include_paths(cuda=False):
     '''
     here = os.path.abspath(__file__)
     torch_path = os.path.dirname(os.path.dirname(here))
-    paths = [os.path.join(torch_path, 'lib', 'include')]
+    lib_include = os.path.join(torch_path, 'lib', 'include')
+    # Some internal (old) Torch headers don't properly prefix their includes,
+    # so we need to pass -Itorch/lib/include/TH as well.
+    paths = [lib_include, os.path.join(lib_include, 'TH')]
     if cuda:
         paths.append(_join_cuda_home('include'))
     return paths
@@ -356,18 +373,22 @@ def _write_ninja_file(path,
     # sysconfig.get_paths()['include'] gives us the location of Python.h
     includes.append(sysconfig.get_paths()['include'])
 
-    cflags = ['-fPIC', '-std=c++11', '-DTORCH_EXTENSION_NAME={}'.format(name)]
-    cflags += ['-I{}'.format(include) for include in includes]
-    cflags += extra_cflags
+    common_cflags = ['-DTORCH_EXTENSION_NAME={}'.format(name)]
+    common_cflags += ['-I{}'.format(include) for include in includes]
+
+    cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
-        cuda_flags = "--compiler-options '-fPIC'"
-        extra_flags = ' '.join(extra_cuda_cflags)
-        flags.append('cuda_flags = {} {}'.format(cuda_flags, extra_flags))
+        cuda_flags = common_cflags
+        cuda_flags += ['--compiler-options', "'-fPIC'"]
+        cuda_flags += extra_cuda_cflags
+        if not any(flag.startswith('-std=') for flag in cuda_flags):
+            cuda_flags.append('-std=c++11')
+        flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
     ldflags = ['-shared'] + extra_ldflags
-    # The darwin linker needs explicit consent to ignore unresolved symbols
+    # The darwin linker needs explicit consent to ignore unresolved symbols.
     if sys.platform == 'darwin':
         ldflags.append('-undefined dynamic_lookup')
     flags.append('ldflags = {}'.format(' '.join(ldflags)))
@@ -393,9 +414,15 @@ def _write_ninja_file(path,
     for source_file in sources:
         # '/path/to/file.cpp' -> 'file'
         file_name = os.path.splitext(os.path.basename(source_file))[0]
-        target = '{}.o'.format(file_name)
+        if _is_cuda_file(source_file):
+            rule = 'cuda_compile'
+            # Use a different object filename in case a C++ and CUDA file have
+            # the same filename but different extension (.cpp vs. .cu).
+            target = '{}.cuda.o'.format(file_name)
+        else:
+            rule = 'compile'
+            target = '{}.o'.format(file_name)
         object_files.append(target)
-        rule = 'cuda_compile' if _is_cuda_file(source_file) else 'compile'
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
     library_target = '{}.so'.format(name)
