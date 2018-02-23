@@ -122,7 +122,7 @@ class TestJit(TestCase):
         def f(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        trace, z = torch.jit.trace(f, (x, y), nderivs=0)
+        trace, z = torch.jit.legacy_trace(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
 
     # matmul is currently implemented as a native function, which
@@ -134,7 +134,7 @@ class TestJit(TestCase):
         x = Variable(torch.Tensor([[0.4]]), requires_grad=True)
         y = Variable(torch.Tensor([[0.7]]), requires_grad=True)
 
-        trace, z = torch.jit.trace(lambda x, y: x.matmul(y), (x, y), nderivs=0)
+        trace, z = torch.jit.legacy_trace(lambda x, y: x.matmul(y), (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
@@ -203,7 +203,7 @@ class TestJit(TestCase):
                 out = torch.sigmoid(out)
             return out
 
-        trace, z = torch.jit.trace(f, (x, y), nderivs=0)
+        trace, z = torch.jit.legacy_trace(f, (x, y), nderivs=0)
         self.assertExpectedTrace(trace)
 
     def test_scopes_intermediate_node(self):
@@ -214,7 +214,7 @@ class TestJit(TestCase):
 
         net = Net()
         t = Variable(torch.ones(2), requires_grad=True)
-        trace, _ = torch.jit.trace(net, (t, ))
+        trace, _ = torch.jit.legacy_trace(net, (t, ))
         torch.onnx._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
@@ -240,7 +240,7 @@ class TestJit(TestCase):
         t = Variable(torch.ones(1, 3, 227, 227), requires_grad=True)
 
         with torch.onnx.set_training(model, False):
-            trace, _ = torch.jit.trace(model, (t, ))
+            trace, _ = torch.jit.legacy_trace(model, (t, ))
 
         torch.onnx._optimize_trace(trace, False)
 
@@ -254,7 +254,7 @@ class TestJit(TestCase):
         cx = Variable(torch.randn(3, 20).float().cuda())
         module = nn.LSTMCell(10, 20).float().cuda()  # Just to allocate weights with correct sizes
 
-        trace, _ = torch.jit.trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
+        trace, _ = torch.jit.legacy_trace(LSTMCell, (input, (hx, cx)) + tuple(module.parameters()))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         torch._C._jit_pass_lint(trace)
@@ -316,7 +316,7 @@ class TestJit(TestCase):
         def Foo(hx, cx):
             return torch.cat((hx + cx, hx * cx))
 
-        trace, _ = torch.jit.trace(Foo, (hx, cx))
+        trace, _ = torch.jit.legacy_trace(Foo, (hx, cx))
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_fuse(trace)
         self.assertExpectedTrace(trace)
@@ -329,7 +329,7 @@ class TestJit(TestCase):
             return z1 * z2
         x = Variable(torch.randn(4, 4).float().cuda())
         y = Variable(torch.randn(4, 4).float().cuda())
-        trace, _ = torch.jit.trace(f, (x, y), nderivs=0)
+        trace, _ = torch.jit.legacy_trace(f, (x, y), nderivs=0)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace, 'raw')
@@ -487,7 +487,7 @@ class TestJit(TestCase):
                 return a * grad_a
 
         x = Variable(torch.randn(10, 10), requires_grad=True)
-        trace, out = torch.jit.trace(MyFn.apply, x, nderivs=1)
+        trace, out = torch.jit.legacy_trace(MyFn.apply, x, nderivs=1)
         out.sum().backward()
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
@@ -901,7 +901,7 @@ class TestJit(TestCase):
         def doit(x, y):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
-        traced, _ = torch.jit.trace(doit, (x, y))
+        traced, _ = torch.jit.legacy_trace(doit, (x, y))
         g = torch._C._jit_get_graph(traced)
         g2 = torch._C.Graph()
         g_to_g2 = {}
@@ -931,12 +931,12 @@ class TestJit(TestCase):
 
     def test_batchnorm(self):
         x = Variable(torch.randn(2, 2, 2, 2).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(nn.BatchNorm2d(2), x)
+        trace, _ = torch.jit.legacy_trace(nn.BatchNorm2d(2), x)
         self.assertExpectedTrace(trace)
 
     def test_dropout(self):
         x = Variable(torch.randn(2, 2).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(nn.Dropout(0.6), x)
+        trace, _ = torch.jit.legacy_trace(nn.Dropout(0.6), x)
         self.assertExpectedTrace(trace)
 
     def test_batchnorm_run_twice(self):
@@ -957,7 +957,7 @@ class TestJit(TestCase):
 
     def test_conv(self):
         x = Variable(torch.randn(20, 16, 50, 40).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(nn.Conv2d(16, 13, 3, bias=False), x)
+        trace, _ = torch.jit.legacy_trace(nn.Conv2d(16, 13, 3, bias=False), x)
         self.assertExpectedTrace(trace)
 
     def test_reuse_function(self):
@@ -1145,7 +1145,7 @@ class TestJit(TestCase):
     def test_alexnet(self):
         return
         x = Variable(torch.randn(10, 3, 224, 224).fill_(1.0), requires_grad=True)
-        trace, _ = torch.jit.trace(torchvision.models.AlexNet(), x)
+        trace, _ = torch.jit.legacy_trace(torchvision.models.AlexNet(), x)
         self.assertExpectedTrace(trace)
         # NB: Purposely NOT testing protobuf export here
 
@@ -1183,14 +1183,14 @@ class TestJit(TestCase):
             out.copy_(x)
             return out
 
-        trace, z = torch.jit.trace(f, (x, ), nderivs=0)
+        trace, z = torch.jit.legacy_trace(f, (x, ), nderivs=0)
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
 
     def test_index_trace(self):
         x = Variable(torch.randn(4, 4), requires_grad=True)
-        trace, z = torch.jit.trace(lambda x: x[0], (x, ), nderivs=1)
+        trace, z = torch.jit.legacy_trace(lambda x: x[0], (x, ), nderivs=1)
         z.sum().backward()
         torch._C._jit_pass_lint(trace)
         torch._C._jit_pass_dce(trace)
@@ -1217,13 +1217,13 @@ class TestJit(TestCase):
                 return x * self.a + self.b
 
         m = MyModule()
-        trace, _ = torch.jit.trace(m, (Variable(torch.randn(2, 2)),), nderivs=0)
+        trace, _ = torch.jit.legacy_trace(m, (Variable(torch.randn(2, 2)),), nderivs=0)
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpected(str(trace))
 
     def test_nested_inplace(self):
         x = Variable(torch.randn(2, 2))
-        trace, _ = torch.jit.trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        trace, _ = torch.jit.legacy_trace(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedTrace(trace)
 
     def checkGraphExecutor(self, func, reference_tensors, input_tensors=None, optimize=True, drop=None):
@@ -1404,7 +1404,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[:5]
-        self.checkScript(script, [x], [outputs], False)
+        self.checkScript(script, [x], outputs, False)
 
     def test_script_gather(self):
         script = '''
@@ -1431,7 +1431,7 @@ class TestJit(TestCase):
         x = Variable(torch.rand(3).float(), requires_grad=True)
         y = Variable(torch.rand(3).float(), requires_grad=True)
         outputs = alpha * x + beta * y
-        self.checkScript(script, [alpha, beta, x, y], [outputs], False)
+        self.checkScript(script, [alpha, beta, x, y], outputs, False)
 
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_script_cast(self):
@@ -1623,6 +1623,12 @@ class TestJit(TestCase):
         expected_out = (x + y).sigmoid().pow(2)
         self.checkScript(func, [x, y], [expected_out], False)
 
+    def test_trace_annotation(self):
+        @torch.jit.trace(Variable(torch.rand(1)))
+        def foo(a):
+            return a + a + a
+        s = Variable(torch.rand(2))
+        self.assertEqual(s + s + s, foo(s))
 
 if __name__ == '__main__':
     run_tests()
