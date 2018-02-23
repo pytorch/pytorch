@@ -327,7 +327,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if 'dtype' in (a['name'] for a in python_binding_arguments):
             dtype_idx, device_idx, requires_grad_idx = (bind_arg_idx, bind_arg_idx + 1, bind_arg_idx + 2)
         else:
-            device_idx, requires_grad_idx =  (bind_arg_idx, bind_arg_idx + 1)
+            device_idx, requires_grad_idx = (bind_arg_idx, bind_arg_idx + 1)
 
         for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
