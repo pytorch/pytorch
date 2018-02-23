@@ -506,7 +506,6 @@
   name: __iand__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitand
@@ -546,7 +545,6 @@
   name: __ior__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitor
@@ -586,7 +584,6 @@
   name: __ixor__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitxor
@@ -626,7 +623,6 @@
   name: __ilshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: lshift
@@ -666,7 +662,6 @@
   name: __irshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: rshift
@@ -4097,7 +4092,7 @@
 
 [[
   name: as_strided_
-  variants: [method,function]
+  variants: [method]
   cpu_half: True
   return: argument 0
   arguments:
