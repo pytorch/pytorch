@@ -9,7 +9,8 @@ namespace torch { namespace tensor {
 // etc. and binds them in their containing modules.
 void initialize_python_bindings(PyObject* module);
 
-// Sets the concrete type constructed by calls to torch.Tensor()
+// Sets the concrete type constructed by calls to torch.Tensor() and most
+// factory methods on the torch module.
 void set_default_tensor_type(const at::Type& type);
 
 // Same as set_default_tensor_type() but takes a PyObject*

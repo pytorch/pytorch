@@ -303,7 +303,6 @@ _C._initExtension(manager_path())
 del manager_path
 
 _C._initialize_tensor_types()
-set_default_tensor_type('torch.FloatTensor')
 
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)

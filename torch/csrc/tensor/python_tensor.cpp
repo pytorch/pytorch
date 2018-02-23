@@ -1,7 +1,6 @@
 #include "python_tensor.h"
 
 #include <structmember.h>
-#include <mutex>
 #include <pybind11/pybind11.h>
 #include <sstream>
 
@@ -10,6 +9,7 @@
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_types.h"
@@ -31,7 +31,6 @@ struct PyTensorType {
 static_assert(std::is_standard_layout<PyTensorType>::value, "PyTensorType must be standard layout");
 
 static PyTensorType* default_tensor_type;
-static std::once_flag init_cuda_flag;
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types);
 
@@ -42,9 +41,7 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
     throw TypeError("type %s not available", tensor_type.name);
   }
   if (tensor_type.is_cuda) {
-    std::call_once(init_cuda_flag, []() {
-      pybind11::module::import("torch.cuda").attr("init")();
-    });
+    torch::cuda::lazy_init();
   }
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*tensor_type.aten_type, args, kwargs));
   END_HANDLE_TH_ERRORS
@@ -179,9 +176,11 @@ static void initialize_aten_types(std::vector<PyTensorType>& tensor_types) {
     set_name(tensor_type, get_name(backend, scalar_type));
   }
 
-  set_type(tensor_types.back(), kCPU, kFloat);
-  set_name(tensor_types.back(), "torch.Tensor");
-  tensor_types.back().is_default = true;
+  // The type object for torch.Tensor is at the end.
+  default_tensor_type = &tensor_types.back();
+  set_type(*default_tensor_type, kCPU, kFloat);
+  set_name(*default_tensor_type, "torch.Tensor");
+  default_tensor_type->is_default = true;
 }
 
 void initialize_python_bindings(PyObject* module) {
@@ -204,9 +203,6 @@ void initialize_python_bindings(PyObject* module) {
   for (auto& tensor_type : tensor_types) {
     py_initialize_tensor_type(tensor_type.py_type, tensor_type.name, var_dict.get());
   }
-
-  // The type object for torch.Tensor is at the end.
-  default_tensor_type = &tensor_types.back();
 
   // Add the type objects to their corresponding modules. e.g. torch.FloatTensor
   // is added to the `torch` module as `FloatTensor`. Also add all the type
@@ -248,11 +244,8 @@ static bool PyTensorType_Check(PyObject* obj) {
   return it != tensor_types.end();
 }
 
-static at::Type* THPDefaultATenType;
-
 void set_default_tensor_type(const at::Type& type) {
   set_type(*default_tensor_type, type.backend(), type.scalarType());
-  THPDefaultATenType = default_tensor_type->aten_type;
 }
 
 void py_set_default_tensor_type(PyObject* obj) {
@@ -267,8 +260,8 @@ void py_set_default_tensor_type(PyObject* obj) {
 }
 
 at::Type& get_default_tensor_type() {
-  TORCH_ASSERT(THPDefaultATenType);
-  return *THPDefaultATenType;
+  TORCH_ASSERT(default_tensor_type && default_tensor_type->aten_type);
+  return *default_tensor_type->aten_type;
 }
 
 }} // namespace torch::tensor

@@ -229,6 +229,7 @@ class TestCase(unittest.TestCase):
                     self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
+                    # TODO: implement abs on CharTensor
                     if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
                     max_err = diff.max()

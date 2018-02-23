@@ -23,7 +23,7 @@ class Max(Module):
             self._output = self.output.new()
         if self._indices is None:
             self._indices = \
-                (torch.cuda.LongTensor() if self.output.type() == 'torch.cuda.FloatTensor'
+                (torch.cuda.LongTensor() if self.output.dtype == torch.cuda.int64
                  else torch.LongTensor())
 
     def updateOutput(self, input):
