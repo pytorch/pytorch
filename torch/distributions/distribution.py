@@ -1,6 +1,6 @@
 import torch
 from torch.autograd import Variable
-from torch.distributions.constraints import _Dependent
+from torch.distributions.constraints import is_dependent
 import warnings
 from torch.distributions import constraints
 
