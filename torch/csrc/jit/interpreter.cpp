@@ -13,6 +13,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/pybind.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/auto_gil.h"
 
 namespace py = pybind11;
@@ -472,19 +473,6 @@ Operation createEvalOperation(CppOp * op) {
     builder.writeTo(stack);
     return 0;
   };
-}
-
-template<typename T>
-T tensor_as(at::Tensor&& t) = delete;
-
-template<>
-int64_t tensor_as(at::Tensor&& t) {
-  // workaround for 1-dim 1-element pytorch tensors until zero-dim
-  // tensors are fully supported
-  if(t.ndimension() == 1 && t.size(0) == 1) {
-    t = t[0];
-  }
-  return at::Scalar(t).to<int64_t>();
 }
 
 // Returns a function implementing functionality of a given node,
