@@ -259,6 +259,12 @@ class TestCreateOperator(test_util.TestCase):
 
 
 class TestAutoNaming(test_util.TestCase):
+    def assertOperatorListEqual(self, operatorDefList1, operatorDefList2):
+        for op in operatorDefList1:
+            op.debug_info = ""
+        for op in operatorDefList2:
+            op.debug_info = ""
+        self.assertEqual(operatorDefList1, operatorDefList2)
     """
     Test that operators are named with different names, and that automatically
     named blob names don't clash intra or inter networks.
@@ -275,7 +281,7 @@ class TestAutoNaming(test_util.TestCase):
         net_a = create_net()
         net_b = create_net()
         # created net proto is predicatable.
-        self.assertEqual(net_a.Proto().op,
+        self.assertOperatorListEqual(net_a.Proto().op,
                          net_b.Proto().op)
         self.assertEqual(net_a.Proto().op[0].output[0], 'foo/ab')
         self.assertEqual(net_a.Proto().op[1].output[0], 'cd')
