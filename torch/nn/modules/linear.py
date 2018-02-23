@@ -1,7 +1,7 @@
 import math
 
-import torch
 from torch.nn.parameter import Parameter
+from .. import init
 from .. import functional as F
 from .module import Module
 
@@ -34,7 +34,8 @@ class Linear(Module):
         >>> print(output.size())
     """
 
-    def __init__(self, in_features, out_features, bias=True):
+    def __init__(self, in_features, out_features, bias=True,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -43,13 +44,14 @@ class Linear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
+        self.weight_init = getattr(init, weight_init)
+        self.bias_init = getattr(init, bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        self.weight_init(self.weight.data)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias_init(self.bias.data)
 
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
@@ -90,7 +92,8 @@ class Bilinear(Module):
         >>> print(output.size())
     """
 
-    def __init__(self, in1_features, in2_features, out_features, bias=True):
+    def __init__(self, in1_features, in2_features, out_features, bias=True,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
@@ -101,13 +104,14 @@ class Bilinear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
+        self.weight_init = getattr(init, weight_init)
+        self.bias_init = getattr(init, bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        self.weight_init(self.weight.data)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias_init(self.bias.data)
 
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)

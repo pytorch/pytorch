@@ -4,6 +4,7 @@ import warnings
 import itertools
 
 from .module import Module
+from .. import init
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 
@@ -12,7 +13,8 @@ class RNNBase(Module):
 
     def __init__(self, mode, input_size, hidden_size,
                  num_layers=1, bias=True, batch_first=False,
-                 dropout=0, bidirectional=False):
+                 dropout=0, bidirectional=False, weight_init='xavier_uniform',
+                 hidden_init='orthogonal', bias_init='zeros'):
         super(RNNBase, self).__init__()
         self.mode = mode
         self.input_size = input_size
@@ -53,6 +55,9 @@ class RNNBase(Module):
                     setattr(self, name, param)
                 self._all_weights.append(param_names)
 
+        self.weight_init = getattr(init, weight_init)
+        self.hidden_init = getattr(init, hidden_init)
+        self.bias_init = getattr(init, bias_init)
         self.flatten_parameters()
         self.reset_parameters()
 
@@ -101,9 +106,13 @@ class RNNBase(Module):
         return ret
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                self.weight_init(param)
+            elif "weight_hh" in name:
+                self.hidden_init(param)
+            elif "bias" in name:
+                self.bias_init(param)
 
     def check_forward_args(self, input, hidden, batch_sizes):
         is_input_packed = batch_sizes is not None
@@ -534,7 +543,8 @@ class RNNCell(RNNCellBase):
         ...     output.append(hx)
     """
 
-    def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
+    def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh",
+                 weight_init='xavier_uniform', hidden_init='orthogonal', bias_init='zeros'):
         super(RNNCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -548,12 +558,19 @@ class RNNCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
+        self.weight_init = getattr(init, weight_init)
+        self.hidden_init = getattr(init, hidden_init)
+        self.bias_init = getattr(init, bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                self.weight_init(param)
+            elif "weight_hh" in name:
+                self.hidden_init(param)
+            elif "bias" in name:
+                self.bias_init(param)
 
     def forward(self, input, hx):
         self.check_forward_input(input)
@@ -628,7 +645,8 @@ class LSTMCell(RNNCellBase):
         ...     output.append(hx)
     """
 
-    def __init__(self, input_size, hidden_size, bias=True):
+    def __init__(self, input_size, hidden_size, bias=True,
+                 weight_init='xavier_uniform', hidden_init='orthogonal', bias_init='zeros'):
         super(LSTMCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -641,12 +659,19 @@ class LSTMCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
+        self.weight_init = getattr(init, weight_init)
+        self.hidden_init = getattr(init, hidden_init)
+        self.bias_init = getattr(init, bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                self.weight_init(param)
+            elif "weight_hh" in name:
+                self.hidden_init(param)
+            elif "bias" in name:
+                self.bias_init(param)
 
     def forward(self, input, hx):
         self.check_forward_input(input)
@@ -707,7 +732,8 @@ class GRUCell(RNNCellBase):
         ...     output.append(hx)
     """
 
-    def __init__(self, input_size, hidden_size, bias=True):
+    def __init__(self, input_size, hidden_size, bias=True,
+                 weight_init='xavier_uniform', hidden_init='orthogonal', bias_init='zeros'):
         super(GRUCell, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -720,12 +746,19 @@ class GRUCell(RNNCellBase):
         else:
             self.register_parameter('bias_ih', None)
             self.register_parameter('bias_hh', None)
+        self.weight_init = getattr(init, weight_init)
+        self.hidden_init = getattr(init, hidden_init)
+        self.bias_init = getattr(init, bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                self.weight_init(param)
+            elif "weight_hh" in name:
+                self.hidden_init(param)
+            elif "bias" in name:
+                self.bias_init(param)
 
     def forward(self, input, hx):
         self.check_forward_input(input)

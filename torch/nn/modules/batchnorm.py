@@ -1,6 +1,7 @@
 import torch
 from .module import Module
 from torch.nn.parameter import Parameter
+from .. import init
 from .. import functional as F
 
 
@@ -35,8 +36,8 @@ class _BatchNorm(Module):
             self.running_mean.zero_()
             self.running_var.fill_(1)
         if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
+            init.Ones(self.weight)
+            init.Zeros(self.bias)
 
     def _check_input_dim(self, input):
         return NotImplemented

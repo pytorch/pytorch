@@ -2,6 +2,7 @@
 import math
 import torch
 from torch.nn.parameter import Parameter
+from .. import init
 from .. import functional as F
 from .module import Module
 from .utils import _single, _pair, _triple
@@ -10,7 +11,8 @@ from .utils import _single, _pair, _triple
 class _ConvNd(Module):
 
     def __init__(self, in_channels, out_channels, kernel_size, stride,
-                 padding, dilation, transposed, output_padding, groups, bias):
+                 padding, dilation, transposed, output_padding, groups, bias,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         super(_ConvNd, self).__init__()
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
@@ -35,16 +37,14 @@ class _ConvNd(Module):
             self.bias = Parameter(torch.Tensor(out_channels))
         else:
             self.register_parameter('bias', None)
+        self.weight_init = getattr(init, weight_init)
+        self.bias_init = getattr(init, bias_init)
         self.reset_parameters()
 
     def reset_parameters(self):
-        n = self.in_channels
-        for k in self.kernel_size:
-            n *= k
-        stdv = 1. / math.sqrt(n)
-        self.weight.data.uniform_(-stdv, stdv)
+        self.weight_init(self.weight.data)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            self.bias_init(self.bias.data)
 
     def __repr__(self):
         s = ('{name}({in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -159,14 +159,15 @@ class Conv1d(_ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
+                 padding=0, dilation=1, groups=1, bias=True,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
         dilation = _single(dilation)
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _single(0), groups, bias)
+            False, _single(0), groups, bias, weight_init, bias_init)
 
     def forward(self, input):
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -278,14 +279,15 @@ class Conv2d(_ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
+                 padding=0, dilation=1, groups=1, bias=True,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
         dilation = _pair(dilation)
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _pair(0), groups, bias)
+            False, _pair(0), groups, bias, weight_init, bias_init)
 
     def forward(self, input):
         return F.conv2d(input, self.weight, self.bias, self.stride,
@@ -390,14 +392,15 @@ class Conv3d(_ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, dilation=1, groups=1, bias=True):
+                 padding=0, dilation=1, groups=1, bias=True,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
         dilation = _triple(dilation)
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            False, _triple(0), groups, bias)
+            False, _triple(0), groups, bias, weight_init, bias_init)
 
     def forward(self, input):
         return F.conv3d(input, self.weight, self.bias, self.stride,
@@ -507,7 +510,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         kernel_size = _single(kernel_size)
         stride = _single(stride)
         padding = _single(padding)
@@ -515,7 +519,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         output_padding = _single(output_padding)
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias)
+            True, output_padding, groups, bias, weight_init, bias_init)
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
@@ -619,7 +623,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         kernel_size = _pair(kernel_size)
         stride = _pair(stride)
         padding = _pair(padding)
@@ -627,7 +632,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         output_padding = _pair(output_padding)
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias)
+            True, output_padding, groups, bias, weight_init, bias_init)
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
@@ -724,7 +729,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
-                 padding=0, output_padding=0, groups=1, bias=True, dilation=1):
+                 padding=0, output_padding=0, groups=1, bias=True, dilation=1,
+                 weight_init='xavier_uniform', bias_init='zeros'):
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
         padding = _triple(padding)
@@ -732,7 +738,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         output_padding = _triple(output_padding)
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
-            True, output_padding, groups, bias)
+            True, output_padding, groups, bias, weight_init, bias_init)
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
