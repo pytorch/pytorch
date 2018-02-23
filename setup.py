@@ -411,8 +411,8 @@ class build_ext(build_ext_parent):
                 hfile_list = ['torch/csrc/cuda/AutoGPU.h',
                               'torch/csrc/cuda/lazy_init.h']
                 hname_list = [os.path.basename(hfile) for hfile in hfile_list]
-                rname_list = [
-                    [os.path.splitext(hname)[0] for hname in hname_list]]
+                rname_list = [os.path.splitext(hname)[0]
+                              for hname in hname_list]
                 cfile_list = [temp_dir + '/' + rname +
                               '_cpu_win.cpp' for rname in rname_list]
 
