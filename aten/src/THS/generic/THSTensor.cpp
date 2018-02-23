@@ -147,7 +147,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   THSTensor_(rawInit)(self);
 
   // TODO: we may need to special case when only one of these are empty.
-  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0) {
+  if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0 && sizes != NULL) {
     nDimI = 0;
     nDimV = THLongStorage_size(sizes);
   } else {
@@ -176,7 +176,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
         "number of dimensions must be nDimI + nDimV");
 
     // TODO: we may need to special case when only one of these are empty.
-    if (!(THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0)) {
+    if (!(THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0 && sizes != NULL)) {
       THLongTensor *max_indices = THLongTensor_new();
       ignore = THLongTensor_new();
       THLongTensor_max(max_indices, ignore, indices, 1, 0);
