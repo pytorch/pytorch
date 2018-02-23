@@ -583,15 +583,22 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
       return it->second;
     return outer_map(v);
   };
-  for(auto input : src->inputs()) {
-    local_map[input] = this->addInput()->copyMetadata(input);
-  }
+
   auto graph = owningGraph();
+  for(auto input : src->inputs()) {
+    local_map[input] = this->addInput()->copyMetadata(input)->setStage(input->stage());
+    graph->setStage(std::max(graph->stage(), input->stage()));
+  }
   for(auto node : src->nodes()) {
     auto new_node = this->appendNode(graph->createClone(node, env));
+    new_node->setStage(node->stage());
+    graph->setStage(std::max(graph->stage(), node->stage()));
     for(size_t i = 0; i < node->outputs().size(); ++i) {
-      local_map[node->outputs()[i]] = new_node->outputs()[i];
-      new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
+      auto oo = node->outputs()[i];
+      auto no = new_node->outputs()[i];
+      local_map[oo] = no;
+      no->copyMetadata(oo);
+      no->setStage(oo->stage());
     }
   }
   for(auto output : src->outputs()) {

@@ -7,6 +7,9 @@ namespace torch { namespace jit {
 // variables
 struct variable_tensor_list : public std::vector<at::Tensor> {
   variable_tensor_list() {}
+  template<class InputIt>
+  variable_tensor_list(InputIt first, InputIt last)
+  : std::vector<at::Tensor>(first, last) {} 
   explicit variable_tensor_list(std::vector<at::Tensor> && tensor)
   : std::vector<at::Tensor>(std::move(tensor)) {}
 };

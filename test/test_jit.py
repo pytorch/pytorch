@@ -11,6 +11,7 @@ from torch.autograd.function import traceable
 from common import TestCase, run_tests, IS_WINDOWS
 import io
 import sys
+import numpy as np
 
 try:
     import torchvision
@@ -1331,8 +1332,6 @@ class TestJit(TestCase):
         outputs = a * b
         self.checkScript(script, [a, b], [outputs], False)
 
-    @unittest.skip("RuntimeError: Expected object of type CPUFloatType "
-                   "but found type Variable[CPUFloatType] for argument #2 'other'")
     def test_script_triple(self):
         script = '''
         def func(x) -> (y):
@@ -1401,25 +1400,33 @@ class TestJit(TestCase):
         ast = torch.jit.frontend.get_jit_ast(fn)
         self.assertExpected(str(ast))
 
+    def _make_scalar_vars(self, arr, dtype):
+        out = []
+        for inp in arr:
+            out.append(Variable(torch.from_numpy(np.array([inp], dtype=dtype))))
+        return out
+
     def test_script_while(self):
-        cu = torch.jit._jit_script_compile('''
-        def test_while(a, b) -> (c):
-            while a < 10:
+        script = '''
+        def test_while(a, b, max) -> (c):
+            while a < max:
                 a = a + 1
                 b = b + 1
             c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_while')))
+        '''
+        inputs = self._make_scalar_vars([1, 1, 10], np.int32)
+        outputs = self._make_scalar_vars([20], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_while')
 
     def test_script_fibb(self):
-        cu = torch.jit._jit_script_compile('''
-        def test_while(lim) -> (third):
+        script = '''
+        def test_while(lim) -> (third, st, fs):
             first = 1
             second = 1
             i = 1
             somenum = 5
             dontmutateme = 3
-            third = 0 # TODO: python lexical scoping
+            third = 0
             while i < lim:
                 third = first + second
                 first = second
@@ -1433,12 +1440,13 @@ class TestJit(TestCase):
 
             st = second + third
             fs = first + second
-
-        ''')
-        self.assertExpected(str(cu.get_graph('test_while')))
+        '''
+        inputs = self._make_scalar_vars([10], np.int32)
+        outputs = self._make_scalar_vars([2, 4, 3], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_while')
 
     def test_script_if(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def test_if(a, b) -> (c):
             d = 3
             if a > 10:
@@ -1447,21 +1455,25 @@ class TestJit(TestCase):
                 b = 3 + d
                 d = 4
             c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_if')))
+        '''
+        inputs = self._make_scalar_vars([1, -1], np.int32)
+        outputs = self._make_scalar_vars([7], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_if')
 
     def test_script_if_noelse(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def test_if_noelse(a, b) -> (c):
             if a > 10:
                 a = 3 + b
             c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_if_noelse')))
+        '''
+        inputs = self._make_scalar_vars([-1, 1], np.int32)
+        outputs = self._make_scalar_vars([0], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_if_noelse')
 
     def test_script_while_nonexistant_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
-            cu = torch.jit._jit_script_compile('''
+            torch.jit._jit_script_compile('''
             def test_while(a, b) -> (c):
                 while a < 10:
                     a = a + x
@@ -1471,7 +1483,7 @@ class TestJit(TestCase):
 
     def test_script_while_nonexistant_cond_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
-            cu = torch.jit._jit_script_compile('''
+            torch.jit._jit_script_compile('''
             def test_while(a, b) -> (c):
                 while a < x:
                     a = a + 1
@@ -1480,17 +1492,19 @@ class TestJit(TestCase):
             ''')
 
     def test_script_while_write_outer_then_read(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def test_while(a, b) -> (c):
             while a < 10:
                 a = a + 1
                 b = a + 1
             c = a + b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_while')))
+        '''
+        inputs = self._make_scalar_vars([42, 1337], np.int32)
+        outputs = self._make_scalar_vars([1379], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_while')
 
     def test_script_while_nest_if(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def test_while_if(a, b) -> (c):
             c = 0
             while a < 10:
@@ -1501,19 +1515,23 @@ class TestJit(TestCase):
                 else:
                     c = -b
             c = c + 1
-        ''')
-        self.assertExpected(str(cu.get_graph('test_while_if')))
+        '''
+        inputs = self._make_scalar_vars([-1234, 4321], np.int32)
+        outputs = self._make_scalar_vars([-5564], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_while_if')
 
     def test_script_if_nest_while(self):
-        cu = torch.jit._jit_script_compile('''
+        script = '''
         def test_if_while(a, b) -> (c):
             c = 0
             if a > b:
                 while a > b:
                     b = b + 1
                     c = -b
-        ''')
-        self.assertExpected(str(cu.get_graph('test_if_while')))
+        '''
+        inputs = self._make_scalar_vars([4321, 1234], np.int32)
+        outputs = self._make_scalar_vars([-4321], np.int32)
+        self.checkScript(script, inputs, outputs, False, 'test_if_while')
 
     def test_script_ternary(self):
         cu = torch.jit._jit_script_compile('''

@@ -33,16 +33,18 @@ auto ${name} = ${type_cast}(node->${method}(Symbol("${name}")));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("at::${name}(${args})")
-CALL_METHOD = CodeTemplate("TensorTemporary(inputs[0]).value().${name}(${args})")
+CALL_METHOD = CodeTemplate("(${first}).${name}(${args})")
 
 CONSTRUCTOR = CodeTemplate("""\
 {"${descriptor}", [](Node *node) {
   ${assignments}
-  return TensorOp([=](const list_of_retainable & inputs,
-                      list_of_retainable & outputs) {
+  return TensorOp([=](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
-    AutoGPU device_guard(deviceForInputs(inputs));
-    pack_list(outputs, ${call});
+    AutoGPU device_guard(deviceForInputs(stack, ${num_inputs}));
+    auto result = ${call};
+    drop(stack, ${num_inputs});
+    pack(stack, std::move(result));
+    return 0;
   }, "${name}", ${num_inputs});
 }},
 """)
@@ -84,6 +86,9 @@ def gen_jit_dispatch(declarations, out):
                                                   name=arg['name'],
                                                   method=ATTR_METHOD_MAP[arg['simple_type']])
                        for arg in scalar_args]
+        if num_inputs == "*":
+            assignments.append('auto varargs_length = node->inputs().size();')
+            num_inputs = 'varargs_length'
 
         # Generate the actuall ATen call. This gets a bit tricky because of
         # TensorList arguments, and functions that are only available as methods.
@@ -92,26 +97,24 @@ def gen_jit_dispatch(declarations, out):
                 if sum(map(is_tensor_arg, arguments)) != 1:
                     # TODO: support this
                     continue
-                args = ['TensorTemporaryList(inputs)' if is_tensor_arg(arg) else arg['name']
+
+                args = ['last(stack, varargs_length)' if is_tensor_arg(arg) else arg['name']
                         for arg in arguments]
             else:
-                tensor_id = iter(count(start=0))
-                args = ['TensorTemporary(inputs[{}]).value()'.format(
+                tensor_id = iter(count(start=num_inputs, step=-1))
+                args = ['std::move(fromLast(stack,{}))'.format(
                     next(tensor_id)) if is_tensor_arg(arg) else arg['name']
                     for arg in arguments]
             call = CALL_NAMESPACE.substitute(name=name, args=args)
         else:
-            tensor_id = iter(count(start=1))
-            args = ['TensorTemporary(inputs[{}]).value()'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
-                    for arg in arguments[1:]]
-            call = CALL_METHOD.substitute(name=name, args=args)
+            tensor_id = iter(count(start=num_inputs, step=-1))
+            args = ['std::move(fromLast(stack,{}))'.format(next(tensor_id)) if is_tensor_arg(arg) else arg['name']
+                    for arg in arguments]
+            call = CALL_METHOD.substitute(name=name, first=args[0], args=args[1:])
 
         constructor = CONSTRUCTOR.substitute(descriptor=descriptor, name=name, call=call,
                                              assignments=assignments,
-                                             # num_inputs is only used in AutogradClosure, which
-                                             # is going to be removed soon anyway. There's no good value
-                                             # we can provide for cat.
-                                             num_inputs=num_inputs if num_inputs != "*" else 0)
+                                             num_inputs=num_inputs)
         assert descriptor not in ops, descriptor
         ops[descriptor] = constructor
 
