@@ -248,7 +248,8 @@ def main():
 
     env_summary = run_env_analysis()
 
-    torch.cuda.init()
+    if torch.cuda.is_available():
+        torch.cuda.init()
     cprofile_prof = run_cprofile(code, globs)
     autograd_prof_cpu, autograd_prof_cuda = run_autograd_prof(code, globs)
 

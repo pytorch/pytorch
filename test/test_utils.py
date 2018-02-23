@@ -441,10 +441,10 @@ class TestBottleneck(TestCase):
 
     def _check_cuda(self, output):
         if torch.cuda.is_available():
-            results = re.search('CUDA', output)
+            results = re.search('CUDA mode', output)
             self.assertIsNotNone(results, self._fail_msg('Should tell users CUDA', output))
         else:
-            results = re.search('CUDA', output)
+            results = re.search('CUDA mode', output)
             self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA', output))
 
     @unittest.skipIf(torch.cuda.is_available(), 'CPU-only test')
