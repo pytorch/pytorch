@@ -408,8 +408,7 @@ class build_ext(build_ext_parent):
                 # To generate .obj files for those .h files for the export class
                 # a header file cannot build, so it has to be copied to someplace as a source file
                 temp_dir = 'torch/csrc/generated'
-                hfile_list = ['torch/csrc/cuda/AutoGPU.h',
-                              'torch/csrc/cuda/lazy_init.h']
+                hfile_list = ['torch/csrc/cuda/AutoGPU.h']
                 hname_list = [os.path.basename(hfile) for hfile in hfile_list]
                 rname_list = [os.path.splitext(hname)[0]
                               for hname in hname_list]
