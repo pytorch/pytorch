@@ -171,7 +171,7 @@ On Linux
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
-conda install numpy pyyaml mkl setuptools cmake cffi
+conda install numpy pyyaml mkl setuptools cmake cffi typing
 
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9

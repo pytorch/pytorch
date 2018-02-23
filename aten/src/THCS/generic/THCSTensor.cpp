@@ -146,8 +146,15 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
 
-  nDimI = THCIndexTensor_(size)(state, indices, 0);
-  nDimV = THCTensor_(nDimension)(state, values) - 1;
+  // TODO: we may need to special case when only one of these are empty.
+  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0
+      && sizes != NULL) {
+    nDimI = 0;
+    nDimV = THLongStorage_size(sizes);
+  } else {
+    nDimI = THCIndexTensor_(size)(state, indices, 0);
+    nDimV = THCTensor_(nDimension)(state, values) - 1;
+  }
   if (!sizes) {
     // TODO Make it work with N-dimensional values
     THArgCheck(nDimV > 0, 3, "size must be provided when nDimV > 0");

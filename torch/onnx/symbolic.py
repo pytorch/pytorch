@@ -631,6 +631,7 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
 
         prev_output = input
         h_outs = []
+        c_outs = []
 
         sequence_lens = unused(g) if batch_sizes is None else batch_sizes
 
@@ -662,12 +663,14 @@ def LSTM_symbolic_builder(input_size, hidden_size, num_layers, batch_first, drop
 
             inputs = [prev_output, weight_ih, weight_hh, bias_concat, sequence_lens, h_in, c_in]
             extra_kwargs = {} if unidirectional else {'direction_s': 'bidirectional'}
-            prev_output, h_out = g.op('LSTM', *inputs, outputs=2,
-                                      hidden_size_i=hidden_size,
-                                      **extra_kwargs)
+            prev_output, h_out, c_out = g.op('LSTM', *inputs, outputs=3,
+                                             hidden_size_i=hidden_size,
+                                             **extra_kwargs)
             h_outs.append(h_out)
+            c_outs.append(c_out)
         h_outs = h_out if num_layers == 1 else g.op('Concat', *h_outs, axis_i=0)
-        return prev_output, h_outs, None
+        c_outs = c_out if num_layers == 1 else g.op('Concat', *c_outs, axis_i=0)
+        return prev_output, h_outs, c_outs
 
     return symbolic
 
