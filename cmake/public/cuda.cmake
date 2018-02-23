@@ -118,9 +118,15 @@ set_property(
 
 # cublas
 add_library(caffe2::cublas UNKNOWN IMPORTED)
+set(__tmp ${CUDA_CUBLAS_LIBRARIES})
+list(GET __tmp 0 __cublas_file)
 set_property(
     TARGET caffe2::cublas PROPERTY IMPORTED_LOCATION
-    ${CUDA_CUBLAS_LIBRARIES})
+    ${__cublas_file})
+list(REMOVE_AT __tmp 0)
+set_property(
+    TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
+    ${__tmp})
 set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
