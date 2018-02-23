@@ -19,7 +19,9 @@ struct TensorType;
 struct Code {
   Code()
   : pImpl(nullptr) {}
-  Code(std::shared_ptr<Graph> & graph);
+  Code(std::shared_ptr<Graph> & graph, bool constants_are_variables);
+  // constants_are_variables = true means that all constants in the
+  // code will have VariableType rather than a base tensor type
   ~Code();
   operator bool() const {
     return pImpl != nullptr;
@@ -27,6 +29,7 @@ struct Code {
 private:
   std::shared_ptr<CodeImpl> pImpl;
   friend struct InterpreterStateImpl;
+  friend std::ostream & operator<<(std::ostream & out, const Code & code);
 };
 
 struct InterpreterState {
@@ -34,9 +37,7 @@ struct InterpreterState {
   // advance the interpreter state by running one stage. Returning the
   // outputs for that stage, suspending the computation.
   // Call this function again continues computation where it left off.
-  void runOneStage(
-    const std::vector<at::Tensor> & inputs,
-    std::vector<at::Tensor> & outputs);
+  void runOneStage(std::vector<at::Tensor> & stack);
   const TensorType & tensorTypeForInput(size_t i) const;
   ~InterpreterState();
   // create a copy of InterpreterState with its current state

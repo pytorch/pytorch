@@ -21,65 +21,16 @@ using operator_constructor = std::function<TensorOp(jit::Node*)>;
 
 namespace {
 
-// a temporary Tensor that does not alter the refcount of impl on
-// acquisition or release, avoids any refcounting in dispatch functions
-struct TensorTemporary {
-  explicit TensorTemporary(at::Retainable * impl)
-  : temp(static_cast<at::TensorImpl*>(impl), false /* do not retain*/) {}
-  const at::Tensor & value() {
-    return temp;
-  }
-  ~TensorTemporary() {
-    // don't reduce the refcount on deletion
-    temp.detach();
-  }
-private:
-  at::Tensor temp;
-};
-
-// same list of Tensors that does not alter the refcount on acquisition or
-// release of the refcount temporaries, only used rarely (e.g. for cat)
-struct TensorTemporaryList {
-  explicit TensorTemporaryList(const list_of_retainable & ts) {
-    tensors.reserve(ts.size());
-    for(auto & t : ts) {
-      tensors.push_back(at::Tensor(static_cast<at::TensorImpl*>(t), false /*do not retain*/));
-    }
-  }
-  // TensorTemporaryList only exposes a TensorList,
-  // not its underlying std::vector<at::Tensor>.
-  // This ArrayRef has the desired semantics: if you get out an at::Tensor from it,
-  // the refcount is bumped;
-  // if you take a reference, it is only guaranteed to stay live as long as the ArrayRef is live,
-  operator TensorList() const {
-    return tensors;
-  }
-  ~TensorTemporaryList() {
-    // we didnt retain the tensors when we created the list
-    // so make sure we don't release them when we free it
-    for(auto & t : tensors) {
-      t.detach();
-    }
-  }
-private:
-  std::vector<at::Tensor> tensors;
-};
-
-using list_of_retainable = std::vector<at::Retainable*>;
-
 // The packer here is carefully written not to make any unnecessary
 // copies.
 
-// pack takes the return values of aten functions and puts them into a
-// refcounted list. Takes an owning reference to a tensor and steals
-// that reference, adding it to the list_of_retainable output list.
-// pack never operates on tensor temporaries.
-void pack(list_of_retainable & outputs, Tensor&& v) {
-  outputs.push_back(toRetainableSteal(std::move(v)));
+// pack takes the return values of aten functions pushes them onto the stack
+void pack(Stack & stack, Tensor&& v) {
+  stack.push_back(std::move(v));
 }
-void pack(list_of_retainable & outputs, std::vector<Tensor>&& ts) {
+void pack(Stack & stack, std::vector<Tensor>&& ts) {
   for(auto& t : ts) {
-    outputs.push_back(toRetainableSteal(std::move(t)));
+    stack.push_back(std::move(t));
   }
 }
 
@@ -87,45 +38,32 @@ template<std::size_t remaining, typename... Args>
 struct TuplePacker
 {
   // NB: *Not* a universal reference.
-  static void execute(list_of_retainable & outputs, std::tuple<Args...> && t)
+  static void execute(Stack & stack, std::tuple<Args...> && t)
   {
     // NB: The move here does not "destroy" the entire tuple, that is
     // not what std::move does; only the particular tuple index
     // processed here gets stolen.
-    pack(outputs, std::get<sizeof...(Args) - remaining>(std::move(t)));
-    TuplePacker<remaining - 1, Args...>::execute(outputs, std::move(t));
+    pack(stack, std::get<sizeof...(Args) - remaining>(std::move(t)));
+    TuplePacker<remaining - 1, Args...>::execute(stack, std::move(t));
   }
 };
 
 template<typename... Args>
 struct TuplePacker<0, Args...>
 {
-  static void execute(list_of_retainable & outputs, std::tuple<Args...> && t) {};
+  static void execute(Stack & stack, std::tuple<Args...> && t) {};
 };
 
 template<typename... Args>
-void pack_list(list_of_retainable & outputs, std::tuple<Args...> && t)
-{
-  TuplePacker<sizeof...(Args), Args...>::execute(outputs, std::move(t));
+void pack(Stack & stack, std::tuple<Args...> && t) {
+  TuplePacker<sizeof...(Args), Args...>::execute(stack, std::move(t));
 }
 
-template<typename... Args>
-void pack_list(list_of_retainable & outputs, Tensor && t)
-{
-  pack(outputs, std::move(t));
-}
-
-template<typename... Args>
-void pack_list(list_of_retainable & outputs, std::vector<Tensor> && t)
-{
-  pack(outputs, std::move(t));
-}
-
-int deviceForInputs(const list_of_retainable & inputs) {
-  if(inputs.size() == 0)
+int deviceForInputs(Stack & stack, size_t N) {
+  if(N == 0)
     return -1;
-  auto t = TensorTemporary(inputs[0]);
-  return t.value().type().is_cuda() ? (int) t.value().get_device() : -1;
+  auto & t = *(stack.end() - N);
+  return t.type().is_cuda() ? (int) t.get_device() : -1;
 }
 
 // A list of functions taking TensorList arguments (where we can't use
