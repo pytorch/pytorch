@@ -82,18 +82,12 @@ set_property(
     TARGET caffe2::cuda PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cudart. CUDA_LIBRARIES is actually a list, so we will do a little bit of
-# trick to get it in place.
-add_library(caffe2::cudart UNKNOWN IMPORTED)
-set(__tmp ${CUDA_LIBRARIES})
-list(GET __tmp 0 __cudart_file)
-set_property(
-    TARGET caffe2::cudart PROPERTY IMPORTED_LOCATION
-    ${__cudart_file})
-list(REMOVE_AT __tmp 0)
+# cudart. CUDA_LIBRARIES is actually a list, so we will make an interface
+# library.
+add_library(caffe2::cudart INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::cudart PROPERTY INTERFACE_LINK_LIBRARIES
-    ${__tmp})
+    ${CUDA_LIBRARIES})
 set_property(
     TARGET caffe2::cudart PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
@@ -116,17 +110,12 @@ set_property(
     TARGET caffe2::curand PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
 
-# cublas
-add_library(caffe2::cublas UNKNOWN IMPORTED)
-set(__tmp ${CUDA_CUBLAS_LIBRARIES})
-list(GET __tmp 0 __cublas_file)
-set_property(
-    TARGET caffe2::cublas PROPERTY IMPORTED_LOCATION
-    ${__cublas_file})
-list(REMOVE_AT __tmp 0)
+# cublas. CUDA_CUBLAS_LIBRARIES is actually a list, so we will make an
+# interface library similar to cudart.
+add_library(caffe2::cublas INTERFACE IMPORTED)
 set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_LINK_LIBRARIES
-    ${__tmp})
+    ${CUDA_CUBLAS_LIBRARIES})
 set_property(
     TARGET caffe2::cublas PROPERTY INTERFACE_INCLUDE_DIRECTORIES
     ${CUDA_INCLUDE_DIRS})
