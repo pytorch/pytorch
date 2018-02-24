@@ -37,8 +37,6 @@ if NOT DEFINED CMAKE_GENERATOR (
   )
 )
 
-if not exist %CAFFE2_ROOT%\build_host_protoc\bin\protoc.exe call %CAFFE2_ROOT%\scripts\build_host_protoc.bat || goto :label_error
-
 echo CAFFE2_ROOT=%CAFFE2_ROOT%
 echo CMAKE_GENERATOR=%CMAKE_GENERATOR%
 echo CMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE%
@@ -64,7 +62,6 @@ cmake .. ^
   -DUSE_OPENCV=OFF ^
   -DBUILD_SHARED_LIBS=OFF ^
   -DBUILD_PYTHON=OFF^
-  -DCAFFE2_CUSTOM_PROTOC_EXECUTABLE=%CAFFE2_ROOT%\build_host_protoc\bin\protoc.exe ^
   || goto :label_error
 
 :: Actually run the build
