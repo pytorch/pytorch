@@ -75,7 +75,7 @@ class Embedding(Module):
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 sparse=False, weight=None):
+                 sparse=False, _weight=None):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -89,15 +89,14 @@ class Embedding(Module):
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-        if weight is None:
+        if _weight is None:
             self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
             self.reset_parameters()
         else:
-            assert list(weight.shape) == [num_embeddings, embedding_dim], \
+            assert list(_weight.shape) == [num_embeddings, embedding_dim], \
                 'Shape of weight does not match num_embeddings and embedding_dim'
-            self.weight = Parameter(weight)
+            self.weight = Parameter(_weight)
         self.sparse = sparse
-
 
     def reset_parameters(self):
         self.weight.data.normal_(0, 1)
@@ -125,10 +124,11 @@ class Embedding(Module):
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
     @classmethod
-    def load_pretrained(cls, embeddings, freeze=True):
+    def from_pretrained(cls, embeddings, freeze=True):
+        assert embeddings.dim() == 2, \
+            'Embeddings parameter is expected to be 2-dimensional'
         rows, cols = embeddings.shape
-        print(embeddings)
-        embedding = cls(num_embeddings=rows, embedding_dim=cols, weight=embeddings)
+        embedding = cls(num_embeddings=rows, embedding_dim=cols, _weight=embeddings)
         embedding.weight.requires_grad = not freeze
         return embedding
 
