@@ -457,7 +457,6 @@ from .random import *
 ################################################################################
 
 
-from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
 
