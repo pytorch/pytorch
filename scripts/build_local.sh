@@ -22,7 +22,9 @@ fi
 
 # Use special install script with Anaconda
 if [ -n "${USE_ANACONDA}" ]; then
-  conda build "$CAFFE2_ROOT/conda"
+  export SKIP_CONDA_TESTS=1
+  export CONDA_INSTALL_LOCALLY=1
+  "${ROOT_DIR}/scripts/build_anaconda.sh" "$@"
 else
   # Build protobuf compiler from third_party if configured to do so
   if [ -n "${USE_HOST_PROTOC:-}" ]; then

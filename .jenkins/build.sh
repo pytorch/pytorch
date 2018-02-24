@@ -46,6 +46,12 @@ if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
   "${ROOT_DIR}/scripts/build_android.sh" "$@"
   exit 0
 fi
+if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
+  export SKIP_CONDA_TESTS=1
+  export CONDA_INSTALL_LOCALLY=1
+  "${ROOT_DIR}/scripts/build_anaconda.sh" "$@"
+  exit 0
+fi
 
 # Run cmake from ./build directory
 mkdir -p ./build
