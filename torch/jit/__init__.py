@@ -7,6 +7,7 @@ from collections import defaultdict, OrderedDict
 import sys
 import warnings
 import itertools
+import weakref
 import types
 import contextlib
 import os
@@ -248,7 +249,7 @@ def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return TracedModule(f, nderivs=nderivs)(*args, **kwargs)
+    return LegacyTracedModule(f, nderivs=nderivs)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -263,9 +264,9 @@ def _unique_state_dict(module, keep_vars=False):
     return filtered_dict
 
 
-class TracedModule(Module):
+class LegacyTracedModule(Module):
     def __init__(self, inner, nderivs=0):
-        super(TracedModule, self).__init__()
+        super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
@@ -456,7 +457,152 @@ def trace(*args, **kwargs):
         >>> def f(x):
         >>>     return x * 2
     """
-    return lambda func: torch._C.GraphExecutor(func, args, kwargs.pop('optimize', True))
+    def wrapper(func):
+        executor_options = {'optimize': True}
+        for name in executor_options:
+            executor_options[name] = kwargs.pop(name, executor_options[name])
+        if isinstance(func, torch.nn.Module):
+            captures = list(func.state_dict(keep_vars=True).values())
+            # TODO: support shared parameters
+            if len(set(map(id, captures))) != len(list(map(id, captures))):
+                raise ValueError("TracedModules don't support parameter sharing between modules")
+            executor = torch._C.GraphExecutor(func, args, captures=captures, **executor_options)
+            return TracedModule(func, executor)
+        else:
+            return torch._C.GraphExecutor(func, args, **executor_options)
+    return wrapper
+
+
+class TracedModuleBase(torch.nn.Module):
+    __frozen = False
+
+    def __init__(self, orig):
+        super(TracedModuleBase, self).__init__()
+
+        self.training = orig.training
+        for name, param in orig._parameters.items():
+            if param is not None:
+                self._parameters[name] = param
+        for name, buf in orig._buffers.items():
+            if param is not None:
+                self._buffers[name] = buf
+        self._orig_class = type(orig)
+
+        if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
+            raise ValueError("Modules that have hooks assigned can't be compiled")
+
+        # XXX: submodules can't be initialized here, because we don't know what the root is
+
+    def _freeze(self):
+        self.__frozen = True
+
+    def __setattr__(self, name, value):
+        if not self.__frozen:
+            return super(TracedModuleBase, self).__setattr__(name, value)
+        if name in self._parameters or name in self._buffers:
+            self._recompute_captures()
+            return super(TracedModuleBase, self).__setattr__(name, value)
+        raise RuntimeError("Only parameters and buffers of compiled modules can be re-assigned.")
+
+    def __delattr__(self, name):
+        raise RuntimeError("Deleting attributes of TracedModules isn't supported")
+
+    def __getstate__(self):
+        raise RuntimeError("TracedModules aren't picklable")
+
+    def _recompute_captures(self):
+        raise NotImplementedError()
+
+    def register_parameter(self, name, param):
+        if name not in self._parameters:
+            raise RuntimeError("Can't add new parameters to TracedModules")
+        if param is None:
+            raise RuntimeError("Can't set parameters to None in TracedModules")
+        super(TracedModuleBase, self).register_parameter(name, param)
+
+    def load_state_dict(self, state):
+        super(TracedModuleBase, self).load_state_dict(state)
+        # NB: this is not strictly necessary, because load_state_dict is copying, but
+        # that's an implementation detail that I don't want to depend on
+        self._recompute_captures()
+
+    def _get_name(self):
+        return 'TracedModule[' + self._orig_class.__name__ + ']'
+
+
+class TracedSubmodule(TracedModuleBase):
+
+    def __init__(self, orig, root):
+        super(TracedSubmodule, self).__init__(orig)
+        for name, submodule in orig._modules.items():
+            self._modules[name] = TracedSubmodule(submodule, root)
+        self._root = weakref.ref(root)
+        self._freeze()
+
+    def _recompute_captures(self):
+        root = self._root()
+        if root is None:
+            raise RuntimeError("Submodules of TracedModule can't work without keeping "
+                               "the main one in scope")
+        root._recompute_captures()
+
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError("Only the top-level compiled module can be called")
+
+
+class TracedModule(TracedModuleBase):
+
+    def __init__(self, orig, executor):
+        super(TracedModule, self).__init__(orig)
+
+        for name, submodule in orig._modules.items():
+            self._modules[name] = TracedSubmodule(submodule, root=self)
+
+        self._executor = executor
+        self._recompute_captures()
+
+        self._freeze()
+
+    def __call__(self, *args):
+        return self._executor(*args)
+
+    def _recompute_captures(self):
+        self._executor.set_captures(*self.state_dict().values())
+
+    def _apply(self, fn):
+        for module in itertools.chain((self,), self.modules()):
+            for param in module._parameters.values():
+                param.data = fn(param.data)
+                if param._grad is not None:
+                    param._grad.data = fn(param._grad.data)
+
+            for key, buf in module._buffers.items():
+                module._buffers[key] = fn(buf)
+        self._recompute_captures()
+        return self
+
+
+def _get_methods(cls):
+    import inspect
+    # In Python 3 unbound methods are functions, but in Python 2 they are methods
+    return inspect.getmembers(cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x))
+
+_compiled_methods_whitelist = {
+    'cpu', 'cuda', 'double', 'float', 'half', 'modules', 'named_children',
+    'named_modules', 'named_parameters', 'parameters', 'state_dict', 'type',
+    'zero_grad',
+}
+
+
+def _make_fail(name):
+    def fail(self, *args, **kwargs):
+        raise RuntimeError(name + " is not supported on TracedModules")
+    return fail
+for name, method in _get_methods(torch.nn.Module):
+    if name.startswith('__'):
+        continue
+    if name not in TracedModuleBase.__dict__ and name not in _compiled_methods_whitelist:
+        setattr(TracedModuleBase, method.__name__, _make_fail(name))
 
 
 def createResolutionCallback(frame_id=2):
