@@ -235,10 +235,10 @@ class KaimingNormal(Initializer):
     def __call__(self, tensor):
         return self.vs(tensor)
 
-
 ##########################
 # aliases
 ##########################
+
 
 ones = Ones
 zeros = Zeros
@@ -257,6 +257,7 @@ kaiming_normal = KaimingNormal
 ##########################
 # utility functions
 ##########################
+
 
 def calculate_gain(nonlinearity, param=None):
     """Return the recommended gain value for the given nonlinearity function.
