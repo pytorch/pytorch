@@ -56,14 +56,21 @@ __global__ void nms_kernel(unsigned char* mask,
   }
 }
 
-std::tuple<Tensor, Tensor> non_max_suppression_cuda(const Tensor& input, const Tensor& scores, const double thresh)
+std::tuple<Tensor, Tensor> non_max_suppression_cuda(
+                                const Tensor& input,
+                                const Tensor& scores,
+                                const double thresh)
 {
-
-  AT_ASSERT(input.ndimension() == 3, "First argument should be a 3D Tensor, (batch_sz x n_boxes x 4)");
-  AT_ASSERT(scores.ndimension() == 2, "Second argument should be a 2D Tensor, (batch_sz x n_boxes)");
-  AT_ASSERT(input.size(0) == scores.size(0), "First and second arguments must have equal-sized first dimension");
-  AT_ASSERT(input.size(1) == scores.size(1), "First and second arguments must have equal-sized second dimension");
-  AT_ASSERT(input.size(2) == 4, "First argument dimension 2 must have size 4, and should be of the form [x, y, w, h]");
+  AT_ASSERT(input.ndimension() == 3,
+            "First argument should be a 3D Tensor, (batch_sz x n_boxes x 4)");
+  AT_ASSERT(scores.ndimension() == 2,
+            "Second argument should be a 2D Tensor, (batch_sz x n_boxes)");
+  AT_ASSERT(input.size(0) == scores.size(0),
+            "First and second arguments must have equal-sized first dimension");
+  AT_ASSERT(input.size(1) == scores.size(1),
+            "First and second arguments must have equal-sized second dimension");
+  AT_ASSERT(input.size(2) == 4,
+           "First argument dimension 2 must have size 4, and should be of the form [x, y, w, h]");
   AT_ASSERT(input.is_contiguous(), "First argument must be a contiguous Tensor");
   AT_ASSERT(scores.is_contiguous(), "Second argument must be a contiguous Tensor");
 
