@@ -35,15 +35,18 @@ std::pair<std::vector<TensorType*>, bool> gatherTypes(at::ArrayRef<Value*> value
   return std::make_pair(std::move(types), present);
 }
 
-void mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> outputs) {
+bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> outputs) {
   JIT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+  bool changed = false;
   for(size_t i = 0; i < lhs.size(); ++i) {
     if(*lhs[i]->type() == *rhs[i]->type()) {
       outputs[i]->setType(lhs[i]->type());
     } else {
       outputs[i]->setType(DynamicType::get());
+      changed = true;
     }
   }
+  return changed;
 }
 
 void PropagateShapeOnNode(Node * node) {
@@ -154,9 +157,15 @@ void PropagateShapeOnNode(Node * node) {
       for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
         loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
       }
-      PropagateShapeOnBlock(body_block);
       auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
-      mergeTypes(loop_carried_inputs, loop_carried_outputs, node->outputs());
+
+      do {
+        PropagateShapeOnBlock(body_block);
+      } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        node->outputs()[i]->setType(loop_carried_block[i]->type());
+      }
     } break;
     default: {
       auto op_info = getTensorOp(node);

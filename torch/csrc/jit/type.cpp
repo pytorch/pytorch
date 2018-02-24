@@ -38,7 +38,8 @@ TypePtr HandleType::get() {
   return value;
 }
 TypePtr DynamicType::get() {
-  return std::make_shared<DynamicType>();
+  static auto value = std::make_shared<DynamicType>();
+  return value;
 }
 
 }} // namespace torch::jit
