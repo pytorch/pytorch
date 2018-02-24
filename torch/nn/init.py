@@ -186,38 +186,54 @@ class VarianceScaling(Initializer):
                 return tensor.normal_(0, std)
 
 
-def xavier_uniform(tensor, gain=1.):
-    vs = VarianceScaling(scale=1.,
-                         gain=gain,
-                         mode="fan_avg",
-                         distribution="uniform")
-    return vs(tensor)
+class XavierUniform(Initializer):
+    def __init__(self, gain=1.):
+        self.vs = VarianceScaling(
+            scale=1., gain=gain,
+            mode="fan_avg",
+            distribution="uniform"
+        )
+
+    def __call__(self, tensor):
+        return self.vs(tensor)
 
 
-def xavier_normal(tensor, gain=1.):
-    vs = VarianceScaling(scale=1.,
-                         gain=gain,
-                         mode="fan_avg",
-                         distribution="normal")
-    return vs(tensor)
+class XavierNormal(Initializer):
+    def __init__(self, gain=1.):
+        self.vs = VarianceScaling(
+            scale=1., gain=gain,
+            mode="fan_avg",
+            distribution="normal"
+        )
+
+    def __call__(self, tensor):
+        return self.vs(tensor)
 
 
-def kaiming_uniform(tensor, a=0, mode="fan_in"):
-    gain = calculate_gain('leaky_relu', a)
-    vs = VarianceScaling(scale=2.,
-                         gain=gain,
-                         mode=mode,
-                         distribution="uniform")
-    return vs(tensor)
+class KaimingUniform(Initializer):
+    def __init__(self, a=0, mode="fan_in"):
+        gain = calculate_gain('leaky_relu', a)
+        self.vs = VarianceScaling(
+            scale=2., gain=gain,
+            mode=mode,
+            distribution="uniform"
+        )
+
+    def __call__(self, tensor):
+        return self.vs(tensor)
 
 
-def kaiming_normal(tensor, a=0, mode="fan_in"):
-    gain = calculate_gain('leaky_relu', a)
-    vs = VarianceScaling(scale=2.,
-                         gain=gain,
-                         mode=mode,
-                         distribution="normal")
-    return vs(tensor)
+class KaimingNormal(Initializer):
+    def __init__(self, a=0, mode="fan_in"):
+        gain = calculate_gain('leaky_relu', a)
+        self.vs = VarianceScaling(
+            scale=2., gain=gain,
+            mode=mode,
+            distribution="normal"
+        )
+
+    def __call__(self, tensor):
+        return self.vs(tensor)
 
 
 ##########################
@@ -233,7 +249,10 @@ uniform = Uniform
 normal = Normal
 dirac = Dirac
 sparse = Sparse
-
+xavier_uniform = XavierUniform
+xavier_normal = XavierNormal
+kaiming_uniform = KaimingUniform
+kaiming_normal = KaimingNormal
 
 ##########################
 # utility functions
@@ -304,5 +323,8 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def get(identifier):
-    func = globals()[identifier]
-    return func if isinstance(func, types.FunctionType) else func()
+    if isinstance(identifier, str):
+        func = globals()[identifier]
+        return func if isinstance(func, types.FunctionType) else func()
+    elif callable(identifier):
+        return identifier
