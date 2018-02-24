@@ -23,9 +23,6 @@ public:
     if (THPVariable_Check(source)) {
       value = torch::jit::tracer::TraceInput(((THPVariable*)source)->cdata);
       return true;
-    } else if (THPModule_isTensor(source)) {
-      value = torch::jit::tracer::TraceInput(torch::createTensor(source));
-      return true;
     } else {
       return false;
     }

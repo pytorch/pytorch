@@ -156,8 +156,6 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
     // by nn.Parameter() with no arguments.
     auto var = torch::tensor::get_default_tensor_type().tensor();
     tensor = static_cast<Variable&>(var).data();
-  } else if (THPModule_isTensor(data)) {
-    tensor = torch::createTensor(data);
   } else if (THPVariable_Check(data)) {
     tensor = ((THPVariable*)data)->cdata.data();
   } else {
