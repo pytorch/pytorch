@@ -17,8 +17,6 @@
 using namespace at;
 using namespace torch::autograd::utils;
 
-extern bool THPModule_isTensor(PyObject *obj);
-
 namespace torch { namespace autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {

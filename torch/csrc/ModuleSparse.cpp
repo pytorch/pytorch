@@ -13,14 +13,14 @@ static PyObject * TH_CONCAT_2(THSPModule_, name)(PyObject *_unused, PyObject *ar
   Py_ssize_t pos = 0;                                                          \
   for (int i = 0; i < PyTuple_Size(args); i++) {                               \
     PyObject *item = PyTuple_GET_ITEM(args, i);                                \
-    if (THPModule_isTensor(item) || THPVariable_Check(item)) {                 \
+    if (THPVariable_Check(item)) {                                             \
       tensor = item;                                                           \
       goto dispatch;                                                           \
     }                                                                          \
   }                                                                            \
   if (kwargs) {                                                                \
     while (PyDict_Next(kwargs, &pos, &key, &value)) {                          \
-      if (THPModule_isTensor(value) || THPVariable_Check(value)) {             \
+      if (THPVariable_Check(value)) {                                          \
         tensor = value;                                                        \
         goto dispatch;                                                         \
       }                                                                        \

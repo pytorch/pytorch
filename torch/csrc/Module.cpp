@@ -135,14 +135,6 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   Py_RETURN_NONE;
 }
 
-bool THPModule_isTensor(PyObject *obj)
-{
-  int result = PySet_Contains(tensor_classes, (PyObject*)Py_TYPE(obj));
-  if (result == -1)
-    throw std::logic_error("FATAL: tensor_classes isn't a set!");
-  return result;
-}
-
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
@@ -166,7 +158,7 @@ PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
 static PyObject * findTensor(PyObject *args, PyObject *kwargs) {
   for (Py_ssize_t i = 0; i < PyTuple_Size(args); i++) {
     PyObject *item = PyTuple_GET_ITEM(args, i);
-    if (THPModule_isTensor(item) || THPVariable_Check(item)) {
+    if (THPVariable_Check(item)) {
       return item;
     }
   }
@@ -174,7 +166,7 @@ static PyObject * findTensor(PyObject *args, PyObject *kwargs) {
     Py_ssize_t pos = 0;
     PyObject *key, *value;
     while (PyDict_Next(kwargs, &pos, &key, &value)) {
-      if (THPModule_isTensor(value) || THPVariable_Check(value)) {
+      if (THPVariable_Check(value)) {
         return value;
       }
     }
@@ -358,11 +350,9 @@ static PyObject * THPModule_cat(PyObject *_unused, PyObject *args, PyObject *kwa
   }
 
   if (first_arg) {
-    if (THPModule_isTensor(first_arg)) {
-      tensor = first_arg;
-    } else if (PySequence_Check(first_arg)) {
+    if (PySequence_Check(first_arg)) {
       item = PySequence_GetItem(first_arg, 0);
-      if (item && (THPModule_isTensor(item) || THPVariable_Check(item))) {
+      if (item && THPVariable_Check(item)) {
         tensor = item;
       }
     }
