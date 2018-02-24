@@ -104,29 +104,6 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
   }
   Py_RETURN_NONE;
 }
-
-static bool THPModule_assignStateless(PyObject *self)
-{
-#define INIT_STATELESS(type)                                                   \
-  stateless = PyObject_CallFunctionObjArgs((PyObject*)&TH_CONCAT_2(type, TensorStatelessType), NULL); \
-  if (!stateless) {                                                            \
-    return false;                                                              \
-  }                                                                            \
-  if (PyObject_SetAttrString(TH_CONCAT_3(THP,type,TensorClass), THP_STATELESS_ATTRIBUTE_NAME, stateless) == -1) { \
-    return false;                                                              \
-  }
-  PyObject *stateless;
-  INIT_STATELESS(Double);
-  INIT_STATELESS(Float);
-  INIT_STATELESS(Half);
-  INIT_STATELESS(Long);
-  INIT_STATELESS(Int);
-  INIT_STATELESS(Short);
-  INIT_STATELESS(Char);
-  INIT_STATELESS(Byte);
-  return true;
-#undef INIT_STATELESS
-}
 //
 // Callback for python part. Used for additional initialization of python classes
 static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_path)
@@ -136,10 +113,10 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
     THPUtils_setError("initialization error - expected bytes/string object as shm_manager_path!");
     return NULL;
   }
+  torch::tensor::initialize_python_bindings(nullptr);
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
   if (!THPModule_loadClasses(self))         return NULL;
-  if (!THPModule_assignStateless(self))     return NULL;
   if (!THPAutograd_initFunctions(self))     return NULL;
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -608,30 +585,13 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   Py_RETURN_TRUE;
 }
 
-static PyObject* THPModule_initializeTensorTypeBindings(PyObject *_unused)
-{
-  HANDLE_TH_ERRORS
-  torch::tensor::initialize_python_bindings(nullptr);
-  Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-#ifdef WITH_CUDA
-extern PyObject * THCSPModule_initExtension(PyObject *self);
-#endif
-
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
-  {"_sparse_init",    (PyCFunction)THSPModule_initExtension,  METH_NOARGS,  NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
   {"_initialize_dtypes",(PyCFunction)THPModule_initializeDtypes,  METH_NOARGS,  NULL},
-  {"_initialize_tensor_type_bindings", (PyCFunction)THPModule_initializeTensorTypeBindings, METH_NOARGS, NULL},
-#ifdef WITH_CUDA
-  {"_cuda_sparse_init",  (PyCFunction)THCSPModule_initExtension,    METH_NOARGS,  NULL},
-#endif
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},

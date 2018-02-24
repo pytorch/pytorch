@@ -26,18 +26,8 @@ THCState *state;
 // Class pointer cache
 ////////////////////////////////////////////////////////////////////////////////
 
-static bool THCPModule_loadClasses(PyObject *torch_module)
+static void THCPModule_loadClasses(PyObject *torch_module)
 {
-#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  if (!THCPDoubleTensor_postInit(torch_module)) return false;
-  if (!THCPFloatTensor_postInit(torch_module)) return false;
-  if (!THCPHalfTensor_postInit(torch_module)) return false;
-  if (!THCPLongTensor_postInit(torch_module)) return false;
-  if (!THCPIntTensor_postInit(torch_module)) return false;
-  if (!THCPShortTensor_postInit(torch_module)) return false;
-  if (!THCPCharTensor_postInit(torch_module)) return false;
-  if (!THCPByteTensor_postInit(torch_module)) return false;
-
   THCPDoubleStorage_postInit(torch_module);
   THCPFloatStorage_postInit(torch_module);
   THCPHalfStorage_postInit(torch_module);
@@ -46,9 +36,6 @@ static bool THCPModule_loadClasses(PyObject *torch_module)
   THCPShortStorage_postInit(torch_module);
   THCPCharStorage_postInit(torch_module);
   THCPByteStorage_postInit(torch_module);
-
-  return true;
-#undef ASSERT_NOT_NULL
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -361,7 +348,7 @@ bool THCPModule_initCuda(PyObject *torch_module) {
   ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_half", PyBool_FromLong(false)) != -1);
 #endif
 
-  ASSERT_TRUE(THCPModule_loadClasses(torch_module));
+  THCPModule_loadClasses(torch_module);
 
   ASSERT_TRUE(PyObject_SetAttrString(torch_module, "_state_cdata", PyLong_FromVoidPtr(state)) != -1);
 
