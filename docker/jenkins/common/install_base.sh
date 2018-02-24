@@ -47,7 +47,10 @@ install_ubuntu() {
 
   # Ubuntu 14.04 ships with protobuf 2.5, but ONNX needs protobuf >= 2.6
   # so we install that here if on 14.04
+  # Ubuntu 14.04 also has cmake 2.8.12 as the default option, so we will
+  # install cmake3 here and use cmake3.
   if [[ "$UBUNTU_VERSION" == 14.04 ]]; then
+    apt-get install -y --no-install-recommends cmake3
     install_protobuf_26
   else
     apt-get install -y --no-install-recommends \
