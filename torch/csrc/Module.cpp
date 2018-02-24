@@ -40,45 +40,11 @@
 namespace py = pybind11;
 
 PyObject* module;
-PyObject* tensor_classes;
 
-PyObject *THPDefaultTensorClass = NULL;
 THPGenerator *THPDefaultGenerator   = NULL;
 
 ////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////
-
-static bool THPModule_loadClasses(PyObject *self)
-{
-#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  PyObject *torch_module = PyImport_ImportModule("torch");
-  if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch module");
-    return false;
-  }
-
-  ASSERT_NOT_NULL(tensor_classes = PyObject_GetAttrString(torch_module, "_tensor_classes"));
-  if (!THPDoubleTensor_postInit(torch_module)) return false;
-  if (!THPFloatTensor_postInit(torch_module)) return false;
-  if (!THPHalfTensor_postInit(torch_module)) return false;
-  if (!THPLongTensor_postInit(torch_module)) return false;
-  if (!THPIntTensor_postInit(torch_module)) return false;
-  if (!THPShortTensor_postInit(torch_module)) return false;
-  if (!THPCharTensor_postInit(torch_module)) return false;
-  if (!THPByteTensor_postInit(torch_module)) return false;
-
-  THPDoubleStorage_postInit(torch_module);
-  THPFloatStorage_postInit(torch_module);
-  THPHalfStorage_postInit(torch_module);
-  THPLongStorage_postInit(torch_module);
-  THPIntStorage_postInit(torch_module);
-  THPShortStorage_postInit(torch_module);
-  THPCharStorage_postInit(torch_module);
-  THPByteStorage_postInit(torch_module);
-
-  return true;
-#undef ASSERT_NOT_NULL
-}
 
 static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
 {
@@ -113,11 +79,22 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
     THPUtils_setError("initialization error - expected bytes/string object as shm_manager_path!");
     return NULL;
   }
-  torch::tensor::initialize_python_bindings(nullptr);
+  torch::tensor::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
-  if (!THPModule_loadClasses(self))         return NULL;
-  if (!THPAutograd_initFunctions(self))     return NULL;
+
+  auto module = THPObjectPtr(PyImport_ImportModule("torch"));
+  if (!module) throw python_error();
+
+  THPDoubleStorage_postInit(module);
+  THPFloatStorage_postInit(module);
+  THPHalfStorage_postInit(module);
+  THPLongStorage_postInit(module);
+  THPIntStorage_postInit(module);
+  THPShortStorage_postInit(module);
+  THPCharStorage_postInit(module);
+  THPByteStorage_postInit(module);
+  THPAutograd_initFunctions(self);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -139,7 +116,6 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
   torch::tensor::py_set_default_tensor_type(type);
-  THPDefaultTensorClass = type;
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
