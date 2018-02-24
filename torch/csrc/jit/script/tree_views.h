@@ -135,6 +135,9 @@ struct List : public TreeView {
   iterator end() const {
     return iterator(tree_->trees().end());
   }
+  bool empty() const {
+    return tree_->trees().begin() == tree_->trees().end();
+  }
   T operator[](size_t i) const {
     return T(subtree(i));
   }

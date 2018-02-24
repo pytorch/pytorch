@@ -479,6 +479,12 @@ struct to_ir {
         auto apply = Apply(tree);
         if (function_table.count(apply.name().name()) > 0) {
           return emitFunctionCall(apply, output_size);
+        } else if (apply.name().name() == "print") {
+          expectOutputs(tree, output_size, 0);
+          if (!apply.attributes().empty())
+            throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
+          return emitNode(kPrint, getValues(apply.inputs()), 0,
+                          AttributeMap{}, ListAttributeMap{})->outputs();
         } else {
           const auto& inputs = getValues(apply.inputs());
           NodeKind kind{apply.name().name()};
@@ -710,6 +716,10 @@ CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
 void CompilationUnit::define(const std::string& script) {
   return pImpl->define(script);
+}
+
+void CompilationUnit::defineFunction(const Def& def) {
+  return pImpl->defineFunction(def);
 }
 
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
