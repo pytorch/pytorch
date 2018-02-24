@@ -22,8 +22,8 @@
 	},
 
 	"test_gpu_speed_word_language_model": {
-		"mean": "5.65807",
-		"sigma": "0.1132"
+		"mean": "5.9411499999999995",
+		"sigma": "0.02134777505971057"
 	},
 
 	"test_gpu_speed_cudnn_lstm": {
