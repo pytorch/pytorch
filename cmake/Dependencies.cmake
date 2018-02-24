@@ -444,6 +444,55 @@ if (USE_MOBILE_OPENGL)
   endif()
 endif()
 
+if (USE_ACL)
+  if (NOT ANDROID)
+    message(WARNING "ARM Compute Library is only used in android builds.")
+    set(USE_ACL OFF)
+  endif()
+endif()
+
+if (USE_ACL AND USE_ARM64)
+  set(ACL_ARCH "arm64-v8a")
+else()
+  set(ACL_ARCH "armv7a")
+endif()
+# ---[ ARM Compute Library
+if (USE_ACL)
+  list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/")
+  list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/include")
+  caffe2_include_directories(${ARM_COMPUTE_INCLUDE_DIRS})
+  string (REPLACE ";" " -I" ANDROID_STL_INCLUDE_FLAGS "-I${ANDROID_STL_INCLUDE_DIRS}")
+  set (ARM_COMPUTE_SRC_DIR "${PROJECT_SOURCE_DIR}/third_party/ComputeLibrary/")
+  set (ARM_COMPUTE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a")
+  set (ARM_COMPUTE_CORE_LIB "${CMAKE_CURRENT_BINARY_DIR}/libarm_compute_core.a")
+  set (ARM_COMPUTE_LIBS ${ARM_COMPUTE_LIB} ${ARM_COMPUTE_CORE_LIB})
+
+  add_custom_command(
+      OUTPUT ${ARM_COMPUTE_LIBS}
+      COMMAND
+        /bin/sh -c "export PATH=\"$PATH:$(dirname ${CMAKE_CXX_COMPILER})\" && \
+        scons -C \"${ARM_COMPUTE_SRC_DIR}\" -Q \
+          examples=no validation_tests=no benchmark_tests=no standalone=yes \
+          embed_kernels=yes opencl=no gles_compute=yes \
+          os=android arch=${ACL_ARCH} \
+          extra_cxx_flags=\"${ANDROID_CXX_FLAGS} ${ANDROID_STL_INCLUDE_FLAGS}\"" &&
+        /bin/sh -c "cp ${ARM_COMPUTE_SRC_DIR}/build/libarm_compute-static.a ${CMAKE_CURRENT_BINARY_DIR}/libarm_compute.a" &&
+        /bin/sh -c "cp ${ARM_COMPUTE_SRC_DIR}/build/libarm_compute_core-static.a ${CMAKE_CURRENT_BINARY_DIR}/libarm_compute_core.a" &&
+        /bin/sh -c "rm -r ${ARM_COMPUTE_SRC_DIR}/build"
+      COMMENT "Building ARM compute library" VERBATIM)
+  add_custom_target(arm_compute_build ALL DEPENDS ${ARM_COMPUTE_LIBS})
+
+  add_library(arm_compute_core STATIC IMPORTED)
+  add_dependencies(arm_compute_core arm_compute_build)
+  set_property(TARGET arm_compute_core PROPERTY IMPORTED_LOCATION ${ARM_COMPUTE_CORE_LIB})
+
+  add_library(arm_compute STATIC IMPORTED)
+  add_dependencies(arm_compute arm_compute_build)
+  set_property(TARGET arm_compute PROPERTY IMPORTED_LOCATION ${ARM_COMPUTE_LIB})
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS arm_compute arm_compute_core)
+endif()
+
 if (USE_SNPE AND ANDROID)
   if (SNPE_LOCATION AND SNPE_HEADERS)
     message(STATUS "Using SNPE location specified by -DSNPE_LOCATION: " ${SNPE_LOCATION})
