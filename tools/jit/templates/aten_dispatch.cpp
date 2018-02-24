@@ -1,6 +1,7 @@
 #include "aten_dispatch.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/functional.h"
 
 #include <unordered_map>
@@ -25,9 +26,15 @@ namespace {
 // copies.
 
 // pack takes the return values of aten functions pushes them onto the stack
+template<typename T>
+void pack(Stack & stack, T&& v) {
+  stack.push_back(as_tensor(std::move(v)));
+}
+template<>
 void pack(Stack & stack, Tensor&& v) {
   stack.push_back(std::move(v));
 }
+template<>
 void pack(Stack & stack, std::vector<Tensor>&& ts) {
   for(auto& t : ts) {
     stack.push_back(std::move(t));
