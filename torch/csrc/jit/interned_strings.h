@@ -144,6 +144,7 @@ _(device) \
 _(ReplaceIfUndef) \
 _(is_zero) \
 _(GraphExecutor) \
+_(Print) \
 _(mm) \
 _(t) \
 _(Loop) \
