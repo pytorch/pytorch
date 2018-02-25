@@ -37,7 +37,13 @@ __global__ void nms_kernel(unsigned char* mask,
                           const int64_t num_boxes,
                           const float thresh)
 {
-  
+//A pretty straightforward implementation, analogous to the standard serial
+//version but with the IoUs computed and mask updated in parallel. We access
+//the box data through an array of sorted indices rather than physically
+//sorting it: unless one has an inordinate number of boxes (O(10^5), whereas
+//for example in the faster rcnn paper they feed 6000 per batch) the
+//data will fit in L2 so sorting it won't actually reduce the number of
+//messy reads from global.
   int col = 0;
   while(col < num_boxes-1)
   {
