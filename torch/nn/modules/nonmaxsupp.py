@@ -2,20 +2,19 @@ from .module import Module
 from .. import functional as F
 
 class NonMaxSuppression(Module):
-    r"""Attempts to eliminate duplicate object detections by
-      removing bounding boxes according to their overlap with
-      higher-scoring boxes.
+    r"""Attempts to remove duplicate object detections.
       
-      The algorithm begins by storing the highest-scoring box and
-      eliminating any box whose intersection-over-union (IoU) with
-      it is too great. That procedure is repeated on the surviving
+      The algorithm begins by storing the highest-scoring bounding
+      box, and eliminating any box whose intersection-over-union (IoU)
+      with it is too great. The procedure repeats on the surviving
       boxes, and so on until there are no boxes left.
       The stored boxes are returned.
 
       NB: The function returns a tuple (mask, indices), where
-      the indices index into the input boxes and are sorted
-      according to score, from higest to lowest. The mask is
-      a mask on the sorted indices. 
+      indices index into the input boxes and are sorted
+      according to score, from higest to lowest.
+      indices[i][mask[i]] gives the indices of the surviving
+      boxes from the ith batch, sorted by score.
 
       Args:
           threshold (float): IoU above which to eliminate boxes
