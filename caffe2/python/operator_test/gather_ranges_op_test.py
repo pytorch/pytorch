@@ -46,7 +46,7 @@ def batched_boarders_and_data(
                 elements=st.integers(min_value=0, max_value=dims[0])
             ),
             hu.arrays([dims[0]], dtype, elements)
-    ))
+        ))
 
 
 @st.composite
@@ -69,8 +69,12 @@ def _tensor_splits(draw):
         min_size=offset,
         max_size=offset
     ))
+
+    key = draw(st.permutations(range(offset)))
+
     return (
-        np.array(data).astype(np.float32), np.array(ranges), np.array(lengths)
+        np.array(data).astype(np.float32), np.array(ranges),
+        np.array(lengths), np.array(key).astype(np.int64)
     )
 
 
@@ -107,6 +111,31 @@ def gather_ranges_to_dense(data, ranges, lengths):
     return outputs
 
 
+def gather_ranges_to_dense_with_key(data, ranges, key, lengths):
+    outputs = []
+    assert len(ranges)
+    batch_size = len(ranges)
+    assert len(ranges[0])
+    num_ranges = len(ranges[0])
+    assert ranges.shape[2] == 2
+    for i in range(num_ranges):
+        out = []
+        for j in range(batch_size):
+            start, length = ranges[j][i]
+            if not length:
+                out.append([0] * lengths[i])
+            else:
+                assert length == lengths[i]
+                key_data_list = zip(
+                    key[start:start + length],
+                    data[start:start + length])
+                sorted_key_data_list = sorted(key_data_list, key=lambda x: x[0])
+                sorted_data = [d for (k, d) in sorted_key_data_list]
+                out.append(sorted_data)
+        outputs.append(np.array(out))
+    return outputs
+
+
 class TestGatherRanges(hu.HypothesisTestCase):
     @given(boarders_and_data=batched_boarders_and_data(), **hu.gcs_cpu_only)
     def test_gather_ranges(self, boarders_and_data, gc, dc):
@@ -130,7 +159,7 @@ class TestGatherRanges(hu.HypothesisTestCase):
 
     @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
     def test_gather_ranges_split(self, tensor_splits, gc, dc):
-        data, ranges, lengths = tensor_splits
+        data, ranges, lengths, _ = tensor_splits
 
         self.assertReferenceChecks(
             device_option=gc,
@@ -143,6 +172,23 @@ class TestGatherRanges(hu.HypothesisTestCase):
             inputs=[data, ranges, lengths],
             reference=gather_ranges_to_dense
         )
+
+    @given(tensor_splits=_tensor_splits(), **hu.gcs_cpu_only)
+    def test_gather_ranges_with_key_split(self, tensor_splits, gc, dc):
+        data, ranges, lengths, key = tensor_splits
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=core.CreateOperator(
+                "GatherRangesToDense",
+                ['data', 'ranges', 'key'],
+                ['X_{}'.format(i) for i in range(len(lengths))],
+                lengths=lengths
+            ),
+            inputs=[data, ranges, key, lengths],
+            reference=gather_ranges_to_dense_with_key
+        )
+
 
 if __name__ == "__main__":
     import unittest
