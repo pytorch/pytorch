@@ -79,6 +79,8 @@ class BlobsQueue : public std::enable_shared_from_this<BlobsQueue> {
     CAFFE_EXPORTED_STAT(queue_balance);
     CAFFE_EXPORTED_STAT(queue_dequeued_records);
     CAFFE_DETAILED_EXPORTED_STAT(queue_dequeued_bytes);
+    CAFFE_AVG_EXPORTED_STAT(read_time_ns);
+    CAFFE_AVG_EXPORTED_STAT(write_time_ns);
   } stats_;
 };
 } // namespace caffe2
