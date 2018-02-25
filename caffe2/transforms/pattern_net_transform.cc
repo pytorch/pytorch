@@ -147,7 +147,7 @@ bool PatternNetTransform::PatternRule(
 }
 
 bool PatternNetTransform::ValidatorRule(
-    const transform::Graph& g,
+    const transform::Graph& /*g*/,
     const std::vector<int>& subgraph) {
   // Due to strict PatternRule, it suffices to simply check for size
   return subgraph.size() == p_.size();

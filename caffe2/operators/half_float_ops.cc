@@ -20,28 +20,28 @@ namespace caffe2 {
 OPERATOR_SCHEMA(FloatToHalf)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out;
-          const TensorShape& X = in[0];
-          out.push_back(X);
-          out[0].set_data_type(TensorProto_DataType_FLOAT16);
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      const TensorShape& X = in[0];
+      out.push_back(X);
+      out[0].set_data_type(TensorProto_DataType_FLOAT16);
 
-          return out;
-        });
+      return out;
+    });
 
 OPERATOR_SCHEMA(HalfToFloat)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          vector<TensorShape> out;
-          const TensorShape& X = in[0];
-          out.push_back(X);
-          out[0].set_data_type(TensorProto_DataType_FLOAT);
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out;
+      const TensorShape& X = in[0];
+      out.push_back(X);
+      out[0].set_data_type(TensorProto_DataType_FLOAT);
 
-          return out;
-        });
+      return out;
+    });
 OPERATOR_SCHEMA(Float16ConstantFill)
     .NumInputs(0)
     .NumOutputs(1)

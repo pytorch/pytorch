@@ -199,7 +199,7 @@ class Converter {
 };
 
 void ConvertImageDataset(
-    const string& input_folder,
+    const string& /*input_folder*/,
     const string& list_filename,
     const string& output_db_name,
     const bool /*shuffle*/) {

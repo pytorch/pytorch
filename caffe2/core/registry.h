@@ -34,7 +34,7 @@
 namespace caffe2 {
 
 template <typename KeyType>
-inline void PrintOffendingKey(const KeyType& key) {
+inline void PrintOffendingKey(const KeyType& /*key*/) {
   printf("[key type printing not supported]\n");
 }
 

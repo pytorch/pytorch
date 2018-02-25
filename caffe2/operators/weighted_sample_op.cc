@@ -74,7 +74,7 @@ REGISTER_CPU_OPERATOR(WeightedSample, WeightedSampleOp<float, CPUContext>);
 OPERATOR_SCHEMA(WeightedSample)
     .NumInputs(1, 2)
     .NumOutputs(1, 2)
-    .TensorInferenceFunction([](const OperatorDef& def,
+    .TensorInferenceFunction([](const OperatorDef& /*def*/,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(2);
       int batch_size = in[0].dims(0);
