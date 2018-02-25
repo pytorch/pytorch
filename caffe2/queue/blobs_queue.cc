@@ -26,6 +26,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/timer.h"
 #include "caffe2/core/workspace.h"
 
 namespace caffe2 {
@@ -72,6 +73,7 @@ BlobsQueue::BlobsQueue(
 bool BlobsQueue::blockingRead(
     const std::vector<Blob*>& inputs,
     float timeout_secs) {
+  Timer readTimer;
   auto keeper = this->shared_from_this();
   const auto& name = name_.c_str();
   CAFFE_SDT(queue_read_start, name, (void*)this, SDT_BLOCKING_OP);
@@ -80,6 +82,8 @@ bool BlobsQueue::blockingRead(
     CAFFE_ENFORCE_LE(reader_, writer_);
     return reader_ != writer_;
   };
+  // Decrease queue balance before reading to indicate queue read pressure
+  // is being increased (-ve queue balance indicates more reads than writes)
   CAFFE_EVENT(stats_, queue_balance, -1);
   if (timeout_secs > 0) {
     std::chrono::milliseconds timeout_ms(int(timeout_secs * 1000));
@@ -110,10 +114,12 @@ bool BlobsQueue::blockingRead(
   CAFFE_EVENT(stats_, queue_dequeued_records);
   ++reader_;
   cv_.notify_all();
+  CAFFE_EVENT(stats_, read_time_ns, readTimer.NanoSeconds());
   return true;
 }
 
 bool BlobsQueue::tryWrite(const std::vector<Blob*>& inputs) {
+  Timer writeTimer;
   auto keeper = this->shared_from_this();
   const auto& name = name_.c_str();
   CAFFE_SDT(queue_write_start, name, (void*)this, SDT_NONBLOCKING_OP);
@@ -122,17 +128,23 @@ bool BlobsQueue::tryWrite(const std::vector<Blob*>& inputs) {
     CAFFE_SDT(queue_write_end, name, (void*)this, SDT_ABORT);
     return false;
   }
+  // Increase queue balance before writing to indicate queue write pressure is
+  // being increased (+ve queue balance indicates more writes than reads)
   CAFFE_EVENT(stats_, queue_balance, 1);
   DCHECK(canWrite());
   doWrite(inputs);
+  CAFFE_EVENT(stats_, write_time_ns, writeTimer.NanoSeconds());
   return true;
 }
 
 bool BlobsQueue::blockingWrite(const std::vector<Blob*>& inputs) {
+  Timer writeTimer;
   auto keeper = this->shared_from_this();
   const auto& name = name_.c_str();
   CAFFE_SDT(queue_write_start, name, (void*)this, SDT_BLOCKING_OP);
   std::unique_lock<std::mutex> g(mutex_);
+  // Increase queue balance before writing to indicate queue write pressure is
+  // being increased (+ve queue balance indicates more writes than reads)
   CAFFE_EVENT(stats_, queue_balance, 1);
   cv_.wait(g, [this]() { return closing_ || canWrite(); });
   if (!canWrite()) {
@@ -141,6 +153,7 @@ bool BlobsQueue::blockingWrite(const std::vector<Blob*>& inputs) {
   }
   DCHECK(canWrite());
   doWrite(inputs);
+  CAFFE_EVENT(stats_, write_time_ns, writeTimer.NanoSeconds());
   return true;
 }
 
