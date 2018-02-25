@@ -2,7 +2,6 @@
 set(Caffe2_DEPENDENCY_LIBS "")
 set(Caffe2_CUDA_DEPENDENCY_LIBS "")
 set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
-set(Caffe2_EXTERNAL_DEPENDENCIES "")
 
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
@@ -70,11 +69,12 @@ endif()
 if(USE_NNPACK)
   include("cmake/External/nnpack.cmake")
   if(NNPACK_FOUND)
-    caffe2_include_directories(${NNPACK_INCLUDE_DIRS})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${NNPACK_LIBRARIES})
     if(TARGET nnpack)
       # ---[ NNPACK is being built together with Caffe2: explicitly specify dependency
-      list(APPEND Caffe2_EXTERNAL_DEPENDENCIES nnpack)
+      list(APPEND Caffe2_DEPENDENCY_LIBS nnpack)
+    else()
+      caffe2_include_directories(${NNPACK_INCLUDE_DIRS})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${NNPACK_LIBRARIES})
     endif()
   else()
     message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
@@ -84,17 +84,14 @@ endif()
 
 # ---[ On Android, Caffe2 uses cpufeatures library in the thread pool
 if (ANDROID)
-  # ---[ Check if cpufeatures was already imported
   if (NOT TARGET cpufeatures)
     add_library(cpufeatures STATIC
-      "${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c")
+        "${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c")
     target_include_directories(cpufeatures
-      PUBLIC "${ANDROID_NDK}/sources/android/cpufeatures")
-    target_link_libraries(cpufeatures PRIVATE dl)
+        PUBLIC "${ANDROID_NDK}/sources/android/cpufeatures")
+    target_link_libraries(cpufeatures PUBLIC dl)
   endif()
-  list(APPEND Caffe2_DEPENDENCY_LIBS $<TARGET_FILE:cpufeatures>)
-  list(APPEND Caffe2_EXTERNAL_DEPENDENCIES cpufeatures)
-  caffe2_include_directories("${ANDROID_NDK}/sources/android/cpufeatures")
+  list(APPEND Caffe2_DEPENDENCY_LIBS cpufeatures)
 endif()
 
 # ---[ gflags
@@ -361,9 +358,7 @@ if(USE_NCCL)
     set(USE_NCCL OFF)
   else()
     include("cmake/External/nccl.cmake")
-    caffe2_include_directories(${NCCL_INCLUDE_DIRS})
-    message(STATUS "NCCL: ${NCCL_LIBRARIES}")
-    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS ${NCCL_LIBRARIES})
+    list(APPEND Caffe2_CUDA_DEPENDENCY_LIBS __caffe2_nccl)
   endif()
 endif()
 
@@ -519,8 +514,7 @@ if (USE_NNAPI AND NOT ANDROID)
 endif()
 
 if (USE_ATEN)
-  list(APPEND Caffe2_EXTERNAL_DEPENDENCIES aten_build)
-  list(APPEND Caffe2_DEPENDENCY_LIBS ATen)
+  list(APPEND Caffe2_DEPENDENCY_LIBS aten_op_header_gen ATen)
   caffe2_include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten/aten/src/ATen)
   caffe2_include_directories(${PROJECT_SOURCE_DIR}/third_party/aten/src)
   caffe2_include_directories(${PROJECT_BINARY_DIR}/caffe2/contrib/aten)
