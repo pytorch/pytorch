@@ -84,7 +84,10 @@ std::tuple<Tensor, Tensor> non_max_suppression_cuda(
   Tensor sorted_inds = std::get<1>(scores.sort(-1, true));
 
 
-  dim3 mask_block(512);
+  dim3 mask_block(512); //would be nice to have 1024 here for gpus that support it,
+                        //but not sure how to do this cleanly without calling
+                        //cudaGetDeviceProperties in the funcion body...
+
   dim3 mask_grid(batch_size);
   nms_kernel<<<mask_grid, mask_block, 0, globalContext().getCurrentCUDAStream()>>>(
                                     mask.data<unsigned char>(),
