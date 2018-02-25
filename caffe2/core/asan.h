@@ -39,3 +39,10 @@
 #if !defined(CAFFE2_ASAN_ENABLED)
 #define CAFFE2_ASAN_ENABLED 0
 #endif
+
+// Define sanitization macro
+#if !CAFFE2_ASAN_ENABLED
+#define CAFFE2_NO_SANITIZE(...)
+#else
+#define CAFFE2_NO_SANITIZE(...) __attribute__((no_sanitize(__VA_ARGS__)))
+#endif
