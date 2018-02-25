@@ -20,7 +20,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import schema
+from caffe2.python import schema, core
 from caffe2.python.layers.layers import (
     ModelLayer,
     IdList,
@@ -46,32 +46,23 @@ class SparseFeatureHash(ModelLayer):
             metadata = schema.Metadata(
                 categorical_limit=self.modulo,
                 feature_specs=input_record.items.metadata.feature_specs,
+                expected_value=input_record.items.metadata.expected_value
             )
-            hashed_indices = schema.Scalar(
-                np.int64,
-                self.get_next_blob_reference("hashed_idx")
-            )
-            hashed_indices.set_metadata(metadata)
-            self.output_schema = schema.List(
-                values=hashed_indices,
-                lengths_blob=input_record.lengths,
-            )
+            with core.NameScope(name):
+                self.output_schema = schema.NewRecord(model.net, IdList)
+            self.output_schema.items.set_metadata(metadata)
+
         elif schema.equal_schemas(input_record, IdScoreList):
             self.modulo = modulo or self.extract_hash_size(input_record.keys.metadata)
             metadata = schema.Metadata(
                 categorical_limit=self.modulo,
                 feature_specs=input_record.keys.metadata.feature_specs,
+                expected_value=input_record.keys.metadata.expected_value
             )
-            hashed_indices = schema.Scalar(
-                np.int64,
-                self.get_next_blob_reference("hashed_idx")
-            )
-            hashed_indices.set_metadata(metadata)
-            self.output_schema = schema.Map(
-                keys=hashed_indices,
-                values=input_record.values,
-                lengths_blob=input_record.lengths,
-            )
+            with core.NameScope(name):
+                self.output_schema = schema.NewRecord(model.net, IdScoreList)
+            self.output_schema.keys.set_metadata(metadata)
+
         else:
             assert False, "Input type must be one of (IdList, IdScoreList)"
 
@@ -91,12 +82,20 @@ class SparseFeatureHash(ModelLayer):
             assert False, "desired_hash_size or categorical_limit must be set"
 
     def add_ops(self, net):
+        net.Copy(
+            self.input_record.lengths(),
+            self.output_schema.lengths()
+        )
         if schema.equal_schemas(self.output_schema, IdList):
             input_blob = self.input_record.items()
             output_blob = self.output_schema.items()
         elif schema.equal_schemas(self.output_schema, IdScoreList):
             input_blob = self.input_record.keys()
             output_blob = self.output_schema.keys()
+            net.Copy(
+                self.input_record.values(),
+                self.output_schema.values()
+            )
         else:
             raise NotImplementedError()
 

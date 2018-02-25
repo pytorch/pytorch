@@ -216,6 +216,53 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
 
+    @given(
+        use_hashing=st.booleans(),
+        modulo=st.integers(min_value=100, max_value=200),
+    )
+    def testSparseFeatureHashIdList(self, use_hashing, modulo):
+        record = schema.NewRecord(
+            self.model.net,
+            schema.List(schema.Scalar(
+                np.int64,
+                metadata=schema.Metadata(categorical_limit=60000)
+            ))
+        )
+        output_schema = self.model.SparseFeatureHash(
+            record,
+            modulo=modulo,
+            use_hashing=use_hashing)
+
+        self.model.output_schema = output_schema
+
+        self.assertEqual(len(self.model.layers), 1)
+        self.assertEqual(output_schema._items.metadata.categorical_limit,
+                modulo)
+        train_init_net, train_net = self.get_training_nets()
+
+    @given(
+        use_hashing=st.booleans(),
+        modulo=st.integers(min_value=100, max_value=200),
+    )
+    def testSparseFeatureHashIdScoreList(self, use_hashing, modulo):
+        record = schema.NewRecord(self.model.net,
+                schema.Map(schema.Scalar(np.int64,
+                    metadata=schema.Metadata(
+                        categorical_limit=60000)),
+                    np.float32))
+
+        output_schema = self.model.SparseFeatureHash(
+            record,
+            modulo=modulo,
+            use_hashing=use_hashing)
+
+        self.model.output_schema = output_schema
+
+        self.assertEqual(len(self.model.layers), 1)
+        self.assertEqual(output_schema._items.keys.metadata.categorical_limit,
+                modulo)
+        train_init_net, train_net = self.get_training_nets()
+
     def testSparseLookupIncorrectPositionWeightedOnIdList(self):
         '''
         Currently the implementation of SparseLookup assumed input is id_score_list
