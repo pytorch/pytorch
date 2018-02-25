@@ -1,6 +1,5 @@
 from .module import Module
 from .. import functional as F
-from torch._C._VariableFunctions import non_max_suppression_buf
 
 class NonMaxSuppression(Module):
     r"""Attempts to eliminate duplicate object detections by
