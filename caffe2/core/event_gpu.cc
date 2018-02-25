@@ -150,12 +150,12 @@ void EventWaitCUDACUDA(const Event* event, void* context) {
 }
 
 // Waiter is CPU, event is CUDA
-void EventWaitCPUCUDA(const Event* event, void* /*context*/) {
+void EventWaitCPUCUDA(const Event* event, void* context) {
   EventFinishCUDA(event);
 }
 
 // Waiter is CUDA, event is CPU
-void EventWaitCUDACPU(const Event* event, void* /*context*/) {
+void EventWaitCUDACPU(const Event* event, void* context) {
   event->Finish(); // calls EventFinishCPU
 }
 

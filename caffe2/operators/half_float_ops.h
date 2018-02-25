@@ -58,7 +58,7 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
 
 inline std::vector<TensorShape> Float16FillerTensorInference(
     const OperatorDef& def,
-    const vector<TensorShape>& /*in*/) {
+    const vector<TensorShape>& in) {
   vector<TensorShape> out(1);
   ArgumentHelper helper(def);
   out[0].set_data_type(static_cast<TensorProto_DataType>(

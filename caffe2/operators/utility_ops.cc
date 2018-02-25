@@ -450,7 +450,7 @@ Example:
     .Input(0, "DATA", "Tensor of rank r >= 1.")
     .Input(1, "INDICES", "Tensor of int32/int64 indices, of any rank q.")
     .Output(0, "OUTPUT", "Tensor of rank q + (r - 1).")
-    .TensorInferenceFunction([](const OperatorDef& /*def*/,
+    .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
       vector<TensorShape> out(1);
       for (auto d : in[1].dims()) {

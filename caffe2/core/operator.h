@@ -122,7 +122,7 @@ class OperatorBase : public Observable<OperatorBase> {
   inline const vector<Blob*>& Outputs() { return outputs_; }
   vector<TensorShape> InputTensorShapes();
 
-  virtual void WaitEvent(const Event& ev, int /*stream_id*/ = -1) {
+  virtual void WaitEvent(const Event& ev, int stream_id = -1) {
     ev.Finish();
   }
 
@@ -132,7 +132,7 @@ class OperatorBase : public Observable<OperatorBase> {
 
   virtual void WaitEvents(
       const std::vector<const Event*>& events,
-      int /*stream_id*/ = -1) {
+      int stream_id = -1) {
     for (const auto& ev : events) {
       ev->Finish();
     }
@@ -286,7 +286,7 @@ class OperatorBase : public Observable<OperatorBase> {
   int net_position_{kNoNetPositionSet};
 
  protected:
-  virtual void RecordEvent(const char* /*err_msg*/ = nullptr) {
+  virtual void RecordEvent(const char* err_msg = nullptr) {
     CAFFE_NOT_IMPLEMENTED;
   }
 

@@ -83,7 +83,7 @@ bool CommonSubexpressionEliminationTransform::PatternRule(
 
 // As long as we have matched more than 2 ops, it is worth eliminating.
 bool CommonSubexpressionEliminationTransform::ValidatorRule(
-    const Graph& /*g*/,
+    const Graph& g,
     const std::vector<int>& subgraph) {
   if (subgraph.size() >= 2) {
     return true;

@@ -238,10 +238,8 @@ class SortedDummyTransform : public Transform {
   SortedDummyTransform() {
     SetPatternMatchType(SORTED_WRT_EXECUTION_ORDER);
   }
-  bool PatternRule(
-      const Graph& g,
-      const std::vector<int>& /*subgraph*/,
-      int idx) override {
+  bool PatternRule(const Graph& g, const std::vector<int>& subgraph, int idx)
+      override {
     if (g.node(idx).op.type() != "TransformDummyOp1") {
       return false;
     }
