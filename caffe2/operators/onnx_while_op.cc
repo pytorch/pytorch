@@ -78,6 +78,6 @@ is marked as omitted by setting its 'has_{name}' argument to False.
     )DOC")
     .Arg("loop_net", "Net executed on each iteration")
     .Input(0, "condition", "Scalar boolean condition")
-    .AllowInplace([](int in, int out) -> bool { return true; });
+    .AllowInplace([](int /*in*/, int /*out*/) -> bool { return true; });
 
 } // namespace caffe2

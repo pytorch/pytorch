@@ -36,7 +36,7 @@ namespace {
 
 void SetColumnBufferShapeImpl(
     const int N,
-    const int C,
+    const int /*C*/,
     const int kernel_dim,
     const StorageOrder order,
     const std::vector<int>& output_image_dims,

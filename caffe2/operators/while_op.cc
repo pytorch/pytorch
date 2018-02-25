@@ -33,6 +33,6 @@ the same workspace as 'While'.
     .Arg("loop_net", "Net executed on each iteration")
     .Arg("cond_net", "Net to (re)compute condition value")
     .Input(0, "condition", "Scalar boolean condition")
-    .AllowInplace([](int in, int out) -> bool { return true; });
+    .AllowInplace([](int /*in*/, int /*out*/) -> bool { return true; });
 
 } // namespace caffe2

@@ -64,7 +64,7 @@ REGISTER_GRADIENT(Sqr, GetSqrGradient);
 struct SignCPUFunctor {
   template <typename T>
   inline void
-  operator()(const int n, const T* x, T* y, CPUContext* device_context) {
+  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
     for (int i = 0; i < n; ++i) {
       y[i] = (-T(1) * (x[i] < 0)) + (x[i] > 0);
     }
