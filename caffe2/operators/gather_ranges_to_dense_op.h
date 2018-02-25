@@ -120,7 +120,8 @@ class GatherRangesToDenseOp final : public Operator<Context> {
           std::sort(
               buffer.begin(),
               buffer.end(),
-              [](const auto& left, const auto& right) {
+              [](const std::pair<int64_t, const char*>& left,
+                 const std::pair<int64_t, const char*>& right) {
                 return left.first < right.first;
               });
           for (int b_i = 0; b_i < rangeLength; ++b_i) {
