@@ -31,6 +31,6 @@ value. Accepts 'then_net' (required) and 'else_net' (optional) arguments for 'th
     .Arg("then_net", "Net executed when condition is true")
     .Arg("else_net", "Net executed when condition is false (optional)")
     .Input(0, "condition", "Scalar boolean condition")
-    .AllowInplace([](int /*in*/, int /*out*/) -> bool { return true; });
+    .AllowInplace([](int in, int out) -> bool { return true; });
 
 } // namespace caffe2

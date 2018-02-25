@@ -776,7 +776,7 @@ class MaxReducer<T, CPUContext> : public BaseReducer {
  public:
   using FixedDispatch = FixedValues<1>;
 
-  MaxReducer(const Meta& /*meta*/, T* out, CPUContext* /*context*/)
+  MaxReducer(const Meta& meta, T* out, CPUContext* /*context*/)
       : out_(out), current_size_(0) {}
 
   template <int FixedSize>
@@ -784,7 +784,7 @@ class MaxReducer<T, CPUContext> : public BaseReducer {
       const Meta& meta,
       const T* in,
       TIndex /*offset*/,
-      CPUContext* /*context*/) {
+      CPUContext* context) {
     CAFFE_ENFORCE(
         meta.first_dim,
         "MaxReducer implemented only for front dimensions reduction");

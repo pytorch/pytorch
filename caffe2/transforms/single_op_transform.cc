@@ -36,7 +36,7 @@ bool SingleOpTransform::PatternRule(
 }
 
 bool SingleOpTransform::ValidatorRule(
-    const Graph& /*g*/,
+    const Graph& g,
     const std::vector<int>& subgraph) {
   if (subgraph.size() == 1) {
     return true;

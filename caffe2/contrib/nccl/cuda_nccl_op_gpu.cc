@@ -212,7 +212,7 @@ OPERATOR_SCHEMA(NCCLReduce)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInput(0)
     .InputsCanCrossDevices()
-    .AllowInplace([](int /*in*/, int out) -> bool { return (out == 0); })
+    .AllowInplace([](int in, int out) -> bool { return (out == 0); })
     .DeviceInferenceFunction(ncclOpDevInfer);
 SHOULD_NOT_DO_GRADIENT(NCCLReduce);
 

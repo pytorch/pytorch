@@ -44,6 +44,6 @@ between selected inner blob names and corresponding outer blob indices.
     .Arg(
         "reuse_workspace",
         "Whether to reuse workspace or create a new one in a given scope")
-    .AllowInplace([](int /*in*/, int /*out*/) -> bool { return true; });
+    .AllowInplace([](int in, int out) -> bool { return true; });
 
 } // namespace caffe2

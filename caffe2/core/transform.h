@@ -110,8 +110,8 @@ class Transform {
    * Given the current subgraph (ordered), should we append the new node at idx?
    */
   virtual bool PatternRule(
-      const transform::Graph& /*g*/,
-      const std::vector<int>& /*subgraph*/,
+      const transform::Graph& g,
+      const std::vector<int>& subgraph,
       int /*idx*/) {
     CAFFE_NOT_IMPLEMENTED;
   }
@@ -121,8 +121,8 @@ class Transform {
    * Given a subgraph, can we accept it?
    */
   virtual bool ValidatorRule(
-      const transform::Graph& /*g*/,
-      const std::vector<int>& /*subgraph*/) {
+      const transform::Graph& g,
+      const std::vector<int>& subgraph) {
     CAFFE_NOT_IMPLEMENTED;
   }
 
@@ -131,8 +131,8 @@ class Transform {
    * upon the subgraph.
    */
   virtual bool ReplaceRule(
-      const std::vector<int>& /*subgraph*/,
-      transform::Graph* /*g_ptr*/) {
+      const std::vector<int>& subgraph,
+      transform::Graph* g_ptr) {
     CAFFE_NOT_IMPLEMENTED;
   }
 
