@@ -12,6 +12,11 @@ class NonMaxSuppression(Module):
       boxes, and so on until there are no boxes left.
       The stored boxes are returned.
 
+      NB: The function returns a tuple (mask, indices), where
+      the indices index into the input boxes and are sorted
+      according to score, from higest to lowest. The mask is
+      a mask on the sorted indices. 
+
       Args:
           threshold (float): IoU above which to eliminate boxes
 
@@ -30,7 +35,7 @@ class NonMaxSuppression(Module):
       >>> scores = torch.abs(torch.randn([1, 3]))
       >>> mask, indices = nms(boxes, scores)
       >>> #indices are SORTED according to score.
-      >>> surviving_boxes = indices[mask] 
+      >>> surviving_box_indices = indices[mask] 
       """
 
     def __init__(self, threshold, use_buffer=False, num_boxes=None):
