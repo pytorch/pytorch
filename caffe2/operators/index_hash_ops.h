@@ -64,12 +64,11 @@ class IndexHashOp : public Operator<Context> {
   template <typename T>
   T hash(T id) {
     int8_t* bytes = (int8_t*)&id;
-    T hashed = seed_ * 0xDEADBEEF;
+    uint64_t hashed = seed_ * 0xDEADBEEF;
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
       hashed = hashed * 65537 + bytes[i];
     }
-    hashed = static_cast<T>((modulo_ + hashed % modulo_) % modulo_);
-    return hashed;
+    return static_cast<T>((modulo_ + hashed % modulo_) % modulo_);
   }
 
  private:
