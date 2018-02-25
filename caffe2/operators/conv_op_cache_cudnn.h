@@ -42,7 +42,7 @@ T AlgorithmsCache<T>::getAlgorithm(
     const std::vector<TIndex>& vec1,
     const std::vector<TIndex>& vec2,
     std::function<T()> generatingFunc) {
-  int64_t seed = 0;
+  uint64_t seed = 0;
   std::hash<TIndex> hashFn;
   for (const auto num : vec1) {
     // Copied from boost::hash_combine.
