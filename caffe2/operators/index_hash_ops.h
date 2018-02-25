@@ -17,6 +17,7 @@
 #ifndef CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 #define CAFFE2_OPERATORS_INDEX_HASH_OPS_H_
 
+#include "caffe2/core/asan.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 
@@ -62,13 +63,14 @@ class IndexHashOp : public Operator<Context> {
 
  protected:
   template <typename T>
-  T hash(T id) {
+  T hash(T id) CAFFE2_NO_SANITIZE("signed-integer-overflow") {
     int8_t* bytes = (int8_t*)&id;
-    uint64_t hashed = seed_ * 0xDEADBEEF;
+    T hashed = seed_ * 0xDEADBEEF;
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
       hashed = hashed * 65537 + bytes[i];
     }
-    return static_cast<T>((modulo_ + hashed % modulo_) % modulo_);
+    hashed = static_cast<T>((modulo_ + hashed % modulo_) % modulo_);
+    return hashed;
   }
 
  private:
