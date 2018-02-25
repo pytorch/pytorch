@@ -14,9 +14,14 @@
 
 
 # ---[ Options
-caffe_option(MKL_USE_SINGLE_DYNAMIC_LIBRARY "Use single dynamic library interface" ON)
-caffe_option(MKL_USE_STATIC_LIBS "Use static libraries" OFF IF NOT MKL_USE_SINGLE_DYNAMIC_LIBRARY)
-caffe_option(MKL_MULTI_THREADED  "Use multi-threading"   ON IF NOT MKL_USE_SINGLE_DYNAMIC_LIBRARY)
+include(CMakeDependentOption)
+option(MKL_USE_SINGLE_DYNAMIC_LIBRARY "Use single dynamic library interface" ON)
+cmake_dependent_option(
+    MKL_USE_STATIC_LIBS "Use static libraries" OFF
+        "NOT MKL_USE_SINGLE_DYNAMIC_LIBRARY" OFF)
+cmake_dependent_option(
+    MKL_MULTI_THREADED  "Use multi-threading" ON
+    "NOT MKL_USE_SINGLE_DYNAMIC_LIBRARY" OFF)
 
 # ---[ Root folders
 if(MSVC)
