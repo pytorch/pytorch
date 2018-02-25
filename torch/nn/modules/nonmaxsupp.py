@@ -1,6 +1,7 @@
 from .module import Module
 from .. import functional as F
 
+
 class NonMaxSuppression(Module):
     r"""Attempts to remove duplicate object detections.
 
