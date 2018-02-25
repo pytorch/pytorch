@@ -187,13 +187,14 @@ class Optimizer(object):
 
 class SgdOptimizer(Optimizer):
     def __init__(self, base_learning_rate=0.01, policy='fixed',
-                 momentum=0.0, nesterov=1, sparse_dedup_aggregator=None,
-                 **kwargs):
+                 momentum=0.0, nesterov=1, lars=None,
+                 sparse_dedup_aggregator=None, **kwargs):
         super(SgdOptimizer, self).__init__()
         self.base_learning_rate = base_learning_rate
         self.policy = policy
         self.momentum = momentum
         self.nesterov = nesterov
+        self.lars = lars
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.init_kwargs = kwargs
 
@@ -203,6 +204,15 @@ class SgdOptimizer(Optimizer):
         if self.base_learning_rate == 0:
             return
         assert self.base_learning_rate > 0
+
+        # TODO(zqq): support LARS for sparse parameters
+        if self.lars is not None and not isinstance(grad, core.GradientSlice):
+            assert self.lars >= 0, 'Lars offset must be nonnegative.'
+            lr_lars_multiplier = net.Lars(
+                [param, grad],
+                self.make_unique_blob_name(str(param) + "_lars"),
+                offset=self.lars)
+            self.add_lr_multiplier(lr_lars_multiplier)
 
         # We need negative sign for LR when used directly with WeightedSum
         # below.
@@ -271,13 +281,14 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
     def __init__(self, base_learning_rate=0.1, momentum=0.0,
                  policy="fixed", nesterov=1, sparse_dedup_aggregator=None,
                  **kwargs):
-        super(SgdOptimizer, self).__init__()
-        self.base_learning_rate = base_learning_rate
-        self.momentum = momentum
-        self.policy = policy
-        self.nesterov = nesterov
-        self.sparse_dedup_aggregator = sparse_dedup_aggregator
-        self.init_kwargs = kwargs
+        super(MultiPrecisionSgdOptimizer, self).__init__(
+            base_learning_rate=base_learning_rate,
+            policy=policy,
+            momentum=momentum,
+            nesterov=nesterov,
+            sparse_dedup_aggregator=sparse_dedup_aggregator,
+            **kwargs
+        )
 
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
@@ -326,13 +337,14 @@ class FP16SgdOptimizer(SgdOptimizer):
                  policy="fixed", nesterov=1, weight_decay=0.0001,
                  sparse_dedup_aggregator=None,
                  **kwargs):
-        super(SgdOptimizer, self).__init__()
-        self.base_learning_rate = base_learning_rate
-        self.momentum = momentum
-        self.policy = policy
-        self.nesterov = nesterov
-        self.sparse_dedup_aggregator = sparse_dedup_aggregator
-        self.init_kwargs = kwargs
+        super(FP16SgdOptimizer, self).__init__(
+            base_learning_rate=base_learning_rate,
+            policy=policy,
+            momentum=momentum,
+            nesterov=nesterov,
+            sparse_dedup_aggregator=sparse_dedup_aggregator,
+            **kwargs
+        )
         self.weight_decay = weight_decay
 
     def _run(self, net, param_init_net, param_info, fp32_update=False):

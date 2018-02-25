@@ -33,6 +33,22 @@ import math
 import unittest
 
 
+class TestLars(OptimizerTestBase, TestCase):
+    def testSparse(self):
+        raise unittest.SkipTest("no sparse support")
+
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_sgd(
+            model, base_learning_rate=0.1, lars=0.5, **kwargs)
+
+    def check_optimizer(self, optimizer):
+        self.assertTrue(optimizer.get_auxiliary_parameters().shared)
+        self.assertFalse(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().shared:
+            tensor = workspace.FetchBlob(param)
+            np.testing.assert_allclose(np.array([1.0]), tensor, atol=1e-5)
+
 class TestMomentumSgd(OptimizerTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
