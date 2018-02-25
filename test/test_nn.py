@@ -1221,9 +1221,9 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_gumbel_softmax_st_cuda(self):
         self._test_gumbel_softmax_st(True)
-    
+
     def _test_nms(self, cuda):
-        #check a small test case
+        # check a small test case
         nms = nn.NonMaxSuppression(0.7)
         boxes = Variable(torch.Tensor([
             [[10.2, 23., 50., 20.],
@@ -1240,22 +1240,21 @@ class TestNN(NNTestCase):
         scores = Variable(torch.Tensor([
             [0.9, 0.7, 0.11, 0.23, 0.8],
             [0.13, 0.89, 0.45, 0.23, 0.3]]))
-        
+
         if cuda:
-           boxes = boxes.cuda()
-           scores = scores.cuda()
+            boxes = boxes.cuda()
+            scores = scores.cuda()
 
         expected_output = (
             torch.ByteTensor(
-                [[1, 1, 0, 1, 1], [1, 1, 1, 0, 1]])
+                [[1, 1, 0, 1, 1], [1, 1, 1, 0, 1]]),
             torch.LongTensor(
-                [[0, 4, 1, 3, 2], [1, 2, 4, 3, 0]]),
-            )
+                [[0, 4, 1, 3, 2], [1, 2, 4, 3, 0]])
+        )
 
         mask, inds = nms(boxes, scores)
         self.assertEqual(mask, expected_output[0])
         self.assertEqual(inds, expected_output[1])
-
 
     def test_non_max_suppression(self):
         self._test_nms(False)

@@ -3,7 +3,7 @@ from .. import functional as F
 
 class NonMaxSuppression(Module):
     r"""Attempts to remove duplicate object detections.
-      
+
       The algorithm begins by storing the highest-scoring bounding
       box, and eliminating any box whose intersection-over-union (IoU)
       with it is too great. The procedure repeats on the surviving
@@ -34,7 +34,7 @@ class NonMaxSuppression(Module):
       >>> scores = torch.abs(torch.randn([1, 3]))
       >>> mask, indices = nms(boxes, scores)
       >>> #indices are SORTED according to score.
-      >>> surviving_box_indices = indices[mask] 
+      >>> surviving_box_indices = indices[mask]
       """
 
     def __init__(self, threshold, use_buffer=False, num_boxes=None):
