@@ -34,7 +34,6 @@
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
 
-#include "ModuleSparse.cpp"
 #include "DataLoader.cpp"
 
 namespace py = pybind11;
