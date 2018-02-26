@@ -61,10 +61,10 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
       auto bag_size_ = indices.sizes()[0];
       output /= bag_size_;
     } else {
-      auto bag_size_ = bag_size.toType(output.type())
-                           .unsqueeze(1)
-                           .index_select(0, offset2bag);
-      output /= bag_size_;
+      auto inv_bag_size_ = (1 / bag_size.toType(output.type()))
+                             .unsqueeze(1)
+                             .index_select(0, offset2bag);
+      output *= inv_bag_size_;
     }
   }
   return output;
@@ -86,8 +86,7 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
       at::zeros(indices__.type(), {indices.sizes()[0]}); // offset2bag = [0 0 0 0 0]
   make_offset2bag(offsets, indices, offset2bag);
   auto output = at::zeros(weight.type(), {offsets.sizes()[0], weight.sizes()[1]});
-  auto index_output = weight.index_select(0, indices);
-  output.index_add_(0, offset2bag, index_output);
+  output.index_select_add_(0, indices, offset2bag, weight);
   make_bag_size(offsets, indices, mode, bag_size);
   auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);
   return std::tuple<Tensor, Tensor, Tensor>(ret, offset2bag, bag_size);

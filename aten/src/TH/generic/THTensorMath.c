@@ -544,6 +544,52 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   THLongTensor_free(index);
 }
 
+void THTensor_(indexSelectAdd)(THTensor *tensor, int dim, THLongTensor *selectIndex, THLongTensor *addIndex, THTensor *src) {
+  ptrdiff_t i, numel;
+  THTensor *tSlice, *sSlice;
+  int64_t *selectIndex_data;
+  int64_t *addIndex_data;
+
+  numel = THLongTensor_nElement(addIndex);
+  THArgCheck(selectIndex->nDimension <= 1, 3, "Index is supposed to be a vector");
+  THArgCheck(addIndex->nDimension == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(src->nDimension > 0, 2, "Source tensor is empty");
+  THArgCheck(dim < src->nDimension, 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+
+  selectIndex = THLongTensor_newContiguous(selectIndex);
+  selectIndex_data = THLongTensor_data(selectIndex);
+  addIndex = THLongTensor_newContiguous(addIndex);
+  addIndex_data = THLongTensor_data(addIndex);
+
+  if (tensor->nDimension > 1)
+  {
+    tSlice = THTensor_(new)();
+    sSlice = THTensor_(new)();
+
+    for (i=0; i<numel; i++)
+    {
+      THTensor_(select)(tSlice, tensor, dim, addIndex_data[i] - TH_INDEX_BASE);
+      THTensor_(select)(sSlice, src, dim, selectIndex_data[i] - TH_INDEX_BASE);
+      THTensor_(cadd)(tSlice, tSlice, 1.0, sSlice);
+    }
+
+    THTensor_(free)(tSlice);
+    THTensor_(free)(sSlice);
+  }
+  else
+  {
+    for (i=0; i<numel; i++)
+    {
+      THTensor_(set1d)(tensor,
+              addIndex_data[i] - TH_INDEX_BASE,
+              THTensor_(get1d)(src,selectIndex_data[i] - TH_INDEX_BASE) +
+              THTensor_(get1d)(tensor,addIndex_data[i] - TH_INDEX_BASE));
+    }
+  }
+  THLongTensor_free(selectIndex);
+  THLongTensor_free(addIndex);
+}
+
 void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real val)
 {
   ptrdiff_t i, numel;
