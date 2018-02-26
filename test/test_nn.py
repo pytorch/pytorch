@@ -3854,10 +3854,10 @@ class TestNN(NNTestCase):
         self.assertEqual(grad1, grad2)
 
         # track_running_stats=False
-        module = nn.BatchNorm1d(3, track_running_stats=False).type(test_type)
+        module = nn.BatchNorm1d(3, track_running_stats=False).type(dtype)
 
-        data = Variable(torch.rand(4, 3).type(test_type), requires_grad=True)
-        grad = torch.rand(4, 3).type(test_type)
+        data = Variable(torch.rand(4, 3).type(dtype), requires_grad=True)
+        grad = torch.rand(4, 3).type(dtype)
 
         # 1st pass
         res1 = module(data)
