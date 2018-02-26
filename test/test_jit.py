@@ -1238,12 +1238,6 @@ class TestJit(TestCase):
         if input_tensors is None:
             input_tensors = reference_tensors
 
-        def wrapped(*inputs):
-            res = func(*inputs)
-            if isinstance(res, torch.Tensor):
-                return (res,)
-            return res
-
         nograd_inputs = [Variable(t) for t in reference_tensors]
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
@@ -1252,13 +1246,13 @@ class TestJit(TestCase):
 
         # test no gradients case
 
-        outputs = wrapped(*nograd_inputs)
+        outputs = func(*nograd_inputs)
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)
 
         # test single grad case
 
-        outputs = wrapped(*recording_inputs)
+        outputs = func(*recording_inputs)
         grads = torch.autograd.grad(allSum(outputs), recording_inputs)
 
         outputs_ge = ge(*recording_inputs)
@@ -1268,7 +1262,7 @@ class TestJit(TestCase):
 
         # test the grad grad case
 
-        outputs = wrapped(*recording_inputs)
+        outputs = func(*recording_inputs)
         l1 = allSum(outputs)
         grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
         l2 = (allSum(grads) * l1)
@@ -1372,7 +1366,7 @@ class TestJit(TestCase):
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
         outputs = a + b + a
-        self.checkScript(script, [a, b], [outputs], False)
+        self.checkScript(script, [a, b], outputs, False)
 
     def test_script_mul(self):
         script = '''
@@ -1383,7 +1377,7 @@ class TestJit(TestCase):
         a = Variable(torch.rand(1), requires_grad=True)
         b = Variable(torch.rand(1), requires_grad=True)
         outputs = a * b
-        self.checkScript(script, [a, b], [outputs], False)
+        self.checkScript(script, [a, b], outputs, False)
 
     def test_script_triple(self):
         script = '''
@@ -1392,7 +1386,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
-        self.checkScript(script, [x], [outputs], False)
+        self.checkScript(script, [x], outputs, False)
 
     def test_script_slice(self):
         script = '''
@@ -1410,7 +1404,7 @@ class TestJit(TestCase):
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[0]
-        self.checkScript(script, [x], [outputs], False)
+        self.checkScript(script, [x], outputs, False)
 
     def test_script_func_call(self):
         script = '''
@@ -1470,7 +1464,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([1, 1, 10], np.int32)
         outputs = self._make_scalar_vars([20], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_while')
+        self.checkScript(script, inputs, outputs[0], False, 'test_while')
 
     def test_script_fibb(self):
         script = '''
@@ -1512,7 +1506,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([1, -1], np.int32)
         outputs = self._make_scalar_vars([7], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_if')
+        self.checkScript(script, inputs, outputs[0], False, 'test_if')
 
     def test_script_if_noelse(self):
         script = '''
@@ -1523,7 +1517,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([-1, 1], np.int32)
         outputs = self._make_scalar_vars([0], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_if_noelse')
+        self.checkScript(script, inputs, outputs[0], False, 'test_if_noelse')
 
     def test_script_while_nonexistant_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
@@ -1555,7 +1549,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([42, 1337], np.int32)
         outputs = self._make_scalar_vars([1379], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_while')
+        self.checkScript(script, inputs, outputs[0], False, 'test_while')
 
     def test_script_while_nest_if(self):
         script = '''
@@ -1572,7 +1566,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([-1234, 4321], np.int32)
         outputs = self._make_scalar_vars([-5564], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_while_if')
+        self.checkScript(script, inputs, outputs[0], False, 'test_while_if')
 
     def test_script_if_nest_while(self):
         script = '''
@@ -1585,7 +1579,7 @@ class TestJit(TestCase):
         '''
         inputs = self._make_scalar_vars([4321, 1234], np.int32)
         outputs = self._make_scalar_vars([-4321], np.int32)
-        self.checkScript(script, inputs, outputs, False, 'test_if_while')
+        self.checkScript(script, inputs, outputs[0], False, 'test_if_while')
 
     def test_script_ternary(self):
         cu = torch.jit.CompilationUnit('''
@@ -1618,7 +1612,7 @@ class TestJit(TestCase):
         with capture_stdout():
             expected_out = func(x, y)
         expected_out = (x + y).sigmoid().pow(2)
-        self.checkScript(func, [x, y], [expected_out], False)
+        self.checkScript(func, [x, y], expected_out, False)
 
     def test_trace_annotation(self):
         @torch.jit.trace(Variable(torch.rand(1)))
