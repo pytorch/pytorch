@@ -1163,6 +1163,15 @@ class TestNN(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
+    def test_embedding_from_pretrained(self):
+        a = torch.Tensor([[1, 2, 3], [4, 5, 6]])
+        embedding = nn.Embedding.from_pretrained(a)
+        self.assertEqual(a, embedding.weight.data)
+
+        input = Variable(torch.LongTensor([0, 1]))
+        output = embedding(input)
+        self.assertEqual(a, output)
+
     def test_embedding_functional(self):
         a = Variable(torch.LongTensor([
             [1, 3, 2],
