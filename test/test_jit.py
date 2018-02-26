@@ -1344,17 +1344,20 @@ class TestJit(TestCase):
         g2result2 = torch.autograd.grad(l3, [da2, db2])
         self.assertEqual(g2result, g2result2)
 
-    def checkScript(self, script, inputs, outputs, optimize, name='func'):
+    def checkScript(self, script, inputs, outputs, optimize, name='func', capture_output=False):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize)
             ge = getattr(cu, name)
         else:
             ge = torch.jit.script(script)
-        with capture_stdout() as captured:
+
+        if capture_output:
+            with capture_stdout() as captured:
+                outputs_ge = ge(*inputs)
+            self.assertExpected(captured[0], subname='stdout')
+        else:
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
-        if captured[0]:
-            self.assertExpected(captured[0], subname='stdout')
 
     def test_script_add(self):
         script = '''

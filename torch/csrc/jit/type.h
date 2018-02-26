@@ -119,6 +119,8 @@ struct TensorType : public Type {
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
+    if(sizes.size() == 0) // zero-dim case
+      return strides;
     strides.back() = 1;
     for(std::size_t i = strides.size() - 1; i > 0; i--) {
       strides[i-1] = strides[i] * sizes[i];
