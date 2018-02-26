@@ -420,7 +420,12 @@ PyObject * THCPModule_initExtension(PyObject *self)
     .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
     .def_readonly("is_integrated", &cudaDeviceProp::integrated)
     .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
-    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem);
+    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
+    .def("__repr__", [](const cudaDeviceProp &prop) {
+      return std::string(prop.name) + " | CUDA " + std::to_string(prop.major) + "."
+      + std::to_string(prop.minor) + " | Memory: " + std::to_string(prop.totalGlobalMem / 1000000)
+      + " MB | Processors: " + std::to_string(prop.multiProcessorCount);
+    });
   m.def("get_device_properties", [](int device) -> cudaDeviceProp * {
     cudaDeviceProp *prop = new cudaDeviceProp; // Python will take ownership and delete when appropriate
     THCudaCheck(cudaGetDeviceProperties(prop, device));
