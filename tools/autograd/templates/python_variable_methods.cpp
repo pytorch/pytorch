@@ -306,7 +306,8 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  if (tensor_device != at::current_device()) {
+  device = device == -1 && !type.is_cuda() ? device : at::current_device();
+  if (tensor_device != device) {
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
   }
