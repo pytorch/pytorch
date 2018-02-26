@@ -9,8 +9,6 @@ from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
 def _standard_gamma(concentration):
-    if not isinstance(concentration, Variable):
-        return torch._C._standard_gamma(concentration)
     return concentration._standard_gamma()
 
 
