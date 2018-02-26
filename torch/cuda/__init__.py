@@ -289,8 +289,8 @@ def get_device_capability(device):
 
 def get_device_properties(device):
     if not _initialized:
-        init();  # will define _get_device_properties and _CudaDeviceProperties
-    return _get_device_properties(device);
+        init()  # will define _get_device_properties and _CudaDeviceProperties
+    return _get_device_properties(device)
 
 
 @contextlib.contextmanager
