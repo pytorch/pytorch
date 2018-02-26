@@ -950,7 +950,7 @@ Normalization functions
 .. autofunction:: batch_norm
 
 :hidden:`instance_norm`
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: instance_norm
 
