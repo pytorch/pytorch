@@ -10,9 +10,16 @@ from torch._C._jit_tree_views import *
 
 PY2 = sys.version_info[0] == 2
 _reserved_prefix = '__jit'
+_reserved_names = {'print'}
 _identifier_chars = set(string.ascii_lowercase + string.ascii_uppercase + string.digits)
 
+
+def is_reserved_name(name):
+    return name.startswith(_reserved_prefix) or name in _reserved_names
+
+
 pretty_node_names = {
+    ast.FunctionDef: "function definitions",
     ast.For: "for loops",
     ast.Delete: "del statements",
     ast.ClassDef: "class definitions",
@@ -27,6 +34,7 @@ pretty_node_names = {
 }
 
 node_start_tokens = {
+    ast.FunctionDef: "def",
     ast.For: "for",
     ast.Delete: "del",
     ast.ClassDef: "class",
@@ -56,6 +64,7 @@ if PY2:
     })
 else:
     pretty_node_names.update({
+        ast.AsyncFunctionDef: "async function definitions",
         ast.AsyncFor: "async for loops",
         ast.AsyncWith: "async with statements",
         ast.Try: "try blocks",
@@ -63,6 +72,7 @@ else:
     })
 
     node_start_tokens.update({
+        ast.AsyncFunctionDef: "async def",
         ast.AsyncFor: "async for",
         ast.AsyncWith: "async with",
         ast.Try: "try",
@@ -210,7 +220,7 @@ class StmtBuilder(Builder):
         if not isinstance(var, Var):
             raise NotSupportedError("the only expressions allowed on the left hand side of "
                                     "assignments are variable names", var.range())
-        return var.name()
+        return var.name
 
     @staticmethod
     def build_Assign(ctx, stmt):
@@ -246,6 +256,14 @@ class StmtBuilder(Builder):
         return If(r, build_expr(ctx, stmt.test),
                   [build_stmt(ctx, s) for s in stmt.body],
                   [build_stmt(ctx, s) for s in stmt.orelse])
+
+    @staticmethod
+    def build_Print(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("print"))
+        if stmt.dest:
+            raise NotSupportedError(r, "print statements with non-default destinations aren't supported")
+        args = [build_expr(ctx, val) for val in stmt.values]
+        return ExprStmt(Apply(Ident(r, "print"), args, []))
 
 
 class ExprBuilder(Builder):
@@ -294,15 +312,18 @@ class ExprBuilder(Builder):
     @staticmethod
     def build_Call(ctx, expr):
         ref = build_expr(ctx, expr.func, allow_methods=True)
-        if type(ref) is not ExprBuilder._MethodRef:
+        args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+        kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+        if type(ref) is ExprBuilder._MethodRef:  # Method call
+            return Apply(ref.name, [ref.self] + args, kwargs)
+        elif isinstance(ref, Var):  # Top-level function call
+            return Apply(ref.name, args, kwargs)
+        else:
             ref_range = ref.range()
             parenthesis_range = find_after(ctx, ref_range.end, '(')
             raise FrontendTypeError(
                 ctx.make_raw_range(ref_range.start, parenthesis_range.end),
                 "trying to call a non-function object")
-        args = [build_expr(ctx, py_arg) for py_arg in expr.args]
-        kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
-        return Apply(ref.name, [ref.self] + args, kwargs)
 
     @staticmethod
     def build_Name(ctx, expr):

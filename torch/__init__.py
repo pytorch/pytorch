@@ -90,6 +90,9 @@ if platform.system() != 'Windows':
 
 
 def typename(o):
+    if isinstance(o, torch.Tensor):
+        return o.type()
+
     module = ''
     class_name = ''
     if hasattr(o, '__module__') and o.__module__ != 'builtins' \
@@ -112,7 +115,7 @@ def is_tensor(obj):
     Args:
         obj (Object): Object to test
     """
-    return type(obj) in _tensor_classes
+    return isinstance(obj, torch.Tensor)
 
 
 def is_storage(obj):
@@ -125,7 +128,6 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
-    global Tensor
     global Storage
     Tensor = _import_dotted_name(t)
     Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
@@ -267,10 +269,8 @@ _storage_classes = {
     CharStorage, ByteStorage, HalfStorage
 }
 
-_tensor_classes = {
-    DoubleTensor, FloatTensor, LongTensor, IntTensor, ShortTensor,
-    CharTensor, ByteTensor, HalfTensor
-}
+# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+_tensor_classes = set()
 
 _integer_tensor_classes = {
     LongTensor, IntTensor, ShortTensor, CharTensor, ByteTensor
@@ -302,7 +302,11 @@ def manager_path():
 _C._initExtension(manager_path())
 del manager_path
 
-set_default_tensor_type('torch.FloatTensor')
+_C._initialize_tensor_type_bindings()
+
+for name in dir(_C._VariableFunctions):
+    globals()[name] = getattr(_C._VariableFunctions, name)
+
 
 ################################################################################
 # Remove unnecessary members
@@ -348,7 +352,7 @@ import torch.distributions
 import torch.testing
 from torch.autograd import no_grad, enable_grad
 
-_C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
+_C._init_names(list(torch._storage_classes))
 _C._initialize_dtypes()
 
 # attach docstrings to torch and tensor functions

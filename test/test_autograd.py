@@ -1314,21 +1314,21 @@ class TestAutograd(TestCase):
 
     def test_type_conversions(self):
         x = Variable(torch.randn(5, 5))
-        self.assertIs(type(x.float().data), torch.FloatTensor)
-        self.assertIs(type(x.int().data), torch.IntTensor)
+        self.assertIsInstance(x.float().data, torch.FloatTensor)
+        self.assertIsInstance(x.int().data, torch.IntTensor)
         if torch.cuda.is_available():
-            self.assertIs(type(x.float().cuda().data), torch.cuda.FloatTensor)
-            self.assertIs(type(x.int().cuda().data), torch.cuda.IntTensor)
-            self.assertIs(type(x.int().cuda().cpu().data), torch.IntTensor)
+            self.assertIsInstance(x.float().cuda().data, torch.cuda.FloatTensor)
+            self.assertIsInstance(x.int().cuda().data, torch.cuda.IntTensor)
+            self.assertIsInstance(x.int().cuda().cpu().data, torch.IntTensor)
             if torch.cuda.device_count() >= 2:
                 x2 = x.float().cuda(1)
-                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIsInstance(x2.data, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
                 x2 = x.float().cuda()
-                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIsInstance(x2.data, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 0)
                 x2 = x2.cuda(1)
-                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIsInstance(x2.data, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
                 y = Variable(torch.randn(5).cuda(1), requires_grad=True)
                 y.cpu().sum().backward()
@@ -1339,17 +1339,16 @@ class TestAutograd(TestCase):
             for y_var in (True, False):
                 y = torch.randn(5, 5).type(t)
                 y = Variable(y) if y_var else y
-                self.assertIs(type(x.type(t).data), t)
-                self.assertIs(type(x.type_as(y).data), t)
+                self.assertIsInstance(x.type(t).data, t)
+                self.assertIsInstance(x.type_as(y).data, t)
                 if torch.cuda.is_available():
                     for x_cuda in (True, False):
                         for y_cuda in (True, False):
                             x_c = x.cuda() if x_cuda else x
                             y_c = y.cuda() if y_cuda else y
-                            y_type = type(y_c.data) if y_var else type(y_c)
-                            y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type.__name__
-                            self.assertIs(y_type, type(x_c.type(y_typestr).data))
-                            self.assertIs(type(y_c.data) if y_var else type(y_c), type(x_c.type_as(y_c).data))
+                            _, y_type = y_c.type().rsplit('.', 1)
+                            y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type
+                            self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
 
         self._test_type_conversion_backward(lambda x: x)
         if torch.cuda.is_available():
@@ -2729,10 +2728,13 @@ def unpack_variables(args):
 
 EXCLUDE_FUNCTIONAL = {
     'addmm',
+    'addmm_',
     'addbmm',
     'baddbmm',
     'addmv',
+    'addmv_',
     'addr',
+    'addr_',
     'where'  # argument order
 }
 EXCLUDE_GRADCHECK = {
@@ -2835,21 +2837,14 @@ def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
                           f_args_variable, f_args_tensor):
     output_variable = apply_fn(*f_args_variable)
 
-    # tensor API currently doesn't have scalars
-    if not exclude_tensor_method(name, test_name) and not has_scalars(output_variable, f_args_variable):
-        output_tensor = apply_fn(*f_args_tensor)
-        if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
-            output_tensor = torch.DoubleTensor((output_tensor,))
-        test_case.assertEqual(unpack_variables(output_variable), output_tensor)
-
     if run_grad_checks:
         run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
                                      output_variable, f_args_variable)
 
     self_variable = f_args_variable[0]
-    if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
+    if isinstance(output_variable, Variable) and output_variable.requires_grad and self_variable is not None:
         output_variable.backward(randn_like(output_variable))
-        test_case.assertEqual(type(self_variable.data), type(self_variable.grad.data))
+        test_case.assertEqual(self_variable.type(), self_variable.grad.type())
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 for test in method_tests:

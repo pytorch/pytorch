@@ -387,9 +387,7 @@ def _symbolic_override_wrapper_maker(symbolic_fn, first_arg_only, fn):
             return output
         flat_output_tensors = tuple(
             v.data for v in function._iter_variables(output))
-        assert len(list(function._iter_variables_permissive(
-            list(kwargs.values())))) == 0, \
-            "Passing Variable through kwargs is not supported"
+        # TODO: kwargs aren't traced
 
         class ExportProxy(Function):
             @staticmethod

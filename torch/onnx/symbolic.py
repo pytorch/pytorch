@@ -24,7 +24,7 @@ import torch.onnx
 def _scalar(x):
     """Convert a scalar tensor into a Python value."""
     assert x.numel() == 1
-    return x[0]
+    return x.item()
 
 
 def _if_scalar_type_as(self, tensor):

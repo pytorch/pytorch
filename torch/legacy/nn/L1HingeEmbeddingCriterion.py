@@ -6,11 +6,11 @@ class L1HingeEmbeddingCriterion(Criterion):
 
     def __init__(self, margin=1):
         super(L1HingeEmbeddingCriterion, self).__init__()
-        self.margin = margin
+        self.margin = float(margin)
         self.gradInput = [torch.Tensor(), torch.Tensor()]
 
     def updateOutput(self, input, y):
-        self.output = input[0].dist(input[1], 1)
+        self.output = float(input[0].dist(input[1], 1))
         if y == -1:
             self.output = max(0, self.margin - self.output)
 

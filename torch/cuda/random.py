@@ -64,12 +64,13 @@ def manual_seed(seed):
     case, it is silently ignored.
 
     Args:
-        seed (int or long): The desired seed.
+        seed (int): The desired seed.
 
     .. warning::
         If you are working with a multi-GPU model, this function is insufficient
         to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
     """
+    seed = int(seed)
     _lazy_call(lambda: _C._cuda_manualSeed(seed))
 
 
@@ -79,8 +80,9 @@ def manual_seed_all(seed):
     case, it is silently ignored.
 
     Args:
-        seed (int or long): The desired seed.
+        seed (int): The desired seed.
     """
+    seed = int(seed)
     _lazy_call(lambda: _C._cuda_manualSeedAll(seed))
 
 

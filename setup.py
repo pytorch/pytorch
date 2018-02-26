@@ -623,6 +623,7 @@ main_sources = [
     "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
 ]
@@ -708,8 +709,7 @@ if WITH_NCCL:
         "torch/csrc/cuda/python_nccl.cpp",
     ]
 if WITH_CUDNN:
-    main_libraries += ['cudnn']
-    library_dirs.insert(0, CUDNN_LIB_DIR)
+    main_libraries += [CUDNN_LIBRARY]
     # NOTE: these are at the front, in case there's another cuDNN in CUDA path
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
     if not IS_WINDOWS:

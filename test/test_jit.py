@@ -19,6 +19,7 @@ try:
 except ImportError:
     HAS_TORCHVISION = False
 
+
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 RUN_CUDA = torch.cuda.is_available()
@@ -32,6 +33,47 @@ if torch.cuda.is_available():
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
 PY2 = sys.version_info[0] == 2
+WINDOWS = sys.platform == 'win32'
+
+
+@contextmanager
+def capture_stdout():
+    # No idea how to capture stdout from C++ on Windows
+    if WINDOWS:
+        yield ['']
+        return
+    import os
+    import fcntl
+    import errno
+    stdout_fd = os.dup(1)
+    r, w = os.pipe()
+    try:
+        # Override stdout with r - dup is guaranteed to return the lowest free fd
+        os.close(1)
+        os.dup(w)
+
+        captured_stdout = ['']
+        yield captured_stdout
+        sys.stdout.flush()  # Make sure that Python hasn't buffered anything
+
+        # Do the ugly dance to read all the data that was written into the pipe
+        fcntl.fcntl(r, fcntl.F_SETFL, os.O_NONBLOCK)
+        total_stdout = ''
+        while True:
+            try:
+                total_stdout += os.read(r, 1000).decode('ascii')
+            except OSError as e:
+                if e.errno != errno.EAGAIN:
+                    raise
+                break
+        captured_stdout[0] = total_stdout
+    finally:
+        # Revert the change, and clean up all fds
+        os.close(1)
+        os.dup(stdout_fd)
+        os.close(stdout_fd)
+        os.close(r)
+        os.close(w)
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
@@ -1196,6 +1238,12 @@ class TestJit(TestCase):
         if input_tensors is None:
             input_tensors = reference_tensors
 
+        def wrapped(*inputs):
+            res = func(*inputs)
+            if isinstance(res, torch.Tensor):
+                return (res,)
+            return res
+
         nograd_inputs = [Variable(t) for t in reference_tensors]
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
@@ -1204,13 +1252,13 @@ class TestJit(TestCase):
 
         # test no gradients case
 
-        outputs = func(*nograd_inputs)
+        outputs = wrapped(*nograd_inputs)
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)
 
         # test single grad case
 
-        outputs = func(*recording_inputs)
+        outputs = wrapped(*recording_inputs)
         grads = torch.autograd.grad(allSum(outputs), recording_inputs)
 
         outputs_ge = ge(*recording_inputs)
@@ -1220,7 +1268,7 @@ class TestJit(TestCase):
 
         # test the grad grad case
 
-        outputs = func(*recording_inputs)
+        outputs = wrapped(*recording_inputs)
         l1 = allSum(outputs)
         grads = torch.autograd.grad(l1, recording_inputs, create_graph=True)
         l2 = (allSum(grads) * l1)
@@ -1303,11 +1351,19 @@ class TestJit(TestCase):
         self.assertEqual(g2result, g2result2)
 
     def checkScript(self, script, inputs, outputs, optimize, name='func'):
-        cu = torch.jit._jit_script_compile(script)
+        if isinstance(script, str):
+            cu = torch.jit._jit_script_compile(script)
+        else:
+            ast = torch.jit.frontend.get_jit_ast(script)
+            cu = torch._C.CompilationUnit()
+            cu.define_function(ast)
         graph = cu.get_graph(name)
         ge = torch._C.GraphExecutor(graph, optimize)
-        outputs_ge = ge(*inputs)
+        with capture_stdout() as captured:
+            outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
+        if captured[0]:
+            self.assertExpected(captured[0], subname='stdout')
 
     def test_script_add(self):
         script = '''
@@ -1389,7 +1445,8 @@ class TestJit(TestCase):
 
     def test_python_frontend(self):
         def fn(x, y, z):
-            q = x + y - z
+            q = x + y - z.sigmoid()
+            print(q)
             w = -z
             if not x and not y and z:
                 m = x if not z else y
@@ -1403,7 +1460,7 @@ class TestJit(TestCase):
     def _make_scalar_vars(self, arr, dtype):
         out = []
         for inp in arr:
-            out.append(Variable(torch.from_numpy(np.array([inp], dtype=dtype))))
+            out.append(torch.from_numpy(np.array(inp, dtype=dtype)))
         return out
 
     def test_script_while(self):
@@ -1551,6 +1608,21 @@ class TestJit(TestCase):
             str(cu.get_graph('test_ternary_control')),
             str(cu2.get_graph('test_ternary')),
         )
+
+    def test_python_frontend_run(self):
+        def func(x, y):
+            q = (x + y).sigmoid()
+            print(q)
+            w = -q
+            return w * w
+
+        x = Variable(torch.arange(4), requires_grad=True)
+        y = Variable(torch.arange(4) * 2, requires_grad=True)
+        with capture_stdout():
+            expected_out = func(x, y)
+        expected_out = (x + y).sigmoid().pow(2)
+        self.checkScript(func, [x, y], [expected_out], False)
+
 
 if __name__ == '__main__':
     run_tests()
