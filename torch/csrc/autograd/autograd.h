@@ -2,7 +2,7 @@
 #define THP_AUTOGRAD_H
 
 PyObject * THPAutograd_initExtension(PyObject *_unused);
-void THPAutograd_initFunctions(PyObject* c_module);
+void THPAutograd_initFunctions();
 
 namespace torch { namespace autograd {
 

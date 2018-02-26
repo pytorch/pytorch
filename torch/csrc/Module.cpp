@@ -72,7 +72,7 @@ static PyObject * THPModule_initNames(PyObject *self, PyObject *arg)
 }
 //
 // Callback for python part. Used for additional initialization of python classes
-static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_path)
+static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manager_path)
 {
   HANDLE_TH_ERRORS
   if (!THPUtils_checkString(shm_manager_path)) {
@@ -94,7 +94,7 @@ static PyObject * THPModule_initExtension(PyObject *self, PyObject *shm_manager_
   THPShortStorage_postInit(module);
   THPCharStorage_postInit(module);
   THPByteStorage_postInit(module);
-  THPAutograd_initFunctions(self);
+  THPAutograd_initFunctions();
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
