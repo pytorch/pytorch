@@ -55,6 +55,12 @@ Convolution Layers
 .. autoclass:: Conv2d
     :members:
 
+:hidden:`Conv2dBackward`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Conv2dBackward
+    :members:
+
 :hidden:`Conv3d`
 ~~~~~~~~~~~~~~~~
 
