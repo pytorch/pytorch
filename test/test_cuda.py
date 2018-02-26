@@ -406,7 +406,6 @@ tests = [
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
-    # TODO: add det to here once Variable and Tensor are the same thing
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,

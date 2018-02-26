@@ -302,12 +302,12 @@ class TestAutograd(TestCase):
             self.assertEqual(l.grad.data, i * i * (1 + l.data))
 
     def test_backward_badcalls(self):
-        x = Variable(torch.ones(1))
+        x = torch.ones(1)
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
             x.backward()
 
     def test_grad_badcalls(self):
-        x = Variable(torch.ones(1))
+        x = torch.ones(1)
         y = x ** 2
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
             torch.autograd.grad(x, y)
@@ -2692,10 +2692,9 @@ method_tests = [
      'broadcast_all'),
     ('masked_select', (), (torch.tensor(1, dtype=torch.uint8),), 'scalar'),
     ('masked_select', (M, M), (torch.tensor(1, dtype=torch.uint8),), 'scalar_broadcast_rhs'),
-    ('masked_select', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'scalar_broadcast_lhs'),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), torch.tensor(10)),
-     'tensor'),
+    ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
+    ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
+    ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), torch.tensor(10)), 'tensor'),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
     ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
@@ -2731,13 +2730,13 @@ method_tests = [
     ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', [1]),
     ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),
     ('take', (S, S, S), (torch.tensor(0, dtype=torch.int64),), 'scalar_index'),
-    ('take', (), (Variable(torch.LongTensor([0])),), 'scalar_data'),
+    ('take', (), (torch.LongTensor([0]),), 'scalar_data'),
     ('take', (), (torch.tensor(0, dtype=torch.int64),), 'scalar_both'),
     ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M))),
     ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all'),
     ('where', (), (bernoulli_scalar(), ()), 'scalar'),
     ('where', (M, 1, M), (bernoulli_scalar(), (M, M, 1)), 'scalar_broadcast_mask'),
-    ('where', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False), ()), 'scalar_broadcast_non_mask'),
+    ('where', (), (mask_not_all_zeros((M, M)), ()), 'scalar_broadcast_non_mask'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([1, 2]),)),
     ('__getitem__', torch.randn(S, S, S), (slice(0, 3),), 'slice'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(0, 3), 1]),), 'slice_index'),
@@ -2751,7 +2750,7 @@ method_tests = [
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None)]),), 'adv_index_sub_2'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
-     Variable(torch.LongTensor([0, 0, 2]))]),), 'adv_index_var'),
+     torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
 ]
 # TODO: clamp with min/max
 
@@ -3042,7 +3041,7 @@ for test in method_tests:
             inplace_name = name + '_'
             # can't broadcast inplace to left hand side
             broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-            if hasattr(Variable(torch.ones(1)), inplace_name) and not broadcast_skip_inplace:
+            if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                 check(inplace_name)
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name
