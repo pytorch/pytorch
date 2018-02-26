@@ -21,10 +21,6 @@
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
 
-#ifdef WITH_CUDA
-#include "cuda/AutoGPU.h"
-#endif
-
 using namespace torch;
 using namespace torch::autograd;
 using namespace torch::jit;

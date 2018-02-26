@@ -16,7 +16,6 @@
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
-#include "ModuleSparse.cpp"
 
 using namespace torch;
 

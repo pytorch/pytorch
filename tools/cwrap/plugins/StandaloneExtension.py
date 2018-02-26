@@ -8,6 +8,7 @@ MODULE_HEAD = """
 #include <exception>
 
 #include "THP_API.h"
+#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/nn/type_checks.h"
 
 """

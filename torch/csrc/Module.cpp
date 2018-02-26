@@ -368,10 +368,10 @@ static PyMethodDef TorchMethods[] = {
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
   // Sparse functions
-  {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
-  {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
-  {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
-  {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
+  // {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
+  // {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
+  // {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
+  // {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -384,15 +384,6 @@ bool THCPShortStorage_init(PyObject *module);
 bool THCPCharStorage_init(PyObject *module);
 bool THCPByteStorage_init(PyObject *module);
 
-bool THCPDoubleTensor_init(PyObject *module);
-bool THCPFloatTensor_init(PyObject *module);
-bool THCPHalfTensor_init(PyObject *module);
-bool THCPLongTensor_init(PyObject *module);
-bool THCPIntTensor_init(PyObject *module);
-bool THCPShortTensor_init(PyObject *module);
-bool THCPCharTensor_init(PyObject *module);
-bool THCPByteTensor_init(PyObject *module);
-
 bool THCPStream_init(PyObject *module);
 
 #ifdef WITH_CUDA
@@ -404,15 +395,6 @@ void initModule(PyObject *module);
 }} // namespace torch::cuda
 #endif
 
-bool THCSPDoubleTensor_init(PyObject *module);
-bool THCSPFloatTensor_init(PyObject *module);
-bool THCSPHalfTensor_init(PyObject *module);
-bool THCSPLongTensor_init(PyObject *module);
-bool THCSPIntTensor_init(PyObject *module);
-bool THCSPShortTensor_init(PyObject *module);
-bool THCSPCharTensor_init(PyObject *module);
-bool THCSPByteTensor_init(PyObject *module);
-
 bool THDPDoubleStorage_init(PyObject *module);
 bool THDPFloatStorage_init(PyObject *module);
 //bool THDPHalfStorage_init(PyObject *module);
@@ -421,15 +403,6 @@ bool THDPIntStorage_init(PyObject *module);
 bool THDPShortStorage_init(PyObject *module);
 bool THDPCharStorage_init(PyObject *module);
 bool THDPByteStorage_init(PyObject *module);
-
-bool THDPDoubleTensor_init(PyObject *module);
-bool THDPFloatTensor_init(PyObject *module);
-//bool THDPHalfTensor_init(PyObject *module);
-bool THDPLongTensor_init(PyObject *module);
-bool THDPIntTensor_init(PyObject *module);
-bool THDPShortTensor_init(PyObject *module);
-bool THDPCharTensor_init(PyObject *module);
-bool THDPByteTensor_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
@@ -508,23 +481,6 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
 
-  ASSERT_TRUE(THPDoubleTensor_init(module));
-  ASSERT_TRUE(THPFloatTensor_init(module));
-  ASSERT_TRUE(THPHalfTensor_init(module));
-  ASSERT_TRUE(THPLongTensor_init(module));
-  ASSERT_TRUE(THPIntTensor_init(module));
-  ASSERT_TRUE(THPShortTensor_init(module));
-  ASSERT_TRUE(THPCharTensor_init(module));
-  ASSERT_TRUE(THPByteTensor_init(module));
-
-  ASSERT_TRUE(THSPDoubleTensor_init(module));
-  ASSERT_TRUE(THSPFloatTensor_init(module));
-  ASSERT_TRUE(THSPLongTensor_init(module));
-  ASSERT_TRUE(THSPIntTensor_init(module));
-  ASSERT_TRUE(THSPShortTensor_init(module));
-  ASSERT_TRUE(THSPCharTensor_init(module));
-  ASSERT_TRUE(THSPByteTensor_init(module));
-
 #ifdef WITH_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
@@ -539,25 +495,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THCPCharStorage_init(module));
   ASSERT_TRUE(THCPByteStorage_init(module));
 
-  ASSERT_TRUE(THCPDoubleTensor_init(module));
-  ASSERT_TRUE(THCPFloatTensor_init(module));
-  ASSERT_TRUE(THCPHalfTensor_init(module));
-  ASSERT_TRUE(THCPLongTensor_init(module));
-  ASSERT_TRUE(THCPIntTensor_init(module));
-  ASSERT_TRUE(THCPShortTensor_init(module));
-  ASSERT_TRUE(THCPCharTensor_init(module));
-  ASSERT_TRUE(THCPByteTensor_init(module));
-
   ASSERT_TRUE(THCPStream_init(module));
-
-  ASSERT_TRUE(THCSPDoubleTensor_init(module));
-  ASSERT_TRUE(THCSPFloatTensor_init(module));
-  ASSERT_TRUE(THCSPHalfTensor_init(module));
-  ASSERT_TRUE(THCSPLongTensor_init(module));
-  ASSERT_TRUE(THCSPIntTensor_init(module));
-  ASSERT_TRUE(THCSPShortTensor_init(module));
-  ASSERT_TRUE(THCSPCharTensor_init(module));
-  ASSERT_TRUE(THCSPByteTensor_init(module));
 #endif
 
 #ifdef WITH_CUDNN
@@ -578,15 +516,6 @@ static PyObject* initModule() {
   ASSERT_TRUE(THDPShortStorage_init(module));
   ASSERT_TRUE(THDPCharStorage_init(module));
   ASSERT_TRUE(THDPByteStorage_init(module));
-
-  ASSERT_TRUE(THDPDoubleTensor_init(module));
-  ASSERT_TRUE(THDPFloatTensor_init(module));
-  //ASSERT_TRUE(THDPHalfTensor_init(module));
-  ASSERT_TRUE(THDPLongTensor_init(module));
-  ASSERT_TRUE(THDPIntTensor_init(module));
-  ASSERT_TRUE(THDPShortTensor_init(module));
-  ASSERT_TRUE(THDPCharTensor_init(module));
-  ASSERT_TRUE(THDPByteTensor_init(module));
 #endif
 
   // force ATen to initialize because it handles
