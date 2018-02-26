@@ -21,7 +21,7 @@ struct CompilationUnit {
   std::unique_ptr<CompilationUnitImpl> pImpl;
 };
 
-std::unique_ptr<CompilationUnit> jitScriptCompile(const std::string& script);
+std::shared_ptr<Graph> jitScriptCompile(Def def);
 
 } // namespace script
 } // namespace jit
