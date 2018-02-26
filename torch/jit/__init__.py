@@ -211,7 +211,7 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
         return _compile(arg)
 
 
-def create_trace(f, args=tuple(), kwargs=None, nderivs=0):
+def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
