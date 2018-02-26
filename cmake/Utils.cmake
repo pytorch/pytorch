@@ -211,44 +211,6 @@ function(caffe2_binary_target target_name_or_src)
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
 
-##############################################################################
-# Helper function to add paths to system include directories.
-#
-# Anaconda distributions typically contain a lot of packages and some
-# of those can conflict with headers/libraries that must be sourced
-# from elsewhere. This helper ensures that Anaconda paths are always
-# added BEFORE other include paths. This prevents a common case where
-# libraries and binaries are linked from Anaconda but headers are
-# included from system packages, since system include directories come
-# before Anaconda include directories by default. 
-#
-# This is just a heuristic and does not have any guarantees. We can
-# add other corner cases here (as long as they are generic enough).
-# A complete include path cross checker is a final resort if this
-# hacky approach proves insufficient.
-#
-function(caffe2_include_directories)
-  foreach(path IN LISTS ARGN)
-    if (${DEPRIORITIZE_ANACONDA})
-      # When not preferring anaconda, always search system header files before
-      # anaconda include directories
-      if (${path} MATCHES "/anaconda")
-        include_directories(AFTER ${path})
-      else()
-        include_directories(BEFORE ${path})
-      endif()
-    else()
-      # When prefering Anaconda, always search anaconda for header files before
-      # system include directories
-      if (${path} MATCHES "/anaconda")
-        include_directories(BEFORE ${path})
-      else()
-        include_directories(AFTER ${path})
-      endif()
-    endif()
-  endforeach()
-endfunction()
-
 
 ###
 # Removes common indentation from a block of text to produce code suitable for
