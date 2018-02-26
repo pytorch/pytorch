@@ -142,7 +142,7 @@ struct TensorInfo {
   }
   operator TypePtr() const {
     if(!defined())
-      return nullptr;
+      return DynamicType::get();
     return std::make_shared<TensorType>(type(), device(), sizes(), strides());
   }
 private:

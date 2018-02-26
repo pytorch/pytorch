@@ -286,6 +286,16 @@ struct to_ir {
     // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
     // TODO: implement scan_outputs
 
+    // the format of the Loop instruction is:
+    // loop_carried_outputs* = Loop(max_trip_count, start_condition, loop_carried_inputs*)
+    //                          block0(loop_counter, loop_carried_block*) {
+    //                             <body>
+    //                             -> (continue_condition, loop_carried_block_outputs*)
+    //                          }
+    // all loop_carried_... lists are the same length and represent the value of
+    // loop-carried variables whose definitions are updated as the loop executes
+    // in a way that ensure single static assignment.
+
     // TODO: clarify that this is an optional input that isn't needed here
     Value* max_trip_count_dummy = emitConst(INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
@@ -300,8 +310,7 @@ struct to_ir {
     // we'll probably have to pattern match iteration number machinery in user
     // code to conform to the spec
     body_block->addInput(); // Iteration num
-    body_block->addInput(); // Condition
-    size_t skip_inputs_num = 2;
+    size_t skip_inputs_num = 1;
 
     {
       environment_stack =

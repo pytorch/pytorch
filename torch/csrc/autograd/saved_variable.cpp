@@ -1,3 +1,4 @@
+#include "Python.h"
 #include "torch/csrc/autograd/saved_variable.h"
 
 #include "torch/csrc/autograd/edge.h"
