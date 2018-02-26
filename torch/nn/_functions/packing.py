@@ -4,10 +4,7 @@ from torch.autograd import Function
 
 class PackPadded(Function):
     @staticmethod
-    def forward(ctx, input, lengths, batch_first):
-        if batch_first:
-            input = input.transpose(0, 1)
-
+    def forward(ctx, input, lengths):
         if lengths[-1] <= 0:
             raise ValueError("Length of all samples has to be greater than 0, "
                              "but found an element in 'lengths' that is <= 0")
@@ -36,7 +33,6 @@ class PackPadded(Function):
                 raise ValueError("'lengths' array has to be sorted in decreasing order")
 
         ctx.batch_sizes = batch_sizes
-        ctx.batch_first = batch_first
         ctx.input_size = input.size()
 
         return torch.cat(steps), torch.LongTensor(batch_sizes)
@@ -49,8 +45,5 @@ class PackPadded(Function):
         for i, bs in enumerate(ctx.batch_sizes):
             grad_input[i, :bs] = grad_steps[offset:offset + bs]
             offset += bs
-
-        if ctx.batch_first:
-            grad_input = grad_input.transpose(0, 1)
 
         return grad_input, None, None
