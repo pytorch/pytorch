@@ -180,9 +180,13 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
     AutoGPU auto_gpu(r.toInt64(2));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 4) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
     AutoGPU auto_gpu(r.toInt64(3));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   }
