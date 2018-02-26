@@ -8,14 +8,54 @@
 namespace at {
 namespace native {
 
-// For backward, we save svd.
+// This method calculates svd with an additional constraint (det(UV) = +1),
+// which will be used in det methods backward.
+//
 // http://www.ics.forth.gr/cvrl/publications/conferences/2000_eccv_SVD_jacobian.pdf
-// But instead of gesvd SVD A = U(A) Sig(A) V(A)^T, which doesn't specify signs
+// Instead of gesvd SVD A = U(A) Sig(A) V(A)^T, which doesn't specify signs
 // of determinants of U and V, we consider det(A) = \prod Sig_(A), where
 //   1. A = U_(A) Sig_(A) V(A)^T
 //   2. Sig_(A) and U_(A) can be different in signs in first row/col from
 //      their counterparts so that U_(A) * V_(A) have +1 determinant
-std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
+//
+// In particular, this is not regular svd anymore as Sig_(A) can have a negative
+// diagonal entry (top left).
+std::tuple<Tensor, Tensor, Tensor> _svd_with_positive_UV_det(const Tensor& self, double det_sign) {
+  // find svd, which gives det up to a sign
+  auto svd = self.svd(true);
+  auto u = std::get<0>(svd);
+  auto sigma = std::get<1>(svd);
+  auto v = std::get<2>(svd);
+  auto prod_sigma = sigma.prod();
+
+  if ((prod_sigma.toCDouble() < 0) ^ (det_sign < 0)) {  // if different sign
+    u.narrow(1, 0, 1).mul_(-1);
+    sigma.narrow(0, 0, 1).mul_(-1);
+  }
+  return std::make_tuple(u, sigma, v);
+}
+
+// Helper function for det methods.
+// QR can give us the accurate det:
+//   1. Q has \pm 1 det, which can be determined by counting the non-zero values
+//      in tau that represent Householder reflectors, which has -1 det
+//   2. R has determinant equal to product of its diagonal entries, which can be
+//      found by calculating prod(diag(A))
+//
+// This helper returns det(Q)=num_nonzero(tau) and diag(R)=diag(A).
+static inline std::tuple<double, Tensor> _qr_det_Q_diag_R(const Tensor& self) {
+  auto qr = self.geqrf();
+  auto a = std::get<0>(qr);
+  auto tau = std::get<1>(qr);
+  int64_t num_reflectors = tau.nonzero().size(0);
+  if (num_reflectors % 2 == 1) {
+    return std::make_tuple(-1., a.diag());
+  } else {
+    return std::make_tuple(1., a.diag());
+  }
+}
+
+Tensor det(const Tensor& self) {
   if (!at::isFloatingType(self.type().scalarType()) ||
       self.dim() != 2 || self.size(0) != self.size(1)) {
     std::ostringstream ss;
@@ -23,35 +63,45 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
        << "square tensor of floating types";
     throw std::runtime_error(ss.str());
   }
-  // check symmetric
-  bool symmetric = self.equal(self.transpose(0, 1));
-
-  auto svd = self.svd(true);
-  auto sigma = std::get<1>(svd);
-  auto u = std::get<0>(svd);
-  auto v = std::get<2>(svd);
-  auto det = sigma.prod();
-  if (!symmetric) {
-    auto qr = self.geqrf();
-    auto a = std::get<0>(qr);
-    auto tau = std::get<1>(qr);
-    // non-zero values in tau represent Householder reflectors, which has -1 det
-    int64_t num_reflectors = tau.nonzero().size(0);
-    auto qr_det = a.diag().prod();
-    if (num_reflectors % 2 == 1) {
-      qr_det = -qr_det;
-    }
-    det = qr_det;  // QR is more stable than svd, so use it anyways
-    if ((qr_det < 0).any().toCByte() ^ (det < 0).any().toCByte()) {  // if different sign
-      u.narrow(1, 0, 1).mul_(-1);
-      sigma.narrow(0, 0, 1).mul_(-1);
-    }
-  }
-  return std::make_tuple(det, u, sigma, v);
+  Tensor diag_R;
+  double det_Q;
+  std::tie(det_Q, diag_R) = _qr_det_Q_diag_R(self);
+  return diag_R.prod().mul(det_Q);
 }
 
-Tensor det(const Tensor& self) {
-  return std::get<0>(self._det_with_svd());
+Tensor logdet(const Tensor& self) {
+  if (!at::isFloatingType(self.type().scalarType()) ||
+      self.dim() != 2 || self.size(0) != self.size(1)) {
+    std::ostringstream ss;
+    ss << "logdet(" << self.type() << "{" << self.sizes() << "}): expected a "
+       << "2D square tensor of floating types";
+    throw std::runtime_error(ss.str());
+  }
+  Tensor diag_R;
+  double det_Q;
+  std::tie(det_Q, diag_R) = _qr_det_Q_diag_R(self);
+  auto det = diag_R.prod().mul(det_Q);
+  auto sign_det = det.sign().toCDouble();
+  if (sign_det <= 0) {
+    return det.log();  // in order to get proper -inf (det=0) or nan (det<0)
+  } else {
+    return diag_R.abs().log().sum();
+  }
+}
+
+std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+  if (!at::isFloatingType(self.type().scalarType()) ||
+      self.dim() != 2 || self.size(0) != self.size(1)) {
+    std::ostringstream ss;
+    ss << "slogdet(" << self.type() << "{" << self.sizes() << "}): expected a "
+       << "2D square tensor of floating types";
+    throw std::runtime_error(ss.str());
+  }
+  Tensor diag_R;
+  double det_Q;
+  std::tie(det_Q, diag_R) = _qr_det_Q_diag_R(self);
+  auto det = diag_R.prod().mul(det_Q);
+  return std::make_tuple(det.sign(), diag_R.abs().log().sum());
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {

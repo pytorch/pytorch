@@ -193,7 +193,6 @@
   variants: function
 
 - func: det(Tensor self) -> Tensor
-- func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function
@@ -313,6 +312,8 @@
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
+
+- func: logdet(Tensor self) -> Tensor
 
 - func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
@@ -443,6 +444,8 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
+- func: slogdet(Tensor self) -> (Tensor, Tensor)
+
 - func: smm(Tensor self, Tensor mat2) -> Tensor
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
@@ -480,6 +483,8 @@
     fft_size: frame_length
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
+
+- func: _svd_with_positive_UV_det(Tensor self, double det_sign) -> (Tensor, Tensor, Tensor)
 
 - func: sum(Tensor self) -> Tensor
   dispatch:

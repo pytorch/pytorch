@@ -848,6 +848,8 @@ std::tuple<Tensor, Tensor, Tensor> prelu_double_backward(
 }
 
 // https://j-towns.github.io/papers/svd-derivative.pdf
+//
+// This makes no assumption on the signs of sigma.
 Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
           bool some, const Tensor& raw_u, const Tensor& sigma, const Tensor& raw_v) {
   auto m = self.size(0);
@@ -867,19 +869,34 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gu = grads[0];
   auto gsigma = grads[1];
   auto gv = grads[2];
-  auto im = at::eye(self.type(), m);
-  auto in = at::eye(self.type(), n);
-  auto ut = u.t();
   auto vt = v.t();
+
+  Tensor sigma_term;
+  if (gsigma.defined()) {
+    sigma_term = u.mm(gsigma.diag()).mm(vt);
+  } else {
+    sigma_term = at::zeros(self.type(), {1}).expand_as(self);
+  }
+  // in case that there are no gu and gv, we can avoid the series of kernel
+  // calls below
+  if (!gv.defined() && !gu.defined()) {
+    return sigma_term;
+  }
+
+  auto ut = u.t();
+  auto im = self.type().eye(m);
+  auto in = self.type().eye(n);
   auto sigma_mat = sigma.diag();
   auto sigma_mat_inv = sigma.pow(-1).diag();
   auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
-  auto F = (sigma_expanded_sq - sigma_expanded_sq.t()).pow(-1);
-  auto& long_type = sigma.type().toScalarType(at::kLong);
-  auto diag_indices = at::arange(long_type, 0, F.numel(), k + 1);
-  F.view({-1}).index_fill_(0, diag_indices, 0);
+  auto F = sigma_expanded_sq - sigma_expanded_sq.t();
+  // The following two lines invert values of F, and fills the diagonal with 0s.
+  // Notice that F currently has 0s on diagonal. So we fill diagonal with +inf
+  // first to prevent nan from appearing in backward of this function.
+  F.as_strided({k}, {k + 1}).fill_(INFINITY);
+  F = F.pow(-1);
 
-  Tensor u_term, sigma_term, v_term;
+  Tensor u_term, v_term;
 
   if (gu.defined()) {
     u_term = u.mm(F.mul(ut.mm(gu) - gu.t().mm(u))).mm(sigma_mat);
@@ -889,12 +906,6 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     u_term = u_term.mm(vt);
   } else {
     u_term = at::zeros(self.type(), {1}).expand_as(self);
-  }
-
-  if (gsigma.defined()) {
-    sigma_term = u.mm(gsigma.diag()).mm(vt);
-  } else {
-    sigma_term = at::zeros(self.type(), {1}).expand_as(self);
   }
 
   if (gv.defined()) {
@@ -911,33 +922,43 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
-// Formula:
-//   d det / d A_ij = \sum_k (\prod_{l neq k} Sigma_l) U_ik V_jk
-// that is, if det != 0
-//   d det / d A = U * (Sigma / det) * V^T
-Tensor _det_with_svd_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-          const Tensor& det, const Tensor& u, const Tensor& sigma, const Tensor& v) {
-  std::vector<torch::autograd::Variable> svd_grads(grads.begin() + 1, grads.end());
-  auto svd_term = svd_backward(svd_grads, self, true, u, sigma, v);
+Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
+  Tensor u, sigma, v;
+  std::tie(u, sigma, v) = self._svd_with_positive_UV_det(det.toCDouble());
+  auto gsigma = prod_backward(grad, sigma, det);
+  return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+}
 
-  auto det_grad = grads[0];
-  auto size = self.size(0);
-  auto null_dim = size - sigma.nonzero().size(0);
-  if (null_dim >= 2) {
-    // \prod_{l neq k} Sigma_l is zero every where
-    return svd_term;
+Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
+  Tensor u, sigma, v;
+  auto logdet_val = logdet.toCDouble();
+  if (logdet_val != logdet_val /* nan, det < 0 */ ) {
+    std::tie(u, sigma, v) = self._svd_with_positive_UV_det(-1.);
+  } else if (logdet_val == -INFINITY /* -inf, det = 0 */ ) {
+    std::tie(u, sigma, v) = self._svd_with_positive_UV_det(0.);
+  } else {
+    std::tie(u, sigma, v) = self._svd_with_positive_UV_det(1.);
   }
-  if (null_dim == 1) {
-    // only last sigma is 0
-    // \prod_{l neq k} Sigma_l is zero at all but last dim
-    // at last dim, it is:
-    auto scale = sigma.narrow(0, 0, size - 1).prod();
-    auto last_u = u.narrow(1, size - 1, 1);
-    auto last_v = v.narrow(1, size - 1, 1);
-    return svd_term + last_u.mm(last_v.transpose(0, 1)).mul_(scale.mul_(det_grad));
+  // backward \sum log(sigma)
+  auto gsigma = grad.div(sigma);
+  return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+}
+
+Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
+                        const Tensor& self,
+                        const Tensor& signdet, const Tensor& logabsdet) {
+  AT_ASSERT(!grads[0].defined(), "slogdet's sign output should never have gradient");
+  Tensor u, sigma, v;
+  auto signdet_val = signdet.toCDouble();
+  std::tie(u, sigma, v) = self._svd_with_positive_UV_det(signdet_val);
+  auto grad_logabsdet = grads[1].expand_as(sigma).contiguous();
+  // sigma here has at most 1 negative entry (topleft)
+  // so backward \sum log(abs(sigma))
+  if (signdet_val < 0) {
+    grad_logabsdet.select(0, 0).neg_();
   }
-  // no zero singular values
-  return svd_term + u.mm(sigma.pow(-1).mul_(det.mul(det_grad)).diag()).mm(v.transpose(0, 1));
+  auto gsigma = grads[1].div(sigma);
+  return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
 }
 
 // Reference:

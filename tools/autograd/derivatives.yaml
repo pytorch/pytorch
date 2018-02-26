@@ -194,8 +194,8 @@
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
 
-- name: _det_with_svd(Tensor self)
-  self: _det_with_svd_backward(grads, self, result0, result1, result2, result3)
+- name: det(Tensor self)
+  self: det_backward(grad, self, result)
 
 - name: diag(Tensor self, int64_t diagonal)
   self: diag_backward(grad, self.sizes(), diagonal)
@@ -350,6 +350,9 @@
 
 - name: log1p(Tensor self)
   self: grad / (self + 1)
+
+- name: logdet(Tensor self)
+  self: logdet_backward(grad, self, result)
 
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
@@ -558,6 +561,9 @@
 - name: sinh(Tensor self)
   self: grad * self.cosh()
 
+- name: slogdet(Tensor self)
+  self: slogdet_backward(grads, self, result0, result1)
+
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: select_backward(grad, dim, indices, self.sizes(), true)
 
@@ -596,7 +602,10 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
-  self: svd_backward(grads, self, some, res1, res2, res3)
+  self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
+
+- name: _svd_with_positive_UV_det(Tensor self, double det_sign)
+  self: svd_backward(grads, self, true, result0, result1, result2)
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: not_implemented("symeig")
