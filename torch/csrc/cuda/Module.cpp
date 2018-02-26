@@ -413,7 +413,7 @@ PyObject * THCPModule_initExtension(PyObject *self)
 
   // Add class and method to torch.cuda
   auto m = py::handle(torch_module).cast<py::module>();
-  py::class_<cudaDeviceProp>(m,"CudaDeviceProperties")
+  py::class_<cudaDeviceProp>(m,"_CudaDeviceProperties")
     .def_readonly("name", &cudaDeviceProp::name)
     .def_readonly("major", &cudaDeviceProp::major)
     .def_readonly("minor", &cudaDeviceProp::minor)
@@ -426,7 +426,7 @@ PyObject * THCPModule_initExtension(PyObject *self)
       + std::to_string(prop.minor) + " | Memory: " + std::to_string(prop.totalGlobalMem / 1000000)
       + " MB | Processors: " + std::to_string(prop.multiProcessorCount);
     });
-  m.def("get_device_properties", [](int device) -> cudaDeviceProp * {
+  m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
     cudaDeviceProp *prop = new cudaDeviceProp; // Python will take ownership and delete when appropriate
     THCudaCheck(cudaGetDeviceProperties(prop, device));
     return prop;
