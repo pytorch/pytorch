@@ -344,7 +344,11 @@ class TestSparse(TestCase):
         from torch.autograd import Variable
         x = Variable(torch.sparse.FloatTensor(2, 3, 4))
         y = x.cuda(0)
-        x.cpu()
+        self.assertEqual(x._dimI(), y._dimI())
+        self.assertEqual(x._dimV(), y._dimV())
+        x = y.cpu()
+        self.assertEqual(y._dimI(), x._dimI())
+        self.assertEqual(y._dimV(), x._dimV())
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]

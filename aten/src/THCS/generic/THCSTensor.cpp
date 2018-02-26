@@ -149,8 +149,8 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   // TODO: we may need to special case when only one of these are empty.
   if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0
       && sizes != NULL) {
-    nDimI = 0;
-    nDimV = THLongStorage_size(sizes);
+    nDimI = THLongStorage_size(sizes);
+    nDimV = 0;
   } else {
     nDimI = THCIndexTensor_(size)(state, indices, 0);
     nDimV = THCTensor_(nDimension)(state, values) - 1;
