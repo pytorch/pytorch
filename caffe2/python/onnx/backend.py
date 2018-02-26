@@ -473,7 +473,7 @@ class Caffe2Backend(Backend):
             pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
                                [n.outputs[0], dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], dummy_name()], axis=2)
+                               [n.outputs[1], dummy_name()], axis=0)
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
@@ -586,9 +586,9 @@ class Caffe2Backend(Backend):
             pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
                                [n.outputs[0], dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], dummy_name()], axis=2)
+                               [n.outputs[1], dummy_name()], axis=0)
             pred_mh.net.Concat([cell_all_f, cell_all_b],
-                               [n.outputs[2], dummy_name()], axis=2)
+                               [n.outputs[2], dummy_name()], axis=0)
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
@@ -697,7 +697,7 @@ class Caffe2Backend(Backend):
             pred_mh.net.Concat([hidden_t_all_f, hidden_t_all_b],
                                [n.outputs[0], dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
-                               [n.outputs[1], dummy_name()], axis=2)
+                               [n.outputs[1], dummy_name()], axis=0)
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
