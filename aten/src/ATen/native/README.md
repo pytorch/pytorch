@@ -64,6 +64,9 @@ signature.
   have ordinarily passed an `int` or `size_t`.
 - `double`. There is no `float`; ATen policy is to use `double` anywhere you would have used `float`.
 - `bool`
+- `Scalar`. `Scalar` supports binding to any numerical types from Python, including integeral types,
+  floating point types, and zero dimensional tensors. `int64_t` and `double` can only bind to the
+  corresponding Python numerical types.
 - `Generator*`, the state for a random number generator,
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
