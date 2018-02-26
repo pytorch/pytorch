@@ -1094,23 +1094,23 @@ class TestTorch(TestCase):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch._C._VariableFunctions.zeros((2, 3), out=d, dtype=torch.float32))
 
-    def test_variable_factory(self):
-        expected = torch.autograd.Variable(torch.Tensor([1, 1]))
+    def test_tensor_factory(self):
+        expected = torch.Tensor([1, 1])
         # test data
-        res1 = torch.autograd.variable([1, 1])
+        res1 = torch.tensor([1, 1])
         self.assertEqual(res1, expected)
 
-        res1 = torch.autograd.variable([1, 1], dtype=torch.int)
+        res1 = torch.tensor([1, 1], dtype=torch.int)
         self.assertEqual(res1, expected)
         self.assertIs(torch.int, res1.dtype)
 
         # test copy
-        res2 = torch.autograd.variable(expected)
+        res2 = torch.tensor(expected)
         self.assertEqual(res2, expected)
         res2[1] = 2
         self.assertEqual(expected, torch.ones_like(expected))
 
-        res2 = torch.autograd.variable(expected, dtype=torch.int)
+        res2 = torch.tensor(expected, dtype=torch.int)
         self.assertEqual(res1, expected)
         self.assertIs(torch.int, res1.dtype)
 
