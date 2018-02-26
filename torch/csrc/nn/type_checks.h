@@ -5,7 +5,6 @@
 
 #include <ATen/ATen.h>
 
-#include "THP_API.h"
 #include "torch/csrc/autograd/python_variable.h"
 
 namespace torch { namespace nn {
