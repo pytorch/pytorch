@@ -34,15 +34,6 @@ static void maybe_initialize_cuda(const at::Type &type) {
 #endif
 }
 
-static Tensor copy_to_device(Tensor self, int device) {
-  AutoGPU auto_gpu(device);
-  int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  if (tensor_device != at::current_device()) {
-    return self.type().copy(self, false);
-  }
-  return self;
-}
-
 ${py_method_dispatch}
 
 }} // namespace torch::autograd

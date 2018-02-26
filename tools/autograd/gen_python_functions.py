@@ -86,18 +86,12 @@ set_requires_grad(${call_dispatch}, ${requires_grad})""")
 PY_VARIABLE_WRAP = CodeTemplate("""\
 return wrap(${call_dispatch});""")
 
-PY_VARIABLE_RETURN_DISPATCH = CodeTemplate("""\
-return ${dispatch_call}(${dispatch_args});""")
-
-PY_VARIABLE_RETURN_DISPATCH_COPY_DEVICE = CodeTemplate("""\
-return copy_to_device(${dispatch_call}(${dispatch_args}), device);""")
-
 PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${return_type} ${dispatch_name}(${formal_args}) {
   ${initialize_cuda}
   ${AutoNoGIL}
   ${AutoGPU}
-  ${return_dispatch}
+  return ${dispatch_call}(${dispatch_args});
 }
 """)
 
@@ -237,7 +231,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 return arg['name']
         return None
 
-    def auto_gpu(option):
+    def auto_gpu(option, has_device_bind):
+        if has_device_bind:
+            return 'AutoGPU auto_gpu(device);'
         tensor_arg = first_tensor_arg(option['arguments'])
         if tensor_arg is not None:
             return 'AutoGPU auto_gpu({});'.format(tensor_arg)
@@ -371,17 +367,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         else:
             env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
-        env['AutoGPU'] = auto_gpu(declaration)
-
-        # we have a device, but it wasn't handled yet because the op/tensor
-        # necessitated the AutoGPU, so we still need to copy to the right device.
-        if has_device_bind and env['AutoGPU']:
-            env['return_dispatch'] = PY_VARIABLE_RETURN_DISPATCH_COPY_DEVICE.substitute(env)
-        else:
-            env['return_dispatch'] = PY_VARIABLE_RETURN_DISPATCH.substitute(env)
-
-        if has_device_bind and not env['AutoGPU']:
-            env['AutoGPU'] = 'AutoGPU auto_gpu(device);'
+        env['AutoGPU'] = auto_gpu(declaration, has_device_bind)
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
