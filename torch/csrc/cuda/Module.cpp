@@ -399,13 +399,6 @@ bool THCPModule_initCuda(PyObject *torch_module) {
   END_HANDLE_TH_ERRORS_RET(false)
 }
 
-cudaDeviceProp *getCudaDeviceProp(int device)
-{
-  cudaDeviceProp *prop = new cudaDeviceProp; // Python will take ownership and delete when appropriate
-  THCudaCheck(cudaGetDeviceProperties(prop, device));
-  return prop;
-}
-
 // Callback for python part. Used for additional initialization of python classes
 PyObject * THCPModule_initExtension(PyObject *self)
 {
@@ -418,13 +411,21 @@ PyObject * THCPModule_initExtension(PyObject *self)
     return NULL;
   }
 
+  // Add class and method to torch.cuda
   auto m = py::handle(torch_module).cast<py::module>();
   py::class_<cudaDeviceProp>(m,"CudaDeviceProperties")
-          .def_readwrite("major", &cudaDeviceProp::major)
-          .def_readwrite("minor", &cudaDeviceProp::minor)
-          .def_readwrite("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
-          .def_readwrite("total_memory", &cudaDeviceProp::totalGlobalMem);
-  m.def("get_device_properties", &getCudaDeviceProp);
+    .def_readonly("name", &cudaDeviceProp::name)
+    .def_readonly("major", &cudaDeviceProp::major)
+    .def_readonly("minor", &cudaDeviceProp::minor)
+    .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
+    .def_readonly("is_integrated", &cudaDeviceProp::integrated)
+    .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
+    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem);
+  m.def("get_device_properties", [](int device) -> cudaDeviceProp * {
+    cudaDeviceProp *prop = new cudaDeviceProp; // Python will take ownership and delete when appropriate
+    THCudaCheck(cudaGetDeviceProperties(prop, device));
+    return prop;
+  });
 
   Py_RETURN_TRUE;
 }
