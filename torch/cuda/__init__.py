@@ -287,19 +287,6 @@ def get_device_capability(device):
         return torch._C._cuda_getDeviceCapability(device)
 
 
-def get_total_memory(device):
-    r"""Gets the total memory capacity of the device in bytes
-
-    Arguments:
-        device (int): device for which to return the name. This function is a
-            no-op if this argument is negative.
-    Returns:
-        int : the memory capacity in total bytes
-    """
-    if device >= 0:
-        return torch._C._cuda_getTotalMemory(device)
-
-
 @contextlib.contextmanager
 def stream(stream):
     r"""Context-manager that selects a given stream.

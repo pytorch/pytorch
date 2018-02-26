@@ -127,7 +127,7 @@ PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceName");
-  int64_t device = THPUtils_unpackLong(arg);
+  long device = THPUtils_unpackLong(arg);
 
   cudaDeviceProp prop;
   THCudaCheck(cudaGetDeviceProperties(&prop, device));
@@ -139,7 +139,7 @@ PyObject * THCPModule_getDeviceCapability_wrap(PyObject *self, PyObject *arg)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceCapability");
-  int64_t device = THPUtils_unpackLong(arg);
+  long device = THPUtils_unpackLong(arg);
 
   cudaDeviceProp prop;
   THCudaCheck(cudaGetDeviceProperties(&prop, device));
@@ -147,17 +147,6 @@ PyObject * THCPModule_getDeviceCapability_wrap(PyObject *self, PyObject *arg)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getTotalMemory_wrap(PyObject *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getTotalMemory");
-  int64_t device = THPUtils_unpackLong(arg);
-  THCPAutoGPU gpu_guard(device);
-  size_t free, total;
-  THCudaCheck(cudaMemGetInfo(&free, &total));
-  return PyLong_FromLong(total);
-  END_HANDLE_TH_ERRORS
-}
 
 PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
 {
@@ -466,7 +455,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
   {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
   {"_cuda_getDeviceCapability", (PyCFunction)THCPModule_getDeviceCapability_wrap, METH_O,   NULL},
-  {"_cuda_getTotalMemory", (PyCFunction)THCPModule_getTotalMemory_wrap, METH_O,   NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
