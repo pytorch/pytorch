@@ -227,10 +227,6 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
-    if 'ATen' in libs:
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers()
-
 
 class build_deps(Command):
     user_options = []
