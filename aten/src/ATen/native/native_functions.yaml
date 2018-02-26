@@ -18,6 +18,7 @@
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addr_(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
 
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
@@ -326,8 +327,10 @@
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
 
 - func: squeeze_(Tensor self) -> Tensor
+  variants: method
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
+  variants: method
 
 - func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -352,10 +355,13 @@
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+  variants: method
 
 - func: t_(Tensor self) -> Tensor
+  variants: method
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
+  variants: method
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
@@ -363,8 +369,10 @@
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+  variants: method
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
+  variants: method
 
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
