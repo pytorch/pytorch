@@ -728,10 +728,11 @@ std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
 
 CompilationUnit::~CompilationUnit() {}
 
-std::unique_ptr<CompilationUnit> jitScriptCompile(const std::string& script) {
-  std::unique_ptr<CompilationUnit> cu{new CompilationUnit};
-  cu->define(script);
-  return cu;
+std::shared_ptr<Graph> jitScriptCompile(Def def) {
+  FunctionTable empty;
+  FunctionDefinition fd(def);
+  to_ir(fd, empty);
+  return fd.graph;
 }
 
 } // namespace script
