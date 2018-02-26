@@ -99,9 +99,6 @@ struct GraphFuser {
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   bool hasFloatType(Value * node) {
-    if(!node->hasType()) {
-      return false;
-    }
     if(auto tt = node->type()->cast<TensorType>()) {
       return tt->scalarType() == at::kFloat;
     } else {
@@ -244,7 +241,7 @@ struct GraphFuser {
         consumer_subgraph->registerOutput(merged->outputs()[i]);
         auto new_output = consumer_group->addOutput();
         output->replaceAllUsesWith(new_output);
-        new_output->setType(output->typeOption());
+        new_output->setType(output->type());
       }
       node->destroy();
     }
@@ -265,7 +262,7 @@ struct GraphFuser {
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         auto in_group = subgraph.addInput();
-        in_group->setType(input->typeOption());
+        in_group->setType(input->type());
         inputs_map[input] = in_group;
         group->addInput(input);
       }

@@ -100,7 +100,7 @@ void Function::set_up_context_edge(
     const variable_list& inputs,
     const variable_list& outputs) {
   auto ctx_select = this_node->addOutput();
-  ctx_select->setType(std::make_shared<jit::HandleType>());
+  ctx_select->setType(jit::HandleType::get());
   auto backward_eval = Eval::getBackwardEval(inputs, outputs);
   if (backward_eval)
     backward_eval->forward_ctx_select = ctx_select;

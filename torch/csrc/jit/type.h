@@ -12,6 +12,7 @@
 namespace torch { namespace jit {
 
 #define TH_FORALL_TYPES(_) \
+_(DynamicType) \
 _(TensorType) \
 _(HandleType)
 
@@ -23,6 +24,7 @@ enum class TypeKind {
 
 struct Type;
 using TypePtr = std::shared_ptr<Type>;
+
 
 struct Type : std::enable_shared_from_this<Type> {
 private:
@@ -46,13 +48,33 @@ public:
     return nullptr;
   }
   template<typename T>
+  const T* cast() const {
+    if (T::Kind == kind())
+      return static_cast<const T*>(this);
+    return nullptr;
+  }
+  template<typename T>
   T* expect() {
     JIT_ASSERT(T::Kind == kind());
     return static_cast<T*>(this);
   }
+  template<typename T>
+  const T* expect() const {
+    JIT_ASSERT(T::Kind == kind());
+    return static_cast<const T*>(this);
+  }
   std::shared_ptr<Type> asShared() {
     return shared_from_this();
   }
+};
+
+
+struct DynamicType : public Type {
+  DynamicType()
+  : Type(TypeKind::DynamicType) {}
+  static const TypeKind Kind = TypeKind::DynamicType;
+  // global singleton
+  static TypePtr get();
 };
 
 // This node represents a single Tensor value
@@ -97,6 +119,8 @@ struct TensorType : public Type {
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
+    if(sizes.size() == 0) // zero-dim case
+      return strides;
     strides.back() = 1;
     for(std::size_t i = strides.size() - 1; i > 0; i--) {
       strides[i-1] = strides[i] * sizes[i];
@@ -128,20 +152,29 @@ graph(%1, %8) {
 */
 struct HandleType : public Type {
   friend struct Type;
-
   HandleType()
     : Type(TypeKind::HandleType) {}
-
-public:
   static const TypeKind Kind = TypeKind::HandleType;
+  // global singleton
+  static TypePtr get();
 };
 
-std::ostream& operator<<(std::ostream & out, const Type & t);
+static inline bool operator==(const Type & lhs, const Type & rhs) {
+  if(lhs.kind() != rhs.kind())
+    return false;
+  if(lhs.kind() != TypeKind::TensorType)
+    return true;
+  auto lt = lhs.expect<TensorType>();
+  auto rt = lhs.expect<TensorType>();
+  return lt->scalarType() == rt->scalarType() &&
+         lt->sizes() == rt->sizes() &&
+         lt->strides() == rt->strides() &&
+         lt->device() == rt->device();
+}
+inline bool operator!=(const Type & lhs, const Type & rhs) {
+  return !(lhs == rhs);
+}
 
-// Immutable case
-#define TYPE_IF(x,Kind) GENERIC_IF(const,TypeKind::Kind,x,Kind)
-#define TYPE_ELSEIF(Kind) GENERIC_ELSEIF(const,TypeKind::Kind,Kind)
-#define TYPE_ELSE() GENERIC_ELSE()
-#define TYPE_END() GENERIC_END()
+std::ostream& operator<<(std::ostream & out, const Type & t);
 
 }} // namespace torch::jit
