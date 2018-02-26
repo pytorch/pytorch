@@ -16,6 +16,8 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/auto_gil.h"
 
+#include <typeinfo>
+
 namespace py = pybind11;
 
 namespace torch { namespace jit {
@@ -526,6 +528,25 @@ Operation getOperation(jit::Node *node, bool constants_are_variables) {
       } else {
         stack.push_back(std::move(alternate));
       }
+      return 0;
+    };
+  IR_ELSEIF(Print)
+    size_t num_inputs = value->inputs().size();
+    return [num_inputs](Stack & stack) {
+      bool first = true;
+      for (at::Tensor i : last(stack, num_inputs)) {
+        if (!first) std::cout << " ";
+        first = false;
+        if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
+          std::cout << at::Tensor(tensor_impl, true);
+        } else if (!i.defined()) {
+          std::cout << "<undefined tensor>";
+        } else {
+          std::cout << "<" << typeid(*i.get()).name() << " at " << i << ">";
+        }
+      }
+      drop(stack, num_inputs);
+      std::cout << std::endl;
       return 0;
     };
   IR_ELSEIF(GraphExecutor)

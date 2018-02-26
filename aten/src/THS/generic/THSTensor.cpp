@@ -148,8 +148,8 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
 
   // TODO: we may need to special case when only one of these are empty.
   if (THLongTensor_nDimension(indices) == 0 && THTensor_(nDimension)(values) == 0 && sizes != NULL) {
-    nDimI = 0;
-    nDimV = THLongStorage_size(sizes);
+    nDimI = THLongStorage_size(sizes);
+    nDimV = 0;
   } else {
     nDimI = THLongTensor_size(indices, 0);
     nDimV = THTensor_(nDimension)(values) - 1;

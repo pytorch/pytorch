@@ -13,9 +13,12 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
 #include "ModuleSparse.cpp"
+
+using namespace torch;
 
 THCState *state;
 
@@ -163,21 +166,24 @@ PyObject * THCPModule_getCompiledVersion(PyObject *self)
 
 PyObject * THCPModule_getRNGState(PyObject *_unused)
 {
+  using namespace at;
+  using namespace torch::autograd;
   HANDLE_TH_ERRORS
-  THPByteTensorPtr res((THPByteTensor *)THPByteTensor_NewEmpty());
-  if (!res) return NULL;
-  THCRandom_getRNGState(state, res->cdata);
-  return (PyObject *)res.release();
+  auto tensor = VariableType::getType(CPU(kByte))->tensor();
+  THCRandom_getRNGState(state, (THByteTensor*)tensor.unsafeGetTH(false));
+  return THPVariable_Wrap(tensor);
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *_new_rng_state)
+PyObject * THCPModule_setRNGState(PyObject *_unused, PyObject *obj)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(THPByteTensor_Check(_new_rng_state), "set_rng_state expects a "
-          "torch.ByteTensor, but got %s", THPUtils_typename(_new_rng_state));
-  THByteTensor *new_rng_state = ((THPByteTensor*)_new_rng_state)->cdata;
-  THCRandom_setRNGState(state, new_rng_state);
+  if (!THPVariable_Check(obj) || THPVariable_UnpackData(obj).type().ID() != at::TypeID::CPUByte) {
+    throw TypeError("set_rng_state expects a torch.ByteTensor, but got %s",
+        Py_TYPE(obj)->tp_name);
+  }
+  auto& tensor = THPVariable_UnpackData(obj);
+  THCRandom_setRNGState(state, (THByteTensor*)tensor.unsafeGetTH(false));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

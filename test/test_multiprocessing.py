@@ -21,6 +21,7 @@ TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', False)
 
 
 class SubProcess(mp.Process):
@@ -246,10 +247,14 @@ class TestMultiprocessing(TestCase):
                 do_test()
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
     def test_fd_sharing(self):
         self._test_sharing(repeat=TEST_REPEATS)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fd_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing(repeat=TEST_REPEATS)
 
@@ -257,19 +262,27 @@ class TestMultiprocessing(TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fs_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5325")
     def test_fs_sharing(self):
         with fs_sharing():
             self._test_sharing(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fs_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fs_pool is known buggy, see https://github.com/pytorch/pytorch/issues/5325")
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fs is known buggy, see https://github.com/pytorch/pytorch/issues/5325")
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)
@@ -409,6 +422,8 @@ class TestMultiprocessing(TestCase):
     def test_is_shared(self):
         self._test_is_shared()
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fs_is_shared is known buggy, see https://github.com/pytorch/pytorch/issues/5325")
     def test_fs_is_shared(self):
         with fs_sharing():
             self._test_is_shared()
