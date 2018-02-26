@@ -543,7 +543,6 @@ main_sources = [
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
-    "torch/csrc/expand_utils.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -684,7 +683,6 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/lazy_init.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]
