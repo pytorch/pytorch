@@ -1900,7 +1900,7 @@ class TestDistributionShapes(TestCase):
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
-                dist = Dist(**param, validate_args=False)
+                dist = Dist(validate_args=False, **param)
                 try:
                     actual_shape = dist.entropy().size()
                     expected_shape = dist.batch_shape if dist.batch_shape else torch.Size(SCALAR_SHAPE)
@@ -2509,6 +2509,7 @@ class TestConstraints(TestCase):
 
                     if is_dependent(constraint):
                         continue
+
                     message = '{} example {}/{} parameter {} = {}'.format(
                         Dist.__name__, i + 1, len(params), name, value)
                     self.assertTrue(constraint.check(value).all(), msg=message)

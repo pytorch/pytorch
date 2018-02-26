@@ -43,13 +43,14 @@ class Uniform(Distribution):
     def __init__(self, low, high, validate_args=None):
         self.low, self.high = broadcast_all(low, high)
 
-        if (self._validate_args or validate_args) and not torch.lt(self.low, self.high).all():
-            raise ValueError("Uniform is not defined when low>= high")
         if isinstance(low, Number) and isinstance(high, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()
         super(Uniform, self).__init__(batch_shape, validate_args=validate_args)
+
+        if self._validate_args and not torch.lt(self.low, self.high).all():
+            raise ValueError("Uniform is not defined when low>= high")
 
     @constraints.dependent_property
     def support(self):
