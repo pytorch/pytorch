@@ -13,6 +13,7 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
 #include "ModuleSparse.cpp"
@@ -409,6 +410,13 @@ bool THCPModule_initCuda(PyObject *torch_module) {
   END_HANDLE_TH_ERRORS_RET(false)
 }
 
+cudaDeviceProp *getCudaDeviceProp(int device)
+{
+  cudaDeviceProp *prop = new cudaDeviceProp; // Python will take ownership and delete when appropriate
+  THCudaCheck(cudaGetDeviceProperties(prop, device));
+  return prop;
+}
+
 // Callback for python part. Used for additional initialization of python classes
 PyObject * THCPModule_initExtension(PyObject *self)
 {
@@ -420,7 +428,16 @@ PyObject * THCPModule_initExtension(PyObject *self)
   if (!THCPModule_initCuda(torch_module)) {
     return NULL;
   }
-  Py_RETURN_NONE;
+
+  auto m = py::handle(torch_module).cast<py::module>();
+  py::class_<cudaDeviceProp>(m,"CudaDeviceProperties")
+          .def_readwrite("major", &cudaDeviceProp::major)
+          .def_readwrite("minor", &cudaDeviceProp::minor)
+          .def_readwrite("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
+          .def_readwrite("total_memory", &cudaDeviceProp::totalGlobalMem);
+  m.def("get_device_properties", &getCudaDeviceProp);
+
+  Py_RETURN_TRUE;
 }
 
 #ifdef WITH_NCCL

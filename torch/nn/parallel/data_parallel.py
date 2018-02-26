@@ -1,8 +1,39 @@
 import torch
+import warnings
 from ..modules import Module
 from .scatter_gather import scatter_kwargs, gather
 from .replicate import replicate
 from .parallel_apply import parallel_apply
+
+
+def _check_balance(device_ids):
+    imbalance_warn = """
+    There is an imbalance between your GPUs. You may want to exclude GPU {} which
+    has >25% less memory or cores than GPU {}. You can do so by setting the
+    CUDA_VISIBLE_DEVICES environment variable."""
+
+    mem_min = cores_min = float('inf')
+    mem_max = cores_max = -float('inf')
+    for i in device_ids:
+        prop = torch.cuda.get_device_properties(i)
+        if prop.total_memory < mem_min:
+            mem_min = prop.total_memory
+            mem_min_i = i
+        if prop.total_memory > mem_max:
+            mem_max = prop.total_memory
+            mem_max_i = i
+        if prop.multi_processor_count < cores_min:
+            cores_min = prop.multi_processor_count
+            cores_min_i = i
+        if prop.multi_processor_count > cores_max:
+            cores_max = prop.multi_processor_count
+            cores_max_i = i
+    mem_imbalanced = mem_max / mem_min > 1.25
+    cores_imbalanced = cores_max / cores_min > 1.25
+    if mem_imbalanced or cores_imbalanced:
+        weak_i = mem_min_i if mem_imbalanced else cores_min_i
+        good_i = mem_max_i if mem_imbalanced else cores_max_i
+        warnings.warn(imbalance_warn.format(weak_i, good_i))
 
 
 class DataParallel(Module):
@@ -60,8 +91,12 @@ class DataParallel(Module):
         self.module = module
         self.device_ids = device_ids
         self.output_device = output_device
+        torch.cuda._lazy_call(self.check_cuda_balance)
         if len(self.device_ids) == 1:
             self.module.cuda(device_ids[0])
+
+    def check_cuda_balance(self):
+        _check_balance(self.device_ids)
 
     def forward(self, *inputs, **kwargs):
         if not self.device_ids:
