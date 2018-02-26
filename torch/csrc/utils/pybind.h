@@ -24,15 +24,10 @@ public:
       value = ((THPVariable*)obj)->cdata.data();
       return true;
     }
-    try {
-      value = torch::createTensor(obj);
-    } catch (std::exception& e) {
-      return false;
-    }
-    return true;
+    return false;
   }
   static handle cast(at::Tensor src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(torch::createPyObject(src));
+    return handle(THPVariable_Wrap(torch::autograd::make_variable(src, false)));
   }
 };
 

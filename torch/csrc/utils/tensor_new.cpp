@@ -22,9 +22,11 @@ using namespace at;
 namespace torch { namespace utils {
 
 static void maybe_initialize_cuda(const at::Type &type) {
+#ifdef WITH_CUDA
   if (type.is_cuda()) {
     torch::cuda::lazy_init();
   }
+#endif
 }
 
 static Tensor new_with_sizes(const Type& type, int device, IntList sizes) {
@@ -148,7 +150,6 @@ static void check_is_sparse(const Type& type) {
   }
 }
 
-
 static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
     "new(*, Type dtype=None, int64_t? device=-1)",
@@ -179,8 +180,10 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
+    AutoGPU auto_gpu(r.toInt64(2));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 4) {
+    AutoGPU auto_gpu(r.toInt64(3));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   }
   throw std::runtime_error("new(): invalid arguments");

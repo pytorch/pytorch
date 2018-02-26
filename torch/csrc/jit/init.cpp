@@ -134,8 +134,8 @@ void initJITBindings(PyObject *module) {
   initPythonIRBindings(module);
   initPythonTracerBindings(module);
   python::initCompilerMixin(module);
-  script::initJitScriptBindings(module);
   script::initTreeViewBindings(module);
+  script::initJitScriptBindings(module);
 }
 
 }}

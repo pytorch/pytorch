@@ -140,16 +140,17 @@ struct TreeToken {
   }
 };
 
-void BatchMM(std::shared_ptr<Graph>& graph) {
+void BatchMMBlock(Block* block) {
   enum class Side { LHS, RHS };
   static const Symbol mm_kind = "mm"_sym;
   static const Symbol add_kind = "add"_sym;
   static const Symbol cat_kind = "cat"_sym;
   static const Symbol dim_sym = "dim"_sym;
+  auto graph = block->owningGraph();
 
-  // Look for trees in the graph
+  // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
-  for (auto node : graph->nodes()) {
+  for (auto node : block->nodes()) {
     if (node->kind() == mm_kind) {
       tokens[node] = TreeToken::fromMM(node);
     } else if (node->kind() == add_kind) {
@@ -169,6 +170,10 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
           lhs->output()->uses().size() == 1 && rhs->output()->uses().size() == 1) {
         if (auto token = TreeToken::unify(node, lhs_it->second, rhs_it->second))
           tokens[node] = token;
+      }
+    } else {
+      for (auto block : node->blocks()) {
+        BatchMMBlock(block);
       }
     }
   }
@@ -202,7 +207,11 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
     root.node->output()->replaceAllUsesWith(batch_mm->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.
   }
-  EliminateDeadCode(graph);
+  EliminateDeadCode(block);
+}
+
+void BatchMM(std::shared_ptr<Graph>& graph) {
+  BatchMMBlock(graph->block());
 }
 
 }}

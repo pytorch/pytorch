@@ -3,38 +3,26 @@ from .. import functional as F
 
 
 class _InstanceNorm(_BatchNorm):
-    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False):
+    def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=False,
+                 track_running_stats=False):
         super(_InstanceNorm, self).__init__(
-            num_features, eps, momentum, affine)
-        self._use_running_stats = False
+            num_features, eps, momentum, affine, track_running_stats)
+
+    def _check_input_dim(self, input):
+        return NotImplemented
 
     def forward(self, input):
-        b = input.size(0)
+        self._check_input_dim(input)
 
-        weight, bias = None, None
-        if self.affine:
-            weight = self.weight.repeat(b)
-            bias = self.bias.repeat(b)
-
-        training = not self._use_running_stats
-        return F.instance_norm(input, weight=weight, bias=bias,
-                               saved_running_mean=self.running_mean,
-                               saved_running_var=self.running_var,
-                               training=training, momentum=self.momentum,
-                               eps=self.eps, affine=self.affine)
-
-    def use_running_stats(self, mode=True):
-        r"""Set using running statistics or instance statistics.
-
-        Instance normalization usually use instance statistics in both training
-        and evaluation modes. But users can set this method to use running
-        statistics in the fashion similar to batch normalization in eval mode.
-        """
-        self._use_running_stats = mode
+        return F.instance_norm(
+            input, self.running_mean, self.running_var, self.weight, self.bias,
+            self.training or not self.track_running_stats, self.momentum, self.eps)
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 3d input that is seen as a mini-batch.
+    r"""Applies Instance Normalization over a 2d or 3d input (a mini-batch of 1d
+    inputs with optional additional channel dimension) as described in the paper
+    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
@@ -42,22 +30,35 @@ class InstanceNorm1d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    of size C (where C is the input size) if :attr:`affine` is ``True``.
 
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
+    By default, this layer uses instance statistics computed from input data in
+    both training and evaluation modes.
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.use_running_stats(mode=True)` method, and switch back to normal
-    behavior with `.use_running_stats(mode=False)` method.
+    If :attr:`track_running_stats` is set to ``True``, during training this
+    layer keeps running estimates of its computed mean and variance, which are
+    then used for normalization during evaluation. The running estimates are
+    kept with a default :attr:`momentum` of 0.1.
+
+    .. note::
+        This :attr:`momentum` argument is different from one used in optimizer
+        classes and the conventional notion of momentum. Mathematically, the
+        update rule for running statistics here is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
+        new observed value.
 
     Args:
-        num_features: num_features from an expected input of size `batch_size x num_features x width`
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, L)` or :math:`L` from input of size :math:`(N, L)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, gives the layer learnable
-            affine parameters. Default: ``False``
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters. Default: ``True``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
 
     Shape:
         - Input: :math:`(N, C, L)`
@@ -70,17 +71,21 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 40))
         >>> output = m(input)
+
+    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
+        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
         if input.dim() != 3:
             raise ValueError('expected 3D input (got {}D input)'
                              .format(input.dim()))
-        super(InstanceNorm1d, self)._check_input_dim(input)
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input that is seen as a mini-batch of 3d inputs
+    r"""Applies Instance Normalization over a 4d input (a mini-batch of 2d inputs
+    with additional channel dimension) as described in the paper
+    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
@@ -88,22 +93,35 @@ class InstanceNorm2d(_InstanceNorm):
 
     The mean and standard-deviation are calculated per-dimension separately
     for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    of size C (where C is the input size) if :attr:`affine` is ``True``.
 
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
+    By default, this layer uses instance statistics computed from input data in
+    both training and evaluation modes.
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.use_running_stats(mode=True)` method, and switch back to normal
-    behavior with `.use_running_stats(mode=False)` method.
+    If :attr:`track_running_stats` is set to ``True``, during training this
+    layer keeps running estimates of its computed mean and variance, which are
+    then used for normalization during evaluation. The running estimates are
+    kept with a default :attr:`momentum` of 0.1.
+
+    .. note::
+        This :attr:`momentum` argument is different from one used in optimizer
+        classes and the conventional notion of momentum. Mathematically, the
+        update rule for running statistics here is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
+        new observed value.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x height x width
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, gives the layer learnable
-            affine parameters. Default: ``False``
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters. Default: ``True``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
 
     Shape:
         - Input: :math:`(N, C, H, W)`
@@ -116,41 +134,57 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
         >>> output = m(input)
+
+    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
+        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
         if input.dim() != 4:
             raise ValueError('expected 4D input (got {}D input)'
                              .format(input.dim()))
-        super(InstanceNorm2d, self)._check_input_dim(input)
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input that is seen as a mini-batch of 4d inputs
+    r"""Applies Instance Normalization over a 5d input (a mini-batch of 3d inputs
+    with additional channel dimension) as described in the paper
+    `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
         y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
 
-    The mean and standard-deviation are calculated per-dimension separately for each object in a mini-batch.
-    Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    The mean and standard-deviation are calculated per-dimension separately
+    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
+    of size C (where C is the input size) if :attr:`affine` is ``True``.
 
-    During training, this layer keeps a running estimate of its computed mean
-    and variance. The running sum is kept with a default momentum of 0.1.
+    By default, this layer uses instance statistics computed from input data in
+    both training and evaluation modes.
 
-    At evaluation time (`.eval()`), the default behaviour of the InstanceNorm module stays the same
-    i.e. running mean/variance is NOT used for normalization. One can force using stored
-    mean and variance with `.use_running_stats(mode=True)` method, and switch back to normal
-    behavior with `.use_running_stats(mode=False)` method.
+    If :attr:`track_running_stats` is set to ``True``, during training this
+    layer keeps running estimates of its computed mean and variance, which are
+    then used for normalization during evaluation. The running estimates are
+    kept with a default :attr:`momentum` of 0.1.
 
+    .. note::
+        This :attr:`momentum` argument is different from one used in optimizer
+        classes and the conventional notion of momentum. Mathematically, the
+        update rule for running statistics here is
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
+        new observed value.
 
     Args:
-        num_features: num_features from an expected input of size batch_size x num_features x depth x height x width
+        num_features: :math:`C` from an expected input of size
+            :math:`(N, C, D, H, W)`
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
-        affine: a boolean value that when set to ``True``, gives the layer learnable
-            affine parameters. Default: ``False``
+        affine: a boolean value that when set to ``True``, this module has
+            learnable affine parameters. Default: ``True``
+        track_running_stats: a boolean value that when set to ``True``, this
+            module tracks the running mean and variance, and when set to ``False``,
+            this module does not track such statistics and always uses batch
+            statistics in both training and eval modes. Default: ``False``
 
     Shape:
         - Input: :math:`(N, C, D, H, W)`
@@ -163,10 +197,12 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100, affine=True)
         >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
         >>> output = m(input)
+
+    .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
+        https://arxiv.org/abs/1607.08022
     """
 
     def _check_input_dim(self, input):
         if input.dim() != 5:
             raise ValueError('expected 5D input (got {}D input)'
                              .format(input.dim()))
-        super(InstanceNorm3d, self)._check_input_dim(input)

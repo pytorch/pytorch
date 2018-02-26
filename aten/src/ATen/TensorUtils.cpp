@@ -1,5 +1,5 @@
 #include "ATen/Config.h"
-#include "ATen/Check.h"
+#include "ATen/TensorUtils.h"
 
 #include "ATen/ATen.h"
 
@@ -210,4 +210,11 @@ void checkBackend(CheckedFrom c, ArrayRef<Tensor> tensors, at::Backend backend) 
   }
 }
 
+void * maybe_data_ptr(const Tensor& tensor) {
+  return tensor.defined() ? (void *)tensor.data_ptr() : nullptr;
+}
+
+void * maybe_data_ptr(const TensorArg& tensor) {
+  return tensor->defined() ? (void *)tensor->data_ptr() : nullptr;
+}
 }

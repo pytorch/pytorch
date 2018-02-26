@@ -339,6 +339,17 @@ class TestSparse(TestCase):
         y = x.clone()
         self.assertTrue(y.is_coalesced())
 
+    @cuda_only
+    def test_cuda_empty(self):
+        from torch.autograd import Variable
+        x = Variable(torch.sparse.FloatTensor(2, 3, 4))
+        y = x.cuda(0)
+        self.assertEqual(x._dimI(), y._dimI())
+        self.assertEqual(x._dimV(), y._dimV())
+        x = y.cpu()
+        self.assertEqual(y._dimI(), x._dimI())
+        self.assertEqual(y._dimV(), x._dimV())
+
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
         y = self.safeToDense(x)

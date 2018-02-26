@@ -263,24 +263,21 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
-    output = Variable(torch.zeros(out_size).type_as(input))
+    output = torch.zeros(out_size).type_as(input)
 
     if weight is None:
-        weight = Variable(torch.ones(C).type_as(input))
-    if torch.is_tensor(weight):
-        # TODO: remove this once Variables and tensors merge
-        weight = Variable(weight)
-    total_weight_data = 0
+        weight = torch.ones(C).type_as(input)
+    total_weight = 0
     for tup in product(*[range(size) for size in out_size]):
         t_nx = target[tup]
-        norm = 0. if ignore_index == t_nx else weight[t_nx]
+        norm = 0. if ignore_index == t_nx else weight[t_nx].item()
         input_index = list(tup)
         input_index.insert(1, t_nx)
         output[tup] = -input[tuple(input_index)] * norm
-        total_weight_data += norm
+        total_weight += norm
 
     if reduce and size_average:
-        return output.sum() / total_weight_data
+        return output.sum() / total_weight
     elif reduce:
         return output.sum()
     return output
@@ -291,7 +288,7 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
 
     def nll_loss_helper(input, target, weight, ignore_index):
         if target == ignore_index:
-            return (variable(0), variable(0))
+            return (0, 0)
         norm = 1 if weight is None else weight[target]
         result = -input[target] * norm
         return (result, norm)
@@ -302,12 +299,7 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
-    if isinstance(losses[0], Variable):
-        losses_tensor = torch.stack(losses).type_as(input)
-        if not torch._C._with_scalars():
-            losses_tensor = losses_tensor.squeeze(1)
-    else:
-        losses_tensor = torch.Tensor(losses).type_as(input)
+    losses_tensor = input.new_tensor(losses)
     if reduce and size_average:
         return sum(losses_tensor) / sum(weights)
     elif reduce:
@@ -673,7 +665,7 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, iter_tensors(d_input)):
-                    jacobian_x[:, i] = d_x
+                    jacobian_x[:, i] = d_x.contiguous().view(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
@@ -698,15 +690,16 @@ class NNTestCase(TestCase):
             res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
             param, _ = self._get_parameters(module)
-            res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
+            res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
         return res
 
     def check_jacobian(self, module, input, jacobian_input=True):
         jacobian_parameters = bool(self._get_parameters(module)[0])
         analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
         numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        analytical_t = iter_tensors(analytical)
-        numerical_t = iter_tensors(numerical)
+        analytical_t = list(iter_tensors(analytical))
+        numerical_t = list(iter_tensors(numerical))
+
         # TODO: compare structure
         self.assertLessEqual(
             max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
@@ -725,7 +718,7 @@ class NNTestCase(TestCase):
             x = x.view(-1)
             d_x = d_x.view(-1)
             for i in range(x.nelement()):
-                original = x[i]
+                original = x[i].item()
                 x[i] = original + eps
                 fx1 = self._forward_criterion(criterion, input, target)
                 x[i] = original - eps
@@ -735,8 +728,9 @@ class NNTestCase(TestCase):
                 x[i] = original
 
         # TODO: check structure
-        analytical_t = iter_tensors(analytical_d_x)
-        numerical_t = iter_tensors(numerical_d_x)
+        analytical_t = list(iter_tensors(analytical_d_x))
+        numerical_t = list(iter_tensors(numerical_d_x))
+
         self.assertLessEqual(
             max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
             PRECISION
@@ -883,13 +877,8 @@ class ModuleTest(TestBase):
         test_case._zero_grad_input(input)
         with freeze_rng_state():
             output = test_case._forward(module, input)
-            grad_output = output
-            if isinstance(grad_output, Variable):
-                grad_output = grad_output.data.clone()
-            else:
-                grad_output = grad_output.clone()
-                output = output.clone()
-            grad_output.normal_()
+            grad_output = output.new(output.shape).normal_()
+            output = output.clone()
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
             d_param = deepcopy(test_case._get_parameters(module)[1])
 
@@ -917,7 +906,7 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
-            type_map = {torch.DoubleTensor: torch.cuda.FloatTensor}
+            type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
@@ -1024,6 +1013,8 @@ class CriterionTest(TestBase):
             out = test_case._forward_criterion(module, input, target)
             expected_out = self.reference_fn(deepcopy(input),
                                              deepcopy(target), module)
+            if isinstance(expected_out, Variable):
+                expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
 
         test_case.check_criterion_jacobian(module, input, target)
@@ -1035,7 +1026,7 @@ class CriterionTest(TestBase):
         try:
             cpu_input = self._get_input()
             type_map = {
-                torch.DoubleTensor: torch.cuda.FloatTensor,
+                'torch.DoubleTensor': torch.cuda.FloatTensor,
             }
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 

@@ -814,8 +814,8 @@ TH_API void THNN_(BatchNormalization_updateOutput)(
           THTensor *output,
           THTensor *weight,       // [OPTIONAL]
           THTensor *bias,         // [OPTIONAL]
-          THTensor *running_mean,
-          THTensor *running_var,
+          THTensor *running_mean, // [OPTIONAL] if train
+          THTensor *running_var,  // [OPTIONAL] if train
           THTensor *save_mean,
           THTensor *save_std,
           bool train,
@@ -829,10 +829,10 @@ TH_API void THNN_(BatchNormalization_backward)(
           THTensor *gradWeight,   // [OPTIONAL]
           THTensor *gradBias,     // [OPTIONAL]
           THTensor *weight,       // [OPTIONAL]
-          THTensor *running_mean,
-          THTensor *running_var,
-          THTensor *save_mean,
-          THTensor *save_std,
+          THTensor *running_mean, // [OPTIONAL] if train
+          THTensor *running_var,  // [OPTIONAL] if train
+          THTensor *save_mean,    // [OPTIONAL] if !train
+          THTensor *save_std,     // [OPTIONAL] if !train
           bool train,
           double scale,
           double eps);

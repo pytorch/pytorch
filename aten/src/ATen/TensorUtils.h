@@ -4,13 +4,13 @@
 #include "ATen/TensorGeometry.h"
 #include "ATen/Utils.h"
 
-// This file contains utility functions for checking that arguments
-// make sense.  This is particularly useful for native functions,
-// which do NO argument checking by default.
-//
-// It's NOT in Utils.h, because this file has a dep on Tensor.h
+// These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 
 namespace at {
+
+// The following are utility functions for checking that arguments
+// make sense.  These are particularly useful for native functions,
+// which do NO argument checking by default.
 
 struct TensorArg {
   Tensor tensor;
@@ -72,4 +72,10 @@ void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 
 // FixMe: does TensorArg slow things down?
 void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
+
+// Methods for getting data_ptr if tensor is defined
+void * maybe_data_ptr(const Tensor& tensor);
+void * maybe_data_ptr(const TensorArg& tensor);
+
 }
+

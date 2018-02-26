@@ -75,7 +75,7 @@ class Embedding(Module):
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 sparse=False):
+                 sparse=False, _weight=None):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -89,10 +89,14 @@ class Embedding(Module):
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-        self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+        if _weight is None:
+            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.reset_parameters()
+        else:
+            assert list(_weight.shape) == [num_embeddings, embedding_dim], \
+                'Shape of weight does not match num_embeddings and embedding_dim'
+            self.weight = Parameter(_weight)
         self.sparse = sparse
-
-        self.reset_parameters()
 
     def reset_parameters(self):
         self.weight.data.normal_(0, 1)
@@ -118,6 +122,36 @@ class Embedding(Module):
             s += ', sparse=True'
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
+
+    @classmethod
+    def from_pretrained(cls, embeddings, freeze=True):
+        r"""Creates Embedding instance from given 2-dimensional FloatTensor.
+
+        Args:
+            embeddings (Tensor): FloatTensor containing weights for the Embedding.
+                First dimension is being passed to Embedding as 'num_embeddings', second as 'embedding_dim'.
+            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+                Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
+
+        Examples::
+
+            >> # FloatTensor containing pretrained weights
+            >> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+            >> embedding = nn.Embedding.from_pretrained(weight)
+            >> # Get embeddings for index 1
+            >> input = Variable(torch.LongTensor([1]))
+            >> embedding(input)
+
+            Variable containing:
+             4.0000  5.1000  6.3000
+            [torch.FloatTensor of size (1,3)]
+        """
+        assert embeddings.dim() == 2, \
+            'Embeddings parameter is expected to be 2-dimensional'
+        rows, cols = embeddings.shape
+        embedding = cls(num_embeddings=rows, embedding_dim=cols, _weight=embeddings)
+        embedding.weight.requires_grad = not freeze
+        return embedding
 
 
 class EmbeddingBag(Module):

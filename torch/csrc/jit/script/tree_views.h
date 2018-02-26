@@ -127,13 +127,16 @@ struct List : public TreeView {
   List(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_LIST);
     // Iterate over list to temporarily instantiate Ts that will check the type
-    for (const T& elem : *this);
+    for (const T& elem : *this) {}
   }
   iterator begin() const {
     return iterator(tree_->trees().begin());
   }
   iterator end() const {
     return iterator(tree_->trees().end());
+  }
+  bool empty() const {
+    return tree_->trees().begin() == tree_->trees().end();
   }
   T operator[](size_t i) const {
     return T(subtree(i));

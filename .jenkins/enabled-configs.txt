@@ -11,6 +11,8 @@ pytorch-linux-xenial-cuda9-cudnn7-py2-build
 pytorch-linux-xenial-cuda9-cudnn7-py2-test
 pytorch-linux-xenial-cuda9-cudnn7-py3-build
 pytorch-linux-xenial-cuda9-cudnn7-py3-test
+pytorch-linux-xenial-py3-clang5-asan-build
+pytorch-linux-xenial-py3-clang5-asan-test
 pytorch-linux-trusty-py2.7.9-build
 pytorch-linux-trusty-py2.7.9-test
 pytorch-linux-trusty-py2.7-build

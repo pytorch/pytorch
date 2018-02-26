@@ -70,10 +70,9 @@ set CUDNN_ROOT_DIR=C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v9.0
 cd test/
 
 python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
-python ..\\ci_scripts\\delete_image.py
 
 7z x %IMAGE_COMMIT_TAG%.7z
-sh run_test.sh -- -v
+sh run_test.sh -- -v && python ..\\ci_scripts\\delete_image.py
 
 EOL
 

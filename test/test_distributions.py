@@ -460,7 +460,7 @@ class TestDistributions(TestCase):
         # check entropy computation
         self.assertEqual(Bernoulli(p).entropy().data, torch.Tensor([0.6108, 0.5004, 0.6730]), prec=1e-4)
         self.assertEqual(Bernoulli(torch.Tensor([0.0])).entropy(), torch.Tensor([0.0]))
-        self.assertEqual(Bernoulli(s).entropy(), torch.Tensor([0.6108]), prec=1e-4)
+        self.assertEqual(Bernoulli(s).entropy(), torch.variable(0.6108), prec=1e-4)
 
     def test_bernoulli_enumerate_support(self):
         examples = [
@@ -532,7 +532,7 @@ class TestDistributions(TestCase):
         for total_count in [1, 2, 10]:
 
             def ref_log_prob(idx, x, log_prob):
-                p = probs.data.view(-1)[idx]
+                p = probs.data.view(-1)[idx].item()
                 expected = scipy.stats.binom(total_count, p).logpmf(x)
                 self.assertAlmostEqual(log_prob, expected, places=3)
 
@@ -755,7 +755,7 @@ class TestDistributions(TestCase):
                                          failure_rate=1e-3)
 
         for probs in [0.001, 0.2, 0.999]:
-            equal_probs = torch.Tensor([0.5])
+            equal_probs = torch.variable(0.5)
             dist = RelaxedBernoulli(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
@@ -831,8 +831,8 @@ class TestDistributions(TestCase):
         uniform = Uniform(low_1d, high_1d)
         above_high = Variable(torch.Tensor([4.0]))
         below_low = Variable(torch.Tensor([-1.0]))
-        self.assertEqual(uniform.log_prob(above_high).data[0], -float('inf'), allow_inf=True)
-        self.assertEqual(uniform.log_prob(below_low).data[0], -float('inf'), allow_inf=True)
+        self.assertEqual(uniform.log_prob(above_high).item(), -float('inf'), allow_inf=True)
+        self.assertEqual(uniform.log_prob(below_low).item(), -float('inf'), allow_inf=True)
 
         set_rng_seed(1)
         self._gradcheck_log_prob(Uniform, (low, high))
@@ -2423,16 +2423,16 @@ class TestNumericalStability(TestCase):
             p = Variable(tensor_type([0, 1]), requires_grad=True)
             categorical = OneHotCategorical(p)
             log_pdf = categorical.log_prob(Variable(tensor_type([0, 1])))
-            self.assertEqual(log_pdf.data[0], 0)
+            self.assertEqual(log_pdf.item(), 0)
 
     def test_categorical_log_prob_with_logits(self):
         for tensor_type in ([torch.FloatTensor, torch.DoubleTensor]):
             p = Variable(tensor_type([-float('inf'), 0]), requires_grad=True)
             categorical = OneHotCategorical(logits=p)
             log_pdf_prob_1 = categorical.log_prob(Variable(tensor_type([0, 1])))
-            self.assertEqual(log_pdf_prob_1.data[0], 0)
+            self.assertEqual(log_pdf_prob_1.item(), 0)
             log_pdf_prob_0 = categorical.log_prob(Variable(tensor_type([1, 0])))
-            self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
+            self.assertEqual(log_pdf_prob_0.item(), -float('inf'), allow_inf=True)
 
     def test_multinomial_log_prob(self):
         for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
@@ -2440,16 +2440,16 @@ class TestNumericalStability(TestCase):
             s = Variable(tensor_type([0, 10]))
             multinomial = Multinomial(10, p)
             log_pdf = multinomial.log_prob(s)
-            self.assertEqual(log_pdf.data[0], 0)
+            self.assertEqual(log_pdf.item(), 0)
 
     def test_multinomial_log_prob_with_logits(self):
         for tensor_type in [torch.FloatTensor, torch.DoubleTensor]:
             p = Variable(tensor_type([-float('inf'), 0]), requires_grad=True)
             multinomial = Multinomial(10, logits=p)
             log_pdf_prob_1 = multinomial.log_prob(Variable(tensor_type([0, 10])))
-            self.assertEqual(log_pdf_prob_1.data[0], 0)
+            self.assertEqual(log_pdf_prob_1.item(), 0)
             log_pdf_prob_0 = multinomial.log_prob(Variable(tensor_type([10, 0])))
-            self.assertEqual(log_pdf_prob_0.data[0], -float('inf'), allow_inf=True)
+            self.assertEqual(log_pdf_prob_0.item(), -float('inf'), allow_inf=True)
 
 
 class TestLazyLogitsInitialization(TestCase):
