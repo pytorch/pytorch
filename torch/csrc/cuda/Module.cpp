@@ -400,10 +400,8 @@ PyObject * THCPModule_initExtension(PyObject *self)
       + " MB | Processors: " + std::to_string(prop.multiProcessorCount);
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
-    cudaDeviceProp *prop = new cudaDeviceProp; // Python will take ownership and delete when appropriate
-    THCudaCheck(cudaGetDeviceProperties(prop, device));
-    return prop;
-  });
+    return at::globalContext().getDeviceProperties(device);
+  }, py::return_value_policy::reference);
 
   Py_RETURN_TRUE;
 }
