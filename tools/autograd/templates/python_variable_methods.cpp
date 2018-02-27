@@ -306,11 +306,11 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  if (tensor_device != at::current_device()) {
+  if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
   }
-  return self.toType(type);
+  return self.toType(type, non_blocking);
 }
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type) {
@@ -341,9 +341,6 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
   auto device = r.toInt64(0);
-  if (device == -1) {
-    device = at::current_device();
-  }
   return THPVariable_Wrap(dispatch_type(self_, type, device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }

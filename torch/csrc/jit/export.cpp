@@ -133,7 +133,6 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
 
 void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Value* n) {
   onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
-  JIT_ASSERT(n->hasType());
   TensorType* node_type = n->type()->expect<TensorType>();
   const std::vector<std::int64_t>& sizes = node_type->sizes();
   for (std::int64_t s : sizes) {

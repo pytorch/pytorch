@@ -66,7 +66,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2017, Torch Contributors'
+copyright = '2018, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -97,6 +97,9 @@ pygments_style = 'sphinx'
 
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
+
+# Disable docstring inheritance
+autodoc_inherit_docstrings = False
 
 
 # -- Options for HTML output ----------------------------------------------

@@ -139,7 +139,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         outputs, grad_outputs, retain_graph, create_graph,
         inputs)
 
-variable = torch._C._VariableFunctions.variable
+variable = torch._C._VariableFunctions.tensor
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")

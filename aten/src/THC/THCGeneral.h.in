@@ -145,6 +145,7 @@ THC_API int THCState_getKernelPeerToPeerAccessEnabled(THCState* state);
 THC_API void THCState_setKernelPeerToPeerAccessEnabled(THCState* state, int val);
 
 THC_API struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state);
+THC_API struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device);
 
 THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);

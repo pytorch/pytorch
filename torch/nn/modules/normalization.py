@@ -1,4 +1,5 @@
 import torch
+import numbers
 from torch.nn.parameter import Parameter
 from .module import Module
 from .batchnorm import _BatchNorm
@@ -106,8 +107,10 @@ class LayerNorm(Module):
         new observed value.
 
     Args:
-        normalized_shape (list or torch.Size): input shape from an expected input of size
-            `[* x normalized_shape[0] x normalized_shape[1] x ... x normalized_shape[-1]]`
+        normalized_shape (int or list or torch.Size): input shape from an expected input
+            of size `[* x normalized_shape[0] x normalized_shape[1] x ... x normalized_shape[-1]]`.
+            If a single integer is used, it is treated as a singleton list, and this module will
+            normalize over the last dimension with that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         elementwise_affine: a boolean value that when set to ``True``, this module
@@ -134,6 +137,8 @@ class LayerNorm(Module):
     def __init__(self, normalized_shape, eps=1e-5, momentum=0.1,
                  elementwise_affine=True, track_running_stats=False):
         super(LayerNorm, self).__init__()
+        if isinstance(normalized_shape, numbers.Integral):
+            normalized_shape = (normalized_shape,)
         self.normalized_shape = torch.Size(normalized_shape)
         self.eps = eps
         self.momentum = momentum
@@ -158,7 +163,7 @@ class LayerNorm(Module):
             self.running_mean.zero_()
             self.running_var.fill_(1)
         if self.elementwise_affine:
-            self.weight.data.uniform_()
+            self.weight.data.fill_(1)
             self.bias.data.zero_()
 
     def forward(self, input):

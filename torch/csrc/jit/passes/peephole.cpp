@@ -19,7 +19,7 @@ void PeepholeOptimize(Block * block) {
     switch (n->kind()) {
       case kexpand:
         // Eliminate redundant expand
-        if (!n->input()->hasType()) break;
+        if (!n->input()->isTensor()) break;
         if (n->is(ksize) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());
           it.destroyCurrent();

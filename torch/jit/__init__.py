@@ -211,7 +211,7 @@ def compile(arg=None, nderivs=1, optimize=True, enabled=True):
         return _compile(arg)
 
 
-def trace(f, args=tuple(), kwargs=None, nderivs=0):
+def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -428,6 +428,59 @@ def _verify_equal(xs, ys):
         if x.sub(y).abs().max() > 1e-6:
             raise RuntimeError("JIT and real computation mismatch")
 
+
+def trace(*args, **kwargs):
+    """
+    Trace a function and return an executable trace that will be optimized
+    using just-in-time compilation.
+
+    .. warning::
+
+        Just-in-time compilation currently only works for functions/modules
+        which are not data dependent (e.g., have conditionals on data in
+        tensors) and do not have any untracked external dependencies (e.g.,
+        perform input/output or access global variables). If you trace such
+        models, you will silently get incorrect results on subsequent
+        invocations of the model.
+
+    Arg:
+        *args - a list of example tensors that will be passed to the function
+                as inputs while tracing. The resulting trace can be run with
+                inputs of different types and shapes assuming the traced operations
+                support those types and shapes.
+
+    Keyword arguments:
+        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
+
+        >>> @jit.trace(torch.autograd.Variable(torch.rand(1)))
+        >>> def f(x):
+        >>>     return x * 2
+    """
+    return lambda func: torch._C.GraphExecutor(func, args, kwargs.pop('optimize', True))
+
+
+class CompilationUnit(object):
+    def __init__(self, lang=None, optimize=True):
+        self.cu = torch._C.CompilationUnit()
+        if lang is not None:
+            self.define(lang)
+        self.execution_engines = {}
+        self.optimize = optimize
+
+    def define(self, lang):
+        self.cu.define(lang)
+
+    def __getattr__(self, attr):
+        if attr not in self.execution_engines:
+            graph = self.cu.get_graph(attr)
+            self.execution_engines[attr] = torch._C.GraphExecutor(graph, self.optimize)
+        return self.execution_engines[attr]
+
+
+def script(fn):
+    ast = torch.jit.frontend.get_jit_ast(fn)
+    graph = _jit_script_compile(ast)
+    return torch._C.GraphExecutor(graph, True)
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

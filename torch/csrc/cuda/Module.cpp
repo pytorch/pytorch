@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
@@ -13,6 +14,7 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
@@ -382,7 +384,29 @@ PyObject * THCPModule_initExtension(PyObject *self)
   if (!THCPModule_initCuda(torch_module)) {
     return NULL;
   }
-  Py_RETURN_NONE;
+
+  // Add class and method to torch.cuda
+  auto m = py::handle(torch_module).cast<py::module>();
+  py::class_<cudaDeviceProp>(m,"_CudaDeviceProperties")
+    .def_readonly("name", &cudaDeviceProp::name)
+    .def_readonly("major", &cudaDeviceProp::major)
+    .def_readonly("minor", &cudaDeviceProp::minor)
+    .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
+    .def_readonly("is_integrated", &cudaDeviceProp::integrated)
+    .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
+    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
+    .def("__repr__", [](const cudaDeviceProp &prop) {
+      std::ostringstream stream;
+      stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
+             << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+             << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
+      return stream.str();
+    });
+  m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
+    return at::globalContext().getDeviceProperties(device);
+  }, py::return_value_policy::reference);
+
+  Py_RETURN_TRUE;
 }
 
 #ifdef WITH_NCCL

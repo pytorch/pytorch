@@ -166,7 +166,6 @@ class TestTorch(TestCase):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_linear_algebra_scalar_raises(self):
         from torch.autograd import Variable, variable
         m = Variable(torch.randn(5, 5))
@@ -1094,23 +1093,23 @@ class TestTorch(TestCase):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch._C._VariableFunctions.zeros((2, 3), out=d, dtype=torch.float32))
 
-    def test_variable_factory(self):
-        expected = torch.autograd.Variable(torch.Tensor([1, 1]))
+    def test_tensor_factory(self):
+        expected = torch.Tensor([1, 1])
         # test data
-        res1 = torch.autograd.variable([1, 1])
+        res1 = torch.tensor([1, 1])
         self.assertEqual(res1, expected)
 
-        res1 = torch.autograd.variable([1, 1], dtype=torch.int)
+        res1 = torch.tensor([1, 1], dtype=torch.int)
         self.assertEqual(res1, expected)
         self.assertIs(torch.int, res1.dtype)
 
         # test copy
-        res2 = torch.autograd.variable(expected)
+        res2 = torch.tensor(expected)
         self.assertEqual(res2, expected)
         res2[1] = 2
         self.assertEqual(expected, torch.ones_like(expected))
 
-        res2 = torch.autograd.variable(expected, dtype=torch.int)
+        res2 = torch.tensor(expected, dtype=torch.int)
         self.assertEqual(res1, expected)
         self.assertIs(torch.int, res1.dtype)
 
@@ -1573,7 +1572,6 @@ class TestTorch(TestCase):
     def test_contiguous(self):
         return self._test_contiguous(self, lambda t: t)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_scalars_as_floats(self):
         "zero-dim variables that don't require grad should bind to scalar arguments"
         x = torch.autograd.variable(2)
@@ -2006,7 +2004,6 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_cat_scalars(self):
         from torch.autograd import variable
         x = variable(0)

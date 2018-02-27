@@ -287,6 +287,14 @@ def get_device_capability(device):
         return torch._C._cuda_getDeviceCapability(device)
 
 
+def get_device_properties(device):
+    if not _initialized:
+        init()  # will define _get_device_properties and _CudaDeviceProperties
+    if device < 0 or device >= device_count():
+        raise AssertionError("Invalid device id")
+    return _get_device_properties(device)
+
+
 @contextlib.contextmanager
 def stream(stream):
     r"""Context-manager that selects a given stream.
