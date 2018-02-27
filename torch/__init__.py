@@ -128,9 +128,47 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
+    r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
+
+    Args:
+        t (type or string): the tensor type or its name
+
+    Example::
+
+        >>> torch.set_default_tensor_type("torch.FloatTensor")
+        >>> torch.Tensor([1.2, 3])
+
+         1.2000
+         3.0000
+        [torch.FloatTensor of size (2,)]
+
+        >>> torch.set_default_tensor_type(torch.double)
+        >>> torch.Tensor([1.2, 3])
+
+         1.2000
+         3.0000
+        [torch.DoubleTensor of size (2,)]
+
+        >>> torch.set_default_tensor_type(torch.cuda.uint8)
+        >>> torch.Tensor([2, 3])
+
+         2
+         3
+        [torch.cuda.ByteTensor of size (2,) (GPU 0)]
+
+        >>> torch.set_default_tensor_type(torch.cuda.LongTensor)
+        >>> torch.Tensor([3, 4])
+
+         3
+         4
+        [torch.cuda.LongTensor of size (2,) (GPU 0)]
+
+    """
     if isinstance(t, globals()['dtype']):
         _C._set_default_tensor_type(t)
     else:
+        if not isinstance(t, str):
+            raise ValueError("t must be a string or a dtype, but got: {}".format(repr(t)))
         Tensor = _import_dotted_name(t)
         _C._set_default_tensor_type(Tensor)
 
