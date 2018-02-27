@@ -110,11 +110,20 @@ std::string getDescriptor(jit::Node* n) {
 
 } // anonymous namespace
 
+bool findTensorOp(jit::Node* n, const std::string* signature) {
+  std::string sig_local;
+  if (!signature)
+    sig_local = getDescriptor(n);
+  else
+    sig_local = *signature;
+  return constructors.count(sig_local);
+}
+
 TensorOp getTensorOp(jit::Node* n) {
   auto signature = getDescriptor(n);
-  try {
+  if (findTensorOp(n, &signature)) {
     return constructors.at(signature)(n);
-  } catch (std::out_of_range &e) {
+  } else {
     throw std::runtime_error("Unsupported op descriptor: " + signature + ". "
                              "File a bug report.");
   }

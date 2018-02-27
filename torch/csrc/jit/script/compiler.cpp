@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/jit/generated/aten_dispatch.h"
 
 #include <Python.h>
 #include <climits>
@@ -168,8 +169,8 @@ struct Environment {
 };
 
 struct to_ir {
-  to_ir(FunctionDefinition& def, FunctionTable& function_table)
-      : def(def), function_table(function_table) {
+  to_ir(FunctionDefinition& def, FunctionTable& function_table, ResolutionCallback rcb)
+      : def(def), function_table(function_table), rcb(rcb) {
     environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
@@ -457,6 +458,30 @@ struct to_ir {
     }
   }
 
+  Node* specializeExternalCall(Node *n) {
+    AutoGIL ag;
+    py::function func = rcb(n->owningGraph(), n->kind().toString());
+    auto* py_func = func.ptr();
+    // Release the function object so we can wrap it in a PythonOp
+    pybind11::handle h = func.release();
+    std::string cconv;
+    for (const auto& i : n->inputs()) {
+      cconv += "t";
+    }
+    Node* new_node = n->owningGraph()->createPythonOp(
+        THPObjectPtr(h.ptr()), cconv, false, {}, {}, false);
+    new_node->insertBefore(n);
+    for (const auto i : n->inputs()) {
+      new_node->addInput(i);
+    }
+    for (const auto o : n->outputs()) {
+      new_node->addOutput();
+    }
+    n->replaceAllUsesWith(new_node);
+    n->destroy();
+    return new_node;
+  }
+
   // This will _always_ compute something, unlike 'getValue' which simply
   // returns an already computed reference if possible.
   std::vector<Value*> emitExpr(
@@ -533,9 +558,12 @@ struct to_ir {
                 break;
             }
           }
-          return emitNode(
-                     kind, tree->range(), inputs, output_size, attributes, list_attributes)
-              ->outputs();
+          auto n = emitNode(
+                     kind, tree->range(), inputs, output_size, attributes, list_attributes);
+          if (!findTensorOp(n)) {
+            n = specializeExternalCall(n);
+          }
+          return n->outputs();
         }
       } break;
       case TK_CAST: {
@@ -693,6 +721,7 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
+  ResolutionCallback rcb;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -706,51 +735,6 @@ struct to_ir {
   }
 };
 
-void specializePass(Block* b, ResolutionCallback rcb) {
-  std::vector<Node*> nodes_to_destroy;
-  for (const auto n : b->nodes()) {
-    try {
-      getOperation(n, true);
-    } catch (std::runtime_error e) {
-      // HACK lol
-      if (n->kind() != kLoop && n->kind() != kIf) {
-        AutoGIL ag;
-        py::function func = rcb(b->owningGraph(), n->kind().toString());
-        auto* py_func = func.ptr();
-        if (!PyFunction_Check(py_func)) {
-          throw std::runtime_error("Unknown operation");
-        } else {
-          // Release the function object so we can wrap it in a PythonOp
-          pybind11::handle h = func.release();
-          std::string cconv;
-          for (const auto& i : n->inputs()) {
-            cconv += "t";
-          }
-          Node* new_node = n->owningGraph()->createPythonOp(
-              THPObjectPtr(h.ptr()), cconv, false, {}, {}, false);
-          n->owningGraph()->setInsertPoint(n);
-          n->owningGraph()->insertNode(new_node);
-          for (const auto i : n->inputs()) {
-            new_node->addInput(i);
-          }
-          for (const auto o : n->outputs()) {
-            new_node->addOutput();
-          }
-          n->replaceAllUsesWith(new_node);
-          nodes_to_destroy.push_back(n);
-        }
-      }
-    }
-    for (const auto b : n->blocks()) {
-      specializePass(b, rcb);
-    }
-  }
-  for (const auto n : nodes_to_destroy) {
-    n->destroy();
-  }
-}
-
-
 struct CompilationUnitImpl {
   CompilationUnitImpl(ResolutionCallback rcb) : rcb(rcb) {}
   void defineFunction(const Def& def) {
@@ -761,8 +745,7 @@ struct CompilationUnitImpl {
     }
 
     auto it = functions.emplace(name, FunctionDefinition{def}).first;
-    to_ir(it->second, functions);
-    specializePass(it->second.graph->block(), rcb);
+    to_ir(it->second, functions, rcb);
   }
 
   void define(const std::string& script) {
@@ -804,8 +787,7 @@ CompilationUnit::~CompilationUnit() {}
 std::shared_ptr<Graph> jitScriptCompile(Def def, ResolutionCallback rcb) {
   FunctionTable empty;
   FunctionDefinition fd(def);
-  to_ir(fd, empty);
-  specializePass(fd.graph->block(), rcb);
+  to_ir(fd, empty, rcb);
   return fd.graph;
 }
 

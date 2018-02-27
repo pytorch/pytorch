@@ -51,5 +51,6 @@ struct TensorOp {
 };
 
 TensorOp getTensorOp(jit::Node* n);
+bool findTensorOp(jit::Node* n, const std::string* signature=nullptr);
 
 }} // namespace torch::jit;
