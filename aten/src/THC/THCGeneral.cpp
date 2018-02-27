@@ -296,6 +296,12 @@ struct cudaDeviceProp* THCState_getCurrentDeviceProperties(THCState* state)
   return &(state->deviceProperties[curDev]);
 }
 
+struct cudaDeviceProp* THCState_getDeviceProperties(THCState* state, int device)
+{
+  THAssert(device >= 0 && device < state->numDevices);
+  return &(state->deviceProperties[device]);
+}
+
 struct THCRNGState* THCState_getRngState(THCState *state)
 {
   return state->rngState;
