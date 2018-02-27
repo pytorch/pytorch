@@ -255,25 +255,30 @@ void THVector_(normal_fill)(real *data,
   THVector_(normal_fill_DISPATCHPTR)(data, size, generator, mean, stddev);
 }
 
-/* This needs to be called in order to initialize the dispatch pointers at runtime.
- * This function simply checks what SIMD extensions are available, and then walks the dispatch table
+/*
+ * This struct's constructor initalizes the dispatch tables. It simply checks
+ * what SIMD extensions are available, and then walks the dispatch table
  * to choose the best function.
  * NOTE: As implemented, it will initialize the dispatch pointer to the first supported function.
  *       This means that in the dispatch tables, implementations supporting more recent extensions
  *       need to come first
  */
-void THVector_(vectorDispatchInit)(void)
-{
-  uint32_t hostSimdExts = detectHostSIMDExtensions();
-  INIT_DISPATCH_PTR(fill);
-  INIT_DISPATCH_PTR(cadd);
-  INIT_DISPATCH_PTR(adds);
-  INIT_DISPATCH_PTR(cmul);
-  INIT_DISPATCH_PTR(muls);
-  INIT_DISPATCH_PTR(cdiv);
-  INIT_DISPATCH_PTR(divs);
-  INIT_DISPATCH_PTR(copy);
-  INIT_DISPATCH_PTR(normal_fill);
-}
+struct THVector_(startup) {
+  THVector_(startup)() {
+    uint32_t hostSimdExts = detectHostSIMDExtensions();
+    INIT_DISPATCH_PTR(fill);
+    INIT_DISPATCH_PTR(cadd);
+    INIT_DISPATCH_PTR(adds);
+    INIT_DISPATCH_PTR(cmul);
+    INIT_DISPATCH_PTR(muls);
+    INIT_DISPATCH_PTR(cdiv);
+    INIT_DISPATCH_PTR(divs);
+    INIT_DISPATCH_PTR(copy);
+    INIT_DISPATCH_PTR(normal_fill);
+  }
+};
+
+// Declare a global instance to force static initialization
+static THVector_(startup) THVector_(g_startup);
 
 #endif

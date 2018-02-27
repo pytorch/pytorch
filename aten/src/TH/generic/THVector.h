@@ -58,7 +58,4 @@ TH_API void THVector_(cinv)(real *y, const real *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
 
-/* Initialize the dispatch pointers */
-TH_API void THVector_(vectorDispatchInit)(void);
-
 #endif
