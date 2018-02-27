@@ -79,28 +79,19 @@ Then, you can run::
     # Print a human readable representation of the graph
     onnx.helper.printable_graph(model.graph)
 
-To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need three things:
-
-1. You'll need an install of Caffe2.  If you don't have one already, Please
-   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
-
-2. You'll need `onnx-caffe2 <https://github.com/onnx/onnx-caffe2>`_, a
-   pure-Python library which provides a Caffe2 backend for ONNX.  You can install ``onnx-caffe2``
-   with pip::
-
-      pip install onnx-caffe2
+To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need to install `caffe2`: If you don't have one already, Please `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
 
 Once these are installed, you can use the backend for Caffe2::
 
     # ...continuing from above
-    import onnx_caffe2.backend as backend
+    import caffe2.python.onnx.backend as backend
     import numpy as np
 
     rep = backend.prepare(model, device="CUDA:0") # or "CPU"
     # For the Caffe2 backend:
     #     rep.predict_net is the Caffe2 protobuf for the network
     #     rep.workspace is the Caffe2 workspace for the network
-    #       (see the class onnx_caffe2.backend.Workspace)
+    #       (see the class caffe2.python.onnx.backend.Workspace)
     outputs = rep.run(np.random.randn(10, 3, 224, 224).astype(np.float32))
     # To run networks with more than one input, pass a tuple
     # rather than a single numpy ndarray.
