@@ -55,6 +55,7 @@ public:
 
   cudaStream_t getCurrentCUDAStream() const;
   cudaDeviceProp* getCurrentDeviceProperties() const;
+  cudaDeviceProp* getDeviceProperties(int device) const;
 
   bool setFlushDenormal(bool on);
 
