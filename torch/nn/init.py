@@ -221,6 +221,7 @@ class XavierNormal(Initializer):
 class KaimingUniform(Initializer):
     def __init__(self, a=0, mode="fan_in"):
         gain = calculate_gain('leaky_relu', a)
+        gain = gain ** 2
         self.vs = VarianceScaling(
             scale=2., gain=gain,
             mode=mode,
@@ -234,6 +235,7 @@ class KaimingUniform(Initializer):
 class KaimingNormal(Initializer):
     def __init__(self, a=0, mode="fan_in"):
         gain = calculate_gain('leaky_relu', a)
+        gain = gain ** 2
         self.vs = VarianceScaling(
             scale=2., gain=gain,
             mode=mode,
@@ -295,9 +297,9 @@ def calculate_gain(nonlinearity, param=None):
     if nonlinearity in linear_fns or nonlinearity in non_linear_fns:
         return 1.
     elif nonlinearity == 'tanh':
-        return 25 / 9
+        return 5.0 / 3
     elif nonlinearity == 'relu':
-        return 2.0
+        return math.sqrt(2.0)
     elif nonlinearity == 'leaky_relu':
         if param is None:
             negative_slope = 0.01
@@ -306,7 +308,7 @@ def calculate_gain(nonlinearity, param=None):
             negative_slope = param
         else:
             raise ValueError("negative_slope {} not a valid number".format(param))
-        return 2.0 / (1 + negative_slope ** 2)
+        return math.sqrt(2.0 / (1 + negative_slope ** 2))
     else:
         raise ValueError("Unsupported nonlinearity {}".format(nonlinearity))
 
