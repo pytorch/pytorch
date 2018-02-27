@@ -460,7 +460,7 @@ class TestDistributions(TestCase):
         # check entropy computation
         self.assertEqual(Bernoulli(p).entropy().data, torch.Tensor([0.6108, 0.5004, 0.6730]), prec=1e-4)
         self.assertEqual(Bernoulli(torch.Tensor([0.0])).entropy(), torch.Tensor([0.0]))
-        self.assertEqual(Bernoulli(s).entropy(), torch.variable(0.6108), prec=1e-4)
+        self.assertEqual(Bernoulli(s).entropy(), torch.tensor(0.6108), prec=1e-4)
 
     def test_bernoulli_enumerate_support(self):
         examples = [
@@ -755,7 +755,7 @@ class TestDistributions(TestCase):
                                          failure_rate=1e-3)
 
         for probs in [0.001, 0.2, 0.999]:
-            equal_probs = torch.variable(0.5)
+            equal_probs = torch.tensor(0.5)
             dist = RelaxedBernoulli(1e10, probs)
             s = dist.rsample()
             self.assertEqual(equal_probs, s)
