@@ -112,7 +112,9 @@ void THPAutograd_initFunctions()
 
   auto c_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!c_module) throw python_error();
-  if (PyModule_AddObject(c_module, "_functions", module.release()) < 0) {
+
+  Py_INCREF(module);
+  if (PyModule_AddObject(c_module, "_functions", module) < 0) {
     throw python_error();
   }
 }
