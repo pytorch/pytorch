@@ -1325,7 +1325,9 @@ add_docstr(torch.erf,
            r"""
 erf(tensor, out=None) -> Tensor
 
-Computes the error function of each element.
+Computes the error function of each element. The error function is defined as follows:
+.. math::
+    \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 
 Example::
 
@@ -1337,7 +1339,10 @@ add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
 
-Computes the inverse error function of each element.
+Computes the inverse error function of each element. The inverse error function is defined
+in the range (-1, 1) as:
+.. math::
+    \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
 Example::
 
@@ -1349,7 +1354,12 @@ add_docstr(torch.exp,
            r"""
 exp(tensor, out=None) -> Tensor
 
-Computes the exponential of each element.
+Returns a new tensor with the exponential of the elements
+of :attr:`input`.
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -1361,7 +1371,15 @@ add_docstr(torch.expm1,
            r"""
 expm1(tensor, out=None) -> Tensor
 
-Computes the exponential of each element minus 1.
+Returns a new tensor with the exponential of the elements minus 1
+of :attr:`input`.
+
+.. math::
+    y_{i} = e^{x_{i}} - 1
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -1525,7 +1543,7 @@ add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor
 
-Computes `input >= other` element-wise.
+Computes :math:`input \geq other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -1936,7 +1954,7 @@ add_docstr(torch.le,
            r"""
 le(input, other, out=None) -> Tensor
 
-Computes `input <= other` element-wise.
+Computes :math:`input \leq other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2860,7 +2878,7 @@ add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
 
-Computes `input != other` element-wise.
+Computes :math:`input \neq other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
