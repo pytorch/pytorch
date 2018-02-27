@@ -137,7 +137,7 @@ static void check_is_dense(const Type& type) {
     std::ostringstream oss;
     oss << "new(..) on a dense tensor can only be called with a dense dtype, got: ";
     oss << torch::getDtype(type)->name;
-    throw std::runtime_error(oss.str());
+    throw TypeError(oss.str().c_str());
   }
 }
 
@@ -146,7 +146,7 @@ static void check_is_sparse(const Type& type) {
     std::ostringstream oss;
     oss << "new(..) on a spase tensor can only be called with a sparse dtype, got: ";
     oss << torch::getDtype(type)->name;
-    throw std::runtime_error(oss.str());
+    throw TypeError(oss.str().c_str());
   }
 }
 
