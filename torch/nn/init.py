@@ -18,15 +18,11 @@ class Initializer(object):
         if len(non_tensor_args) > 0:
             first = non_tensor_args[0]
         if first is None:
-            new_instance = object.__new__(cls)
-            return new_instance
+            return object.__new__(cls)
         if isinstance(first, torch.Tensor):
-            new_instance = object.__new__(cls)
-            new_instance.__init__(*non_tensor_args[1:], **non_tensor_kwargs)
-            new_instance(first)
+            cls(*non_tensor_args[1:], **non_tensor_kwargs)(first)
         else:
-            new_instance = object.__new__(cls)
-            return new_instance
+            return object.__new__(cls)
 
 ##########################
 # initializers
