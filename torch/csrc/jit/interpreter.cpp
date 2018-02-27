@@ -371,9 +371,9 @@ bool hasHandleOutput(Node * n) {
 
 Operation createPythonOperation(PythonOp* op) {
   py::function func;
-  try {
+  if (op->unpack_variables) {
     func = py::function(py::handle(op->pyobj.get()).attr("apply"));
-  } catch (std::exception e) {
+  } else {
     func = py::function(py::handle(op->pyobj.get()), true);
   }
   bool unpack_variables = op->unpack_variables;

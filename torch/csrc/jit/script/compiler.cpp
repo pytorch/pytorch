@@ -505,6 +505,7 @@ struct to_ir {
                           AttributeMap{}, ListAttributeMap{})->outputs();
         } else {
           const auto& inputs = getValues(apply.inputs());
+          // TODO emit ExternalCall
           NodeKind kind{apply.name().name()};
 
           AttributeMap attributes{};
