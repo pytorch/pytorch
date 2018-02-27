@@ -8,7 +8,7 @@ To build, clone and install scons
 brew install scons
 ```
 
-set ANDROID_NDK to /opt/android_ndk/xxx(e.g. 15c)
+set ANDROID_NDK to /opt/android_ndk/xxx(e.g. /opt/android_ndk/android-ndk-r15c/)
 
 setup toolchain:
 arm
