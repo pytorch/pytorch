@@ -823,7 +823,7 @@ const static auto cf_examples = R"JIT(
     c = a
 )JIT";
 void testControlFlow() {
-  script::CompilationUnit cu([](Graph* g, std::string s) { return py::function(); });
+  script::CompilationUnit cu;
   cu.define(cf_examples);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.getGraph(name);

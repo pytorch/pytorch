@@ -741,8 +741,8 @@ struct to_ir {
 };
 
 struct CompilationUnitImpl {
-  CompilationUnitImpl(ResolutionCallback rcb) : rcb(rcb) {}
-  void defineFunction(const Def& def) {
+  CompilationUnitImpl() {}
+  void defineFunction(const Def& def, ResolutionCallback rcb) {
     const auto& name = def.name().name();
 
     if (functions.count(name) > 0) {
@@ -753,10 +753,10 @@ struct CompilationUnitImpl {
     to_ir(it->second, functions, rcb);
   }
 
-  void define(const std::string& script) {
+  void define(const std::string& script, ResolutionCallback rcb) {
     Parser p(script);
     while (p.lexer().cur().kind != TK_EOF) {
-      defineFunction(Def(p.parseFunction()));
+      defineFunction(Def(p.parseFunction()), rcb);
     }
   }
 
@@ -770,17 +770,18 @@ struct CompilationUnitImpl {
  private:
   friend struct to_ir;
   FunctionTable functions;
-  ResolutionCallback rcb;
 };
 
-CompilationUnit::CompilationUnit(ResolutionCallback rcb) : pImpl(new CompilationUnitImpl(rcb)) {}
+CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
-void CompilationUnit::define(const std::string& script) {
-  return pImpl->define(script);
+void CompilationUnit::define(
+    const std::string& script,
+    ResolutionCallback rcb) {
+  return pImpl->define(script, rcb);
 }
 
-void CompilationUnit::defineFunction(const Def& def) {
-  return pImpl->defineFunction(def);
+void CompilationUnit::defineFunction(const Def& def, ResolutionCallback rcb) {
+  return pImpl->defineFunction(def, rcb);
 }
 
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
