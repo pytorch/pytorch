@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
@@ -13,6 +14,7 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
@@ -313,8 +315,31 @@ PyObject * THCPModule_maxMemoryCached(PyObject *_unused, PyObject *arg)
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
+static void bindCudaDeviceProperties(PyObject* module) {
+  // Add class and method to torch.cuda
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
+    .def_readonly("name", &cudaDeviceProp::name)
+    .def_readonly("major", &cudaDeviceProp::major)
+    .def_readonly("minor", &cudaDeviceProp::minor)
+    .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
+    .def_readonly("is_integrated", &cudaDeviceProp::integrated)
+    .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
+    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
+    .def("__repr__", [](const cudaDeviceProp &prop) {
+      std::ostringstream stream;
+      stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
+             << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+             << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
+      return stream.str();
+    });
+  m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
+    return at::globalContext().getDeviceProperties(device);
+  }, py::return_value_policy::reference);
+}
+
 // Callback for python part. Used for additional initialization of python classes
-PyObject * THCPModule_initExtension(PyObject *self)
+static PyObject * THCPModule_initExtension(PyObject *self)
 {
   HANDLE_TH_ERRORS
   state = at::globalContext().lazyInitCUDA();
@@ -357,6 +382,8 @@ PyObject * THCPModule_initExtension(PyObject *self)
   auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
   if (!_state_cdata) throw python_error();
   set_module_attr("_state_cdata", _state_cdata.get());
+
+  bindCudaDeviceProperties(m);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

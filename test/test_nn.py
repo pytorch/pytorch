@@ -1672,7 +1672,6 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_pad_scalar_error(self):
         inputs = variable(0, requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
