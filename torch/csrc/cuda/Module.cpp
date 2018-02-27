@@ -395,9 +395,10 @@ PyObject * THCPModule_initExtension(PyObject *self)
     .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
     .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
     .def("__repr__", [](const cudaDeviceProp &prop) {
-      return std::string(prop.name) + " | CUDA " + std::to_string(prop.major) + "."
-      + std::to_string(prop.minor) + " | Memory: " + std::to_string(prop.totalGlobalMem / 1000000)
-      + " MB | Processors: " + std::to_string(prop.multiProcessorCount);
+      char repr[256];
+      snprintf(repr, 256, "_CudaDeviceProperties(name=\"%s\", major=%d, minor=%d, total_memory=%dMB, multi_processor_count=%d)",
+        prop.name, prop.major, prop.minor, prop.totalGlobalMem / 1000000, prop.multiProcessorCount);
+      return std::string(repr);
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
     return at::globalContext().getDeviceProperties(device);
