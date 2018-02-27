@@ -98,16 +98,13 @@ class TestIndexing(TestCase):
         true = variable(1).byte()
         false = variable(0).byte()
 
-        tensors = [Variable(torch.randn(2, 3))]
-        if torch._C._with_scalars():
-            tensors.append(variable(3))
+        tensors = [Variable(torch.randn(2, 3)), variable(3)]
 
         for a in tensors:
             self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
             self.assertEqual(variable([]), a[False])
-            if torch._C._with_scalars():
-                self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
-                self.assertEqual(variable([]), a[false])
+            self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
+            self.assertEqual(variable([]), a[false])
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
@@ -115,9 +112,7 @@ class TestIndexing(TestCase):
         true = variable(1).byte()
         false = variable(0).byte()
 
-        tensors = [Variable(torch.randn(2, 3))]
-        if torch._C._with_scalars():
-            tensors.append(variable(3))
+        tensors = [Variable(torch.randn(2, 3)), variable(3)]
 
         for a in tensors:
             # prefix with a 1,1, to ensure we are compatible with numpy which cuts off prefix 1s
@@ -128,11 +123,10 @@ class TestIndexing(TestCase):
             self.assertEqual(a, neg_ones)
             a[False] = 5
             self.assertEqual(a, neg_ones)
-            if torch._C._with_scalars():
-                a[true] = neg_ones_expanded * 2
-                self.assertEqual(a, neg_ones * 2)
-                a[false] = 5
-                self.assertEqual(a, neg_ones * 2)
+            a[true] = neg_ones_expanded * 2
+            self.assertEqual(a, neg_ones * 2)
+            a[false] = 5
+            self.assertEqual(a, neg_ones * 2)
             a[None] = neg_ones_expanded * 3
             self.assertEqual(a, neg_ones * 3)
             a[...] = neg_ones_expanded * 4
@@ -151,7 +145,6 @@ class TestIndexing(TestCase):
         with self.assertRaises(RuntimeError):
             a[true] = torch.autograd.Variable(a_expanded)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_getitem_scalars(self):
         zero = variable(0).long()
         one = variable(1).long()
@@ -171,7 +164,6 @@ class TestIndexing(TestCase):
             r[zero]
         self.assertEqual(r, r[...])
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_setitem_scalars(self):
         zero = variable(0).long()
 
@@ -250,7 +242,6 @@ class TestIndexing(TestCase):
         x = Variable(torch.arange(0, 16).view(4, 4))
         self.assertRaisesRegex(TypeError, 'slice indices', lambda: x["0":"1"])
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_zero_dim_index(self):
         # We temporarily support indexing a zero-dim tensor as if it were
         # a one-dim tensor to better maintain backwards compatibility.

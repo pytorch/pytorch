@@ -43,18 +43,6 @@ class non_differentiable(object):
         self.tensor = tensor
 
 
-def skipIfNoScalars(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            fn(*args, **kwargs)
-        except Exception:
-            if not torch._C._with_scalars():
-                raise unittest.SkipTest('Compiled without Scalars')
-            raise
-    return wrapper
-
-
 @contextlib.contextmanager
 def backward_engine(engine):
     _prev_engine = Variable._execution_engine
@@ -2199,7 +2187,7 @@ method_tests = [
     ('view', (S, S, S), (S * S, S),),
     ('view', (S, S, S), (torch.Size([S * S, S]),), 'size'),
     ('view', (S,), (S,), '1d'),
-    ('view', (), (dont_convert(()),), 'scalar_to_scalar', NO_ARGS, [skipIfNoScalars]),
+    ('view', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('view', (), (1,), 'scalar_to_1d'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(variable(5.5)),), 'scalar'),
@@ -2209,7 +2197,7 @@ method_tests = [
     ('expand', (S, 1), (S, S, S), 'new_dim'),
     ('expand', (1,), (S, S, S), '1_element'),
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
-    ('expand', (), (dont_convert(()),), 'scalar_to_scalar', NO_ARGS, [skipIfNoScalars]),
+    ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('expand', (), (1, 3, 2), 'scalar_to_dims'),
     ('exp', (S, S, S), NO_ARGS),
     ('exp', (), NO_ARGS, 'scalar'),
@@ -2527,24 +2515,24 @@ method_tests = [
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
     # FIXME: we should compute the derivative w.r.t variable(2)
     ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(variable(2))),
-     'variable_dim', [0], [skipIfNoScalars]),
+     'variable_dim', [0]),
     ('index_fill', (S, S), (0, variable(0).long(), 2), 'scalar_index_dim', [0]),
     ('index_fill', (), (0, variable([0]).long(), 2), 'scalar_input_dim', [0]),
     ('index_fill', (), (0, variable(0).long(), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric'),
+    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null'),
+    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1'),
+    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2'),
     ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
      'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, ''),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t variable(1)
-    ('fill_', (S, S, S), (non_differentiable(variable(1)),), 'variable', NO_ARGS, [skipIfNoScalars]),
+    ('fill_', (S, S, S), (non_differentiable(variable(1)),), 'variable'),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq_', (), ((),), 'scalar'),
@@ -2582,7 +2570,7 @@ method_tests = [
     ('lt_', (), (0,), 'pyscalar_scalar'),
     ('le_', (), (0,), 'pyscalar_scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
-    ('permute', (), (dont_convert(()),), 'scalar', NO_ARGS, [skipIfNoScalars]),
+    ('permute', (), (dont_convert(()),), 'scalar'),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
@@ -2621,12 +2609,12 @@ method_tests = [
     ('masked_select', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'scalar_broadcast_lhs'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)),
-     'variable', NO_ARGS, [skipIfNoScalars]),
+     'variable'),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
     ('masked_fill', (), (variable(0, requires_grad=False).byte().bernoulli_(), 10), 'scalar'),
     ('masked_fill', (), (variable(0, requires_grad=False).byte().bernoulli_(), variable(10)),
-     'scalar_variable', NO_ARGS, [skipIfNoScalars]),
+     'scalar_variable'),
     ('masked_fill', (M, M), (variable(0, requires_grad=False).byte().bernoulli_(), 10), 'scalar_broadcast_rhs'),
     ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
     ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
@@ -2635,7 +2623,7 @@ method_tests = [
     ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
      'scalar_broadcast_rhs'),
     ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
-    ('resize_', (), (dont_convert(()),), 'scalar', NO_ARGS, [skipIfNoScalars]),
+    ('resize_', (), (dont_convert(()),), 'scalar'),
     ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
     ('resize_as_', (), (non_differentiable(variable(5)),), 'scalar'),
     ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
@@ -2826,15 +2814,6 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
 
 
-def has_scalars(output, args):
-    def ensure_tuple(y):
-        return y if isinstance(y, tuple) else (y,)
-
-    # include _with_scalars so we can easily find and remove this
-    all_tuple = args + ensure_tuple(output)
-    return torch._C._with_scalars() and any(x.dim() == 0 for x in all_tuple if isinstance(x, Variable))
-
-
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
                           f_args_variable, f_args_tensor):
     output_variable = apply_fn(*f_args_variable)
@@ -2876,14 +2855,11 @@ for test in method_tests:
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the szie (e.g. unsqueeze)
-                self_is_scalar = torch._C._with_scalars() and self_variable.dim() == 0
                 args_variable = create_input(args, requires_grad=not is_inplace)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                # scalar API doesn't work on tensors
-                has_scalar = has_scalars(output_variable, args_variable) or self_is_scalar
-                if not exclude_tensor_method(name, test_name) and not has_scalar:
+                if not exclude_tensor_method(name, test_name):
                     output_tensor = getattr(self_tensor, name)(*args_tensor)
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))
