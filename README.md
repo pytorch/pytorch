@@ -180,7 +180,7 @@ conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml setuptools cmake cffi
+conda install numpy pyyaml setuptools cmake cffi typing
 ```
 #### Get the PyTorch source
 ```bash
