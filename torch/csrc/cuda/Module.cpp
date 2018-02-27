@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
@@ -395,10 +396,11 @@ PyObject * THCPModule_initExtension(PyObject *self)
     .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
     .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
     .def("__repr__", [](const cudaDeviceProp &prop) {
-      char repr[256];
-      snprintf(repr, 256, "_CudaDeviceProperties(name=\"%s\", major=%d, minor=%d, total_memory=%dMB, multi_processor_count=%d)",
-        prop.name, prop.major, prop.minor, prop.totalGlobalMem / 1000000, prop.multiProcessorCount);
-      return std::string(repr);
+      std::ostringstream stream;
+      stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
+             << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+             << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
+      return stream.str();
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
     return at::globalContext().getDeviceProperties(device);
