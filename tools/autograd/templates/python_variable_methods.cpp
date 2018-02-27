@@ -520,26 +520,31 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
+    "type(Type dtype, bool non_blocking=False)",
     "type(PyObject* new_type=None, bool non_blocking=False)",
     "type(PyObject* new_type=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
   auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.isNone(0)) {
-    return THPUtils_packString(torch::utils::type_to_string(self_.type()));
+  if (r.idx == 0) {
+    return THPVariable_Wrap(dispatch_type(self_, r.type(0),  -1, r.toBool(1)));
+  } else if (r.idx == 1 || r.idx == 2) {
+    if (r.isNone(0)) {
+      return THPUtils_packString(torch::utils::type_to_string(self_.type()));
+    }
+    auto obj = r.pyobject(0);
+    std::string type_name;
+    if (PyType_Check(obj)) {
+      type_name = ((PyTypeObject*)obj)->tp_name;
+    } else if (THPUtils_checkString(obj)) {
+      type_name = THPUtils_unpackString(obj);
+    } else {
+      throw TypeError("new_type must be a type or str object");
+    }
+    auto& type = torch::utils::type_from_string(type_name);
+    return THPVariable_Wrap(dispatch_type(self_, type, -1, r.toBool(1)));
   }
-  auto obj = r.pyobject(0);
-  std::string type_name;
-  if (PyType_Check(obj)) {
-    type_name = ((PyTypeObject*)obj)->tp_name;
-  } else if (THPUtils_checkString(obj)) {
-    type_name = THPUtils_unpackString(obj);
-  } else {
-    throw TypeError("new_type must be a type or str object");
-  }
-  auto& type = torch::utils::type_from_string(type_name);
-  return THPVariable_Wrap(dispatch_type(self_, type, -1, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
