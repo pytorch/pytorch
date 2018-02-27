@@ -1,9 +1,9 @@
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/generated/aten_dispatch.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/jit/generated/aten_dispatch.h"
 
 #include <Python.h>
 #include <climits>
@@ -169,7 +169,10 @@ struct Environment {
 };
 
 struct to_ir {
-  to_ir(FunctionDefinition& def, FunctionTable& function_table, Resolver* resolver)
+  to_ir(
+      FunctionDefinition& def,
+      FunctionTable& function_table,
+      Resolver* resolver)
       : def(def), function_table(function_table), resolver(resolver) {
     environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
@@ -534,8 +537,8 @@ struct to_ir {
                 break;
             }
           }
-          auto n = emitNode(
-                     kind, tree->range(), inputs, output_size, attributes, list_attributes);
+          auto n =
+              emitNode(kind, inputs->range(), output_size, attributes, list_attributes);
           std::vector<Value*> outputs = n->outputs();
           if (!findTensorOp(n) && resolver) {
             outputs = resolver->resolveCall(tree->range(), n);
@@ -698,7 +701,7 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  Resolver *resolver;
+  Resolver* resolver;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -746,9 +749,7 @@ struct CompilationUnitImpl {
 
 CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
-void CompilationUnit::define(
-    const std::string& script,
-    Resolver* resolver) {
+void CompilationUnit::define(const std::string& script, Resolver* resolver) {
   return pImpl->define(script, resolver);
 }
 

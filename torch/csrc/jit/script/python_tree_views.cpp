@@ -74,10 +74,9 @@ void initTreeViewBindings(PyObject *module) {
     });
 
   py::class_<Ident, TreeView>(m, "Ident")
-    .def(py::init(&Ident::create))
-    .def_property_readonly("name", [](const Ident& self) {
-      return self.name();
-    });
+      .def(py::init(&Ident::create))
+      .def_property_readonly(
+          "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
     .def(py::init([](const Type& type, const Ident& name) {
