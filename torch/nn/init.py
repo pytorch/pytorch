@@ -13,8 +13,21 @@ class Initializer(object):
     """
     Base class for all initializations.
     """
-    def __call__(self, tensor):
-        raise NotImplementedError
+    def __new__(cls, *non_tensor_args, **non_tensor_kwargs):
+        first = None
+        if len(non_tensor_args) > 0:
+            first = non_tensor_args[0]
+        if first is not None:
+            if isinstance(first, torch.Tensor):
+                new_instance = object.__new__(cls)
+                new_instance.__init__(*non_tensor_args, **non_tensor_kwargs)
+                new_instance(tensor_arg)
+            else:
+                new_instance = object.__new__(cls)
+                return new_instance
+        else:
+            new_instance = object.__new__(cls)
+            return new_instance
 
 ##########################
 # initializers
@@ -145,7 +158,7 @@ class Sparse(Initializer):
         return tensor
 
 
-class VarianceScaling(Initializer):
+class VarianceScaling(object):
     def __init__(self, scale, gain, mode, distribution):
         if scale < 0.:
             raise ValueError('`scale` must be a positive float.')
@@ -326,6 +339,6 @@ def _calculate_fan_in_and_fan_out(tensor):
 def get(identifier):
     if isinstance(identifier, str):
         func = globals()[identifier]
-        return func if isinstance(func, types.FunctionType) else func()
+        return func
     elif callable(identifier):
         return identifier
