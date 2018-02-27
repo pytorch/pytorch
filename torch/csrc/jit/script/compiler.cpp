@@ -169,8 +169,8 @@ struct Environment {
 };
 
 struct to_ir {
-  to_ir(FunctionDefinition& def, FunctionTable& function_table, ResolutionCallback rcb)
-      : def(def), function_table(function_table), rcb(rcb) {
+  to_ir(FunctionDefinition& def, FunctionTable& function_table, Resolver* resolver)
+      : def(def), function_table(function_table), resolver(resolver) {
     environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
@@ -458,35 +458,6 @@ struct to_ir {
     }
   }
 
-  Node* specializeExternalCall(Node *n, const TreeRef& tree) {
-    AutoGIL ag;
-    py::function func;
-    try {
-      func = rcb(n->owningGraph(), n->kind().toString());
-    } catch (std::exception e) {
-      throw ErrorReport(tree) << "Unknown function " << n->kind().toString();
-    }
-    auto* py_func = func.ptr();
-    // Release the function object so we can wrap it in a PythonOp
-    pybind11::handle h = func.release();
-    std::string cconv;
-    for (const auto& i : n->inputs()) {
-      cconv += "t";
-    }
-    Node* new_node = n->owningGraph()->createPythonOp(
-        THPObjectPtr(h.ptr()), cconv, false, {}, {}, false);
-    new_node->insertBefore(n);
-    for (const auto i : n->inputs()) {
-      new_node->addInput(i);
-    }
-    for (const auto o : n->outputs()) {
-      new_node->addOutput();
-    }
-    n->replaceAllUsesWith(new_node);
-    n->destroy();
-    return new_node;
-  }
-
   // This will _always_ compute something, unlike 'getValue' which simply
   // returns an already computed reference if possible.
   std::vector<Value*> emitExpr(
@@ -565,10 +536,11 @@ struct to_ir {
           }
           auto n = emitNode(
                      kind, tree->range(), inputs, output_size, attributes, list_attributes);
-          if (!findTensorOp(n)) {
-            n = specializeExternalCall(n, tree);
+          std::vector<Value*> outputs = n->outputs();
+          if (!findTensorOp(n) && resolver) {
+            outputs = resolver->resolveCall(tree->range(), n);
           }
-          return n->outputs();
+          return outputs;
         }
       } break;
       case TK_CAST: {
@@ -726,7 +698,7 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  ResolutionCallback rcb;
+  Resolver *resolver;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -742,7 +714,7 @@ struct to_ir {
 
 struct CompilationUnitImpl {
   CompilationUnitImpl() {}
-  void defineFunction(const Def& def, ResolutionCallback rcb) {
+  void defineFunction(const Def& def, Resolver* resolver) {
     const auto& name = def.name().name();
 
     if (functions.count(name) > 0) {
@@ -750,13 +722,13 @@ struct CompilationUnitImpl {
     }
 
     auto it = functions.emplace(name, FunctionDefinition{def}).first;
-    to_ir(it->second, functions, rcb);
+    to_ir(it->second, functions, resolver);
   }
 
-  void define(const std::string& script, ResolutionCallback rcb) {
+  void define(const std::string& script, Resolver* resolver) {
     Parser p(script);
     while (p.lexer().cur().kind != TK_EOF) {
-      defineFunction(Def(p.parseFunction()), rcb);
+      defineFunction(Def(p.parseFunction()), resolver);
     }
   }
 
@@ -776,12 +748,12 @@ CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
 void CompilationUnit::define(
     const std::string& script,
-    ResolutionCallback rcb) {
-  return pImpl->define(script, rcb);
+    Resolver* resolver) {
+  return pImpl->define(script, resolver);
 }
 
-void CompilationUnit::defineFunction(const Def& def, ResolutionCallback rcb) {
-  return pImpl->defineFunction(def, rcb);
+void CompilationUnit::defineFunction(const Def& def, Resolver* resolver) {
+  return pImpl->defineFunction(def, resolver);
 }
 
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
@@ -790,10 +762,10 @@ std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
 
 CompilationUnit::~CompilationUnit() {}
 
-std::shared_ptr<Graph> jitScriptCompile(Def def, ResolutionCallback rcb) {
+std::shared_ptr<Graph> jitScriptCompile(Def def, Resolver* resolver) {
   FunctionTable empty;
   FunctionDefinition fd(def);
-  to_ir(fd, empty, rcb);
+  to_ir(fd, empty, resolver);
   return fd.graph;
 }
 

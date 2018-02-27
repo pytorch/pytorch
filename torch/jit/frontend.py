@@ -123,7 +123,7 @@ def get_jit_ast(fn, rcb):
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
         raise RuntimeError("expected a single top-level function")
-    return build_def(SourceRangeFactory(source, rcb), py_ast.body[0])
+    return build_def(SourceRangeFactory(source), py_ast.body[0])
 
 
 class Builder(object):

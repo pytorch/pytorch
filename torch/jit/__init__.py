@@ -464,8 +464,8 @@ def createResolutionCallback(frame_id=2):
         if key not in frame.f_locals:
             try:
                 return frame.f_globals[key]
-            except:
-                raise RuntimeError("Unknown function {}".format(key))
+            except KeyError:
+                return None
         else:
             return frame.f_locals[key]
 

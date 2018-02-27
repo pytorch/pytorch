@@ -13,9 +13,8 @@ namespace py = pybind11;
 namespace torch { namespace jit { namespace script {
 
 struct SourceRangeFactory {
-  SourceRangeFactory(std::string source, ResolutionCallback rcb)
-    : source_(std::make_shared<std::string>(std::move(source))),
-      rcb_(rcb) {
+  SourceRangeFactory(std::string source)
+    : source_(std::make_shared<std::string>(std::move(source))) {
     std::size_t pos = 0;
     do {
       line_len_prefix_sum_.push_back(pos);
@@ -35,7 +34,6 @@ struct SourceRangeFactory {
 
   std::shared_ptr<std::string> source_;
   std::vector<std::size_t> line_len_prefix_sum_;
-  ResolutionCallback rcb_;
 };
 
 template<typename T>
@@ -58,16 +56,13 @@ void initTreeViewBindings(PyObject *module) {
     .def_property_readonly("start", &SourceRange::start)
     .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-    .def(py::init<std::string&&, ResolutionCallback>())
+    .def(py::init<std::string&&>())
     .def("make_range", &SourceRangeFactory::create)
     .def("make_raw_range", [](const SourceRangeFactory& self, size_t start, size_t end) {
       return SourceRange(self.source_, start, end);
     })
     .def_property_readonly("source", [](const SourceRangeFactory& self) {
       return *self.source_;
-    })
-    .def_property_readonly("rcb", [](const SourceRangeFactory& self) {
-      return self.rcb_;
     });
 
   py::class_<TreeView>(m, "TreeView")

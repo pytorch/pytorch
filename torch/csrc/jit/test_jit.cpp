@@ -824,7 +824,7 @@ const static auto cf_examples = R"JIT(
 )JIT";
 void testControlFlow() {
   script::CompilationUnit cu;
-  cu.define(cf_examples);
+  cu.define(cf_examples, nullptr);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.getGraph(name);
     Code code(graph,  /*constants_are_variables=*/false);
