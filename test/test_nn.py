@@ -301,7 +301,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 module.double().cuda()
                 module(input)
                 for p in module.parameters():
-                    test_case.assertEqual(type(p.data), torch.cuda.DoubleTensor)
+                    test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
                     test_case.assertEqual(p.get_device(), 0)
 
                 # test half()
@@ -309,7 +309,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 module.half().cuda()
                 module(input)
                 for o in module.parameters():
-                    test_case.assertEqual(type(p.data), torch.cuda.HalfTensor)
+                    test_case.assertIsInstance(p, torch.cuda.HalfTensor)
                     test_case.assertEqual(p.get_device(), 0)
 
     def _get_target(self):
@@ -373,7 +373,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             if dtype is not None:
                 cpu_input = convert_dtype(cpu_input, dtype, True)
                 # NLLLoss requires target to be LongTensor
-                if type(cpu_target.data) != torch.LongTensor:
+                if not isinstance(cpu_target, torch.LongTensor):
                     cpu_target = convert_dtype(cpu_target, dtype)
                 cpu_module.type(dtype)
                 gpu_module.type(dtype)
