@@ -458,8 +458,10 @@ def trace(*args, **kwargs):
     """
     return lambda func: torch._C.GraphExecutor(func, args, kwargs.pop('optimize', True))
 
+
 def createResolutionCallback(frame_id=2):
     frame = inspect.stack()[frame_id][0]
+
     def env(graph, key):
         if key not in frame.f_locals:
             try:
@@ -470,6 +472,7 @@ def createResolutionCallback(frame_id=2):
             return frame.f_locals[key]
 
     return env
+
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
