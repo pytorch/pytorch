@@ -40,9 +40,6 @@
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
-#   WITH_SCALARS
-#     build with native support for scalars (zero-dim tensors)
-#
 #   PYTORCH_BINARY_BUILD
 #     toggle static linking against libstdc++, used when we're building
 #     binaries for distribution
@@ -114,10 +111,6 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
-
-if 'WITH_SCALARS' not in os.environ:
-    os.environ['WITH_SCALARS'] = '1'
-WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
@@ -722,9 +715,6 @@ if DEBUG:
     else:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
-
-if WITH_SCALARS:
-    extra_compile_args += ['-DWITH_SCALARS']
 
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
