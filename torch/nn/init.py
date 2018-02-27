@@ -17,14 +17,13 @@ class Initializer(object):
         first = None
         if len(non_tensor_args) > 0:
             first = non_tensor_args[0]
-        if first is not None:
-            if isinstance(first, torch.Tensor):
-                new_instance = object.__new__(cls)
-                new_instance.__init__(*non_tensor_args, **non_tensor_kwargs)
-                new_instance(tensor_arg)
-            else:
-                new_instance = object.__new__(cls)
-                return new_instance
+        if first is None:
+            new_instance = object.__new__(cls)
+            return new_instance
+        if isinstance(first, torch.Tensor):
+            new_instance = object.__new__(cls)
+            new_instance.__init__(*non_tensor_args[1:], **non_tensor_kwargs)
+            new_instance(first)
         else:
             new_instance = object.__new__(cls)
             return new_instance
