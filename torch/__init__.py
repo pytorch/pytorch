@@ -219,9 +219,6 @@ def manager_path():
 _C._initExtension(manager_path())
 del manager_path
 
-_C._initialize_dtypes()
-_C._initialize_tensor_type_bindings()
-
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
 
