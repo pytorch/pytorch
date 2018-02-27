@@ -100,7 +100,6 @@ from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, 
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from tools.setup_helpers.nnpack import WITH_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
-from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
@@ -220,10 +219,6 @@ def build_libs(libs):
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
-
-    if 'ATen' in libs:
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers()
 
 
 class build_deps(Command):
@@ -394,29 +389,6 @@ class build_ext(build_ext_parent):
 
             _C_LIB = os.path.join(build_temp, build_dir, lib_filename).replace('\\', '/')
 
-            THNN.extra_link_args += [_C_LIB]
-            if WITH_CUDA:
-                THCUNN.extra_link_args += [_C_LIB]
-            else:
-                # To generate .obj files for those .h files for the export class
-                # a header file cannot build, so it has to be copied to someplace as a source file
-                temp_dir = 'torch/csrc/generated'
-                hfile_list = ['torch/csrc/cuda/AutoGPU.h']
-                hname_list = [os.path.basename(hfile) for hfile in hfile_list]
-                rname_list = [os.path.splitext(hname)[0]
-                              for hname in hname_list]
-                cfile_list = [temp_dir + '/' + rname +
-                              '_cpu_win.cpp' for rname in rname_list]
-
-                if not os.path.exists(temp_dir):
-                    os.mkdir(temp_dir)
-
-                for hfile, cfile in zip(hfile_list, cfile_list):
-                    if os.path.exists(cfile):
-                        os.remove(cfile)
-                    shutil.copyfile(hfile, cfile)
-
-                C.sources += cfile_list
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
@@ -541,7 +513,6 @@ main_sources = [
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
-    "torch/csrc/expand_utils.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -616,11 +587,11 @@ main_sources = [
     "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/nn/THNN.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
 ]
-main_sources += split_types("torch/csrc/Tensor.cpp", ninja_global)
 
 try:
     import numpy as np
@@ -680,15 +651,13 @@ if WITH_CUDA:
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Stream.cpp",
-        "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/expand_utils.cpp",
         "torch/csrc/cuda/lazy_init.cpp",
         "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/nn/THCUNN.cpp",
     ]
-    main_sources += split_types("torch/csrc/cuda/Tensor.cpp", ninja_global)
 
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
@@ -762,17 +731,6 @@ if not IS_WINDOWS:
                    )
     extensions.append(DL)
 
-THNN = Extension("torch._thnn._THNN",
-                 sources=['torch/csrc/nn/THNN.cpp'],
-                 language='c++',
-                 extra_compile_args=extra_compile_args,
-                 include_dirs=include_dirs,
-                 extra_link_args=extra_link_args + [
-                     ATEN_LIB,
-                     make_relative_rpath('../lib'),
-                 ]
-                 )
-extensions.append(THNN)
 
 if WITH_CUDA:
     thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
@@ -796,18 +754,6 @@ if WITH_CUDA:
                         extra_link_args=thnvrtc_link_flags,
                         )
     extensions.append(THNVRTC)
-
-    THCUNN = Extension("torch._thnn._THCUNN",
-                       sources=['torch/csrc/nn/THCUNN.cpp'],
-                       language='c++',
-                       extra_compile_args=extra_compile_args,
-                       include_dirs=include_dirs,
-                       extra_link_args=extra_link_args + [
-                           ATEN_LIB,
-                           make_relative_rpath('../lib'),
-                       ]
-                       )
-    extensions.append(THCUNN)
 
 version = '0.4.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):

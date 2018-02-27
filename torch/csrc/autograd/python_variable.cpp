@@ -14,7 +14,6 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/cuda/AutoGPU.h"
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/tensor/python_tensor.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -150,8 +149,6 @@ PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
     // by nn.Parameter() with no arguments.
     auto var = torch::tensor::get_default_tensor_type().tensor();
     tensor = static_cast<Variable&>(var).data();
-  } else if (THPModule_isTensor(data)) {
-    tensor = torch::createTensor(data);
   } else if (THPVariable_Check(data)) {
     tensor = ((THPVariable*)data)->cdata.data();
   } else {
