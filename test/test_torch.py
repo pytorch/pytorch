@@ -1100,6 +1100,8 @@ class TestTorch(TestCase):
         torch.set_default_tensor_type('torch.IntTensor')
         self.assertIs(torch.int32, torch.Tensor.dtype)
         self.assertIs(torch.int32, torch.IntTensor.dtype)
+        torch.set_default_tensor_type(torch.int64)
+        self.assertIs(torch.int64, torch.Tensor.dtype)
         torch.set_default_tensor_type(default_type)
 
     def test_tensor_factory(self):

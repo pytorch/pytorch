@@ -280,15 +280,27 @@ static bool PyTensorType_Check(PyObject* obj) {
   return it != tensor_types.end();
 }
 
+static PyTensorType *get_tensor_type(THPDtype *obj) {
+  auto it = std::find_if(tensor_types.begin(), tensor_types.end(),
+    [obj](const PyTensorType& x) {
+      return x.dtype == obj;
+    });
+  return it == tensor_types.end() ? nullptr : &(*it);
+}
+
 void set_default_tensor_type(const at::Type& type) {
   set_type(*default_tensor_type, type.backend(), type.scalarType());
 }
 
 void py_set_default_tensor_type(PyObject* obj) {
-  if (!PyTensorType_Check(obj)) {
+  PyTensorType *type;
+  if (PyTensorType_Check(obj)) {
+    type = (PyTensorType*)obj;
+  } else if (THPDtype_Check(obj)) {
+    type = get_tensor_type((THPDtype*)obj);
+  } else {
     throw TypeError("invalid type object");
   }
-  auto type = (PyTensorType*)obj;
   if (!type->aten_type) {
     throw unavailable_type(*type);
   }
