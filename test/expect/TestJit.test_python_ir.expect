@@ -1,9 +1,9 @@
-graph(%0 : UNKNOWN_TYPE
-      %1 : UNKNOWN_TYPE) {
+graph(%0 : Dynamic
+      %1 : Dynamic) {
   %2 : Double(1) = add[alpha={1}](%0, %1)
   %3 : Double(1) = mul(%0, %2)
   %4 : Double(1) = tanh(%3)
   %5 : Double(1) = sigmoid(%4)
-  %6 : UNKNOWN_TYPE = TensorTest[a= 1  1  1  1 [ CPUDoubleTensor{2,2} ]]()
+  %6 : Dynamic = TensorTest[a= 1  1  1  1 [ CPUDoubleTensor{2,2} ]]()
   return (%5);
 }

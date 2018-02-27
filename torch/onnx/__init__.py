@@ -106,7 +106,7 @@ def _trace(func, args, return_outs=False, aten=False):
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
 
-    trace, torch_out = torch.jit.trace(func, args)
+    trace, torch_out = torch.jit.get_trace_graph(func, args)
     _optimize_trace(trace, aten)
     if return_outs:
         return trace, torch_out
@@ -129,7 +129,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace, torch_out = torch.jit.trace(model, args)
+        trace, torch_out = torch.jit.get_trace_graph(model, args)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
         raise RuntimeError("state_dict changed after running the tracer; "

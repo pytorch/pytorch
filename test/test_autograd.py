@@ -1341,6 +1341,7 @@ class TestAutograd(TestCase):
                 y = Variable(y) if y_var else y
                 self.assertIsInstance(x.type(t).data, t)
                 self.assertIsInstance(x.type_as(y).data, t)
+                self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
                 if torch.cuda.is_available():
                     for x_cuda in (True, False):
                         for y_cuda in (True, False):
@@ -1349,6 +1350,7 @@ class TestAutograd(TestCase):
                             _, y_type = y_c.type().rsplit('.', 1)
                             y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type
                             self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
+                            self.assertEqual(y_c.data_ptr(), y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr())
 
         self._test_type_conversion_backward(lambda x: x)
         if torch.cuda.is_available():

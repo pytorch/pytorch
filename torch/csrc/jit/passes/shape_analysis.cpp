@@ -9,9 +9,9 @@
 namespace torch { namespace jit {
 
 namespace {
-void SetUnknownType(Node * node) {
+void setDynamicType(Node * node) {
   for(auto o : node->outputs()) {
-    o->setType(nullptr);
+    o->setType(DynamicType::get());
   }
 }
 
@@ -21,19 +21,40 @@ at::Tensor representativeTensor(const TensorType * type) {
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }
 
+void PropagateShapeOnBlock(Block * block);
+
+std::pair<std::vector<TensorType*>, bool> gatherTypes(at::ArrayRef<Value*> values) {
+  std::vector<TensorType*> types;
+  bool present = true;
+  for(auto v : values) {
+    TensorType* type = v->type()->cast<TensorType>();
+    if(!type)
+      present = false;
+    types.push_back(type);
+  }
+  return std::make_pair(std::move(types), present);
+}
+
+bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> outputs) {
+  JIT_ASSERT(lhs.size() == rhs.size() && rhs.size() == outputs.size());
+  bool changed = false;
+  for(size_t i = 0; i < lhs.size(); ++i) {
+    if(*lhs[i]->type() == *rhs[i]->type()) {
+      outputs[i]->setType(lhs[i]->type());
+    } else {
+      outputs[i]->setType(DynamicType::get());
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 void PropagateShapeOnNode(Node * node) {
   std::vector<TensorType*> types;
-  // get all the input types, propagate unknown types if we don't have
-  // valid tensor types for the inputs
-  for(auto input : node->inputs()) {
-    if(!input->hasType()) {
-      return SetUnknownType(node);
-    }
-    if(TensorType * t = input->type()->cast<TensorType>()) {
-      types.push_back(t);
-    } else {
-      return SetUnknownType(node);
-    }
+  bool present;
+  std::tie(types, present) = gatherTypes(node->inputs());
+  if(!present) {
+    return setDynamicType(node);
   }
 
   switch(node->kind()) {
@@ -117,7 +138,34 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->inferTypeFrom(node->t(kvalue));
     } break;
     case kUndefined: {
-      node->output()->setType(nullptr);
+      node->output()->setType(DynamicType::get());
+    } break;
+    case kIf: {
+      auto then_block = node->blocks()[0];
+      auto else_block = node->blocks()[1];
+      PropagateShapeOnBlock(then_block);
+      PropagateShapeOnBlock(else_block);
+      mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
+    } break;
+    case kLoop: {
+      auto body_block = node->blocks()[0];
+      // propagate counter type
+      body_block->inputs()[0]->setType(node->inputs()[0]->type());
+      // propagate loop-carried input types to block inputs
+      auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
+      auto loop_carried_block = body_block->inputs().slice(1); // skip trip
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
+      }
+      auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
+
+      do {
+        PropagateShapeOnBlock(body_block);
+      } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        node->outputs()[i]->setType(loop_carried_block[i]->type());
+      }
     } break;
     default: {
       auto op_info = getTensorOp(node);
@@ -137,9 +185,6 @@ void PropagateShapeOnNode(Node * node) {
 void PropagateShapeOnBlock(Block * block) {
   for (Node * node : block->nodes()) {
     PropagateShapeOnNode(node);
-    for (Block * sub_block : node->blocks()) {
-      PropagateShapeOnBlock(sub_block);
-    }
   }
 }
 

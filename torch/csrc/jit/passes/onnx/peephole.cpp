@@ -108,7 +108,7 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     // always have this information (because expands are only ever traced,
     // not generated from symbolic), but if for some reason we don't
     // have it, we need to skip.
-    if (!unexpanded_rhs->hasType()) continue;
+    if (!unexpanded_rhs->isTensor()) continue;
 
     // Not all broadcasts are supported by ONNX broadcast.
     if (!fusibleExpandTo(unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from

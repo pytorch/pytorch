@@ -1,77 +1,77 @@
 testBlocks
-graph(%a : UNKNOWN_TYPE
-      %b : UNKNOWN_TYPE
-      %c : UNKNOWN_TYPE) {
-  %2 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
-  %4 : UNKNOWN_TYPE = If(%c)
+graph(%a : Dynamic
+      %b : Dynamic
+      %c : Dynamic) {
+  %2 : Dynamic = add[alpha={1}](%a, %b)
+  %4 : Dynamic = If(%c)
     block0() {
-      %5 : UNKNOWN_TYPE = add[alpha={1}](%2, %2)
+      %5 : Dynamic = add[alpha={1}](%2, %2)
       -> (%5)
     }
     block1() {
-      %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
-      %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %2)
+      %6 : Dynamic = add[alpha={1}](%b, %2)
+      %7 : Dynamic = add[alpha={1}](%6, %2)
       -> (%7)
     }
-  %8 : UNKNOWN_TYPE = add[alpha={1}](%4, %2)
+  %8 : Dynamic = add[alpha={1}](%4, %2)
   return (%8);
 }
 
-graph(%a : UNKNOWN_TYPE
-      %b : UNKNOWN_TYPE
-      %c : UNKNOWN_TYPE) {
-  %2 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
-  %4 : UNKNOWN_TYPE = If(%c)
+graph(%a : Dynamic
+      %b : Dynamic
+      %c : Dynamic) {
+  %2 : Dynamic = add[alpha={1}](%a, %b)
+  %4 : Dynamic = If(%c)
     block0() {
-      %6 : UNKNOWN_TYPE = add[alpha={1}](%b, %2)
-      %7 : UNKNOWN_TYPE = add[alpha={1}](%6, %2)
+      %6 : Dynamic = add[alpha={1}](%b, %2)
+      %7 : Dynamic = add[alpha={1}](%6, %2)
       -> (%7)
     }
-  %8 : UNKNOWN_TYPE = add[alpha={1}](%4, %2)
+  %8 : Dynamic = add[alpha={1}](%4, %2)
   return (%8);
 }
 
-graph(%a : UNKNOWN_TYPE
-      %b : UNKNOWN_TYPE
-      %c : UNKNOWN_TYPE) {
-  %3 : UNKNOWN_TYPE = add[alpha={1}](%a, %b)
-  %4 : UNKNOWN_TYPE = If(%c)
+graph(%a : Dynamic
+      %b : Dynamic
+      %c : Dynamic) {
+  %3 : Dynamic = add[alpha={1}](%a, %b)
+  %4 : Dynamic = If(%c)
     block0() {
-      %5 : UNKNOWN_TYPE = add[alpha={1}](%b, %3)
-      %6 : UNKNOWN_TYPE = add[alpha={1}](%5, %3)
+      %5 : Dynamic = add[alpha={1}](%b, %3)
+      %6 : Dynamic = add[alpha={1}](%5, %3)
       -> (%6)
     }
-  %7 : UNKNOWN_TYPE = add[alpha={1}](%4, %3)
+  %7 : Dynamic = add[alpha={1}](%4, %3)
   return (%7);
 }
 
 testCreateAutodiffSubgraphs
-graph(%0 : UNKNOWN_TYPE
-      %1 : UNKNOWN_TYPE
-      %2 : UNKNOWN_TYPE
-      %3 : UNKNOWN_TYPE
-      %4 : UNKNOWN_TYPE) {
-  %21 : UNKNOWN_TYPE, %22 : UNKNOWN_TYPE = GraphExecutor_0(%0, %3, %1, %4, %2)
+graph(%0 : Dynamic
+      %1 : Dynamic
+      %2 : Dynamic
+      %3 : Dynamic
+      %4 : Dynamic) {
+  %21 : Dynamic, %22 : Dynamic = GraphExecutor_0(%0, %3, %1, %4, %2)
   return (%22, %21);
 }
-with GraphExecutor_0 = graph(%1 : UNKNOWN_TYPE
-      %2 : UNKNOWN_TYPE
-      %4 : UNKNOWN_TYPE
-      %5 : UNKNOWN_TYPE
-      %16 : UNKNOWN_TYPE) {
-  %0 : UNKNOWN_TYPE = mm(%1, %2)
-  %3 : UNKNOWN_TYPE = mm(%4, %5)
-  %6 : UNKNOWN_TYPE = add[alpha={1}](%0, %3)
-  %7 : UNKNOWN_TYPE, %8 : UNKNOWN_TYPE, %9 : UNKNOWN_TYPE, %10 : UNKNOWN_TYPE = chunk[chunks=4, dim=1](%6)
-  %11 : UNKNOWN_TYPE = sigmoid(%7)
-  %12 : UNKNOWN_TYPE = sigmoid(%10)
-  %13 : UNKNOWN_TYPE = tanh(%9)
-  %14 : UNKNOWN_TYPE = sigmoid(%8)
-  %15 : UNKNOWN_TYPE = mul(%14, %16)
-  %17 : UNKNOWN_TYPE = mul(%11, %13)
-  %18 : UNKNOWN_TYPE = add[alpha={1}](%15, %17)
-  %19 : UNKNOWN_TYPE = tanh(%18)
-  %20 : UNKNOWN_TYPE = mul(%12, %19)
+with GraphExecutor_0 = graph(%1 : Dynamic
+      %2 : Dynamic
+      %4 : Dynamic
+      %5 : Dynamic
+      %16 : Dynamic) {
+  %0 : Dynamic = mm(%1, %2)
+  %3 : Dynamic = mm(%4, %5)
+  %6 : Dynamic = add[alpha={1}](%0, %3)
+  %7 : Dynamic, %8 : Dynamic, %9 : Dynamic, %10 : Dynamic = chunk[chunks=4, dim=1](%6)
+  %11 : Dynamic = sigmoid(%7)
+  %12 : Dynamic = sigmoid(%10)
+  %13 : Dynamic = tanh(%9)
+  %14 : Dynamic = sigmoid(%8)
+  %15 : Dynamic = mul(%14, %16)
+  %17 : Dynamic = mul(%11, %13)
+  %18 : Dynamic = add[alpha={1}](%15, %17)
+  %19 : Dynamic = tanh(%18)
+  %20 : Dynamic = mul(%12, %19)
   return (%18, %20);
 }
 
@@ -88,17 +88,17 @@ graph(%0 : Float(2, 3, 4)
       %2 : Float(2, 3, 4)
       %3 : Float(2, 3, 4)
       %4 : Float(2, 3, 4)) {
-  %5 : UNKNOWN_TYPE = Constant[value=<Tensor>, is_zero=1]()
-  %6 : UNKNOWN_TYPE = ReplaceIfUndef(%0, %5)
-  %7 : UNKNOWN_TYPE = Constant[value=<Tensor>, is_zero=1]()
-  %8 : UNKNOWN_TYPE = ReplaceIfUndef(%1, %7)
-  %9 : UNKNOWN_TYPE = mul(%6, %2)
-  %10 : UNKNOWN_TYPE = add[alpha={1}](%8, %9)
-  %11 : UNKNOWN_TYPE = mul(%6, %4)
-  %12 : UNKNOWN_TYPE = mul(%10, %3)
-  %13 : UNKNOWN_TYPE = mul(%10, %2)
-  %14 : UNKNOWN_TYPE = add[alpha={1}](%11, %12)
-  %15 : UNKNOWN_TYPE = add[alpha={1}](%6, %13)
+  %5 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %6 : Dynamic = ReplaceIfUndef(%0, %5)
+  %7 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %8 : Dynamic = ReplaceIfUndef(%1, %7)
+  %9 : Dynamic = mul(%6, %2)
+  %10 : Dynamic = add[alpha={1}](%8, %9)
+  %11 : Dynamic = mul(%6, %4)
+  %12 : Dynamic = mul(%10, %3)
+  %13 : Dynamic = mul(%10, %2)
+  %14 : Dynamic = add[alpha={1}](%11, %12)
+  %15 : Dynamic = add[alpha={1}](%6, %13)
   return (%14, %15);
 }
 
@@ -116,14 +116,14 @@ graph(%0 : Float(2, 3, 4)
       %1 : Float(2, 3, 4)
       %2 : Float(2, 3, 4)
       %3 : Float(2, 3, 4)) {
-  %4 : UNKNOWN_TYPE = Constant[value=<Tensor>, is_zero=1]()
-  %5 : UNKNOWN_TYPE = ReplaceIfUndef(%0, %4)
-  %6 : UNKNOWN_TYPE = Constant[value=<Tensor>, is_zero=1]()
-  %7 : UNKNOWN_TYPE = ReplaceIfUndef(%1, %6)
-  %8 : UNKNOWN_TYPE = mul(%5, %2)
-  %9 : UNKNOWN_TYPE = add[alpha={1}](%7, %8)
-  %10 : UNKNOWN_TYPE = mul(%5, %3)
-  %11 : UNKNOWN_TYPE = add[alpha={1}](%10, %9)
+  %4 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %5 : Dynamic = ReplaceIfUndef(%0, %4)
+  %6 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %7 : Dynamic = ReplaceIfUndef(%1, %6)
+  %8 : Dynamic = mul(%5, %2)
+  %9 : Dynamic = add[alpha={1}](%7, %8)
+  %10 : Dynamic = mul(%5, %3)
+  %11 : Dynamic = add[alpha={1}](%10, %9)
   return (%11);
 }
 
