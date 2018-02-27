@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
@@ -41,6 +42,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
+    random.seed(seed)
     torch.manual_seed(seed)
 
     if init_fn is not None:
