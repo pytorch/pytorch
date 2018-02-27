@@ -1094,6 +1094,14 @@ class TestTorch(TestCase):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch._C._VariableFunctions.zeros((2, 3), out=d, dtype=torch.float32))
 
+    def test_constructor_dtypes(self):
+        default_type = torch.Tensor().type()
+        self.assertIs(torch.Tensor().dtype, torch.Tensor.dtype)
+        torch.set_default_tensor_type('torch.IntTensor')
+        self.assertIs(torch.int32, torch.Tensor.dtype)
+        self.assertIs(torch.int32, torch.IntTensor.dtype)
+        torch.set_default_tensor_type(default_type)
+
     def test_tensor_factory(self):
         expected = torch.Tensor([1, 1])
         # test data

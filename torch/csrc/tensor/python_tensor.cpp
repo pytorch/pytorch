@@ -5,10 +5,13 @@
 #include <sstream>
 
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -22,8 +25,7 @@ using namespace torch::autograd;
 struct PyTensorType {
   PyTypeObject py_type;
   at::Type* aten_type;
-  bool is_cuda;
-  bool is_sparse;
+  THPDtype *dtype;
   // The base tensor type i.e. `torch.Tensor`. All tensors are pass isinstance
   // checks on the base type.
   bool is_base_type;
@@ -37,7 +39,7 @@ static PyTensorType* default_tensor_type;
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types);
 
 static TypeError unavailable_type(const PyTensorType& type) {
-  const char* cuda_msg = type.is_cuda ? ". Torch not compiled with CUDA enabled." : "";
+  const char* cuda_msg = type.dtype->is_cuda ? ". Torch not compiled with CUDA enabled." : "";
   return TypeError("type %s not available%s", type.name, cuda_msg);
 }
 
@@ -49,7 +51,7 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   }
   // TODO: fix Windows issues and remove WITH_CUDA
 #ifdef WITH_CUDA
-  if (tensor_type.is_cuda) {
+  if (tensor_type.dtype->is_cuda) {
     torch::cuda::lazy_init();
   }
 #endif
@@ -73,15 +75,38 @@ static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *Tensor_dtype(PyTensorType* self) {
+  return torch::autograd::utils::wrap(self->dtype);
+}
+
+PyObject *Tensor_is_cuda(PyTensorType* self) {
+  if (self->dtype->is_cuda) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
+PyObject *Tensor_is_sparse(PyTensorType *self) {
+  if (self->dtype->is_sparse) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 static struct PyMethodDef metaclass_methods[] = {
   {"__instancecheck__", (PyCFunction)Tensor_instancecheck, METH_O, NULL},
   {NULL}
 };
 
-static struct PyMemberDef metaclass_members[] = {
-  {(char*)"is_cuda", T_BOOL, offsetof(PyTensorType, is_cuda), READONLY, NULL},
-  {(char*)"is_sparse", T_BOOL, offsetof(PyTensorType, is_sparse), READONLY, NULL},
-  {NULL}
+typedef PyObject *(*getter)(PyObject *, void *);
+
+static struct PyGetSetDef metaclass_properties[] = {
+  {"dtype",        (getter)Tensor_dtype, nullptr, nullptr, nullptr},
+  {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
+  {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
+  {nullptr}
 };
 
 static PyTypeObject metaclass;
@@ -91,7 +116,7 @@ static void py_initialize_metaclass(PyTypeObject& metaclass) {
   metaclass.tp_basicsize = sizeof(PyTypeObject);
   metaclass.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE;
   metaclass.tp_methods = metaclass_methods;
-  metaclass.tp_members = metaclass_members;
+  metaclass.tp_getset = metaclass_properties;
   metaclass.tp_name = "torch.tensortype";
   metaclass.tp_base = &PyType_Type;
   if (PyType_Ready(&metaclass) < 0) {
@@ -139,8 +164,7 @@ static std::string get_name(Backend backend, ScalarType scalarType) {
 static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarType) {
   auto baseType = globalContext().type_registry[static_cast<int>(backend)][static_cast<int>(scalarType)].get();
   type_obj.aten_type = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
-  type_obj.is_cuda = backend == kCUDA || backend == kSparseCUDA;
-  type_obj.is_sparse = backend == kSparseCPU || backend == kSparseCUDA;
+  type_obj.dtype = torch::getDtype(backend, scalarType);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {
@@ -201,7 +225,7 @@ void initialize_python_bindings(PyObject* module) {
 
   // Initialize the Python metaclass for the torch.Tensor, torch.FloatTensor,
   // etc. types. The metaclass handles __instancecheck__ checks and binds the
-  // propeties is_cuda and is_sparse on the type objects.
+  // dtype property on the type objects.
   py_initialize_metaclass(metaclass);
 
   // Get the tp_dict of the Variable class. We copy function definitions

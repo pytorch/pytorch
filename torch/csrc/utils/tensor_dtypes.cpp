@@ -85,9 +85,7 @@ void initializeDtypes() {
     auto type = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
     std::string name = std::string(PyModule_GetName(module)) + '.' + primary_name;
     PyObject *dtype = THPDtype_New(type, name, is_cuda, is_sparse);
-    if (type) {
-      torch::registerDtypeObject((THPDtype*)dtype, *type);
-    }
+    torch::registerDtypeObject((THPDtype*)dtype, backend, scalarType, type);
     Py_INCREF(dtype);
     if (PyModule_AddObject(module, primary_name.c_str(), dtype) != 0) {
       throw python_error();
