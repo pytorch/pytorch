@@ -31,7 +31,7 @@ public:
     if (src.variable.defined()) {
       return handle(THPVariable_Wrap(src.variable));
     } else {
-      return handle(torch::createPyObject(src.buffer));
+      return handle(THPVariable_Wrap(torch::autograd::make_variable(src.buffer, false)));
     }
   }
 };

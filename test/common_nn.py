@@ -293,9 +293,6 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         result = -input[target] * norm
         return (result, norm)
 
-    if torch.is_tensor(weight):
-        # TODO: remove this once Variables and tensors merge
-        weight = Variable(weight)
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
@@ -428,24 +425,6 @@ loss_reference_fns = {
 
 
 sample_scalar = variable(0)
-
-
-# TODO: replace this with torch.rand() when Variables and tensors are merged;
-# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_rand(sizes, requires_grad=False):
-    if len(sizes) == 0:
-        return torch.testing.rand_like(sample_scalar, requires_grad=requires_grad)
-    else:
-        return Variable(torch.rand(*sizes), requires_grad=requires_grad)
-
-
-# TODO: replace this with torch.randn() when Variables and tensors are merged;
-# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_randn(sizes, requires_grad=False):
-    if len(sizes) == 0:
-        return torch.testing.randn_like(sample_scalar, requires_grad=requires_grad)
-    else:
-        return Variable(torch.randn(*sizes), requires_grad=requires_grad)
 
 criterion_tests = [
     dict(
@@ -890,7 +869,7 @@ class TestBase(object):
                     elif torch.is_tensor(sizes):
                         return Variable(sizes.double())
                     else:
-                        return torch_randn(sizes)
+                        return torch.randn(sizes)
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
 
