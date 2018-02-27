@@ -79,10 +79,7 @@ Then, you can run::
     # Print a human readable representation of the graph
     onnx.helper.printable_graph(model.graph)
 
-To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need to install `caffee2`:
-
-1. You'll need an install of Caffe2.  If you don't have one already, Please
-   `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
+To run the exported script with `caffe2 <https://caffe2.ai/>`_, you will need to install `caffe2`: If you don't have one already, Please `follow the install instructions <https://caffe2.ai/docs/getting-started.html>`_.
 
 Once these are installed, you can use the backend for Caffe2::
 
