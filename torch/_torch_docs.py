@@ -1326,6 +1326,7 @@ add_docstr(torch.erf,
 erf(tensor, out=None) -> Tensor
 
 Computes the error function of each element. The error function is defined as follows:
+
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 
@@ -1340,7 +1341,8 @@ add_docstr(torch.erfinv,
 erfinv(tensor, out=None) -> Tensor
 
 Computes the inverse error function of each element. The inverse error function is defined
-in the range (-1, 1) as:
+in the range :math:`(-1, 1)` as:
+
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
