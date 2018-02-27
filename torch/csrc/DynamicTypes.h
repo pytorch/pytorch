@@ -28,10 +28,6 @@ PyTypeObject* getPyTypeObject(const at::Tensor& tensor);
 at::Type& getATenType(PyTypeObject* type);
 THPDtype* getDtype(const at::Type& type);
 THPDtype* getDtype(at::Backend backend, at::ScalarType scalarType);
-
-//rename to createPyObject when THPP is removed
-// Creates a at::Tensor from a PyObject.  Does NOT steal the PyObject reference.
-at::Tensor createTensor(PyObject* data);
 std::unique_ptr<at::Storage> createStorage(PyObject* obj);
 
 bool isStorage(PyObject* obj);

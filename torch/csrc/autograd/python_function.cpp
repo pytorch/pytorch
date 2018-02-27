@@ -21,10 +21,6 @@
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
 
-#ifdef WITH_CUDA
-#include "cuda/AutoGPU.h"
-#endif
-
 using namespace torch;
 using namespace torch::autograd;
 using namespace torch::jit;
@@ -369,10 +365,6 @@ static void _wrap_outputs(THPFunction *self,
     if (THPVariable_Check(obj)) {
       return ((THPVariable*)obj)->cdata;
     }
-    if (THPModule_isTensor(obj)) {
-      // temporarily wrap tensors as variables until the classes are merged
-      return make_variable(createTensor(obj), /*requires_grad=*/false);
-    }
     throw TypeError("%s.forward: expected Variable (got %s) for return value %d",
         Py_TYPE(self)->tp_name, Py_TYPE(obj)->tp_name, i);
   };
@@ -456,10 +448,6 @@ static void _save_variables(THPFunction* self)
       auto variable = (THPVariable*)obj;
       bool is_output = variable->cdata.grad_fn().get() == cdata_ptr;
       self->saved_variables.emplace_back(variable->cdata, is_output);
-    } else if (THPModule_isTensor(obj)) {
-      // TODO: remove once Variable and Tensor classes are merged
-      auto var = make_variable(createTensor(obj), /*requires_grad=*/false);
-      self->saved_variables.emplace_back(std::move(var), false);
     } else {
       throw TypeError(
           "save_for_backward can only save variables, but argument %d is of "

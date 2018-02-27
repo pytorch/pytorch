@@ -128,15 +128,6 @@ THPDtype* getDtype(at::Backend backend, at::ScalarType scalarType) {
   return dtype;
 }
 
-at::Tensor createTensor(PyObject *data)
-{
-  if (THPVariable_Check(data)) {
-    return ((THPVariable*)data)->cdata;
-  }
-  auto tensor_type = pytype_to_attype.at(Py_TYPE(data));
-  auto tensor = ((THPVoidTensor *)data)->cdata;
-  return tensor_type->unsafeTensorFromTH(tensor, true); // Calls retain on underlying TH Tensor
-}
 PyObject* createPyObject(const at::Tensor& tensor)
 {
   auto type = getPyTypeObject(tensor);

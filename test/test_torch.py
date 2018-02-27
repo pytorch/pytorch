@@ -166,7 +166,6 @@ class TestTorch(TestCase):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_linear_algebra_scalar_raises(self):
         from torch.autograd import Variable, variable
         m = Variable(torch.randn(5, 5))
@@ -1583,7 +1582,6 @@ class TestTorch(TestCase):
     def test_contiguous(self):
         return self._test_contiguous(self, lambda t: t)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_scalars_as_floats(self):
         "zero-dim variables that don't require grad should bind to scalar arguments"
         x = torch.autograd.variable(2)
@@ -2016,7 +2014,6 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_cat_scalars(self):
         from torch.autograd import variable
         x = variable(0)
@@ -4830,7 +4827,7 @@ class TestTorch(TestCase):
 
     def test_print(self):
         for t in torch._tensor_classes:
-            if IS_WINDOWS and t in [torch.cuda.sparse.HalfTensor, torch.cuda.HalfTensor]:
+            if IS_WINDOWS and t == torch.cuda.HalfTensor:
                 return  # CUDA HalfTensor is not supported on Windows yet
             if t == torch.HalfTensor:
                 continue  # HalfTensor does not support fill
@@ -4924,8 +4921,7 @@ class TestTorch(TestCase):
         self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
         if TEST_NUMPY:
             self.assertEqual(x.new([np.int32(3), np.float64(4)]).tolist(), [3, 4])
-        if torch._C._with_scalars():
-            self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
+        self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
         self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
         self.assertEqual(x.new(tuple()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())

@@ -7,7 +7,7 @@ namespace torch { namespace tensor {
 
 // Initializes the Python tensor type objects: torch.Tensor, torch.FloatTensor,
 // etc. and binds them in their containing modules.
-void initialize_python_bindings(PyObject* module);
+void initialize_python_bindings();
 
 // Sets the concrete type constructed by calls to torch.Tensor() and most
 // factory methods on the torch module.

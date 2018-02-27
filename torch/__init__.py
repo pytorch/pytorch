@@ -151,7 +151,6 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 from .storage import _StorageBase
-from .tensor import _TensorBase
 
 
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
@@ -186,87 +185,6 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 
-class DoubleTensor(_C.DoubleTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return DoubleStorage
-
-
-class FloatTensor(_C.FloatTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return FloatStorage
-
-
-class HalfTensor(_C.HalfTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return HalfStorage
-
-
-class LongTensor(_C.LongTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return LongStorage
-
-
-class IntTensor(_C.IntTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return IntStorage
-
-
-class ShortTensor(_C.ShortTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return ShortStorage
-
-
-class CharTensor(_C.CharTensorBase, _TensorBase):
-
-    def is_signed(self):
-        # TODO
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return CharStorage
-
-
-class ByteTensor(_C.ByteTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return ByteStorage
-
-
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage
@@ -274,10 +192,6 @@ _storage_classes = {
 
 # The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
 _tensor_classes = set()
-
-_integer_tensor_classes = {
-    LongTensor, IntTensor, ShortTensor, CharTensor, ByteTensor
-}
 
 
 ################################################################################
@@ -323,21 +237,6 @@ del IntStorageBase
 del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
-del DoubleTensorBase
-del FloatTensorBase
-del LongTensorBase
-del IntTensorBase
-del ShortTensorBase
-del CharTensorBase
-del ByteTensorBase
-
-del SparseDoubleTensorBase
-del SparseFloatTensorBase
-del SparseLongTensorBase
-del SparseIntTensorBase
-del SparseShortTensorBase
-del SparseCharTensorBase
-del SparseByteTensorBase
 
 ################################################################################
 # Import most common subpackages

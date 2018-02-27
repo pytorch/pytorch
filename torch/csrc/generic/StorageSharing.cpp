@@ -290,7 +290,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   size_t view_size =  (size_t)THPUtils_unpackLong(_view_size);
 
   int64_t device = THPUtils_unpackLong(_device);
-  THCPAutoGPU __autogpu(device);
+  AutoGPU __autogpu(device);
 
   char *buffer;
   Py_ssize_t handle_size;
