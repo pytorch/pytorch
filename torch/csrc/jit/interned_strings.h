@@ -156,8 +156,7 @@ _(Assign) \
 _(Placeholder) \
 _(JumpZ) \
 _(JumpNZ) \
-_(Jump) \
-_(ExternalCall)
+_(Jump)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \
