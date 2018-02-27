@@ -394,18 +394,6 @@ struct Variable::ViewImpl : public Variable::Impl {
 //                        Variable Implementation
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-namespace detail {
-inline at::Tensor handle_scalars(at::Tensor& data) {
-#ifndef WITH_SCALARS
-  if (data.dim() == 0) {
-    // Don't expose 0-dim tensors to Variable API.
-    return data.as_strided_({1}, {1});
-  }
-#endif
-  return data;
-}
-} // namespace detail
-
 // Factory Functions
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -414,7 +402,6 @@ inline Variable make_variable_view(
     at::Tensor data,
     Edge gradient_edge = Edge()) {
   if (data.defined()) {
-    data = detail::handle_scalars(data);
     auto impl = new Variable::ViewImpl(
         std::move(base), std::move(data), std::move(gradient_edge));
     return Variable(impl, /*retain=*/false);
@@ -424,7 +411,7 @@ inline Variable make_variable_view(
 
 inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
   if (data.defined()) {
-    auto impl = new Variable::Impl(detail::handle_scalars(data), requires_grad);
+    auto impl = new Variable::Impl(data, requires_grad);
     return Variable(impl, /*retain=*/false);
   }
   return Variable();
@@ -432,8 +419,7 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
 
 inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
   if (data.defined()) {
-    auto impl = new Variable::Impl(
-        detail::handle_scalars(data), false, std::move(gradient_edge));
+    auto impl = new Variable::Impl(data, false, std::move(gradient_edge));
     return Variable(impl, /*retain=*/false);
   }
   return Variable();
