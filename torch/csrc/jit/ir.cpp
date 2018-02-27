@@ -568,6 +568,7 @@ void PythonOp::cloneFrom(Node * other_) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
   }
+  this->unpack_variables = other->unpack_variables;
 }
 
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {

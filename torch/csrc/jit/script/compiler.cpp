@@ -1,7 +1,10 @@
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
+#include "torch/csrc/utils/object_ptr.h"
 
+#include <Python.h>
 #include <climits>
 
 namespace torch {
@@ -702,7 +705,53 @@ struct to_ir {
   }
 };
 
+void specializePass(Block* b, ResolutionCallback rcb) {
+  std::vector<Node*> nodes_to_destroy;
+  for (const auto n : b->nodes()) {
+    try {
+      getOperation(n, true);
+    } catch (std::runtime_error e) {
+      // HACK lol
+      if (n->kind() != kLoop && n->kind() != kIf) {
+        AutoGIL ag;
+        py::function func = rcb(b->owningGraph(), n->kind().toString());
+        auto* py_func = func.ptr();
+        if (!PyFunction_Check(py_func)) {
+          throw std::runtime_error("Unknown operation");
+        } else {
+          // Release the function object so we can wrap it in a PythonOp
+          pybind11::handle h = func.release();
+          std::string cconv;
+          for (const auto& i : n->inputs()) {
+            cconv += "t";
+          }
+          Node* new_node = n->owningGraph()->createPythonOp(
+              THPObjectPtr(h.ptr()), cconv, false, {}, {}, false);
+          n->owningGraph()->setInsertPoint(n);
+          n->owningGraph()->insertNode(new_node);
+          for (const auto i : n->inputs()) {
+            new_node->addInput(i);
+          }
+          for (const auto o : n->outputs()) {
+            new_node->addOutput();
+          }
+          n->replaceAllUsesWith(new_node);
+          nodes_to_destroy.push_back(n);
+        }
+      }
+    }
+    for (const auto b : n->blocks()) {
+      specializePass(b, rcb);
+    }
+  }
+  for (const auto n : nodes_to_destroy) {
+    n->destroy();
+  }
+}
+
+
 struct CompilationUnitImpl {
+  CompilationUnitImpl(ResolutionCallback rcb) : rcb(rcb) {}
   void defineFunction(const Def& def) {
     const auto& name = def.name().name();
 
@@ -712,6 +761,7 @@ struct CompilationUnitImpl {
 
     auto it = functions.emplace(name, FunctionDefinition{def}).first;
     to_ir(it->second, functions);
+    specializePass(it->second.graph->block(), rcb);
   }
 
   void define(const std::string& script) {
@@ -731,9 +781,10 @@ struct CompilationUnitImpl {
  private:
   friend struct to_ir;
   FunctionTable functions;
+  ResolutionCallback rcb;
 };
 
-CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
+CompilationUnit::CompilationUnit(ResolutionCallback rcb) : pImpl(new CompilationUnitImpl(rcb)) {}
 
 void CompilationUnit::define(const std::string& script) {
   return pImpl->define(script);
@@ -749,10 +800,11 @@ std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
 
 CompilationUnit::~CompilationUnit() {}
 
-std::shared_ptr<Graph> jitScriptCompile(Def def) {
+std::shared_ptr<Graph> jitScriptCompile(Def def, ResolutionCallback rcb) {
   FunctionTable empty;
   FunctionDefinition fd(def);
   to_ir(fd, empty);
+  specializePass(fd.graph->block(), rcb);
   return fd.graph;
 }
 

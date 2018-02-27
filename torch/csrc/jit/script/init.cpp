@@ -12,7 +12,7 @@ void initJitScriptBindings(PyObject* module) {
           "get_graph",
           &CompilationUnit::getGraph,
           py::return_value_policy::reference)
-      .def(py::init<>())
+      .def(py::init<ResolutionCallback>())
       .def("define", &CompilationUnit::define);
   m.def("_jit_script_compile", jitScriptCompile);
 }

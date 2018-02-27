@@ -370,7 +370,13 @@ bool hasHandleOutput(Node * n) {
 }
 
 Operation createPythonOperation(PythonOp* op) {
-  py::object func = py::handle(op->pyobj.get()).attr("apply");
+  py::function func;
+  try {
+    func = py::function(py::handle(op->pyobj.get()).attr("apply"));
+  } catch (std::exception e) {
+    func = py::function(py::handle(op->pyobj.get()), true);
+  }
+  bool unpack_variables = op->unpack_variables;
   bool has_handle = hasHandleOutput(op);
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
@@ -384,35 +390,73 @@ Operation createPythonOperation(PythonOp* op) {
     size_t next_scalar = 0;
     size_t next_tensor = 0;
     HandleBuilder builder(has_handle);
-    for(auto arg_type : op->cconv) {
-      if(arg_type == 's') {
-        py_inputs[i] = py::reinterpret_borrow<py::object>(op->scalar_args[next_scalar++].get());
-      } else if(arg_type == 't') {
-        py_inputs[i] = py::reinterpret_steal<py::object>(THPVariable_Wrap(
-          builder.addInput(std::move(fromLast(stack, num_inputs - next_tensor)), op->var_flags.at(next_tensor))));
-        next_tensor++;
+    if (unpack_variables) {
+      for (auto arg_type : op->cconv) {
+        if (arg_type == 's') {
+          py_inputs[i] = py::reinterpret_borrow<py::object>(
+              op->scalar_args[next_scalar++].get());
+        } else if (arg_type == 't') {
+          py_inputs[i] = py::reinterpret_steal<py::object>(
+              THPVariable_Wrap(builder.addInput(
+                  std::move(fromLast(stack, num_inputs - next_tensor)),
+                  op->var_flags.at(next_tensor))));
+          next_tensor++;
+        }
+        i++;
       }
-      i++;
-    }
-    drop(stack, num_inputs);
-    py::object py_outputs(func(*py_inputs));
-
-    auto addOutput = [&](py::handle entry) {
-      if(!THPVariable_Check(entry.ptr())) {
-        throw std::runtime_error("Function.apply returned a non-Variable output");
+      drop(stack, num_inputs);
+      py::object py_outputs(func(*py_inputs));
+      auto addOutput = [&](py::handle entry) {
+        if (!THPVariable_Check(entry.ptr())) {
+          throw std::runtime_error(
+              "Function.apply returned a non-Variable output");
+        }
+        THPVariable* var = (THPVariable*)entry.ptr();
+        stack.push_back(builder.addOutput(var->cdata));
+      };
+      if (!PyTuple_Check(py_outputs.ptr())) {
+        addOutput(py_outputs);
+      } else {
+        for (py::handle entry : py::tuple(py_outputs)) {
+          addOutput(entry);
+        }
       }
-      THPVariable *var = (THPVariable*) entry.ptr();
-      stack.push_back(builder.addOutput(var->cdata));
-    };
-    if(!PyTuple_Check(py_outputs.ptr())) {
-      addOutput(py_outputs);
+      builder.writeTo(stack);
+      return 0;
     } else {
-      for(py::handle entry : py::tuple(py_outputs)) {
-        addOutput(entry);
+      for (auto arg_type : op->cconv) {
+        if (arg_type == 's') {
+          py_inputs[i] = py::reinterpret_borrow<py::object>(
+              op->scalar_args[next_scalar++].get());
+        } else if (arg_type == 't') {
+          auto var = fromLast(stack, num_inputs - next_tensor);
+          py_inputs[i] = py::reinterpret_steal<py::object>(
+              THPVariable_Wrap(autograd::make_variable(var)));
+          next_tensor++;
+        }
+        i++;
       }
+      drop(stack, num_inputs);
+      py::object py_outputs(func(*py_inputs));
+
+      auto addOutput = [&](py::handle entry) {
+        if (!THPVariable_Check(entry.ptr())) {
+          throw std::runtime_error(
+              "Function application returned a non-Variable output");
+        }
+        THPVariable* var = (THPVariable*)entry.ptr();
+        stack.push_back(var->cdata.data());
+      };
+
+      if (!PyTuple_Check(py_outputs.ptr())) {
+        addOutput(py_outputs);
+      } else {
+        for (py::handle entry : py::tuple(py_outputs)) {
+          addOutput(entry);
+        }
+      }
+      return 0;
     }
-    builder.writeTo(stack);
-    return 0;
   };
 }
 

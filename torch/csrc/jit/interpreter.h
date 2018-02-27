@@ -2,6 +2,9 @@
 #include <memory>
 #include <vector>
 
+#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/ir.h"
+
 namespace at {
   struct Tensor;
 }
@@ -31,6 +34,8 @@ private:
   friend struct InterpreterStateImpl;
   friend std::ostream & operator<<(std::ostream & out, const Code & code);
 };
+
+Operation getOperation(jit::Node* node, bool computes_on_variables); 
 
 struct InterpreterState {
   InterpreterState(const Code & code);

@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/tree_views.h"
 
 #include <pybind11/pybind11.h>
@@ -12,8 +13,9 @@ namespace py = pybind11;
 namespace torch { namespace jit { namespace script {
 
 struct SourceRangeFactory {
-  SourceRangeFactory(std::string source)
-    : source_(std::make_shared<std::string>(std::move(source))) {
+  SourceRangeFactory(std::string source, ResolutionCallback rcb)
+    : source_(std::make_shared<std::string>(std::move(source))),
+      rcb_(rcb) {
     std::size_t pos = 0;
     do {
       line_len_prefix_sum_.push_back(pos);
@@ -33,6 +35,7 @@ struct SourceRangeFactory {
 
   std::shared_ptr<std::string> source_;
   std::vector<std::size_t> line_len_prefix_sum_;
+  ResolutionCallback rcb_;
 };
 
 template<typename T>
@@ -55,13 +58,16 @@ void initTreeViewBindings(PyObject *module) {
     .def_property_readonly("start", &SourceRange::start)
     .def_property_readonly("end", &SourceRange::end);
   py::class_<SourceRangeFactory>(m, "SourceRangeFactory")
-    .def(py::init<std::string&&>())
+    .def(py::init<std::string&&, ResolutionCallback>())
     .def("make_range", &SourceRangeFactory::create)
     .def("make_raw_range", [](const SourceRangeFactory& self, size_t start, size_t end) {
       return SourceRange(self.source_, start, end);
     })
     .def_property_readonly("source", [](const SourceRangeFactory& self) {
       return *self.source_;
+    })
+    .def_property_readonly("rcb", [](const SourceRangeFactory& self) {
+      return self.rcb_;
     });
 
   py::class_<TreeView>(m, "TreeView")
@@ -73,7 +79,10 @@ void initTreeViewBindings(PyObject *module) {
     });
 
   py::class_<Ident, TreeView>(m, "Ident")
-    .def(py::init(&Ident::create));
+    .def(py::init(&Ident::create))
+    .def_property_readonly("name", [](const Ident& self) {
+      return self.name();
+    });
 
   py::class_<Param, TreeView>(m, "Param")
     .def(py::init([](const Type& type, const Ident& name) {

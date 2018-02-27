@@ -882,7 +882,7 @@ public:
     n->i_(kdevice, device);
     return n;
   }
-  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args);
+  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args, bool unpack_variables = true);
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
@@ -1184,12 +1184,13 @@ struct PythonOp : public Node {
   static const BuiltinSymbol Kind = kPythonOp;
   PythonOp(Graph * graph)
   : Node(graph,kPythonOp) {}
-  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
+  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args, bool unpack_variables = true) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
     this->var_flags = std::move(var_flags);
     this->is_legacy = is_legacy;
+    this->unpack_variables = unpack_variables;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1207,6 +1208,7 @@ struct PythonOp : public Node {
   // 't' -- tensor argument
   std::string cconv;
   bool is_legacy;
+  bool unpack_variables;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
@@ -1214,9 +1216,9 @@ struct PythonOp : public Node {
   std::string name() const;
   virtual void cloneFrom(Node * other_) override;
 };
-inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
+inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args, bool unpack_variables) {
   auto op = new PythonOp(this);
-  return op->init(std::move(pyobj),cconv,is_legacy,std::move(var_flags), std::move(scalar_args));
+  return op->init(std::move(pyobj),cconv,is_legacy,std::move(var_flags), std::move(scalar_args), unpack_variables);
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
