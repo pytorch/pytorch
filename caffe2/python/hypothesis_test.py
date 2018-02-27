@@ -180,10 +180,15 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(gc, op, [X1, X2], elementwise_max)
 
     def test_add(self):
+        def not_overflow(x):
+            if not isinstance(x, float):
+                return abs(x) < (1 << 30) - 1
+            return True
+
         def ref(x, y):
             return (x + y, )
-        _test_binary("Add", ref, test_gradient=True)(self)
-        _test_binary_broadcast("Add", ref)(self)
+        _test_binary("Add", ref, filter_=not_overflow, test_gradient=True)(self)
+        _test_binary_broadcast("Add", ref, filter_=not_overflow)(self)
 
     def test_sub(self):
         def ref(x, y):
@@ -193,10 +198,15 @@ class TestOperators(hu.HypothesisTestCase):
         _test_binary_broadcast("Sub", ref)(self)
 
     def test_mul(self):
+        def not_overflow(x):
+            if not isinstance(x, float):
+                return abs(x) < (1 << 15) - 1
+            return True
+
         def ref(x, y):
             return (x * y, )
-        _test_binary("Mul", ref, test_gradient=True)(self)
-        _test_binary_broadcast("Mul", ref)(self)
+        _test_binary("Mul", ref, filter_=not_overflow, test_gradient=True)(self)
+        _test_binary_broadcast("Mul", ref, filter_=not_overflow)(self)
 
     def test_div(self):
         def ref(x, y):
