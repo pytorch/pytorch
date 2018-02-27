@@ -2596,8 +2596,6 @@ class TestNN(NNTestCase):
                  torch.cuda.HalfTensor]
         precs = [1e-5, 1e-5, 1e-2]
         for tp, prec in zip(types, precs):
-            if IS_WINDOWS and tp == torch.cuda.HalfTensor:  # CUDA HalfTensor is not supported on Windows yet
-                continue
             for depth_multiplier in [1, 2]:
                 m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
                 i = Variable(torch.randn(2, 2, 6, 6).type(tp) / 2, requires_grad=True)
@@ -6416,4 +6414,22 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 if __name__ == '__main__':
+
+    enabled_tests = ['test_Conv2d_depthwise_naive_groups']
+    all_methods = dir(TestNN())
+    all_tests = [x for x in all_methods if x.startswith("test_")]
+    for test_name in all_tests:
+        if not test_name in enabled_tests:
+            delattr(TestNN, test_name)
+    all_methods = dir(TestNNInit())
+    all_tests = [x for x in all_methods if x.startswith("test_")]
+    for test_name in all_tests:
+        if not test_name in enabled_tests:
+            delattr(TestNNInit, test_name)
+    all_methods = dir(PackedSequenceTest())
+    all_tests = [x for x in all_methods if x.startswith("test_")]
+    for test_name in all_tests:
+        if not test_name in enabled_tests:
+            delattr(PackedSequenceTest, test_name)
+
     run_tests()
