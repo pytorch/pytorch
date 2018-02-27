@@ -31,7 +31,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn, \
     smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, IS_WINDOWS, PY3
+    TEST_SCIPY, download_file, PY3
 
 if TEST_SCIPY:
     from scipy import stats
@@ -2422,7 +2422,6 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix this test for Windows')
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_Conv2d_deterministic_cudnn(self):
@@ -6414,22 +6413,4 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 if __name__ == '__main__':
-
-    enabled_tests = ['test_Conv2d_depthwise_naive_groups']
-    all_methods = dir(TestNN())
-    all_tests = [x for x in all_methods if x.startswith("test_")]
-    for test_name in all_tests:
-        if not test_name in enabled_tests:
-            delattr(TestNN, test_name)
-    all_methods = dir(TestNNInit())
-    all_tests = [x for x in all_methods if x.startswith("test_")]
-    for test_name in all_tests:
-        if not test_name in enabled_tests:
-            delattr(TestNNInit, test_name)
-    all_methods = dir(PackedSequenceTest())
-    all_tests = [x for x in all_methods if x.startswith("test_")]
-    for test_name in all_tests:
-        if not test_name in enabled_tests:
-            delattr(PackedSequenceTest, test_name)
-
     run_tests()
