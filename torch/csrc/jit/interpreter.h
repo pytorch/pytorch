@@ -35,8 +35,6 @@ private:
   friend std::ostream & operator<<(std::ostream & out, const Code & code);
 };
 
-Operation getOperation(jit::Node* node, bool computes_on_variables); 
-
 struct InterpreterState {
   InterpreterState(const Code & code);
   // advance the interpreter state by running one stage. Returning the
