@@ -458,9 +458,14 @@ struct to_ir {
     }
   }
 
-  Node* specializeExternalCall(Node *n) {
+  Node* specializeExternalCall(Node *n, const TreeRef& tree) {
     AutoGIL ag;
-    py::function func = rcb(n->owningGraph(), n->kind().toString());
+    py::function func;
+    try {
+      func = rcb(n->owningGraph(), n->kind().toString());
+    } catch (std::exception e) {
+      throw ErrorReport(tree) << "Unknown function " << n->kind().toString();
+    }
     auto* py_func = func.ptr();
     // Release the function object so we can wrap it in a PythonOp
     pybind11::handle h = func.release();
@@ -561,7 +566,7 @@ struct to_ir {
           auto n = emitNode(
                      kind, tree->range(), inputs, output_size, attributes, list_attributes);
           if (!findTensorOp(n)) {
-            n = specializeExternalCall(n);
+            n = specializeExternalCall(n, tree);
           }
           return n->outputs();
         }
