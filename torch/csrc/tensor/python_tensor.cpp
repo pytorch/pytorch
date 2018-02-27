@@ -194,7 +194,7 @@ static void initialize_aten_types(std::vector<PyTensorType>& tensor_types) {
   default_tensor_type->is_base_type = true;
 }
 
-void initialize_python_bindings(PyObject* module) {
+void initialize_python_bindings() {
   // Initialize the at::Type* pointers, name, and properties of the PyTensorType
   // vector. After this call, the vector must not be resized.
   initialize_aten_types(tensor_types);

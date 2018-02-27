@@ -11,7 +11,6 @@
 
 #include "torch/csrc/THP.h"
 #include "serialization.h"
-#include "AutoGPU.h"
 #include "Module.h"
 #include "Storage.h"
 #include "Tensor.h"

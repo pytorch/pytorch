@@ -159,7 +159,6 @@ def _lazy_init():
             "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
     torch._C._cuda_init()
-    torch._C._cuda_sparse_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
@@ -466,7 +465,6 @@ from .random import *
 ################################################################################
 
 
-from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
 
@@ -541,87 +539,6 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 
-class DoubleTensor(_CudaBase, torch._C.CudaDoubleTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return DoubleStorage
-
-
-class FloatTensor(_CudaBase, torch._C.CudaFloatTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return FloatStorage
-
-
-class LongTensor(_CudaBase, torch._C.CudaLongTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return LongStorage
-
-
-class IntTensor(_CudaBase, torch._C.CudaIntTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return IntStorage
-
-
-class ShortTensor(_CudaBase, torch._C.CudaShortTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return ShortStorage
-
-
-class CharTensor(_CudaBase, torch._C.CudaCharTensorBase, _TensorBase):
-
-    def is_signed(self):
-        # TODO
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return CharStorage
-
-
-class ByteTensor(_CudaBase, torch._C.CudaByteTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return ByteStorage
-
-
-class HalfTensor(_CudaBase, torch._C.CudaHalfTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type():
-        return HalfStorage
-
-
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -630,12 +547,6 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
-
-torch._integer_tensor_classes.add(LongTensor)
-torch._integer_tensor_classes.add(IntTensor)
-torch._integer_tensor_classes.add(ShortTensor)
-torch._integer_tensor_classes.add(CharTensor)
-torch._integer_tensor_classes.add(ByteTensor)
 
 from . import sparse
 from . import profiler
