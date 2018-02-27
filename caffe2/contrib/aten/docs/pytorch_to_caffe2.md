@@ -135,7 +135,7 @@ The graph can then be imported using ONNX and run with Caffe2:
 
 ```
 import onnx
-import onnx_caffe2.backend
+import caffe2.python.onnx.backend
 import numpy as np
 
 graph = onnx.load("output.onnx")
@@ -143,7 +143,7 @@ graph = onnx.load("output.onnx")
 a = np.random.randn(3, 2).astype(np.float32)
 b = np.random.randn(3, 2).astype(np.float32)
 
-prepared_backend = onnx_caffe2.backend.prepare(graph)
+prepared_backend = caffe2.python.onnx.backend.prepare(graph)
 W = {graph.graph.input[0].name: a, graph.graph.input[1].name: b}
 c2_out = prepared_backend.run(W)[0]
 
