@@ -382,6 +382,39 @@ def softmarginloss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
+def _multimarginloss_reference(input, target_idx, p, margin, weight):
+    if weight is None:
+        weight = input.new(len(input)).fill_(1)
+
+    output = 0
+    for i in range(0, len(input)):
+        if i != target_idx:
+            output += max(0, weight[target_idx] * (margin - input[target_idx] + input[i]) ** p)
+    return output
+
+
+def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_average=True,
+                              reduce=True):
+    if input.dim() == 1:
+        n = 1
+        dim = input.size(0)
+        output = input.new(1)
+        output[0] = _multimarginloss_reference(input, target[0], p, margin, weight) / dim
+        return output
+    else:
+        n = input.size(0)
+        dim = input.size(1)
+        output = input.new(n)
+        for x in range(0, n):
+            output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
+
+        if reduce and size_average:
+            return output.mean() / dim
+        elif reduce:
+            return output.sum() / dim
+        return output / dim
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -390,6 +423,7 @@ loss_reference_fns = {
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
     'HingeEmbeddingLoss': hingeembeddingloss_reference,
     'SoftMarginLoss': softmarginloss_reference,
+    'MultiMarginLoss': multimarginloss_reference,
 }
 
 
@@ -557,6 +591,54 @@ criterion_tests = [
         module_name='MultiMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        input_size=(10,),
+        target_fn=lambda: torch.rand(1).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+        desc='1d',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(2,),
+        input_fn=lambda: torch.rand(5, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, p=2, size_average=get_size_average(m)),
+        desc='p',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(1, 0.5),
+        legacy_constructor_args=(1, None, 0.5),
+        input_size=(5, 10),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
+        desc='margin',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(1, 1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10)),
+        input_size=(5, 10),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, weight=get_weight(m), size_average=get_size_average(m)),
+        desc='weights',
+        check_no_size_average=True,
         check_gradgrad=False,
     ),
     dict(
