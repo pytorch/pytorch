@@ -20,7 +20,7 @@ class Initializer(object):
         if first is None:
             return object.__new__(cls)
         if isinstance(first, torch.Tensor):
-            cls(*non_tensor_args[1:], **non_tensor_kwargs)(first)
+            return cls(*non_tensor_args[1:], **non_tensor_kwargs)(first)
         else:
             return object.__new__(cls)
 
@@ -154,9 +154,7 @@ class Sparse(Initializer):
 
 
 class VarianceScaling(object):
-    def __init__(self, scale, gain, mode, distribution):
-        if scale < 0.:
-            raise ValueError('`scale` must be a positive float.')
+    def __init__(self, gain, mode, distribution):
         mode = mode.lower()
         valid_modes = ["fan_in", "fan_avg", "fan_out"]
         if mode not in valid_modes:
@@ -168,14 +166,13 @@ class VarianceScaling(object):
                 distribution, valid_distributions)
             )
 
-        self.scale = scale
         self.gain = gain
         self.mode = mode
         self.distribution = distribution
 
     def __call__(self, tensor):
         fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
-        scale = self.scale
+        scale = 1.0
         scale *= self.gain
         if self.mode == 'fan_in':
             scale /= max(1., fan_in)
@@ -196,8 +193,9 @@ class VarianceScaling(object):
 
 class XavierUniform(Initializer):
     def __init__(self, gain=1.):
+        gain = gain ** 2
         self.vs = VarianceScaling(
-            scale=1., gain=gain,
+            gain=gain,
             mode="fan_avg",
             distribution="uniform"
         )
@@ -208,8 +206,9 @@ class XavierUniform(Initializer):
 
 class XavierNormal(Initializer):
     def __init__(self, gain=1.):
+        gain = gain ** 2
         self.vs = VarianceScaling(
-            scale=1., gain=gain,
+            gain=gain,
             mode="fan_avg",
             distribution="normal"
         )
@@ -220,10 +219,9 @@ class XavierNormal(Initializer):
 
 class KaimingUniform(Initializer):
     def __init__(self, a=0, mode="fan_in"):
-        gain = calculate_gain('leaky_relu', a)
-        gain = gain ** 2
+        gain = calculate_gain('leaky_relu', a) ** 2
         self.vs = VarianceScaling(
-            scale=2., gain=gain,
+            gain=gain,
             mode=mode,
             distribution="uniform"
         )
@@ -234,10 +232,9 @@ class KaimingUniform(Initializer):
 
 class KaimingNormal(Initializer):
     def __init__(self, a=0, mode="fan_in"):
-        gain = calculate_gain('leaky_relu', a)
-        gain = gain ** 2
+        gain = calculate_gain('leaky_relu', a) ** 2
         self.vs = VarianceScaling(
-            scale=2., gain=gain,
+            gain=gain,
             mode=mode,
             distribution="normal"
         )
@@ -280,9 +277,9 @@ def calculate_gain(nonlinearity, param=None):
     conv{1,2,3}d :math:`1`
     sigmoid      :math:`1`
     selu         :math:`1`
-    tanh         :math:`25 / 9`
-    relu         :math:`2`
-    leaky_relu   :math:`2 / (1 + negative\_slope^2)`
+    tanh         :math:`5.0 / 3`
+    relu         :math:`\sqrt{2}`
+    leaky_relu   :math:`\sqrt{2 / (1 + negative\_slope^2)}`
     ============ ==========================================
 
     Args:
