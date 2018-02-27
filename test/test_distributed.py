@@ -49,6 +49,8 @@ def skip_if_no_multigpu(func):
             sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
         if torch.cuda.device_count() < 2:
             sys.exit(SKIP_IF_NO_MULTIGPU_EXIT_CODE)
+        if torch.cuda.device_count() < int(os.environ['WORLD_SIZE']):
+            sys.exit(SKIP_IF_NO_MULTIGPU_EXIT_CODE)
 
         return func(*args, **kwargs)
     return wrapper
