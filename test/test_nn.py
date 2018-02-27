@@ -4911,16 +4911,6 @@ new_criterion_tests = [
         check_no_size_average=True,
         check_gradgrad=False,
     ),
-    dict(
-        module_name='MarginRankingLoss',
-        constructor_args=(True, ),
-        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
-        target_fn=lambda: torch.randn(50).sign(),
-        reference_fn=lambda i, t, m:
-            marginrankingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
-        desc='reduce',
-        check_no_size_average=True,
-    ),
 ]
 
 
