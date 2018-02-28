@@ -118,7 +118,7 @@ class UpsamplingNearest2d(Upsample):
 
         >>> m = nn.UpsamplingNearest2d(scale_factor=2)
         >>> m(input)
-\
+
         (0 ,0 ,.,.) =
           1  1  2  2
           1  1  2  2
