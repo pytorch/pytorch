@@ -12,7 +12,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/cuda/lazy_init.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_types.h"
@@ -51,12 +51,9 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
   if (!tensor_type.aten_type) {
     throw unavailable_type(tensor_type);
   }
-  // TODO: fix Windows issues and remove WITH_CUDA
-#ifdef WITH_CUDA
   if (tensor_type.dtype->is_cuda) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
-#endif
   return THPVariable_Wrap(torch::utils::legacy_tensor_ctor(*tensor_type.aten_type, args, kwargs));
   END_HANDLE_TH_ERRORS
 }
