@@ -143,6 +143,13 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
 
+    .. warning::
+        If you are using Python 2, torch.save does NOT support StringIO.StringIO
+        as a valid file-like object. This is because the write method should return
+        the number of bytes written; StringIO.write() does not do this.
+
+        Please use something like io.BytesIO instead.
+
     Example:
         # Save to file
         >>> x = torch.Tensor([0, 1, 2, 3, 4])
@@ -156,6 +163,14 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
 
 def _save(obj, f, pickle_module, pickle_protocol):
+    if sys.version_info[0] == 2:
+        import StringIO
+        if isinstance(f, StringIO.StringIO):
+            msg = ('torch.save received unsupported StringIO.StringIO file object, whose '
+                   'write method does not return the number of bytes written. '
+                   'Please use something like io.BytesIO for torch.save instead.')
+            raise RuntimeError(msg)
+
     import torch.nn as nn
     serialized_container_types = {}
     serialized_storages = {}

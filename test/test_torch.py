@@ -74,16 +74,6 @@ class BytesIOContext(io.BytesIO):
     def __exit__(self, *args):
         pass
 
-if not PY3:
-    import StringIO
-
-    class StringIOContext(StringIO.StringIO):
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *args):
-            pass
-
 
 class TestTorch(TestCase):
 
@@ -4694,8 +4684,6 @@ class TestTorch(TestCase):
     def test_serialization_filelike(self):
         # Test serialization (load and save) with a filelike object
         self._test_serialization(BytesIOContext, test_use_filename=False)
-        if not PY3:
-            self._test_serialization(StringIOContext, test_use_filename=False)
 
     def _test_serialization_offset(self, filecontext_lambda):
         a = torch.randn(5, 5)
@@ -4714,8 +4702,6 @@ class TestTorch(TestCase):
 
     def test_serialization_offset_filelike(self):
         self._test_serialization_offset(lambda: BytesIOContext())
-        if not PY3:
-            self._test_serialization_offset(lambda: StringIOContext())
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
@@ -4770,8 +4756,6 @@ class TestTorch(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda_filelike(self):
         self._test_serialization_cuda(lambda: BytesIOContext())
-        if not PY3:
-            self._test_serialization_cuda(lambda: StringIOContext())
 
     def test_serialization_backwards_compat(self):
         a = [torch.arange(1 + i, 26 + i).view(5, 5).float() for i in range(2)]
@@ -4835,8 +4819,6 @@ class TestTorch(TestCase):
 
     def test_serialization_container_filelike(self):
         self._test_serialization_container(lambda: BytesIOContext())
-        if not PY3:
-            self._test_serialization_container(lambda: StringIOContext())
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
