@@ -1456,7 +1456,7 @@ class TestJit(TestCase):
     def _make_scalar_vars(self, arr, dtype):
         out = []
         for inp in arr:
-            out.append(torch.from_numpy(np.array(inp, dtype=dtype)))
+            out.append(Variable(torch.from_numpy(np.array(inp, dtype=dtype))))
         return out
 
     def test_script_while(self):

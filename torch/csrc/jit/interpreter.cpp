@@ -369,7 +369,7 @@ bool hasHandleOutput(Node * n) {
   return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
 }
 
-Operation createPythonOperation(PythonOp* op) {
+Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
   py::function func;
   if (op->unpack_variables) {
     func = py::function(py::handle(op->pyobj.get()).attr("apply"));
@@ -430,8 +430,11 @@ Operation createPythonOperation(PythonOp* op) {
               op->scalar_args[next_scalar++].get());
         } else if (arg_type == 't') {
           auto var = fromLast(stack, num_inputs - next_tensor);
-          py_inputs[i] = py::reinterpret_steal<py::object>(
-              THPVariable_Wrap(autograd::make_variable(var)));
+          if (!values_are_variables) {
+            var = autograd::make_variable(var);
+          }
+          py_inputs[i] =
+              py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
           next_tensor++;
         }
         i++;
@@ -445,7 +448,8 @@ Operation createPythonOperation(PythonOp* op) {
               "Function application returned a non-Variable output");
         }
         THPVariable* var = (THPVariable*)entry.ptr();
-        stack.push_back(var->cdata.data());
+        auto cdata = var->cdata;
+        stack.push_back(values_are_variables ? std::move(cdata) : cdata.data());
       };
 
       if (!PyTuple_Check(py_outputs.ptr())) {
@@ -517,9 +521,9 @@ Operation createEvalOperation(CppOp * op) {
 
 // Returns a function implementing functionality of a given node,
 // or nullptr if it's a no-op for autograd.
-Operation getOperation(jit::Node *node, bool constants_are_variables) {
+Operation getOperation(jit::Node* node, bool values_are_variables) {
   IR_IFM(node, PythonOp)
-    return createPythonOperation(value);
+  return createPythonOperation(value, values_are_variables);
   IR_ELSEIFM(CppOp)
     if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
       return createEvalOperation(value);
@@ -539,12 +543,12 @@ Operation getOperation(jit::Node *node, bool constants_are_variables) {
       return 0;
     };
   IR_ELSEIF(Constant)
-    if(constants_are_variables) {
-      auto t = torch::autograd::make_variable(value->t(kvalue), false);
-      return [t](Stack & stack) {
-        stack.push_back(t);
-        return 0;
-      };
+  if (values_are_variables) {
+    auto t = torch::autograd::make_variable(value->t(kvalue), false);
+    return [t](Stack& stack) {
+      stack.push_back(t);
+      return 0;
+    };
     } else {
       auto t = value->t(kvalue);
       return [t](Stack & stack) {
@@ -664,9 +668,8 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph> & graph_, bool constants_are_variables)
-  : constants_are_variables(constants_are_variables)
-  , preprocess(*graph_) {
+  CodeImpl(std::shared_ptr<Graph>& graph_, bool values_are_variables)
+      : values_are_variables(values_are_variables), preprocess(*graph_) {
     graph = preprocess.graph;
     //std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
@@ -793,7 +796,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getOperation(n, constants_are_variables);
+    instructions[inst].callback = getOperation(n, values_are_variables);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -917,7 +920,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  bool constants_are_variables;
+  bool values_are_variables;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -1023,8 +1026,8 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph> & graph, bool constants_are_variables)
-: pImpl(new CodeImpl(graph, constants_are_variables)) {}
+Code::Code(std::shared_ptr<Graph>& graph, bool values_are_variables)
+    : pImpl(new CodeImpl(graph, values_are_variables)) {}
 Code::~Code() {}
 InterpreterState::InterpreterState(const Code & function)
 : pImpl(new InterpreterStateImpl(function)) {}

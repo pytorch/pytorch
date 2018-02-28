@@ -157,7 +157,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
 }
 
 InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
-  code_ = jit::Code(state->graph, /*constants_are_variables=*/false);
+  code_ = jit::Code(state->graph, /*values_are_variables=*/false);
   stage_details_.resize(state->graph->stage() + 1);
   auto graph_inputs = state->graph->inputs();
   auto inputs_it = graph_inputs.begin();
