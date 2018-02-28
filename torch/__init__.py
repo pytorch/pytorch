@@ -226,13 +226,6 @@ _tensor_classes = set()
 
 
 ################################################################################
-# Import interface functions defined in Python
-################################################################################
-
-from .functional import *
-
-
-################################################################################
 # Initialize extension
 ################################################################################
 
@@ -252,6 +245,14 @@ del manager_path
 
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
+
+
+################################################################################
+# Import interface functions defined in Python
+################################################################################
+
+# needs to be after the above ATen bindings so we can overwrite from Python side
+from .functional import *
 
 
 ################################################################################

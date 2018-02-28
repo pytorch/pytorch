@@ -237,13 +237,6 @@ bmm(batch2) -> Tensor
 See :func:`torch.bmm`
 """)
 
-add_docstr_all('btrifact',
-               r"""
-btrifact(info=None, pivot=True) -> (Tensor, Tensor)
-
-See :func:`torch.btrifact`
-""")
-
 add_docstr_all('btrifact_with_info',
                r"""
 btrifact_with_info(pivot=True) -> (Tensor, Tensor, Tensor)
@@ -1926,13 +1919,6 @@ add_docstr_all('chunk',
 chunk(chunks, dim=0) -> List of Tensors
 
 See :func:`torch.chunk`
-""")
-
-add_docstr_all('split',
-               r"""
-split(split_size_or_sections, dim=0) -> List of Tensors
-
-See :func:`torch.split`
 """)
 
 add_docstr_all('stft',

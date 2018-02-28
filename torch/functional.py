@@ -5,13 +5,94 @@ import math
 
 __all__ = [
     'bartlett_window',
+    'btrifact',
     'btriunpack',
     'hamming_window',
     'hann_window',
     'isnan',
+    'split',
     'unbind',
     'unique',
 ]
+
+
+def split(tensor, split_size_or_sections, dim=0):
+    r"""Splits the tensor into chunks.
+
+    If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
+    be split into equally sized chunks (if possible). Last chunk will be smaller if
+    the tensor size along the given dimension :attr:`dim= is not divisible by
+    :attr:`split_size`.
+
+    If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
+    into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
+    to :attr:`split_size_or_sections`.
+
+    Arguments:
+        tensor (Tensor): tensor to split.
+        split_size_or_sections (int) or (list(int)): size of a single chunk or
+        list of sizes for each chunk
+        dim (int): dimension along which to split the tensor.
+    """
+    # Overwriting reason:
+    # This dispatches to two ATen functions depending on the type of
+    # split_size_or_sections. The branching code is in variable.py, which we
+    # call here.
+    return tensor.split(split_size_or_sections, dim)
+
+
+def btrifact(A, info=None, pivot=True):
+    r"""Batch LU factorization.
+
+    Returns a tuple containing the LU factorization and pivots. Pivoting is done if
+    :attr:`pivot` is set.
+
+    The optional argument :attr:`info` stores information if the factorization
+    succeeded for each minibatch example. The :attr:`info` is provided as an
+    `IntTensor`, its values will be filled from dgetrf and a non-zero value
+    indicates an error occurred. Specifically, the values are from cublas if cuda is
+    being used, otherwise LAPACK.
+
+    .. warning::
+        The :attr:`info` argument is deprecated in favor of :meth:`torch.btrifact_with_info`.
+
+    Arguments:
+        A (Tensor): the tensor to factor
+        info (IntTensor, optional): (deprecated) an `IntTensor` to store values
+            indicating whether factorization succeeds
+        pivot (bool, optional): controls whether pivoting is done
+
+    Returns:
+        A tuple containing factorization and pivots.
+
+    Example::
+
+        >>> A = torch.randn(2, 3, 3)
+        >>> A_LU, pivots = torch.btrifact(A)
+        >>> A_LU
+
+        (0 ,.,.) =
+          0.7908 -0.0854  0.1522
+          0.2757 -1.2942 -1.3715
+         -0.6029  0.3609  0.3210
+
+        (1 ,.,.) =
+          0.9091  0.1719  0.7741
+          0.1625  0.6720  0.1687
+         -0.1927 -0.9420 -0.4891
+        [torch.FloatTensor of size (2,3,3)]
+
+        >>> pivots
+
+         2  2  3
+         1  3  3
+        [torch.IntTensor of size (2,3)]
+
+    """
+    # Overwriting reason:
+    # `info` is being deprecated in favor of `btrifact_with_info`. This warning
+    # is in variable.py, which we call here.
+    return A.btrifact(info, pivot)
 
 
 def unbind(tensor, dim=0):
@@ -29,7 +110,7 @@ def unbind(tensor, dim=0):
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
-    Returns a tuple as ``(the pivots, the L tensor, the U tensor)``.
+    Returns a tuple of tensors as ``(the pivots, the L tensor, the U tensor)``.
 
     Arguments:
         LU_data (Tensor): the packed LU factorization data

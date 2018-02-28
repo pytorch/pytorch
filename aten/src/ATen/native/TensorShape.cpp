@@ -180,6 +180,12 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   if (self.dim() == 0) {
     throw std::runtime_error("split expects at least a 1-dimensional tensor");
   }
+  if (split_size < 0) {
+    std::ostringstream ss;
+    ss << "split expects split_size be non-negative, but got split_size="
+       << split_size;
+    throw std::runtime_error(ss.str());
+  }
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;
   std::vector<Tensor> splits(num_splits);
@@ -188,6 +194,40 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   for (int64_t i = 0; i < num_splits; ++i) {
     auto length = i < num_splits - 1 ? split_size : last_split_size;
     splits[i] = self.narrow(dim, i * split_size, length);
+  }
+  return splits;
+}
+
+std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, int64_t dim) {
+  if (self.dim() == 0) {
+    throw std::runtime_error("split_with_sizes expects at least a 1-dimensional tensor");
+  }
+  int64_t dim_size = self.size(dim);
+  int64_t num_splits = split_sizes.size();
+  std::vector<Tensor> splits(num_splits);
+  int64_t start_idx = 0;
+  int64_t i;
+
+  for (i = 0; i < num_splits; ++i) {
+    auto length = split_sizes[i];
+    if (length < 0) {
+      std::ostringstream ss;
+      ss << "split_with_sizes expects split_sizes have only non-negative "
+         << "entries, but got split_sizes=" << split_sizes;
+      throw std::runtime_error(ss.str());
+    }
+    if (start_idx >= dim_size) {
+      break;
+    }
+    splits[i] = self.narrow(dim, start_idx, length);
+    start_idx += length;
+  }
+  if (i < num_splits || start_idx != dim_size) {
+    std::ostringstream ss;
+    ss << "split_with_sizes expects split_sizes to sum exactly to "
+       << dim_size << " (input tensor's size at dimension " << dim << "), "
+       << "but got split_sizes=" << split_sizes;
+    throw std::runtime_error(ss.str());
   }
   return splits;
 }

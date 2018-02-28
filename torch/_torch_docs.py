@@ -660,28 +660,6 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
-add_docstr(torch.split,
-           r"""
-split(tensor, split_size_or_sections, dim=0) -> List of Tensors
-
-Splits the tensor into chunks.
-
-If :attr:`split_size_or_sections` is an integer type, then :attr:`tensor` will
-be split into equally sized chunks (if possible). Last chunk will be smaller if
-the tensor size along the given dimension :attr:`dim= is not divisible by
-:attr:`split_size`.
-
-If :attr:`split_size_or_sections` is a list, then :attr:`tensor` will be split
-into ``len(split_size_or_sections)`` chunks with sizes in :attr:`dim` according
-to :attr:`split_size_or_sections`.
-
-Arguments:
-    tensor (Tensor): tensor to split.
-    split_size_or_sections (int) or (list(int)): size of a single chunk or
-    list of sizes for each chunk
-    dim (int): dimension along which to split the tensor.
-""")
-
 add_docstr(torch.cat,
            r"""
 cat(seq, dim=0, out=None) -> Tensor
@@ -5492,57 +5470,6 @@ Example::
      0  0  0
      0  0  0
     [torch.FloatTensor of size (2,3)]
-""")
-
-add_docstr(torch.btrifact,
-           r"""
-btrifact(A, info=None, pivot=True) -> (Tensor, IntTensor)
-
-Batch LU factorization.
-
-Returns a tuple containing the LU factorization and pivots. Pivoting is done if
-:attr:`pivot` is set.
-
-The optional argument :attr:`info` stores information if the factorization
-succeeded for each minibatch example. The :attr:`info` is provided as an
-`IntTensor`, its values will be filled from `dgetrf` and a non-zero value
-indicates an error occurred. Specifically, the values are from cuBLAS if CUDA is
-being used, otherwise LAPACK.
-
-.. warning::
-    The :attr:`info` argument is deprecated in favor of :meth:`torch.btrifact_with_info`.
-
-Arguments:
-    A (Tensor): the tensor to factor
-    info (IntTensor, optional): (deprecated) an `IntTensor` to store values
-        indicating whether factorization succeeds
-    pivot (bool, optional): controls whether pivoting is done
-
-Returns:
-    A tuple containing factorization and pivots.
-
-Example::
-
-    >>> A = torch.randn(2, 3, 3)
-    >>> A_LU, pivots = torch.btrifact(A)
-    >>> A_LU
-
-    (0 ,.,.) =
-      0.7908 -0.0854  0.1522
-      0.2757 -1.2942 -1.3715
-     -0.6029  0.3609  0.3210
-
-    (1 ,.,.) =
-      0.9091  0.1719  0.7741
-      0.1625  0.6720  0.1687
-     -0.1927 -0.9420 -0.4891
-    [torch.FloatTensor of size (2,3,3)]
-
-    >>> pivots
-
-     2  2  3
-     1  3  3
-    [torch.IntTensor of size (2,3)]
 
 """)
 
