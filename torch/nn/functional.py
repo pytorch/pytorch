@@ -40,8 +40,8 @@ Args:
 
 Examples::
 
-    >>> filters = autograd.Variable(torch.randn(33, 16, 3))
-    >>> inputs = autograd.Variable(torch.randn(20, 16, 50))
+    >>> filters = torch.randn(33, 16, 3)
+    >>> inputs = torch.randn(20, 16, 50)
     >>> F.conv1d(inputs, filters)
 """)
 
@@ -69,8 +69,8 @@ Args:
 Examples::
 
     >>> # With square kernels and equal stride
-    >>> filters = autograd.Variable(torch.randn(8,4,3,3))
-    >>> inputs = autograd.Variable(torch.randn(1,4,5,5))
+    >>> filters = torch.randn(8,4,3,3)
+    >>> inputs = torch.randn(1,4,5,5)
     >>> F.conv2d(inputs, filters, padding=1)
 """)
 
@@ -97,8 +97,8 @@ Args:
 
 Examples::
 
-    >>> filters = autograd.Variable(torch.randn(33, 16, 3, 3, 3))
-    >>> inputs = autograd.Variable(torch.randn(20, 16, 50, 10, 20))
+    >>> filters = torch.randn(33, 16, 3, 3, 3)
+    >>> inputs = torch.randn(20, 16, 50, 10, 20)
     >>> F.conv3d(inputs, filters)
 """)
 
@@ -214,12 +214,12 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
 
     Example:
         >>> # pool of square window of size=3, stride=2
-        >>> input = Variable(torch.Tensor([[[1,2,3,4,5,6,7]]]))
+        >>> input = torch.Tensor([[[1,2,3,4,5,6,7]]])
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        Variable containing:
+
         (0 ,.,.) =
           2  4  6
-        [torch.FloatTensor of size 1x1x3]
+        [torch.FloatTensor of size (1,1,3)]
     """
     if input.dim() != 3:
         raise ValueError('expected 3D input (got {} dimensions)'
@@ -300,7 +300,7 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
                         Useful to pass to max_unpool2d.
 
     Examples:
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> input = torch.randn(20, 16, 50, 32)
         >>> # pool of square window of size=3, and target output size 13x12
         >>> F.fractional_max_pool2d(input, 3, output_size=(13, 12))
         >>> # pool of square window and target output size being half of input image size
@@ -557,7 +557,7 @@ def alpha_dropout(input, p=0.5, training=False):
     # TODO avoid casting to byte after resize
     noise = input.data.new().resize_(input.size())
     noise.bernoulli_(p)
-    noise = Variable(noise.byte())
+    noise = noise.byte()
 
     output = input.masked_fill(noise, alpha)
 
@@ -862,7 +862,7 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
     """
     dims = logits.dim()
     gumbel_noise = _sample_gumbel(logits.size(), eps=eps, out=logits.data.new())
-    y = logits + Variable(gumbel_noise)
+    y = logits + gumbel_noise
     return softmax(y / tau, dims - 1)
 
 
@@ -1017,12 +1017,11 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     Examples::
 
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
+        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
         >>> # an embedding matrix containing 10 tensors of size 3
-        >>> embedding_matrix = Variable(torch.rand(10, 3))
+        >>> embedding_matrix = torch.rand(10, 3)
         >>> F.embedding(input, embedding_matrix)
 
-        Variable containing:
         (0 ,.,.) =
          -1.0822  1.2522  0.2434
           0.8393 -0.6062 -0.3348
@@ -1034,22 +1033,21 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
          -0.1527  0.0877  0.4260
           0.8393 -0.6062 -0.3348
          -0.8738 -0.9054  0.4281
-        [torch.FloatTensor of size 2x4x3]
+        [torch.FloatTensor of size (2,4,3)]
 
         >>> # example with padding_idx
         >>> weights = torch.rand(10, 3)
         >>> weights[0, :].zero_()
-        >>> embedding_matrix = Variable(weights)
-        >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
+        >>> embedding_matrix = weights
+        >>> input = torch.LongTensor([[0,2,0,5]])
         >>> F.embedding(input, embedding_matrix, padding_idx=0)
 
-        Variable containing:
         (0 ,.,.) =
           0.0000  0.0000  0.0000
           0.3452  0.4937 -0.9361
           0.0000  0.0000  0.0000
           0.0706 -2.1962 -0.6276
-        [torch.FloatTensor of size 1x4x3]
+        [torch.FloatTensor of size (1,4,3)]
 
     """
     input = input.contiguous()
@@ -1111,16 +1109,15 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         Examples::
 
             >>> # an Embedding module containing 10 tensors of size 3
-            >>> embedding_matrix = Variable(torch.rand(10, 3))
+            >>> embedding_matrix = torch.rand(10, 3)
             >>> # a batch of 2 samples of 4 indices each
-            >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
-            >>> offsets = Variable(torch.LongTensor([0,4]))
+            >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
+            >>> offsets = torch.LongTensor([0,4])
             >>> embedding_bag(embedding_matrix, input, offsets)
 
-            Variable containing:
             -1.1840 -0.2547 -0.5860
             -0.7126  0.0002 -0.3411
-            [torch.FloatTensor of size 2x3]
+            [torch.FloatTensor of size (2,3)]
 
         """
     if indices.dim() == 2:
@@ -1342,15 +1339,15 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     Example::
 
         >>> # input is of size N x C = 3 x 5
-        >>> input = autograd.Variable(torch.randn(3, 5))
+        >>> input = torch.randn(3, 5)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
+        >>> target = torch.LongTensor([1, 0, 4])
         >>> output = F.nll_loss(F.log_softmax(input), target)
         >>> output.backward()
     """
     dim = input.dim()
     if torch.is_tensor(weight):
-        weight = Variable(weight)
+        weight = weight
     if dim == 2:
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
@@ -1456,8 +1453,8 @@ def cross_entropy(input, target, weight=None, size_average=True, ignore_index=-1
 
     Examples::
 
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.LongTensor(3).random_(5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.LongTensor(3).random_(5)
         >>> loss = F.cross_entropy(input, target)
         >>> loss.backward()
     """
@@ -1486,8 +1483,8 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
 
     Examples::
 
-        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
-        >>> target = autograd.Variable(torch.LongTensor(3).random_(2))
+        >>> input = torch.randn(3, requires_grad=True)
+        >>> target = torch.LongTensor(3).random_(2)
         >>> loss = F.binary_cross_entropy(F.sigmoid(input), target)
         >>> loss.backward()
     """
@@ -1502,7 +1499,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
         if torch.is_tensor(weight):
-            weight = Variable(weight)
+            weight = weight
 
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
@@ -1529,8 +1526,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
 
     Examples::
 
-         >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
-         >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+         >>> input = torch.randn(3, requires_grad=True)
+         >>> target = torch.FloatTensor(3).random_(2)
          >>> loss = F.binary_cross_entropy_with_logits(input, target)
          >>> loss.backward()
     """
@@ -1670,7 +1667,7 @@ def pixel_shuffle(input, upscale_factor):
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = autograd.Variable(torch.Tensor(1, 9, 4, 4))
+        >>> input = torch.Tensor(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])
@@ -1958,8 +1955,8 @@ def pairwise_distance(x1, x2, p=2, eps=1e-6):
 
     Example::
 
-        >>> input1 = autograd.Variable(torch.randn(100, 128))
-        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
         >>> output = F.pairwise_distance(input1, input2, p=2)
         >>> output.backward()
     """
@@ -1989,8 +1986,8 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 
     Example::
 
-        >>> input1 = autograd.Variable(torch.randn(100, 128))
-        >>> input2 = autograd.Variable(torch.randn(100, 128))
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
         >>> output = F.cosine_similarity(input1, input2)
         >>> print(output)
     """
@@ -2032,9 +2029,9 @@ def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, s
 
     Example::
 
-        >>> input1 = autograd.Variable(torch.randn(100, 128))
-        >>> input2 = autograd.Variable(torch.randn(100, 128))
-        >>> input3 = autograd.Variable(torch.randn(100, 128))
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
+        >>> input3 = torch.randn(100, 128)
         >>> output = F.triplet_margin_loss(input1, input2, input3, p=2)
         >>> output.backward()
 
