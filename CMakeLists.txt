@@ -72,11 +72,14 @@ enable_testing()
 
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
+include(cmake/BuildVariables.cmake)
 
 # External projects
 include(ExternalProject)
 
+# TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
+include(cmake/public/utils.cmake)
 include(cmake/Summary.cmake)
 
 set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
@@ -199,22 +202,6 @@ endif()
 
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
-# Since one would use glog, gflags, and protobuf functionalities, any
-# dependent library will have to depend on glog, gflags, and protobuf
-# as well, so we mark them as INTERFACE transitive dependency.
-set(CAFFE2_INTERFACE_LIBS)
-if (USE_GLOG)
-  list(APPEND CAFFE2_INTERFACE_LIBS glog::glog)
-endif()
-if (USE_GFLAGS)
-  list(APPEND CAFFE2_INTERFACE_LIBS gflags)
-endif()
-list(APPEND CAFFE2_INTERFACE_LIBS protobuf::libprotobuf)
-
-# TODO: figure out how we should remove this public dependency.
-if (USE_OPENCV)
-  list(APPEND CAFFE2_INTERFACE_LIBS ${OpenCV_LIBS})
-endif()
 
 if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING
@@ -223,12 +210,10 @@ if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
       "generate files that are not well tested.")
 endif()
 
-target_link_libraries(caffe2 INTERFACE ${CAFFE2_INTERFACE_LIBS})
 if (USE_CUDA)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
-  target_link_libraries(caffe2_gpu INTERFACE
-      ${CAFFE2_INTERFACE_LIBS} caffe2::cudart)
+
 endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
@@ -256,6 +241,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2

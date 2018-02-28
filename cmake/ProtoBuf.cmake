@@ -70,7 +70,7 @@ if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lit
 endif()
 
 # TODO: enable using lite protobuf.
-list(APPEND Caffe2_DEPENDENCY_LIBS protobuf::libprotobuf)
+list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS protobuf::libprotobuf)
 
 # Protobuf generated files use <> as inclusion path, so following normal
 # convention we will use SYSTEM inclusion path.

@@ -1,3 +1,4 @@
+include(CheckCCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
@@ -170,6 +171,17 @@ endif()
 if (IOS)
   add_definitions("-mfpu=neon-fp16")
   add_definitions("-Wno-deprecated-declarations")
+endif()
+
+# ---[ If we are building with ACL, we will enable neon-fp16.
+if(USE_ACL)
+  if(NOT USE_ARM64)
+    add_definitions("-mfpu=neon-fp16")
+  endif()
+  CHECK_C_COMPILER_FLAG(-mfp16-format=ieee CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
+  if(CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
+    add_definitions("-mfp16-format=ieee")
+  endif()
 endif()
 
 # ---[ If we use asan, turn on the flags.

@@ -1,8 +1,3 @@
-# This list is required for static linking and exported to Caffe2Config.cmake
-set(Caffe2_DEPENDENCY_LIBS "")
-set(Caffe2_CUDA_DEPENDENCY_LIBS "")
-set(Caffe2_PYTHON_DEPENDENCY_LIBS "")
-
 # ---[ Custom Protobuf
 include("cmake/ProtoBuf.cmake")
 
@@ -46,21 +41,21 @@ if(BLAS STREQUAL "Eigen")
 elseif(BLAS STREQUAL "ATLAS")
   find_package(Atlas REQUIRED)
   include_directories(${ATLAS_INCLUDE_DIRS})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
-  list(APPEND Caffe2_DEPENDENCY_LIBS cblas)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${ATLAS_LIBRARIES})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS cblas)
 elseif(BLAS STREQUAL "OpenBLAS")
   find_package(OpenBLAS REQUIRED)
   include_directories(${OpenBLAS_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${OpenBLAS_LIB})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${OpenBLAS_LIB})
 elseif(BLAS STREQUAL "MKL")
   find_package(MKL REQUIRED)
   include_directories(${MKL_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${MKL_LIBRARIES})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${MKL_LIBRARIES})
   set(CAFFE2_USE_MKL 1)
 elseif(BLAS STREQUAL "vecLib")
   find_package(vecLib REQUIRED)
   include_directories(${vecLib_INCLUDE_DIR})
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS ${vecLib_LINKER_LIBS})
 else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
 endif()
@@ -99,7 +94,7 @@ if(USE_GFLAGS)
   include(cmake/public/gflags.cmake)
   if (TARGET gflags)
     set(CAFFE2_USE_GFLAGS 1)
-    list(APPEND Caffe2_DEPENDENCY_LIBS gflags)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
   else()
     message(WARNING
         "gflags is not found. Caffe2 will build without gflags support but "
@@ -114,7 +109,7 @@ if(USE_GLOG)
   include(cmake/public/glog.cmake)
   if (TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
-    list(APPEND Caffe2_DEPENDENCY_LIBS glog::glog)
+    list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS glog::glog)
   else()
     message(WARNING
         "glog is not found. Caffe2 will build without glog support but it is "
@@ -340,7 +335,14 @@ endif()
 # ---[ CUDA
 if(USE_CUDA)
   include(cmake/public/cuda.cmake)
-  if(NOT CAFFE2_FOUND_CUDA)
+  if(CAFFE2_FOUND_CUDA)
+    # A helper variable recording the list of Caffe2 dependent librareis
+    # caffe2::cuda is dealt with separately, due to CUDA_ADD_LIBRARY
+    # design reason (it adds CUDA_LIBRARIES itself).
+    set(Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS
+        caffe2::cudart caffe2::curand
+        caffe2::cublas caffe2::cudnn caffe2::nvrtc)
+  else()
     message(WARNING
         "Not compiling with CUDA. Suppress this warning with "
         "-DUSE_CUDA=OFF.")
@@ -439,6 +441,7 @@ if (USE_MOBILE_OPENGL)
   endif()
 endif()
 
+# ---[ ARM Compute Library: check compatibility.
 if (USE_ACL)
   if (NOT ANDROID)
     message(WARNING "ARM Compute Library is only supported for Android builds.")
@@ -447,6 +450,15 @@ if (USE_ACL)
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
       # 32-bit ARM (armv7, armv7-a, armv7l, etc)
       set(ACL_ARCH "armv7a")
+      # Compilers for 32-bit ARM need extra flags to enable NEON-FP16
+      add_definitions("-mfpu=neon-fp16")
+
+      include(CheckCCompilerFlag)
+      CHECK_C_COMPILER_FLAG(
+          -mfp16-format=ieee CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
+      if (CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
+        add_definitions("-mfp16-format=ieee")
+      endif()
     elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
       # 64-bit ARM
       set(ACL_ARCH "arm64-v8a")
@@ -457,7 +469,7 @@ if (USE_ACL)
   endif()
 endif()
 
-# ---[ ARM Compute Library
+# ---[ ARM Compute Library: build the target.
 if (USE_ACL)
   list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/")
   list(APPEND ARM_COMPUTE_INCLUDE_DIRS "third_party/ComputeLibrary/include")
