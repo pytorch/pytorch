@@ -19,10 +19,8 @@ __all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable']
 def _make_grads(outputs, grads):
     new_grads = []
     for out, grad in zip(outputs, grads):
-        if isinstance(grad, Variable):
+        if isinstance(grad, torch.Tensor):
             new_grads.append(grad)
-        elif torch.is_tensor(grad):
-            new_grads.append(Variable(grad))
         elif grad is None:
             if out.requires_grad:
                 if out.numel() != 1:
@@ -70,7 +68,7 @@ def backward(variables, grad_variables=None, retain_graph=None, create_graph=Fal
 
     if grad_variables is None:
         grad_variables = [None] * len(variables)
-    elif isinstance(grad_variables, Variable) or torch.is_tensor(grad_variables):
+    elif isinstance(grad_variables, torch.Tensor):
         grad_variables = [grad_variables]
     else:
         grad_variables = list(grad_variables)
@@ -126,7 +124,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
     inputs = (inputs,) if isinstance(inputs, Variable) else tuple(inputs)
     if grad_outputs is None:
         grad_outputs = [None] * len(outputs)
-    elif isinstance(grad_outputs, Variable) or torch.is_tensor(grad_outputs):
+    elif isinstance(grad_outputs, torch.Tensor):
         grad_outputs = [grad_outputs]
     else:
         grad_outputs = list(grad_outputs)
