@@ -70,7 +70,10 @@ static inline ssize_t io(PyObject* fildes, void* buf, size_t nbytes, bool is_rea
 #endif
   if (!memview) throw python_error();
 
-  auto method = is_read ? "readinto" : "write";
+  char* method = "write";
+  if (is_read) {
+    method = "readinto";
+  }
   THPObjectPtr r(PyObject_CallMethod(fildes, method, "O", memview.get()));
   if (r) {
     return PyLong_AsSsize_t(r.get());
