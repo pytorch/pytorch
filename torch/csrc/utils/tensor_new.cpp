@@ -5,9 +5,9 @@
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
-#include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_scalars.h"
@@ -22,11 +22,9 @@ using namespace at;
 namespace torch { namespace utils {
 
 static void maybe_initialize_cuda(const at::Type &type) {
-#ifdef WITH_CUDA
   if (type.is_cuda()) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
-#endif
 }
 
 static Tensor new_with_sizes(const Type& type, int device, IntList sizes) {

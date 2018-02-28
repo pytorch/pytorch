@@ -7,10 +7,10 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/cuda/lazy_init.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -298,11 +298,9 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 }
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool non_blocking) {
-#ifdef WITH_CUDA
   if (type.is_cuda()) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
-#endif
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
