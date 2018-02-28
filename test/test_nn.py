@@ -22,7 +22,7 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.autograd import Variable, variable, gradcheck
+from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
@@ -1673,7 +1673,7 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
     def test_pad_scalar_error(self):
-        inputs = variable(0, requires_grad=True)
+        inputs = torch.tensor(0, requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 

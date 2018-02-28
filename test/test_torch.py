@@ -176,10 +176,10 @@ class TestTorch(TestCase):
             self.assertEqual(res1, res2)
 
     def test_linear_algebra_scalar_raises(self):
-        from torch.autograd import Variable, variable
+        from torch.autograd import Variable
         m = Variable(torch.randn(5, 5))
         v = Variable(torch.randn(5))
-        s = variable(7)
+        s = torch.tensor(7)
         self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
         self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
         self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
@@ -1588,12 +1588,12 @@ class TestTorch(TestCase):
 
     def test_scalars_as_floats(self):
         "zero-dim variables that don't require grad should bind to scalar arguments"
-        x = torch.autograd.variable(2)
-        y = torch.autograd.variable(3)
+        x = torch.tensor(2)
+        y = torch.tensor(3)
         # 3 + (3 * 3) * 2
         self.assertEqual(y.addcmul(y, y, value=x), 21)
 
-        x = torch.autograd.variable(2, requires_grad=True)
+        x = torch.tensor(2, requires_grad=True)
         self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
     @staticmethod
@@ -2019,9 +2019,8 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
     def test_cat_scalars(self):
-        from torch.autograd import variable
-        x = variable(0)
-        y = variable(1)
+        x = torch.tensor(0)
+        y = torch.tensor(1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
 
     def test_stack(self):
@@ -4508,8 +4507,7 @@ class TestTorch(TestCase):
 
     def test_deepcopy_scalar(self):
         from copy import deepcopy
-        from torch.autograd import variable
-        a = variable(5)
+        a = torch.tensor(5)
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
