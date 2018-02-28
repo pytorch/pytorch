@@ -424,8 +424,6 @@ loss_reference_fns = {
 }
 
 
-sample_scalar = torch.tensor(0)
-
 criterion_tests = [
     dict(
         module_name='L1Loss',
