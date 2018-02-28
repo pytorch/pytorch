@@ -406,6 +406,7 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_av
             return output.sum() / dim
         return output / dim
 
+
 def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
     cos = input1.new(input1.size(0)).zero_()
     output = input1.new(input1.size(0)).zero_()
