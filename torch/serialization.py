@@ -1,6 +1,7 @@
 import difflib
 import inspect
 import os
+import io
 import shutil
 import struct
 import sys
@@ -120,6 +121,16 @@ def _with_file_like(f, mode, body):
             f.close()
 
 
+def _is_real_file(f):
+    """Checks if f is backed by a real file (has a fileno)"""
+    try:
+        return f.fileno() >= 0
+    except io.UnsupportedOperation:
+        return False
+    except AttributeError:
+        return False
+
+
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
 
@@ -201,7 +212,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
     for key in serialized_storage_keys:
-        serialized_storages[key]._write_file(f)
+        serialized_storages[key]._write_file(f, _is_real_file(f))
 
 
 def load(f, map_location=None, pickle_module=pickle):
@@ -410,14 +421,15 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    foffset = f.tell()
-    if foffset == 0:
+    f_is_real_file = _is_real_file(f)
+    if f_is_real_file and f.tell() == 0:
+        # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
             return legacy_load(f)
         except tarfile.TarError:
             # if not a tarfile, reset file offset and proceed
-            f.seek(foffset)
+            f.seek(0)
 
     magic_number = pickle_module.load(f)
     if magic_number != MAGIC_NUMBER:
@@ -433,10 +445,16 @@ def _load(f, map_location, pickle_module):
 
     deserialized_storage_keys = pickle_module.load(f)
 
+    if not f_is_real_file:
+        for key in deserialized_storage_keys:
+            assert key in deserialized_objects
+            deserialized_objects[key]._set_from_file(f, None, f_is_real_file)
+        return result
+
     offset = f.tell()
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
-        deserialized_objects[key]._set_from_file(f, offset)
+        deserialized_objects[key]._set_from_file(f, offset, f_is_real_file)
         offset = None
 
     return result
