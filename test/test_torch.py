@@ -4817,6 +4817,9 @@ class TestTorch(TestCase):
     def test_serialization_container(self):
         self._test_serialization_container(lambda: tempfile.NamedTemporaryFile())
 
+    # TODO(rzou): test_serialization_container breaks if called multiple times.
+    # The following test won't fail if called by itself.
+    @unittest.skipIf(not PY3, 'This test is broken on Python 2')
     def test_serialization_container_filelike(self):
         self._test_serialization_container(lambda: BytesIOContext())
 
