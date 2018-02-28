@@ -1686,13 +1686,13 @@ Computes a QR decomposition of :attr:`input`, but without constructing
 Rather, this directly calls the underlying LAPACK function `?geqrf`
 which produces a sequence of 'elementary reflectors'.
 
-See `LAPACK documentation`_ for further details.
+See `LAPACK documentation for geqrf`_ for further details.
 
 Args:
     input (Tensor): the input matrix
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
-.. _LAPACK documentation:
+.. _LAPACK documentation for geqrf:
     https://software.intel.com/en-us/node/521004
 
 """)
@@ -3253,13 +3253,13 @@ Computes the orthogonal matrix `Q` of a QR factorization, from the `(a, tau)`
 tuple returned by :func:`torch.geqrf`.
 
 This directly calls the underlying LAPACK function `?orgqr`.
-See `LAPACK documentation`_ for further details.
+See `LAPACK documentation for orgqr`_ for further details.
 
 Args:
     a (Tensor): the `a` from :func:`torch.geqrf`.
     tau (Tensor): the `tau` from :func:`torch.geqrf`.
 
-.. _LAPACK documentation:
+.. _LAPACK documentation for orgqr:
     https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
 
 """)
@@ -3272,14 +3272,14 @@ Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
 formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
 
 This directly calls the underlying LAPACK function `?ormqr`.
-See `LAPACK documentation`_ for further details.
+See `LAPACK documentation for ormqr`_ for further details.
 
 Args:
     a (Tensor): the `a` from :func:`torch.geqrf`.
     tau (Tensor): the `tau` from :func:`torch.geqrf`.
     mat (Tensor): the matrix to be multiplied.
 
-.. _LAPACK documentation:
+.. _LAPACK documentation for ormqr:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
 """)

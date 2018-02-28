@@ -20,7 +20,7 @@ def get_rng_state():
 
 
 def manual_seed(seed):
-    r"""Sets the seed for generating random numbers. This returns a
+    r"""Sets the seed for generating random numbers. Returns a
     `torch._C.Generator` object.
 
     Args:
@@ -53,7 +53,7 @@ def fork_rng(devices=None, enabled=True, _caller="fork_rng", _devices_kw="device
 
     Arguments:
         devices (iterable of CUDA IDs): CUDA devices for which to fork
-            the RNG.  CPU RNG state is always forked.  By default, fork_rng operates
+            the RNG.  CPU RNG state is always forked.  By default, :meth:`fork_rng` operates
             on all devices, but will emit a warning if your machine has a lot
             of devices, since this function will run very slowly in that case.
             If you explicitly specify devices, this warning will be supressed
