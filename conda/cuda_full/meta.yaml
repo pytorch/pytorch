@@ -19,9 +19,11 @@ requirements:
     - future
     - glog
     - gflags
+    - leveldb
     - lmdb
     - numpy
-    - opencv
+    - opencv ==3.3.0
+    - openmpi
     - python
     - protobuf {{ protobuf }}
     - six
@@ -29,9 +31,11 @@ requirements:
     - future
     - glog
     - gflags
+    - leveldb
     - lmdb
     - numpy
-    - opencv
+    - opencv ==3.3.0
+    - openmpi
     - protobuf
     - python
     - six

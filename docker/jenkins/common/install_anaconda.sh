@@ -31,10 +31,3 @@ rm ~/anaconda.sh
 
 export PATH="/opt/conda/bin:$PATH"
 echo 'export PATH=/opt/conda/bin:$PATH' > ~/.bashrc
-
-# Optional dependencies not yet installed by install_base.sh
-# TODO is this needed? libopenmpi seems needed for CUDA builds
-apt-get install -y --no-install-recommends \
-      libgflags-dev \
-      libgtest-dev \
-      libopenmpi-dev
