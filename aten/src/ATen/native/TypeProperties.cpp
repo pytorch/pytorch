@@ -18,18 +18,13 @@ bool is_floating_point(const Tensor& self) {
   return at::isFloatingType(self.type().scalarType());
 }
 
-template <typename scalar>
-struct IsSigned {
-  static bool apply() { return std::is_signed<scalar>(); }
-};
-
-template<>
-struct IsSigned<Half> {
-  static bool apply() { return true; }
-};
-
 bool is_signed(const Tensor &self) {
-  return dispatch_all<bool, IsSigned>(self.type(), "is_signed");
+  if (self.type().scalarType() == ScalarType::Half) {
+    return true;
+  }
+  return AT_DISPATCH_ALL_TYPES(self.type(), "is_signed", ([&]() -> bool {
+    return std::is_signed<scalar_t>();
+  }));
 }
 
 bool is_sparse(const Tensor& self) {
