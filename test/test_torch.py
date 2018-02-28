@@ -2120,10 +2120,8 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_slice(self):
-        # TODO: remove the Variable wrapper once we merge Variable and Tensor
-        from torch.autograd import Variable
-        empty = Variable(torch.Tensor())
-        x = Variable(torch.arange(0, 16).view(4, 4))
+        empty = torch.Tensor()
+        x = torch.arange(0, 16).view(4, 4)
         self.assertEqual(x.slice(), x)
         self.assertEqual(x.slice(0, 0, 4), x)
         # start and stop are clamped to the size of dim
@@ -2140,21 +2138,17 @@ class TestTorch(TestCase):
         self.assertEqual(x.slice(0, 0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
     def test_is_signed(self):
-        # TODO: remove the Variable wrapper once we merge Variable and Tensor
-        from torch.autograd import Variable
-        self.assertEqual(Variable(torch.IntTensor(5)).is_signed(), True)
-        self.assertEqual(Variable(torch.ByteTensor(5)).is_signed(), False)
-        self.assertEqual(Variable(torch.FloatTensor(5)).is_signed(), True)
-        self.assertEqual(Variable(torch.HalfTensor(10)).is_signed(), True)
+        self.assertEqual(torch.IntTensor(5).is_signed(), True)
+        self.assertEqual(torch.ByteTensor(5).is_signed(), False)
+        self.assertEqual(torch.FloatTensor(5).is_signed(), True)
+        self.assertEqual(torch.HalfTensor(10).is_signed(), True)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_is_signed_cuda(self):
-        # TODO: remove the Variable wrapper once we merge Variable and Tensor
-        from torch.autograd import Variable
-        self.assertEqual(Variable(torch.IntTensor(5).cuda()).is_signed(), True)
-        self.assertEqual(Variable(torch.ByteTensor(5).cuda()).is_signed(), False)
-        self.assertEqual(Variable(torch.FloatTensor(5).cuda()).is_signed(), True)
-        self.assertEqual(Variable(torch.HalfTensor(10).cuda()).is_signed(), True)
+        self.assertEqual(torch.cuda.IntTensor(5).is_signed(), True)
+        self.assertEqual(torch.cuda.ByteTensor(5).is_signed(), False)
+        self.assertEqual(torch.cuda.FloatTensor(5).is_signed(), True)
+        self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 
     @skipIfNoLapack
     def test_gesv(self):
@@ -2656,20 +2650,16 @@ class TestTorch(TestCase):
                 M[i] = row
             return M.diag().prod() * multiplier
 
-        # TODO: remove Variable wrapper once Variable and Tensor are the same
-        Variable = torch.autograd.Variable
-
-        eye_det = Variable(conv_fn(torch.eye(5))).det()
+        eye_det = conv_fn(torch.eye(5)).det()
         self.assertEqual(eye_det, eye_det.clone().fill_(1), 1e-8, 'determinant of identity')
 
         def test(M):
             M = conv_fn(M)
-            var_M = Variable(M)
-            M_det = var_M.det().data
+            M_det = M.det().data
 
             self.assertEqual(M_det, M_det.clone().fill_(reference_det(M)), 1e-8, 'determinant')
-            self.assertEqual(M_det, var_M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
-            self.assertEqual(M_det, var_M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
+            self.assertEqual(M_det, M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
+            self.assertEqual(M_det, M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
 
             for x in [0, 2, 4]:
                 for scale in [-2, -0.1, 0, 10]:
@@ -2677,12 +2667,12 @@ class TestTorch(TestCase):
                     # dim 0
                     M_clone = M.clone()
                     M_clone[:, x] *= scale
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after scaling a row')
                     # dim 1
                     M_clone = M.clone()
                     M_clone[x, :] *= scale
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after scaling a column')
 
             for x1, x2 in [(0, 3), (4, 1), (3, 2)]:
@@ -2691,12 +2681,12 @@ class TestTorch(TestCase):
                 # dim 0
                 M_clone = M.clone()
                 M_clone[:, x2] = M_clone[:, x1]
-                det = Variable(M_clone).det().data
+                det = M_clone.det()
                 self.assertEqual(target, det, 1e-8, 'determinant when two rows are same')
                 # dim 1
                 M_clone = M.clone()
                 M_clone[x2, :] = M_clone[x1, :]
-                det = Variable(M_clone).det().data
+                det = M_clone.det()
                 self.assertEqual(target, det, 1e-8, 'determinant when two columns are same')
 
                 for scale1, scale2 in [(0.3, -1), (0, 2), (10, 0.1)]:
@@ -2706,14 +2696,14 @@ class TestTorch(TestCase):
                     t = M_clone[:, x1] * scale1
                     M_clone[:, x1] += M_clone[:, x2] * scale2
                     M_clone[:, x2] = t
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after exchanging rows')
                     # dim 1
                     M_clone = M.clone()
                     t = M_clone[x1, :] * scale1
                     M_clone[x1, :] += M_clone[x2, :] * scale2
                     M_clone[x2, :] = t
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after exchanging columns')
 
         test(torch.randn(5, 5))
@@ -3135,8 +3125,6 @@ class TestTorch(TestCase):
             for inplace in (True, False):
                 for uplo in (None, True, False):
                     checkPsdCholesky(a, uplo, inplace)
-                    # TODO: remove once Variable and Tensor are merged
-                    checkPsdCholesky(torch.autograd.Variable(a), uplo, inplace)
 
     def test_numel(self):
         b = torch.ByteTensor(3, 100, 100)
@@ -4562,24 +4550,6 @@ class TestTorch(TestCase):
         q = torch.rand(5, 5)
         self.assertTrue(isBinary(q.bernoulli()))
 
-    def test_bernoulli_variable(self):
-        # TODO: remove once we merge Variable and Tensor
-        t = torch.autograd.Variable(torch.ByteTensor(10, 10))
-
-        def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum() == 0
-
-        p = 0.5
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
-
-        p = torch.autograd.Variable(torch.rand(10))
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
-
-        q = torch.rand(5, 5)
-        self.assertTrue(isBinary(q.bernoulli()))
-
     def test_normal(self):
         q = torch.Tensor(100, 100)
         q.normal_()
@@ -5330,8 +5300,7 @@ class TestTorch(TestCase):
         self.assertEqual(x_clone, xor_result)
 
     def test_invert(self):
-        # TODO remove this once we merge tensor and variable
-        x = torch.autograd.Variable(torch.ByteTensor([0, 1, 1]))
+        x = torch.ByteTensor([0, 1, 1])
         self.assertEqual((~x).tolist(), [1, 0, 0])
 
     def test_apply(self):

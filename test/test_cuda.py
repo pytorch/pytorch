@@ -732,32 +732,26 @@ class TestCuda(TestCase):
                 t += 1
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def _test_autogpu(self, TensorCtor):
-        x = TensorCtor().cuda()
-        y = TensorCtor().cuda()
+    def test_autogpu(self):
+        x = torch.randn(5, 5).cuda()
+        y = torch.randn(5, 5).cuda()
         self.assertEqual(x.get_device(), 0)
         self.assertEqual(x.get_device(), 0)
         with torch.cuda.device(1):
-            z = TensorCtor().cuda()
+            z = torch.randn(5, 5).cuda()
             self.assertEqual(z.get_device(), 1)
             q = x.add(y)
             self.assertEqual(q.get_device(), 0)
-            w = TensorCtor().cuda()
+            w = torch.randn(5, 5).cuda()
             self.assertEqual(w.get_device(), 1)
             self.assertEqual(y.cuda().get_device(), 1)
             self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
 
-    def test_autogpu(self):
-        # TODO: clean-up and merge with above code after Variable and Tensor
-        # are merged
-        self._test_autogpu(lambda: torch.randn(5, 5))
-        self._test_autogpu(lambda: torch.autograd.Variable(torch.randn(5, 5)))
-
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_new(self):
-        x = torch.autograd.Variable(torch.randn(3, 3).cuda())
+        x = torch.randn(3, 3).cuda()
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
         self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
 
@@ -1087,12 +1081,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    def test_bernoulli_variable(self):
-        # TODO: delete when tensor/variable are merged
-        from torch.autograd import Variable
-        x = torch.cuda.FloatTensor([0, 1]).cuda()
-        x_var = Variable(x)
-        self.assertEqual(x_var.bernoulli().data, x.bernoulli())
+    def test_bernoulli(self):
+        x = torch.tensor([0, 1], dtype=torch.cuda.float32)
+        self.assertEqual(x.bernoulli().tolist(), [0, 1])
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()

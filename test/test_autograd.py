@@ -2701,14 +2701,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
             if isinstance(arg.tensor, Variable):
                 return maybe_non_contig(arg.tensor)
             return Variable(maybe_non_contig(arg.tensor))
-        elif torch.is_tensor(arg) or isinstance(arg, Variable):
-            # TODO: simplify once Variable and Tensor are merged
-            shape = arg.shape
-            if not torch.is_tensor(arg):
-                arg = arg.data
+        elif isinstance(arg, torch.Tensor):
             if isinstance(arg, torch.FloatTensor):
                 arg = arg.double()
-            v = Variable(maybe_non_contig(arg)).view(shape)
+            v = maybe_non_contig(arg).detach()
             v.requires_grad = requires_grad and v.is_floating_point()
             return v
         elif callable(arg):

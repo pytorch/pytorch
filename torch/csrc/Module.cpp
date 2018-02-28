@@ -119,13 +119,6 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
-{
-  HANDLE_TH_ERRORS
-  return torch::createPyObject(torch::utils::tensor_from_numpy(array));
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject *THPModule_safeCall(PyObject *_unused, PyObject *args, PyObject *kwargs)
 {
   PyObject *result = NULL;
@@ -353,15 +346,9 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  NULL},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     NULL},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  NULL},
-  {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
-  // Sparse functions
-  // {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
-  // {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
-  // {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
-  // {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
