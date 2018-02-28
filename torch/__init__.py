@@ -131,14 +131,7 @@ def set_default_tensor_type(t):
     if isinstance(t, globals()['dtype']):
         _C._set_default_tensor_type(t)
     else:
-        global Storage
         Tensor = _import_dotted_name(t)
-        Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
-
-        if 'cuda' in t:
-            import torch.cuda
-            torch.cuda.init()
-
         _C._set_default_tensor_type(Tensor)
 
 
