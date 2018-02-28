@@ -520,8 +520,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "type(PyObject* new_type=None, bool non_blocking=False)",
-    "type(PyObject* new_type=None, bool async=False)|deprecated"
+    "type(PyObject* dtype=None, bool non_blocking=False)",
+    "type(PyObject* dtype=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   PyObject* parsed_args[2];
@@ -531,14 +531,17 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   }
   auto obj = r.pyobject(0);
   std::string type_name;
+  bool is_dtype = false;
   if (PyType_Check(obj)) {
     type_name = ((PyTypeObject*)obj)->tp_name;
   } else if (THPUtils_checkString(obj)) {
     type_name = THPUtils_unpackString(obj);
+  } else if (THPDtype_Check(obj)) {
+    is_dtype = true;
   } else {
-    throw TypeError("new_type must be a type or str object");
+    throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto& type = torch::utils::type_from_string(type_name);
+  auto& type = is_dtype ? r.type(0) : torch::utils::type_from_string(type_name);
   return THPVariable_Wrap(dispatch_type(self_, type, -1, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
