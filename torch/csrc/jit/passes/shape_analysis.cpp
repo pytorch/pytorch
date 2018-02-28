@@ -85,8 +85,7 @@ void PropagateShapeOnNode(Node * node) {
       int64_t dim = node->i(kdim);
       int64_t length = node->i(klength);
       sizes.at(dim) = length;
-      // xxx - does not propagate strides of narrow correctly
-      node->output()->setType(tp->withSizes(sizes));
+      node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
     } break;
     case ksum: {
       if (node->hasAttribute(kdim)) {

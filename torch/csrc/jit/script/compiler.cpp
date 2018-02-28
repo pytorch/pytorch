@@ -222,16 +222,16 @@ struct to_ir {
     return save_env;
   }
 
-  Node* create(Symbol kind, const TreeRef& loc,  size_t num_outputs) {
+  Node* create(Symbol kind, const SourceRange& loc,  size_t num_outputs) {
     return def.graph
              ->create(kind, num_outputs)
-             ->setSourceLocation(std::make_shared<SourceRange>(loc->range()));
+             ->setSourceLocation(std::make_shared<SourceRange>(loc));
   }
 
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kIf, expr, 0));
+    Node* n = def.graph->insertNode(create(kIf, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -257,7 +257,7 @@ struct to_ir {
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kIf, stmt, 0));
+    Node* n = def.graph->insertNode(create(kIf, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -303,10 +303,10 @@ struct to_ir {
     // in a way that ensure single static assignment.
 
     // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(stmt, INT_MAX, "i")[0];
+    Value* max_trip_count_dummy = emitConst(stmt.range(), INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kLoop, stmt, 0));
+    Node* n = def.graph->insertNode(create(kLoop, stmt.range(), 0));
     n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
@@ -478,14 +478,14 @@ struct to_ir {
         expectOutputs(tree, output_size, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        return emitNode(kind, tree, getValues(inputs), output_size)->outputs();
+        return emitNode(kind, tree->range(), getValues(inputs), output_size)->outputs();
       } break;
       case '+':
       case '-': {
         expectOutputs(tree, output_size, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree, getValues(inputs), output_size);
+        auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
         if (kind != kneg)
           node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
@@ -498,7 +498,7 @@ struct to_ir {
           expectOutputs(tree, output_size, 0);
           if (!apply.attributes().empty())
             throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
-          return emitNode(kPrint, tree, getValues(apply.inputs()), 0,
+          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0,
                           AttributeMap{}, ListAttributeMap{})->outputs();
         } else {
           const auto& inputs = getValues(apply.inputs());
@@ -530,7 +530,7 @@ struct to_ir {
             }
           }
           return emitNode(
-                     kind, tree, inputs, output_size, attributes, list_attributes)
+                     kind, tree->range(), inputs, output_size, attributes, list_attributes)
               ->outputs();
         }
       } break;
@@ -541,14 +541,14 @@ struct to_ir {
       } break;
       case TK_CONST: {
         expectOutputs(tree, output_size, 1);
-        return emitConst(tree,
+        return emitConst(tree->range(),
             tree->tree(0)->doubleValue(), tree->tree(1)->stringValue());
       } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
         const auto slice = Slice(tree);
         return emitSlice(
-            slice,
+            slice.range(),
             {slice.value(), slice.startOr(0), slice.endOr(-1)},
             output_size);
       } break;
@@ -556,7 +556,7 @@ struct to_ir {
         expectOutputs(tree, output_size, 1);
         const auto gather = Gather(tree);
         return emitGather(
-            gather, {gather.value(), gather.indices()}, output_size);
+            gather.range(), {gather.value(), gather.indices()}, output_size);
       } break;
       case '.':
         // TODO: add support for "."
@@ -590,13 +590,13 @@ struct to_ir {
     }
     return emitNode(
                Symbol("type_as"),
-               input,
-               {emitExpr(input, 1)[0], createConstant(input, at::CPU(t).ones({1}))},
+               input->range(),
+               {emitExpr(input, 1)[0], createConstant(input->range(), at::CPU(t).ones({1}))},
                1)
         ->outputs();
   }
 
-  std::vector<Value*> emitConst(const TreeRef& loc, const double val, const std::string& type) {
+  std::vector<Value*> emitConst(const SourceRange& loc, const double val, const std::string& type) {
     if (type == "f") {
       return {createConstant(loc, at::CPU(at::kFloat).scalarTensor(val))};
     } else if (type == "LL") {
@@ -612,7 +612,7 @@ struct to_ir {
 
   Node* emitNode(
       NodeKind kind,
-      const TreeRef& loc,
+      const SourceRange& loc,
       const std::vector<Value*> inputs,
       const size_t output_size,
       const AttributeMap& attributes = AttributeMap{},
@@ -647,11 +647,11 @@ struct to_ir {
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
   std::vector<Value*> emitSlice(
-      const TreeRef& loc,
+      const SourceRange& loc,
       TreeList&& inputs,
       const size_t output_size) {
     const auto applyInputs =
-        Compound::create(TK_LIST, loc->range(), std::move(inputs));
+        Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
     const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
@@ -670,11 +670,11 @@ struct to_ir {
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
   std::vector<Value*> emitGather(
-      const TreeRef& loc,
+      const SourceRange& loc,
       TreeList&& inputs,
       const size_t output_size) {
     const auto applyInputs =
-        Compound::create(TK_LIST, loc->range(), std::move(inputs));
+        Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
     const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
@@ -695,9 +695,9 @@ struct to_ir {
   std::shared_ptr<Environment> environment_stack;
 
  private:
-  Value* createConstant(const TreeRef& loc, const at::Tensor& val) {
+  Value* createConstant(const SourceRange& loc, const at::Tensor& val) {
     auto n = def.graph->createConstant(val);
-    n->setSourceLocation(std::make_shared<SourceRange>(loc->range()));
+    n->setSourceLocation(std::make_shared<SourceRange>(loc));
     return def.graph->insertNode(n)->output();
   }
 };

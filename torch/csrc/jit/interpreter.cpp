@@ -908,24 +908,22 @@ struct InterpreterStateImpl {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
         // std::cout << "\n";
-        size_t new_pc;
         try {
           auto & inst = instructions[pc];
           loadTensorsFromRegisters(inst.inputs, stack);
-          new_pc = pc + 1 + inst.callback(stack);
+          size_t new_pc = pc + 1 + inst.callback(stack);
           for(int i = inst.outputs.size - 1; i >= 0; i--) {
             int reg = get(inst.outputs,i);
             registers[reg] = pop(stack);
             // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
           }
+          pc = new_pc;
         } catch(std::exception & e) {
-          if(pc >= instructions.size() || !instructions[pc].debug_location)
+          if(!instructions[pc].debug_location)
             throw; // rethrow original exception
           // throw a new exception with enhanced debugging information
           instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
         }
-
-        pc = new_pc;
     }
     current_pc = pc;
     current_stage++;
