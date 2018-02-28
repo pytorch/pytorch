@@ -68,7 +68,7 @@ static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kw
     "clamp(Scalar min=None, Scalar max=None)",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(0) && !r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp(self_, r.scalar(0), r.scalar(1)));
@@ -105,7 +105,7 @@ static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* k
     "clamp_(Scalar min=None, Scalar max=None)",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(0) && !r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp_(self_, r.scalar(0), r.scalar(1)));
@@ -127,7 +127,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
     "size()",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[3];
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     return wrap(self_.size(r.toInt64(0)));
@@ -150,7 +150,7 @@ static PyObject * THPVariable_stride(PyObject* self, PyObject* args, PyObject* k
     "stride()",
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[3];
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     return wrap(self_.stride(r.toInt64(0)));
@@ -206,7 +206,7 @@ static PyObject * THPVariable_copy_(PyObject* self, PyObject* args, PyObject* kw
     "copy_(Tensor other, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   return THPVariable_Wrap(dispatch_copy_(self_, r.tensor(0), r.toBool(1)));
   END_HANDLE_TH_ERRORS
@@ -336,7 +336,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
     "cuda(int64_t? device=-1, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
@@ -441,7 +441,7 @@ static PyObject * THPVariable_map_(PyObject* self, PyObject* args, PyObject* kwa
   HANDLE_TH_ERRORS
   static PythonArgParser parser({ "map_(Tensor other, PyObject* callable)" });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   Variable other = r.tensor(0);
   if (self_.requires_grad() || other.requires_grad()) {
@@ -458,7 +458,7 @@ static PyObject * THPVariable_map2_(PyObject* self, PyObject* args, PyObject* kw
   HANDLE_TH_ERRORS
   static PythonArgParser parser({ "map2_(Tensor x, Tensor y, PyObject* callable)" });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[3];
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   Variable x = r.tensor(0);
   Variable y = r.tensor(1);
@@ -524,7 +524,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     "type(PyObject* dtype=None, bool async=False)|deprecated"
   });
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.isNone(0)) {
     return THPUtils_packString(torch::utils::type_to_string(self_.type()));

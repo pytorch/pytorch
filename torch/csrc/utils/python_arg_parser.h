@@ -11,7 +11,7 @@
 //     "norm(Scalar p, int64_t dim, bool keepdim=False)",
 //     "norm(Scalar p=2)",
 //   });
-//   PyObject* parsed_args[3];
+//   ParsedArgs<3> parsed_args;
 //   auto r = parser.parse(args, kwargs, parsed_args);
 //   if (r.idx == 0) {
 //     norm(r.scalar(0), r.int64(1), r.bool(0));
@@ -47,14 +47,22 @@ struct FunctionParameter;
 struct FunctionSignature;
 struct PythonArgs;
 
+// Contains bound Python arguments in declaration order
+template<int N>
+struct ParsedArgs {
+  PyObject* args[N];
+};
+
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts);
 
-  PythonArgs parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
+  template<int N>
+  inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* dst[]);
+  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
@@ -133,6 +141,15 @@ struct FunctionParameter {
     at::Type* default_type;
   };
 };
+
+template<int N>
+inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+  if (N < max_args) {
+    throw ValueError("dst does not have enough capacity, expected %d (got %d)",
+        (int)max_args, N);
+  }
+  return raw_parse(args, kwargs, dst.args);
+}
 
 inline at::Tensor PythonArgs::tensor(int i) {
   if (!args[i]) return at::Tensor();
