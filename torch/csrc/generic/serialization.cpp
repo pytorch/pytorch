@@ -91,20 +91,20 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
 
   // fast track for bytes and little endian
   if (sizeof(real) == 1 || THP_nativeByteOrder() == THPByteOrder::THP_LITTLE_ENDIAN) {
-     char *bytes = (char *) data;
-     int64_t remaining = sizeof(real) * storage->size;
-     while (remaining > 0) {
-       // we write and read in 1GB blocks to avoid bugs on some OSes
-       ssize_t result = doRead<io>(file, bytes, THMin(remaining, 1073741824));
-       if (result == 0) // 0 means EOF, which is also an error
-         throw std::runtime_error("unexpected EOF. The file might be corrupted.");
-       if (result < 0)
-         throw std::system_error(result, std::system_category());
-       bytes += result;
-       remaining -= result;
-     }
-     if (remaining != 0)
-       throw std::system_error(result, std::system_category());
+    char *bytes = (char *) data;
+    int64_t remaining = sizeof(real) * storage->size;
+    while (remaining > 0) {
+      // we write and read in 1GB blocks to avoid bugs on some OSes
+      ssize_t result = doRead<io>(file, bytes, THMin(remaining, 1073741824));
+      if (result == 0) // 0 means EOF, which is also an error
+        throw std::runtime_error("unexpected EOF. The file might be corrupted.");
+      if (result < 0)
+        throw std::system_error(result, std::system_category());
+      bytes += result;
+      remaining -= result;
+    }
+    if (remaining != 0)
+      throw std::system_error(result, std::system_category());
   } else {
     int64_t buffer_size = std::min(size, (int64_t)5000);
     std::unique_ptr<uint8_t[]> le_buffer(new uint8_t[buffer_size * sizeof(real)]);

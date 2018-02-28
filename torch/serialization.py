@@ -138,10 +138,19 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
     Args:
         obj: saved object
-        f: a file-like object (has to implement fileno that returns a file descriptor)
-            or a string containing a file name
+        f: a file-like object (has to implement write and flush) or a string
+           containing a file name
         pickle_module: module used for pickling metadata and objects
         pickle_protocol: can be specified to override the default protocol
+
+    Example:
+        # Save to file
+        >>> x = torch.Tensor([0, 1, 2, 3, 4])
+        >>> torch.save(x, 'tensor.pt')
+
+        # Save to io.BytesIO buffer
+        >>> buffer = io.BytesIO()
+        >>> torch.save(x, buffer)
     """
     return _with_file_like(f, "wb", lambda f: _save(obj, f, pickle_module, pickle_protocol))
 
@@ -248,9 +257,8 @@ def load(f, map_location=None, pickle_module=pickle):
     deserialization methods using register_package.
 
     Args:
-        f: a file-like object (has to implement fileno that returns a file
-            descriptor, and must implement seek), or a string containing a file
-            name
+        f: a file-like object (has to implement read, readline, tell, and seek),
+            or a string containing a file name
         map_location: a function, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
@@ -266,7 +274,10 @@ def load(f, map_location=None, pickle_module=pickle):
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage.cuda(1))
         # Map tensors from GPU 1 to GPU 0
         >>> torch.load('tensors.pt', map_location={'cuda:1':'cuda:0'})
-
+        # Load tensor from io.BytesIO object
+        >>> with open('tensor.pt') as f:
+                buffer = io.BytesIO(f.read())
+        >>> torch.load(buffer)
     """
     new_fd = False
     if isinstance(f, str) or \

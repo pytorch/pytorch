@@ -46,15 +46,18 @@ class FilelikeMock(object):
         self.calls = set([])
         self.bytesio = io.BytesIO(data)
 
-        for attr in ['readline', 'seek', 'tell', 'write']:
-            setattr(self, attr, getattr(self.bytesio, attr))
+        def trace(fn, name):
+            def result(*args, **kwargs):
+                self.calls.add(name)
+                return fn(*args, **kwargs)
+            return result
+
+        for attr in ['read', 'readline', 'seek', 'tell', 'write', 'flush']:
+            traced_fn = trace(getattr(self.bytesio, attr), attr)
+            setattr(self, attr, traced_fn)
 
     def fileno_opt(self):
         raise io.UnsupportedOperation('Not a real file')
-
-    def read(self, n=-1):
-        self.calls.add('read')
-        return self.bytesio.read(n)
 
     def readinto_opt(self, view):
         self.calls.add('readinto')
