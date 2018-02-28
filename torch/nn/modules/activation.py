@@ -86,21 +86,42 @@ class ReLU(Threshold):
 class RReLU(Module):
     r""" Randomized leaky ReLU.
 
+    Applies the randomized leaky rectified liner unit function
+    element-wise described in the paper
+    `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
+
+    The function is defined as:
+
     .. math::
-       {RReLU}(x) = \left\{
-       \begin{eqnarray}
-        x \textrm{ if } x \geq 0 \\
-       ax \textrm{ if } x < 0 ,
-       \end{eqnarray}
-       \right.
+        f(x) = \begin{cases}
+            ax & \text{if } x < 0 \\
+            x & \text{if } x \geq 0 , \\
+        \end{cases}
 
-    where :math:`a` is a random number between some threshold (typically :math:`\frac{1}{8}` and :math:`\frac{1}{3}`).
+    where :math:`a` is randomly sampled from uniform distribution
+    :math:`U(\text{lower}, \text{upper})`, typically
+    :math:`U\left(\frac{1}{8}, \frac{1}{3}\right)`
 
-    More details can be found in the paper `Empirical Evaluation of Rectified Activations in Convolutional Network`_ .
+    Args:
+        lower: lower bound of the uniform distribution. Default: :math:`1/8`
+        upper: upper bound of the uniform distribution. Default: :math:`1/3`
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
 
     .. image:: _static/img/activation/RReLU.png
 
-    .. _Empirical Evaluation of Rectified Activations in Convolutional Network: https://arxiv.org/abs/1505.00853
+    Examples::
+
+        >>> m = nn.RReLU(0.1, 0.3)
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
+        https://arxiv.org/abs/1505.00853
     """
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
