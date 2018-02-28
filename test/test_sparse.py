@@ -341,8 +341,7 @@ class TestSparse(TestCase):
 
     @cuda_only
     def test_cuda_empty(self):
-        from torch.autograd import Variable
-        x = Variable(torch.sparse.FloatTensor(2, 3, 4))
+        x = torch.sparse.FloatTensor(2, 3, 4)
         y = x.cuda(0)
         self.assertEqual(x._dimI(), y._dimI())
         self.assertEqual(x._dimV(), y._dimV())
@@ -611,26 +610,6 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
-    def test_sparse_mask_variable(self):
-        # TODO: remove once variable and tensor are merged
-        i = torch.autograd.Variable(self.IndexTensor([
-            [1, 3, 0, 4],
-            [2, 1, 2, 3],
-        ]))
-        v = torch.autograd.Variable(self.ValueTensor([1, 2, 3, 4]))
-        x = torch.autograd.Variable(self.SparseTensor(i.data, v.data, torch.Size([5, 4])).coalesce())
-        dense = torch.autograd.Variable(self.ValueTensor([
-            [1, 2, 3, 4],
-            [5, 6, 7, 8],
-            [9, 10, 11, 12],
-            [13, 14, 15, 16],
-            [17, 18, 19, 20],
-        ]))
-        exp_v = torch.autograd.Variable(self.ValueTensor([7, 14, 3, 20]))
-        res = dense._sparse_mask(x)
-        expected = torch.autograd.Variable(self.SparseTensor(i.data, exp_v.data, torch.Size([5, 4])))
-        self.assertEqual(res, expected)
-
     def test_sparse_mask(self):
         self._test_sparse_mask_fixed()
 
@@ -832,17 +811,13 @@ class TestSparse(TestCase):
         self.assertRaises(RuntimeError, lambda: self.SparseTensor(i, v, torch.Size([3])))
 
     def _test_new_device(self, size, device):
-        from torch.autograd import Variable
         with torch.cuda.device(device):
             x = torch.cuda.sparse.DoubleTensor(*size)
-            v = Variable(x)
         self.assertEqual(x.get_device(), device)
         x1 = x.new()
         x2 = x.new(2, 3)
         self.assertEqual(x1.get_device(), device)
         self.assertEqual(x2.get_device(), device)
-        self.assertEqual(v.new().get_device(), device)
-        self.assertEqual(v.new(2, 3).get_device(), device)
 
     @cuda_only
     def test_new_device_single_gpu(self):
@@ -858,19 +833,12 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20, 10), 1)
 
     def test_new(self):
-        def do_test(x, indices, values):
-            if not x.is_cuda:
-                # CUDA sparse tensors currently requires the size to be
-                # specified if nDimV > 0
-                self.assertEqual(x.new(indices, values), x)
-            self.assertEqual(x.new(indices, values, x.size()), x)
-
-        x, i, v = self._gen_sparse(3, 10, 100)
-        do_test(x, i, v)
-
-        # TODO: simplify once Variable and Tensor are merged
-        from torch.autograd import Variable
-        do_test(Variable(x), Variable(i), Variable(v))
+        x, indices, values = self._gen_sparse(3, 10, 100)
+        if not x.is_cuda:
+            # CUDA sparse tensors currently requires the size to be
+            # specified if nDimV > 0
+            self.assertEqual(x.new(indices, values), x)
+        self.assertEqual(x.new(indices, values, x.size()), x)
 
         self.assertIs(torch.sparse.uint8, Variable(x).new(dtype=torch.sparse.uint8).dtype)
         self.assertIs(torch.sparse.uint8, Variable(x).new(1, 2, dtype=torch.sparse.uint8).dtype)
@@ -888,11 +856,9 @@ class TestSparse(TestCase):
     def test_is_sparse(self):
         x = torch.randn(3, 3)
         self.assertFalse(x.is_sparse)
-        self.assertFalse(torch.autograd.Variable(x).is_sparse)
 
         x = self.SparseTensor()
         self.assertTrue(x.is_sparse)
-        self.assertTrue(torch.autograd.Variable(x).is_sparse)
 
     def test_resize_as(self):
         def do_test(t):
@@ -902,9 +868,7 @@ class TestSparse(TestCase):
             # _dimI and _dimV match.
             self.assertEqual(t, t + y)
 
-        from torch.autograd import Variable
         do_test(self.SparseTensor())
-        do_test(Variable(self.SparseTensor()))
 
 
 class TestUncoalescedSparse(TestSparse):
