@@ -232,11 +232,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         return None
 
     def auto_gpu(option, has_device_bind):
-        if has_device_bind:
-            return 'AutoGPU auto_gpu(device);'
         tensor_arg = first_tensor_arg(option['arguments'])
         if tensor_arg is not None:
-            return 'AutoGPU auto_gpu({});'.format(tensor_arg)
+            if not has_device_bind:
+                return 'AutoGPU auto_gpu({});'.format(tensor_arg)
+            else:  # e.g. for ones_like, the default is the device of the tensor arg
+                device_to_use = '({}.type().is_cuda() ? {}.get_device() : -1)'.format(tensor_arg, tensor_arg)
+                return 'AutoGPU auto_gpu(device == -1 ? {} : device);'.format(device_to_use)
+        elif has_device_bind:
+            return 'AutoGPU auto_gpu(device);'
         else:
             return ''
 
