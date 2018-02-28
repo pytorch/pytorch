@@ -842,42 +842,48 @@ class MarginRankingLoss(Module):
         return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average)
 
 
-class MultiMarginLoss(Module):
+class MultiMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-class classification hinge
     loss (margin-based loss) between input `x` (a 2D mini-batch `Tensor`) and
     output `y` (which is a 1D tensor of target class indices,
     `0` <= `y` <= `x.size(1)`):
 
-    For each mini-batch sample::
+    For each mini-batch sample, the loss in terms of the 1D input `x` and scalar
+    output `y` is::
 
-        loss(x, y) = sum_i(max(0, (margin - x[y] + x[i]))^p) / x.size(0)
+        loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] + x[i]))^p) / x.size(0)
                      where `i == 0` to `x.size(0)` and `i != y`.
 
-    Optionally, you can give non-equal weighting on the classes by passing
-    a 1D `weight` tensor into the constructor.
+    Args:
+        p (int, optional): Has a default value of `1`. `1` and `2` are the only
+            supported values
+        margin (float, optional): Has a default value of `1`.
+        weight (Tensor, optional): a manual rescaling weight given to each
+            class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+            treated as if having all ones.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
-    The loss function then becomes:
-
-        loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] - x[i]))^p) / x.size(0)
-
-    By default, the losses are averaged over observations for each minibatch.
-    However, if the field `size_average` is set to ``False``,
-    the losses are instead summed.
     """
 
-    def __init__(self, p=1, margin=1, weight=None, size_average=True):
-        super(MultiMarginLoss, self).__init__()
+    def __init__(self, p=1, margin=1, weight=None, size_average=True, reduce=True):
+        super(MultiMarginLoss, self).__init__(weight, size_average)
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
         assert weight is None or weight.dim() == 1
         self.p = p
         self.margin = margin
-        self.size_average = size_average
-        self.weight = weight
+        self.reduce = reduce
 
     def forward(self, input, target):
-        return F.multi_margin_loss(input, target, self.p, self.margin,
-                                   self.weight, self.size_average)
+        return F.multi_margin_loss(input, target, self.p, self.margin, self.weight,
+                                   self.size_average, self.reduce)
 
 
 class TripletMarginLoss(Module):

@@ -822,13 +822,19 @@ class TestAutograd(TestCase):
     def test_requires_grad_factory(self):
         x = Variable(torch.randn(2, 3))
         fns = [torch.ones_like, torch.testing.randn_like]
-        dtypes = [torch.float32, torch.float64]
+        dtypes = [torch.float32, torch.float64, torch.cuda.float32, torch.cuda.float64]
         for fn in fns:
             for requires_grad in [True, False]:
                 for dtype in dtypes:
-                    output = fn(x, dtype=dtype, requires_grad=requires_grad)
-                    self.assertEqual(requires_grad, output.requires_grad)
-                    self.assertEqual(dtype, output.dtype)
+                    if not dtype.is_cuda:
+                        output = fn(x, dtype=dtype, requires_grad=requires_grad)
+                        self.assertEqual(requires_grad, output.requires_grad)
+                        self.assertIs(dtype, output.dtype)
+                    elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
+                        output = fn(x, dtype=dtype, device=1, requires_grad=requires_grad)
+                        self.assertEqual(requires_grad, output.requires_grad)
+                        self.assertIs(dtype, output.dtype)
+                        self.assertEqual(1, output.get_device())
 
     def test_grad_assignment(self):
         x = Variable(torch.randn(5, 5))
@@ -1329,6 +1335,10 @@ class TestAutograd(TestCase):
                 y = Variable(y) if y_var else y
                 self.assertIsInstance(x.type(t).data, t)
                 self.assertIsInstance(x.type_as(y).data, t)
+                # TODO: t.dtype should work
+                t_dtype = t().dtype
+                self.assertIsInstance(x.type(t_dtype).data, t)
+                self.assertIs(t_dtype, x.type(t_dtype).dtype)
                 self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
                 if torch.cuda.is_available():
                     for x_cuda in (True, False):
@@ -1338,6 +1348,7 @@ class TestAutograd(TestCase):
                             _, y_type = y_c.type().rsplit('.', 1)
                             y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type
                             self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
+                            self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
                             self.assertEqual(y_c.data_ptr(), y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr())
 
         self._test_type_conversion_backward(lambda x: x)
@@ -2690,14 +2701,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
             if isinstance(arg.tensor, Variable):
                 return maybe_non_contig(arg.tensor)
             return Variable(maybe_non_contig(arg.tensor))
-        elif torch.is_tensor(arg) or isinstance(arg, Variable):
-            # TODO: simplify once Variable and Tensor are merged
-            shape = arg.shape
-            if not torch.is_tensor(arg):
-                arg = arg.data
+        elif isinstance(arg, torch.Tensor):
             if isinstance(arg, torch.FloatTensor):
                 arg = arg.double()
-            v = Variable(maybe_non_contig(arg)).view(shape)
+            v = maybe_non_contig(arg).detach()
             v.requires_grad = requires_grad and v.is_floating_point()
             return v
         elif callable(arg):

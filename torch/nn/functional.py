@@ -1644,8 +1644,8 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
     return _functions.loss.CosineEmbeddingLoss.apply(input1, input2, target, margin, size_average)
 
 
-def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
-    """multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True) -> Variable
+def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True):
+    """multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True) -> Variable
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -1654,7 +1654,7 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
     if weight is not None and weight.dim() != 1:
         raise ValueError('weight must be one-dimensional')
 
-    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, size_average)
+    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, size_average, reduce)
 
 
 def pixel_shuffle(input, upscale_factor):
