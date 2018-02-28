@@ -23,6 +23,15 @@ if TEST_SCIPY:
 
 SIZE = 100
 
+can_retrieve_source = True
+with warnings.catch_warnings(record=True) as warns:
+    with tempfile.NamedTemporaryFile() as checkpoint:
+        x = torch.save(torch.nn.Module(), checkpoint)
+        for warn in warns:
+            if "Couldn't retrieve source code" in warn.message.args[0]:
+                can_retrieve_source = False
+                break
+
 
 class TestTorch(TestCase):
 
@@ -4749,7 +4758,8 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
-                self.assertEquals(len(w), 0)
+                if can_retrieve_source:
+                    self.assertEquals(len(w), 0)
 
             # Replace the module with different source
             fname = os.path.join(os.path.dirname(__file__), 'data/network2.py')
@@ -4758,8 +4768,9 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
-                self.assertEquals(len(w), 1)
-                self.assertTrue(w[0].category, 'SourceChangeWarning')
+                if can_retrieve_source:
+                    self.assertEquals(len(w), 1)
+                    self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
