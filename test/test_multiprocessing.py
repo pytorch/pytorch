@@ -262,6 +262,8 @@ class TestMultiprocessing(TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
     def test_fs_sharing(self):
         with fs_sharing():
             self._test_sharing(repeat=TEST_REPEATS)
