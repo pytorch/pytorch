@@ -35,7 +35,7 @@ static PyObject * ${pycname}(PyObject* self, PyObject* args, PyObject* kwargs)
     ${signatures}
   });
   ${unpack_self}
-  PyObject* parsed_args[${max_args}];
+  ParsedArgs<${max_args}> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   ${dispatch}
   Py_RETURN_NONE;

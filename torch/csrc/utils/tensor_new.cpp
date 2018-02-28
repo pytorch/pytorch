@@ -158,13 +158,13 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
     "new(Tensor indices, Tensor values, *, int64_t? device=-1)",
     "new(Tensor indices, Tensor values, IntList size, *, int64_t? device=-1)",
   });
-  PyObject* parsed_args[4];
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     AutoGPU auto_gpu(r.toInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    PyObject* arg = parsed_args[0];
+    PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
@@ -198,13 +198,13 @@ Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
     return legacy_sparse_tensor_ctor(type, args, kwargs);
   }
 
-  PyObject* parsed_args[2];
+  ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     AutoGPU auto_gpu(r.toInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    PyObject* arg = parsed_args[0];
+    PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
@@ -232,7 +232,7 @@ static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObjec
     "new(Tensor indices, Tensor values, *, int64_t? device=-1)",
     "new(Tensor indices, Tensor values, IntList size, *, int64_t? device=-1)",
   });
-  PyObject* parsed_args[5];
+  ParsedArgs<5> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = r.typeWithDefault(0, type);
@@ -241,7 +241,7 @@ static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObjec
     AutoGPU auto_gpu(r.toInt64(1));
     return actual_type.tensor();
   } else if (r.idx == 1) {
-    PyObject* arg = parsed_args[0];
+    PyObject* arg = r.pyobject(0);
     const auto& actual_type = r.typeWithDefault(1, type);
     check_is_sparse(actual_type);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
@@ -281,7 +281,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     return legacy_sparse_tensor_new(type, args, kwargs);
   }
 
-  PyObject* parsed_args[3];
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     const auto& actual_type = r.typeWithDefault(0, type);
@@ -290,7 +290,7 @@ Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
     AutoGPU auto_gpu(r.toInt64(1));
     return actual_type.tensor();
   } else if (r.idx == 1) {
-    PyObject* arg = parsed_args[0];
+    PyObject* arg = r.pyobject(0);
     const auto& actual_type = r.typeWithDefault(1, type);
     check_is_dense(actual_type);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
@@ -325,7 +325,7 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
     "new_tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
-  PyObject* parsed_args[4];
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0)), r.toBool(2));
