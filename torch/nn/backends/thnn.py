@@ -23,7 +23,7 @@ def _initialize_backend():
     from .._functions.rnn import RNN, \
         RNNTanhCell, RNNReLUCell, GRUCell, LSTMCell
     from .._functions.dropout import Dropout, FeatureDropout
-    from .._functions.loss import CosineEmbeddingLoss, MarginRankingLoss
+    from .._functions.loss import MarginRankingLoss
 
     backend.register_function('RNN', RNN)
     backend.register_function('RNNTanhCell', RNNTanhCell)
@@ -33,7 +33,6 @@ def _initialize_backend():
     backend.register_function('Dropout', Dropout)
     backend.register_function('Dropout2d', FeatureDropout)
     backend.register_function('Dropout3d', FeatureDropout)
-    backend.register_function('CosineEmbeddingLoss', CosineEmbeddingLoss)
     backend.register_function('MarginRankingLoss', MarginRankingLoss)
     for cls in _thnn_functions:
         name = cls.__name__

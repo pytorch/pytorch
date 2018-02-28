@@ -406,6 +406,24 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_av
             return output.sum() / dim
         return output / dim
 
+def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+    cos = input1.new(input1.size(0)).zero_()
+    output = input1.new(input1.size(0)).zero_()
+    for i in range(0, input1.size(0)):
+        cos[i] += (input1[i] * input2[i]).sum()
+        cos[i] /= (((input1[i] * input1[i]).sum() + 1e-12) * ((input2[i] * input2[i]).sum() + 1e-12)) ** 0.5
+
+        if target[i] == 1:
+            output[i] = 1 - cos[i]
+        if target[i] == -1:
+            output[i] = max(0, cos[i] - margin)
+
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
 
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
@@ -416,6 +434,7 @@ loss_reference_fns = {
     'HingeEmbeddingLoss': hingeembeddingloss_reference,
     'SoftMarginLoss': softmarginloss_reference,
     'MultiMarginLoss': multimarginloss_reference,
+    'CosineEmbeddingLoss': cosineembeddingloss_reference,
 }
 
 
@@ -633,15 +652,17 @@ criterion_tests = [
         module_name='CosineEmbeddingLoss',
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
-        check_gradgrad=False,
+        reference_fn=lambda i, t, m:
+            cosineembeddingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
     ),
     dict(
         module_name='CosineEmbeddingLoss',
         constructor_args=(0.7,),
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
+        reference_fn=lambda i, t, m:
+            cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, size_average=get_size_average(m)),
         desc='margin',
-        check_gradgrad=False,
     ),
     dict(
         module_name='MarginRankingLoss',
