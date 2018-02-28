@@ -59,7 +59,7 @@ static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* 
   static PythonArgParser parser({
     "clamp(Tensor input, Scalar min=None, Scalar max=None)",
   });
-  PyObject* parsed_args[4];
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(1) && !r.isNone(2)) {
     return THPVariable_Wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
