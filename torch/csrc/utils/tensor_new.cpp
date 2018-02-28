@@ -4,6 +4,7 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/python_arg_parser.h"
@@ -18,6 +19,14 @@ static const int MAX_DIMS = 128;
 using namespace at;
 
 namespace torch { namespace utils {
+
+static void maybe_initialize_cuda(const at::Type &type) {
+#ifdef WITH_CUDA
+  if (type.is_cuda()) {
+    torch::cuda::lazy_init();
+  }
+#endif
+}
 
 static Tensor new_with_sizes(const Type& type, int device, IntList sizes) {
   AutoNoGIL no_gil;
@@ -39,9 +48,7 @@ static Tensor new_with_tensor(const Type& type, Tensor other) {
 }
 
 static Tensor new_with_tensor_copy(const Type& type, Tensor other) {
-  if (other.type() != type) {
-    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString());
-  }
+  maybe_initialize_cuda(type);
   return type.copy(other);
 }
 
@@ -98,11 +105,9 @@ static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
 #endif
 
   auto sizes = compute_sizes(data);
-  // TODO: we should pass tensor.sizes() rather than sizes, but this doesn't works
-  // if scalars are disabled because the size changes without WITH_SCALARS.
   auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), /*requires_grad=*/false);
   recursive_store(
-      (char*)tensor.data_ptr(), sizes, tensor.strides(), 0,
+      (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);
   return tensor;
 }
@@ -110,6 +115,7 @@ static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
 Tensor new_from_data(const Type & type, int device, PyObject *data) {
   auto tensor = new_from_data(type.scalarType(), data);
   if (tensor.type() != type) {
+    maybe_initialize_cuda(type);
     AutoNoGIL no_gil;
     AutoGPU auto_gpu(device);
     tensor = tensor.toType(type);
@@ -123,7 +129,6 @@ static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
   }
   return new_from_data(type, device, data);
 }
-
 
 static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
@@ -150,8 +155,10 @@ static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObje
     auto cdata = reinterpret_cast<void*>(r.toInt64(0));
     return type.unsafeTensorFromTH(cdata, true);
   } else if (r.idx == 3) {
+    AutoGPU auto_gpu(r.toInt64(2));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
   } else if (r.idx == 4) {
+    AutoGPU auto_gpu(r.toInt64(3));
     return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
   }
   throw std::runtime_error("new(): invalid arguments");
@@ -204,16 +211,16 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
 
 Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new(Tensor other, *, bool requires_grad=False)",
-    "new(PyObject* data, *, int64_t? device=-1, bool requires_grad=False)",
+    "new_tensor(Tensor other, *, Type dtype=None, bool requires_grad=False)",
+    "new_tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
-  PyObject* parsed_args[3];
+  PyObject* parsed_args[4];
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return set_requires_grad(new_with_tensor_copy(type, r.tensor(0)), r.toBool(1));
+    return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0)), r.toBool(2));
   } else if (r.idx == 1) {
-    return set_requires_grad(new_from_data(type, r.toInt64(1), r.pyobject(0)), r.toBool(2));
+    return set_requires_grad(new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0)), r.toBool(3));
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
 }

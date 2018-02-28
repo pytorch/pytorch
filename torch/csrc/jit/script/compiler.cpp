@@ -222,6 +222,32 @@ struct to_ir {
     return save_env;
   }
 
+  std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
+    Value* cond_value = emitExpr(expr.cond(), 1)[0];
+
+    Node* n = def.graph->insertNode(def.graph->create(kIf, 0));
+    n->addInput(cond_value);
+    auto* true_block = n->addBlock();
+    auto* false_block = n->addBlock();
+
+    auto emit_if_expr = [this](Block* b, const Expr& expr) {
+      environment_stack = std::make_shared<Environment>(b, environment_stack);
+      WithInsertPoint guard(*def.graph, b);
+      Value* out_val = emitExpr(expr, 1)[0];
+      b->registerOutput(out_val);
+
+      environment_stack = environment_stack->next;
+    };
+
+    emit_if_expr(true_block, expr.true_expr());
+    emit_if_expr(false_block, expr.false_expr());
+
+    // Add op outputs
+    auto expr_value = n->addOutput(); // Resulting value
+
+    return {expr_value};
+  }
+
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
@@ -260,6 +286,16 @@ struct to_ir {
     // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
     // TODO: implement scan_outputs
 
+    // the format of the Loop instruction is:
+    // loop_carried_outputs* = Loop(max_trip_count, start_condition, loop_carried_inputs*)
+    //                          block0(loop_counter, loop_carried_block*) {
+    //                             <body>
+    //                             -> (continue_condition, loop_carried_block_outputs*)
+    //                          }
+    // all loop_carried_... lists are the same length and represent the value of
+    // loop-carried variables whose definitions are updated as the loop executes
+    // in a way that ensure single static assignment.
+
     // TODO: clarify that this is an optional input that isn't needed here
     Value* max_trip_count_dummy = emitConst(INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
@@ -274,8 +310,7 @@ struct to_ir {
     // we'll probably have to pattern match iteration number machinery in user
     // code to conform to the spec
     body_block->addInput(); // Iteration num
-    body_block->addInput(); // Condition
-    size_t skip_inputs_num = 2;
+    size_t skip_inputs_num = 1;
 
     {
       environment_stack =
@@ -445,13 +480,20 @@ struct to_ir {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, getValues(inputs), output_size);
-        node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        if (kind != kneg)
+          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
         if (function_table.count(apply.name().name()) > 0) {
           return emitFunctionCall(apply, output_size);
+        } else if (apply.name().name() == "print") {
+          expectOutputs(tree, output_size, 0);
+          if (!apply.attributes().empty())
+            throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
+          return emitNode(kPrint, getValues(apply.inputs()), 0,
+                          AttributeMap{}, ListAttributeMap{})->outputs();
         } else {
           const auto& inputs = getValues(apply.inputs());
           NodeKind kind{apply.name().name()};
@@ -468,16 +510,18 @@ struct to_ir {
                 const auto& type = value.get()->tree(1)->stringValue();
                 attributes.insert({name, {v, type}});
               } break;
-              case TK_LIST:
+              case TK_LIST: {
                 std::vector<double> vs{};
                 for (const auto& tree : value.get()->trees()) {
                   vs.push_back(tree->tree(0)->doubleValue());
                 }
                 const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
                 list_attributes.insert({name, {std::move(vs), type}});
+              } break;
+            default:
+                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+                break;
             }
-            break;
-            break;
           }
           return emitNode(
                      kind, inputs, output_size, attributes, list_attributes)
@@ -510,8 +554,10 @@ struct to_ir {
       } break;
       case '.':
         // TODO: add support for "."
-      case TK_IF_EXPR:
-        // TODO: add support for conditional
+      case TK_IF_EXPR: {
+        expectOutputs(tree, output_size, 1);
+        return emitTernaryIf(TernaryIf(tree));
+      } break;
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
@@ -681,16 +727,21 @@ void CompilationUnit::define(const std::string& script) {
   return pImpl->define(script);
 }
 
+void CompilationUnit::defineFunction(const Def& def) {
+  return pImpl->defineFunction(def);
+}
+
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
   return pImpl->getGraph(func_name);
 }
 
 CompilationUnit::~CompilationUnit() {}
 
-std::unique_ptr<CompilationUnit> jitScriptCompile(const std::string& script) {
-  std::unique_ptr<CompilationUnit> cu{new CompilationUnit};
-  cu->define(script);
-  return cu;
+std::shared_ptr<Graph> jitScriptCompile(Def def) {
+  FunctionTable empty;
+  FunctionDefinition fd(def);
+  to_ir(fd, empty);
+  return fd.graph;
 }
 
 } // namespace script

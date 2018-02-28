@@ -144,10 +144,19 @@ _(device) \
 _(ReplaceIfUndef) \
 _(is_zero) \
 _(GraphExecutor) \
+_(Print) \
 _(mm) \
 _(t) \
 _(Loop) \
-_(If)
+_(If) \
+_(Store) \
+_(Load) \
+_(Drop) \
+_(Assign) \
+_(Placeholder) \
+_(JumpZ) \
+_(JumpNZ) \
+_(Jump)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \

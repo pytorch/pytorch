@@ -1,4 +1,4 @@
-"""
+r"""
 The torch.onnx module contains functions to export models into the ONNX
 IR format.  These models can be loaded with the ONNX library and then
 converted to models which run on other deep learning frameworks.
@@ -22,7 +22,7 @@ from torch.jit import _unique_state_dict
 
 @contextlib.contextmanager
 def set_training(model, mode):
-    """
+    r"""
     A context manager to temporarily set the training mode of 'model'
     to 'mode', resetting it when we exit the with-block.  A no-op if
     mode is None.
@@ -42,7 +42,7 @@ def set_training(model, mode):
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
            input_names=None, output_names=None, aten=False):
-    """
+    r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
     at the moment, it supports a limited set of dynamic models (e.g., RNNs.)
@@ -106,7 +106,7 @@ def _trace(func, args, return_outs=False, aten=False):
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
 
-    trace, torch_out = torch.jit.trace(func, args)
+    trace, torch_out = torch.jit.get_trace_graph(func, args)
     _optimize_trace(trace, aten)
     if return_outs:
         return trace, torch_out
@@ -129,7 +129,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     # can turn training=True (or None, to preserve whatever the original
     # training mode was.)
     with set_training(model, training):
-        trace, torch_out = torch.jit.trace(model, args)
+        trace, torch_out = torch.jit.get_trace_graph(model, args)
 
     if orig_state_dict_keys != _unique_state_dict(model).keys():
         raise RuntimeError("state_dict changed after running the tracer; "
@@ -172,7 +172,7 @@ attr_pattern = re.compile("^(.+)_([ifstgz])$")
 
 
 def _run_symbolic_method(op_name, symbolic_fn, args):
-    """
+    r"""
     This trampoline function gets invoked for every symbolic method
     call from C++.
     """
@@ -193,7 +193,7 @@ def _is_onnx_list(value):
 
 
 def _add_attribute(node, key, value, aten):
-    """ initializes the right attribute based on type of value """
+    r""" initializes the right attribute based on type of value """
     m = attr_pattern.match(key)
     if m is None:
         raise IndexError((
@@ -233,7 +233,7 @@ def _newNode(g, opname, outputs, *args, **kwargs):
 
 
 def _graph_op(g, opname, *raw_args, **kwargs):
-    """
+    r"""
     Create an ONNX operator 'opname', taking 'args' as inputs and attributes
     'kwargs'; returning the node representing the single output of this operator
     (see the `outputs` keyword argument for multi-return nodes).
@@ -364,7 +364,7 @@ def _graph_constant(g, value, dims, type, *args, **kwargs):
 
 
 def _node_getitem(self, k):
-    """
+    r"""
     Accessor for attributes of a node which is polymorphic over
     return type.
 
@@ -387,9 +387,7 @@ def _symbolic_override_wrapper_maker(symbolic_fn, first_arg_only, fn):
             return output
         flat_output_tensors = tuple(
             v.data for v in function._iter_variables(output))
-        assert len(list(function._iter_variables_permissive(
-            list(kwargs.values())))) == 0, \
-            "Passing Variable through kwargs is not supported"
+        # TODO: kwargs aren't traced
 
         class ExportProxy(Function):
             @staticmethod
@@ -418,7 +416,7 @@ def _symbolic_override_wrapper_maker(symbolic_fn, first_arg_only, fn):
 
 
 def symbolic_override(symbolic_fn):
-    """
+    r"""
     Decorator to override ONNX export of the a function with specified subgraph.
 
     Effectively allows to attach symbolic() implementation to an arbitrary
@@ -429,7 +427,8 @@ def symbolic_override(symbolic_fn):
        them (similar requirement to NestedIOFunction)
      - outputs are similarly Variables/Tensors or (nested) lists or tuples of
        them
-     - keyword arguments are of non-tensor type
+     - non-tensor typed values should be keyword arguments both in definition
+       and when called
 
     Example usage:
 
@@ -447,12 +446,12 @@ def symbolic_override(symbolic_fn):
 
 
 def symbolic_override_first_arg_based(symbolic_fn):
-    """
+    r"""
     Decorator to override ONNX export of the a function with specified subgraph.
 
-    Equivalent to `symbolic_override` but checks only the first argument of the
-    function to figure out whether the tracing is on. Thus the first arg needs
-    to be a Variable.
+    Equivalent to :func:`symbolic_override` but checks only the first argument
+    of the function to figure out whether the tracing is on. Thus the first arg
+    needs to be a Variable.
     """
 
     return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, True)

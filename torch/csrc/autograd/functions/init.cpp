@@ -69,23 +69,6 @@ PyObject* getValueAttr(PyObject* obj, void* _unused)
   END_HANDLE_TH_ERRORS
 }
 
-template<typename T, typename ParamsT, at::Tensor ParamsT::*ptr>
-PyObject* getTensorAttr(PyObject* obj, void* _unused)
-{
-  HANDLE_TH_ERRORS
-  THPCppFunction* self = (THPCppFunction*)obj;
-  auto& val = ((T*)(self->cdata.get()))->*ptr;
-  THPObjectPtr py_tensor;
-  if (!val.defined()) {
-    Py_INCREF(Py_None);
-    py_tensor = Py_None;
-  } else {
-    py_tensor = torch::createPyObject(val);
-  }
-  return py_tensor.release();
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* accumulateGradVar(PyObject *_self, void* _unused)
 {
   THPCppFunction* self = (THPCppFunction*)_self;
@@ -138,7 +121,7 @@ namespace torch { namespace autograd {
 void initAutogradClosureBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   py::class_<jit::InterpreterFunctionFactory,std::shared_ptr<jit::InterpreterFunctionFactory>>(m, "InterpreterFunctionFactory")
-    .def("__call__", &jit::InterpreterFunctionFactory::construct)
+    .def("__call__", &jit::InterpreterFunctionFactory::construct_function)
     ;
 
   m.def("_jit_createInterpreterFactory", [](jit::tracer::TracingState* tracing_state) {

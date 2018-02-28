@@ -7,6 +7,7 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/cuda/lazy_init.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
@@ -296,28 +297,20 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static void lazy_init_cuda() {
-  static std::once_flag once;
-  std::call_once(once, []() {
-    auto module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
-    if (!module) throw python_error();
-    auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));
-    if (!res) throw python_error();
-  });
-}
-
 static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool non_blocking) {
+#ifdef WITH_CUDA
   if (type.is_cuda()) {
-    lazy_init_cuda();
+    torch::cuda::lazy_init();
   }
+#endif
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  if (tensor_device != at::current_device()) {
+  if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
   }
-  return self.toType(type);
+  return self.toType(type, non_blocking);
 }
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type) {
@@ -348,9 +341,6 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
   auto device = r.toInt64(0);
-  if (device == -1) {
-    device = at::current_device();
-  }
   return THPVariable_Wrap(dispatch_type(self_, type, device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }

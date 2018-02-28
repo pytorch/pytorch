@@ -1,21 +1,23 @@
 #pragma once
 
 #include <Python.h>
-#include <memory>
-#include <string>
-#include <mutex>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
 
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
 namespace torch { namespace autograd {
 
 struct EvalOutput : Function {
   explicit EvalOutput(const Edge& next_edge_)
-    : next_edge(next_edge_) {
-    num_inputs = 1;
-  }
+      : Function(/*num_inputs=*/1), next_edge(next_edge_) {}
 
   virtual variable_list apply(const variable_list& inputs) override {
     throw std::logic_error("EvalOutput::apply() called");
@@ -35,12 +37,12 @@ struct Eval : Function {
     struct Boundary {
       // All nodes from within the subgraph that connect to the outside.
       // These are the places that will need to be patched to point to placeholders.
-      // Contains pairs of (fn, offset into next_functions).
+      // Contains pairs of (fn, offset into next_edges).
       edge_set begins;
       // All nodes that are not in the subgraph, but are in the union of
-      // next_functions of all nodes from the subgraph. These are the places that
+      // next_edges of all nodes from the subgraph. These are the places that
       // will be modeled by placeholders.
-      // Contains pairs of (fn, input_nr) and is equivalent to next_functions
+      // Contains pairs of (fn, input_nr) and is equivalent to next_edges
       // of an Eval node that will replace the subgraph.
       edge_set ends;
     };
@@ -77,7 +79,7 @@ struct Eval : Function {
   // simple_graph is an optimization of first backward stage - in this case
   // all Eval subgraphs contain only a single gradient function, and the
   // graph search on creation + call to the engine in apply can be elided
-  function_list roots;
+  edge_list roots;
   std::shared_ptr<Function> simple_graph;
 
   placeholder_list placeholders;
@@ -85,7 +87,7 @@ struct Eval : Function {
   bool traceable = false;
 
 private:
-  std::pair<function_list, variable_list> filterRoots(const variable_list& inputs);
+  std::pair<edge_list, variable_list> filterRoots(const variable_list& inputs);
 
   Subgraph getSubgraph(
       const variable_list& inputs,

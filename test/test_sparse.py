@@ -6,6 +6,7 @@ import random
 import unittest
 from common import TestCase, run_tests
 from common_nn import TEST_CUDA
+from test_torch import TestTorch
 from numbers import Number
 
 
@@ -337,6 +338,17 @@ class TestSparse(TestCase):
         self.assertTrue(x.is_coalesced())
         y = x.clone()
         self.assertTrue(y.is_coalesced())
+
+    @cuda_only
+    def test_cuda_empty(self):
+        from torch.autograd import Variable
+        x = Variable(torch.sparse.FloatTensor(2, 3, 4))
+        y = x.cuda(0)
+        self.assertEqual(x._dimI(), y._dimI())
+        self.assertEqual(x._dimV(), y._dimV())
+        x = y.cpu()
+        self.assertEqual(y._dimI(), x._dimI())
+        self.assertEqual(y._dimV(), x._dimV())
 
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
@@ -859,6 +871,16 @@ class TestSparse(TestCase):
         # TODO: simplify once Variable and Tensor are merged
         from torch.autograd import Variable
         do_test(Variable(x), Variable(i), Variable(v))
+
+    @cpu_only  # not really, but we only really want to run this once
+    def test_dtypes(self):
+        cpum = torch.sparse
+        cpu_dtypes = [cpum.uint8, cpum.int8, cpum.int16, cpum.int32, cpum.int64,
+                      cpum.float32, cpum.float64]
+        cudam = torch.cuda.sparse
+        cuda_dtypes = [cudam.uint8, cudam.int8, cudam.int16, cudam.int32, cudam.int64,
+                       cudam.float32, cudam.float64]
+        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, True)
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

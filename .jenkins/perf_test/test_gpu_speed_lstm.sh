@@ -11,10 +11,10 @@ test_gpu_speed_lstm () {
   cd benchmark/scripts/
 
   SAMPLE_ARRAY=()
-  NUM_RUNS=5
+  NUM_RUNS=20
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
-    runtime=$(get_runtime_of_command "python lstm.py")
+    runtime=$(get_runtime_of_command "python lstm.py --skip-cpu-governor-check")
     echo $runtime
     SAMPLE_ARRAY+=(${runtime})
   done

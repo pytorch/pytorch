@@ -5,7 +5,7 @@ import math
 
 __all__ = [
     'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
-    'hann_window', 'hamming_window', 'bartlett_window', 'where',
+    'hann_window', 'hamming_window', 'bartlett_window', 'where', 'isnan'
 ]
 
 
@@ -160,7 +160,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = torch.eye(sz).type_as(LU_data).unsqueeze(0).repeat(nBatch, 1, 1)
         for i in range(nBatch):
             for j in range(sz):
-                k = LU_pivots[i, j] - 1
+                k = int(LU_pivots[i, j] - 1)
                 t = P[i, :, j].clone()
                 P[i, :, j] = P[i, :, k]
                 P[i, :, k] = t
@@ -514,3 +514,25 @@ def where(condition, x, y):
     # the parameter order is changed here; the functional order is the same as numpy; the
     # method follows the usual torch mask semantics of x.fn(mask, y)
     return torch._C._VariableBase.where(x, condition, y)
+
+
+def isnan(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is NaN or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of NaN elements.
+
+    Example::
+
+        >>> torch.isnan(torch.Tensor([1, float('nan'), 2]))
+         0
+         1
+         0
+        [torch.ByteTensor of size 3]
+    """
+    if not torch.is_tensor(tensor):
+        raise ValueError("The argument is not a tensor")
+    return tensor != tensor

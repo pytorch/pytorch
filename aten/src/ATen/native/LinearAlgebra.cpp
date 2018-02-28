@@ -139,16 +139,6 @@ Tensor dot(const Tensor& self, const Tensor& tensor) {
   return self._dot(tensor);
 }
 
-static Tensor maybeSqueeze(const Tensor & tensor, int64_t dim_tensor1, int64_t dim_tensor2) {
-  if (dim_tensor1 == 1) {
-    return tensor.squeeze(-2);
-  } else if (dim_tensor2 == 1) {
-    return tensor.squeeze(-1);
-  } else {
-    return tensor;
-  }
-}
-
 /*
 Matrix product of two Tensors.
 The behavior depends on the dimensionality of the Tensors as follows:
@@ -189,16 +179,13 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
     auto size2 = t2.sizes();
     std::vector<int64_t> output_size;
     output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
-    output_size.insert(output_size.end(), size2.end() - 1, size2.end());
+    if (dim_tensor2 > 1) {
+      output_size.push_back(size2[dim_tensor2 - 1]);
+    }
 
     // fold the batch into the first dimension
     Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
-
-    auto output = t1.mm(t2).view(output_size);
-    if (dim_tensor2 == 1) {
-      output = output.squeeze(-1);
-    }
-    return output;
+    return at::_unsafe_view(t1.mm(t2), output_size);
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages
@@ -234,9 +221,14 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
     Tensor output = tensor1_expanded.bmm(tensor2_expanded);
 
     // reshape batches back into result
-    std::vector<int64_t> total_expansion(expand_batch_portion);
-    total_expansion.insert(total_expansion.end(), {n, p});
-    return maybeSqueeze(output.view(total_expansion), dim_tensor1, dim_tensor2);
+    std::vector<int64_t> output_shape(expand_batch_portion);
+    if (dim_tensor1 > 1) {
+      output_shape.push_back(n);
+    }
+    if (dim_tensor2 > 1) {
+      output_shape.push_back(p);
+    }
+    return at::_unsafe_view(output, output_shape);
   }
 
   runtime_error("both arguments to matmul need to be at least 1D, but they are %dD and %dD",

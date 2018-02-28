@@ -30,13 +30,13 @@ struct Engine {
   using dependencies_type = std::unordered_map<Function*, int>;
 
   // Given a list of (Function, input number) pairs computes the value of the graph
-  // by following next_function references.
+  // by following next_edge references.
   virtual variable_list execute(
-      const function_list& roots,
+      const edge_list& roots,
       const variable_list& inputs,
       bool keep_graph,
       bool create_graph,
-      const function_list& outputs = {});
+      const edge_list& outputs = {});
 
   void queue_callback(std::function<void()> callback);
 

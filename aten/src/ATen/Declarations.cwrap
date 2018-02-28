@@ -45,18 +45,6 @@
       long_args: True
 ]]
 [[
-  name: zeros_like
-  cname: zerosLike
-  aten_sparse: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
-]]
-[[
   name: ones
   variants:
     - function
@@ -67,17 +55,6 @@
       output: True
     - arg: THSize* size
       long_args: True
-]]
-[[
-  name: ones_like
-  cname: onesLike
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
 ]]
 [[
   name: numel
@@ -265,6 +242,7 @@
   cname: newClone
   return: THTensor*
   aten_sparse: True
+  cpu_half: True
   arguments:
     - THTensor* self
 ]]
@@ -528,7 +506,6 @@
   name: __iand__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitand
@@ -568,7 +545,6 @@
   name: __ior__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitor
@@ -608,7 +584,6 @@
   name: __ixor__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitxor
@@ -648,7 +623,6 @@
   name: __ilshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: lshift
@@ -688,7 +662,6 @@
   name: __irshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: rshift
@@ -4119,7 +4092,7 @@
 
 [[
   name: as_strided_
-  variants: [method,function]
+  variants: [method]
   cpu_half: True
   return: argument 0
   arguments:

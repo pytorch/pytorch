@@ -31,7 +31,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 namespace at { namespace native {
 
@@ -60,7 +60,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   CheckedFrom c = "cudnn_batch_norm";
   setCuDNNStreamToCurrent();
 
-  checkAllDefined(c, {input, weight, bias, running_mean, running_var});
+  checkAllDefined(c, {input, weight, bias});
+  if (!training) {
+    checkAllDefined(c, {running_mean, running_var});
+  }
   checkAllSameGPU(c, {input, weight, bias, running_mean, running_var});
   if (input->type().scalarType() == ScalarType::Half) {
     checkScalarType(c, weight, ScalarType::Float);
@@ -73,7 +76,9 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
   for (auto t : {weight, bias, running_mean, running_var}) {
-    checkNumel(c, t, num_features);
+    if (t->defined()) {
+      checkNumel(c, t, num_features);
+    }
   }
 
   cudnnBatchNormMode_t mode;
@@ -97,16 +102,12 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
 
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
-
-  // Though technically we only need to allocate this for training,
-  //  (1) THNN batch normalization expects non-undefined tensors for
-  //  backwards (which we will pass these to, if !training, because
-  //  CuDNN backwards with !training doesn't gradcheck), and
-  //  (2) These are pretty small tensors, no big deal.
-  Tensor save_mean = running_mean_t.type().tensor(running_mean_t.sizes());
-  Tensor save_var = running_var_t.type().tensor(running_var_t.sizes());
+  Tensor save_mean, save_var;
 
   if (training) {
+    int64_t num_features = input_t.size(1);
+    save_mean = weight_t.type().tensor({ num_features });
+    save_var = weight_t.type().tensor({ num_features });
     CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
@@ -115,8 +116,8 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
       weight->data_ptr(),
       bias->data_ptr(),
       exponential_average_factor,
-      running_mean->data_ptr(),
-      running_var->data_ptr(),
+      at::maybe_data_ptr(running_mean),
+      at::maybe_data_ptr(running_var),
       epsilon,
       save_mean.data_ptr(),
       save_var.data_ptr()));

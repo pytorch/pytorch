@@ -1,3 +1,83 @@
+# Welcome to the PyTorch setup.py.
+#
+# Environment variables you are probably interestd in:
+#
+#   DEBUG
+#     build with -O0 and -g (debug symbols)
+#
+#   MAX_JOBS
+#     maximum number of compile jobs we should use to compile your code
+#
+#   NO_CUDA
+#     disables CUDA build
+#
+#   CFLAGS
+#     flags to apply to both C and C++ files to be compiled (a quirk of setup.py
+#     which we have faithfully adhered to in our build system is that CFLAGS
+#     also applies to C++ files, in contrast to the default behavior of autogoo
+#     and cmake build systems.)
+#
+#   CC
+#     the C/C++ compiler to use (NB: the CXX flag has no effect for distutils
+#     compiles, because distutils always uses CC to compile, even for C++
+#     files.
+#
+# Environment variables for feature toggles:
+#
+#   NO_CUDNN
+#     disables the cuDNN build
+#
+#   NO_NNPACK
+#     disables NNPACK build
+#
+#   NO_DISTRIBUTED
+#     disables THD (distributed) build
+#
+#   NO_SYSTEM_NCCL
+#     disables use of system-wide nccl (we will use our submoduled
+#     copy in torch/lib/nccl)
+#
+#   WITH_GLOO_IBVERBS
+#     toggle features related to distributed support
+#
+#   WITH_SCALARS
+#     build with native support for scalars (zero-dim tensors)
+#
+#   PYTORCH_BINARY_BUILD
+#     toggle static linking against libstdc++, used when we're building
+#     binaries for distribution
+#
+#   PYTORCH_BUILD_VERSION
+#   PYTORCH_BUILD_NUMBER
+#     specify the version of PyTorch, rather than the hard-coded version
+#     in this file; used when we're building binaries for distribution
+#
+# Environment variables we respect (these environment variables are
+# conventional and are often understood/set by other software.)
+#
+#   CUDA_HOME (Linux/OS X)
+#   CUDA_PATH (Windows)
+#     specify where CUDA is installed; usually /usr/local/cuda or
+#     /usr/local/cuda-x.y
+#
+#   CUDNN_LIB_DIR
+#   CUDNN_INCLUDE_DIR
+#   CUDNN_LIBRARY
+#     specify where cuDNN is installed
+#
+#   NCCL_ROOT_DIR
+#   NCCL_LIB_DIR
+#   NCCL_INCLUDE_DIR
+#     specify where nccl is installed
+#
+#   NVTOOLSEXT_PATH (Windows only)
+#     specify where nvtoolsext is installed
+#
+#   LIBRARY_PATH
+#   LD_LIBRARY_PATH
+#     we will search for libraries in these paths
+
+
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -9,6 +89,7 @@ import distutils.command.clean
 import platform
 import subprocess
 import shutil
+import multiprocessing
 import sys
 import os
 import json
@@ -38,6 +119,11 @@ if 'WITH_SCALARS' not in os.environ:
     os.environ['WITH_SCALARS'] = '1'
 WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
+NUM_JOBS = multiprocessing.cpu_count()
+max_jobs = os.getenv("MAX_JOBS")
+if max_jobs is not None:
+    NUM_JOBS = min(NUM_JOBS, int(max_jobs))
+
 try:
     import ninja
     WITH_NINJA = True
@@ -63,11 +149,7 @@ if not WITH_NINJA:
         def _single_compile(obj):
             src, ext = build[obj]
             self._compile(obj, src, ext, cc_args, extra_postargs, pp_opts)
-        num_jobs = multiprocessing.cpu_count()
-        max_jobs = os.getenv("MAX_JOBS")
-        if max_jobs is not None:
-            num_jobs = min(num_jobs, int(max_jobs))
-        multiprocessing.pool.ThreadPool(num_jobs).map(_single_compile, objects)
+        multiprocessing.pool.ThreadPool(NUM_JOBS).map(_single_compile, objects)
 
         return objects
     distutils.ccompiler.CCompiler.compile = parallelCCompile
@@ -120,6 +202,7 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["NUM_JOBS"] = str(NUM_JOBS)
     if not IS_WINDOWS:
         if WITH_NINJA:
             my_env["CMAKE_GENERATOR"] = '-GNinja'
@@ -322,13 +405,25 @@ class build_ext(build_ext_parent):
             if WITH_CUDA:
                 THCUNN.extra_link_args += [_C_LIB]
             else:
-                # To generate .obj files for AutoGPU for the export class
+                # To generate .obj files for those .h files for the export class
                 # a header file cannot build, so it has to be copied to someplace as a source file
-                if not os.path.exists("torch/csrc/generated"):
-                    os.mkdir("torch/csrc/generated")
-                if os.path.exists("torch/csrc/generated/AutoGPU_cpu_win.cpp"):
-                    os.remove("torch/csrc/generated/AutoGPU_cpu_win.cpp")
-                shutil.copyfile("torch/csrc/cuda/AutoGPU.h", "torch/csrc/generated/AutoGPU_cpu_win.cpp")
+                temp_dir = 'torch/csrc/generated'
+                hfile_list = ['torch/csrc/cuda/AutoGPU.h']
+                hname_list = [os.path.basename(hfile) for hfile in hfile_list]
+                rname_list = [os.path.splitext(hname)[0]
+                              for hname in hname_list]
+                cfile_list = [temp_dir + '/' + rname +
+                              '_cpu_win.cpp' for rname in rname_list]
+
+                if not os.path.exists(temp_dir):
+                    os.mkdir(temp_dir)
+
+                for hfile, cfile in zip(hfile_list, cfile_list):
+                    if os.path.exists(cfile):
+                        os.remove(cfile)
+                    shutil.copyfile(hfile, cfile)
+
+                C.sources += cfile_list
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
@@ -446,6 +541,7 @@ main_sources = [
     "torch/csrc/Module.cpp",
     "torch/csrc/Generator.cpp",
     "torch/csrc/Size.cpp",
+    "torch/csrc/Dtype.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/DynamicTypes.cpp",
@@ -459,6 +555,7 @@ main_sources = [
     "torch/csrc/utils/tensor_list.cpp",
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
+    "torch/csrc/utils/tensor_dtypes.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
@@ -526,6 +623,7 @@ main_sources = [
     "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
 ]
@@ -552,9 +650,6 @@ if WITH_DISTRIBUTED:
         extra_compile_args += ['-DWITH_DISTRIBUTED_MW']
     include_dirs += [tmp_install_path + "/include/THD"]
     main_link_args += [THD_LIB]
-
-if IS_WINDOWS and not WITH_CUDA:
-    main_sources += ["torch/csrc/generated/AutoGPU_cpu_win.cpp"]
 
 if WITH_CUDA:
     nvtoolext_lib_name = None
@@ -597,6 +692,7 @@ if WITH_CUDA:
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
         "torch/csrc/cuda/expand_utils.cpp",
+        "torch/csrc/cuda/lazy_init.cpp",
         "torch/csrc/cuda/serialization.cpp",
     ]
     main_sources += split_types("torch/csrc/cuda/Tensor.cpp", ninja_global)
@@ -613,8 +709,7 @@ if WITH_NCCL:
         "torch/csrc/cuda/python_nccl.cpp",
     ]
 if WITH_CUDNN:
-    main_libraries += ['cudnn']
-    library_dirs.append(CUDNN_LIB_DIR)
+    main_libraries += [CUDNN_LIBRARY]
     # NOTE: these are at the front, in case there's another cuDNN in CUDA path
     include_dirs.insert(0, CUDNN_INCLUDE_DIR)
     if not IS_WINDOWS:
@@ -768,11 +863,15 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/cuda/*.cuh',
+                'lib/include/ATen/cudnn/*.h',
+                'lib/include/ATen/cuda/detail/*.cuh',
                 'lib/include/pybind11/*.h',
                 'lib/include/pybind11/detail/*.h',
                 'lib/include/TH/*.h',
                 'lib/include/TH/generic/*.h',
                 'lib/include/THC/*.h',
+                'lib/include/THC/*.cuh',
                 'lib/include/THC/generic/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/autograd/*.h',

@@ -303,14 +303,14 @@ static void throw_error_out_requires_grad(const char* name) {
 static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
     auto& var = as_variable_ref(tensor);
-    grad_fn->num_inputs = 1;
+    grad_fn->set_num_inputs(1);
     var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
 static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->num_inputs = tensors.size();
+    grad_fn->set_num_inputs(tensors.size());
     uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
@@ -327,14 +327,13 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
 static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
     auto& var = as_variable_ref(tensor);
-    grad_fn->num_inputs = 1;
-    var.set_gradient_edge({std::move(grad_fn), 0});
+    autograd::create_gradient_edge(var, std::move(grad_fn));
   }
 }
 
 static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->num_inputs = tensors.size();
+    grad_fn->set_num_inputs(tensors.size());
     uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
@@ -381,8 +380,8 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   requires_grad &= isFloatingPoint(self.type().scalarType());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->next_functions = get_next_functions(self, src);
-    grad_fn->num_inputs = 1;
+    grad_fn->set_next_edges(collect_next_edges(self, src));
+    grad_fn->set_num_inputs(1);
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }

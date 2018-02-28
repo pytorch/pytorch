@@ -4,24 +4,8 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 
 
-tensor_classes = [
-    'DoubleTensorBase',
-    'FloatTensorBase',
-    'LongTensorBase',
-    'IntTensorBase',
-    'ShortTensorBase',
-    'CharTensorBase',
-    'ByteTensorBase',
-]
-
-
 def add_docstr_all(method, docstr):
-    for cls_name in tensor_classes:
-        cls = getattr(torch._C, cls_name)
-        try:
-            add_docstr(getattr(cls, method), docstr)
-        except AttributeError:
-            pass
+    add_docstr(getattr(torch._C._VariableBase, method), docstr)
 
 
 add_docstr_all('abs',
@@ -177,8 +161,7 @@ each element with the value returned by :attr:`callable`.
     sections that require high performance.
 """)
 
-add_docstr_all('asin',
-               r"""
+add_docstr_all('asin', r"""
 asin() -> Tensor
 
 See :func:`torch.asin`
@@ -326,15 +309,13 @@ tensor.
 
 add_docstr_all('copy_',
                r"""
-copy_(src, non_blocking=False, broadcast=True) -> Tensor
+copy_(src, non_blocking=False) -> Tensor
 
 Copies the elements from :attr:`src` into :attr:`self` tensor and returns
 :attr:`self`.
 
-If :attr:`broadcast` is True, the :attr:`src` tensor must be
-:ref:`broadcastable <broadcasting-semantics>` with :attr:`self` tensor.
-Otherwise, :attr:`src` tensor should have the same number of elements as
-:attr:`self` tensor. It may be of a different data type or reside on a
+The :attr:`src` tensor must be :ref:`broadcastable <broadcasting-semantics>`
+with the :attr:`self` tensor. It may be of a different data type or reside on a
 different device.
 
 Args:
@@ -342,8 +323,6 @@ Args:
     non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
         the copy may occur asynchronously with respect to the host. For other
         cases, this argument has no effect.
-    broadcast (bool): if ``True``, :attr:`src` will be broadcast to the shape of
-        the underlying tensor.
 """)
 
 add_docstr_all('cos',

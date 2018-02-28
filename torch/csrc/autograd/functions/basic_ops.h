@@ -1,18 +1,20 @@
 #pragma once
 
 #include <Python.h>
-#include <memory>
-#include <string>
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/symbolic.h"
 
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace torch { namespace autograd {
 
 struct Error : public Function {
-  Error(std::string msg, function_list&& next_functions)
-    : Function(std::move(next_functions))
+  Error(std::string msg, edge_list&& next_edges)
+    : Function(/*num_inputs=*/0, std::move(next_edges))
     , msg(std::move(msg)) {}
 
   Error(std::string msg)
@@ -34,9 +36,9 @@ struct DelayedError : public Function {
 };
 
 struct GraphRoot : public Function {
-  GraphRoot(function_list functions, variable_list inputs)
-    : Function(std::move(functions)), outputs(std::move(inputs)) {
-    }
+  GraphRoot(edge_list functions, variable_list inputs)
+      : Function(/*num_inputs=*/0, std::move(functions)),
+        outputs(std::move(inputs)) {}
 
   virtual variable_list apply(const variable_list& inputs) {
     return outputs;

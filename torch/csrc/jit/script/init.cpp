@@ -11,7 +11,9 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "get_graph",
           &CompilationUnit::getGraph,
-          py::return_value_policy::reference);
+          py::return_value_policy::reference)
+      .def(py::init<>())
+      .def("define", &CompilationUnit::define);
   m.def("_jit_script_compile", jitScriptCompile);
 }
 

@@ -32,12 +32,15 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/tensor/python_tensor.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT
+  BOOL, STORAGE, PYOBJECT, TYPE
 };
 
 struct FunctionParameter;
@@ -78,6 +81,8 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
+  inline const at::Type& type(int i);
+  inline const at::Type& typeWithDefault(int i, const at::Type& default_type);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -125,6 +130,7 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    at::Type* default_type;
   };
 };
 
@@ -223,6 +229,28 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
+inline const at::Type& PythonArgs::type(int i) {
+  if (!args[i]) {
+    auto type = signature.params[i].default_type;
+    return type ? *type : torch::tensor::get_default_tensor_type();
+  }
+  THPDtype* dtype = reinterpret_cast<THPDtype*>(args[i]);
+  if (dtype->cdata == nullptr) {
+    std::ostringstream oss;
+    oss << "Error attempting to use dtype " << dtype->name << ".";
+    if (dtype->is_cuda) {
+      oss << "  Torch not compiled with CUDA enabled." << std::endl;
+    }
+    throw std::runtime_error(oss.str());
+  }
+  return *(dtype->cdata);
+}
+
+inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& default_type) {
+  if (!args[i]) return default_type;
+  return type(i);
+}
+
 inline int64_t PythonArgs::toInt64(int i) {
   return toInt64WithDefault(i, signature.params[i].default_int);
 }
@@ -256,9 +284,6 @@ inline bool PythonArgs::isNone(int i) {
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  if (!THPGenerator_Check(args[i])) {
-    throw TypeError("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
-  }
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 
