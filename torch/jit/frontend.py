@@ -118,7 +118,7 @@ class FrontendTypeError(FrontendError):
     pass
 
 
-def get_jit_ast(fn, rcb):
+def get_jit_ast(fn):
     source = dedent(inspect.getsource(fn))
     py_ast = ast.parse(source)
     if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):

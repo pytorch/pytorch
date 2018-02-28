@@ -1450,13 +1450,13 @@ class TestJit(TestCase):
                 q = x
             return x
 
-        ast = torch.jit.frontend.get_jit_ast(fn, rcb=None)
+        ast = torch.jit.frontend.get_jit_ast(fn)
         self.assertExpected(str(ast))
 
     def _make_scalar_vars(self, arr, dtype):
         out = []
         for inp in arr:
-            out.append(Variable(torch.from_numpy(np.array(inp, dtype=dtype))))
+            out.append(torch.from_numpy(np.array(inp, dtype=dtype)))
         return out
 
     def test_script_while(self):

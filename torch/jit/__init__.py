@@ -463,13 +463,12 @@ def createResolutionCallback(frame_id=2):
     frame = inspect.stack()[frame_id][0]
 
     def env(key):
-        if key not in frame.f_locals:
-            try:
-                return frame.f_globals[key]
-            except KeyError:
-                return None
-        else:
+        if key in frame.f_locals:
             return frame.f_locals[key]
+        elif key in frame.f_globals:
+            return frame.f_globals[key]
+        else:
+            return None
 
     return env
 
@@ -496,7 +495,7 @@ class CompilationUnit(object):
 
 def script(fn):
     rcb = createResolutionCallback()
-    ast = torch.jit.frontend.get_jit_ast(fn, rcb)
+    ast = torch.jit.frontend.get_jit_ast(fn)
     graph = _jit_script_compile(ast, rcb)
     return torch._C.GraphExecutor(graph, True)
 

@@ -5,7 +5,6 @@
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
 
-#include <Python.h>
 #include <climits>
 
 namespace torch {
@@ -537,12 +536,24 @@ struct to_ir {
             }
           }
           auto n =
-              emitNode(kind, inputs->range(), output_size, attributes, list_attributes);
+              emitNode(kind, apply.range(), inputs, output_size, attributes, list_attributes);
           std::vector<Value*> outputs = n->outputs();
           if (!hasTensorOp(n)) {
-            outputs = resolver.resolveCall(tree->range(), n);
+            // This will either throw or return a new node. We take
+            // responsibility for inserting the node with inputs and outputs and
+            // destroying the old node
+            auto new_node = resolver.resolveCall(tree->range(), n);
+            new_node->insertBefore(n);
+            for (const auto& i : n->inputs()) {
+              new_node->addInput(i);
+            }
+            for (size_t i = 0; i < n->outputs().size(); ++i) {
+              new_node->addOutput();
+            }
+            n->destroy();
+            n = new_node;
           }
-          return outputs;
+          return n->outputs();
         }
       } break;
       case TK_CAST: {

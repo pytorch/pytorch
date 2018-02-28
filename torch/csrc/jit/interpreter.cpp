@@ -371,12 +371,12 @@ bool hasHandleOutput(Node * n) {
 
 Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
   py::function func;
-  if (op->unpack_variables) {
+  if (op->tracing_autograd_python_function) {
     func = py::function(py::handle(op->pyobj.get()).attr("apply"));
   } else {
-    func = py::function(py::handle(op->pyobj.get()), true);
+    func = py::function(py::handle(op->pyobj.get()), /*is_borrowed=*/true);
   }
-  bool unpack_variables = op->unpack_variables;
+  bool tracing_autograd_python_function = op->tracing_autograd_python_function;
   bool has_handle = hasHandleOutput(op);
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
@@ -390,7 +390,12 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
     size_t next_scalar = 0;
     size_t next_tensor = 0;
     HandleBuilder builder(has_handle);
-    if (unpack_variables) {
+    // Note: The first branch here should be considered deprecated and will
+    // probably be removed in the future.
+    //
+    // tracing_autograd_python_function indicates that we need to hook this
+    // PythonOp up to autograd with the HandleBuilder
+    if (tracing_autograd_python_function) {
       for (auto arg_type : op->cconv) {
         if (arg_type == 's') {
           py_inputs[i] = py::reinterpret_borrow<py::object>(
@@ -416,6 +421,10 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
         stack.push_back(builder.addOutput(var->cdata));
       };
       if (!PyTuple_Check(py_outputs.ptr())) {
+        if (num_outputs != 1) {
+          throw std::runtime_error(
+              "Function.apply returned the wrong number of outputs.");
+        }
         addOutput(py_outputs);
       } else {
         auto output_tuple = py::tuple(py_outputs);
@@ -430,6 +439,12 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       builder.writeTo(stack);
       return 0;
     } else {
+      // In this case we're not hooking this PythonOp up to autograd. We always
+      // pass in and return Variables to the PythonOp. The flag
+      // values_are_variables indicates that the actual inputs and outputs are
+      // Variable types. In the case that this is false, we must wrap up inputs
+      // Tensors into Variables and we must unwrap the outputs to Tensors. In
+      // the other case, we pass in inputs and return outputs as-is
       for (auto arg_type : op->cconv) {
         if (arg_type == 's') {
           py_inputs[i] = py::reinterpret_borrow<py::object>(
@@ -460,6 +475,10 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       };
 
       if (!PyTuple_Check(py_outputs.ptr())) {
+        if (num_outputs != 1) {
+          throw std::runtime_error(
+              "Function.apply returned the wrong number of outputs.");
+        }
         addOutput(py_outputs);
       } else {
         auto output_tuple = py::tuple(py_outputs);

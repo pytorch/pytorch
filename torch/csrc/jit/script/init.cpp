@@ -10,8 +10,7 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 struct PythonResolver : public Resolver {
   PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
 
-  std::vector<Value*> resolveCall(SourceRange location, Node* n)
-      const override {
+  Node* resolveCall(SourceRange location, Node* n) const override {
     AutoGIL ag;
     py::function func;
     func = rcb(n->kind().toString());
@@ -21,20 +20,11 @@ struct PythonResolver : public Resolver {
           << "Unknown function " << n->kind().toString();
     }
     // Release the function object so we can wrap it in a PythonOp
-    pybind11::handle h = func.release();
+    auto fn_ptr = THPObjectPtr(func.release().ptr());
     std::string cconv(n->inputs().size(), 't');
     Node* new_node = n->owningGraph()->createPythonOp(
-        THPObjectPtr(h.ptr()), cconv, false, {}, {}, false);
-    new_node->insertBefore(n);
-    for (const auto i : n->inputs()) {
-      new_node->addInput(i);
-    }
-    for (const auto o : n->outputs()) {
-      new_node->addOutput();
-    }
-    n->replaceAllUsesWith(new_node);
-    n->destroy();
-    return new_node->outputs();
+        std::move(fn_ptr), cconv, false, {}, {}, false);
+    return new_node;
   }
 
   ResolutionCallback rcb;

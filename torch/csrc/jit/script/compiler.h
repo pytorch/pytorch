@@ -13,7 +13,14 @@ namespace jit {
 namespace script {
 
 struct Resolver {
-  virtual std::vector<Value*> resolveCall(SourceRange location, Node* n) const {
+  // Given an external call node where the signature does not correspond to an
+  // existing ATen operator, this function returns a new node that calls into
+  // the correct external op, or throws if that op cannot be found.
+  //
+  // The function simply instatntiates the new node and returns it. It is the
+  // responsiblity of the caller to insert the node into the graph and delete
+  // the original node.
+  virtual Node* resolveCall(SourceRange location, Node* n) const {
     throw ErrorReport(location) << "Unknown function " << n->kind().toString();
   }
 };

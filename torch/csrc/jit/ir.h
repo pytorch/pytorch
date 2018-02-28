@@ -888,7 +888,7 @@ public:
       bool is_legacy,
       std::vector<VariableFlags>&& var_flags,
       pyobj_list&& scalar_args,
-      bool unpack_variables = true);
+      bool tracing_autograd_python_function = true);
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
@@ -1196,13 +1196,13 @@ struct PythonOp : public Node {
       bool is_legacy,
       std::vector<VariableFlags>&& var_flags,
       pyobj_list&& scalar_args,
-      bool unpack_variables = true) {
+      bool tracing_autograd_python_function = true) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
     this->var_flags = std::move(var_flags);
     this->is_legacy = is_legacy;
-    this->unpack_variables = unpack_variables;
+    this->tracing_autograd_python_function = tracing_autograd_python_function;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1220,7 +1220,7 @@ struct PythonOp : public Node {
   // 't' -- tensor argument
   std::string cconv;
   bool is_legacy;
-  bool unpack_variables;
+  bool tracing_autograd_python_function;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
@@ -1234,7 +1234,7 @@ inline Node* Graph::createPythonOp(
     bool is_legacy,
     std::vector<VariableFlags>&& var_flags,
     pyobj_list&& scalar_args,
-    bool unpack_variables) {
+    bool tracing_autograd_python_function) {
   auto op = new PythonOp(this);
   return op->init(
       std::move(pyobj),
@@ -1242,7 +1242,7 @@ inline Node* Graph::createPythonOp(
       is_legacy,
       std::move(var_flags),
       std::move(scalar_args),
-      unpack_variables);
+      tracing_autograd_python_function);
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.
