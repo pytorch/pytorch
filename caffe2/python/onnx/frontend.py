@@ -32,10 +32,11 @@ import logging
 import re
 
 from caffe2.python import core as caffe2_core
+from caffe2.proto import caffe2_legacy_pb2
 from enum import Enum
 from onnx import (defs, checker, helper, numpy_helper, mapping,
                   ModelProto, GraphProto, NodeProto, AttributeProto, TensorProto, OperatorSetIdProto)
-from onnx.helper import make_tensor, make_tensor_value_info
+from onnx.helper import make_tensor, make_tensor_value_info, make_attribute
 import numpy as np
 
 from caffe2.python.onnx.helper import make_model, c2_native_run_net, dummy_name
@@ -178,6 +179,7 @@ class Caffe2Frontend(object):
                     break
 
         attrs = {attr.name: attr for attr in node.attribute}
+
         def apply_trans(k, dim=2, ks=None):
             ks = ks or (k + 's')
             if dim == 2:
@@ -211,7 +213,39 @@ class Caffe2Frontend(object):
         apply_trans('stride')
         apply_trans('dilation')
         apply_trans('adj')
-        apply_trans('pad', 4)
+        apply_trans('pad', dim=4)
+
+        legacy_pad_attr = attrs.pop('legacy_pad', None)
+        if legacy_pad_attr:
+            assert node.op_type.endswith("Pool")
+            assert not node.op_type.startswith("Global")
+            input_size = shapes[node.input[0]]
+            output_size = shapes[node.output[0]]
+            assert len(output_size) == 4
+            if legacy_pad_attr.i == caffe2_legacy_pb2.NOTSET:
+                pass
+            elif legacy_pad_attr.i == caffe2_legacy_pb2.VALID:
+                assert not 'pads' in attrs
+                new_attr = make_attribute('auto_pad', 'VALID')
+                attrs[new_attr.name] = new_attr
+            elif legacy_pad_attr.i == caffe2_legacy_pb2.SAME:
+                assert not 'pads' in attrs
+                # default behavior in Caffe2 is SAME_UPPER
+                # https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h#L39
+                new_attr = make_attribute('auto_pad', 'SAME_UPPER')
+                attrs[new_attr.name] = new_attr
+            elif legacy_pad_attr.i == caffe2_legacy_pb2.CAFFE_LEGACY_POOLING:
+                # The problem here is that, Pool op in Caffe may add an additional pixel, if the last part is smaller than stride.
+                # So we use the explicit padding to replace legacy_pad.
+                # pad[end] = output_size[start + 2] * stride[start] - pad[start] - 1 + kernel[start] - input[start + 2]
+                # end = start + len(pad) / 2
+                logger.warning('Converting legacy padding to explict padding.')
+                for i in range(2):
+                    attrs['pads'].ints[i + 2] = (output_size[i + 2] * attrs['strides'].ints[i] - attrs['pads'].ints[i]
+                                                 - 1 + attrs['kernel_shape'].ints[i] - input_size[i + 2])
+            else:
+                logger.error('Don\'t know how to handle the legacy_pad, while processing operator:\n{}'.format(op_def))
+                raise
 
         del node.attribute[:]
         node.attribute.extend(attrs.values())
@@ -376,6 +410,7 @@ class Caffe2Frontend(object):
             raise ValueError('Please pass value_info as a '
                              'name -> (type, shape) dictionary')
 
+        cls._filter_fake_init(init_net, value_info)
         cls._ssa_rewrite(predict_net, init_net, value_info)
 
         if init_net:
@@ -505,13 +540,24 @@ class Caffe2Frontend(object):
                 )])
 
     @classmethod
+    def _filter_fake_init(cls, init_net, value_info):
+        if init_net:
+            fake_inits = [op for op in init_net.op
+                          if len(op.output) == 1 and op.output[0] in value_info and
+                          re.match('GivenTensor.*Fill|ConstantFill', op.type)]
+            for fake_init in fake_inits:
+                init_net.op.remove(fake_init)
+            del fake_inits[:]
+            del fake_inits
+
+    @classmethod
     def _ssa_rewrite(cls, net, init_net, value_info):
         def ssa_name(name, version):
             return '{}_{}'.format(name, version)
 
         if init_net:
             for op in init_net.op:
-                assert re.match('GivenTensor.*Fill', op.type)
+                assert re.match('GivenTensor.*Fill', op.type), "type is {}, \n{}".format(op.type, op)
                 assert len(op.output) == 1
                 op.output[0] = ssa_name(op.output[0], 0)
             init_net.external_input[:] = [ssa_name(name, 0)
