@@ -97,14 +97,16 @@ set(Caffe2_MAIN_LIBS)
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
 if(USE_ACL)
-  if(NOT USE_ARM64)
+  # Check if 32-bit ARM: armv7, armv7-a, armv7l, etc
+  if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
+    # Compilers for 32-bit ARM need extra flags to enable NEON-FP16
     target_compile_options(caffe2 PRIVATE "-mfpu=neon-fp16")
-  endif()
 
-  include(CheckCCompilerFlag)
-  CHECK_C_COMPILER_FLAG(-mfp16-format=ieee CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
-  if(CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
-    target_compile_options(caffe2 PRIVATE "-mfp16-format=ieee")
+    include(CheckCCompilerFlag)
+    CHECK_C_COMPILER_FLAG(-mfp16-format=ieee CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
+    if (CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
+      target_compile_options(caffe2 PRIVATE "-mfp16-format=ieee")
+    endif()
   endif()
 endif()
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
