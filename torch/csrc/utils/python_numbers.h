@@ -70,15 +70,18 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     return PyFloat_AS_DOUBLE(obj);
   }
   if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
+    double value = PyLong_AsDouble(obj);
+
+    // convert from python error to C exception
+    if (PyErr_Occurred()) {
+      PyErr_Clear();
       throw std::runtime_error("Overflow when unpacking double");
     }
     if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
+      // FIXME: warning instead of raise exception
       throw std::runtime_error("Precision loss when unpacking double");
     }
-    return (double)value;
+    return value;
   }
 #if PY_MAJOR_VERSION == 2
   if (PyInt_Check(obj)) {
