@@ -416,6 +416,14 @@ def upsample_nearest2d(g, input, scale_factor):
                 height_scale_f=scale_factor, mode_s="nearest")
 
 
+def upsample_bilinear2d(g, input, output_size):
+    input_width, input_height = input.type().sizes()[2:]
+    width_scale = input_width / output_size[0]
+    height_scale = input_height / output_size[1]
+    return g.op("Upsample", input, width_scale_f=width_scale,
+                height_scale_f=height_scale, mode_s="bilinear")
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 
