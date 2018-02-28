@@ -379,7 +379,7 @@ class build_ext(build_ext_parent):
             print('-- Building without distributed package')
 
         generate_code(ninja_global)
-        
+
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
