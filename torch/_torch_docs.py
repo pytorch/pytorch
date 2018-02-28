@@ -1748,9 +1748,9 @@ If :math:`m < n`, :func:`gels` solves the least-norm problem:
    \end{array}
 
 Returned tensor :math:`X` has shape :math:`(\max(m, n) \times k)`. The first :math:`n`
-rows of the returned matrix :math:`X` contains the solution. If :math`m \geq n`,
-the residual sum of squares for the solution in each column is given by the sum
-of squares of elements in the remaining :math:`m - n` rows in that column.
+rows of :math:`X` contains the solution. If :math`m \geq n`, the residual sum of squares
+for the solution in each column is given by the sum of squares of elements in the
+remaining :math:`m - n` rows of that column.
 
 Args:
     B (Tensor): the matrix :math:`B`
