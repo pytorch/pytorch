@@ -1633,12 +1633,12 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=True, r
     return binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
-def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
-    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=True) -> Tensor
+def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True, reduce=True):
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=True, reduce=True) -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
-    return _functions.loss.CosineEmbeddingLoss.apply(input1, input2, target, margin, size_average)
+    return torch._C._VariableFunctions.cosine_embedding_loss(input1, input2, target, margin, size_average, reduce)
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True):

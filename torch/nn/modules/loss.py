@@ -783,7 +783,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
                                              self.reduce)
 
 
-class CosineEmbeddingLoss(Module):
+class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given  an input tensors
     x1, x2 and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
@@ -805,13 +805,14 @@ class CosineEmbeddingLoss(Module):
     batch samples. By default, `size_average = True`.
     """
 
-    def __init__(self, margin=0, size_average=True):
-        super(CosineEmbeddingLoss, self).__init__()
+    def __init__(self, margin=0, size_average=True, reduce=True):
+        super(CosineEmbeddingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input1, input2, target):
-        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average)
+        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average,
+                                       self.reduce)
 
 
 class MarginRankingLoss(Module):
