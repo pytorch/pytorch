@@ -232,7 +232,7 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
 
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
-avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Variable
+avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
 Applies 2D average-pooling operation in kh x kw regions by step size
 dh x dw steps. The number of output features is equal to the number of
@@ -255,7 +255,7 @@ Args:
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
-avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Variable
+avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
 Applies 3D average-pooling operation in kt x kh x kw regions by step
 size dt x dh x dw steps. The number of output features is equal to the
@@ -325,7 +325,7 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
 
 def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    """Applies a 1D max pooling over an input signal composed of several input
+    r"""Applies a 1D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool1d` for details.
@@ -336,7 +336,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
 def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    """Applies a 2D max pooling over an input signal composed of several input
+    r"""Applies a 2D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool2d` for details.
@@ -347,7 +347,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
 
 def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
                ceil_mode=False, return_indices=False):
-    """Applies a 3D max pooling over an input signal composed of several input
+    r"""Applies a 3D max pooling over an input signal composed of several input
     planes.
 
     See :class:`~torch.nn.MaxPool3d` for details.
@@ -386,7 +386,7 @@ def _unpool_output_size(input, kernel_size, stride, padding, output_size):
 
 def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
-    """Computes a partial inverse of :class:`MaxPool1d`.
+    r"""Computes a partial inverse of :class:`MaxPool1d`.
 
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
@@ -400,7 +400,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
 
 def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
-    """Computes a partial inverse of :class:`MaxPool2d`.
+    r"""Computes a partial inverse of :class:`MaxPool2d`.
 
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
@@ -414,7 +414,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
 
 def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
                  output_size=None):
-    """Computes a partial inverse of :class:`MaxPool3d`.
+    r"""Computes a partial inverse of :class:`MaxPool3d`.
 
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
@@ -427,7 +427,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
 
 
 def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    """Applies a 2D power-average pooling over an input signal composed of
+    r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.LPPool2d` for details.
@@ -438,7 +438,7 @@ def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
 
 
 def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
-    """Applies a 1D power-average pooling over an input signal composed of
+    r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.LPPool1d` for details.
@@ -492,7 +492,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
 
 
 adaptive_avg_pool1d = _add_docstr(torch._C._VariableFunctions.adaptive_avg_pool1d, r"""
-adaptive_avg_pool1d(input, output_size) -> Variable
+adaptive_avg_pool1d(input, output_size) -> Tensor
 
 Applies a 1D adaptive average pooling over an input signal composed of
 several input planes.
@@ -504,7 +504,7 @@ Args:
 """)
 
 adaptive_avg_pool2d = _add_docstr(torch._C._nn.adaptive_avg_pool2d, r"""
-adaptive_avg_pool2d(input, output_size) -> Variable
+adaptive_avg_pool2d(input, output_size) -> Tensor
 
 Applies a 2D adaptive average pooling over an input signal composed of
 several input planes.
@@ -517,7 +517,7 @@ Args:
 """)
 
 adaptive_avg_pool3d = _add_docstr(torch._C._nn.adaptive_avg_pool3d, r"""
-adaptive_avg_pool3d(input, output_size) -> Variable
+adaptive_avg_pool3d(input, output_size) -> Tensor
 
 Applies a 3D adaptive average pooling over an input signal composed of
 several input planes.
@@ -576,7 +576,7 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
 
 
 def threshold(input, threshold, value, inplace=False):
-    """Thresholds each element of the input Tensor.
+    r"""Thresholds each element of the input Tensor.
 
     See :class:`~torch.nn.Threshold` for more details.
     """
@@ -586,14 +586,14 @@ def threshold(input, threshold, value, inplace=False):
 
 
 threshold_ = _add_docstr(torch._C._nn.threshold_, r"""
-threshold_(input, threshold, value) -> Variable
+threshold_(input, threshold, value) -> Tensor
 
 In-place version of :func:`~threshold`.
 """)
 
 
 def relu(input, inplace=False):
-    """relu(input, threshold, value, inplace=False) -> Variable
+    r"""relu(input, threshold, value, inplace=False) -> Tensor
 
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
@@ -608,7 +608,7 @@ def relu_(input):
 
 def glu(input, dim=-1):
     r"""
-    glu(input, dim=-1) -> Variable
+    glu(input, dim=-1) -> Tensor
 
     The gated linear unit. Computes:
 
@@ -631,7 +631,7 @@ def glu(input, dim=-1):
 
 def hardtanh(input, min_val=-1., max_val=1., inplace=False):
     r"""
-    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Variable
+    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
 
     Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
     details.
@@ -642,14 +642,14 @@ def hardtanh(input, min_val=-1., max_val=1., inplace=False):
 
 
 hardtanh_ = _add_docstr(torch._C._nn.hardtanh_, r"""
-hardtanh_(input, min_val=-1., max_val=1.) -> Variable
+hardtanh_(input, min_val=-1., max_val=1.) -> Tensor
 
 In-place version of :func:`~hardtanh`.
 """)
 
 
 def relu6(input, inplace=False):
-    r"""relu6(input, inplace=False) -> Variable
+    r"""relu6(input, inplace=False) -> Tensor
 
     Applies the element-wise function :math:`{ReLU6}(x) = min(max(0,x), 6)`.
 
@@ -670,14 +670,14 @@ def elu(input, alpha=1., inplace=False):
 
 
 elu_ = _add_docstr(torch._C._nn.elu_, r"""
-elu_(input, alpha=1.) -> Variable
+elu_(input, alpha=1.) -> Tensor
 
 In-place verison of :func:`~elu`.
 """)
 
 
 def selu(input, inplace=False):
-    r"""selu(input, inplace=False) -> Variable
+    r"""selu(input, inplace=False) -> Tensor
 
     Applies element-wise,
     :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
@@ -691,7 +691,7 @@ def selu(input, inplace=False):
     return torch._C._VariableFunctions.selu(input)
 
 selu_ = _add_docstr(torch._C._VariableFunctions.selu_, r"""
-selu_(input) -> Variable
+selu_(input) -> Tensor
 
 In-place verison of :func:`~selu`.
 """)
@@ -699,7 +699,7 @@ In-place verison of :func:`~selu`.
 
 def leaky_relu(input, negative_slope=0.01, inplace=False):
     r"""
-    leaky_relu(input, negative_slope=0.01, inplace=False) -> Variable
+    leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
 
     Applies element-wise,
     :math:`f(x) = max(0, x) + {negative\_slope} * min(0, x)`
@@ -712,14 +712,14 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
 
 
 leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
-leaky_relu_(input, negative_slope=0.01) -> Variable
+leaky_relu_(input, negative_slope=0.01) -> Tensor
 
 In-place version of :func:`~leaky_relu`.
 """)
 
 
 prelu = _add_docstr(torch._C._nn.prelu, r"""
-prelu(input, weight) -> Variable
+prelu(input, weight) -> Tensor
 
 Applies element-wise the function
 :math:`PReLU(x) = max(0,x) + weight * min(0,x)` where weight is a
@@ -730,9 +730,11 @@ See :class:`~torch.nn.PReLU` for more details.
 
 
 def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
-    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Variable
+    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
 
     Randomized leaky ReLU.
+
+    See :class:`~torch.nn.RReLU` for more details.
     """
     if inplace:
         return torch._C._VariableFunctions.rrelu_(input, lower, upper, training)
@@ -740,13 +742,13 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
 
 
 rrelu_ = _add_docstr(torch._C._VariableFunctions.rrelu_, r"""
-rrelu_(input, lower=1./8, upper=1./3, training=False) -> Variable
+rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
 
 In-place version of :func:`~rrelu`.
 """)
 
 logsigmoid = _add_docstr(torch._C._nn.log_sigmoid, r"""
-logsigmoid(input) -> Variable
+logsigmoid(input) -> Tensor
 
 Applies element-wise :math:`LogSigmoid(x) = log( 1 / (1 + exp(-x_i)))`
 
@@ -754,7 +756,7 @@ See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
 hardshrink = _add_docstr(torch._C._nn.hardshrink, r"""
-hardshrink(input, lambd=0.5) -> Variable
+hardshrink(input, lambd=0.5) -> Tensor
 
 Applies the hard shrinkage function element-wise
 
@@ -763,7 +765,7 @@ See :class:`~torch.nn.Hardshrink` for more details.
 
 
 def tanhshrink(input):
-    r"""tanhshrink(input) -> Variable
+    r"""tanhshrink(input) -> Tensor
 
     Applies element-wise, :math:`Tanhshrink(x) = x - Tanh(x)`
 
@@ -773,7 +775,7 @@ def tanhshrink(input):
 
 
 def softsign(input):
-    r"""softsign(input) -> Variable
+    r"""softsign(input) -> Tensor
 
     Applies element-wise, the function :math:`f(x) = x / (1 + |x|)`
 
@@ -783,7 +785,7 @@ def softsign(input):
 
 
 softplus = _add_docstr(torch._C._nn.softplus, r"""
-softplus(input, beta=1, threshold=20) -> Variable
+softplus(input, beta=1, threshold=20) -> Tensor
 """)
 
 
@@ -923,7 +925,7 @@ def log_softmax(input, dim=None, _stacklevel=3):
 
 
 softshrink = _add_docstr(torch._C._nn.softshrink, r"""
-softshrink(input, lambd=0.5) -> Variable
+softshrink(input, lambd=0.5) -> Tensor
 
 Applies the soft shrinkage function elementwise
 
@@ -932,7 +934,7 @@ See :class:`~torch.nn.Softshrink` for more details.
 
 
 def tanh(input):
-    r"""tanh(input) -> Variable
+    r"""tanh(input) -> Tensor
 
     Applies element-wise,
     :math:`f(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))`
@@ -943,7 +945,7 @@ def tanh(input):
 
 
 def sigmoid(input):
-    r"""sigmoid(input) -> Variable
+    r"""sigmoid(input) -> Tensor
 
     Applies the element-wise function :math:`f(x) = 1 / ( 1 + exp(-x))`
 
@@ -1288,7 +1290,7 @@ def layer_norm(input, normalized_shape, running_mean, running_var,
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
-    """Applies local response normalization over an input signal composed of
+    r"""Applies local response normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
     Applies normalization across channels.
 
@@ -1408,7 +1410,7 @@ def poisson_nll_loss(input, target, log_input=True, full=False, size_average=Tru
 
 
 kl_div = _add_docstr(torch._C._nn.kl_div, r"""
-kl_div(input, target, size_average=True) -> Variable
+kl_div(input, target, size_average=True) -> Tensor
 
 The `Kullback-Leibler divergence`_ Loss.
 
@@ -1559,7 +1561,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, size_average=True, re
 
 
 smooth_l1_loss = _add_docstr(torch._C._nn.smooth_l1_loss, r"""
-smooth_l1_loss(input, target, size_average=True) -> Variable
+smooth_l1_loss(input, target, size_average=True) -> Tensor
 
 Function that uses a squared term if the absolute
 element-wise error falls below 1 and an L1 term otherwise.
@@ -1569,8 +1571,7 @@ See :class:`~torch.nn.SmoothL1Loss` for details.
 
 
 def l1_loss(input, target, size_average=True, reduce=True):
-    """
-    l1_loss(input, target, size_average=True, reduce=True) -> Variable
+    r"""l1_loss(input, target, size_average=True, reduce=True) -> Tensor
 
     Function that takes the mean element-wise absolute value difference.
 
@@ -1581,8 +1582,7 @@ def l1_loss(input, target, size_average=True, reduce=True):
 
 
 def mse_loss(input, target, size_average=True, reduce=True):
-    """
-    mse_loss(input, target, size_average=True, reduce=True) -> Variable
+    r"""mse_loss(input, target, size_average=True, reduce=True) -> Tensor
 
     Measures the element-wise mean squared error.
 
@@ -1593,7 +1593,7 @@ def mse_loss(input, target, size_average=True, reduce=True):
 
 
 def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
-    """margin_ranking_loss(input1, input2, target, margin=0, size_average=True) -> Variable
+    r"""margin_ranking_loss(input1, input2, target, margin=0, size_average=True) -> Tensor
 
     See :class:`~torch.nn.MarginRankingLoss` for details.
     """
@@ -1604,7 +1604,7 @@ def margin_ranking_loss(input1, input2, target, margin=0, size_average=True):
 
 
 def hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True):
-    """hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True) -> Variable
+    r"""hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=True) -> Tensor
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
@@ -1612,20 +1612,20 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=Tr
 
 
 multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""
-multilabel_margin_loss(input, target, size_average=True, reduce=True) -> Variable
+multilabel_margin_loss(input, target, size_average=True, reduce=True) -> Tensor
 
 See :class:`~torch.nn.MultiLabelMarginLoss` for details.
 """)
 
 soft_margin_loss = _add_docstr(torch._C._nn.soft_margin_loss, r"""
-soft_margin_loss(input, target, size_average=True, reduce=True) -> Variable
+soft_margin_loss(input, target, size_average=True, reduce=True) -> Tensor
 
 See :class:`~torch.nn.SoftMarginLoss` for details.
 """)
 
 
 def multilabel_soft_margin_loss(input, target, weight=None, size_average=True, reduce=True):
-    """multilabel_soft_margin_loss(input, target, weight=None, size_average=True) -> Variable
+    r"""multilabel_soft_margin_loss(input, target, weight=None, size_average=True) -> Tensor
 
     See :class:`~torch.nn.MultiLabelSoftMarginLoss` for details.
     """
@@ -1634,7 +1634,7 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=True, r
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
-    """cosine_embedding_loss(input1, input2, target, margin=0, size_average=True) -> Variable
+    r"""cosine_embedding_loss(input1, input2, target, margin=0, size_average=True) -> Tensor
 
     See :class:`~torch.nn.CosineEmbeddingLoss` for details.
     """
@@ -1642,7 +1642,7 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
 
 
 def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True):
-    """multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True) -> Variable
+    r"""multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True) -> Tensor
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
