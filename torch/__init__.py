@@ -1,4 +1,4 @@
-"""
+r"""
 The torch package contains data structures for multi-dimensional
 tensors and mathematical operations over these are defined.
 Additionally, it provides many utilities for efficient serializing of
@@ -127,6 +127,12 @@ def is_storage(obj):
     return type(obj) in _storage_classes
 
 
+if sys.version_info[0] == 2:
+    _base_str_class = basestring
+else:
+    _base_str_class = str
+
+
 def set_default_tensor_type(t):
     r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
 
@@ -167,7 +173,7 @@ def set_default_tensor_type(t):
     if isinstance(t, globals()['dtype']):
         _C._set_default_tensor_type(t)
     else:
-        if not isinstance(t, str):
+        if not isinstance(t, _base_str_class):
             raise ValueError("t must be a string or a dtype, but got: {}".format(repr(t)))
         Tensor = _import_dotted_name(t)
         _C._set_default_tensor_type(Tensor)
