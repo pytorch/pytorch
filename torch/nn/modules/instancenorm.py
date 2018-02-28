@@ -69,7 +69,7 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm1d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100, 40))
+        >>> input = torch.randn(20, 100, 40)
         >>> output = m(input)
 
     .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
@@ -132,7 +132,7 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm2d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
+        >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
 
     .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
@@ -195,7 +195,7 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm3d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
+        >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
 
     .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:

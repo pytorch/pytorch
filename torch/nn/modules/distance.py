@@ -22,10 +22,10 @@ class PairwiseDistance(Module):
 
     Examples::
 
-    >>> pdist = nn.PairwiseDistance(p=2)
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> output = pdist(input1, input2)
+        >>> pdist = nn.PairwiseDistance(p=2)
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
+        >>> output = pdist(input1, input2)
     """
     def __init__(self, p=2, eps=1e-6):
         super(PairwiseDistance, self).__init__()
@@ -54,11 +54,10 @@ class CosineSimilarity(Module):
 
     Examples::
 
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-    >>> output = cos(input1, input2)
-    >>> print(output)
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
+        >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+        >>> output = cos(input1, input2)
     """
     def __init__(self, dim=1, eps=1e-8):
         super(CosineSimilarity, self).__init__()
