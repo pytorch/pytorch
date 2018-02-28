@@ -19,7 +19,6 @@ requirements:
     - future
     - glog
     - gflags
-    - leveldb
     - lmdb
     - numpy
     - opencv ==3.3.0
@@ -31,7 +30,6 @@ requirements:
     - future
     - glog
     - gflags
-    - leveldb
     - lmdb
     - numpy
     - opencv ==3.3.0
