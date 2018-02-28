@@ -5,20 +5,16 @@ namespace torch {
 namespace jit {
 namespace script {
 
-using ResolutionCallback = std::function<py::function(Graph*, std::string)>;
+using ResolutionCallback = std::function<py::function(std::string)>;
 
 struct PythonResolver : public Resolver {
   PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
 
-  std::vector<Value*> resolveCall(SourceRange location, Node* n) override {
+  std::vector<Value*> resolveCall(SourceRange location, Node* n)
+      const override {
     AutoGIL ag;
     py::function func;
-    try {
-      func = rcb(n->owningGraph(), n->kind().toString());
-    } catch (std::exception e) {
-      throw ErrorReport(location)
-          << "Unknown function " << n->kind().toString();
-    }
+    func = rcb(n->kind().toString());
     auto* py_func = func.ptr();
     if (py_func == Py_None) {
       throw ErrorReport(location)
@@ -26,10 +22,7 @@ struct PythonResolver : public Resolver {
     }
     // Release the function object so we can wrap it in a PythonOp
     pybind11::handle h = func.release();
-    std::string cconv;
-    for (const auto& i : n->inputs()) {
-      cconv += "t";
-    }
+    std::string cconv(n->inputs().size(), 't');
     Node* new_node = n->owningGraph()->createPythonOp(
         THPObjectPtr(h.ptr()), cconv, false, {}, {}, false);
     new_node->insertBefore(n);
@@ -61,11 +54,11 @@ void initJitScriptBindings(PyObject* module) {
              const std::string& script,
              ResolutionCallback rcb) {
             PythonResolver r(rcb);
-            return self->define(script, &r);
+            return self->define(script, r);
           });
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
     PythonResolver r(rcb);
-    return jitScriptCompile(def, &r);
+    return jitScriptCompile(def, r);
   });
 }
 

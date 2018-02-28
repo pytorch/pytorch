@@ -172,7 +172,7 @@ struct to_ir {
   to_ir(
       FunctionDefinition& def,
       FunctionTable& function_table,
-      Resolver* resolver)
+      const Resolver& resolver)
       : def(def), function_table(function_table), resolver(resolver) {
     environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
@@ -539,8 +539,8 @@ struct to_ir {
           auto n =
               emitNode(kind, inputs->range(), output_size, attributes, list_attributes);
           std::vector<Value*> outputs = n->outputs();
-          if (!findTensorOp(n) && resolver) {
-            outputs = resolver->resolveCall(tree->range(), n);
+          if (!hasTensorOp(n)) {
+            outputs = resolver.resolveCall(tree->range(), n);
           }
           return outputs;
         }
@@ -700,7 +700,7 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
-  Resolver* resolver;
+  const Resolver& resolver;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -716,7 +716,7 @@ struct to_ir {
 
 struct CompilationUnitImpl {
   CompilationUnitImpl() {}
-  void defineFunction(const Def& def, Resolver* resolver) {
+  void defineFunction(const Def& def, const Resolver& resolver) {
     const auto& name = def.name().name();
 
     if (functions.count(name) > 0) {
@@ -727,7 +727,7 @@ struct CompilationUnitImpl {
     to_ir(it->second, functions, resolver);
   }
 
-  void define(const std::string& script, Resolver* resolver) {
+  void define(const std::string& script, const Resolver& resolver) {
     Parser p(script);
     while (p.lexer().cur().kind != TK_EOF) {
       defineFunction(Def(p.parseFunction()), resolver);
@@ -748,11 +748,13 @@ struct CompilationUnitImpl {
 
 CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
-void CompilationUnit::define(const std::string& script, Resolver* resolver) {
+void CompilationUnit::define(
+    const std::string& script,
+    const Resolver& resolver) {
   return pImpl->define(script, resolver);
 }
 
-void CompilationUnit::defineFunction(const Def& def, Resolver* resolver) {
+void CompilationUnit::defineFunction(const Def& def, const Resolver& resolver) {
   return pImpl->defineFunction(def, resolver);
 }
 
@@ -762,7 +764,7 @@ std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
 
 CompilationUnit::~CompilationUnit() {}
 
-std::shared_ptr<Graph> jitScriptCompile(Def def, Resolver* resolver) {
+std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver) {
   FunctionTable empty;
   FunctionDefinition fd(def);
   to_ir(fd, empty, resolver);

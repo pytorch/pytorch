@@ -13,7 +13,7 @@ namespace jit {
 namespace script {
 
 struct Resolver {
-  virtual std::vector<Value*> resolveCall(SourceRange location, Node* n) {
+  virtual std::vector<Value*> resolveCall(SourceRange location, Node* n) const {
     throw ErrorReport(location) << "Unknown function " << n->kind().toString();
   }
 };
@@ -21,8 +21,8 @@ struct Resolver {
 struct CompilationUnitImpl;
 struct CompilationUnit {
   CompilationUnit();
-  void define(const std::string& source, Resolver* resolver);
-  void defineFunction(const Def& def, Resolver* resolver);
+  void define(const std::string& source, const Resolver& resolver);
+  void defineFunction(const Def& def, const Resolver& resolver);
   std::shared_ptr<Graph> getGraph(const std::string& func_name);
   ~CompilationUnit();
 
@@ -30,7 +30,7 @@ struct CompilationUnit {
   std::unique_ptr<CompilationUnitImpl> pImpl;
 };
 
-std::shared_ptr<Graph> jitScriptCompile(Def def, Resolver* resolver);
+std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver);
 
 } // namespace script
 } // namespace jit

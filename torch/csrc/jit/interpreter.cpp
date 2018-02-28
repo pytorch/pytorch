@@ -406,6 +406,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       }
       drop(stack, num_inputs);
       py::object py_outputs(func(*py_inputs));
+      auto num_outputs = op->outputs().size();
       auto addOutput = [&](py::handle entry) {
         if (!THPVariable_Check(entry.ptr())) {
           throw std::runtime_error(
@@ -417,7 +418,12 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       if (!PyTuple_Check(py_outputs.ptr())) {
         addOutput(py_outputs);
       } else {
-        for (py::handle entry : py::tuple(py_outputs)) {
+        auto output_tuple = py::tuple(py_outputs);
+        if (output_tuple.size() != num_outputs) {
+          throw std::runtime_error(
+              "Function.apply returned the wrong number of outputs.");
+        }
+        for (py::handle entry : output_tuple) {
           addOutput(entry);
         }
       }
@@ -442,6 +448,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       drop(stack, num_inputs);
       py::object py_outputs(func(*py_inputs));
 
+      auto num_outputs = op->outputs().size();
       auto addOutput = [&](py::handle entry) {
         if (!THPVariable_Check(entry.ptr())) {
           throw std::runtime_error(
@@ -455,6 +462,11 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
       if (!PyTuple_Check(py_outputs.ptr())) {
         addOutput(py_outputs);
       } else {
+        auto output_tuple = py::tuple(py_outputs);
+        if (output_tuple.size() != num_outputs) {
+          throw std::runtime_error(
+              "Function application returned the wrong number of outputs.");
+        }
         for (py::handle entry : py::tuple(py_outputs)) {
           addOutput(entry);
         }

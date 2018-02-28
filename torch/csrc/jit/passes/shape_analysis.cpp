@@ -168,9 +168,7 @@ void PropagateShapeOnNode(Node * node) {
       }
     } break;
     case kPythonOp: {
-      for (auto& output : node->outputs()) {
-        output->setType(DynamicType::get());
-      }
+      setDynamicType(node);
     } break;
     default: {
       auto op_info = getTensorOp(node);

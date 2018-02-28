@@ -825,7 +825,7 @@ const static auto cf_examples = R"JIT(
 )JIT";
 void testControlFlow() {
   script::CompilationUnit cu;
-  cu.define(cf_examples, nullptr);
+  cu.define(cf_examples, torch::jit::script::Resolver());
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.getGraph(name);
     Code code(graph, /*values_are_variables=*/false);

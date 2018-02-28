@@ -2,9 +2,6 @@
 #include <memory>
 #include <vector>
 
-#include "torch/csrc/jit/generated/aten_dispatch.h"
-#include "torch/csrc/jit/ir.h"
-
 namespace at {
   struct Tensor;
 }

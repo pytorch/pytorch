@@ -462,7 +462,7 @@ def trace(*args, **kwargs):
 def createResolutionCallback(frame_id=2):
     frame = inspect.stack()[frame_id][0]
 
-    def env(graph, key):
+    def env(key):
         if key not in frame.f_locals:
             try:
                 return frame.f_globals[key]
