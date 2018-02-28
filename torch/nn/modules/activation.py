@@ -90,7 +90,7 @@ class RReLU(Module):
        {RReLU}(x) = \left\{
        \begin{eqnarray}
         x \textrm{ if } x \geq 0 \\
-       ax \textrm{ if } x < 0
+       ax \textrm{ if } x < 0 ,
        \end{eqnarray}
        \right.
 
