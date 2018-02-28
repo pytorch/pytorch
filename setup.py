@@ -380,15 +380,6 @@ class build_ext(build_ext_parent):
 
         generate_code(ninja_global)
 
-        if IS_WINDOWS:
-            build_temp = self.build_temp
-            build_dir = 'torch/csrc'
-
-            ext_filename = self.get_ext_filename('_C')
-            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
-
-            _C_LIB = os.path.join(build_temp, build_dir, lib_filename).replace('\\', '/')
-
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
@@ -513,6 +504,7 @@ main_sources = [
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -654,7 +646,6 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/lazy_init.cpp",
         "torch/csrc/cuda/serialization.cpp",
         "torch/csrc/nn/THCUNN.cpp",
     ]

@@ -3,9 +3,9 @@
 // ${generated_comment}
 
 #include <ATen/ATen.h>
-#include "torch/csrc/cuda/lazy_init.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/tensor/python_tensor.h"
 
@@ -27,11 +27,9 @@ static at::Type& default_type() {
 }
 
 static void maybe_initialize_cuda(const at::Type &type) {
-#ifdef WITH_CUDA
   if (type.is_cuda()) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
-#endif
 }
 
 ${py_method_dispatch}
