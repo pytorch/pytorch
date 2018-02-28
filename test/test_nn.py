@@ -3890,6 +3890,21 @@ class TestNN(NNTestCase):
             if TEST_CUDA:
                 test_cpu_against_cuda(N, C, H, W, padding_mode)
 
+    def test_grid_sample_3d(self):
+        for padding_mode in ['zeros', 'border']:
+            # do gradcheck
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            input = Variable(torch.randn(N, C, D, H, W), requires_grad=True)
+            grid = Variable(torch.randn(N, D, H, W, 3), requires_grad=True)
+            self.assertTrue(gradcheck(
+                lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                (input, grid)))
+
+
     def test_affine_grid(self):
         # test known input on CPU
         input = Variable(torch.arange(1, 7).view(1, 2, 3))
