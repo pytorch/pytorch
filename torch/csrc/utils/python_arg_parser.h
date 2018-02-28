@@ -47,7 +47,7 @@ struct FunctionParameter;
 struct FunctionSignature;
 struct PythonArgs;
 
-// Contains bounds Python arguments
+// Contains bound Python arguments in declaration order
 template<int N>
 struct ParsedArgs {
   PyObject* args[N];
