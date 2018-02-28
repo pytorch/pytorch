@@ -4,10 +4,10 @@ macro(caffe2_interface_library SRC DST)
   add_dependencies(${DST} ${SRC})
   # Depending on the nature of the source library as well as the compiler,
   # determine the needed compilation flags.
-  get_target_property(__tmp ${SRC} TYPE)
+  get_target_property(__src_target_type ${SRC} TYPE)
   # Depending on the type of the source library, we will set up the
   # link command for the specific SRC library.
-  if (${__tmp} STREQUAL "STATIC_LIBRARY")
+  if (${__src_target_type} STREQUAL "STATIC_LIBRARY")
     # In the case of static library, we will need to add whole-static flags.
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
       target_link_libraries(
@@ -22,22 +22,43 @@ macro(caffe2_interface_library SRC DST)
           ${DST} INTERFACE
           -Wl,--whole-archive $<TARGET_FILE:${SRC}> -Wl,--no-whole-archive)
     endif()
-  elseif(${__tmp} STREQUAL "SHARED_LIBRARY")
+    # Link all interface link libraries of the src target as well.
+    # For static library, we need to explicitly depend on all the libraries
+    # that are the dependent library of the source library. Note that we cannot
+    # use the populated INTERFACE_LINK_LIBRARIES property, because if one of the
+    # dependent library is not a target, cmake creates a $<LINK_ONLY:src> wrapper
+    # and then one is not able to find target "src". For more discussions, check
+    #   https://gitlab.kitware.com/cmake/cmake/issues/15415
+    #   https://cmake.org/pipermail/cmake-developers/2013-May/019019.html
+    # Specifically the following quote
+    #
+    # """
+    # For STATIC libraries we can define that the PUBLIC/PRIVATE/INTERFACE keys
+    # are ignored for linking and that it always populates both LINK_LIBRARIES
+    # LINK_INTERFACE_LIBRARIES.  Note that for STATIC libraries the
+    # LINK_LIBRARIES property will not be used for anything except build-order
+    # dependencies.
+    # """
+    target_link_libraries(${DST} INTERFACE
+        $<TARGET_PROPERTY:${SRC},LINK_LIBRARIES>)
+  elseif(${__src_target_type} STREQUAL "SHARED_LIBRARY")
     if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
       target_link_libraries(
           ${DST} INTERFACE -Wl,--no-as-needed ${SRC} -Wl,--as-needed)
     else()
       target_link_libraries(${DST} INTERFACE ${SRC})
     endif()
+    # Link all interface link libraries of the src target as well.
+    # For shared libraries, we can simply depend on the INTERFACE_LINK_LIBRARIES
+    # property of the target.
+    target_link_libraries(${DST} INTERFACE
+        $<TARGET_PROPERTY:${SRC},INTERFACE_LINK_LIBRARIES>)
   else()
     message(FATAL_ERROR
         "You made a CMake build file error: target " ${SRC}
         " must be of type either STATIC_LIBRARY or SHARED_LIBRARY. However, "
-        "I got " ${__tmp} ".")
+        "I got " ${__src_target_type} ".")
   endif()
-  # Link all interface link libraries of the src target as well.
-  target_link_libraries(${DST} INTERFACE
-      $<TARGET_PROPERTY:${SRC},INTERFACE_LINK_LIBRARIES>)
   # For all other interface properties, manually inherit from the source target.
   set_target_properties(${DST} PROPERTIES
     INTERFACE_COMPILE_DEFINITIONS

@@ -161,10 +161,14 @@ function(caffe2_binary_target target_name_or_src)
     prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
   endif()
   add_executable(${__target} ${__srcs})
+  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  # For binaries, some of the code actually directly call the dependent
+  # libraries even if they are not part of the public dependency libs. As a
+  # result, we will explicitly link the test against the Caffe2 dependency
+  # libs. This should be changed in a future cleanup.
+  target_link_libraries(${__target} ${Caffe2_DEPENDENCY_LIBS})
   if (USE_CUDA)
-    target_link_libraries(${__target} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_CUDA_DEPENDENCY_LIBS})
-  else()
-    target_link_libraries(${__target} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
+    target_link_libraries(${__target} ${Caffe2_CUDA_DEPENDENCY_LIBS})   
   endif()
   install(TARGETS ${__target} DESTINATION bin)
 endfunction()
