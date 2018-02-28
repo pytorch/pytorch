@@ -3345,7 +3345,7 @@ Computes the inverse of a positive semidefinite matrix given its
 Cholesky factor :attr:`u`: returns matrix `inv`
 
 If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper
-triangular such that: 
+triangular such that:
 
 .. math::
     inv = (u^T u)^{-1}
@@ -4913,7 +4913,7 @@ Returns the upper triangular part of the matrix (2-D tensor) :attr:`input`,
 the other elements of the result tensor :attr:`out` are set to 0.
 
 The upper triangular part of the matrix is defined as the elements on and
-above the diagonal. 
+above the diagonal.
 
 The argument :attr:`diagonal` controls which diagonal to consider. If
 :attr:`diagonal` = 0, all elements on and below the main diagonal are
