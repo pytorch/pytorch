@@ -36,6 +36,7 @@
     case ::at::ScalarType::Float: func<float>(args); break;                   \
     case ::at::ScalarType::Double: func<double>(args); break;                 \
     case ::at::ScalarType::Half: func<gloo::float16>(args); break;            \
+    case ::at::ScalarType::Byte: func<int8_t>(args); break;                   \
     default:                                                                  \
       throw std::runtime_error("Invalid " + std::string(#func) + " function type"); \
   }
