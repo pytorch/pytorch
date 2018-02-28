@@ -8,6 +8,9 @@ add_docstr(torch.abs,
 
 Computes the element-wise absolute value of the given :attr:`input` tensor.
 
+.. math::
+    \text{out}_{i} = |\text{input}_{i}|
+
 Example::
 
     >>> torch.abs(torch.FloatTensor([-1, -2, 3]))
@@ -19,6 +22,9 @@ add_docstr(torch.acos,
 acos(input, out=None) -> Tensor
 
 Returns a new tensor with the arccosine  of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = cos^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -149,7 +155,7 @@ along the first dimension).
 same number of matrices.
 
 If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
-:math:`(b \times m \times p)` tensor, ::attr:`mat` must be
+:math:`(b \times m \times p)` tensor, :attr:`mat` must be
 :ref:`broadcastable <broadcasting-semantics>` with a :math:`(n \times p)` tensor
 and attr:`out` will be a :math:`(n \times p)` tensor.
 
@@ -380,6 +386,9 @@ asin(input, out=None) -> Tensor
 
 Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = sin^{-1}(\text{input}_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -407,6 +416,9 @@ add_docstr(torch.atan,
 atan(input, out=None) -> Tensor
 
 Returns a new tensor with the arctangent  of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = tan^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -514,8 +526,12 @@ to be used for drawing the binary random number.
 Hence, all values in :attr:`input` have to be in the range:
 :math:`0 \leq input_i \leq 1`
 
-The `i-th` element of the output tensor will draw a value `1` according
-to the `i-th` probability value given in :attr:`input`.
+The :math:`\text{i}^{th}` element of the output tensor will draw a
+value `1` according to the :math:`\text{i}^{th}` probability value given
+in :attr:`input`.
+
+.. math::
+    \text{out}_{i} \sim \mathrm{Bernoulli}(p = \text{input}_{i})
 
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
 shape as :attr:`input`
@@ -598,13 +614,13 @@ add_docstr(torch.cat,
 cat(seq, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
-All tensors must either have the same shape (except in the cat dimension) or be
-empty.
+All tensors must either have the same shape (except in the concatenating
+dimension) or be empty.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`
 
-:func:`cat` can be best understood via examples.
+:func:`torch.cat` can be best understood via examples.
 
 Args:
     seq (sequence of tensors): any python sequence of tensors of the same type.
@@ -647,6 +663,9 @@ ceil(input, out=None) -> Tensor
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
+.. math::
+    \text{out}_{i} = \lceil \text{input}_{i} \rceil = \lfloor \text{input}_{i} \rfloor + 1
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -676,8 +695,10 @@ add_docstr(torch.reciprocal,
            r"""
 reciprocal(input, out=None) -> Tensor
 
-Returns a new tensor with the reciprocal of the elements of :attr:`input`,
-i.e. :math:`x^{-1} = \frac{1}{x}`.
+Returns a new tensor with the reciprocal of the elements of :attr:`input`
+
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 
 Args:
     input (Tensor): the input tensor
@@ -816,6 +837,9 @@ cos(input, out=None) -> Tensor
 
 Returns a new tensor with the cosine  of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \cos(\text{input}_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -844,6 +868,9 @@ cosh(input, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \cosh(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -1218,7 +1245,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4,4)
+    >>> a = torch.randn(4, 4)
     >>> a
 
     -0.1810  0.4017  0.2863 -0.1013
@@ -1359,6 +1386,9 @@ exp(tensor, out=None) -> Tensor
 Returns a new tensor with the exponential of the elements
 of :attr:`input`.
 
+.. math::
+    y_{i} = e^{x_{i}}
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -1418,6 +1448,9 @@ floor(input, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+.. math::
+    \text{out}_{i} = \lfloor \text{input}_{i} \rfloor
 
 Args:
     input (Tensor): the input tensor
@@ -1481,6 +1514,9 @@ frac(tensor, out=None) -> Tensor
 
 Computes the fractional portion of each element in :attr:`tensor`.
 
+.. math::
+    \text{out}_{i} = \text{input}_{i} - \lfloor \text{input}_{i} \rfloor
+
 Example::
 
     >>> torch.frac(torch.Tensor([1, 2.5, -3.2])
@@ -1522,9 +1558,9 @@ For a 3-D tensor the output is specified by::
 
 If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and :attr:`dim` = i, then :attr:`index` must be an n-dimensional tensor with
-size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where y >= 1 and
-:attr:`out` will have the same size as :attr:`index`.
+and :attr:`dim` = `i`, then :attr:`index` must be an n-dimensional tensor with
+size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
+and :attr:`out` will have the same size as :attr:`index`.
 
 Args:
     input (Tensor): the source tensor
@@ -2080,6 +2116,9 @@ log(input, out=None) -> Tensor
 Returns a new tensor with the natural logarithm of the elements
 of :attr:`input`.
 
+.. math::
+    y_{i} = \log_{e} (x_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -2114,7 +2153,7 @@ log1p(input, out=None) -> Tensor
 Returns a new tensor with the natural logarithm of (1 + :attr:`input`).
 
 .. math::
-    y_i = \log (x_i + 1)
+    y_i = \log_{e} (x_i + 1)
 
 .. note:: This function is more accurate than :func:`torch.log` for small
           values of :attr:`input`
@@ -2768,7 +2807,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4,4)
+    >>> a = torch.randn(4, 4)
     >>> a
 
     -0.7280  0.0598 -1.4327 -0.5825
@@ -2982,6 +3021,9 @@ add_docstr(torch.norm,
 
 Returns the p-norm of the :attr:`input` tensor.
 
+.. math::
+    ||x||_{p} = \sqrt[p]{x_{1}^{p} + x_{2}^{p} + \ldots + x_{N}^{p}}
+
 Args:
     input (Tensor): the input tensor
     p (float, optional): the exponent value in the norm formulation
@@ -3048,7 +3090,7 @@ add_docstr(torch.normal,
 .. function:: normal(means, std, out=None)
 
 Returns a tensor of random numbers drawn from separate normal distributions
-who's mean and standard deviation are given.
+whose mean and standard deviation are given.
 
 The :attr:`means` is a tensor with the mean of
 each output element's normal distribution
@@ -3056,8 +3098,8 @@ each output element's normal distribution
 The :attr:`std` is a tensor with the standard deviation of
 each output element's normal distribution
 
-The shapes of :attr:`means` and :attr:`std` don't need to match.
-The total number of elements in each tensor need to be the same.
+The shapes of :attr:`means` and :attr:`std` don't need to match, but the
+total number of elements in each tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`means`
           is used as the shape for the returned output tensor
@@ -3138,7 +3180,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(1,2,3,4,5)
+    >>> a = torch.randn(1, 2, 3, 4, 5)
     >>> torch.numel(a)
     120
     >>> a = torch.zeros(4,4)
@@ -3152,7 +3194,7 @@ add_docstr(torch.ones,
 ones(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
-by the varargs :attr:`sizes`.
+by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of integers defining the shape of the output tensor
@@ -3260,7 +3302,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
@@ -3304,7 +3346,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
@@ -3351,7 +3393,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
@@ -3361,7 +3403,7 @@ Example::
     -0.9406 -2.1618  2.2443
     [torch.FloatTensor of size 3x3]
 
-    >>> b = torch.randn(3,2)
+    >>> b = torch.randn(3, 2)
     >>> b
 
     -0.3119 -1.8224
@@ -3563,7 +3605,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> a
 
@@ -3662,7 +3704,7 @@ rand(*sizes, out=None) -> Tensor
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
 
-The shape of the tensor is defined by the varargs :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of ints defining the shape of the output tensor.
@@ -3691,9 +3733,10 @@ add_docstr(torch.randn,
 randn(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
-with zero mean and variance of one.
+with zero mean and variance of one (also called the standard normal
+distirbution).
 
-The shape of the tensor is defined by the varargs :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of ints defining the shape of the output tensor.
@@ -3782,8 +3825,11 @@ add_docstr(torch.arange,
 arange(start=0, end, step=1, out=None) -> Tensor
 
 Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor`
-with values from the interval ``[start, end)`` taken with step :attr:`step`
-starting from `start`.
+with values from the interval ``[start, end)`` taken with common difference
+:attr:`step` beginning from `start`.
+
+.. math::
+    out_{i+1} = out_{i} + \mathrm{step}
 
 Args:
     start (float): the starting value for the set of points
@@ -3927,6 +3973,9 @@ rsqrt(input, out=None) -> Tensor
 Returns a new tensor with the reciprocal of the square-root of each of
 the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \frac{1}{\sqrt{\text{input}_{i}}}
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -3996,6 +4045,9 @@ sigmoid(input, out=None) -> Tensor
 
 Returns a new tensor with the sigmoid of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -4056,6 +4108,9 @@ sin(input, out=None) -> Tensor
 
 Returns a new tensor with the sine of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \sin(\text{input}_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -4084,6 +4139,9 @@ sinh(input, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic sine of the elements of
 :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sinh(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4169,6 +4227,9 @@ add_docstr(torch.sqrt,
 sqrt(input, out=None) -> Tensor
 
 Returns a new tensor with the square-root of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sqrt{\text{input}_{i}}
 
 Args:
     input (Tensor): the input tensor
@@ -4542,7 +4603,8 @@ Example::
 
 """)
 
-add_docstr(torch.take, r"""\
+add_docstr(torch.take,
+           r"""\
 take(input, indices) -> Tensor
 
 Returns a new tensor with the elements of :attr:`input` at the given indices.
@@ -4569,6 +4631,9 @@ add_docstr(torch.tan,
 tan(input, out=None) -> Tensor
 
 Returns a new tensor with the tangent of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \tan(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4598,6 +4663,9 @@ tanh(input, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic tangent of the elements
 of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \tanh(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4766,7 +4834,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a
 
      1.3225  1.7304  1.4573
@@ -4820,7 +4888,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a
 
      1.3225  1.7304  1.4573
@@ -4888,14 +4956,14 @@ Shape:
 
 Examples::
 
-    >>> A = torch.randn(2,2).triu()
+    >>> A = torch.randn(2, 2).triu()
     >>> A
 
     -1.8793  0.1567
      0.0000 -2.1972
     [torch.FloatTensor of size 2x2]
 
-    >>> b = torch.randn(2,3)
+    >>> b = torch.randn(2, 3)
     >>> b
 
      1.8776 -0.0759  1.6590
@@ -4955,8 +5023,9 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A negative dim value can be used and will correspond to
-:math:`dim + input.dim() + 1`
+A negative `dim` value within the range
+[-`input.dim()`, `input.dim`) can be used and
+will correspond to :meth:`unsqueeze` applied at `dim` = `dim + input.dim() + 1`
 
 Args:
     input (Tensor): the input tensor
@@ -5047,7 +5116,7 @@ add_docstr(torch.zeros,
 zeros(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
-by the varargs :attr:`sizes`.
+by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of integers defining the shape of the output tensor
