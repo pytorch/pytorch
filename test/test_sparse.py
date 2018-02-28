@@ -872,6 +872,9 @@ class TestSparse(TestCase):
         from torch.autograd import Variable
         do_test(Variable(x), Variable(i), Variable(v))
 
+        self.assertIs(torch.sparse.uint8, Variable(x).new(dtype=torch.sparse.uint8).dtype)
+        self.assertIs(torch.sparse.uint8, Variable(x).new(1, 2, dtype=torch.sparse.uint8).dtype)
+
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         cpum = torch.sparse

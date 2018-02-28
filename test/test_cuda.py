@@ -760,6 +760,24 @@ class TestCuda(TestCase):
         x = torch.autograd.Variable(torch.randn(3, 3).cuda())
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
         self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
+
+        y = x.new(dtype=torch.cuda.int64, device=1)
+        self.assertEqual(y.get_device(), 1)
+        self.assertIs(y.dtype, torch.cuda.int64)
+        y = x.new(dtype=torch.int64)
+        self.assertIs(y.dtype, torch.int64)
+
+        y = x.new(1, 2, 3, dtype=torch.cuda.int64, device=1)
+        self.assertEqual(y.get_device(), 1)
+        self.assertIs(y.dtype, torch.cuda.int64)
+        y = x.new(1, 2, 3, dtype=torch.int64)
+        self.assertIs(y.dtype, torch.int64)
+
+        y = x.new([0, 1, 2], dtype=torch.cuda.int64, device=1)
+        self.assertEqual(y.get_device(), 1)
+        self.assertIs(y.dtype, torch.cuda.int64)
+        y = x.new([0, 1, 2], dtype=torch.int64)
+        self.assertIs(y.dtype, torch.int64)
         with torch.cuda.device(1):
             self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
             self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
