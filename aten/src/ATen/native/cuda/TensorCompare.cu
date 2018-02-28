@@ -1,6 +1,6 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
-#include "ATen/cuda/Dispatch.h"
+#include "ATen/cuda/Dispatch.cuh"
 
 namespace {
 template <typename scalar_t>

@@ -4,7 +4,7 @@
 
 #include "ATen/cuda/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/Dispatch.h"
+#include "ATen/cuda/Dispatch.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>

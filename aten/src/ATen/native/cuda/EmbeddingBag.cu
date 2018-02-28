@@ -2,7 +2,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
-#include "ATen/cuda/Dispatch.h"
+#include "ATen/cuda/Dispatch.cuh"
 #include "ATen/cuda/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 
