@@ -99,17 +99,6 @@ THPDtype* getDtype(at::Backend backend, at::ScalarType scalarType) {
   return dtype;
 }
 
-PyObject* createPyObject(const at::Tensor& tensor)
-{
-  auto type = getPyTypeObject(tensor);
-  PyObject *obj = type->tp_alloc(type, 0);
-  if (obj) {
-    // Retain underlying TH Tensor
-    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.unsafeGetTH(true);
-  }
-  return obj;
-}
-
 PyObject* createPyObject(const at::Storage& storage)
 {
   auto type = getPyTypeObject(storage);
