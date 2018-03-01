@@ -177,18 +177,6 @@ if(USE_LEVELDB)
   endif()
 endif()
 
-# ---[ Rocksdb
-if(USE_ROCKSDB)
-  find_package(RocksDB)
-  if(ROCKSDB_FOUND)
-    include_directories(${RocksDB_INCLUDE_DIR})
-    list(APPEND Caffe2_DEPENDENCY_LIBS ${RocksDB_LIBRARIES})
-  else()
-    message(WARNING "Not compiling with RocksDB. Suppress this warning with -DUSE_ROCKSDB=OFF")
-    set(USE_ROCKSDB OFF)
-  endif()
-endif()
-
 # ---[ ZMQ
 if(USE_ZMQ)
   find_package(ZMQ)

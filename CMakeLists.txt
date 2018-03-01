@@ -11,6 +11,15 @@ set(CAFFE2_VERSION_PATCH 1)
 set(CAFFE2_VERSION
     "${CAFFE2_VERSION_MAJOR}.${CAFFE2_VERSION_MINOR}.${CAFFE2_VERSION_PATCH}")
 
+# One variable that determines whether the current cmake process is being run
+# with the main Caffe2 library. This is useful for building modules - if
+# modules are built with the main Caffe2 library then one does not need to do
+# find caffe2 in the cmake script. One can usually guard it in some way like
+#    if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+#      find_package(Caffe2 REQUIRED)
+#    endif()
+set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -49,7 +58,7 @@ option(USE_OPENCV "Use openCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
-option(USE_ROCKSDB "Use RocksDB" ON)
+option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_THREADS "Use Threads" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
@@ -79,7 +88,6 @@ include(ExternalProject)
 # TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
 include(cmake/public/utils.cmake)
-include(cmake/Summary.cmake)
 
 set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
 
@@ -183,9 +191,6 @@ if(BUILD_DOCS)
   endif (DOXYGEN_FOUND)
 endif (BUILD_DOCS)
 
-
-caffe2_print_configuration_summary()
-
 # ---[ CMake related files
 # Uninistall option.
 if(NOT TARGET caffe2_uninstall)
@@ -254,3 +259,6 @@ endif()
 
 # ---[ Modules
 add_subdirectory(modules)
+
+include(cmake/Summary.cmake)
+caffe2_print_configuration_summary()
