@@ -10,7 +10,7 @@ MODE_BORDER = 1
 
 
 def grid_sampler(input, grid, padding_mode):
-    if cudnn.is_acceptable(input.data) and padding_mode == 'zeros':
+    if cudnn.is_acceptable(input.data) and padding_mode == 'zeros' and input.dim() == 4:
         return torch._C._VariableFunctions.cudnn_grid_sampler(input, grid)
     else:
         return GridSampler.apply(input, grid, padding_mode)
@@ -43,13 +43,20 @@ class GridSampler(Function):
         elif padding_mode == 'border':
             ctx.padding_mode = MODE_BORDER
         else:
-            raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}"
-                             .format(padding_mode))
+            raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}".format(padding_mode))
 
         grid_sz = grid.size()
         backend = type2backend[input.type()]
-        output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
-        backend.SpatialGridSamplerBilinear_updateOutput(backend.library_state, input, grid, output, ctx.padding_mode)
+        if input.dim() == 4:
+            output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2])
+            backend.SpatialGridSamplerBilinear_updateOutput(backend.library_state, input, grid,
+                                                            output, ctx.padding_mode)
+        elif input.dim() == 5:
+            output = input.new(grid_sz[0], input.size(1), grid_sz[1], grid_sz[2], grid_sz[3])
+            backend.VolumetricGridSamplerBilinear_updateOutput(backend.library_state, input, grid,
+                                                               output, ctx.padding_mode)
+        else:
+            raise ValueError("input has to be 4d or 5d but got input of shape: {}".format(input.shape))
         return output
 
     @staticmethod
@@ -61,9 +68,16 @@ class GridSampler(Function):
         backend = type2backend[input.type()]
         grad_input = input.new(input.size())
         grad_grid = grid.new(grid.size())
-        backend.SpatialGridSamplerBilinear_updateGradInput(
-            backend.library_state, input, grad_input,
-            grid, grad_grid, grad_output, padding_mode)
+        if input.dim() == 4:
+            backend.SpatialGridSamplerBilinear_updateGradInput(
+                backend.library_state, input, grad_input,
+                grid, grad_grid, grad_output, padding_mode)
+        elif input.dim() == 5:
+            backend.VolumetricGridSamplerBilinear_updateGradInput(
+                backend.library_state, input, grad_input,
+                grid, grad_grid, grad_output, padding_mode)
+        else:
+            raise ValueError("input has to be 4d or 5d but got input of shape: {}".format(input.shape))
         return grad_input, grad_grid, None
 
 
