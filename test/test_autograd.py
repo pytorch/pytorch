@@ -15,7 +15,7 @@ from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 
 from common import TestCase, run_tests, skipIfNoLapack, suppress_warnings
-from torch.autograd import Variable, Function, variable
+from torch.autograd import Variable, Function
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
 
@@ -2110,19 +2110,19 @@ def random_fullrank_matrix_distinct_singular_value(l):
 
 
 def uniform_scalar(offset=0, requires_grad=False):
-    v = variable(0).uniform_(0, 1) + offset
+    v = torch.tensor(0).uniform_(0, 1) + offset
     v.requires_grad = requires_grad
     return v
 
 
 def normal_scalar_clamp(amin, amax, requires_grad=False):
-    v = variable(0).normal_().clamp(amin, amax)
+    v = torch.tensor(0).normal_().clamp(amin, amax)
     v.requires_grad = requires_grad
     return v
 
 
 def bernoulli_scalar():
-    return variable(0).byte().bernoulli_()
+    return torch.tensor(0, dtype=torch.uint8).bernoulli_()
 
 
 class dont_convert(tuple):
@@ -2201,7 +2201,7 @@ method_tests = [
     ('view', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('view', (), (1,), 'scalar_to_1d'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
-    ('view_as', (), (non_differentiable(variable(5.5)),), 'scalar'),
+    ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
     ('expand', (S, 1, 1), (S, S, S)),
     ('expand', (torch.Size([S, 1, S]),), (S, S, S), 'size'),
@@ -2364,9 +2364,9 @@ method_tests = [
     ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', [0]),
     ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', [0]),
     ('prod', prod_single_zero(S), NO_ARGS, 'single_zero'),
-    ('prod', (variable(0, requires_grad=True)), NO_ARGS, 'scalar_zero'),
-    ('prod', (variable(0, requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
-    ('prod', (variable(0, requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
+    ('prod', (torch.tensor(0, requires_grad=True)), NO_ARGS, 'scalar_zero'),
+    ('prod', (torch.tensor(0, requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
+    ('prod', (torch.tensor(0, requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
     ('var', (S, S, S), NO_ARGS),
     ('var', (S, S, S), (1,), 'dim', [0]),
     ('var', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
@@ -2389,7 +2389,7 @@ method_tests = [
     ('cumprod', (S, S, S), (0,)),
     ('cumprod', (S, S, S), (1,), 'dim1', [0]),
     ('cumprod', (), (0,), 'scalar'),
-    ('cumprod', (variable(0, requires_grad=True)), (0,), 'scalar_zeros'),
+    ('cumprod', (torch.tensor(0, requires_grad=True)), (0,), 'scalar_zeros'),
     ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim2', [0]),
     ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', [0]),
     ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', [0]),
@@ -2515,21 +2515,21 @@ method_tests = [
     ('cross', (S, 3), ((S, 3),)),
     ('cross', (S, 3, S), ((S, 3, S), 1), 'dim'),
     ('index_select', (S, S, S), (0, index_variable(2, S)), 'dim', [0]),
-    ('index_select', (), (0, variable([0]).long()), 'scalar_mixed_dim', [0]),
-    ('index_select', (), (0, variable(0).long()), 'scalar_dim', [0]),
+    ('index_select', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_mixed_dim', [0]),
+    ('index_select', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_dim', [0]),
     ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
-    ('index_add', (), (0, variable([0]).long(), variable([2])), 'scalar_input_dim', [0]),
-    ('index_add', (), (0, variable(0).long(), variable(2)), 'scalar_all_dim', [0]),
+    ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2])), 'scalar_input_dim', [0]),
+    ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2)), 'scalar_all_dim', [0]),
     ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
-    ('index_copy', (), (0, variable([0]).long(), variable([2])), 'scalar_input_dim', [0]),
-    ('index_copy', (), (0, variable(0).long(), variable(2)), 'scalar_all_dim', [0]),
+    ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2])), 'scalar_input_dim', [0]),
+    ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2)), 'scalar_all_dim', [0]),
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
-    # FIXME: we should compute the derivative w.r.t variable(2)
-    ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(variable(2))),
+    # FIXME: we should compute the derivative w.r.t torch.tensor(2)
+    ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
      'variable_dim', [0]),
-    ('index_fill', (S, S), (0, variable(0).long(), 2), 'scalar_index_dim', [0]),
-    ('index_fill', (), (0, variable([0]).long(), 2), 'scalar_input_dim', [0]),
-    ('index_fill', (), (0, variable(0).long(), 2), 'scalar_both_dim', [0]),
+    ('index_fill', (S, S), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_index_dim', [0]),
+    ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
+    ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric'),
@@ -2542,8 +2542,8 @@ method_tests = [
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
-    # FIXME: we should compute the derivative w.r.t variable(1)
-    ('fill_', (S, S, S), (non_differentiable(variable(1)),), 'variable'),
+    # FIXME: we should compute the derivative w.r.t torch.tensor(1)
+    ('fill_', (S, S, S), (non_differentiable(torch.tensor(1)),), 'variable'),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq_', (), ((),), 'scalar'),
@@ -2601,32 +2601,33 @@ method_tests = [
     ('split', (S, S, S), (S, 1), 'dim', [1]),
     ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', [0]),
     ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', [0]),
-    ('gather', (), (0, variable([0]).long()), 'scalar_input', [0]),
-    ('gather', (S,), (0, variable(0).long()), 'scalar_index', [0]),
-    ('gather', (), (0, variable(0).long()), 'scalar_both', [0]),
+    ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', [0]),
+    ('gather', (S,), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_index', [0]),
+    ('gather', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_both', [0]),
     ('scatter', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
     ('scatter', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
-    ('scatter', (), (0, variable(0).long(), ()), 'scalar_all_dim0', [0]),
+    ('scatter', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', [0]),
     ('scatter_add', (M, S), (0, gather_variable((S, S), 1, M), (S, S)), 'dim0', [0]),
     ('scatter_add', (M, S), (1, gather_variable((M, S // 2), 0, S), (M, S // 2)), 'dim1', [0]),
-    ('scatter_add', (), (0, variable(0).long(), ()), 'scalar_all_dim0', [0]),
+    ('scatter_add', (), (0, torch.tensor(0, dtype=torch.int64), ()), 'scalar_all_dim0', [0]),
     ('masked_select', (M, M), (mask_not_all_zeros((M, M)),)),
     ('masked_select', (M, M), (mask_not_all_zeros((M,)),), 'broadcast_rhs'),
     ('masked_select', (M,), (mask_not_all_zeros((M, M)),), 'broadcast_lhs'),
     ('masked_select', (M, 1, M), (mask_not_all_zeros((M, M)),),
      'broadcast_all'),
-    ('masked_select', (), (variable(1).byte(),), 'scalar'),
-    ('masked_select', (M, M), (variable(1).byte(),), 'scalar_broadcast_rhs'),
+    ('masked_select', (), (torch.tensor(1, dtype=torch.uint8),), 'scalar'),
+    ('masked_select', (M, M), (torch.tensor(1, dtype=torch.uint8),), 'scalar_broadcast_rhs'),
     ('masked_select', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'scalar_broadcast_lhs'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)),
-     'variable'),
+    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), torch.tensor(10)),
+     'tensor'),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
-    ('masked_fill', (), (variable(0, requires_grad=False).byte().bernoulli_(), 10), 'scalar'),
-    ('masked_fill', (), (variable(0, requires_grad=False).byte().bernoulli_(), variable(10)),
+    ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
+    ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), torch.tensor(10)),
      'scalar_variable'),
-    ('masked_fill', (M, M), (variable(0, requires_grad=False).byte().bernoulli_(), 10), 'scalar_broadcast_rhs'),
+    ('masked_fill', (M, M), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10),
+     'scalar_broadcast_rhs'),
     ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
     ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
      'broadcast_rhs'),
@@ -2636,7 +2637,7 @@ method_tests = [
     ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
     ('resize_', (), (dont_convert(()),), 'scalar'),
     ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
-    ('resize_as_', (), (non_differentiable(variable(5)),), 'scalar'),
+    ('resize_as_', (), (non_differentiable(torch.tensor(5)),), 'scalar'),
     ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
     ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
     ('sort', (S, M, S), NO_ARGS),
@@ -2654,9 +2655,9 @@ method_tests = [
     ('topk', (), (1, 0, True), 'dim_desc_scalar', [1]),
     ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', [1]),
     ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),
-    ('take', (S, S, S), (variable(0).long(),), 'scalar_index'),
+    ('take', (S, S, S), (torch.tensor(0, dtype=torch.int64),), 'scalar_index'),
     ('take', (), (Variable(torch.LongTensor([0])),), 'scalar_data'),
-    ('take', (), (variable(0).long(),), 'scalar_both'),
+    ('take', (), (torch.tensor(0, dtype=torch.int64),), 'scalar_both'),
     ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M))),
     ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all'),
     ('where', (), (bernoulli_scalar(), ()), 'scalar'),
@@ -2691,7 +2692,7 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
         if isinstance(arg, torch.Size) or isinstance(arg, dont_convert):
             return arg
         elif isinstance(arg, tuple) and len(arg) == 0:
-            var = variable(1).double().normal_()
+            var = torch.tensor(1).double().normal_()
             var.requires_grad = requires_grad
             return var
         elif isinstance(arg, tuple) and not isinstance(arg[0], Variable):

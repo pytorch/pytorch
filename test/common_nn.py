@@ -6,7 +6,7 @@ from itertools import product
 
 import torch
 import torch.cuda
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
@@ -423,8 +423,6 @@ loss_reference_fns = {
     'MultiMarginLoss': multimarginloss_reference,
 }
 
-
-sample_scalar = variable(0)
 
 criterion_tests = [
     dict(
