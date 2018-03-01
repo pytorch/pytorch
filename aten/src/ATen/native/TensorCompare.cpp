@@ -6,7 +6,7 @@
 
 namespace {
 template <typename scalar_t>
-void where_cuda(
+void where_cpu(
     at::Tensor& ret,
     const at::Tensor& condition,
     const at::Tensor& self,
@@ -61,7 +61,7 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = self.type().tensor(self.sizes());
   AT_DISPATCH_ALL_TYPES(ret.type(), "where", [&] {
-    where_cuda<scalar_t>(ret, condition, self, other);
+    where_cpu<scalar_t>(ret, condition, self, other);
   });
   return ret;
 }
