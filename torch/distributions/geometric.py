@@ -23,8 +23,8 @@ class Geometric(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        probs (Number, Tensor or Variable): the probabilty of sampling `1`. Must be in range (0, 1]
-        logits (Number, Tensor or Variable): the log-odds of sampling `1`.
+        probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
+        logits (Number, Tensor): the log-odds of sampling `1`.
     """
     params = {'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer

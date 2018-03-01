@@ -22,8 +22,8 @@ class Gumbel(TransformedDistribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): Location parameter of the distribution
-        scale (float or Tensor or Variable): Scale parameter of the distribution
+        loc (float or Tensor): Location parameter of the distribution
+        scale (float or Tensor): Scale parameter of the distribution
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
