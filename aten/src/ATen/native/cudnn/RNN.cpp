@@ -443,11 +443,10 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
+	  int mat_numel = *filter_dim_a.prod().data<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
-            AT_ASSERT(*filter_dim_a.prod().data<int>() == *filter_dim_a[0].data<int>(), "filter_dim_a.prod() == filter_dim_a[0]");
             std::initializer_list<int64_t> size = {
-              *filter_dim_a[0].data<int>() * num_linear_layers / 2,
-              *filter_dim_a[2].data<int>()};
+              mat_numel * num_linear_layers / 2, 1};
             // Generate a new parameter tensor which is a view into the
             // weight_buf.
             Tensor param = weight_buf.type().tensor().set_(*weight_buf.storage(), offset, size);
@@ -456,7 +455,7 @@ namespace {
           } else {
             AT_ASSERT(cur_offset == offset, "cur_offset == offset");
           }
-          cur_offset = offset + *filter_dim_a[0].data<int>();
+          cur_offset = offset + mat_numel;
         }
       } // for cudnn_method
       if (layer == 0) {
