@@ -126,7 +126,30 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(tp->withSizesStrides(sizes, strides));
     } break;
     case kview: {
-      node->output()->setType(types.at(0)->withSizes(node->is(ksize)));
+      auto sizes = node->is(ksize);
+      bool inferred = false;
+      size_t inferred_idx;
+      long long size_product = 1;
+      for (size_t i=0; i<sizes.size(); ++i) {
+        if (sizes[i] == -1) {
+          if (inferred)
+            throw std::runtime_error("-1 occured in more than 1 size position");
+          inferred = true;
+          inferred_idx = i;
+        } else {
+          size_product *= sizes[i];
+        }
+      }
+
+      if (inferred) {
+        if (types.size() != 1) {
+          throw std::runtime_error("expected 1 input for view");
+        }
+        auto rep_ten = representativeTensor(types[0]);
+        long long inferred_size = rep_ten.numel() / size_product;
+        sizes[inferred_idx] = inferred_size;
+      }
+      node->output()->setType(types.at(0)->withSizes(sizes));
     } break;
     case kReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
