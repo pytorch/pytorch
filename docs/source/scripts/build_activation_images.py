@@ -41,7 +41,7 @@ functions = [
     'Softsign',
     'Tanh',
     'Tanhshrink'
-    #'Threshold'  Omit, pending cleanup. See PR5457
+    # 'Threshold'  Omit, pending cleanup. See PR5457
 ]
 
 
