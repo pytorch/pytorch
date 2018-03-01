@@ -1106,6 +1106,33 @@ class TestTorch(TestCase):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
         self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
 
+    def test_constructor_dtypes(self):
+        default_type = torch.Tensor().type()
+        self.assertIs(torch.Tensor().dtype, torch.Tensor.dtype)
+
+        torch.set_default_tensor_type('torch.IntTensor')
+        self.assertIs(torch.int32, torch.Tensor.dtype)
+        self.assertIs(torch.int32, torch.IntTensor.dtype)
+        self.assertEqual(torch.IntStorage, torch.Storage)
+
+        torch.set_default_tensor_type(torch.int64)
+        self.assertIs(torch.int64, torch.Tensor.dtype)
+        self.assertIs(torch.int64, torch.LongTensor.dtype)
+        self.assertEqual(torch.LongStorage, torch.Storage)
+
+        torch.set_default_tensor_type('torch.Tensor')
+        self.assertIs(torch.int64, torch.Tensor.dtype)
+        self.assertIs(torch.int64, torch.LongTensor.dtype)
+        self.assertEqual(torch.LongStorage, torch.Storage)
+
+        if torch.cuda.is_available():
+            torch.set_default_tensor_type(torch.cuda.float64)
+            self.assertIs(torch.cuda.float64, torch.Tensor.dtype)
+            self.assertIs(torch.cuda.float64, torch.cuda.DoubleTensor.dtype)
+            self.assertEqual(torch.cuda.DoubleStorage, torch.Storage)
+
+        torch.set_default_tensor_type(default_type)
+
     def test_tensor_factory(self):
         expected = torch.Tensor([1, 1])
         # test data

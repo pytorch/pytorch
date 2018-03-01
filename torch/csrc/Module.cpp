@@ -78,6 +78,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
     THPUtils_setError("initialization error - expected bytes/string object as shm_manager_path!");
     return NULL;
   }
+  torch::utils::initializeDtypes();
   torch::tensor::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
@@ -231,11 +232,6 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
-PyObject * THPModule_initializeDtypes(PyObject *_unused) {
-  torch::utils::initializeDtypes();
-  Py_RETURN_NONE;
-}
-
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
@@ -330,7 +326,6 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
-  {"_initialize_dtypes",(PyCFunction)THPModule_initializeDtypes,  METH_NOARGS,  NULL},
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},

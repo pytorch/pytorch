@@ -128,15 +128,11 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
-    global Storage
-    Tensor = _import_dotted_name(t)
-    Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
-
-    if 'cuda' in t:
-        import torch.cuda
-        torch.cuda.init()
-
-    _C._set_default_tensor_type(Tensor)
+    if isinstance(t, globals()['dtype']):
+        _C._set_default_tensor_type(t)
+    else:
+        Tensor = _import_dotted_name(t)
+        _C._set_default_tensor_type(Tensor)
 
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
@@ -250,7 +246,6 @@ import torch.testing
 from torch.autograd import no_grad, enable_grad
 
 _C._init_names(list(torch._storage_classes))
-_C._initialize_dtypes()
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs
