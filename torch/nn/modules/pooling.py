@@ -42,7 +42,7 @@ class MaxPool1d(Module):
 
         >>> # pool of size=3, stride=2
         >>> m = nn.MaxPool1d(3, stride=2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 50))
+        >>> input = torch.randn(20, 16, 50)
         >>> output = m(input)
 
     .. _link:
@@ -120,7 +120,7 @@ class MaxPool2d(Module):
         >>> m = nn.MaxPool2d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool2d((3, 2), stride=(2, 1))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
 
     .. _link:
@@ -194,28 +194,28 @@ class MaxUnpool1d(Module):
 
         >>> pool = nn.MaxPool1d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool1d(2, stride=2)
-        >>> input = Variable(torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8]]]))
+        >>> input = torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
-        Variable containing:
+
         (0 ,.,.) =
            0   2   0   4   0   6   0   8
-        [torch.FloatTensor of size 1x1x8]
+        [torch.FloatTensor of size (1,1,8)]
 
         >>> # Example showcasing the use of output_size
-        >>> input = Variable(torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8, 9]]]))
+        >>> input = torch.Tensor([[[1, 2, 3, 4, 5, 6, 7, 8, 9]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices, output_size=input.size())
-        Variable containing:
+
         (0 ,.,.) =
            0   2   0   4   0   6   0   8   0
-        [torch.FloatTensor of size 1x1x9]
+        [torch.FloatTensor of size (1,1,9)]
 
         >>> unpool(output, indices)
-        Variable containing:
+
         (0 ,.,.) =
            0   2   0   4   0   6   0   8
-        [torch.FloatTensor of size 1x1x8]
+        [torch.FloatTensor of size (1,1,8)]
 
     """
 
@@ -274,29 +274,29 @@ class MaxUnpool2d(Module):
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
         >>> input = Variable(torch.Tensor([[[[ 1,  2,  3,  4],
-        ...                                  [ 5,  6,  7,  8],
-        ...                                  [ 9, 10, 11, 12],
-        ...                                  [13, 14, 15, 16]]]]))
+                                             [ 5,  6,  7,  8],
+                                             [ 9, 10, 11, 12],
+                                             [13, 14, 15, 16]]]]))
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
-        Variable containing:
+
         (0 ,0 ,.,.) =
            0   0   0   0
            0   6   0   8
            0   0   0   0
            0  14   0  16
-        [torch.FloatTensor of size 1x1x4x4]
+        [torch.FloatTensor of size (1,1,4,4)]
 
         >>> # specify a different output size than input size
         >>> unpool(output, indices, output_size=torch.Size([1, 1, 5, 5]))
-        Variable containing:
+
         (0 ,0 ,.,.) =
            0   0   0   0   0
            6   0   8   0   0
            0   0   0  14   0
           16   0   0   0   0
            0   0   0   0   0
-        [torch.FloatTensor of size 1x1x5x5]
+        [torch.FloatTensor of size (1,1,5,5)]
 
     """
 
@@ -355,7 +355,7 @@ class MaxUnpool3d(Module):
         >>> # pool of square window of size=3, stride=2
         >>> pool = nn.MaxPool3d(3, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool3d(3, stride=2)
-        >>> output, indices = pool(Variable(torch.randn(20, 16, 51, 33, 15)))
+        >>> output, indices = pool(torch.randn(20, 16, 51, 33, 15))
         >>> unpooled_output = unpool(output, indices)
         >>> unpooled_output.size()
         torch.Size([20, 16, 51, 33, 15])
@@ -415,11 +415,11 @@ class AvgPool1d(Module):
 
         >>> # pool with window of size=3, stride=2
         >>> m = nn.AvgPool1d(3, stride=2)
-        >>> m(Variable(torch.Tensor([[[1,2,3,4,5,6,7]]])))
-        Variable containing:
+        >>> m(torch.Tensor([[[1,2,3,4,5,6,7]]]))
+
         (0 ,.,.) =
           2  4  6
-        [torch.FloatTensor of size 1x1x3]
+        [torch.FloatTensor of size (1,1,3)]
     """
 
     def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
@@ -488,7 +488,7 @@ class AvgPool2d(Module):
         >>> m = nn.AvgPool2d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.AvgPool2d((3, 2), stride=(2, 1))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
 
@@ -562,7 +562,7 @@ class MaxPool3d(Module):
         >>> m = nn.MaxPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.MaxPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
+        >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
 
     .. _link:
@@ -637,7 +637,7 @@ class AvgPool3d(Module):
         >>> m = nn.AvgPool3d(3, stride=2)
         >>> # pool of non-square window
         >>> m = nn.AvgPool3d((3, 2, 2), stride=(2, 1, 2))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50,44, 31))
+        >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
     """
 
@@ -693,7 +693,7 @@ class FractionalMaxPool2d(Module):
         >>> m = nn.FractionalMaxPool2d(3, output_size=(13, 12))
         >>> # pool of square window and target output size being half of input image size
         >>> m = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
 
     .. _Fractional MaxPooling:
@@ -719,7 +719,7 @@ class FractionalMaxPool2d(Module):
                                  .format(output_ratio))
 
     def forward(self, input):
-        samples = None if self._random_samples is None else Variable(self._random_samples)
+        samples = None if self._random_samples is None else self._random_samples
         return F.fractional_max_pool2d(
             input, self.kernel_size, self.output_size, self.output_ratio,
             self.return_indices,
@@ -758,7 +758,7 @@ class LPPool2d(Module):
         >>> m = nn.LPPool2d(2, 3, stride=2)
         >>> # pool of non-square window of power 1.2
         >>> m = nn.LPPool2d(1.2, (3, 2), stride=(2, 1))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 32))
+        >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
 
     """
@@ -804,7 +804,7 @@ class LPPool1d(Module):
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.
         >>> m = nn.LPPool1d(2, 3, stride=2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 50))
+        >>> input = torch.randn(20, 16, 50)
         >>> output = m(input)
     """
 
@@ -841,7 +841,7 @@ class AdaptiveMaxPool1d(Module):
     Examples:
         >>> # target output size of 5
         >>> m = nn.AdaptiveMaxPool1d(5)
-        >>> input = autograd.Variable(torch.randn(1, 64, 8))
+        >>> input = torch.randn(1, 64, 8)
         >>> output = m(input)
 
     """
@@ -876,15 +876,15 @@ class AdaptiveMaxPool2d(Module):
     Examples:
         >>> # target output size of 5x7
         >>> m = nn.AdaptiveMaxPool2d((5,7))
-        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9))
+        >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveMaxPool2d(7)
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> input = torch.randn(1, 64, 10, 9)
         >>> output = m(input)
         >>> # target output size of 10x7
         >>> m = nn.AdaptiveMaxPool2d((None, 7))
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> input = torch.randn(1, 64, 10, 9)
         >>> output = m(input)
 
     """
@@ -920,15 +920,15 @@ class AdaptiveMaxPool3d(Module):
     Examples:
         >>> # target output size of 5x7x9
         >>> m = nn.AdaptiveMaxPool3d((5,7,9))
-        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9, 10))
+        >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
         >>> m = nn.AdaptiveMaxPool3d(7)
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> input = torch.randn(1, 64, 10, 9, 8)
         >>> output = m(input)
         >>> # target output size of 7x9x8
         >>> m = nn.AdaptiveMaxPool3d((7, None, None))
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> input = torch.randn(1, 64, 10, 9, 8)
         >>> output = m(input)
 
     """
@@ -958,7 +958,7 @@ class AdaptiveAvgPool1d(Module):
     Examples:
         >>> # target output size of 5
         >>> m = nn.AdaptiveAvgPool1d(5)
-        >>> input = autograd.Variable(torch.randn(1, 64, 8))
+        >>> input = torch.randn(1, 64, 8)
         >>> output = m(input)
 
     """
@@ -990,15 +990,15 @@ class AdaptiveAvgPool2d(Module):
     Examples:
         >>> # target output size of 5x7
         >>> m = nn.AdaptiveAvgPool2d((5,7))
-        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9))
+        >>> input = torch.randn(1, 64, 8, 9)
         >>> output = m(input)
         >>> # target output size of 7x7 (square)
         >>> m = nn.AdaptiveAvgPool2d(7)
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> input = torch.randn(1, 64, 10, 9)
         >>> output = m(input)
         >>> # target output size of 10x7
         >>> m = nn.AdaptiveMaxPool2d((None, 7))
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9))
+        >>> input = torch.randn(1, 64, 10, 9)
         >>> output = m(input)
 
     """
@@ -1030,15 +1030,15 @@ class AdaptiveAvgPool3d(Module):
     Examples:
         >>> # target output size of 5x7x9
         >>> m = nn.AdaptiveAvgPool3d((5,7,9))
-        >>> input = autograd.Variable(torch.randn(1, 64, 8, 9, 10))
+        >>> input = torch.randn(1, 64, 8, 9, 10)
         >>> output = m(input)
         >>> # target output size of 7x7x7 (cube)
         >>> m = nn.AdaptiveAvgPool3d(7)
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> input = torch.randn(1, 64, 10, 9, 8)
         >>> output = m(input)
         >>> # target output size of 7x9x8
         >>> m = nn.AdaptiveMaxPool3d((7, None, None))
-        >>> input = autograd.Variable(torch.randn(1, 64, 10, 9, 8))
+        >>> input = torch.randn(1, 64, 10, 9, 8)
         >>> output = m(input)
 
     """

@@ -29,7 +29,7 @@ class Linear(Module):
     Examples::
 
         >>> m = nn.Linear(20, 30)
-        >>> input = autograd.Variable(torch.randn(128, 20))
+        >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
     """
@@ -84,8 +84,8 @@ class Bilinear(Module):
     Examples::
 
         >>> m = nn.Bilinear(20, 30, 40)
-        >>> input1 = autograd.Variable(torch.randn(128, 20))
-        >>> input2 = autograd.Variable(torch.randn(128, 30))
+        >>> input1 = torch.randn(128, 20)
+        >>> input2 = torch.randn(128, 30)
         >>> output = m(input1, input2)
         >>> print(output.size())
     """

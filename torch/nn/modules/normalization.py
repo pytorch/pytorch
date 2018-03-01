@@ -24,10 +24,11 @@ class LocalResponseNorm(Module):
     Shape:
         - Input: :math:`(N, C, ...)`
         - Output: :math:`(N, C, ...)` (same shape as input)
+
     Examples:
         >>> lrn = nn.LocalResponseNorm(2)
-        >>> signal_2d = autograd.Variable(torch.randn(32, 5, 24, 24))
-        >>> signal_4d = autograd.Variable(torch.randn(16, 5, 7, 7, 7, 7))
+        >>> signal_2d = torch.randn(32, 5, 24, 24)
+        >>> signal_4d = torch.randn(16, 5, 7, 7, 7, 7)
         >>> output_2d = lrn(signal_2d)
         >>> output_4d = lrn(signal_4d)
     """
@@ -125,11 +126,16 @@ class LayerNorm(Module):
         - Output: :math:`(N, *)` (same shape as input)
 
     Examples:
-        >>> input = autograd.Variable(torch.randn(20, 5, 10, 10))
+        >>> input = torch.randn(20, 5, 10, 10)
         >>> # With Learnable Parameters
         >>> m = nn.LayerNorm(input.size()[1:])
         >>> # Without Learnable Parameters
         >>> m = nn.LayerNorm(input.size()[1:], elementwise_affine=False)
+        >>> # Normalize over last two dimensions
+        >>> m = nn.LayerNorm([10, 10])
+        >>> # Normalize over last dimension of size 10
+        >>> m = nn.LayerNorm(10)
+        >>> # Activating the module
         >>> output = m(input)
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
