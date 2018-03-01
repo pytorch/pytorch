@@ -2,7 +2,7 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
-#include "ATen/cuda/AccumulateType.h"
+#include "ATen/cuda/AccumulateType.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -212,7 +212,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
    dim3 block(128);
 
    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-     using cuda_scalar_t = to_cuda_type<scalar_t>::type;
+     using cuda_scalar_t = cuda::type<scalar_t>;
      embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
        indices.data<int64_t>(),
        grad.data<cuda_scalar_t>(),
@@ -288,7 +288,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   dim3 block(32, 4);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-    using cuda_scalar_t = to_cuda_type<scalar_t>::type;
+    using cuda_scalar_t = cuda::type<scalar_t>;
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
@@ -335,7 +335,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   int dim = self.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
-    using cuda_scalar_t = to_cuda_type<scalar_t>::type;
+    using cuda_scalar_t = cuda::type<scalar_t>;
     using accscalar_t = cuda::acc_type<cuda_scalar_t>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
       self.data<cuda_scalar_t>(),

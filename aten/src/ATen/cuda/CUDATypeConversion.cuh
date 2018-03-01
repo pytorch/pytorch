@@ -6,9 +6,17 @@
 // Type traits to convert types to CUDA-specific types. Used primarily to
 // convert at::Half to CUDA's half type. This makes the conversion explicit.
 
-namespace at {
-template<typename T>
-struct to_cuda_type { using type = T; };
+namespace at { namespace cuda {
+template <typename T>
+struct TypeConversion {
+  using type = T;
+};
 
-template<> struct to_cuda_type<Half> { using type = half; };
-} // namespace at
+template <>
+struct TypeConversion<Half> {
+  using type = half;
+};
+
+template <typename T>
+using type = typename TypeConversion<T>::type;
+}} // namespace at::cuda
