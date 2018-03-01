@@ -37,14 +37,36 @@ void graph_pass(const std::shared_ptr<tracer::TracingState>& state) {
   return F(state->graph);
 }
 
+struct PythonGraphExecutor : GraphExecutor {
+  using GraphExecutor::GraphExecutor;
+  variable_tensor_list run(variable_tensor_list && inputs) {
+    inputs.insert(inputs.end(), captures.begin(), captures.end());
+    return GraphExecutor::run(std::move(inputs));
+  }
+  variable_tensor_list captures;
+};
+
 // This is a temporary constructor so that we can write python tests of
 // the executor. It does not have most of the functionality of CompiledFunction
 // such as being able to hold parameters...
-GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::TraceInput> inputs, bool optimize) {
-  auto enter_info = tracer::enter(std::move(inputs), 1);
-  py::tuple py_inputs(enter_info.second.size());
-  for(size_t i = 0; i < enter_info.second.size(); ++i) {
+PythonGraphExecutor createExecutorByTracing(
+        py::function func,
+        std::vector<tracer::TraceInput> inputs,
+        std::vector<tracer::TraceInput> captures,
+        bool optimize) {
+  std::vector<tracer::TraceInput> trace_inputs;
+  trace_inputs.insert(trace_inputs.end(), inputs.begin(), inputs.end());
+  trace_inputs.insert(trace_inputs.end(), captures.begin(), captures.end());
+  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
+  py::tuple py_inputs(inputs.size());
+  for(size_t i = 0; i < inputs.size(); ++i) {
     py_inputs[i] = py::cast(enter_info.second[i]);
+  }
+  // All conditions that could trigger this should be asserted on the Python side
+  for (size_t i = 0; i < captures.size(); ++i) {
+    // TODO: remove TraceInput, since everything is a Variable now
+    JIT_ASSERT(captures[i].variable.defined());
+    JIT_ASSERT(enter_info.second[i + inputs.size()].is_same(captures[i].variable));
   }
   // Call back into Python function
   auto out = py::reinterpret_steal<py::object>(PyObject_CallObject(func.ptr(), py_inputs.ptr()));
@@ -59,15 +81,15 @@ GraphExecutor createExecutorByTracing(py::function func, std::vector<tracer::Tra
   tracer::exit(outputs);
   auto graph = enter_info.first->graph;
   EliminateDeadCode(graph);
-  return GraphExecutor(std::move(graph), optimize);
+  return PythonGraphExecutor(std::move(graph), optimize);
 }
 
 // we cannot use the default py:cast<autograd::Variable> because it currently
 // unwraps the data tensor in the conversion process
 // TODO: replace with bs type
-variable_tensor_list createVariableTensorList(py::tuple tuple) {
+variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
   variable_tensor_list result;
-  result.reserve(tuple.size());
+  result.reserve(tuple.size() + reserve_extra_space);
   for(auto e : tuple) {
     result.push_back(py::cast<autograd::Variable>(e));
   }
@@ -101,24 +123,29 @@ void initJITBindings(PyObject *module) {
      return py::reinterpret_steal<py::object>(python::unflatten(vars, desc));
    });
 
-  py::class_<GraphExecutor>(m, "GraphExecutor")
+  py::class_<PythonGraphExecutor>(m, "GraphExecutor")
       .def(
           py::init([](py::function func,
                       std::vector<tracer::TraceInput> inputs,
+                      std::vector<tracer::TraceInput> captures,
                       bool optimize) {
-            return createExecutorByTracing(func, std::move(inputs), optimize);
+            return createExecutorByTracing(func, std::move(inputs), std::move(captures), optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
+          py::arg("captures") = std::vector<tracer::TraceInput>{},
           py::arg("optimize") = true)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
-            return GraphExecutor(std::move(graph), optimize);
+            return PythonGraphExecutor(std::move(graph), optimize);
           }),
           py::arg("graph"),
           py::arg("optimize") = true)
-      .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        auto inputs = createVariableTensorList(args);
+      .def("set_captures", [](PythonGraphExecutor& ge, py::args args) {
+        ge.captures = createVariableTensorList(args);
+      })
+      .def("__call__", [](PythonGraphExecutor& ge, py::args args) -> py::object {
+        auto inputs = createVariableTensorList(args, ge.captures.size());
         auto outputs = ge.run(std::move(inputs));
         // if we don't tell pybind these are variables it chokes on the
         // conversion.
