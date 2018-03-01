@@ -42,10 +42,7 @@ static inline float TH_lerpf(float a, float b, float weight) {
   return a + weight * (b-a);
 }
 
-#define DEFINE_INT_POW(TYPE) \
-static inline TYPE TH_pow(TYPE x, TYPE y) { \
-  THArgCheck(y >= 0, 1, \
-      "Integers to negative integer powers are not allowed"); \
+#define POW_CODE(TYPE) \
   TYPE result = 1;    \
   while (y) {         \
     if (y & 1) {      \
@@ -55,7 +52,18 @@ static inline TYPE TH_pow(TYPE x, TYPE y) { \
     x *= x;           \
   }                   \
   return result;      \
-}                     \
+
+#define DEFINE_INT_POW(TYPE) \
+static inline TYPE TH_pow(TYPE x, TYPE y) { \
+  THArgCheck(y >= 0, 1, \
+      "Integers to negative integer powers are not allowed"); \
+  POW_CODE(TYPE) \
+} \
+
+#define DEFINE_UINT_POW(TYPE) \
+static inline TYPE TH_pow(TYPE x, TYPE y) { \
+  POW_CODE(TYPE) \
+} \
 
 #define DEFINE_POW_WITH_CPOW(TYPE) \
 static inline TYPE TH_pow(TYPE x, TYPE y) { \
@@ -65,7 +73,7 @@ static inline TYPE TH_pow(TYPE x, TYPE y) { \
 DEFINE_INT_POW(int64_t);
 DEFINE_INT_POW(int32_t);
 DEFINE_INT_POW(int16_t);
-DEFINE_INT_POW(uint8_t);
+DEFINE_UINT_POW(uint8_t);
 DEFINE_INT_POW(int8_t);
 DEFINE_POW_WITH_CPOW(float);
 DEFINE_POW_WITH_CPOW(double);
