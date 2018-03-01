@@ -611,6 +611,7 @@ struct Instruction {
   UseList inputs;
   ListHandle<int> outputs;
   Symbol debug_name; // used in dump to understand the generated code
+  std::shared_ptr<SourceLocation> debug_location; // for error reporting
 };
 
 
@@ -663,6 +664,7 @@ struct CodeImpl {
 
   void insertNodesFromBlock(Block* block) {
     for(auto node : block->nodes()) {
+      const auto & source_location = node->getSourceLocation();
       switch(node->kind()) {
         case kIf: {
           // x = if c:
@@ -684,15 +686,15 @@ struct CodeImpl {
 
           // kPlaceholder instructions are replaced with branch instructions
           // when the branch target locations are known
-          auto cond_branch = insertInstruction(kPlaceholder, node->inputs(), moveFlags(node), {});
+          auto cond_branch = insertInstruction(kPlaceholder, source_location, node->inputs(), moveFlags(node), {});
           auto then_block = node->blocks()[0];
           auto else_block = node->blocks()[1];
           insertNodesFromBlock(else_block);
-          insertAssign(else_block->outputs(), moveFlags(else_block), node->outputs());
-          auto jump = insertInstruction(kPlaceholder, {}, {}, {});
+          insertAssign(source_location,else_block->outputs(), moveFlags(else_block), node->outputs());
+          auto jump = insertInstruction(kPlaceholder, source_location, {}, {}, {});
           auto then_block_start = instructions.size();
           insertNodesFromBlock(then_block);
-          insertAssign(then_block->outputs(), moveFlags(then_block), node->outputs());
+          insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
           createJumpNZ(cond_branch, then_block_start);
         } break;
@@ -714,18 +716,18 @@ struct CodeImpl {
           auto body_block = node->blocks()[0];
 
           // before assign op: stack: ... <cond> <loop-carried-depdencies>
-          insertAssign(node->inputs(), moveFlags(node), body_block->inputs());
+          insertAssign(source_location, node->inputs(), moveFlags(node), body_block->inputs());
           // after assign op: stack: ... <cond>
           // cond_branch consumes <cond> from top of the stack
-          auto cond_branch = insertInstruction(kPlaceholder, {}, {}, {});
+          auto cond_branch = insertInstruction(kPlaceholder, source_location,{}, {}, {});
           // after branch: stack: ...
 
           auto entry = instructions.size();
           insertNodesFromBlock(body_block);
           // before assign op: stack: ... <cond> <loop-carried-depdencies>
-          insertAssign(body_block->outputs(), moveFlags(body_block), body_block->inputs());
+          insertAssign(source_location, body_block->outputs(), moveFlags(body_block), body_block->inputs());
           // after assign op: stack: ... <cond>
-          auto cond_branch_end = insertInstruction(kPlaceholder, {}, {}, {});
+          auto cond_branch_end = insertInstruction(kPlaceholder, source_location, {}, {}, {});
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
@@ -746,17 +748,19 @@ struct CodeImpl {
   }
 
   size_t insertInstruction(Node * n) {
-    auto inst = insertInstruction(n->kind(), n->inputs(), moveFlags(n) , n->outputs());
+    auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
     instructions[inst].callback = getOperation(n, constants_are_variables);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
+                           std::shared_ptr<SourceLocation> debug_location,
                                  ArrayRef<Value*> inputs,
                                  ArrayRef<uint8_t> move_flags,
                                  ArrayRef<Value*> outputs) {
     instructions.emplace_back();
     auto & inst = instructions.back();
     inst.debug_name = sym;
+    inst.debug_location = std::move(debug_location);
     listBegin(inst.inputs.values);
     for(auto input : inputs) {
       listInsert(inst.inputs.values, getOrAllocateRegister(input, true));
@@ -778,8 +782,8 @@ struct CodeImpl {
     return moveFlags(b->return_node());
   }
 
-  size_t insertAssign(ArrayRef<Value*> inputs, ArrayRef<uint8_t> move_flags, ArrayRef<Value*> outputs) {
-    auto inst = insertInstruction(kAssign, inputs, move_flags, outputs);
+  size_t insertAssign(std::shared_ptr<SourceLocation> debug_location, ArrayRef<Value*> inputs, ArrayRef<uint8_t> move_flags, ArrayRef<Value*> outputs) {
+    auto inst = insertInstruction(kAssign, std::move(debug_location),inputs, move_flags, outputs);
     // This node effectively forwards its inputs into different places in a register list.
     // We don't need to manipulate the stack in any way, because all inputs are also outputs,
     // and the interpreter will take care of putting them in correct places.
@@ -904,13 +908,21 @@ struct InterpreterStateImpl {
         // std::cout << "executing " << pc << ": ";
         // function->dumpInstruction(std::cout, pc);
         // std::cout << "\n";
-        auto & inst = instructions[pc];
-        loadTensorsFromRegisters(inst.inputs, stack);
-        pc += 1 + inst.callback(stack);
-        for(int i = inst.outputs.size - 1; i >= 0; i--) {
-          int reg = get(inst.outputs,i);
-          registers[reg] = pop(stack);
-          // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+        try {
+          auto & inst = instructions[pc];
+          loadTensorsFromRegisters(inst.inputs, stack);
+          size_t new_pc = pc + 1 + inst.callback(stack);
+          for(int i = inst.outputs.size - 1; i >= 0; i--) {
+            int reg = get(inst.outputs,i);
+            registers[reg] = pop(stack);
+            // std::cout << "pop reg[" << reg << "];\n" << registers[reg].pImpl << "\n";
+          }
+          pc = new_pc;
+        } catch(std::exception & e) {
+          if(!instructions[pc].debug_location)
+            throw; // rethrow original exception
+          // throw a new exception with enhanced debugging information
+          instructions[pc].debug_location->wrapAndRethrowException(e, "operation failed in interpreter");
         }
     }
     current_pc = pc;
