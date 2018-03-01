@@ -1,3 +1,5 @@
+// Returns unique elements of input tensor.
+
 #include <unordered_map>
 #include <unordered_set>
 
@@ -6,7 +8,7 @@
 namespace at {
 namespace native{
 
-std::tuple<Tensor, Tensor> unique_1d(
+std::tuple<Tensor, Tensor> unique(
     const Tensor& self, const bool sorted, const bool return_inverse) {
   std::unordered_set<int64_t> set(
       self.data<int64_t>(), self.data<int64_t>() + self.numel());
@@ -25,7 +27,7 @@ std::tuple<Tensor, Tensor> unique_1d(
     inverse_indices = self.type().toScalarType(kLong).tensor({0});
     
   } else {
-    inverse_indices = self.type().toScalarType(kLong).tensor({self.numel()});    
+    inverse_indices = self.type().toScalarType(kLong).tensor(self.sizes());    
     std::unordered_map<int64_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
     for (int i = 0; i < output.numel(); ++i) {
