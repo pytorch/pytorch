@@ -30,6 +30,10 @@ static std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
 static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
 static std::unordered_map<const at::Type*, THPDtype*> attype_to_dtype;
 
+static THPDtype* dtype_registry
+  [static_cast<int>(at::Backend::NumOptions)]
+  [static_cast<int>(at::ScalarType::NumOptions)] = {};
+
 static at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
     if (is_sparse){
@@ -63,8 +67,11 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, 
   }
 }
 
-void registerDtypeObject(THPDtype *dtype, at::Type& type) {
-  attype_to_dtype[&type] = dtype;
+void registerDtypeObject(THPDtype *dtype, at::Backend backend, at::ScalarType scalarType, const at::Type* type) {
+  dtype_registry[static_cast<int>(backend)][static_cast<int>(scalarType)] = dtype;
+  if (type != nullptr) {
+    attype_to_dtype[type] = dtype;
+  }
 }
 
 static PyTypeObject* getPyTypeObject(const at::Storage& storage)
@@ -82,6 +89,14 @@ THPDtype* getDtype(const at::Type& type) {
     return it->second;
   }
   throw std::invalid_argument("unsupported at::Type");
+}
+
+THPDtype* getDtype(at::Backend backend, at::ScalarType scalarType) {
+  auto dtype = dtype_registry[static_cast<int>(backend)][static_cast<int>(scalarType)];
+  if (!dtype) {
+    throw std::invalid_argument("unsupported backend, scalarType");
+  }
+  return dtype;
 }
 
 PyObject* createPyObject(const at::Storage& storage)
