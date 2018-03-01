@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <memory>
 
+#include <TH/TH.h>
 #ifdef WITH_CUDA
 #include <THC/THC.h>
 #endif
