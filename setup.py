@@ -500,6 +500,7 @@ main_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/DataLoader.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",

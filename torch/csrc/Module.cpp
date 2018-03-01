@@ -17,6 +17,8 @@
 #include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/DataLoader.h"
+#include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/autograd/python_variable.h"
@@ -33,8 +35,6 @@
 
 #define WITH_NUMPY_IMPORT_ARRAY
 #include "THP.h"
-
-#include "DataLoader.cpp"
 
 namespace py = pybind11;
 

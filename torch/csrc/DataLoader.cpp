@@ -1,4 +1,4 @@
-#include "THP.h"
+#include "DataLoader.h"
 
 // In cases like DataLoader, if a worker process die due to bus error/segfault
 // or just hang, the main process, if implemented with
@@ -14,12 +14,17 @@
 
 #ifndef _WIN32
 
-#include <sys/wait.h>
+#include <atomic>
 #include <map>
 #include <set>
-#include <atomic>
 #include <signal.h>
+#include <sstream>
+#include <sys/wait.h>
 
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/python_numbers.h"
+
+using namespace torch;
 
 // Critical signal handlers should be registered on worker processes before
 // doing work.
@@ -82,18 +87,18 @@ static void handler_SIGTERM(int sig, siginfo_t *info, void *ctx)
   }
 }
 
-PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *arg) {
+static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *arg) {
   HANDLE_TH_ERRORS
   setSignalHandler(SIGBUS, &handler_SIGBUS, NULL);
   setSignalHandler(SIGSEGV, &handler_SIGSEGV, NULL);
   setSignalHandler(SIGTERM, &handler_SIGTERM, NULL);
-  Py_RETURN_TRUE;
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static std::map<int64_t, std::set<pid_t>> worker_pids = {};
 
-PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
+static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
   HANDLE_TH_ERRORS
   int error;
   std::set<pid_t> *pid_set;
@@ -137,16 +142,20 @@ PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module) {
 
 // We don't want to exit on any SIGCHLD from any child. child_pids is a tuple
 // of pids we are interested in.
-PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *args) {
+static PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *args) {
   HANDLE_TH_ERRORS
-  Py_ssize_t num_args = args ? (Py_ssize_t) PyTuple_Size(args) : 0;
-  THPUtils_assert(num_args == 2, "_update_worker_pids expectes exactly 2 arguments.");
+  if (PyTuple_GET_SIZE(args) != 2) {
+    throw TypeError("_update_worker_pids expectes exactly 2 arguments.");
+  }
   int64_t key = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
-  THPUtils_assert(worker_pids.find(key) == worker_pids.end(), "_update_worker_pids "
-        "should be called only once for each DataLoader.");
+  if (worker_pids.find(key) != worker_pids.end()) {
+    throw ValueError("_update_worker_pids should be called only once for each DataLoader.");
+  }
   PyObject *child_pids = PyTuple_GET_ITEM(args, 1);
-  THPUtils_assert(PyTuple_Check(child_pids), "_update_worker_pids "
-        "expects a tuple for child_pids, but got %s.", THPUtils_typename(child_pids));
+  if (!PyTuple_Check(child_pids)) {
+    throw TypeError("_update_worker_pids expects a tuple for child_pids, but got %s.",
+        Py_TYPE(child_pids)->tp_name);
+  }
 
   std::set<pid_t> pids_set = {};
   auto size = PyTuple_GET_SIZE(child_pids);
@@ -161,14 +170,15 @@ PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *args) {
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_id) {
+static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_id) {
   HANDLE_TH_ERRORS
 
   int64_t key = THPUtils_unpackLong(loader_id);
-  THPUtils_assert(worker_pids.find(key) != worker_pids.end(), "Cannot find worker "
-        "information for DataLoader with id %ld.", key);
-
-  worker_pids.erase(key);
+  auto it = worker_pids.find(key);
+  if (it == worker_pids.end()) {
+    throw ValueError("Cannot find worker information for DataLoader with id %ld.", key);
+  }
+  worker_pids.erase(it);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -179,20 +189,20 @@ PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *loader_id) {
 #else
 // dummy implementations for windows
 
-PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *_ignored) {
-    Py_RETURN_TRUE;
+static PyObject *THPModule_setWorkerSignalHandlers(PyObject *module, PyObject *_ignored) {
+  Py_RETURN_NONE;
 }
 
-PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *_ignored) {
-    Py_RETURN_TRUE;
+static PyObject *THPModule_updateWorkerPIDs(PyObject *module, PyObject *_ignored) {
+  Py_RETURN_NONE;
 }
 
-PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *_ignored) {
-    Py_RETURN_NONE;
+static PyObject *THPModule_removeWorkerPIDs(PyObject *module, PyObject *_ignored) {
+  Py_RETURN_NONE;
 }
 
-PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ignored) {
-    Py_RETURN_NONE;
+static PyObject *THPModule_errorIfAnyWorkerFails(PyObject *module, PyObject *_ignored) {
+  Py_RETURN_NONE;
 }
 
 #endif
