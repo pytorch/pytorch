@@ -85,8 +85,9 @@ fi
 if [[ "$JOB_NAME" != *pynightly* ]]; then
    pip install cffi
    git clone https://github.com/pytorch/extension-ffi.git
-   cd extension-ffi/script
+   pushd extension-ffi/script
    python build.py
+   popd
 fi
 
 # Test documentation build
