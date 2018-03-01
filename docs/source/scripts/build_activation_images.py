@@ -40,8 +40,8 @@ functions = [
     'Softshrink',
     'Softsign',
     'Tanh',
-    'Tanhshrink',
-    'Threshold'
+    'Tanhshrink'
+    #'Threshold'  Omit, pending cleanup. See PR5457
 ]
 
 

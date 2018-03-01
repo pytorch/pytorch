@@ -14,8 +14,6 @@ class Threshold(Module):
          y =  x        if x >  threshold
               value    if x <= threshold
 
-    .. image:: _static/img/activation/Threshold.png
-
     Args:
         threshold: The value to threshold at
         value: The value to replace with
@@ -34,7 +32,7 @@ class Threshold(Module):
         >>> print(m(input))
     """
 
-    def __init__(self, threshold=0.0, value=0.0, inplace=False):
+    def __init__(self, threshold, value, inplace=False):
         super(Threshold, self).__init__()
         self.threshold = threshold
         self.value = value
