@@ -10,35 +10,109 @@
 
 #include "TH/THRandom.h"
 
-namespace at {
-namespace native {
+namespace {
+/*
+ * This section is a counterpart to Distributions.cu
+ *
+ */
 
-Tensor& bernoulli_(Tensor& self, const Tensor& p, Generator* generator) {
-  self.copy_(at::bernoulli(std::get<0>(expand_inplace(self, p)), generator));
-  return self;
+// The function `sample_poisson`
+// is adapted from Numpy's distributions.c implementation.
+// It is MIT licensed, so here is the copyright:
+
+/* Copyright 2005 Robert Kern (robert.kern@gmail.com)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject to
+ * the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+THGenerator* get_generator(at::Generator* gen) {
+  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
+  return gen_->generator;
 }
 
-Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
-  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
-  return native::bernoulli_(self, probs, generator);
-}
+int64_t sample_poisson(double lambda, THGenerator* generator) {
+  if (lambda >= 10) {
+    // transformed rejection method, (Hoermann, 1993)
+    int64_t k;
+    double U, V, a, b, invalpha, vr, us;
 
+    double slam = std::sqrt(lambda);
+    double loglam = std::log(lambda);
+    b = 0.931 + 2.53 * slam;
+    a = -0.059 + 0.02483 * b;
+    invalpha = 1.1239 + 1.1328 / (b - 3.4);
+    vr = 0.9277 - 3.6224 / (b - 2);
+
+    while (1) {
+      U = THRandom_standard_uniform(generator) - 0.5;
+      V = THRandom_standard_uniform(generator);
+      us = 0.5 - std::fabs(U);
+      k = (int64_t)std::floor((2 * a / us + b) * U + lambda + 0.43);
+      if ((us >= 0.07) && (V <= vr)) {
+        return k;
+      }
+      if ((k < 0) || ((us < 0.013) && (V > us))) {
+        continue;
+      }
+      if ((std::log(V) + std::log(invalpha) - std::log(a / (us * us) + b)) <=
+          (-lambda + k * loglam - std::lgamma((double)k + 1))) {
+        return k;
+      }
+    }
+  } else if (lambda == 0) {
+    return 0;
+  } else {
+    int64_t X;
+    double prod, U, enlam;
+
+    enlam = std::exp(-lambda);
+    X = 0;
+    prod = 1.0;
+    while (1) {
+      U = THRandom_standard_uniform(generator);
+      prod *= U;
+      if (prod > enlam) {
+        X += 1;
+      } else {
+        return X;
+      }
+    }
+  }
+}
 
 // TODO Replace this with more accurate digamma().
-template <typename scalar>
-static inline scalar digamma_one(scalar x) {
+template <typename scalar_t>
+scalar_t digamma_one(scalar_t x) {
   const double eps = x * 1e-3;
   return (std::lgamma(x + eps) - std::lgamma(x - eps)) / (eps + eps);
 }
 
 // Computes the reparameterized gradient -(d/dalpha cdf(x;alpha)) / pdf(x;alpha)
 // for random number x drawn from a standard Gamma distribution Gamma(alpha).
-template <typename scalar>
-static inline scalar standard_gamma_grad_one(scalar alpha, scalar x) {
+template <typename scalar_t>
+scalar_t standard_gamma_grad_one(scalar_t alpha, scalar_t x) {
   // Use a Taylor series expansion for small x.
   if (x < 0.8f) {
-    scalar numer = 1;
-    scalar denom = alpha;
+    scalar_t numer = 1;
+    scalar_t denom = alpha;
     auto series1 = numer / denom;
     auto series2 = numer / (denom * denom);
     for (int i = 1; i <= 5; ++i) {
@@ -79,7 +153,7 @@ static inline scalar standard_gamma_grad_one(scalar alpha, scalar x) {
   // Use a bivariate rational approximation to the reparameterized gradient.
   const auto u = std::log(x / alpha);
   const auto v = std::log(alpha);
-  static const scalar coef_uv[3][8] = {
+  static const scalar_t coef_uv[3][8] = {
     {0.16009398, -0.094634809, 0.025146376, -0.0030648343,
      1, 0.32668115, 0.10406089, 0.0014179084},
     {0.53487893, 0.1298071, 0.065735949, -0.0015649758,
@@ -87,7 +161,7 @@ static inline scalar standard_gamma_grad_one(scalar alpha, scalar x) {
     {0.040121004, -0.0065914022, -0.0026286047, -0.0013441777,
      0.017050642, -0.0021309326, 0.00085092367, -1.5247877e-07},
   };
-  scalar coef_v[8];
+  scalar_t coef_v[8];
   for (int i = 0; i < 8; ++ i) {
     coef_v[i] = coef_uv[0][i] + u * (coef_uv[1][i] + u * coef_uv[2][i]);
   }
@@ -95,21 +169,29 @@ static inline scalar standard_gamma_grad_one(scalar alpha, scalar x) {
   const auto q = coef_v[4] + v * (coef_v[5] + v * (coef_v[6] + v * coef_v[7]));
   return std::exp(p / q);
 }
+} // namespace
 
-template <typename scalar>
-struct StandardGammaGradOp {
-  static void apply(Tensor& ret, const Tensor& self, const Tensor& output) {
-    CPU_tensor_apply3<scalar, scalar, scalar>(ret, self, output,
-      [](scalar& ret_val, const scalar& self_val, const scalar &output_val) {
-         ret_val = standard_gamma_grad_one(self_val, output_val);
-      }
-    );
-  }
-};
+namespace at {
+namespace native {
+Tensor& bernoulli_(Tensor& self, const Tensor& p, Generator* generator) {
+  self.copy_(at::bernoulli(std::get<0>(expand_inplace(self, p)), generator));
+  return self;
+}
+
+Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
+  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
+  return native::bernoulli_(self, probs, generator);
+}
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
-  dispatch_floating_types<void, StandardGammaGradOp>(self.type(), "_standard_gamma_grad", ret, self, output);
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", [&] {
+    CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
+      [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
+         ret_val = standard_gamma_grad_one(self_val, output_val);
+      }
+    );
+  });
   return ret;
 }
 
@@ -117,115 +199,17 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   runtime_error("_standard_gamma_grad is not implemented for CUDA types");
 }
 
-/*
- * This section is a counterpart to Distributions.cu
- *
- */
-
-namespace dist {
-  // The function `sample_poisson`
-  // is adapted from Numpy's distributions.c implementation.
-  // It is MIT licensed, so here is the copyright:
-
-  /* Copyright 2005 Robert Kern (robert.kern@gmail.com)
-   *
-   * Permission is hereby granted, free of charge, to any person obtaining a
-   * copy of this software and associated documentation files (the
-   * "Software"), to deal in the Software without restriction, including
-   * without limitation the rights to use, copy, modify, merge, publish,
-   * distribute, sublicense, and/or sell copies of the Software, and to
-   * permit persons to whom the Software is furnished to do so, subject to
-   * the following conditions:
-   *
-   * The above copyright notice and this permission notice shall be included
-   * in all copies or substantial portions of the Software.
-   *
-   * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-   * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-   * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-   * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-   * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-   * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-   */
-
-  THGenerator * get_generator(Generator *gen) {
-    auto default_gen = &at::globalContext().defaultGenerator(Backend::CPU);
-    auto gen_ = check_generator<CPUGenerator>(gen, default_gen);
-    return gen_->generator;
-  }
-
-  template <typename scalar>
-  struct PoissonOp {
-    static int64_t sample_poisson(double lambda, THGenerator *generator) {
-      if (lambda >= 10) {
-        // transformed rejection method, (Hoermann, 1993)
-        int64_t k;
-        double U, V, a, b, invalpha, vr, us;
-
-        double slam = std::sqrt(lambda);
-        double loglam = std::log(lambda);
-        b = 0.931 + 2.53 * slam;
-        a = -0.059 + 0.02483 * b;
-        invalpha = 1.1239 + 1.1328/(b-3.4);
-        vr = 0.9277 - 3.6224/(b-2);
-
-        while (1) {
-          U = THRandom_standard_uniform(generator) - 0.5;
-          V = THRandom_standard_uniform(generator);
-          us = 0.5 - std::fabs(U);
-          k = (int64_t) std::floor((2*a/us + b)*U + lambda + 0.43);
-          if ((us >= 0.07) && (V <= vr)) {
-            return k;
-          }
-          if ((k < 0) || ((us < 0.013) && (V > us))) {
-            continue;
-          }
-          if ((std::log(V) + std::log(invalpha) - std::log(a/(us*us)+b)) <= (-lambda + k*loglam - std::lgamma((double) k+1)))
-          {
-            return k;
-          }
-        }
-      }
-      else if (lambda == 0) {
-        return 0;
-      }
-      else {
-        int64_t X;
-        double prod, U, enlam;
-
-        enlam = std::exp(-lambda);
-        X = 0;
-        prod = 1.0;
-        while (1) {
-          U = THRandom_standard_uniform(generator);
-          prod *= U;
-          if (prod > enlam) {
-            X += 1;
-          }
-          else {
-            return X;
-          }
-        }
-      }
-    }
-
-    static void apply(Tensor& ret, const Tensor& lambda, THGenerator *generator) {
-      CPU_tensor_apply2<scalar, double>(ret, lambda,
-        [generator](scalar& ret_val, const double& lambda){
-          ret_val = sample_poisson(lambda, generator);
-        }
-      );
-    }
-  };
-} // at::native::dist
-
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   Tensor ret = lambda.type().zeros(lambda.sizes());
   auto lambda_ = lambda.toType(ScalarType::Double);
-  dispatch_floating_types<void, dist::PoissonOp>(ret.type(), "poisson", ret, lambda_, dist::get_generator(gen));
+  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
+    THGenerator* generator = get_generator(gen);
+    CPU_tensor_apply2<scalar_t, double>(ret, lambda,
+      [generator](scalar_t& ret_val, const double& lambda){
+        ret_val = sample_poisson(lambda, generator);
+      }
+    );
+  });
   return ret;
 }
-
-} // at::native
-} // at
+}} // namespace at::native
