@@ -88,3 +88,11 @@ if [[ "$JOB_NAME" != *pynightly* ]]; then
    cd extension-ffi/script
    python build.py
 fi
+
+# Test documentation build
+if [[ "$JOB_NAME" == *xenial-cuda8-cudnn6-py3* ]]; then
+  pushd docs
+  pip install -r requirements.txt || true
+  make html
+  popd
+fi
