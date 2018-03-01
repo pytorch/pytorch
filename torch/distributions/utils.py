@@ -4,7 +4,7 @@ from numbers import Number
 import math
 import torch
 import torch.nn.functional as F
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 
 # This follows semantics of numpy.finfo.
 _Finfo = namedtuple('_Finfo', ['eps', 'tiny'])
@@ -96,7 +96,7 @@ def broadcast_all(*values):
             values[idx] = template.new(template.size()).fill_(values[idx])
     else:
         for idx in scalar_idxs:
-            values[idx] = variable(values[idx])
+            values[idx] = torch.tensor(values[idx])
     return values
 
 
