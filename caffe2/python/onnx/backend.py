@@ -467,9 +467,15 @@ class Caffe2Backend(Backend):
 
         if direction == 'forward':
             hidden_t_all, hidden_t_last = make_rnn(0)
+
+            # in the forward case, storage is shared between the two
+            # outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates n.outputs[0]
+            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+
             pred_mh.net = pred_mh.net.Clone(
                 "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0], hidden_t_last: n.outputs[1] }
+                blob_remap={ hidden_t_all: n.outputs[0] }
             )
         elif direction == 'bidirectional':
             hidden_t_all_f, hidden_t_last_f = make_rnn(0)
@@ -582,11 +588,16 @@ class Caffe2Backend(Backend):
 
         if direction == 'forward':
             hidden_t_all, hidden_t_last, cell_last = make_lstm(0)
+
+            # in the forward case, storage is shared between the three
+            # outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates n.outputs[0]
+            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+            pred_mh.net.Copy(cell_last, n.outputs[2])
+
             pred_mh.net = pred_mh.net.Clone(
                 "dummy-clone-net",
-                blob_remap={hidden_t_all: n.outputs[0],
-                            hidden_t_last: n.outputs[1],
-                            cell_last: n.outputs[2]}
+                blob_remap={ hidden_t_all: n.outputs[0] }
             )
         elif direction == 'bidirectional':
             hidden_t_all_f, hidden_t_last_f, cell_last_f = make_lstm(0)
@@ -699,9 +710,15 @@ class Caffe2Backend(Backend):
 
         if direction == 'forward':
             hidden_t_all, hidden_t_last = make_gru(0)
+
+            # in the forward case, storage is shared between the two
+            # outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates n.outputs[0]
+            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+
             pred_mh.net = pred_mh.net.Clone(
                 "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0], hidden_t_last: n.outputs[1] }
+                blob_remap={ hidden_t_all: n.outputs[0] }
             )
         elif direction == 'bidirectional':
             hidden_t_all_f, hidden_t_last_f = make_gru(0)
