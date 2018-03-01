@@ -568,6 +568,8 @@ void PythonOp::cloneFrom(Node * other_) {
     Py_INCREF(sa.get());
     this->scalar_args.emplace_back(sa.get());
   }
+  this->tracing_autograd_python_function =
+      other->tracing_autograd_python_function;
 }
 
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {

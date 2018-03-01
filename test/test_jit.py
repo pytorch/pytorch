@@ -1656,5 +1656,83 @@ class TestJit(TestCase):
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
 
+    def test_script_python_call(self):
+        def pyfunc(a):
+            return a * 3.0
+
+        cu = torch.jit.CompilationUnit('''
+        def other_func(a) -> (b):
+            b = a + a
+
+        def test_call_python(a) -> (b):
+            b = pyfunc(a)
+            b = other_func(b)
+            i = 0
+            step = 1
+            while i < 10:
+                b = pyfunc(b)
+                if b > 3.0:
+                    b = pyfunc(b)
+                i = 11
+        ''')
+        inputs = self._make_scalar_vars([1], np.float32)
+        outputs = self._make_scalar_vars([54], np.float32)
+
+        self.assertEqual(cu.test_call_python(*inputs), outputs[0])
+
+    def test_script_python_call_failure(self):
+        with self.assertRaisesRegex(RuntimeError, "Unknown function pyfunc2"):
+            def pyfunc(a):
+                return a * 3.0
+
+            cu = torch.jit.CompilationUnit('''
+            def other_func(a) -> (b):
+                b = a + a
+
+            def test_call_python(a) -> (b):
+                b = pyfunc(a)
+                b = other_func(b)
+                i = 0
+                step = 1
+                while i < 10:
+                    b = pyfunc2(b)
+                    if b > 3.0:
+                        b = pyfunc(b)
+                    i = 11
+            ''')
+            inputs = self._make_scalar_vars([1], np.float32)
+            outputs = self._make_scalar_vars([54], np.float32)
+
+            self.assertEqual(cu.test_call_python(*inputs), outputs)
+
+    def test_script_python_call_annotation(self):
+        def pyfunc(a):
+            return a * 3.0
+
+        @torch.jit.script
+        def foo(a):
+            # return self.test(a)
+            return pyfunc(a) + pyfunc(a)
+
+        inputs = self._make_scalar_vars([1], np.float32)
+        outputs = self._make_scalar_vars([6], np.float32)
+
+        self.assertEqual(foo(*inputs), outputs[0])
+
+    def test_script_python_call_annotation_failure(self):
+        with self.assertRaisesRegex(RuntimeError, "Unknown function pyfunc2"):
+            def pyfunc(a):
+                return a * 3.0
+
+            @torch.jit.script
+            def foo(a):
+                # return self.test(a)
+                return pyfunc2(a) + pyfunc(a)
+
+            inputs = self._make_scalar_vars([1], np.float32)
+            outputs = self._make_scalar_vars([6], np.float32)
+
+            self.assertEqual(foo(*inputs), outputs)
+
 if __name__ == '__main__':
     run_tests()

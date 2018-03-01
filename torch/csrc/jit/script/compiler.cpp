@@ -1,6 +1,9 @@
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #include <climits>
 
@@ -165,8 +168,11 @@ struct Environment {
 };
 
 struct to_ir {
-  to_ir(FunctionDefinition& def, FunctionTable& function_table)
-      : def(def), function_table(function_table) {
+  to_ir(
+      FunctionDefinition& def,
+      FunctionTable& function_table,
+      const Resolver& resolver)
+      : def(def), function_table(function_table), resolver(resolver) {
     environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
@@ -529,9 +535,25 @@ struct to_ir {
                 break;
             }
           }
-          return emitNode(
-                     kind, tree->range(), inputs, output_size, attributes, list_attributes)
-              ->outputs();
+          auto n =
+              emitNode(kind, apply.range(), inputs, output_size, attributes, list_attributes);
+          std::vector<Value*> outputs = n->outputs();
+          if (!hasTensorOp(n)) {
+            // This will either throw or return a new node. We take
+            // responsibility for inserting the node with inputs and outputs and
+            // destroying the old node
+            auto new_node = resolver.resolveCall(tree->range(), n);
+            new_node->insertBefore(n);
+            for (const auto& i : n->inputs()) {
+              new_node->addInput(i);
+            }
+            for (size_t i = 0; i < n->outputs().size(); ++i) {
+              new_node->addOutput();
+            }
+            n->destroy();
+            n = new_node;
+          }
+          return n->outputs();
         }
       } break;
       case TK_CAST: {
@@ -689,6 +711,7 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
+  const Resolver& resolver;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
@@ -703,7 +726,8 @@ struct to_ir {
 };
 
 struct CompilationUnitImpl {
-  void defineFunction(const Def& def) {
+  CompilationUnitImpl() {}
+  void defineFunction(const Def& def, const Resolver& resolver) {
     const auto& name = def.name().name();
 
     if (functions.count(name) > 0) {
@@ -711,13 +735,13 @@ struct CompilationUnitImpl {
     }
 
     auto it = functions.emplace(name, FunctionDefinition{def}).first;
-    to_ir(it->second, functions);
+    to_ir(it->second, functions, resolver);
   }
 
-  void define(const std::string& script) {
+  void define(const std::string& script, const Resolver& resolver) {
     Parser p(script);
     while (p.lexer().cur().kind != TK_EOF) {
-      defineFunction(Def(p.parseFunction()));
+      defineFunction(Def(p.parseFunction()), resolver);
     }
   }
 
@@ -735,12 +759,14 @@ struct CompilationUnitImpl {
 
 CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
-void CompilationUnit::define(const std::string& script) {
-  return pImpl->define(script);
+void CompilationUnit::define(
+    const std::string& script,
+    const Resolver& resolver) {
+  return pImpl->define(script, resolver);
 }
 
-void CompilationUnit::defineFunction(const Def& def) {
-  return pImpl->defineFunction(def);
+void CompilationUnit::defineFunction(const Def& def, const Resolver& resolver) {
+  return pImpl->defineFunction(def, resolver);
 }
 
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
@@ -749,10 +775,10 @@ std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
 
 CompilationUnit::~CompilationUnit() {}
 
-std::shared_ptr<Graph> jitScriptCompile(Def def) {
+std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver) {
   FunctionTable empty;
   FunctionDefinition fd(def);
-  to_ir(fd, empty);
+  to_ir(fd, empty, resolver);
   return fd.graph;
 }
 
