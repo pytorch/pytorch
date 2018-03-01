@@ -134,12 +134,12 @@ int main() {
   ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
 
   if (x.type().scalarType() != ScalarType::Half) {
-    AT_DISPATCH_ALL_TYPES(x.type(), "foo", ([&] {
+    AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
       scalar_t s = 1;
       cout << "hello, dispatch: " << x.type().toString() << s << "\n";
       auto data = (scalar_t*)x.data_ptr();
       (void)data;
-    }));
+    });
   }
 
   // test direct C-scalar type conversions

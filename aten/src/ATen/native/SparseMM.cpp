@@ -57,9 +57,9 @@ Tensor& _sspaddmm_out_cpu(
     const Tensor& mat2,
     Scalar beta,
     Scalar alpha) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "sspaddmm", ([&]{
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "sspaddmm", [&]{
     sspaddmm_TH_dispatch<scalar_t>(result, beta, self, alpha, mat1, mat2);
-  }));
+  });
   return result;
 }
 

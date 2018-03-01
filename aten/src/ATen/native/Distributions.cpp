@@ -185,13 +185,13 @@ Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "_standard_gamma_grad", [&] {
     CPU_tensor_apply3<scalar_t, scalar_t, scalar_t>(ret, self, output,
       [](scalar_t& ret_val, const scalar_t& self_val, const scalar_t &output_val) {
          ret_val = standard_gamma_grad_one(self_val, output_val);
       }
     );
-  }));
+  });
   return ret;
 }
 
@@ -202,14 +202,14 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   Tensor ret = lambda.type().zeros(lambda.sizes());
   auto lambda_ = lambda.toType(ScalarType::Double);
-  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
     CPU_tensor_apply2<scalar_t, double>(ret, lambda,
       [generator](scalar_t& ret_val, const double& lambda){
         ret_val = sample_poisson(lambda, generator);
       }
     );
-  }));
+  });
   return ret;
 }
 }} // namespace at::native

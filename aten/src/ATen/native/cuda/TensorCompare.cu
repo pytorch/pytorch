@@ -32,9 +32,9 @@ Tensor _s_where_cuda(
     const Tensor& self,
     const Tensor& other) {
   Tensor ret = self.type().tensor(self.sizes());
-  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "where", ([&] {
+  AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "where", [&] {
     where_cuda<scalar_t>(ret, condition, self, other);
-  }));
+  });
   return ret;
 }
 }} // namespace at::native

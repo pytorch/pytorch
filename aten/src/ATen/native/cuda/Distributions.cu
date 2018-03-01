@@ -50,9 +50,9 @@ namespace at { namespace native {
 Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
   Tensor ret = lambda.type().tensor(lambda.sizes());
   auto lambda_ = lambda.toType(ScalarType::Float);
-  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", ([&] {
+  AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
      poisson_cuda_kernel<scalar_t>(ret, lambda_, next_philox_seed(gen));
-   }));
+   });
   return ret;
 }
 

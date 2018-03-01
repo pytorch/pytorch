@@ -212,7 +212,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
    dim3 grid(THCCeilDiv(stride, (int64_t) 4));
    dim3 block(128);
 
-   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", ([&] {
+   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
      using cuda_scalar_t = to_cuda_type<scalar_t>::type;
      embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
        indices.data<int64_t>(),
@@ -221,7 +221,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
        num_indices,
        stride,
        padding_idx);
-   }));
+   });
 
    THCudaCheck(cudaGetLastError());
    return grad_weight;
@@ -288,7 +288,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", ([&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
     using cuda_scalar_t = to_cuda_type<scalar_t>::type;
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
@@ -299,7 +299,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
       num_indices,
       stride,
       padding_idx);
-  }));
+  });
   THCudaCheck(cudaGetLastError());
 
   return grad_weight;
@@ -335,7 +335,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   dim3 block(128);
   int dim = self.stride(0);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", ([&] {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
     using cuda_scalar_t = to_cuda_type<scalar_t>::type;
     using accscalar_t = cuda::acc_type<cuda_scalar_t>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
@@ -344,7 +344,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
       scalar_cast<accscalar_t>(max_norm),
       scalar_cast<accscalar_t>(norm_type),
       dim);
-  }));
+  });
   THCudaCheck(cudaGetLastError());
 
   return self;

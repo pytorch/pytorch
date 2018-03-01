@@ -60,9 +60,9 @@ Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
 
 Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& other) {
   Tensor ret = self.type().tensor(self.sizes());
-  AT_DISPATCH_ALL_TYPES(ret.type(), "where", ([&] {
+  AT_DISPATCH_ALL_TYPES(ret.type(), "where", [&] {
     where_cuda<scalar_t>(ret, condition, self, other);
-  }));
+  });
   return ret;
 }
 }} // namespace at::native
