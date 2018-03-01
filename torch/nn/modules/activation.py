@@ -54,6 +54,8 @@ class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
     :math:`{ReLU}(x)= max(0, x)`
 
+    .. image:: _static/img/activation/ReLU.png
+
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
 
@@ -80,7 +82,45 @@ class ReLU(Threshold):
 
 
 class RReLU(Module):
+    r""" Randomized leaky ReLU.
 
+    Applies the randomized leaky rectified liner unit function
+    element-wise described in the paper
+    `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
+
+    The function is defined as:
+
+    .. math::
+        f(x) = \begin{cases}
+            ax & \text{if } x < 0 \\
+            x & \text{if } x \geq 0 , \\
+        \end{cases}
+
+    where :math:`a` is randomly sampled from uniform distribution
+    :math:`U(\text{lower}, \text{upper})`, typically
+    :math:`U\left(\frac{1}{8}, \frac{1}{3}\right)`
+
+    Args:
+        lower: lower bound of the uniform distribution. Default: :math:`1/8`
+        upper: upper bound of the uniform distribution. Default: :math:`1/3`
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: _static/img/activation/RReLU.png
+
+    Examples::
+
+        >>> m = nn.RReLU(0.1, 0.3)
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
+        https://arxiv.org/abs/1505.00853
+    """
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
@@ -108,6 +148,8 @@ class Hardtanh(Module):
        f(x) =  x,  otherwise
 
     The range of the linear region :math:`[-1, 1]` can be adjusted
+
+    .. image:: _static/img/activation/Hardtanh.png
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -166,6 +208,8 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/ReLU6.png
+
     Examples::
 
         >>> m = nn.ReLU6()
@@ -191,6 +235,8 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Sigmoid.png
+
     Examples::
 
         >>> m = nn.Sigmoid()
@@ -214,6 +260,8 @@ class Tanh(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: _static/img/activation/Tanh.png
 
     Examples::
 
@@ -243,6 +291,8 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/ELU.png
+
     Examples::
 
         >>> m = nn.ELU()
@@ -271,6 +321,8 @@ class SELU(Module):
     :math:`f(x) = scale * (\max(0,x) + \min(0, alpha * (\exp(x) - 1)))`,
     with ``alpha=1.6732632423543772848170429916717`` and
     ``scale=1.0507009873554804934193349852946``.
+
+    .. image:: _static/img/activation/SELU.png
 
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
@@ -351,6 +403,8 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Hardshrink.png
+
     Examples::
 
         >>> m = nn.Hardshrink()
@@ -384,6 +438,8 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/LeakyReLU.png
+
     Examples::
 
         >>> m = nn.LeakyReLU(0.1)
@@ -414,6 +470,8 @@ class LogSigmoid(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: _static/img/activation/LogSigmoid.png
 
     Examples::
 
@@ -447,6 +505,8 @@ class Softplus(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: _static/img/activation/Softplus.png
 
     Examples::
 
@@ -485,6 +545,8 @@ class Softshrink(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: _static/img/activation/Softshrink.png
 
     Examples::
 
@@ -526,6 +588,8 @@ class PReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/PReLU.png
+
     Examples::
 
         >>> m = nn.PReLU()
@@ -555,6 +619,8 @@ class Softsign(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Softsign.png
+
     Examples::
 
         >>> m = nn.Softsign()
@@ -577,6 +643,8 @@ class Tanhshrink(Module):
         - Input: :math:`(N, *)` where `*` means, any number of additional
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: _static/img/activation/Tanhshrink.png
 
     Examples::
 
