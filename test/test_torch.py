@@ -5433,7 +5433,7 @@ class TestTorch(TestCase):
             self.assertEqual(
                 expected_unique.numpy().tolist(),
                 sorted(x_unique.numpy().tolist())
-            ) 
+            )
             self.assertEqual(empty_inverse, x_inverse)
 
             x_unique, x_inverse = x.unique(return_inverse=True)
@@ -5442,7 +5442,7 @@ class TestTorch(TestCase):
                 sorted(x_unique.numpy().tolist())
             )
             self.assertEqual(expected_inverse.numel(), x_inverse.numel())
-            
+
         x_unique, x_inverse = x.unique(sorted=True)
         self.assertEqual(expected_unique, x_unique)
         self.assertEqual(empty_inverse, x_inverse)
@@ -5456,13 +5456,13 @@ class TestTorch(TestCase):
         y_unique, y_inverse = y.unique(sorted=True, return_inverse=True)
         self.assertEqual(expected_unique, y_unique)
         self.assertEqual(expected_inverse.view(y.size()), y_inverse)
-        
+
         # Tests invalid use cases.
         self.assertRaises(
             RuntimeError, lambda: torch.IntTensor([1, 2, 3]).unique())
         self.assertRaises(
             RuntimeError, lambda: torch.FloatTensor([1., 2.5, 3.5]).unique())
-        
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
