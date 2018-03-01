@@ -285,8 +285,8 @@ class RNN(RNNBase):
     Examples::
 
         >>> rnn = nn.RNN(10, 20, 2)
-        >>> input = Variable(torch.randn(5, 3, 10))
-        >>> h0 = Variable(torch.randn(2, 3, 20))
+        >>> input = torch.randn(5, 3, 10)
+        >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
 
@@ -380,9 +380,9 @@ class LSTM(RNNBase):
     Examples::
 
         >>> rnn = nn.LSTM(10, 20, 2)
-        >>> input = Variable(torch.randn(5, 3, 10))
-        >>> h0 = Variable(torch.randn(2, 3, 20))
-        >>> c0 = Variable(torch.randn(2, 3, 20))
+        >>> input = torch.randn(5, 3, 10)
+        >>> h0 = torch.randn(2, 3, 20)
+        >>> c0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, (h0, c0))
     """
 
@@ -452,8 +452,8 @@ class GRU(RNNBase):
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
-        >>> input = Variable(torch.randn(5, 3, 10))
-        >>> h0 = Variable(torch.randn(2, 3, 20))
+        >>> input = torch.randn(5, 3, 10)
+        >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
 
@@ -526,12 +526,12 @@ class RNNCell(RNNCellBase):
     Examples::
 
         >>> rnn = nn.RNNCell(10, 20)
-        >>> input = Variable(torch.randn(6, 3, 10))
-        >>> hx = Variable(torch.randn(3, 20))
+        >>> input = torch.randn(6, 3, 10)
+        >>> hx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-        ...     hx = rnn(input[i], hx)
-        ...     output.append(hx)
+                hx = rnn(input[i], hx)
+                output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
@@ -619,13 +619,13 @@ class LSTMCell(RNNCellBase):
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20)
-        >>> input = Variable(torch.randn(6, 3, 10))
-        >>> hx = Variable(torch.randn(3, 20))
-        >>> cx = Variable(torch.randn(3, 20))
+        >>> input = torch.randn(6, 3, 10)
+        >>> hx = torch.randn(3, 20)
+        >>> cx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-        ...     hx, cx = rnn(input[i], (hx, cx))
-        ...     output.append(hx)
+                hx, cx = rnn(input[i], (hx, cx))
+                output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True):
@@ -699,12 +699,12 @@ class GRUCell(RNNCellBase):
     Examples::
 
         >>> rnn = nn.GRUCell(10, 20)
-        >>> input = Variable(torch.randn(6, 3, 10))
-        >>> hx = Variable(torch.randn(3, 20))
+        >>> input = torch.randn(6, 3, 10)
+        >>> hx = torch.randn(3, 20)
         >>> output = []
         >>> for i in range(6):
-        ...     hx = rnn(input[i], hx)
-        ...     output.append(hx)
+                hx = rnn(input[i], hx)
+                output.append(hx)
     """
 
     def __init__(self, input_size, hidden_size, bias=True):

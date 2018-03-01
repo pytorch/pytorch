@@ -32,40 +32,40 @@ class Upsample(Module):
 
     Examples::
 
-        >>> inp
-        Variable containing:
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input
+
         (0 ,0 ,.,.) =
           1  2
           3  4
-        [torch.FloatTensor of size 1x1x2x2]
+        [torch.FloatTensor of size (1,1,2,2)]
 
         >>> m = nn.Upsample(scale_factor=2, mode='bilinear')
-        >>> m(inp)
-        Variable containing:
+        >>> m(input)
+
         (0 ,0 ,.,.) =
           1.0000  1.3333  1.6667  2.0000
           1.6667  2.0000  2.3333  2.6667
           2.3333  2.6667  3.0000  3.3333
           3.0000  3.3333  3.6667  4.0000
-        [torch.FloatTensor of size 1x1x4x4]
+        [torch.FloatTensor of size (1,1,4,4)]
 
-        >>> inp
-        Variable containing:
+        >>> input
+
         (0 ,0 ,.,.) =
           1  2
           3  4
-        [torch.FloatTensor of size 1x1x2x2]
+        [torch.FloatTensor of size (1,1,2,2)]
 
         >>> m = nn.Upsample(scale_factor=2, mode='nearest')
-        >>> m(inp)
-        Variable containing:
+        >>> m(input)
+
         (0 ,0 ,.,.) =
           1  1  2  2
           1  1  2  2
           3  3  4  4
           3  3  4  4
-        [torch.FloatTensor of size 1x1x4x4]
-
+        [torch.FloatTensor of size (1,1,4,4)]
 
     """
 
@@ -108,22 +108,23 @@ class UpsamplingNearest2d(Upsample):
 
     Examples::
 
-        >>> inp
-        Variable containing:
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input
+
         (0 ,0 ,.,.) =
           1  2
           3  4
-        [torch.FloatTensor of size 1x1x2x2]
+        [torch.FloatTensor of size (1,1,2,2)]
 
         >>> m = nn.UpsamplingNearest2d(scale_factor=2)
-        >>> m(inp)
-        Variable containing:
+        >>> m(input)
+
         (0 ,0 ,.,.) =
           1  1  2  2
           1  1  2  2
           3  3  4  4
           3  3  4  4
-        [torch.FloatTensor of size 1x1x4x4]
+        [torch.FloatTensor of size (1,1,4,4)]
 
     """
     def __init__(self, size=None, scale_factor=None):
@@ -155,22 +156,23 @@ class UpsamplingBilinear2d(Upsample):
 
     Examples::
 
-        >>> inp
-        Variable containing:
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input
+
         (0 ,0 ,.,.) =
           1  2
           3  4
-        [torch.FloatTensor of size 1x1x2x2]
+        [torch.FloatTensor of size (1,1,2,2)]
 
         >>> m = nn.UpsamplingBilinear2d(scale_factor=2)
-        >>> m(inp)
-        Variable containing:
+        >>> m(input)
+
         (0 ,0 ,.,.) =
           1.0000  1.3333  1.6667  2.0000
           1.6667  2.0000  2.3333  2.6667
           2.3333  2.6667  3.0000  3.3333
           3.0000  3.3333  3.6667  4.0000
-        [torch.FloatTensor of size 1x1x4x4]
+        [torch.FloatTensor of size (1,1,4,4)]
 
     """
     def __init__(self, size=None, scale_factor=None):
