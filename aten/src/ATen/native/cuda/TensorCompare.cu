@@ -1,6 +1,8 @@
 #include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/Dispatch.h"
+
+#include "ATen/cuda/CUDAApplyUtils.cuh"
+#include "ATen/cuda/CUDATypeConversion.cuh"
 
 namespace {
 template <typename scalar_t>
@@ -33,7 +35,7 @@ Tensor _s_where_cuda(
     const Tensor& other) {
   Tensor ret = self.type().tensor(self.sizes());
   AT_DISPATCH_ALL_TYPES_AND_HALF(ret.type(), "where", [&] {
-    where_cuda<scalar_t>(ret, condition, self, other);
+    where_cuda<to_cuda_type<scalar_t>::type>(ret, condition, self, other);
   });
   return ret;
 }

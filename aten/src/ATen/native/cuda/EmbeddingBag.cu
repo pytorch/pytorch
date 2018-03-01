@@ -4,7 +4,6 @@
 
 #include "ATen/cuda/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/CUDAHalf.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
