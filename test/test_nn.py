@@ -31,7 +31,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, \
     smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, IS_WINDOWS, PY3
+    TEST_SCIPY, download_file, PY3
 
 if TEST_SCIPY:
     from scipy import stats
@@ -2422,7 +2422,6 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix this test for Windows')
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_Conv2d_deterministic_cudnn(self):
@@ -2596,8 +2595,6 @@ class TestNN(NNTestCase):
                  torch.cuda.HalfTensor]
         precs = [1e-5, 1e-5, 1e-2]
         for tp, prec in zip(types, precs):
-            if IS_WINDOWS and tp == torch.cuda.HalfTensor:  # CUDA HalfTensor is not supported on Windows yet
-                continue
             for depth_multiplier in [1, 2]:
                 m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
                 i = Variable(torch.randn(2, 2, 6, 6).type(tp) / 2, requires_grad=True)

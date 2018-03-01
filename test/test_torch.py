@@ -1099,8 +1099,7 @@ class TestTorch(TestCase):
                       torch.float16, torch.float32, torch.float64]
         cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
                        torch.cuda.float32, torch.cuda.float64]
-        if not IS_WINDOWS:  # cuda.float16 doesn't work on windows
-            cuda_dtypes.append(torch.cuda.float16)
+        cuda_dtypes.append(torch.cuda.float16)
         self._test_dtypes(self, cpu_dtypes, cuda_dtypes, False)
 
     def test_dtype_out_match(self):
@@ -4657,7 +4656,6 @@ class TestTorch(TestCase):
             xh2 = torch.load(f)
             self.assertEqual(xh.float(), xh2.float())
 
-    @unittest.skipIf(IS_WINDOWS, 'NYI: CUDA HalfTensor support on Windows')
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
@@ -4801,8 +4799,6 @@ class TestTorch(TestCase):
 
     def test_print(self):
         for t in torch._tensor_classes:
-            if IS_WINDOWS and t == torch.cuda.HalfTensor:
-                return  # CUDA HalfTensor is not supported on Windows yet
             if t == torch.HalfTensor:
                 continue  # HalfTensor does not support fill
             if t.is_sparse:
@@ -5122,11 +5118,9 @@ class TestTorch(TestCase):
                 for i in range(len(array)):
                     self.assertEqual(tensor[i], array[i])
 
-                # CUDA HalfTensor is not supported on Windows yet
-                if not IS_WINDOWS:
-                    tensor = torch.cuda.HalfTensor(array)
-                    for i in range(len(array)):
-                        self.assertEqual(tensor[i], array[i])
+                tensor = torch.cuda.HalfTensor(array)
+                for i in range(len(array)):
+                    self.assertEqual(tensor[i], array[i])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):

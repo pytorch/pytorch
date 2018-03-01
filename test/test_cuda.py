@@ -9,7 +9,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, IS_WINDOWS
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
 
 HAS_CUDA = True
 if not torch.cuda.is_available():
@@ -403,13 +403,11 @@ tests = [
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
+    ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
     # TODO: add det to here once Variable and Tensor are the same thing
 ]
-
-if not IS_WINDOWS:
-    tests.append(('qr', large_2d_lapack, lambda t: [], 'big', float_types))
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
