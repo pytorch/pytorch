@@ -7,6 +7,10 @@ online tutorials.
 import os.path
 import torch.nn.modules.activation
 import torch.autograd
+import matplotlib
+
+matplotlib.use('Agg')
+
 import pylab
 
 
