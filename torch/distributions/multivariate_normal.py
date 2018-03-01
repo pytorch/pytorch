@@ -89,9 +89,9 @@ class MultivariateNormal(Distribution):
         [torch.FloatTensor of size 2]
 
     Args:
-        loc (Tensor or Variable): mean of the distribution
-        covariance_matrix (Tensor or Variable): positive-definite covariance matrix
-        scale_tril (Tensor or Variable): lower-triangular factor of covariance, with positive-valued diagonal
+        loc (Tensor): mean of the distribution
+        covariance_matrix (Tensor): positive-definite covariance matrix
+        scale_tril (Tensor): lower-triangular factor of covariance, with positive-valued diagonal
 
     Note:
         Only one of `covariance_matrix` or `scale_tril` can be specified.
@@ -99,7 +99,7 @@ class MultivariateNormal(Distribution):
         Using `scale_tril` will be more efficient: all computations internally
         are based on `scale_tril`. If `covariance_matrix` is passed instead,
         this is only used to compute the corresponding lower triangular
-        matrices.
+        matrices using a Cholesky decomposition.
     """
     params = {'loc': constraints.real_vector,
               'covariance_matrix': constraints.positive_definite,
@@ -113,12 +113,12 @@ class MultivariateNormal(Distribution):
             raise ValueError("Exactly one of covariance_matrix or scale_tril may be specified (but not both).")
         if scale_tril is None:
             if covariance_matrix.dim() < 2:
-                raise ValueError("covariance_matrix must be two-dimensional")
+                raise ValueError("covariance_matrix must be two-dimensional, with optional leading batch dimensions")
             self.covariance_matrix = covariance_matrix
             batch_shape = _get_batch_shape(covariance_matrix, loc)
         else:
             if scale_tril.dim() < 2:
-                raise ValueError("scale_tril matrix must be two-dimensional")
+                raise ValueError("scale_tril matrix must be two-dimensional, with optional leading batch dimensions")
             self.scale_tril = scale_tril
             batch_shape = _get_batch_shape(scale_tril, loc)
         self.loc = loc
