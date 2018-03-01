@@ -255,7 +255,8 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
     if dropout_state is None:
         dropout_state = {}
     mode = cudnn.rnn.get_cudnn_mode(mode)
-    dropout_seed = torch.IntTensor(1).random_()[0]
+    # TODO: This is really goofy way of using the Torch RNG to get a random number
+    dropout_seed = int(torch.IntTensor(1).random_())
     if flat_weight is None:
         warnings.warn("RNN module weights are not part of single contiguous "
                       "chunk of memory. This means they need to be compacted "
