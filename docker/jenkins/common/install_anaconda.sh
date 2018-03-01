@@ -15,10 +15,10 @@ apt-get install -y wget
 echo 'export PATH=/opt/conda/bin:$PATH' > /etc/profile.d/conda.sh
 case "$ANACONDA_VERSION" in
   2*)
-    wget --quiet https://repo.continuum.io/archive/Anaconda2-5.0.1-Linux-x86_64.sh -O ~/anaconda.sh
+    wget https://repo.continuum.io/archive/Anaconda2-5.0.1-Linux-x86_64.sh -O ~/anaconda.sh
   ;;
   3*)
-    wget --quiet https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh -O ~/anaconda.sh
+    wget https://repo.continuum.io/archive/Anaconda3-5.0.1-Linux-x86_64.sh -O ~/anaconda.sh
   ;;
   *)
     echo "Invalid ANACONDA_VERSION..."
