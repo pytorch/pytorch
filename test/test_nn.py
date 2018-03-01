@@ -3841,7 +3841,7 @@ class TestNN(NNTestCase):
             IH = random.randint(1, 8)
             IW = random.randint(1, 8)
             H = random.randint(IH + 1, 12)
-            W = random.randint(IH + 1, 12)
+            W = random.randint(IW + 1, 12)
             test_shape(N, C, IH, IW, H, W, padding_mode)
 
             # test smaller output
@@ -3889,6 +3889,80 @@ class TestNN(NNTestCase):
             # test CUDA against CPU
             if TEST_CUDA:
                 test_cpu_against_cuda(N, C, H, W, padding_mode)
+
+    def test_grid_sample_3d(self):
+        def test_cpu_against_cuda(N, C, D, H, W, padding_mode):
+            def test_shape(N, C, ID, IH, IW, D, H, W, padding_mode):
+
+                input_cpu = Variable(torch.randn(C, N, ID, IH, IW).transpose(0, 1), requires_grad=True)
+                grid_cpu = Variable(torch.randn(D, N, H, W, 3).transpose(0, 1), requires_grad=True)
+                out_cpu = F.grid_sample(input_cpu, grid_cpu, padding_mode=padding_mode)
+                self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
+
+                input_cuda = Variable(input_cpu.data.transpose(0, 1).cuda().transpose(0, 1), requires_grad=True)
+                grid_cuda = Variable(grid_cpu.data.transpose(0, 1).cuda().transpose(0, 1), requires_grad=True)
+                out_cuda = F.grid_sample(input_cuda, grid_cuda, padding_mode=padding_mode)
+                self.assertEqual(out_cpu, out_cuda)
+
+                gradients = out_cpu.data.new(out_cpu.size()).normal_()
+                out_cpu.backward(gradients)
+                out_cuda.backward(gradients.cuda())
+                self.assertEqual(input_cpu.grad, input_cuda.grad)
+                self.assertEqual(grid_cpu.grad, grid_cuda.grad, prec=5e-5)
+
+                # check that zero-dimensional input strides don't error out
+                base_input = torch.randn(C, ID, IH, IW)
+                input_cpu = Variable(base_input.expand(input_cuda.size()), requires_grad=True)
+                grid_cpu = Variable(torch.randn(N, D, H, W, 3), requires_grad=True)
+                out_cpu = F.grid_sample(input_cpu, grid_cpu, padding_mode=padding_mode)
+
+                input_cuda = Variable(base_input.cuda().expand(input_cuda.size()), requires_grad=True)
+                grid_cuda = Variable(grid_cpu.data.cuda(), requires_grad=True)
+                out_cuda = F.grid_sample(input_cuda, grid_cuda, padding_mode=padding_mode)
+                self.assertEqual(out_cpu, out_cuda)
+
+            # test same size output
+            test_shape(N, C, D, H, W, D, H, W, padding_mode)
+
+            # test larger output
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            ID = random.randint(1, 8)
+            IH = random.randint(1, 8)
+            IW = random.randint(1, 8)
+            D = random.randint(ID + 1, 12)
+            H = random.randint(IH + 1, 12)
+            W = random.randint(IW + 1, 12)
+            test_shape(N, C, ID, IH, IW, D, H, W, padding_mode)
+
+            # test smaller output
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            ID = random.randint(1, 8)
+            IH = random.randint(1, 8)
+            IW = random.randint(1, 8)
+            D = random.randint(1, ID)
+            H = random.randint(1, IH)
+            W = random.randint(1, IW)
+            test_shape(N, C, ID, IH, IW, D, H, W, padding_mode)
+
+        # test known input on CPU
+        for padding_mode in ['zeros', 'border']:
+            # do gradcheck
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            input = Variable(torch.randn(N, C, D, H, W), requires_grad=True)
+            grid = Variable(torch.randn(N, D, H, W, 3), requires_grad=True)
+            self.assertTrue(gradcheck(
+                lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                (input, grid)))
+
+            # test CUDA against CPU
+            if TEST_CUDA:
+                test_cpu_against_cuda(N, C, D, H, W, padding_mode)
 
     def test_affine_grid(self):
         # test known input on CPU

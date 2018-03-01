@@ -1821,10 +1821,16 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     `output` using input pixel locations from the grid.
 
     Uses bilinear interpolation to sample the input pixels.
-    Currently, only spatial (4 dimensional) inputs are supported.
+    Currently, only spatial (4 dimensional) and volumetric (5 dimensional)
+    inputs are supported.
 
-    For each output location, :attr:`grid` has `x` and `y`
+    For each output location, :attr:`grid` has `x`, `y`
     input pixel locations which are used to compute output.
+    In the case of 5D inputes, :attr:`grid` has `x`, `y`, `z` pixel locations.
+
+    .. Note::
+        To avoid confusion in notation, let's note that `x` corresponds to the `width` dimension `IW`,
+        `y` corresponds to the height dimension `IH` and `z` corresponds to the `depth` dimension `ID`.
 
     :attr:`grid` has values in the range of `[-1, 1]`. This is because the
     pixel locations are normalized by the input height and width.
@@ -1840,8 +1846,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     .. Note:: This function is used in building Spatial Transformer Networks
 
     Args:
-        input (Variable): input batch of images (N x C x IH x IW)
-        grid (Variable): flow-field of size (N x OH x OW x 2)
+        input (Variable): input batch (N x C x IH x IW) or (N x C x ID x IH x IW)
+        grid (Variable): flow-field of size (N x OH x OW x 2) or (N x OD x OH x OW x 3)
         padding_mode (str): padding mode for outside grid values
             'zeros' | 'border'. Default: 'zeros'
 
@@ -1849,7 +1855,6 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Variable): output Tensor
 
     """
-    batch_size, channels, in_height, in_width = input.size()
     return vision.grid_sampler(input, grid, padding_mode)
 
 
