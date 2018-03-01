@@ -308,9 +308,10 @@ def RNN(*args, **kwargs):
         # and we don't want to pay the cost of decorator invocation
         import torch
         if torch._C._jit_is_tracing(input):
-            import torch.onnx.symbolic
+            import torch.onnx
+            import torch.onnx.core.symbolic
             decorator = torch.onnx.symbolic_override_first_arg_based(
-                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+                torch.onnx.core.symbolic.RNN_symbolic_builder(*args, **kwargs))
             func = decorator(func)
 
         return func(input, *fargs, **fkwargs)

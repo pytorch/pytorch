@@ -39,8 +39,8 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   ctx.graph = new_graph.get();
   std::unordered_map<Value*, Value*> env;
 
-  py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_symbolic = py::module::import("torch.onnx.symbolic");
+  py::object onnx = py::module::import("torch.onnx.core");
+  py::object onnx_symbolic = py::module::import("torch.onnx.core.symbolic");
 
   // Returns a node that n maps to in the new graph
   auto envFn = [&env](Value * n) -> Value* {
