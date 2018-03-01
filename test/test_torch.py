@@ -4777,7 +4777,11 @@ class TestTorch(TestCase):
         self.assertEqual(c[1], c[3], 0)
         self.assertEqual(c[4][1:4], c[5], 0)
 
-    def _test_serialization_container(self, filecontext_lambda):
+    # unique_key is necessary because on Python 2.7, if a warning passed to
+    # the warning module is the same, it is not raised again.
+    def _test_serialization_container(self, unique_key, filecontext_lambda):
+        tmpmodule_name = 'tmpmodule{}'.format(unique_key)
+
         def import_module(name, filename):
             if sys.version_info >= (3, 5):
                 import importlib.util
@@ -4792,7 +4796,7 @@ class TestTorch(TestCase):
 
         with filecontext_lambda() as checkpoint:
             fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
-            module = import_module('tmpmodule', fname)
+            module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
             # First check that the checkpoint can be loaded without warnings
@@ -4805,7 +4809,7 @@ class TestTorch(TestCase):
 
             # Replace the module with different source
             fname = os.path.join(os.path.dirname(__file__), 'data/network2.py')
-            module = import_module('tmpmodule', fname)
+            module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
@@ -4815,13 +4819,10 @@ class TestTorch(TestCase):
                     self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
-        self._test_serialization_container(tempfile.NamedTemporaryFile)
+        self._test_serialization_container('file', tempfile.NamedTemporaryFile)
 
-    # TODO(rzou): test_serialization_container breaks if called multiple times.
-    # The following test won't fail if called by itself.
-    @unittest.skipIf(not PY3, 'This test is broken on Python 2')
     def test_serialization_container_filelike(self):
-        self._test_serialization_container(BytesIOContext)
+        self._test_serialization_container('filelike', BytesIOContext)
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
