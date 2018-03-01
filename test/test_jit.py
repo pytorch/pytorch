@@ -1794,8 +1794,21 @@ class TestJit(TestCase):
         traced_model.load_state_dict(state)
         out_state = traced_model(x)
         self.assertEqual(out, out_state)
-        self.assertNotEqual(out, out_ones)
+        self.assertNotEqual(out,  out_ones)
 
+    def test_topk_neg_index(self):
+        with self.assertRaisesRegex(RuntimeError,
+        "Number of op outputs did not match number of node outputs"):
+            cu = torch.jit.CompilationUnit('''
+            def test_slice_neg_index(a) -> (b):
+                b = slice(a, dim=0, end=-2, start=2, step=1)
+                b = topk(a, dim=0, k=2, largest=True, sorted=True)
+            ''')
+            inputs = [torch.zeros(10)]
+            outputs = [torch.zeros(2), torch.from_numpy(np.array([1, 5])).long()]
+
+            real_outs = cu.test_slice_neg_index(*inputs)
+            self.assertEqual(real_outs, outputs)
 
 if __name__ == '__main__':
     run_tests()

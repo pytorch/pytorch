@@ -177,6 +177,9 @@ void PropagateShapeOnNode(Node * node) {
         stack.push_back(representativeTensor(type));
       }
       op_info.op(stack);
+      if (stack.size() != node->outputs().size()) {
+        throw std::runtime_error("Number of op outputs did not match number of node outputs");
+      }
       for(size_t i = 0; i < stack.size(); ++i) {
         node->outputs()[i]->inferTypeFrom(stack[i]);
       }
