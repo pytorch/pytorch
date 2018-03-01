@@ -42,6 +42,33 @@ static inline float TH_lerpf(float a, float b, float weight) {
   return a + weight * (b-a);
 }
 
+#define DEFINE_INT_POW(TYPE) \
+static inline TYPE TH_pow(TYPE x, TYPE y) { \
+  THArgCheck(y >= 0, 1, \
+      "Integers to negative integer powers are not allowed"); \
+  TYPE result = 1;    \
+  while (y) {         \
+    if (y & 1) {      \
+       result *= x;   \
+    }                 \
+    y /= 2;           \
+    x *= x;           \
+  }                   \
+  return result;      \
+}                     \
+
+#define DEFINE_POW_WITH_CPOW(TYPE) \
+static inline TYPE TH_pow(TYPE x, TYPE y) { \
+  return pow(x, y); \
+} \
+
+DEFINE_INT_POW(int64_t);
+DEFINE_INT_POW(int32_t);
+DEFINE_INT_POW(int16_t);
+DEFINE_INT_POW(uint8_t);
+DEFINE_INT_POW(int8_t);
+DEFINE_POW_WITH_CPOW(float);
+DEFINE_POW_WITH_CPOW(double);
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -80,7 +107,7 @@ Output was modified to be inf or -inf when input is 1 or -1. */
     WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
     WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
     PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
-    THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY
+    
     DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
     PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
