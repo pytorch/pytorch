@@ -4698,10 +4698,10 @@ class TestTorch(TestCase):
             self.assertEqual(i, j)
 
     def test_serialization_offset(self):
-        self._test_serialization_offset(lambda: tempfile.TemporaryFile())
+        self._test_serialization_offset(tempfile.TemporaryFile)
 
     def test_serialization_offset_filelike(self):
-        self._test_serialization_offset(lambda: BytesIOContext())
+        self._test_serialization_offset(BytesIOContext)
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
@@ -4751,11 +4751,11 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda(self):
-        self._test_serialization_cuda(lambda: tempfile.NamedTemporaryFile())
+        self._test_serialization_cuda(tempfile.NamedTemporaryFile)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_serialization_cuda_filelike(self):
-        self._test_serialization_cuda(lambda: BytesIOContext())
+        self._test_serialization_cuda(BytesIOContext)
 
     def test_serialization_backwards_compat(self):
         a = [torch.arange(1 + i, 26 + i).view(5, 5).float() for i in range(2)]
@@ -4815,13 +4815,13 @@ class TestTorch(TestCase):
                     self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_container(self):
-        self._test_serialization_container(lambda: tempfile.NamedTemporaryFile())
+        self._test_serialization_container(tempfile.NamedTemporaryFile)
 
     # TODO(rzou): test_serialization_container breaks if called multiple times.
     # The following test won't fail if called by itself.
     @unittest.skipIf(not PY3, 'This test is broken on Python 2')
     def test_serialization_container_filelike(self):
-        self._test_serialization_container(lambda: BytesIOContext())
+        self._test_serialization_container(BytesIOContext)
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -4843,34 +4843,36 @@ class TestTorch(TestCase):
                 self.assertIsInstance(tensor, torch.FloatTensor)
                 self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
 
-    def test_serialization_api_guarantees(self):
+    def test_serialization_filelike_api_requirements(self):
         filemock = FilelikeMock(b'', has_readinto=False)
         tensor = torch.randn(3, 5)
         torch.save(tensor, filemock)
-        expected = set(['write', 'flush'])
-        self.assertTrue(len(filemock.calls.difference(expected)) is 0)
+        expected_superset = set(['write', 'flush'])
+        self.assertTrue(expected_superset.issuperset(filemock.calls))
 
         # Reset between save and load
         filemock.seek(0)
         filemock.calls.clear()
 
         _ = torch.load(filemock)
-        expected = set(['read', 'readline', 'seek', 'tell'])
-        self.assertTrue(len(filemock.calls.difference(expected)) is 0)
+        expected_superset = set(['read', 'readline', 'seek', 'tell'])
+        self.assertTrue(expected_superset.issuperset(filemock.calls))
 
-    def _test_load_filelike(self, tensor, mock, desc):
-        with tempfile.TemporaryFile() as f:
-            torch.save(tensor, f)
-            f.seek(0)
-            data = mock(f.read())
+    def _test_serialization_filelike(self, tensor, mock, desc):
+        f = mock(b'')
+        torch.save(tensor, f)
+        f.seek(0)
+        data = mock(f.read())
 
-        msg = 'torch.load(filelike) with {}'
+        msg = 'filelike serialization with {}'
 
         b = torch.load(data)
         self.assertTrue(torch.equal(tensor, b), msg.format(desc))
 
-    def test_load_filelike(self):
-        # Test serialization (load) of a filelike object against a file
+    def test_serialization_filelike_missing_attrs(self):
+        # Test edge cases where filelike objects are missing attributes.
+        # The Python io docs suggests that these attributes should really exist
+        # and throw io.UnsupportedOperation, but that isn't always the case.
         mocks = [
             ('no readinto', lambda x: FilelikeMock(x)),
             ('has readinto', lambda x: FilelikeMock(x, has_readinto=True)),
@@ -4879,27 +4881,29 @@ class TestTorch(TestCase):
 
         to_serialize = torch.randn(3, 10)
         for desc, mock in mocks:
-            self._test_load_filelike(to_serialize, mock, desc)
+            self._test_serialization_filelike(to_serialize, mock, desc)
 
-    def test_load_filelike_uses_readinto(self):
+    def test_serialization_filelike_stress(self):
+        a = torch.randn(11 * (2 ** 9) + 1, 5 * (2 ** 9))
+
+        # This one should call python read multiple times
+        self._test_serialization_filelike(a, lambda x: FilelikeMock(x, has_readinto=False),
+                                          'read() stress test')
+        self._test_serialization_filelike(a, lambda x: FilelikeMock(x, has_readinto=True),
+                                          'readinto() stress test')
+
+    def test_serialization_filelike_uses_readinto(self):
         # For maximum effiency, when reading a file-like object,
         # ensure the C API calls readinto instead of read.
         a = torch.randn(5, 4)
-        with tempfile.TemporaryFile() as f:
-            filename = f
-            torch.save(a, f)
-            f.seek(0)
-            data = FilelikeMock(f.read(), has_readinto=True)
+
+        f = io.BytesIO()
+        torch.save(a, f)
+        f.seek(0)
+        data = FilelikeMock(f.read(), has_readinto=True)
 
         b = torch.load(data)
         self.assertTrue(data.was_called('readinto'))
-
-    def test_load_filelike_stress(self):
-        # The idea is that this should cause the python read() method
-        # to be called multiple times.
-        a = torch.randn(11 * (2 ** 9) + 1, 5 * (2 ** 9))
-        self._test_load_filelike(a, lambda x: FilelikeMock(x, has_readinto=False),
-                                 'stress test')
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

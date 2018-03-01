@@ -239,8 +239,8 @@ static PyObject *THPStorage_(setFromFile)(THPStorage *self, PyObject *args)
   bool is_real_file = PyTuple_GET_ITEM(args, 2) == Py_True;
 
   if (!is_real_file) {
-    // offset can be implemented with a call to the Python object's seek(),
-    // but it's not necessary to do reading at this stage.
+    // offset can be implemented with a call to the Python object's seek()
+    // but it is currently unnecessary to support this.
     THPUtils_assert(offset == Py_None,
                     "_set_from_file: offset is NYI for filelike objects");
     THStorage *storage = THPStorage_(readFileRaw<PyObject*>)(file, self->cdata);

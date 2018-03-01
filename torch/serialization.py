@@ -471,13 +471,7 @@ def _load(f, map_location, pickle_module):
 
     deserialized_storage_keys = pickle_module.load(f)
 
-    if not f_is_real_file:
-        for key in deserialized_storage_keys:
-            assert key in deserialized_objects
-            deserialized_objects[key]._set_from_file(f, None, f_is_real_file)
-        return result
-
-    offset = f.tell()
+    offset = f.tell() if f_is_real_file else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
         deserialized_objects[key]._set_from_file(f, offset, f_is_real_file)
