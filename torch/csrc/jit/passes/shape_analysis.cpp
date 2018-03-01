@@ -62,14 +62,14 @@ void PropagateShapeOnNode(Node * node) {
     // here, otherwise we fallback to running a fake version of the op
     // to get a quick and dirty propagation
     case kneg: {
-      node->output()->setType(types[0]->contiguous());
+      node->output()->setType(types.at(0)->contiguous());
     } break;
     case kmm: {
       auto lhs_type = types.at(0);
       auto rhs_type = types.at(1);
       node->output()->setType(std::make_shared<TensorType>(
         lhs_type->scalarType(), lhs_type->device(),
-        at::IntList{lhs_type->sizes()[0], rhs_type->sizes()[1]}));
+        at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
     } break;
     case kt: {
       auto tp = types.at(0);
@@ -85,7 +85,7 @@ void PropagateShapeOnNode(Node * node) {
       int64_t dim = node->i(kdim);
       int64_t length = node->i(klength);
       sizes.at(dim) = length;
-      node->output()->setType(tp->withSizes(sizes));
+      node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
     } break;
     case ksum: {
       if (node->hasAttribute(kdim)) {
@@ -132,7 +132,7 @@ void PropagateShapeOnNode(Node * node) {
       // If types[0] has a type, then it is not defined, and the type will
       // get set to types[0] because that will be the value propagated.
       // If its type is not defined, then unification is an undefined type.
-      node->output()->setType(types[0]->shared_from_this());
+      node->output()->setType(types.at(0)->shared_from_this());
     } break;
     case kConstant: {
       node->output()->inferTypeFrom(node->t(kvalue));
@@ -141,16 +141,16 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(DynamicType::get());
     } break;
     case kIf: {
-      auto then_block = node->blocks()[0];
-      auto else_block = node->blocks()[1];
+      auto then_block = node->blocks().at(0);
+      auto else_block = node->blocks().at(1);
       PropagateShapeOnBlock(then_block);
       PropagateShapeOnBlock(else_block);
       mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
     } break;
     case kLoop: {
-      auto body_block = node->blocks()[0];
+      auto body_block = node->blocks().at(0);
       // propagate counter type
-      body_block->inputs()[0]->setType(node->inputs()[0]->type());
+      body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
       // propagate loop-carried input types to block inputs
       auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
       auto loop_carried_block = body_block->inputs().slice(1); // skip trip
@@ -184,7 +184,15 @@ void PropagateShapeOnNode(Node * node) {
 
 void PropagateShapeOnBlock(Block * block) {
   for (Node * node : block->nodes()) {
-    PropagateShapeOnNode(node);
+    try {
+      PropagateShapeOnNode(node);
+    } catch(std::exception & e) {
+      if(auto sl = node->getSourceLocation()) {
+        sl->wrapAndRethrowException(e, "operation failed shape propagation");
+      } else {
+        throw;
+      }
+    }
   }
 }
 

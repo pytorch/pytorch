@@ -1641,5 +1641,20 @@ class TestJit(TestCase):
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
 
+    def test_script_error(self):
+        @torch.jit.script
+        def foo(a):
+            return a.mm(a)
+        s = Variable(torch.rand(10))
+        with self.assertRaisesRegex(RuntimeError, "failed shape propagation"):
+            foo(s)
+
+        @torch.jit.script
+        def bar(c, b):
+            return c / b
+
+        with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
+            bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
+
 if __name__ == '__main__':
     run_tests()

@@ -25,6 +25,7 @@
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/variable_flags.h"
+#include "torch/csrc/jit/source_location.h"
 
 namespace torch { namespace autograd {
 
@@ -68,14 +69,7 @@ static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
 }
 
-// SourceLocation represents source code-level debug information for a node.
-// It contains a Python stack trace that represents the provenance of a given
-// node in the trace.
-struct SourceLocation {
-  SourceLocation(std::string python_traceback)
-  : python_traceback(std::move(python_traceback)) {}
-  std::string python_traceback;
-};
+
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a
@@ -274,7 +268,7 @@ public:
     return kind_;
   }
   Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
-    source_location_ = sl;
+    source_location_ = std::move(sl);
     return this;
   }
   std::shared_ptr<SourceLocation> getSourceLocation() const {
