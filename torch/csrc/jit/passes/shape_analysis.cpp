@@ -167,6 +167,9 @@ void PropagateShapeOnNode(Node * node) {
         node->outputs()[i]->setType(loop_carried_block[i]->type());
       }
     } break;
+    case kPythonOp: {
+      setDynamicType(node);
+    } break;
     default: {
       auto op_info = getTensorOp(node);
       std::vector<at::Tensor> stack;

@@ -369,8 +369,14 @@ bool hasHandleOutput(Node * n) {
   return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
 }
 
-Operation createPythonOperation(PythonOp* op) {
-  py::object func = py::handle(op->pyobj.get()).attr("apply");
+Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
+  py::function func;
+  if (op->tracing_autograd_python_function) {
+    func = py::function(py::handle(op->pyobj.get()).attr("apply"));
+  } else {
+    func = py::function(py::handle(op->pyobj.get()), /*is_borrowed=*/true);
+  }
+  bool tracing_autograd_python_function = op->tracing_autograd_python_function;
   bool has_handle = hasHandleOutput(op);
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
@@ -384,35 +390,108 @@ Operation createPythonOperation(PythonOp* op) {
     size_t next_scalar = 0;
     size_t next_tensor = 0;
     HandleBuilder builder(has_handle);
-    for(auto arg_type : op->cconv) {
-      if(arg_type == 's') {
-        py_inputs[i] = py::reinterpret_borrow<py::object>(op->scalar_args[next_scalar++].get());
-      } else if(arg_type == 't') {
-        py_inputs[i] = py::reinterpret_steal<py::object>(THPVariable_Wrap(
-          builder.addInput(std::move(fromLast(stack, num_inputs - next_tensor)), op->var_flags.at(next_tensor))));
-        next_tensor++;
+    // Note: The first branch here should be considered deprecated and will
+    // probably be removed in the future.
+    //
+    // tracing_autograd_python_function indicates that we need to hook this
+    // PythonOp up to autograd with the HandleBuilder
+    if (tracing_autograd_python_function) {
+      for (auto arg_type : op->cconv) {
+        if (arg_type == 's') {
+          py_inputs[i] = py::reinterpret_borrow<py::object>(
+              op->scalar_args[next_scalar++].get());
+        } else if (arg_type == 't') {
+          py_inputs[i] = py::reinterpret_steal<py::object>(
+              THPVariable_Wrap(builder.addInput(
+                  std::move(fromLast(stack, num_inputs - next_tensor)),
+                  op->var_flags.at(next_tensor))));
+          next_tensor++;
+        }
+        i++;
       }
-      i++;
-    }
-    drop(stack, num_inputs);
-    py::object py_outputs(func(*py_inputs));
-
-    auto addOutput = [&](py::handle entry) {
-      if(!THPVariable_Check(entry.ptr())) {
-        throw std::runtime_error("Function.apply returned a non-Variable output");
+      drop(stack, num_inputs);
+      py::object py_outputs(func(*py_inputs));
+      auto num_outputs = op->outputs().size();
+      auto addOutput = [&](py::handle entry) {
+        if (!THPVariable_Check(entry.ptr())) {
+          throw std::runtime_error(
+              "Function.apply returned a non-Variable output");
+        }
+        THPVariable* var = (THPVariable*)entry.ptr();
+        stack.push_back(builder.addOutput(var->cdata));
+      };
+      if (!PyTuple_Check(py_outputs.ptr())) {
+        if (num_outputs != 1) {
+          throw std::runtime_error(
+              "Function.apply returned the wrong number of outputs.");
+        }
+        addOutput(py_outputs);
+      } else {
+        auto output_tuple = py::tuple(py_outputs);
+        if (output_tuple.size() != num_outputs) {
+          throw std::runtime_error(
+              "Function.apply returned the wrong number of outputs.");
+        }
+        for (py::handle entry : output_tuple) {
+          addOutput(entry);
+        }
       }
-      THPVariable *var = (THPVariable*) entry.ptr();
-      stack.push_back(builder.addOutput(var->cdata));
-    };
-    if(!PyTuple_Check(py_outputs.ptr())) {
-      addOutput(py_outputs);
+      builder.writeTo(stack);
+      return 0;
     } else {
-      for(py::handle entry : py::tuple(py_outputs)) {
-        addOutput(entry);
+      // In this case we're not hooking this PythonOp up to autograd. We always
+      // pass in and return Variables to the PythonOp. The flag
+      // values_are_variables indicates that the actual inputs and outputs are
+      // Variable types. In the case that this is false, we must wrap up inputs
+      // Tensors into Variables and we must unwrap the outputs to Tensors. In
+      // the other case, we pass in inputs and return outputs as-is
+      for (auto arg_type : op->cconv) {
+        if (arg_type == 's') {
+          py_inputs[i] = py::reinterpret_borrow<py::object>(
+              op->scalar_args[next_scalar++].get());
+        } else if (arg_type == 't') {
+          auto var = fromLast(stack, num_inputs - next_tensor);
+          if (!values_are_variables) {
+            var = autograd::make_variable(var);
+          }
+          py_inputs[i] =
+              py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
+          next_tensor++;
+        }
+        i++;
       }
+      drop(stack, num_inputs);
+      py::object py_outputs(func(*py_inputs));
+
+      auto num_outputs = op->outputs().size();
+      auto addOutput = [&](py::handle entry) {
+        if (!THPVariable_Check(entry.ptr())) {
+          throw std::runtime_error(
+              "Function application returned a non-Variable output");
+        }
+        THPVariable* var = (THPVariable*)entry.ptr();
+        auto cdata = var->cdata;
+        stack.push_back(values_are_variables ? std::move(cdata) : cdata.data());
+      };
+
+      if (!PyTuple_Check(py_outputs.ptr())) {
+        if (num_outputs != 1) {
+          throw std::runtime_error(
+              "Function.apply returned the wrong number of outputs.");
+        }
+        addOutput(py_outputs);
+      } else {
+        auto output_tuple = py::tuple(py_outputs);
+        if (output_tuple.size() != num_outputs) {
+          throw std::runtime_error(
+              "Function application returned the wrong number of outputs.");
+        }
+        for (py::handle entry : py::tuple(py_outputs)) {
+          addOutput(entry);
+        }
+      }
+      return 0;
     }
-    builder.writeTo(stack);
-    return 0;
   };
 }
 
@@ -473,9 +552,9 @@ Operation createEvalOperation(CppOp * op) {
 
 // Returns a function implementing functionality of a given node,
 // or nullptr if it's a no-op for autograd.
-Operation getOperation(jit::Node *node, bool constants_are_variables) {
+Operation getOperation(jit::Node* node, bool values_are_variables) {
   IR_IFM(node, PythonOp)
-    return createPythonOperation(value);
+  return createPythonOperation(value, values_are_variables);
   IR_ELSEIFM(CppOp)
     if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
       return createEvalOperation(value);
@@ -495,12 +574,12 @@ Operation getOperation(jit::Node *node, bool constants_are_variables) {
       return 0;
     };
   IR_ELSEIF(Constant)
-    if(constants_are_variables) {
-      auto t = torch::autograd::make_variable(value->t(kvalue), false);
-      return [t](Stack & stack) {
-        stack.push_back(t);
-        return 0;
-      };
+  if (values_are_variables) {
+    auto t = torch::autograd::make_variable(value->t(kvalue), false);
+    return [t](Stack& stack) {
+      stack.push_back(t);
+      return 0;
+    };
     } else {
       auto t = value->t(kvalue);
       return [t](Stack & stack) {
@@ -620,9 +699,8 @@ int relativeJump(int from_inst, int to_inst) {
 }
 
 struct CodeImpl {
-  CodeImpl(std::shared_ptr<Graph> & graph_, bool constants_are_variables)
-  : constants_are_variables(constants_are_variables)
-  , preprocess(*graph_) {
+  CodeImpl(std::shared_ptr<Graph>& graph_, bool values_are_variables)
+      : values_are_variables(values_are_variables), preprocess(*graph_) {
     graph = preprocess.graph;
     //std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
@@ -749,7 +827,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getOperation(n, constants_are_variables);
+    instructions[inst].callback = getOperation(n, values_are_variables);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -873,7 +951,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
-  bool constants_are_variables;
+  bool values_are_variables;
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -979,8 +1057,8 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
   return out;
 }
 
-Code::Code(std::shared_ptr<Graph> & graph, bool constants_are_variables)
-: pImpl(new CodeImpl(graph, constants_are_variables)) {}
+Code::Code(std::shared_ptr<Graph>& graph, bool values_are_variables)
+    : pImpl(new CodeImpl(graph, values_are_variables)) {}
 Code::~Code() {}
 InterpreterState::InterpreterState(const Code & function)
 : pImpl(new InterpreterStateImpl(function)) {}

@@ -459,16 +459,32 @@ def trace(*args, **kwargs):
     return lambda func: torch._C.GraphExecutor(func, args, kwargs.pop('optimize', True))
 
 
+def createResolutionCallback(frame_id=2):
+    frame = inspect.stack()[frame_id][0]
+
+    def env(key):
+        if key in frame.f_locals:
+            return frame.f_locals[key]
+        elif key in frame.f_globals:
+            return frame.f_globals[key]
+        else:
+            return None
+
+    return env
+
+
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
         self.cu = torch._C.CompilationUnit()
         if lang is not None:
-            self.define(lang)
+            self.define(lang, frame_id=3)
         self.execution_engines = {}
         self.optimize = optimize
 
-    def define(self, lang):
-        self.cu.define(lang)
+    def define(self, lang, rcb=None, frame_id=2):
+        if not rcb:
+            rcb = createResolutionCallback(frame_id)
+        self.cu.define(lang, rcb)
 
     def __getattr__(self, attr):
         if attr not in self.execution_engines:
@@ -478,8 +494,9 @@ class CompilationUnit(object):
 
 
 def script(fn):
+    rcb = createResolutionCallback()
     ast = torch.jit.frontend.get_jit_ast(fn)
-    graph = _jit_script_compile(ast)
+    graph = _jit_script_compile(ast, rcb)
     return torch._C.GraphExecutor(graph, True)
 
 if not torch._C._jit_init():

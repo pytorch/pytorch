@@ -407,7 +407,7 @@ void interpTest() {
     auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
 
     auto lstm_g = build_lstm();
-    Code  lstm_function(lstm_g, /*constants_are_variables=*/false);
+    Code lstm_function(lstm_g, /*values_are_variables=*/false);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -433,7 +433,7 @@ void interpStageTest() {
 
 
     auto lstm_g = build_lstm_stages();
-    Code lstm_function(lstm_g,  /*constants_are_variables=*/false);
+    Code lstm_function(lstm_g, /*values_are_variables=*/false);
     std::vector<at::Tensor> outputs;
     InterpreterState lstm_interp(lstm_function);
     runOneStage(lstm_interp, {input[0], hx, cx, w_ih, w_hh}, outputs);
@@ -511,7 +511,8 @@ std::pair<tensor_list, tensor_list> runGradient(Gradient& grad_spec,
                                                 tensor_list& tensors_in,
                                                 tensor_list& tensor_grads_in) {
   tensor_list tensors_out, tensor_grads_out;
-  Code f_code { grad_spec.f,  /*constants_are_variables=*/false }, df_code { grad_spec.df,  /*constants_are_variables=*/false };
+  Code f_code{grad_spec.f, /*values_are_variables=*/false},
+      df_code{grad_spec.df, /*values_are_variables=*/false};
   InterpreterState f_interpreter { f_code }, df_interpreter { df_code };
 
   runOneStage(f_interpreter, tensors_in, tensors_out);
@@ -824,10 +825,10 @@ const static auto cf_examples = R"JIT(
 )JIT";
 void testControlFlow() {
   script::CompilationUnit cu;
-  cu.define(cf_examples);
+  cu.define(cf_examples, torch::jit::script::Resolver());
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.getGraph(name);
-    Code code(graph,  /*constants_are_variables=*/false);
+    Code code(graph, /*values_are_variables=*/false);
     InterpreterState interp(code);
     interp.runOneStage(stack);
     return stack;
