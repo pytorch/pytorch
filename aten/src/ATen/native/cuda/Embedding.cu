@@ -4,7 +4,8 @@
 
 #include "ATen/cuda/AccumulateType.h"
 #include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/Dispatch.cuh"
+#include "ATen/cuda/CUDAHalf.cuh"
+#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>
@@ -212,10 +213,11 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
    dim3 block(128);
 
    AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", ([&] {
+     using cuda_scalar_t = to_cuda_type<scalar_t>::type;
      embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
        indices.data<int64_t>(),
-       grad.data<scalar_t>(),
-       grad_weight.data<scalar_t>(),
+       grad.data<cuda_scalar_t>(),
+       grad_weight.data<cuda_scalar_t>(),
        num_indices,
        stride,
        padding_idx);
@@ -287,11 +289,12 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   dim3 block(32, 4);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", ([&] {
+    using cuda_scalar_t = to_cuda_type<scalar_t>::type;
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
-      grad.data<scalar_t>(),
-      grad_weight.data<scalar_t>(),
+      grad.data<cuda_scalar_t>(),
+      grad_weight.data<cuda_scalar_t>(),
       count.defined() ? count.data<int64_t>() : nullptr,
       num_indices,
       stride,
@@ -333,9 +336,10 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   int dim = self.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", ([&] {
-    using accscalar_t = cuda::acc_type<scalar_t>;
+    using cuda_scalar_t = to_cuda_type<scalar_t>::type;
+    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
-      self.data<scalar_t>(),
+      self.data<cuda_scalar_t>(),
       unique_indices.data<int64_t>(),
       scalar_cast<accscalar_t>(max_norm),
       scalar_cast<accscalar_t>(norm_type),
