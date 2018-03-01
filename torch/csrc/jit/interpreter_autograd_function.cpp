@@ -1,17 +1,22 @@
-#include "Python.h"
+#include <Python.h>
 
 #include "torch/csrc/autograd/edge.h"
-#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/interpreter_autograd_function.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/tracer_state.h"
+#include "torch/csrc/jit/variable_flags.h"
 
 #include <ATen/ATen.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <memory>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 namespace torch { namespace jit {
@@ -40,9 +45,9 @@ autograd::variable_list InterpreterAutogradFunction::apply(
   const auto & details = stage_details_[stage_];
 
   // Validate inputs
-  std::vector<at::Tensor> tinputs;
-  tinputs.reserve(inputs.size());
-  TORCH_ASSERT(inputs.size() == static_cast<std::size_t>(num_inputs));
+  std::vector<at::Tensor> stack;
+  stack.reserve(inputs.size());
+  TORCH_ASSERT(inputs.size() == num_inputs_);
   TORCH_ASSERT(inputs.size() == details.input_flags.size());
   for (std::size_t i = 0; i < (std::size_t)inputs.size(); ++i) {
     auto actual_flags = VariableFlags::of(inputs[i]);
@@ -78,19 +83,18 @@ autograd::variable_list InterpreterAutogradFunction::apply(
       // will be undefined. To ensure we can continue, we create a 0 gradient,
       // using trace information to figure out what shape it should be
       if(traced_flags.defined) {
-        tinputs.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
+        stack.push_back(zeroTensorWithType(interp_.tensorTypeForInput(i)));
       } else {
-        tinputs.push_back(at::Tensor());
+        stack.push_back(at::Tensor());
       }
     } else {
-      tinputs.push_back(inputs[i].data());
+      stack.push_back(inputs[i].data());
     }
   }
 
   // Run the interpreter
-  std::vector<at::Tensor> toutputs;
   InterpreterState interp = (keep_graph_) ? interp_.clone() : interp_;
-  interp.runOneStage(tinputs, toutputs);
+  interp.runOneStage(stack);
 
   // Lazily create grad_fn
   std::shared_ptr<Function> grad_fn;
@@ -105,7 +109,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     if(stage_ + 1 == stage_details_.size())
       return;
 
-    // Patch next_functions to include prevous stage next_functions
+    // Patch next_edges to include prevous stage next_edges
     // This is needed because stage N is really a derivative of
     // all stages from 1 to N-1. If a part of stage x graph is
     // reused in stage y (y > x), it is inlined by the tracer,
@@ -113,7 +117,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
     // aren't real inputs to that stage, so that's the only place
     // where we can get them.
     for (auto copied_idx : stage_details_[stage_ + 1].copied_next_fns) {
-      grad_fn->next_functions.push_back(next_functions[copied_idx]);
+      grad_fn->add_next_edge(next_edges_[copied_idx]);
     }
     // Add grad_fns corresponding to inputs
     for(size_t i = 0; i < inputs.size(); ++i) {
@@ -125,26 +129,27 @@ autograd::variable_list InterpreterAutogradFunction::apply(
         continue; // See Note [Null-edge pruning]
       } else if (!input.defined() || !input.requires_grad()) {
         // See Note [Temporary workaround for variants]
-        grad_fn->next_functions.emplace_back();
+        grad_fn->add_next_edge({});
         continue;
       }
-      grad_fn->next_functions.push_back(input.gradient_edge());
+      grad_fn->add_next_edge(input.gradient_edge());
     }
   };
 
   // Wrap the outputs
   // TODO: handle views
   autograd::variable_list result;
-  JIT_ASSERT(toutputs.size() == details.output_flags.size());
-  auto num_outputs = toutputs.size();
+  JIT_ASSERT(stack.size() == details.output_flags.size());
+  auto num_outputs = stack.size();
   for (std::size_t i = 0; i < num_outputs; ++i) {
     auto & flags = details.output_flags[i];
     if (flags.requires_grad) { // See Note [Null-edge pruning]
       if (!grad_fn) make_grad_fn();
-      autograd::Edge edge(grad_fn, grad_fn->num_inputs++);
-      result.push_back(autograd::make_variable(toutputs[i], std::move(edge)));
+      auto variable = autograd::make_variable(stack[i], /*requires_grad=*/false);
+      autograd::create_gradient_edge(variable, grad_fn);
+      result.push_back(std::move(variable));
     } else {
-      result.push_back(autograd::make_variable(toutputs[i], /*requires_grad=*/false));
+      result.push_back(autograd::make_variable(stack[i], /*requires_grad=*/false));
     }
   }
 
@@ -152,7 +157,7 @@ autograd::variable_list InterpreterAutogradFunction::apply(
 }
 
 InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
-  code_ = jit::Code(state->graph);
+  code_ = jit::Code(state->graph, /*values_are_variables=*/false);
   stage_details_.resize(state->graph->stage() + 1);
   auto graph_inputs = state->graph->inputs();
   auto inputs_it = graph_inputs.begin();
@@ -177,7 +182,7 @@ InterpreterFunctionFactory::InterpreterFunctionFactory(TracingState *state) {
   }
 }
 
-std::shared_ptr<autograd::Function> InterpreterFunctionFactory::construct() {
+std::shared_ptr<InterpreterAutogradFunction> InterpreterFunctionFactory::construct() {
   return std::make_shared<InterpreterAutogradFunction>(code_, stage_details_);
 }
 

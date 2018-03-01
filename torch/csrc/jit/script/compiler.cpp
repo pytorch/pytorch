@@ -1,6 +1,9 @@
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/generated/aten_dispatch.h"
+#include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
+#include "torch/csrc/utils/object_ptr.h"
 
 #include <climits>
 
@@ -165,8 +168,11 @@ struct Environment {
 };
 
 struct to_ir {
-  to_ir(FunctionDefinition& def, FunctionTable& function_table)
-      : def(def), function_table(function_table) {
+  to_ir(
+      FunctionDefinition& def,
+      FunctionTable& function_table,
+      const Resolver& resolver)
+      : def(def), function_table(function_table), resolver(resolver) {
     environment_stack = std::make_shared<Environment>(def.graph->block());
     // populate def->graph
     auto& tree = *def.tree;
@@ -222,10 +228,16 @@ struct to_ir {
     return save_env;
   }
 
+  Node* create(Symbol kind, const SourceRange& loc,  size_t num_outputs) {
+    return def.graph
+             ->create(kind, num_outputs)
+             ->setSourceLocation(std::make_shared<SourceRange>(loc));
+  }
+
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(def.graph->create(kIf, 0));
+    Node* n = def.graph->insertNode(create(kIf, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -251,7 +263,7 @@ struct to_ir {
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(def.graph->create(kIf, 0));
+    Node* n = def.graph->insertNode(create(kIf, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -286,11 +298,21 @@ struct to_ir {
     // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
     // TODO: implement scan_outputs
 
+    // the format of the Loop instruction is:
+    // loop_carried_outputs* = Loop(max_trip_count, start_condition, loop_carried_inputs*)
+    //                          block0(loop_counter, loop_carried_block*) {
+    //                             <body>
+    //                             -> (continue_condition, loop_carried_block_outputs*)
+    //                          }
+    // all loop_carried_... lists are the same length and represent the value of
+    // loop-carried variables whose definitions are updated as the loop executes
+    // in a way that ensure single static assignment.
+
     // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(INT_MAX, "i")[0];
+    Value* max_trip_count_dummy = emitConst(stmt.range(), INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(def.graph->create(kLoop, 0));
+    Node* n = def.graph->insertNode(create(kLoop, stmt.range(), 0));
     n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
@@ -300,8 +322,7 @@ struct to_ir {
     // we'll probably have to pattern match iteration number machinery in user
     // code to conform to the spec
     body_block->addInput(); // Iteration num
-    body_block->addInput(); // Condition
-    size_t skip_inputs_num = 2;
+    size_t skip_inputs_num = 1;
 
     {
       environment_stack =
@@ -463,21 +484,28 @@ struct to_ir {
         expectOutputs(tree, output_size, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        return emitNode(kind, getValues(inputs), output_size)->outputs();
+        return emitNode(kind, tree->range(), getValues(inputs), output_size)->outputs();
       } break;
       case '+':
       case '-': {
         expectOutputs(tree, output_size, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, getValues(inputs), output_size);
-        node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
+        if (kind != kneg)
+          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
         if (function_table.count(apply.name().name()) > 0) {
           return emitFunctionCall(apply, output_size);
+        } else if (apply.name().name() == "print") {
+          expectOutputs(tree, output_size, 0);
+          if (!apply.attributes().empty())
+            throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
+          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0,
+                          AttributeMap{}, ListAttributeMap{})->outputs();
         } else {
           const auto& inputs = getValues(apply.inputs());
           NodeKind kind{apply.name().name()};
@@ -494,20 +522,38 @@ struct to_ir {
                 const auto& type = value.get()->tree(1)->stringValue();
                 attributes.insert({name, {v, type}});
               } break;
-              case TK_LIST:
+              case TK_LIST: {
                 std::vector<double> vs{};
                 for (const auto& tree : value.get()->trees()) {
                   vs.push_back(tree->tree(0)->doubleValue());
                 }
                 const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
                 list_attributes.insert({name, {std::move(vs), type}});
+              } break;
+            default:
+                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+                break;
             }
-            break;
-            break;
           }
-          return emitNode(
-                     kind, inputs, output_size, attributes, list_attributes)
-              ->outputs();
+          auto n =
+              emitNode(kind, apply.range(), inputs, output_size, attributes, list_attributes);
+          std::vector<Value*> outputs = n->outputs();
+          if (!hasTensorOp(n)) {
+            // This will either throw or return a new node. We take
+            // responsibility for inserting the node with inputs and outputs and
+            // destroying the old node
+            auto new_node = resolver.resolveCall(tree->range(), n);
+            new_node->insertBefore(n);
+            for (const auto& i : n->inputs()) {
+              new_node->addInput(i);
+            }
+            for (size_t i = 0; i < n->outputs().size(); ++i) {
+              new_node->addOutput();
+            }
+            n->destroy();
+            n = new_node;
+          }
+          return n->outputs();
         }
       } break;
       case TK_CAST: {
@@ -517,7 +563,7 @@ struct to_ir {
       } break;
       case TK_CONST: {
         expectOutputs(tree, output_size, 1);
-        return emitConst(
+        return emitConst(tree->range(),
             tree->tree(0)->doubleValue(), tree->tree(1)->stringValue());
       } break;
       case TK_SLICE: {
@@ -566,20 +612,21 @@ struct to_ir {
     }
     return emitNode(
                Symbol("type_as"),
-               {emitExpr(input, 1)[0], createConstant(at::CPU(t).ones({1}))},
+               input->range(),
+               {emitExpr(input, 1)[0], createConstant(input->range(), at::CPU(t).ones({1}))},
                1)
         ->outputs();
   }
 
-  std::vector<Value*> emitConst(const double val, const std::string& type) {
+  std::vector<Value*> emitConst(const SourceRange& loc, const double val, const std::string& type) {
     if (type == "f") {
-      return {createConstant(at::CPU(at::kFloat).scalarTensor(val))};
+      return {createConstant(loc, at::CPU(at::kFloat).scalarTensor(val))};
     } else if (type == "LL") {
-      return {createConstant(at::CPU(at::kLong).scalarTensor(val))};
+      return {createConstant(loc, at::CPU(at::kLong).scalarTensor(val))};
     } else if (type == "b") {
-      return {createConstant(at::CPU(at::kByte).scalarTensor(val))};
+      return {createConstant(loc, at::CPU(at::kByte).scalarTensor(val))};
     } else if (type == "i") {
-      return {createConstant(at::CPU(at::kInt).scalarTensor(val))};
+      return {createConstant(loc, at::CPU(at::kInt).scalarTensor(val))};
     } else {
       throw std::runtime_error("unknown const type " + type);
     }
@@ -587,11 +634,12 @@ struct to_ir {
 
   Node* emitNode(
       NodeKind kind,
+      const SourceRange& loc,
       const std::vector<Value*> inputs,
       const size_t output_size,
       const AttributeMap& attributes = AttributeMap{},
       const ListAttributeMap& list_attributes = ListAttributeMap{}) {
-    Node* n = def.graph->insertNode(def.graph->create(kind, output_size));
+    Node* n = def.graph->insertNode(create(kind, loc, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -621,17 +669,18 @@ struct to_ir {
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
   std::vector<Value*> emitSlice(
-      const SourceRange& range,
+      const SourceRange& loc,
       TreeList&& inputs,
       const size_t output_size) {
     const auto applyInputs =
-        Compound::create(TK_LIST, range, std::move(inputs));
+        Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
     const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
     const auto& end = at::Scalar(input_values[2]->node()->t(kvalue)).toInt();
     return emitNode(
                Symbol("slice"),
+               loc,
                {tensor},
                output_size,
                {{"dim", {0, "LL"}},
@@ -643,16 +692,17 @@ struct to_ir {
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
   std::vector<Value*> emitGather(
-      const SourceRange& range,
+      const SourceRange& loc,
       TreeList&& inputs,
       const size_t output_size) {
     const auto applyInputs =
-        Compound::create(TK_LIST, range, std::move(inputs));
+        Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
     const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
     return emitNode(
                Symbol("select"),
+               loc,
                {tensor},
                output_size,
                {{"dim", {0, "LL"}}, {"index", {idx, "LL"}}})
@@ -661,19 +711,23 @@ struct to_ir {
 
   FunctionDefinition& def; // the def being constructed
   FunctionTable& function_table;
+  const Resolver& resolver;
 
   // Singly-linked list of environments. This top element contains a member
   // `next` that points to the most immediate enclosing scope's value.
   std::shared_ptr<Environment> environment_stack;
 
  private:
-  Value* createConstant(const at::Tensor& val) {
-    return def.graph->insertNode(def.graph->createConstant(val))->output();
+  Value* createConstant(const SourceRange& loc, const at::Tensor& val) {
+    auto n = def.graph->createConstant(val);
+    n->setSourceLocation(std::make_shared<SourceRange>(loc));
+    return def.graph->insertNode(n)->output();
   }
 };
 
 struct CompilationUnitImpl {
-  void defineFunction(const Def& def) {
+  CompilationUnitImpl() {}
+  void defineFunction(const Def& def, const Resolver& resolver) {
     const auto& name = def.name().name();
 
     if (functions.count(name) > 0) {
@@ -681,13 +735,13 @@ struct CompilationUnitImpl {
     }
 
     auto it = functions.emplace(name, FunctionDefinition{def}).first;
-    to_ir(it->second, functions);
+    to_ir(it->second, functions, resolver);
   }
 
-  void define(const std::string& script) {
+  void define(const std::string& script, const Resolver& resolver) {
     Parser p(script);
     while (p.lexer().cur().kind != TK_EOF) {
-      defineFunction(Def(p.parseFunction()));
+      defineFunction(Def(p.parseFunction()), resolver);
     }
   }
 
@@ -705,8 +759,14 @@ struct CompilationUnitImpl {
 
 CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
 
-void CompilationUnit::define(const std::string& script) {
-  return pImpl->define(script);
+void CompilationUnit::define(
+    const std::string& script,
+    const Resolver& resolver) {
+  return pImpl->define(script, resolver);
+}
+
+void CompilationUnit::defineFunction(const Def& def, const Resolver& resolver) {
+  return pImpl->defineFunction(def, resolver);
 }
 
 std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
@@ -715,10 +775,11 @@ std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
 
 CompilationUnit::~CompilationUnit() {}
 
-std::unique_ptr<CompilationUnit> jitScriptCompile(const std::string& script) {
-  std::unique_ptr<CompilationUnit> cu{new CompilationUnit};
-  cu->define(script);
-  return cu;
+std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver) {
+  FunctionTable empty;
+  FunctionDefinition fd(def);
+  to_ir(fd, empty, resolver);
+  return fd.graph;
 }
 
 } // namespace script

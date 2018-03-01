@@ -16,8 +16,7 @@ matrix:
         python: "2.7"
         install: pip install flake8
         script: flake8
-      # mypy will complain about various files. Limiting it to only typed files
       - env: MYPY_TYPE_CHECK
         python: "3.6"
         install: pip install mypy mypy-extensions
-        script: mypy --py2 aten/src/ATen/function_wrapper.py
+        script: mypy @mypy-files.txt

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "detail/IndexUtils.cuh"
-#include "ATen/Check.h"
+#include "ATen/TensorUtils.h"
 
 //
 // This file contains pointwise operation functions and kernels that

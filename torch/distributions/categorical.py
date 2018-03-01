@@ -73,17 +73,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        if isinstance(self.probs, Variable):
-            return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
-        else:
-            return self.probs.new([float('nan')]).expand(self._extended_shape())
+        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
 
     @property
     def variance(self):
-        if isinstance(self.probs, Variable):
-            return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
-        else:
-            return self.probs.new([float('nan')]).expand(self._extended_shape())
+        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)

@@ -21,6 +21,7 @@ TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
+TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', False)
 
 
 class SubProcess(mp.Process):
@@ -60,7 +61,7 @@ def sum_tensors(inq, outq):
     with torch.cuda.device(1):
         tensors = inq.get()
         for tensor in tensors:
-            outq.put((tensor.sum(), tensor.get_device(),
+            outq.put((tensor.sum().item(), tensor.get_device(),
                       tensor.numel(), tensor.storage().size()))
 
 
@@ -246,10 +247,14 @@ class TestMultiprocessing(TestCase):
                 do_test()
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
     def test_fd_sharing(self):
         self._test_sharing(repeat=TEST_REPEATS)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fd_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing(repeat=TEST_REPEATS)
 
@@ -257,10 +262,14 @@ class TestMultiprocessing(TestCase):
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
     def test_fs_sharing(self):
         with fs_sharing():
             self._test_sharing(repeat=TEST_REPEATS)
 
+    @unittest.skipIf(TEST_WITH_ASAN,
+                     "test_fs_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)

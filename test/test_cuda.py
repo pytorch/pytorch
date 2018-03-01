@@ -22,10 +22,24 @@ if HAS_CUDA:
     torch.ones(1).cuda()  # has_magma shows up after cuda is initialized
     HAS_MAGMA = torch.cuda.has_magma
 
+floating_set = {torch.FloatTensor, torch.DoubleTensor, torch.cuda.FloatTensor,
+                torch.cuda.DoubleTensor, torch.HalfTensor, torch.cuda.HalfTensor}
+
 
 def is_floating(t):
-    return type(t) in [torch.FloatTensor, torch.DoubleTensor,
-                       torch.cuda.FloatTensor, torch.cuda.DoubleTensor]
+    if not isinstance(t, type):
+        raise TypeError('t should be an instance of type')
+    assert t != torch.autograd.Variable
+    return t in floating_set
+
+
+def is_half(t):
+    if isinstance(t, torch.Tensor):
+        return t.dtype in [torch.float16, torch.cuda.float16]
+    assert isinstance(t, type)
+    assert t != torch.autograd.Variable
+    return t in [torch.HalfTensor, torch.cuda.HalfTensor]
+
 
 types = [
     torch.FloatTensor,
@@ -35,12 +49,32 @@ types = [
     torch.ShortTensor,
     torch.CharTensor,
     torch.ByteTensor,
+    torch.HalfTensor,
+]
+
+signed_types = [
+    torch.FloatTensor,
+    torch.DoubleTensor,
+    torch.LongTensor,
+    torch.IntTensor,
+    torch.ShortTensor,
+    torch.CharTensor,
+]
+
+unsigned_types = [
+    torch.ByteTensor,
 ]
 
 float_types = [
     torch.FloatTensor,
-    torch.DoubleTensor
-]  # TODO: add half...
+    torch.DoubleTensor,
+    torch.HalfTensor,
+]
+
+float_types_no_half = [
+    torch.FloatTensor,
+    torch.DoubleTensor,
+]
 
 
 def number(floating, integer, t):
@@ -49,7 +83,6 @@ def number(floating, integer, t):
         return floating
     else:
         return integer
-# TODO: check HalfTensor
 
 S = 10
 M = 50
@@ -70,17 +103,56 @@ def make_sparse_tensor(t, n, *sizes):
     return t(i, v, torch.Size(sizes))
 
 
+def tensor_clamp(t, min, max):
+    if is_half(t):
+        return t.float().clamp(min, max).half()
+    else:
+        return t.clamp(min, max)
+
+
+def tensor_mul(t, scale):
+    if is_half(t):
+        return t.float().mul(scale).half()
+    else:
+        return t.mul(scale)
+
+
+def tensor_abs_(t):
+    if is_half(t):
+        return t.float().abs_().half()
+    else:
+        return t.abs_()
+
+
+def constant_tensor_sub(a, b):
+    # helper function to address const - torch.HalfTensor where it doesn't
+    # have resize_as()
+    if is_half(b):
+        return (a - b.float()).half()
+    else:
+        return a - b
+
+
+def constant_tensor_add(a, b):
+    # helper function to address const + torch.HalfTensor where it doesn't
+    # have add()
+    if is_half(b):
+        return (a + b.float()).half()
+    else:
+        return a + b
+
+
 def small_2d(t):
     return make_tensor(t, S, S)
 
 
 def small_2d_scaled(t, scale=10):
-    return make_tensor(t, S, S).mul(scale)
+    return tensor_mul(make_tensor(t, S, S), scale)
 
 
 def small_2d_oneish(t):
     if is_floating(t):
-        return make_tensor(t, S, S).clamp(min=0.99, max=1.01)
+        return tensor_clamp(make_tensor(t, S, S), min=0.99, max=1.01)
     else:
         return t(S, S).fill_(1)
 
@@ -102,7 +174,7 @@ def medium_2d_expanded(t):
 
 
 def medium_2d_scaled(t, scale=10):
-    return make_tensor(t, M, M).mul(scale)
+    return tensor_mul(make_tensor(t, M, M), scale)
 
 
 def small_3d_ones(t):
@@ -110,8 +182,9 @@ def small_3d_ones(t):
 
 
 def small_3d_positive(t):
-    min_val = 1e-3 if is_floating(t) else 2
-    return make_tensor(t, S, S, S).clamp_(min_val, 120)
+    # In div_tensor(), half cannot achieve float precision
+    min_val = 1e-3 if is_floating(t) and not is_half(t) else 2
+    return tensor_clamp(make_tensor(t, S, S, S), min_val, 120)
 
 
 def small_3d_unique(t):
@@ -169,17 +242,18 @@ tests = [
     ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', float_types),
     ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', float_types),
     ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
-    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types),
-    ('pow', small_3d, lambda t: [small_3d(t).abs_()], 'tensor', float_types),
+    # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
+    ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half),
+    ('pow', small_3d, lambda t: [tensor_abs_(small_3d(t))], 'tensor', float_types),
     ('addbmm', small_2d, lambda t: [small_3d(t), small_3d(t)], None, float_types),
     ('addbmm', small_2d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('addbmm', small_2d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
     ('baddbmm', small_3d, lambda t: [small_3d(t), small_3d(t)],),
     ('baddbmm', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('baddbmm', small_3d, lambda t: [number(0.5, 3, t), number(0.4, 2, t), small_3d(t), small_3d(t)], 'two_scalars'),
-    ('addcdiv', small_2d_lapack, lambda t: [small_2d_lapack(t).mul(2), small_2d_lapack(t)],),
+    ('addcdiv', small_2d_lapack, lambda t: [tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)],),
     ('addcdiv', small_2d_lapack, lambda t: [number(2.8, 1, t),
-                                            small_2d_lapack(t).mul(2), small_2d_lapack(t)], 'scalar'),
+                                            tensor_mul(small_2d_lapack(t), 2), small_2d_lapack(t)], 'scalar'),
     ('addcmul', small_3d, lambda t: [small_3d(t), small_3d(t)],),
     ('addcmul', small_3d, lambda t: [number(0.4, 2, t), small_3d(t), small_3d(t)], 'scalar'),
     ('addmm', medium_2d, lambda t: [medium_2d(t), medium_2d(t)],),
@@ -197,7 +271,8 @@ tests = [
     ('chunk', medium_2d, lambda t: [4],),
     ('chunk', medium_2d, lambda t: [4, 1], 'dim'),
     ('chunk', medium_2d, lambda t: [4, -2], 'neg_dim'),
-    ('clamp', medium_2d_scaled, lambda t: [-1, 5],),
+    ('clamp', medium_2d_scaled, lambda t: [-1, 5], None, signed_types),
+    ('clamp', medium_2d_scaled, lambda t: [1, 5], None, unsigned_types),
     ('clone', medium_2d, lambda t: [],),
     ('contiguous', medium_2d, lambda t: [],),
     ('cross', new_t(M, 3, M), lambda t: [new_t(M, 3, M)(t)],),
@@ -249,9 +324,9 @@ tests = [
     ('mode', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [-1], 'neg_dim'),
     ('remainder', small_3d, lambda t: [3], 'value'),
-    ('remainder', small_3d, lambda t: [-3], 'negative_value'),
+    ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
-    ('remainder', small_3d, lambda t: [0 - small_3d_positive(t)], 'negative_tensor'),
+    ('remainder', small_3d, lambda t: [constant_tensor_sub(0, small_3d_positive(t))], 'negative_tensor', signed_types),
     ('std', small_3d, lambda t: [],),
     ('std', small_3d, lambda t: [1], 'dim'),
     ('std', small_3d, lambda t: [-1], 'neg_dim'),
@@ -321,9 +396,9 @@ tests = [
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
-    ('rsqrt', lambda t: small_3d(t) + 1, lambda t: [], None, float_types),
-    ('sinh', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
-    ('tan', lambda t: small_3d(t).clamp(-1, 1), lambda t: [], None, float_types),
+    ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
+    ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
+    ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     # lapack tests
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
@@ -349,6 +424,56 @@ custom_precision = {
     'cumprod': 1e-4,
     'qr': 3e-4,
     'digamma': 1e0,  # large values lead to large absolute error but small relative error
+}
+
+custom_half_precision = {
+    'add': 1e-2,
+    'acos': 1e-3,
+    'addbmm': 1e-1,
+    'addcmul': 1e-2,
+    'addmm': 1e-1,
+    'addmv': 1e-2,
+    'addr': 1e-2,
+    'asin': 1e-3,
+    'atan2': 1e-3,
+    'atan': 1e-3,
+    'baddbmm': 1e-2,
+    'cos': 1e-3,
+    'cosh': 1e-2,
+    'cross': 1e-2,
+    'cumprod': 1e-2,
+    'cumsum': 1e-2,
+    'dist': 1e-2,
+    'div': 1e-3,
+    'dot': 1e-2,
+    'erf': 1e-3,
+    'erfinv': 1e-3,
+    'exp': 1e-2,
+    'expm1': 1e-2,
+    'lerp': 1e-2,
+    'lgamma': 1e-2,
+    'log': 1e-2,
+    'log1p': 1e-3,
+    'mean': 1e-3,
+    'mul': 1e-2,
+    'norm': 1e-1,
+    'pow': 1e-1,
+    'prod': 1e-3,
+    'reciprocal': 1e-1,
+    'remainder': 1e-3,
+    'renorm': 1e-3,
+    'rsqrt': 1e-2,
+    'sigmoid': 1e-3,
+    'sin': 1e-3,
+    'sinh': 1e-3,
+    'sqrt': 1e-3,
+    'std': 1e-3,
+    'sub': 1e-2,
+    'sum': 1e-2,
+    'tan': 1e-3,
+    'tanh': 1e-3,
+    'trace': 1e-3,
+    'var': 1e-3,
 }
 
 simple_pointwise = [
@@ -412,6 +537,9 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
         gpu_args = [to_gpu(arg) for arg in cpu_args]
+        if t.__name__ == 'HalfTensor':
+            cpu_tensor = cpu_tensor.float()
+            cpu_args = [arg.float() if torch.is_tensor(arg) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
         try:
             gpu_result = getattr(gpu_tensor, fn)(*gpu_args)
@@ -429,7 +557,11 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         self.assertEqual(cpu_tensor, gpu_tensor, precision)
         self.assertEqual(cpu_args, gpu_args, precision)
         # Compare results
-        self.assertEqual(cpu_result, gpu_result, precision)
+        if fn == 'element_size' and t.__name__ == 'HalfTensor':
+            # Workaround since cpu_result is float
+            self.assertEqual(2, gpu_result)
+        else:
+            self.assertEqual(cpu_result, gpu_result, precision)
     return tmp
 
 
@@ -600,34 +732,46 @@ class TestCuda(TestCase):
                 t += 1
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def _test_autogpu(self, TensorCtor):
-        x = TensorCtor().cuda()
-        y = TensorCtor().cuda()
+    def test_autogpu(self):
+        x = torch.randn(5, 5).cuda()
+        y = torch.randn(5, 5).cuda()
         self.assertEqual(x.get_device(), 0)
         self.assertEqual(x.get_device(), 0)
         with torch.cuda.device(1):
-            z = TensorCtor().cuda()
+            z = torch.randn(5, 5).cuda()
             self.assertEqual(z.get_device(), 1)
             q = x.add(y)
             self.assertEqual(q.get_device(), 0)
-            w = TensorCtor().cuda()
+            w = torch.randn(5, 5).cuda()
             self.assertEqual(w.get_device(), 1)
             self.assertEqual(y.cuda().get_device(), 1)
             self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
 
-    def test_autogpu(self):
-        # TODO: clean-up and merge with above code after Variable and Tensor
-        # are merged
-        self._test_autogpu(lambda: torch.randn(5, 5))
-        self._test_autogpu(lambda: torch.autograd.Variable(torch.randn(5, 5)))
-
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_new(self):
-        x = torch.autograd.Variable(torch.randn(3, 3).cuda())
+        x = torch.randn(3, 3).cuda()
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
         self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
+
+        y = x.new(dtype=torch.cuda.int64, device=1)
+        self.assertEqual(y.get_device(), 1)
+        self.assertIs(y.dtype, torch.cuda.int64)
+        y = x.new(dtype=torch.int64)
+        self.assertIs(y.dtype, torch.int64)
+
+        y = x.new(1, 2, 3, dtype=torch.cuda.int64, device=1)
+        self.assertEqual(y.get_device(), 1)
+        self.assertIs(y.dtype, torch.cuda.int64)
+        y = x.new(1, 2, 3, dtype=torch.int64)
+        self.assertIs(y.dtype, torch.int64)
+
+        y = x.new([0, 1, 2], dtype=torch.cuda.int64, device=1)
+        self.assertEqual(y.get_device(), 1)
+        self.assertIs(y.dtype, torch.cuda.int64)
+        y = x.new([0, 1, 2], dtype=torch.int64)
+        self.assertIs(y.dtype, torch.int64)
         with torch.cuda.device(1):
             self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
             self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
@@ -672,18 +816,18 @@ class TestCuda(TestCase):
 
     def test_type_conversions(self):
         x = torch.randn(5, 5)
-        self.assertIs(type(x.float()), torch.FloatTensor)
-        self.assertIs(type(x.cuda()), torch.cuda.DoubleTensor)
-        self.assertIs(type(x.cuda().float()), torch.cuda.FloatTensor)
-        self.assertIs(type(x.cuda().float().cpu()), torch.FloatTensor)
-        self.assertIs(type(x.cuda().float().cpu().int()), torch.IntTensor)
+        self.assertIsInstance(x.float(), torch.FloatTensor)
+        self.assertIsInstance(x.cuda(), torch.cuda.DoubleTensor)
+        self.assertIsInstance(x.cuda().float(), torch.cuda.FloatTensor)
+        self.assertIsInstance(x.cuda().float().cpu(), torch.FloatTensor)
+        self.assertIsInstance(x.cuda().float().cpu().int(), torch.IntTensor)
 
         y = x.storage()
-        self.assertIs(type(y.float()), torch.FloatStorage)
-        self.assertIs(type(y.cuda()), torch.cuda.DoubleStorage)
-        self.assertIs(type(y.cuda().float()), torch.cuda.FloatStorage)
-        self.assertIs(type(y.cuda().float().cpu()), torch.FloatStorage)
-        self.assertIs(type(y.cuda().float().cpu().int()), torch.IntStorage)
+        self.assertIsInstance(y.float(), torch.FloatStorage)
+        self.assertIsInstance(y.cuda(), torch.cuda.DoubleStorage)
+        self.assertIsInstance(y.cuda().float(), torch.cuda.FloatStorage)
+        self.assertIsInstance(y.cuda().float().cpu(), torch.FloatStorage)
+        self.assertIsInstance(y.cuda().float().cpu().int(), torch.IntStorage)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_type_conversions_same_gpu(self):
@@ -774,13 +918,13 @@ class TestCuda(TestCase):
         for r, t in zip(r_tensors, tensors):
             self.assertEqual(r.get_device(), t.get_device())
             self.assertEqual(r, t * 2)
-            self.assertIsInstance(r, type(t))
+            self.assertEqual(r.type(), t.type())
 
         rc_tensors = comm.reduce_add_coalesced(dup_tensors, buffer_size=buffer_size)
         self.assertEqual(r_tensors, rc_tensors)
         for r, rc in zip(r_tensors, rc_tensors):
             self.assertEqual(rc.get_device(), r.get_device())
-            self.assertIsInstance(rc, type(r))
+            self.assertEqual(rc.type(), r.type())
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_reduce_add_coalesced(self):
@@ -937,12 +1081,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    def test_bernoulli_variable(self):
-        # TODO: delete when tensor/variable are merged
-        from torch.autograd import Variable
-        x = torch.cuda.FloatTensor([0, 1]).cuda()
-        x_var = Variable(x)
-        self.assertEqual(x_var.bernoulli().data, x.bernoulli())
+    def test_bernoulli(self):
+        x = torch.tensor([0, 1], dtype=torch.cuda.float32)
+        self.assertEqual(x.bernoulli().tolist(), [0, 1])
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
@@ -1193,9 +1334,6 @@ class TestCuda(TestCase):
     def test_contiguous(self):
         TestTorch._test_contiguous(self, lambda t: t.cuda())
 
-    def test_broadcast_fallback(self):
-        TestTorch._test_broadcast_fallback(self, lambda t: t.cuda())
-
     def test_broadcast_fused_matmul(self):
         TestTorch._test_broadcast_fused_matmul(self, lambda t: t.cuda())
 
@@ -1237,7 +1375,7 @@ class TestCuda(TestCase):
         # This affects the result of THC_reduceAll operations at extreme values
         x = torch.cuda.ByteTensor([0])
         y = torch.cuda.ByteTensor([255])
-        expected = torch.cuda.LongTensor([0])
+        expected = torch.cuda.LongTensor([0])[0]
 
         _, v = x.max(dim=0)
         self.assertEqual(v, expected)
@@ -1263,7 +1401,7 @@ class TestCuda(TestCase):
         tensor = torch.randn(100).cuda()
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
         self.assertEqual(tensor.var(), tensor.var(unbiased=True))
-        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False)[0])
+        self.assertEqual(tensor.var(unbiased=False), tensor.var(0, unbiased=False))
 
         tensor = torch.FloatTensor([1.0, 2.0]).cuda()
         self.assertEqual(tensor.var(unbiased=True), 0.5)
@@ -1272,7 +1410,7 @@ class TestCuda(TestCase):
         tensor = torch.randn(100).cuda()
         self.assertEqual(tensor.std(0), tensor.std(0, unbiased=True))
         self.assertEqual(tensor.std(), tensor.std(unbiased=True))
-        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False)[0])
+        self.assertEqual(tensor.std(unbiased=False), tensor.std(0, unbiased=False))
 
     def test_var_large_input(self):
         # Large, not-nice input
@@ -1285,14 +1423,14 @@ class TestCuda(TestCase):
         tensor = torch.FloatTensor([2281.5, 2281.25]).cuda()
 
         # Stability for inner dim
-        self.assertEqual(tensor.var(0)[0], 0.03125)
+        self.assertEqual(tensor.var(0), 0.03125)
 
         # General stability
         self.assertEqual(tensor.var(), 0.03125)
 
         # Stability for outer dimensions
         tensor = tensor.unsqueeze(1)
-        self.assertEqual(tensor.var(0)[0], 0.03125)
+        self.assertEqual(tensor.var(0), 0.03125)
 
     def test_digamma(self):
         def test(use_double=False):
@@ -1369,11 +1507,18 @@ class TestCuda(TestCase):
         torch.cuda.nvtx.range_pop()
 
 
-if HAS_CUDA:
+def load_ignore_file():
+    from os.path import join, dirname
+    global ignores
+    path = join(dirname(__file__), 'data', 'test_cuda_ignores.txt')
+    with open(path, 'r') as f:
+        ignores = {l for l in f.read().splitlines() if not l.startswith('#')}
+
+
+def generate_tests():
     for decl in tests:
         for t in types:
             tensor = t()
-            gpu_tensor = get_gpu_type(t)()
 
             # Default values
             desc = ''
@@ -1392,6 +1537,9 @@ if HAS_CUDA:
                 continue
 
             precision = custom_precision.get(name, TestCuda.precision)
+            if t == torch.HalfTensor:
+                precision = custom_half_precision.get(name, precision)
+
             for inplace in (True, False):
                 if inplace and no_inplace:
                     continue
@@ -1399,11 +1547,13 @@ if HAS_CUDA:
                     name_inner = name + '_'
                 else:
                     name_inner = name
-                if not hasattr(tensor, name_inner):
+
+                if t != torch.HalfTensor and not hasattr(tensor, name_inner):
+                    # torch.HalfTensor doesn't support most operations,
+                    # but we use torch.FloatTensor as cpu baseline
                     continue
-                if not hasattr(gpu_tensor, name_inner):
-                    print("Ignoring {}, because it's not implemented by torch.cuda.{}".format(
-                        name_inner, gpu_tensor.__class__.__name__))
+                full_name = '{}.{}'.format(tensor.type(), name_inner)
+                if full_name in ignores:
                     continue
 
                 test_name = 'test_' + t.__name__ + '_' + name_inner
@@ -1417,4 +1567,7 @@ if HAS_CUDA:
 
 
 if __name__ == '__main__':
+    if HAS_CUDA:
+        load_ignore_file()
+        generate_tests()
     run_tests()

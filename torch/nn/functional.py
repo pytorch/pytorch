@@ -1171,54 +1171,123 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
     return ret
 
 
-def instance_norm(input, weight, bias, saved_running_mean, saved_running_var,
-                  training=False, momentum=0.1, eps=1e-5, affine=False):
-    """Applies instance normalization over an input. The implementation is
-    based on batch_norm, in which we do reshape, batchnorm, and reshape again.
+def batch_norm(input, running_mean, running_var, weight=None, bias=None,
+               training=False, momentum=0.1, eps=1e-5):
+    r"""Applies Batch Normalization for each channel across a batch of data.
+
+    See :class:`~torch.nn.BatchNorm1d`, :class:`~torch.nn.BatchNorm2d`,
+    :class:`~torch.nn.BatchNorm3d` for details.
+    """
+    if training:
+        size = list(input.size())
+        if reduce(mul, size[2:], size[0]) == 1:
+            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
+    return torch._C._VariableFunctions.batch_norm(
+        input, weight, bias, running_mean, running_var,
+        training, momentum, eps, torch.backends.cudnn.enabled
+    )
+
+
+def instance_norm(input, running_mean, running_var, weight=None, bias=None,
+                  use_input_stats=True, momentum=0.1, eps=1e-5):
+    r"""Applies Instance Normalization for each channel in each data sample in a
+    batch.
 
     See :class:`~torch.nn.InstanceNorm1d`, :class:`~torch.nn.InstanceNorm2d`,
     :class:`~torch.nn.InstanceNorm3d` for details.
     """
-    import torch
+    if not use_input_stats and (running_mean is None or running_var is None):
+        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
+
+    b, c = input.size(0), input.size(1)
+    if weight is not None:
+        weight = weight.repeat(b)
+    if bias is not None:
+        bias = bias.repeat(b)
+
     import torch.onnx.symbolic
 
     @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
-    def _instance_norm(input, weight=None, bias=None, saved_running_mean=None,
-                       saved_running_var=None, training=False, momentum=0.1,
-                       eps=1e-5, affine=False):
-        b, c = input.size(0), input.size(1)
-
-        # Repeat stored stats and affine transform params
-        running_mean = saved_running_mean.repeat(b)
-        running_var = saved_running_var.repeat(b)
+    def _instance_norm(input, running_mean=None, running_var=None, weight=None,
+                       bias=None, use_input_stats=None, momentum=None, eps=None):
+        # Repeat stored stats and affine transform params if necessary
+        if running_mean is not None:
+            running_mean_orig = running_mean
+            running_mean = running_mean_orig.repeat(b)
+        if running_var is not None:
+            running_var_orig = running_var
+            running_var = running_var_orig.repeat(b)
 
         # Apply instance norm
         input_reshaped = input.contiguous().view(1, b * c, *input.size()[2:])
 
         out = batch_norm(
             input_reshaped, running_mean, running_var, weight=weight, bias=bias,
-            training=training, momentum=momentum, eps=eps)
+            training=use_input_stats, momentum=momentum, eps=eps)
 
         # Reshape back
-        saved_running_mean.copy_(running_mean.view(b, c).mean(0, keepdim=False))
-        saved_running_var.copy_(running_var.view(b, c).mean(0, keepdim=False))
+        if running_mean is not None:
+            running_mean_orig.copy_(running_mean.view(b, c).mean(0, keepdim=False))
+        if running_var is not None:
+            running_var_orig.copy_(running_var.view(b, c).mean(0, keepdim=False))
 
         return out.view(b, c, *input.size()[2:])
-    return _instance_norm(input, weight=weight, bias=bias, saved_running_mean=saved_running_mean,
-                          saved_running_var=saved_running_var, training=training,
-                          momentum=momentum, eps=eps, affine=affine)
+    return _instance_norm(input, running_mean=running_mean,
+                          running_var=running_var, weight=weight, bias=bias,
+                          use_input_stats=use_input_stats, momentum=momentum,
+                          eps=eps)
 
 
-def batch_norm(input, running_mean, running_var, weight=None, bias=None,
-               training=False, momentum=0.1, eps=1e-5):
-    if training:
-        size = list(input.size())
-        if reduce(mul, size[2:], size[0]) == 1:
-            raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-    return torch._C._VariableFunctions.batch_norm(
-        input, weight, bias,
-        Variable(running_mean), Variable(running_var), training, momentum, eps, torch.backends.cudnn.enabled
-    )
+def layer_norm(input, normalized_shape, running_mean, running_var,
+               weight=None, bias=None, use_input_stats=True,
+               momentum=0.1, eps=1e-5):
+    r"""Applies Layer Normalization for last certain number of dimensions.
+
+    See :class:`~torch.nn.LayerNorm` for details.
+    """
+    if not use_input_stats and (running_mean is None or running_var is None):
+        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
+
+    normalized_ndim = len(normalized_shape)
+    input_shape = input.size()
+
+    if input_shape[-normalized_ndim:] != torch.Size(normalized_shape):
+        raise ValueError('Expected input with shape [*, {}], but got {} input'
+                         .format(', '.join(normalized_shape), list(input_shape)))
+
+    n = reduce(mul, input_shape[:-normalized_ndim], 1)
+
+    # Repeat stored stats if necessary
+    if running_mean is not None:
+        running_mean_orig = running_mean
+        running_mean = running_mean_orig.repeat(n)
+    if running_var is not None:
+        running_var_orig = running_var
+        running_var = running_var_orig.repeat(n)
+
+    # Apply layer norm
+    input_reshaped = input.contiguous().view(1, n, -1)
+
+    out = batch_norm(
+        input_reshaped, running_mean, running_var, None, None,
+        use_input_stats, momentum, eps)
+
+    # Copy back
+    if running_mean is not None:
+        running_mean_orig.fill_(running_mean.mean())
+    if running_var is not None:
+        running_var_orig.fill_(running_var.mean())
+
+    out = out.view(*input_shape)
+
+    if weight is not None and bias is not None:
+        return torch.addcmul(bias, 1, out, weight)
+    elif weight is not None:
+        return torch.mul(out, weight)
+    elif bias is not None:
+        return torch.add(out, bias)
+    else:
+        return out
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
@@ -1575,8 +1644,8 @@ def cosine_embedding_loss(input1, input2, target, margin=0, size_average=True):
     return _functions.loss.CosineEmbeddingLoss.apply(input1, input2, target, margin, size_average)
 
 
-def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True):
-    """multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True) -> Variable
+def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True):
+    """multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=True, reduce=True) -> Variable
 
     See :class:`~torch.nn.MultiMarginLoss` for details.
     """
@@ -1585,7 +1654,7 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
     if weight is not None and weight.dim() != 1:
         raise ValueError('weight must be one-dimensional')
 
-    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, size_average)
+    return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, size_average, reduce)
 
 
 def pixel_shuffle(input, upscale_factor):
@@ -1752,10 +1821,16 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     `output` using input pixel locations from the grid.
 
     Uses bilinear interpolation to sample the input pixels.
-    Currently, only spatial (4 dimensional) inputs are supported.
+    Currently, only spatial (4 dimensional) and volumetric (5 dimensional)
+    inputs are supported.
 
-    For each output location, :attr:`grid` has `x` and `y`
+    For each output location, :attr:`grid` has `x`, `y`
     input pixel locations which are used to compute output.
+    In the case of 5D inputes, :attr:`grid` has `x`, `y`, `z` pixel locations.
+
+    .. Note::
+        To avoid confusion in notation, let's note that `x` corresponds to the `width` dimension `IW`,
+        `y` corresponds to the height dimension `IH` and `z` corresponds to the `depth` dimension `ID`.
 
     :attr:`grid` has values in the range of `[-1, 1]`. This is because the
     pixel locations are normalized by the input height and width.
@@ -1771,8 +1846,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     .. Note:: This function is used in building Spatial Transformer Networks
 
     Args:
-        input (Variable): input batch of images (N x C x IH x IW)
-        grid (Variable): flow-field of size (N x OH x OW x 2)
+        input (Variable): input batch (N x C x IH x IW) or (N x C x ID x IH x IW)
+        grid (Variable): flow-field of size (N x OH x OW x 2) or (N x OD x OH x OW x 3)
         padding_mode (str): padding mode for outside grid values
             'zeros' | 'border'. Default: 'zeros'
 
@@ -1780,7 +1855,6 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Variable): output Tensor
 
     """
-    batch_size, channels, in_height, in_width = input.size()
     return vision.grid_sampler(input, grid, padding_mode)
 
 

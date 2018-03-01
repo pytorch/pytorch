@@ -10,34 +10,6 @@ project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
 
-# ---[ If running on Ubuntu, check system version and compiler version.
-if(EXISTS "/etc/os-release")
-  execute_process(COMMAND
-    "sed" "-ne" "s/^ID=\\([a-z]\\+\\)$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  execute_process(COMMAND
-    "sed" "-ne" "s/^VERSION_ID=\"\\([0-9\\.]\\+\\)\"$/\\1/p" "/etc/os-release"
-    OUTPUT_VARIABLE OS_RELEASE_VERSION_ID
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-    )
-  if(OS_RELEASE_ID STREQUAL "ubuntu")
-    if(OS_RELEASE_VERSION_ID VERSION_GREATER "17.04")
-      if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-        if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS "6.0.0"
-          AND NOT CMAKE_CXX_COMPILER_VERSION VERSION_LESS "5.0.0")
-            message(FATAL_ERROR
-              "Do not use GCC 5. GCC 5 has a known bug in Ubuntu 17.10"
-              " and higher, which won't be fixed. For more information, see: "
-              "https://github.com/pytorch/pytorch/issues/5229"
-              )
-        endif()
-      endif()
-    endif()
-  endif()
-endif()
-
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
 if(APPLE)
@@ -58,6 +30,31 @@ IF(NOT MSVC)
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
 ENDIF(NOT MSVC)
 
+INCLUDE(CheckCXXSourceCompiles)
+
+#Check if certain std functions are supported. Sometimes
+#_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
+CHECK_CXX_SOURCE_COMPILES("
+#include <cmath>
+#include <string>
+
+int main() {
+  int a = std::isinf(3.0);
+  int b = std::isnan(0.0);
+  std::string s = std::to_string(1);
+
+  return 0;
+  }" SUPPORT_GLIBCXX_USE_C99)
+
+if(NOT SUPPORT_GLIBCXX_USE_C99)
+  message(FATAL_ERROR
+          "The C++ compiler does not support required functions. "
+          "This is very likely due to a known bug in GCC 5 "
+          "(and maybe other versions) on Ubuntu 17.10 and newer. "
+          "For more information, see: "
+          "https://github.com/pytorch/pytorch/issues/5229"
+         )
+endif()
 
 # Top-level build config
 ############################################
@@ -218,6 +215,26 @@ ENDIF(UNIX)
 
 INCLUDE (CheckIncludeFile)
 INCLUDE (CheckCSourceCompiles)
+INCLUDE (CheckCSourceRuns)
+
+# Check that our programs run.  This is different from the native CMake compiler
+# check, which just tests if the program compiles and links.  This is important
+# because with ASAN you might need to help the compiled library find some
+# dynamic libraries.
+CHECK_C_SOURCE_RUNS("
+int main() { return 0; }
+" COMPILER_WORKS)
+IF(NOT COMPILER_WORKS)
+  # Force cmake to retest next time around
+  unset(COMPILER_WORKS CACHE)
+  MESSAGE(FATAL_ERROR
+      "Could not run a simple program built with your compiler. "
+      "If you are trying to use -fsanitize=address, make sure "
+      "libasan is properly installed on your system (you can confirm "
+      "if the problem is this by attempting to build and run a "
+      "small program.)")
+ENDIF()
+
 CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
 # Check for a cpuid intrinsic
 IF(HAVE_CPUID_H)
@@ -261,6 +278,7 @@ ENDIF()
 IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_CXX_FLAGS}")
 ENDIF(C_SSE3_FOUND)
 
 # we don't set -mavx and -mavx2 flags globally, but only for specific files

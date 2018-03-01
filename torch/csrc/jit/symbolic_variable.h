@@ -148,8 +148,8 @@ struct SymbolicVariable {
   }
 private:
   SymbolicVariable typeLike(SymbolicVariable other) {
-    if (auto other_type = other.v->typeOption())
-      v->setType(other_type->expect<TensorType>()->contiguous());
+    if (auto other_type = other.v->type()->cast<TensorType>())
+      v->setType(other_type->contiguous());
     return *this;
   }
   static Symbol s(const char * s_) {

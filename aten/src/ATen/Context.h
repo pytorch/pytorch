@@ -55,6 +55,9 @@ public:
 
   cudaStream_t getCurrentCUDAStream() const;
   cudaDeviceProp* getCurrentDeviceProperties() const;
+  cudaDeviceProp* getDeviceProperties(int device) const;
+
+  bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
   // that CuDNN was enabled, it doesn't actually say anything about

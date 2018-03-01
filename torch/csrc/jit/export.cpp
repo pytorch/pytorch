@@ -133,7 +133,6 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
 
 void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Value* n) {
   onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
-  JIT_ASSERT(n->hasType());
   TensorType* node_type = n->type()->expect<TensorType>();
   const std::vector<std::int64_t>& sizes = node_type->sizes();
   for (std::int64_t s : sizes) {
@@ -198,7 +197,9 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     }
     auto p_n = p_g->add_node();
     if (node->getSourceLocation()) {
-      p_n->set_doc_string(node->getSourceLocation()->python_traceback);
+      std::stringstream ss;
+      node->getSourceLocation()->highlight(ss);
+      p_n->set_doc_string(ss.str());
     }
     for(auto input : node->inputs()) {
       if (input->node()->kind() == kUndefined) {

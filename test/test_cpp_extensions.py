@@ -67,7 +67,7 @@ class TestCppExtension(common.TestCase):
             name='torch_test_cuda_extension',
             sources=[
                 'cpp_extensions/cuda_extension.cpp',
-                'cpp_extensions/cuda_extension_kernel.cu'
+                'cpp_extensions/cuda_extension.cu'
             ],
             extra_cuda_cflags=['-O2'],
             verbose=True)

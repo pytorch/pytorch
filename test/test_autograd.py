@@ -43,18 +43,6 @@ class non_differentiable(object):
         self.tensor = tensor
 
 
-def skipIfNoScalars(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        try:
-            fn(*args, **kwargs)
-        except Exception:
-            if not torch._C._with_scalars():
-                raise unittest.SkipTest('Compiled without Scalars')
-            raise
-    return wrapper
-
-
 @contextlib.contextmanager
 def backward_engine(engine):
     _prev_engine = Variable._execution_engine
@@ -834,9 +822,19 @@ class TestAutograd(TestCase):
     def test_requires_grad_factory(self):
         x = Variable(torch.randn(2, 3))
         fns = [torch.ones_like, torch.testing.randn_like]
+        dtypes = [torch.float32, torch.float64, torch.cuda.float32, torch.cuda.float64]
         for fn in fns:
-            for val in [True, False]:
-                self.assertEqual(val, fn(x, requires_grad=val).requires_grad)
+            for requires_grad in [True, False]:
+                for dtype in dtypes:
+                    if not dtype.is_cuda:
+                        output = fn(x, dtype=dtype, requires_grad=requires_grad)
+                        self.assertEqual(requires_grad, output.requires_grad)
+                        self.assertIs(dtype, output.dtype)
+                    elif torch.cuda.is_available() and torch.cuda.device_count() > 1:
+                        output = fn(x, dtype=dtype, device=1, requires_grad=requires_grad)
+                        self.assertEqual(requires_grad, output.requires_grad)
+                        self.assertIs(dtype, output.dtype)
+                        self.assertEqual(1, output.get_device())
 
     def test_grad_assignment(self):
         x = Variable(torch.randn(5, 5))
@@ -1310,21 +1308,21 @@ class TestAutograd(TestCase):
 
     def test_type_conversions(self):
         x = Variable(torch.randn(5, 5))
-        self.assertIs(type(x.float().data), torch.FloatTensor)
-        self.assertIs(type(x.int().data), torch.IntTensor)
+        self.assertIsInstance(x.float().data, torch.FloatTensor)
+        self.assertIsInstance(x.int().data, torch.IntTensor)
         if torch.cuda.is_available():
-            self.assertIs(type(x.float().cuda().data), torch.cuda.FloatTensor)
-            self.assertIs(type(x.int().cuda().data), torch.cuda.IntTensor)
-            self.assertIs(type(x.int().cuda().cpu().data), torch.IntTensor)
+            self.assertIsInstance(x.float().cuda().data, torch.cuda.FloatTensor)
+            self.assertIsInstance(x.int().cuda().data, torch.cuda.IntTensor)
+            self.assertIsInstance(x.int().cuda().cpu().data, torch.IntTensor)
             if torch.cuda.device_count() >= 2:
                 x2 = x.float().cuda(1)
-                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIsInstance(x2.data, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
                 x2 = x.float().cuda()
-                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIsInstance(x2.data, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 0)
                 x2 = x2.cuda(1)
-                self.assertIs(type(x2.data), torch.cuda.FloatTensor)
+                self.assertIsInstance(x2.data, torch.cuda.FloatTensor)
                 self.assertIs(x2.get_device(), 1)
                 y = Variable(torch.randn(5).cuda(1), requires_grad=True)
                 y.cpu().sum().backward()
@@ -1335,17 +1333,23 @@ class TestAutograd(TestCase):
             for y_var in (True, False):
                 y = torch.randn(5, 5).type(t)
                 y = Variable(y) if y_var else y
-                self.assertIs(type(x.type(t).data), t)
-                self.assertIs(type(x.type_as(y).data), t)
+                self.assertIsInstance(x.type(t).data, t)
+                self.assertIsInstance(x.type_as(y).data, t)
+                # TODO: t.dtype should work
+                t_dtype = t().dtype
+                self.assertIsInstance(x.type(t_dtype).data, t)
+                self.assertIs(t_dtype, x.type(t_dtype).dtype)
+                self.assertEqual(y.data_ptr(), y.type(t).data_ptr())
                 if torch.cuda.is_available():
                     for x_cuda in (True, False):
                         for y_cuda in (True, False):
                             x_c = x.cuda() if x_cuda else x
                             y_c = y.cuda() if y_cuda else y
-                            y_type = type(y_c.data) if y_var else type(y_c)
-                            y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type.__name__
-                            self.assertIs(y_type, type(x_c.type(y_typestr).data))
-                            self.assertIs(type(y_c.data) if y_var else type(y_c), type(x_c.type_as(y_c).data))
+                            _, y_type = y_c.type().rsplit('.', 1)
+                            y_typestr = ('torch.cuda.' if y_cuda else 'torch.') + y_type
+                            self.assertEqual(y_c.type(), x_c.type(y_typestr).type())
+                            self.assertIs(y_c.dtype, x_c.type(y_c.dtype).dtype)
+                            self.assertEqual(y_c.data_ptr(), y_c.cuda().data_ptr() if y_cuda else y_c.data_ptr())
 
         self._test_type_conversion_backward(lambda x: x)
         if torch.cuda.is_available():
@@ -2194,7 +2198,7 @@ method_tests = [
     ('view', (S, S, S), (S * S, S),),
     ('view', (S, S, S), (torch.Size([S * S, S]),), 'size'),
     ('view', (S,), (S,), '1d'),
-    ('view', (), (dont_convert(()),), 'scalar_to_scalar', NO_ARGS, [skipIfNoScalars]),
+    ('view', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('view', (), (1,), 'scalar_to_1d'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(variable(5.5)),), 'scalar'),
@@ -2204,7 +2208,7 @@ method_tests = [
     ('expand', (S, 1), (S, S, S), 'new_dim'),
     ('expand', (1,), (S, S, S), '1_element'),
     ('expand', (1, S), (1, 1, S), 'new_dim_front_old_front_1'),
-    ('expand', (), (dont_convert(()),), 'scalar_to_scalar', NO_ARGS, [skipIfNoScalars]),
+    ('expand', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('expand', (), (1, 3, 2), 'scalar_to_dims'),
     ('exp', (S, S, S), NO_ARGS),
     ('exp', (), NO_ARGS, 'scalar'),
@@ -2522,24 +2526,24 @@ method_tests = [
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
     # FIXME: we should compute the derivative w.r.t variable(2)
     ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(variable(2))),
-     'variable_dim', [0], [skipIfNoScalars]),
+     'variable_dim', [0]),
     ('index_fill', (S, S), (0, variable(0).long(), 2), 'scalar_index_dim', [0]),
     ('index_fill', (), (0, variable([0]).long(), 2), 'scalar_input_dim', [0]),
     ('index_fill', (), (0, variable(0).long(), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric'),
+    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null'),
+    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1'),
+    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2'),
     ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
      'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, ''),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
     # FIXME: we should compute the derivative w.r.t variable(1)
-    ('fill_', (S, S, S), (non_differentiable(variable(1)),), 'variable', NO_ARGS, [skipIfNoScalars]),
+    ('fill_', (S, S, S), (non_differentiable(variable(1)),), 'variable'),
     ('eq_', (S, S, S), ((S, S, S),)),
     ('eq_', (S, S, S), ((1,),), 'broadcast_rhs'),
     ('eq_', (), ((),), 'scalar'),
@@ -2577,7 +2581,7 @@ method_tests = [
     ('lt_', (), (0,), 'pyscalar_scalar'),
     ('le_', (), (0,), 'pyscalar_scalar'),
     ('permute', (1, 2, 3, 4), (0, 2, 3, 1)),
-    ('permute', (), (dont_convert(()),), 'scalar', NO_ARGS, [skipIfNoScalars]),
+    ('permute', (), (dont_convert(()),), 'scalar'),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
@@ -2616,12 +2620,12 @@ method_tests = [
     ('masked_select', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'scalar_broadcast_lhs'),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
     ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), variable(10)),
-     'variable', NO_ARGS, [skipIfNoScalars]),
+     'variable'),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
     ('masked_fill', (), (variable(0, requires_grad=False).byte().bernoulli_(), 10), 'scalar'),
     ('masked_fill', (), (variable(0, requires_grad=False).byte().bernoulli_(), variable(10)),
-     'scalar_variable', NO_ARGS, [skipIfNoScalars]),
+     'scalar_variable'),
     ('masked_fill', (M, M), (variable(0, requires_grad=False).byte().bernoulli_(), 10), 'scalar_broadcast_rhs'),
     ('masked_scatter', (M, M), (torch.ByteTensor(M, M).bernoulli_(), (M, M))),
     ('masked_scatter', (M, M), (torch.ByteTensor(M,).bernoulli_(), (M, M)),
@@ -2630,7 +2634,7 @@ method_tests = [
     ('masked_scatter', (M, M), (bernoulli_scalar(), (M, M)),
      'scalar_broadcast_rhs'),
     ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
-    ('resize_', (), (dont_convert(()),), 'scalar', NO_ARGS, [skipIfNoScalars]),
+    ('resize_', (), (dont_convert(()),), 'scalar'),
     ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
     ('resize_as_', (), (non_differentiable(variable(5)),), 'scalar'),
     ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
@@ -2697,14 +2701,10 @@ def create_input(call_args, requires_grad=True, non_contiguous=False):
             if isinstance(arg.tensor, Variable):
                 return maybe_non_contig(arg.tensor)
             return Variable(maybe_non_contig(arg.tensor))
-        elif torch.is_tensor(arg) or isinstance(arg, Variable):
-            # TODO: simplify once Variable and Tensor are merged
-            shape = arg.shape
-            if not torch.is_tensor(arg):
-                arg = arg.data
+        elif isinstance(arg, torch.Tensor):
             if isinstance(arg, torch.FloatTensor):
                 arg = arg.double()
-            v = Variable(maybe_non_contig(arg)).view(shape)
+            v = maybe_non_contig(arg).detach()
             v.requires_grad = requires_grad and v.is_floating_point()
             return v
         elif callable(arg):
@@ -2725,10 +2725,13 @@ def unpack_variables(args):
 
 EXCLUDE_FUNCTIONAL = {
     'addmm',
+    'addmm_',
     'addbmm',
     'baddbmm',
     'addmv',
+    'addmv_',
     'addr',
+    'addr_',
     'where'  # argument order
 }
 EXCLUDE_GRADCHECK = {
@@ -2818,34 +2821,18 @@ def run_grad_and_gradgrad_checks(test_case, name, test_name, apply_method, outpu
         test_case.assertTrue(gradgradcheck(apply_method, input_variables, gen_non_contig_grad_outputs=True))
 
 
-def has_scalars(output, args):
-    def ensure_tuple(y):
-        return y if isinstance(y, tuple) else (y,)
-
-    # include _with_scalars so we can easily find and remove this
-    all_tuple = args + ensure_tuple(output)
-    return torch._C._with_scalars() and any(x.dim() == 0 for x in all_tuple if isinstance(x, Variable))
-
-
 def run_functional_checks(test_case, test_name, name, apply_fn, run_grad_checks,
                           f_args_variable, f_args_tensor):
     output_variable = apply_fn(*f_args_variable)
-
-    # tensor API currently doesn't have scalars
-    if not exclude_tensor_method(name, test_name) and not has_scalars(output_variable, f_args_variable):
-        output_tensor = apply_fn(*f_args_tensor)
-        if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
-            output_tensor = torch.DoubleTensor((output_tensor,))
-        test_case.assertEqual(unpack_variables(output_variable), output_tensor)
 
     if run_grad_checks:
         run_grad_and_gradgrad_checks(test_case, name, test_name, apply_fn,
                                      output_variable, f_args_variable)
 
     self_variable = f_args_variable[0]
-    if isinstance(output_variable, torch.autograd.Variable) and self_variable is not None:
+    if isinstance(output_variable, Variable) and output_variable.requires_grad and self_variable is not None:
         output_variable.backward(randn_like(output_variable))
-        test_case.assertEqual(type(self_variable.data), type(self_variable.grad.data))
+        test_case.assertEqual(self_variable.type(), self_variable.grad.type())
         test_case.assertEqual(self_variable.size(), self_variable.grad.size())
 
 for test in method_tests:
@@ -2875,14 +2862,11 @@ for test in method_tests:
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the szie (e.g. unsqueeze)
-                self_is_scalar = torch._C._with_scalars() and self_variable.dim() == 0
                 args_variable = create_input(args, requires_grad=not is_inplace)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
                 output_variable = getattr(self_variable, name)(*args_variable)
-                # scalar API doesn't work on tensors
-                has_scalar = has_scalars(output_variable, args_variable) or self_is_scalar
-                if not exclude_tensor_method(name, test_name) and not has_scalar:
+                if not exclude_tensor_method(name, test_name):
                     output_tensor = getattr(self_tensor, name)(*args_tensor)
                     if not torch.is_tensor(output_tensor) and not isinstance(output_tensor, tuple):
                         output_tensor = torch.DoubleTensor((output_tensor,))

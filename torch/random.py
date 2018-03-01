@@ -24,8 +24,9 @@ def manual_seed(seed):
     `torch._C.Generator` object.
 
     Args:
-        seed (int or long): The desired seed.
+        seed (int): The desired seed.
     """
+    seed = int(seed)
     import torch.cuda
 
     if not torch.cuda._in_bad_fork:

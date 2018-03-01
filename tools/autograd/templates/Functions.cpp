@@ -96,11 +96,7 @@ Tensor norm_backward(const Tensor & grad, const Tensor & self, const Scalar & p_
 }
 
 Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor norm, int64_t dim, bool keepdim) {
-#ifdef WITH_SCALARS
   if (!keepdim && self.dim() != 0) {
-#else
-  if (!keepdim && self.dim() > 1) {
-#endif
     grad = grad.unsqueeze(dim);
     norm = norm.unsqueeze(dim);
   }
@@ -133,11 +129,7 @@ Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
 }
 
 Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdim) {
-#ifdef WITH_SCALARS
   if (!keepdim && sizes.size() > 0) {
-#else
-  if (!keepdim && sizes.size() > 1) {
-#endif
     return grad.unsqueeze(dim).expand(sizes);
   } else {
     return grad.expand(sizes);
@@ -353,17 +345,6 @@ Tensor cumsum_backward(const Tensor & x, int64_t dim) {
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
   auto result = self;
 
-#ifndef WITH_SCALARS
-  // Let's say the input had size (1, 1). input.squeeze(), with scalars
-  // disabled, produces a result of size (1,). This needs some
-  // special handling because for all other cases we unsqueeze every
-  // dimension that has size 1; doing that here would lead to one extra
-  // unsqueezed dimension
-  if (self.sizes().equals({1})) {
-    return result.view(sizes);
-  }
-#endif
-
   int64_t nDims = sizes.size();
   for (int64_t dim = 0; dim < nDims; dim++) {
     if (sizes[dim] == 1) {
@@ -375,13 +356,9 @@ Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
 
 Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
-#ifdef WITH_SCALARS
   // in NumPy it's not an error to unsqueeze a scalar, but we still need to avoided
   // unsqueezing in the backward.
   if (sizes.size() > 0 && sizes[dim] == 1) {
-#else
-  if (sizes[dim] == 1 && sizes.size() != 1) {
-#endif
     return self.unsqueeze(dim);
   }
   return self;
@@ -475,21 +452,12 @@ Tensor repeat_backward(Tensor grad, int64_t input_dims, IntList repeats) {
 
 Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = zeros_like(input);
-#ifdef WITH_SCALARS
   grad_input.masked_fill_(input == value, grad);
-#else
-  auto grad_data = as_variable_ref(grad).data();
-  grad_input.masked_fill_(input == value, Scalar(grad_data[0]));
-#endif
   return grad_input;
 }
 
 Tensor select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) {
-#ifdef WITH_SCALARS
   if (!keepdim) {
-#else
-  if (!keepdim && sizes.size() > 1) {
-#endif
     grad = grad.unsqueeze(dim);
     indices = indices.unsqueeze(dim);
   }
@@ -505,12 +473,7 @@ Tensor trace_backward(const Tensor & grad, IntList sizes) {
 
   auto grad_input = grad.type().zeros(sizes[0] * sizes[1]);
   auto indices = long_type.arange(0, grad_input.numel(), sizes[1] + 1);
-#ifdef WITH_SCALARS
   grad_input.index_fill_(0, indices, grad);
-#else
-  auto grad_data = static_cast<const Variable&>(grad).data();
-  grad_input.index_fill_(0, indices, Scalar(grad_data[0]));
-#endif
   return grad_input.view(sizes);
 }
 
@@ -1053,12 +1016,13 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & ggG,
     const Tensor & ggB,
     const Tensor & gO,
+    const Tensor & running_mean_v,
+    const Tensor & running_var_v,
+    bool training,
     double eps,
     const Tensor & save_mean_v,
     const Tensor & save_std_v,
-    const Tensor & running_mean_v,
-    const Tensor & running_var_v,
-    bool training) {
+    std::array<bool,3> output_mask) {
 
   // NB: In the original design of BatchNorm, save_mean, save_std, running_mean
   // and running_var are unconditionally tensor "buffers", and never get wrapped
@@ -1172,6 +1136,13 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     auto ggO_B_term = ggB_expanded;
     ggO = ggO.defined() ? ggO.add_(ggO_B_term) : ggO_B_term;
   }
+
+  if (output_mask[0] && !ggO.defined()) ggO = at::zeros_like(gO);
+  if (output_mask[1] && !gG.defined()) {
+    AT_ASSERT(affine, "gamma should always be defined when it requires grad");
+    gG = at::zeros_like(gamma);
+  }
+  if (output_mask[2] && !gI.defined()) gI = at::zeros_like(input);
 
   return std::tuple<Tensor, Tensor, Tensor>{gI, gG, ggO};
 

@@ -1,10 +1,16 @@
-#include "tensor.h"
+#include "torch/csrc/autograd/functions/tensor.h"
 
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/generated/Functions.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_gpu.h"
+
+#include <cstdint>
+#include <memory>
+#include <utility>
 
 namespace torch { namespace autograd {
 
@@ -26,20 +32,21 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
   return grad_inputs;
 };
 
-CopySlices::CopySlices(const Variable& base_var, at::TensorGeometry view_, std::shared_ptr<Function> fn_)
-  : base(base_var)
-  , view(std::move(view_))
-  , fn(std::move(fn_))
-{
-  num_inputs = 1;
-
-  // Take the next_functions of fn as our own, except for index 0 which goes
+CopySlices::CopySlices(
+    const Variable& base_var,
+    at::TensorGeometry view_,
+    std::shared_ptr<Function> fn_)
+    : Function(/*num_inputs=*/1),
+      base(base_var),
+      view(std::move(view_)),
+      fn(std::move(fn_)) {
+  // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
-  const auto num_connections = fn->next_functions.size();
-  next_functions.reserve(num_connections);
-  next_functions.push_back(base_var.gradient_edge());
-  for (size_t i = 1; i < num_connections; i++) {
-    next_functions.push_back(fn->next_functions[i]);
+  const auto num_outputs = fn->num_outputs();
+  next_edges_.reserve(num_outputs);
+  add_next_edge(base_var.gradient_edge());
+  for (size_t i = 1; i < num_outputs; i++) {
+    add_next_edge(fn->next_edge(i));
   }
 }
 
@@ -62,7 +69,7 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   // double-backprop is disabled.
   auto res = (*fn)({ grad_slice.clone() });
 
-  variable_list grad_inputs(next_functions.size());
+  variable_list grad_inputs(num_outputs());
   for (size_t i = 0; i < res.size(); i++) {
     if (should_compute_output(i)) {
       TORCH_ASSERT(res[i].defined());
@@ -78,7 +85,7 @@ auto CopySlices::apply(const variable_list& inputs) -> variable_list {
   return grad_inputs;
 }
 
-void CopySlices::releaseVariables() {
+void CopySlices::release_variables() {
   fn = nullptr;
 }
 
