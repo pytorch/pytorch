@@ -5423,8 +5423,47 @@ class TestTorch(TestCase):
         torch.set_flush_denormal(False)
 
     def test_unique(self):
-        pass
-    
+        x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
+        expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
+        expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
+        empty_inverse = torch.LongTensor([])
+
+        if TEST_NUMPY:
+            x_unique, x_inverse = x.unique_1d()
+            self.assertEqual(
+                expected_unique.numpy().tolist(),
+                sorted(x_unique.numpy().tolist())
+            ) 
+            self.assertEqual(empty_inverse, x_inverse)
+
+            x_unique, x_inverse = x.unique_1d(return_inverse=True)
+            self.assertEqual(
+                expected_unique.numpy().tolist(),
+                sorted(x_unique.numpy().tolist())
+            )
+            self.assertEqual(expected_inverse.numel(), x_inverse.numel())
+            
+        x_unique, x_inverse = x.unique_1d(sorted=True)
+        self.assertEqual(expected_unique, x_unique)
+        self.assertEqual(empty_inverse, x_inverse)
+
+        x_unique, x_inverse = x.unique_1d(sorted=True, return_inverse=True)
+        self.assertEqual(expected_unique, x_unique)
+        self.assertEqual(expected_inverse, x_inverse)
+
+        # Tests 1-D unique on a higher rank tensor.
+        y = x.view(2, 2, 2)
+        y_unique, y_inverse = y.unique_1d(sorted=True, return_inverse=True)
+        self.assertEqual(expected_unique, y_unique)
+        self.assertEqual(expected_inverse, y_inverse)
+        
+        # Tests invalid use cases.
+        self.assertRaises(
+            RuntimeError, lambda: torch.IntTensor([1, 2, 3]).unique_1d())
+        self.assertRaises(
+            RuntimeError, lambda: torch.FloatTensor([1., 2.5, 3.5]).unique_1d())
+        
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
