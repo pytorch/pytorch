@@ -102,6 +102,10 @@ FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
 FILE(GLOB native_cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cudnn/*.cpp")
 FILE(GLOB native_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cuda/*.cu")
 
+FILE(GLOB_RECURSE cuda_h
+     RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+     "cuda/*.cuh" "cuda/*.h" "cudnn/*.cuh" "cudnn/*.h")
+
 FILE(GLOB cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cudnn/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
@@ -298,6 +302,11 @@ ENDFOREACH()
 FOREACH(HEADER ${generated_h})
   INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${HEADER}
   DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+ENDFOREACH()
+FOREACH(HEADER ${cuda_h})
+  # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
+  GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
 INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)

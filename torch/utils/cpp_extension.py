@@ -104,7 +104,7 @@ class BuildExtension(build_ext):
                         cflags = cflags['nvcc']
                     cflags += ['--compiler-options', "'-fPIC'"]
                 elif isinstance(cflags, dict):
-                        cflags = cflags['cxx']
+                    cflags = cflags['cxx']
                 # NVCC does not allow multiple -std to be passed, so we avoid
                 # overriding the option if the user explicitly passed it.
                 if not any(flag.startswith('-std=') for flag in cflags):
@@ -195,7 +195,11 @@ def include_paths(cuda=False):
     lib_include = os.path.join(torch_path, 'lib', 'include')
     # Some internal (old) Torch headers don't properly prefix their includes,
     # so we need to pass -Itorch/lib/include/TH as well.
-    paths = [lib_include, os.path.join(lib_include, 'TH')]
+    paths = [
+        lib_include,
+        os.path.join(lib_include, 'TH'),
+        os.path.join(lib_include, 'THC')
+    ]
     if cuda:
         paths.append(_join_cuda_home('include'))
     return paths

@@ -142,7 +142,7 @@ PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
   auto state_lock = info.state->lock();
 
   Node *n = ctor(*graph);
-  auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
+  auto sl = std::make_shared<StringSourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
 
   for (Variable input : inputs) {

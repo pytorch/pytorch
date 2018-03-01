@@ -7,7 +7,7 @@
 #include <cuda.h>
 #include <cuda_fp16.h>
 
-namespace at { namespace native { namespace cuda {
+namespace at { namespace cuda {
 
 template <typename T>
 struct AccumulateType { };
@@ -26,4 +26,4 @@ template<typename T>
 using acc_type = typename AccumulateType<T>::type;
 
 
-}}}  // namespace at::native::cuda
+}}  // namespace at::cuda

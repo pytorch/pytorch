@@ -19,7 +19,6 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::TensorList;
-using operator_constructor = std::function<TensorOp(jit::Node*)>;
 
 namespace {
 
@@ -88,7 +87,7 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   return res;
 }
 
-std::unordered_map<std::string, operator_constructor> constructors = {
+ConstructorsMap constructors = {
   ${constructors}
 };
 
@@ -110,14 +109,22 @@ std::string getDescriptor(jit::Node* n) {
 
 } // anonymous namespace
 
-TensorOp getTensorOp(jit::Node* n) {
+ConstructorsMap::iterator findTensorOp(jit::Node* n) {
   auto signature = getDescriptor(n);
-  try {
-    return constructors.at(signature)(n);
-  } catch (std::out_of_range &e) {
-    throw std::runtime_error("Unsupported op descriptor: " + signature + ". "
-                             "File a bug report.");
+  return constructors.find(signature);
+}
+bool hasTensorOp(jit::Node* n) {
+  return constructors.end() != findTensorOp(n);
+}
+TensorOp getTensorOp(jit::Node* n) {
+  auto itr = findTensorOp(n);
+  if (itr == constructors.end()) {
+    throw std::runtime_error(
+        "Unsupported op descriptor: " + getDescriptor(n) +
+        ". "
+        "File a bug report.");
   }
-};
+  return itr->second(n);
+}
 
 }} // namespace torch::jit
