@@ -1,10 +1,10 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
-#include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 
-#include "ATen/cuda/AccumulateType.h"
+#include "ATen/cuda/AccumulateType.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
+#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>
@@ -211,11 +211,12 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
    dim3 grid(THCCeilDiv(stride, (int64_t) 4));
    dim3 block(128);
 
-   DISPATCH_ALL_FLOATING_TYPES(grad.type(), "embedding_backward", [&]() {
+   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
+     using cuda_scalar_t = cuda::type<scalar_t>;
      embedding_backward_feature_kernel<<<grid, block, 0, stream>>>(
        indices.data<int64_t>(),
-       grad.data<scalar_t>(),
-       grad_weight.data<scalar_t>(),
+       grad.data<cuda_scalar_t>(),
+       grad_weight.data<cuda_scalar_t>(),
        num_indices,
        stride,
        padding_idx);
@@ -286,12 +287,13 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   dim3 grid(THCCeilDiv(num_indices, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
 
-  DISPATCH_ALL_FLOATING_TYPES(grad.type(), "embedding_backward", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
+    using cuda_scalar_t = cuda::type<scalar_t>;
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
-      grad.data<scalar_t>(),
-      grad_weight.data<scalar_t>(),
+      grad.data<cuda_scalar_t>(),
+      grad_weight.data<cuda_scalar_t>(),
       count.defined() ? count.data<int64_t>() : nullptr,
       num_indices,
       stride,
@@ -332,10 +334,11 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   dim3 block(128);
   int dim = self.stride(0);
 
-  DISPATCH_ALL_FLOATING_TYPES(self.type(), "embedding_backward", [&]() {
-    using accscalar_t = cuda::acc_type<scalar_t>;
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
+    using cuda_scalar_t = cuda::type<scalar_t>;
+    using accscalar_t = cuda::acc_type<cuda_scalar_t>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
-      self.data<scalar_t>(),
+      self.data<cuda_scalar_t>(),
       unique_indices.data<int64_t>(),
       scalar_cast<accscalar_t>(max_norm),
       scalar_cast<accscalar_t>(norm_type),

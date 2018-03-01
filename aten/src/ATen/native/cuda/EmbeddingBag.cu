@@ -1,10 +1,10 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
-#include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 
-#include "ATen/cuda/AccumulateType.h"
+#include "ATen/cuda/AccumulateType.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
+#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCNumerics.cuh>
@@ -172,10 +172,11 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
-  DISPATCH_ALL_FLOATING_TYPES(weight.type(), "embedding_bag_cuda", [&]() {
-    EmbeddingBag_updateOutputKernel<scalar_t><<<grid, block, 0, stream>>>(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(weight.type(), "embedding_bag_cuda", [&] {
+    using cuda_scalar_t = cuda::type<scalar_t>;
+    EmbeddingBag_updateOutputKernel<cuda_scalar_t><<<grid, block, 0, stream>>>(
         indices.data<int64_t>(), offsets.data<int64_t>(),
-        weight.data<scalar_t>(), output.data<scalar_t>(),
+        weight.data<cuda_scalar_t>(), output.data<cuda_scalar_t>(),
         offset2bag.data<int64_t>(), numIndices, numBags, stride, mode,
         bag_size.data<int64_t>());
   });
@@ -265,12 +266,13 @@ Tensor embedding_bag_backward_cuda(const Tensor &grad_, const Tensor &indices,
 
   dim3 grid(THCCeilDiv(numel, (ptrdiff_t)4), THCCeilDiv(stride, (int64_t)128));
   dim3 block(32, 4);
-  DISPATCH_ALL_FLOATING_TYPES(
-      grad.type(), "embedding_bag_backward_cuda", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+      grad.type(), "embedding_bag_backward_cuda", [&] {
+        using cuda_scalar_t = cuda::type<scalar_t>;
         EmbeddingBag_accGradParametersKernel<
-            scalar_t><<<grid, block, 0, stream>>>(
+            cuda_scalar_t><<<grid, block, 0, stream>>>(
             sorted_indices.data<int64_t>(), orig_indices.data<int64_t>(),
-            grad.data<scalar_t>(), grad_weight.data<scalar_t>(),
+            grad.data<cuda_scalar_t>(), grad_weight.data<cuda_scalar_t>(),
             offset2bag.data<int64_t>(),
             count.defined() ? count.data<int64_t>() : nullptr, numel, stride,
             mode, bag_size.data<int64_t>());
