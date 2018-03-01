@@ -120,6 +120,10 @@ def unused(g):
     return g.op("Undefined")
 
 
+def Constant(g, value):
+    return g.op("Constant", value_t=value)
+
+
 def add(g, self, other, alpha):
     if _scalar(alpha) != 1:
         return _unimplemented("add", "alpha != 1")
