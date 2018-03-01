@@ -5422,6 +5422,9 @@ class TestTorch(TestCase):
         self.assertEqual(double_tensor[2], 0.0, prec=0.0)  # tiny_double to zero
         torch.set_flush_denormal(False)
 
+    def test_unique(self):
+        pass
+    
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2

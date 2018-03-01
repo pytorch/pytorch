@@ -363,6 +363,9 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
+- func: unique(Tensor self, bool return_inverse=false) -> (Tensor, Tensor)
+  variants: method
+
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
 
