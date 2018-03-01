@@ -21,8 +21,7 @@ requirements:
     - gflags
     - lmdb
     - numpy
-    - opencv ==3.3.0
-    - openmpi
+    - opencv
     - python
     - protobuf {{ protobuf }}
     - six
@@ -32,8 +31,7 @@ requirements:
     - gflags
     - lmdb
     - numpy
-    - opencv ==3.3.0
-    - openmpi
+    - opencv
     - protobuf
     - python
     - six

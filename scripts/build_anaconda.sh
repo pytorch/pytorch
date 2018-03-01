@@ -19,9 +19,9 @@ fi
 # to be pulled from conda-forge, which will break with a "can't find
 # libopencv_highgui.so", so we also pin opencv version to 3.3.0 to avoid that
 # issue
-if [[ "${BUILD_ENVIRONMENT}" == *full* ]]; then
-  CONDA_BUILD_ARGS+=(" -c conda-forge")
-fi
+#if [[ "${BUILD_ENVIRONMENT}" == *full* ]]; then
+#  CONDA_BUILD_ARGS+=(" -c conda-forge")
+#fi
 
 # Reinitialize submodules
 git submodule update --init

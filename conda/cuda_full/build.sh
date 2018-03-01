@@ -30,14 +30,16 @@ CMAKE_ARGS+=("-DCUDA_ARCH_NAME=All")
 CMAKE_ARGS+=("-DUSE_GFLAGS=ON")
 CMAKE_ARGS+=("-DUSE_GLOG=ON")
 CMAKE_ARGS+=("-DUSE_GLOO=ON")
-CMAKE_ARGS+=("-DUSE_IBVERBS=ON")
 CMAKE_ARGS+=("-DUSE_LMDB=ON")
-CMAKE_ARGS+=("-DUSE_MPI=ON")
 CMAKE_ARGS+=("-DUSE_NCCL=ON")
 CMAKE_ARGS+=("-DUSE_OPENCV=ON")
 
 # cudnn comes from a module location
 #-DCUDNN_ROOT_DIR=/public/apps/cudnn/v7.0/cuda/ \
+
+# openmpi is needed but can't be included from conda, b/c it's only available
+# in conda-forge, which uses gcc 4.8.5
+CMAKE_ARGS+=("-DUSE_MPI=ON")
 
 # Explicitly turn unused packages off to prevent cmake from trying to find
 # system libraries. If conda packages are built with any system libraries then
