@@ -13,7 +13,6 @@
 #include "serialization.h"
 #include "Module.h"
 #include "Storage.h"
-#include "Tensor.h"
 #include "Stream.h"
 #ifdef _THP_CORE
 #include "utils.h"
