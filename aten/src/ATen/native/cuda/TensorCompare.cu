@@ -2,6 +2,7 @@
 #include "ATen/Dispatch.h"
 
 #include "ATen/cuda/CUDAApplyUtils.cuh"
+#include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
 namespace {
