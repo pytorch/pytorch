@@ -26,15 +26,16 @@
 #include <vector>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/THP.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Dtype.h"
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Generator.h"
+#include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/numpy_stub.h"
 
 namespace torch {
 
@@ -159,7 +160,8 @@ inline at::Tensor PythonArgs::tensor(int i) {
     // a test for Py_None here; instead, you need to mark the argument
     // as *allowing none*; you can do this by writing 'Tensor?' instead
     // of 'Tensor' in the ATen metadata.
-    throw TypeError("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
+    throw TypeError("expected Variable as argument %d, but got %s", i,
+        Py_TYPE(args[i])->tp_name);
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
 }
@@ -191,7 +193,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Variable as element %d in argument %d, but got %s",
-                 idx, i, THPUtils_typename(args[i]));
+                 idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -212,7 +214,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Variable as element %d in argument %d, but got %s",
-                 idx, i, THPUtils_typename(args[i]));
+                 idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }

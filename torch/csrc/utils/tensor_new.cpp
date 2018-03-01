@@ -5,15 +5,17 @@
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/numpy_stub.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_scalars.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/autograd/variable.h"
 
 static const int MAX_DIMS = 128;
 
