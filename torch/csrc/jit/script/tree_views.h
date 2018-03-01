@@ -260,10 +260,10 @@ struct Attribute : public TreeView {
   Ident name() const {
     return Ident(subtree(0));
   }
-  Expr value() const {
-    return Expr(subtree(1));
+  TreeRef value() const {
+    return subtree(1);
   }
-  static Attribute create(const SourceRange& range, const Ident& name, const Expr& value) {
+  static Attribute create(const SourceRange& range, const Ident& name, const TreeRef& value) {
     return Attribute(Compound::create(TK_ATTRIBUTE, range, {name, value}));
   }
 };

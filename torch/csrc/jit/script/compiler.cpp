@@ -514,9 +514,9 @@ struct to_ir {
           ListAttributeMap list_attributes{};
           for (const auto& attr : apply.attributes()) {
             const auto& name = attr.name().name();
-            const Expr& value = attr.value();
+            const TreeRef& value = attr.value();
             // TODO: handle non-float attributes
-            switch (value.kind()) {
+            switch (value->kind()) {
               case TK_CONST: {
                 auto v = value.get()->tree(0)->doubleValue();
                 const auto& type = value.get()->tree(1)->stringValue();
@@ -531,7 +531,7 @@ struct to_ir {
                 list_attributes.insert({name, {std::move(vs), type}});
               } break;
             default:
-                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value->kind();
                 break;
             }
           }

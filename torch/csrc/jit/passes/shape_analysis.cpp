@@ -126,7 +126,7 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(tp->withSizesStrides(sizes, strides));
     } break;
     case kview: {
-      node->output()->setType(types.at(0)->withSizes(node->is(ksizes)));
+      node->output()->setType(types.at(0)->withSizes(node->is(ksize)));
     } break;
     case kReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
