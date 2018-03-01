@@ -492,6 +492,7 @@ class TestJit(TestCase):
         torch._C._jit_pass_dce(trace)
         self.assertExpectedTrace(trace)
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     def test_traced_module(self):
         input = Variable(torch.randn(3, 10))
         hx = Variable(torch.randn(3, 20))
