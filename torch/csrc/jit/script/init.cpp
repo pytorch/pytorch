@@ -9,7 +9,13 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 
 // The visibility attribute is to avoid a warning about storing a field in the
 // struct that has a different visibility (from pybind) than the struct.
-struct __attribute__((visibility("hidden"))) PythonResolver : public Resolver {
+#ifdef _WIN32
+#define VISIBILITY_HIDDEN
+#else
+#define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
+#endif
+
+struct VISIBILITY_HIDDEN PythonResolver : public Resolver {
   PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
 
   Node* resolveCall(SourceRange location, Node* n) const override {
