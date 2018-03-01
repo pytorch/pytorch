@@ -25,18 +25,15 @@ echo "Installing caffe2 to ${PREFIX}"
 PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
 CMAKE_ARGS=()
 
-# Default leveldb from conda-forge doesn't work. If you want to use leveldb,
-# use this old pip version
-# pip install leveldb==0.18
-CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
-
 # This installation defaults to using MKL because it is much faster. If you
 # want to build without MKL then you should also remove mkl from meta.yaml in
 # addition to removing the flags below
 CMAKE_ARGS+=("-DBLAS=MKL")
 
-# There is a separate build folder for CUDA builds
+# Minimal packages
 CMAKE_ARGS+=("-DUSE_CUDA=OFF")
+CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
+CMAKE_ARGS+=("-DUSE_MPI=OFF")
 CMAKE_ARGS+=("-DUSE_NCCL=OFF")
 
 # Install under specified prefix
