@@ -20,7 +20,7 @@ macro(caffe2_interface_library SRC DST)
       # Assume everything else is like gcc
       target_link_libraries(
           ${DST} INTERFACE
-          -Wl,--whole-archive $<TARGET_FILE:${SRC}> -Wl,--no-whole-archive)
+          "-Wl,--whole-archive $<TARGET_FILE:${SRC}> -Wl,--no-whole-archive")
     endif()
     # Link all interface link libraries of the src target as well.
     # For static library, we need to explicitly depend on all the libraries
