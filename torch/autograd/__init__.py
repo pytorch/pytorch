@@ -140,7 +140,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
 
 def variable(*args, **kwargs):
     warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")
-    return torch._C._VariableFunctions.tensor(*args, **kwargs)
+    return torch.tensor(*args, **kwargs)
 
 if not torch._C._autograd_init():
     raise RuntimeError("autograd initialization failed")
