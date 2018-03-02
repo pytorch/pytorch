@@ -364,7 +364,10 @@
   variants: method
 
 - func: unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
-  
+  dispatch:
+    CPU: unique_cpu
+    CUDA: unique_cuda
+
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
 
