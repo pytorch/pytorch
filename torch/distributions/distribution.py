@@ -133,7 +133,7 @@ class Distribution(object):
         use `itertools.product(m.enumerate_support())`.
 
         Returns:
-            Variable or Tensor iterating over dimension 0.
+            Tensor iterating over dimension 0.
         """
         raise NotImplementedError
 
