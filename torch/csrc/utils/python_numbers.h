@@ -2,6 +2,8 @@
 
 #include <Python.h>
 #include <stdint.h>
+#include <iostream>
+#include <string>
 #include <stdexcept>
 #include "torch/csrc/Exceptions.h"
 
@@ -52,7 +54,16 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
     throw python_error();
   }
   if (overflow != 0) {
-    throw std::runtime_error("Overflow when unpacking long");
+    auto objRepr = PyObject_Repr(obj);
+  #if PY_MAJOR_VERSION == 2
+    auto objString = PyString_AsString(objRepr);
+  #else
+    auto objString = PyUnicode_AsUTF8(objRepr);
+  #endif
+    Py_XDECREF(objRepr);
+    throw std::runtime_error("Overflow when unpacking long."
+      " The int passed in (" + std::string(objString) + ") is not representable"
+      " by int64, maybe you should convert it to float first");
   }
   return (int64_t)value;
 }
@@ -71,15 +82,16 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   }
   if (PyLong_Check(obj)) {
     double value = PyLong_AsDouble(obj);
-
     // convert from python error to C exception
-    if (PyErr_Occurred()) {
+    if (PyErr_Occurred() &&
+     PyErr_GivenExceptionMatches(PyErr_Occurred(), PyExc_OverflowError)) {
       PyErr_Clear();
       throw std::runtime_error("Overflow when unpacking double");
     }
+    // FIXME: can't find a test case to invoke following line
     if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      // FIXME: warning instead of raise exception
-      throw std::runtime_error("Precision loss when unpacking double");
+      std::cerr << "WARNING: Precision loss "
+        "when converting int to double" << std::endl;
     }
     return value;
   }
