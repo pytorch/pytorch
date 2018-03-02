@@ -148,7 +148,7 @@ class Conv1d(_ConvNd):
     Examples::
 
         >>> m = nn.Conv1d(16, 33, 3, stride=2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 50))
+        >>> input = torch.randn(20, 16, 50)
         >>> output = m(input)
 
     .. _cross-correlation:
@@ -267,7 +267,7 @@ class Conv2d(_ConvNd):
         >>> m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
         >>> # non-square kernels and unequal stride and with padding and dilation
         >>> m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 100))
+        >>> input = torch.randn(20, 16, 50, 100)
         >>> output = m(input)
 
     .. _cross-correlation:
@@ -379,7 +379,7 @@ class Conv3d(_ConvNd):
         >>> m = nn.Conv3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(4, 2, 0))
-        >>> input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
+        >>> input = torch.randn(20, 16, 10, 50, 100)
         >>> output = m(input)
 
     .. _cross-correlation:
@@ -598,10 +598,10 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         >>> m = nn.ConvTranspose2d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.ConvTranspose2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
-        >>> input = autograd.Variable(torch.randn(20, 16, 50, 100))
+        >>> input = torch.randn(20, 16, 50, 100)
         >>> output = m(input)
         >>> # exact output size can be also specified as an argument
-        >>> input = autograd.Variable(torch.randn(1, 16, 12, 12))
+        >>> input = torch.randn(1, 16, 12, 12)
         >>> downsample = nn.Conv2d(16, 16, 3, stride=2, padding=1)
         >>> upsample = nn.ConvTranspose2d(16, 16, 3, stride=2, padding=1)
         >>> h = downsample(input)
@@ -713,7 +713,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         >>> m = nn.ConvTranspose3d(16, 33, 3, stride=2)
         >>> # non-square kernels and unequal stride and with padding
         >>> m = nn.Conv3d(16, 33, (3, 5, 2), stride=(2, 1, 1), padding=(0, 4, 2))
-        >>> input = autograd.Variable(torch.randn(20, 16, 10, 50, 100))
+        >>> input = torch.randn(20, 16, 10, 50, 100)
         >>> output = m(input)
 
     .. _cross-correlation:

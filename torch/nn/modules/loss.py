@@ -71,8 +71,8 @@ class L1Loss(_Loss):
     Examples::
 
         >>> loss = nn.L1Loss()
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -165,9 +165,9 @@ class NLLLoss(_WeightedLoss):
         >>> m = nn.LogSoftmax()
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C = 3 x 5
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
+        >>> target = torch.LongTensor([1, 0, 4])
         >>> output = loss(m(input), target)
         >>> output.backward()
         >>>
@@ -176,10 +176,10 @@ class NLLLoss(_WeightedLoss):
         >>> N, C = 5, 4
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C x height x width
-        >>> data = Variable(torch.randn(N, 16, 10, 10))
+        >>> data = torch.randn(N, 16, 10, 10)
         >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = Variable(torch.LongTensor(N, 8, 8).random_(0, C))
+        >>> target = torch.LongTensor(N, 8, 8).random_(0, C)
         >>> output = loss(m(data), target)
         >>> output.backward()
     """
@@ -235,8 +235,8 @@ class PoissonNLLLoss(_Loss):
     Examples::
 
         >>> loss = nn.PoissonNLLLoss()
-        >>> log_input = autograd.Variable(torch.randn(5, 2), requires_grad=True)
-        >>> target = autograd.Variable(torch.randn(5, 2))
+        >>> log_input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
         >>> output = loss(log_input, target)
         >>> output.backward()
     """
@@ -359,8 +359,8 @@ class MSELoss(_Loss):
     Examples::
 
         >>> loss = nn.MSELoss()
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -419,8 +419,8 @@ class BCELoss(_WeightedLoss):
 
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
-        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
-        >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+        >>> input = torch.randn(3, requires_grad=True)
+        >>> target = torch.FloatTensor(3).random_(2)
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
@@ -480,11 +480,11 @@ class BCEWithLogitsLoss(Module):
 
      Examples::
 
-         >>> loss = nn.BCEWithLogitsLoss()
-         >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
-         >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
-         >>> output = loss(input, target)
-         >>> output.backward()
+        >>> loss = nn.BCEWithLogitsLoss()
+        >>> input = torch.randn(3, requires_grad=True)
+        >>> target = torch.FloatTensor(3).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
     def __init__(self, weight=None, size_average=True, reduce=True):
         super(BCEWithLogitsLoss, self).__init__()
@@ -728,8 +728,8 @@ class CrossEntropyLoss(_WeightedLoss):
     Examples::
 
         >>> loss = nn.CrossEntropyLoss()
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.LongTensor(3).random_(5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.LongTensor(3).random_(5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -914,9 +914,9 @@ class TripletMarginLoss(Module):
         - Output: :math:`(N, 1)`
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> input3 = autograd.Variable(torch.randn(100, 128))
+    >>> input1 = torch.randn(100, 128, requires_grad=True)
+    >>> input2 = torch.randn(100, 128, requires_grad=True)
+    >>> input3 = torch.randn(100, 128, requires_grad=True)
     >>> output = triplet_loss(input1, input2, input3)
     >>> output.backward()
 

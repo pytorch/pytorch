@@ -110,7 +110,7 @@ class BatchNorm1d(_BatchNorm):
         >>> m = nn.BatchNorm1d(100)
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm1d(100, affine=False)
-        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> input = torch.randn(20, 100)
         >>> output = m(input)
 
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
@@ -179,7 +179,7 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100)
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm2d(100, affine=False)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
+        >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
 
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
@@ -249,7 +249,7 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100)
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm3d(100, affine=False)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
+        >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
 
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
