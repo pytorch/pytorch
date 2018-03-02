@@ -171,8 +171,8 @@ class Distribution(object):
             ValueError: when the rightmost dimensions of `value` do not match the
                 distribution's batch and event shapes.
         """
-        if not (torch.is_tensor(value) or isinstance(value, Variable)):
-            raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
+        if not isinstance(value, torch.Tensor):
+            raise ValueError('The value argument to log_prob must be a Tensor')
 
         event_dim_start = len(value.size()) - len(self._event_shape)
         if value.size()[event_dim_start:] != self._event_shape:
