@@ -77,6 +77,10 @@ if(USE_NNPACK)
   endif()
 endif()
 
+if(USE_OBSERVERS)
+  list(APPEND Caffe2_DEPENDENCY_LIBS Caffe2_CPU_OBSERVER)
+endif()
+
 # ---[ On Android, Caffe2 uses cpufeatures library in the thread pool
 if (ANDROID)
   if (NOT TARGET cpufeatures)
