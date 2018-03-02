@@ -17,7 +17,7 @@ from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
 
 
-conv1d = _add_docstr(torch._C._VariableFunctions.conv1d, r"""
+conv1d = _add_docstr(torch.conv1d, r"""
 conv1d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 1D convolution over an input signal composed of several input
@@ -45,7 +45,7 @@ Examples::
     >>> F.conv1d(inputs, filters)
 """)
 
-conv2d = _add_docstr(torch._C._VariableFunctions.conv2d, r"""
+conv2d = _add_docstr(torch.conv2d, r"""
 conv2d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 2D convolution over an input image composed of several input
@@ -74,7 +74,7 @@ Examples::
     >>> F.conv2d(inputs, filters, padding=1)
 """)
 
-conv3d = _add_docstr(torch._C._VariableFunctions.conv3d, r"""
+conv3d = _add_docstr(torch.conv3d, r"""
 conv3d(input, weight, bias=None, stride=1, padding=0, dilation=1, groups=1) -> Tensor
 
 Applies a 3D convolution over an input image composed of several input
@@ -102,7 +102,7 @@ Examples::
     >>> F.conv3d(inputs, filters)
 """)
 
-conv_transpose1d = _add_docstr(torch._C._VariableFunctions.conv_transpose1d, r"""
+conv_transpose1d = _add_docstr(torch.conv_transpose1d, r"""
 conv_transpose1d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 1D transposed convolution operator over an input signal
@@ -127,7 +127,7 @@ Args:
       a tuple (dW,). Default: 1
 """)
 
-conv_transpose2d = _add_docstr(torch._C._VariableFunctions.conv_transpose2d, r"""
+conv_transpose2d = _add_docstr(torch.conv_transpose2d, r"""
 conv_transpose2d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 2D transposed convolution operator over an input image
@@ -152,7 +152,7 @@ Args:
       a tuple (dH, dW). Default: 1
 """)
 
-conv_transpose3d = _add_docstr(torch._C._VariableFunctions.conv_transpose3d, r"""
+conv_transpose3d = _add_docstr(torch.conv_transpose3d, r"""
 conv_transpose3d(input, weight, bias=None, stride=1, padding=0, output_padding=0, groups=1, dilation=1) -> Tensor
 
 Applies a 3D transposed convolution operator over an input image
@@ -330,7 +330,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = torch._C._VariableFunctions.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -457,7 +457,7 @@ def adaptive_max_pool1d(input, output_size, return_indices=False):
         output_size: the target output size (single integer)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    ret = torch._C._VariableFunctions.adaptive_max_pool1d(input, output_size)
+    ret = torch.adaptive_max_pool1d(input, output_size)
     return ret if return_indices else ret[0]
 
 
@@ -491,7 +491,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
     return ret if return_indices else ret[0]
 
 
-adaptive_avg_pool1d = _add_docstr(torch._C._VariableFunctions.adaptive_avg_pool1d, r"""
+adaptive_avg_pool1d = _add_docstr(torch.adaptive_avg_pool1d, r"""
 adaptive_avg_pool1d(input, output_size) -> Tensor
 
 Applies a 1D adaptive average pooling over an input signal composed of
@@ -687,10 +687,10 @@ def selu(input, inplace=False):
     See :class:`~torch.nn.SELU` for more details.
     """
     if inplace:
-        return torch._C._VariableFunctions.selu_(input)
-    return torch._C._VariableFunctions.selu(input)
+        return torch.selu_(input)
+    return torch.selu(input)
 
-selu_ = _add_docstr(torch._C._VariableFunctions.selu_, r"""
+selu_ = _add_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
 
 In-place verison of :func:`~selu`.
@@ -737,11 +737,11 @@ def rrelu(input, lower=1. / 8, upper=1. / 3, training=False, inplace=False):
     See :class:`~torch.nn.RReLU` for more details.
     """
     if inplace:
-        return torch._C._VariableFunctions.rrelu_(input, lower, upper, training)
-    return torch._C._VariableFunctions.rrelu(input, lower, upper, training)
+        return torch.rrelu_(input, lower, upper, training)
+    return torch.rrelu(input, lower, upper, training)
 
 
-rrelu_ = _add_docstr(torch._C._VariableFunctions.rrelu_, r"""
+rrelu_ = _add_docstr(torch.rrelu_, r"""
 rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
 
 In-place version of :func:`~rrelu`.
@@ -1063,8 +1063,8 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
             padding_idx = -1
     if max_norm is not None:
         with torch.no_grad():
-            torch._C._VariableFunctions.embedding_renorm_(weight, input, max_norm, norm_type)
-    return torch._C._VariableFunctions.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
+            torch.embedding_renorm_(weight, input, max_norm, norm_type)
+    return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
 def embedding_bag(embedding_matrix, indices, offsets=None,
@@ -1158,9 +1158,9 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
 
     if max_norm is not None:
         with torch.no_grad():
-            torch._C._VariableFunctions.embedding_renorm_(weight, input, max_norm, norm_type)
+            torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
-    ret, _, _ = torch._C._VariableFunctions.embedding_bag(
+    ret, _, _ = torch.embedding_bag(
         embedding_matrix,
         indices,
         offsets,
@@ -1181,7 +1181,7 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
         size = list(input.size())
         if reduce(mul, size[2:], size[0]) == 1:
             raise ValueError('Expected more than 1 value per channel when training, got input size {}'.format(size))
-    return torch._C._VariableFunctions.batch_norm(
+    return torch.batch_norm(
         input, weight, bias, running_mean, running_var,
         training, momentum, eps, torch.backends.cudnn.enabled
     )
@@ -1608,7 +1608,7 @@ def hinge_embedding_loss(input, target, margin=1.0, size_average=True, reduce=Tr
 
     See :class:`~torch.nn.HingeEmbeddingLoss` for details.
     """
-    return torch._C._VariableFunctions.hinge_embedding_loss(input, target, margin, size_average, reduce)
+    return torch.hinge_embedding_loss(input, target, margin, size_average, reduce)
 
 
 multilabel_margin_loss = _add_docstr(torch._C._nn.multilabel_margin_loss, r"""

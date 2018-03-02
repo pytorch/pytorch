@@ -275,7 +275,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
         weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])
 
-        output, hy, cy, reserve, new_weight_buf = torch._C._VariableFunctions._cudnn_rnn(
+        output, hy, cy, reserve, new_weight_buf = torch._cudnn_rnn(
             input, weight_arr, weight_stride0,
             Variable(flat_weight) if flat_weight is not None else None,
             hx, cx,

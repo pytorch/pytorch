@@ -11,7 +11,7 @@ MODE_BORDER = 1
 
 def grid_sampler(input, grid, padding_mode):
     if cudnn.is_acceptable(input.data) and padding_mode == 'zeros' and input.dim() == 4:
-        return torch._C._VariableFunctions.cudnn_grid_sampler(input, grid)
+        return torch.cudnn_grid_sampler(input, grid)
     else:
         return GridSampler.apply(input, grid, padding_mode)
 
@@ -24,7 +24,7 @@ def affine_grid_generator(theta, size):
         if not cudnn.is_acceptable(theta.data):
             raise RuntimeError("AffineGridGenerator generator theta not acceptable for CuDNN")
         N, C, H, W = size
-        return torch._C._VariableFunctions.cudnn_affine_grid_generator(theta, N, C, H, W)
+        return torch.cudnn_affine_grid_generator(theta, N, C, H, W)
     else:
         return AffineGridGenerator.apply(theta, size)
 

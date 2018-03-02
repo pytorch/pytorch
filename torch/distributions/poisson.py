@@ -7,12 +7,6 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
-def _poisson(rate):
-    if not isinstance(rate, Variable):
-        return torch._C._VariableFunctions.poisson(Variable(rate)).data
-    return torch._C._VariableFunctions.poisson(rate)
-
-
 class Poisson(ExponentialFamily):
     r"""
     Creates a Poisson distribution parameterized by `rate`, the rate parameter.
@@ -52,7 +46,7 @@ class Poisson(ExponentialFamily):
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            return _poisson(self.rate.expand(shape))
+            return torch.poisson(self.rate.expand(shape))
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
