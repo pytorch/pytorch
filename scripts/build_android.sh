@@ -86,21 +86,6 @@ CMAKE_ARGS+=("-DUSE_MOBILE_OPENGL=OFF")
 # Use-specified CMake arguments go last to allow overridding defaults
 CMAKE_ARGS+=($@)
 
-USE_GCC=true
-for arg in ${CMAKE_ARGS[@]};do
-  if [ $arg == "-DANDROID_TOOLCHAIN=clang" ];then
-    USE_GCC=false
-  elif [ $arg == "-DANDROID_TOOLCHAIN=gcc" ];then
-    USE_GCC=true
-  fi
-done
-
-if $USE_GCC;then
-  CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-s")
-else
-  CMAKE_ARGS+=("-DCMAKE_EXE_LINKER_FLAGS=-s")
-fi
-
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=../install \
     -DCMAKE_BUILD_TYPE=Release \
