@@ -2,9 +2,11 @@
 #include "ATen/Dispatch.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/CUDAHalf.cuh"
-#include "ATen/cuda/CUDAHalfMath.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
+
+#include <THC/THCTensorTypeUtils.cuh>
+#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 namespace {
 template <typename scalar_t>
@@ -53,15 +55,6 @@ struct CmpOpCUDA<Comparator, half> {
   }
 };
 
-template<typename scalar>
-using LeOpCUDA = CmpOpCUDA<std::less_equal, scalar>;
-template<typename scalar>
-using GeOpCUDA = CmpOpCUDA<std::greater_equal, scalar>;
-template<typename scalar>
-using EqOpCUDA = CmpOpCUDA<std::equal_to, scalar>;
-template<typename scalar>
-using NeOpCUDA = CmpOpCUDA<std::not_equal_to, scalar>;
-
 template<template<typename T> class Comparator>
 struct CmpOpFloatingCUDA {
   static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
@@ -74,10 +67,33 @@ struct CmpOpFloatingCUDA {
   }
 };
 
-using LeOpFloatingCUDA = CmpOpFloatingCUDA<std::less_equal>;
-using GeOpFloatingCUDA = CmpOpFloatingCUDA<std::greater_equal>;
-using EqOpFloatingCUDA = CmpOpFloatingCUDA<std::equal_to>;
-using NeOpFloatingCUDA = CmpOpFloatingCUDA<std::not_equal_to>;
+template<template<typename T> class Comparator>
+at::Tensor cmp_cuda(const at::Tensor& self, at::Scalar other, const char* op_name) {
+  at::Tensor result = self.type().toScalarType(at::kByte).tensor(self.sizes());
+  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+    CmpOpFloatingCUDA<Comparator>::apply(result, self, other);
+  }
+  else {
+    AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
+      CmpOpCUDA<Comparator, scalar_t>::apply(result, self, other);
+    });
+  }
+  return result;
+}
+
+template<template<typename T> class Comparator>
+at::Tensor& cmp_out_cuda(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
+  result.resize_(self.sizes());
+  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+    CmpOpFloatingCUDA<Comparator>::apply(result, self, other);
+  }
+  else {
+    AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
+      CmpOpCUDA<Comparator, scalar_t>::apply(result, self, other);
+    });
+  }
+  return result;
+}
 } // namespace
 
 namespace at { namespace native {
@@ -92,55 +108,51 @@ Tensor _s_where_cuda(
   return ret;
 }
 
-Tensor& le_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
-  result.resize_(self.sizes());
-  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    LeOpFloatingCUDA::apply(result, self, other);
-  }
-  else {
-    AT_DISPATCH_ALL_MATH_TYPES(self.type(), "le", [&]() {
-      LeOpCUDA<scalar_t>::apply(result, self, other);
-    });
-  }
-  return result;
+Tensor lt_cuda(const Tensor& self, Scalar other) {
+  return cmp_cuda<std::less>(self, other, "lt");
 }
 
-Tensor& ge_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
-  result.resize_(self.sizes());
-  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    GeOpFloatingCUDA::apply(result, self, other);
-  }
-  else {
-    AT_DISPATCH_ALL_MATH_TYPES(self.type(), "ge", [&]() {
-      GeOpCUDA<scalar_t>::apply(result, self, other);
-    });
-  }
-  return result;
+Tensor gt_cuda(const Tensor& self, Scalar other) {
+  return cmp_cuda<std::greater>(self, other, "gt");
 }
 
-Tensor& eq_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
-  result.resize_(self.sizes());
-  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    EqOpFloatingCUDA::apply(result, self, other);
-  }
-  else {
-    AT_DISPATCH_ALL_MATH_TYPES(self.type(), "eq", [&]() {
-      EqOpCUDA<scalar_t>::apply(result, self, other);
-    });
-  }
-  return result;
+Tensor le_cuda(const Tensor& self, Scalar other) {
+  return cmp_cuda<std::less_equal>(self, other, "le");
 }
 
-Tensor& ne_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
-  result.resize_(self.sizes());
-  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    NeOpFloatingCUDA::apply(result, self, other);
-  }
-  else {
-    AT_DISPATCH_ALL_MATH_TYPES(self.type(), "ne", [&]() {
-      NeOpCUDA<scalar_t>::apply(result, self, other);
-    });
-  }
-  return result;
+Tensor ge_cuda(const Tensor& self, Scalar other) {
+  return cmp_cuda<std::greater_equal>(self, other, "ge");
+}
+
+Tensor eq_cuda(const Tensor& self, Scalar other) {
+  return cmp_cuda<std::equal_to>(self, other, "eq");
+}
+
+Tensor ne_cuda(const Tensor& self, Scalar other) {
+  return cmp_cuda<std::not_equal_to>(self, other, "ne");
+}
+
+Tensor & lt_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cuda<std::less>(result, self, other, "lt");
+}
+
+Tensor & gt_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cuda<std::greater>(result, self, other, "gt");
+}
+
+Tensor & le_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cuda<std::less_equal>(result, self, other, "le");
+}
+
+Tensor & ge_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cuda<std::greater_equal>(result, self, other, "ge");
+}
+
+Tensor & eq_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cuda<std::equal_to>(result, self, other, "eq");
+}
+
+Tensor & ne_out_cuda(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cuda<std::not_equal_to>(result, self, other, "ne");
 }
 }} // namespace at::native

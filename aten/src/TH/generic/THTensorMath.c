@@ -3678,12 +3678,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
 }
 
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
-  {									\
-    THByteTensor_resizeNd(r_, t->nDimension, t->size, NULL);		\
-    TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
   void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, real value)	\
   {									\
     THTensor_(resizeNd)(r_, t->nDimension, t->size, NULL);		\

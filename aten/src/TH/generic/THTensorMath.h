@@ -114,13 +114,6 @@ TH_API void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInpu
 
 TH_API int THTensor_(equal)(THTensor *ta, THTensor *tb);
 
-TH_API void THTensor_(ltValue)(THByteTensor *r_, THTensor* t, real value);
-TH_API void THTensor_(leValue)(THByteTensor *r_, THTensor* t, real value);
-TH_API void THTensor_(gtValue)(THByteTensor *r_, THTensor* t, real value);
-TH_API void THTensor_(geValue)(THByteTensor *r_, THTensor* t, real value);
-TH_API void THTensor_(neValue)(THByteTensor *r_, THTensor* t, real value);
-TH_API void THTensor_(eqValue)(THByteTensor *r_, THTensor* t, real value);
-
 TH_API void THTensor_(ltValueT)(THTensor *r_, THTensor* t, real value);
 TH_API void THTensor_(leValueT)(THTensor *r_, THTensor* t, real value);
 TH_API void THTensor_(gtValueT)(THTensor *r_, THTensor* t, real value);

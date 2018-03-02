@@ -658,20 +658,13 @@
     - method
     - function
   return: argument 0
-  options:
-    - cname: ltValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: ltTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
+  cname: ltTensor
+  arguments:
+    - arg: THBoolTensor* result
+      output: True
+    - arg: THTensor* self
+      broadcast: other fallback
+    - THTensor* other
 ]]
 [[
   name: lt_
@@ -695,20 +688,13 @@
     - method
     - function
   return: argument 0
-  options:
-    - cname: gtValue
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - THTensor* self
-        - real other
-    - cname: gtTensor
-      arguments:
-        - arg: THBoolTensor* result
-          output: True
-        - arg: THTensor* self
-          broadcast: other fallback
-        - THTensor* other
+  cname: gtTensor
+  arguments:
+    - arg: THBoolTensor* result
+      output: True
+    - arg: THTensor* self
+      broadcast: other fallback
+    - THTensor* other
 ]]
 [[
   name: gt_
