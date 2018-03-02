@@ -40,7 +40,7 @@
     const at::Type& the_type = TYPE;                                     \
     switch (the_type.scalarType()) {                                     \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, uint8_t, __VA_ARGS__)   \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)    \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)  \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)    \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)    \
@@ -57,7 +57,7 @@
     const at::Type& the_type = TYPE;                                     \
     switch (the_type.scalarType()) {                                     \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Byte, uint8_t, __VA_ARGS__)   \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, uint8_t, __VA_ARGS__)   \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Char, int8_t, __VA_ARGS__)    \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)  \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)    \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Int, int32_t, __VA_ARGS__)    \
