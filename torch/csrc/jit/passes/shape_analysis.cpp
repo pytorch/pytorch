@@ -161,10 +161,11 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(tp->withSizesStrides(sizes, strides));
     } break;
     case kview: {
+      JIT_ASSERT(types.size() == 1);
       auto sizes = node->is(ksize);
       bool inferred = false;
       size_t inferred_idx;
-      long long size_product = 1;
+      int64_t size_product = 1;
       for (size_t i=0; i<sizes.size(); ++i) {
         if (sizes[i] == -1) {
           if (inferred)
@@ -177,11 +178,9 @@ void PropagateShapeOnNode(Node * node) {
       }
 
       if (inferred) {
-        if (types.size() != 1) {
-          throw std::runtime_error("expected 1 input for view");
-        }
         auto rep_ten = representativeTensor(types[0]);
-        long long inferred_size = rep_ten.numel() / size_product;
+        JIT_ASSERT(size_product != 0);
+        int64_t inferred_size = rep_ten.numel() / size_product;
         sizes[inferred_idx] = inferred_size;
       }
       node->output()->setType(types.at(0)->withSizes(sizes));
@@ -224,9 +223,7 @@ void PropagateShapeOnNode(Node * node) {
         break;
       }
       op_info.op(stack);
-      if (stack.size() != node->outputs().size()) {
-        throw std::runtime_error("Number of op outputs did not match number of node outputs");
-      }
+      JIT_ASSERT(stack.size() == node->outputs().size());
       for(size_t i = 0; i < stack.size(); ++i) {
         node->outputs()[i]->inferTypeFrom(stack[i]);
       }
