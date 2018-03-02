@@ -620,7 +620,7 @@ class SmoothL1Loss(_Loss):
     where :math:`z_{i}` is given by:
 
     .. math::
-        z_{i} = 
+        z_{i} =
         \begin{cases}
         0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < 1 \\
         |x_i - y_i| - 0.5, & \text{otherwise }
