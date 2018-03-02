@@ -950,10 +950,12 @@ class TestTorch(TestCase):
 
         typecasts = [
             lambda x: x.long(),
-            lambda x: x.int(),
             lambda x: x.short(),
             lambda x: x.byte(),
         ]
+
+        if not IS_WINDOWS:
+            typecasts.append(lambda x: x.int())
 
         shape = (11, 5)
         tensor = cast(torch.LongTensor(shape).random_(-10, 10))
