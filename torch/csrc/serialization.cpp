@@ -81,7 +81,7 @@ inline ssize_t doPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes) 
   return read_bytes;
 }
 
-// Either doesfildes.readinto(buf) or fildes.write(buf)
+// Either does fildes.readinto(buf) or fildes.write(buf)
 static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, bool is_read) {
 #if PY_MAJOR_VERSION >= 3
   auto rw_flag = is_read ? PyBUF_WRITE : PyBUF_READ;
