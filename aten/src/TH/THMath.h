@@ -65,7 +65,7 @@ static inline TYPE TH_pow(TYPE x, TYPE y) { \
   POW_CODE(TYPE) \
 } \
 
-#define DEFINE_POW_WITH_CPOW(TYPE) \
+#define DEFINE_FLOATING_POW(TYPE) \
 static inline TYPE TH_pow(TYPE x, TYPE y) { \
   return pow(x, y); \
 } \
@@ -73,10 +73,10 @@ static inline TYPE TH_pow(TYPE x, TYPE y) { \
 DEFINE_INT_POW(int64_t);
 DEFINE_INT_POW(int32_t);
 DEFINE_INT_POW(int16_t);
-DEFINE_UINT_POW(uint8_t);
 DEFINE_INT_POW(int8_t);
-DEFINE_POW_WITH_CPOW(float);
-DEFINE_POW_WITH_CPOW(double);
+DEFINE_UINT_POW(uint8_t);
+DEFINE_FLOATING_POW(float);
+DEFINE_FLOATING_POW(double);
 
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
@@ -115,7 +115,7 @@ Output was modified to be inf or -inf when input is 1 or -1. */
     WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
     WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
     PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL
-    
+    THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY
     DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
     CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
     PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
