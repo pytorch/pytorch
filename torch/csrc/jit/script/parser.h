@@ -212,7 +212,7 @@ struct Parser {
           auto ident = parseIdent();
           L.expect('=');
           auto v = parseAttributeValue();
-          attributes.push_back(Attribute::create(ident.range(), Ident(ident), Expr(v)));
+          attributes.push_back(Attribute::create(ident.range(), Ident(ident), v));
         } else {
           inputs.push_back(parseExp());
         }
