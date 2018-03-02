@@ -196,8 +196,21 @@ void PropagateShapeOnNode(Node * node) {
     default: {
       auto op_info = getTensorOp(node);
       std::vector<at::Tensor> stack;
+      bool shape_inferenceable = true;
+      // Integral typed inputs are often an indicator that we're indexing into
+      // a tensor, so we should special-case these ops in the shape propagation.
+      // Additionally, passing in a zero representative tensor into an integer
+      // division op causes divide-by-zero errors
       for(auto & type : types) {
+        if (at::isIntegralType(type->scalarType())) {
+          shape_inferenceable = false;
+          break;
+        }
         stack.push_back(representativeTensor(type));
+      }
+      if (!shape_inferenceable) {
+        setDynamicType(node);
+        break;
       }
       op_info.op(stack);
       if (stack.size() != node->outputs().size()) {

@@ -1822,6 +1822,15 @@ class TestJit(TestCase):
         real_outs = cu.test_view_shape_prop(*inputs)
         self.assertEqual(real_outs, outputs)
 
+    def test_integral_shape_inference(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_integral_shape_inference(a) -> (b):
+            b = a / a
+        ''')
+        inputs = [torch.ones(10, 10).type(torch.LongTensor)]
+        outputs = torch.ones(10, 10)
+
+        self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
 if __name__ == '__main__':
     run_tests()
