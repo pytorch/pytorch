@@ -19,6 +19,7 @@ import torch.cuda
 from torch.autograd import Variable
 from torch._six import string_classes
 import torch.backends.cudnn
+import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -53,6 +54,8 @@ try:
     import scipy
 except ImportError:
     TEST_SCIPY = False
+
+TEST_MKL = torch.backends.mkl.is_available()
 
 
 def skipIfNoLapack(fn):

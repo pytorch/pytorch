@@ -101,12 +101,14 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
 FILE(GLOB native_cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cudnn/*.cpp")
 FILE(GLOB native_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cuda/*.cu")
+FILE(GLOB native_mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkl/*.cpp")
 
 FILE(GLOB_RECURSE cuda_h
      RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
      "cuda/*.cuh" "cuda/*.h" "cudnn/*.cuh" "cudnn/*.h")
 
 FILE(GLOB cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cudnn/*.cpp")
+FILE(GLOB mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkl/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
@@ -152,7 +154,7 @@ ADD_CUSTOM_TARGET(aten_files_are_generated
 )
 
 
-SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
+SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
@@ -163,6 +165,9 @@ IF(NOT NO_CUDA)
   SET(all_cpp ${all_cpp} ${ATen_CUDA_SRCS})
   IF(CUDNN_FOUND)
     SET(all_cpp ${all_cpp} ${cudnn_cpp})
+  ENDIF()
+  IF(AT_MKL_ENABLED)
+    SET(all_cpp ${all_cpp} ${mkl_cpp})
   ENDIF()
 endif()
 
@@ -258,6 +263,7 @@ IF(CUDA_FOUND)
     ${CUDA_cusparse_LIBRARY}
     ${CUDA_curand_LIBRARY})
   CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+  CUDA_ADD_CUFFT_TO_TARGET(ATen)
 
   if(CUDNN_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})
