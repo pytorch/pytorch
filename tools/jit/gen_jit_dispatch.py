@@ -8,6 +8,7 @@ template_path = os.path.join(os.path.dirname(__file__), 'templates')
 
 ATEN_DISPATCH_H = CodeTemplate.from_file(template_path + '/aten_dispatch.h')
 ATEN_DISPATCH_CPP = CodeTemplate.from_file(template_path + '/aten_dispatch.cpp')
+ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
 
 ATTR_METHOD_MAP = {
     'int64_t': 'i',
@@ -56,10 +57,14 @@ CONSTRUCTOR = CodeTemplate("""\
 """)
 
 
+def is_magic_method(api_name):
+    return api_name.startswith('__') and api_name.endswith('__')
+
+
 def is_jit_op(decl):
     uses_tensors = any(arg['simple_type'] in {'Tensor', 'TensorList'} for arg in decl['arguments']) or \
         'Tensor' in decl['method_of']
-    return (not decl['api_name'].endswith('_') and
+    return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
             not decl['name'].endswith('_out') and
             not any(arg['simple_type'] == 'Generator' for arg in decl['arguments']) and
             not any(arg['simple_type'] == 'SparseTensor' for arg in decl['arguments']) and
@@ -68,10 +73,14 @@ def is_jit_op(decl):
             uses_tensors)
 
 
+# Scalar overloads like add(Tensor self, Scalar other) are not supported atm.
+# TODO: Why are they not supported?
 skip_scalar_overload = {
     'lt-2': [1], 'gt-2': [1], 'le-2': [1], 'ge-2': [1], 'eq-2': [1], 'ne-2': [1],
     'pow-2': [0, 1], 'add-3': [1], 'sub-3': [1], 'mul-2': [1], 'div-2': [1],
-    'fmod-2': [1], 'remainder-2': [1]
+    'fmod-2': [1], 'remainder-2': [1], '__and__-2': [1], '__or__-2': [1],
+    '__iand__-2': [1], '__ior__-2': [1], '__xor__-2': [1], '__ixor__-2': [1],
+    '__lshift__-2': [1], '__ilshift__-2': [1], '__rshift__-2': [1], '__irshift__-2': [1],
 }
 
 
@@ -90,9 +99,11 @@ def gen_jit_dispatch(declarations, out):
         return arg['simple_type'] in {'Tensor', 'TensorList'}
 
     ops = {}
+    names = set()
     for decl in jit_decls:
         arguments = decl['arguments']
         name = decl['name']
+        names.add(name)
         has_tensorlist = any(arg['simple_type'] == 'TensorList' for arg in arguments)
         scalar_arg_idx = [i for i, arg in enumerate(arguments) if not is_tensor_arg(arg)]
         num_tensor_args = sum(map(is_tensor_arg, arguments))
@@ -186,6 +197,7 @@ def gen_jit_dispatch(declarations, out):
                                                  pos_assignments=pos_assignments,
                                                  num_inputs=num_inputs)
 
+            # If this assert fails, you might need to update skip_scalar_overload
             assert descriptor not in ops, descriptor
             ops[descriptor] = constructor
 
@@ -193,6 +205,10 @@ def gen_jit_dispatch(declarations, out):
     env = {'constructors': sorted(ops.values())}
     write(out, 'aten_dispatch.h', ATEN_DISPATCH_H, env)
     write(out, 'aten_dispatch.cpp', ATEN_DISPATCH_CPP, env)
+
+    strings_env = {'aten_symbols': ["_({}) \\".format(n) for n in sorted(names)]}
+
+    write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
 
 def main():
