@@ -1,9 +1,9 @@
 #pragma once
-#include <iostream>
-#include <sstream>
-#include <typeinfo>
-#include <stdexcept>
 
+#include <ostream>
+#include <sstream>
+#include <stdexcept>
+#include <string>
 
 namespace torch { namespace jit {
 // SourceLocation represents source code-level debug information for a node.
@@ -12,6 +12,7 @@ namespace torch { namespace jit {
 // In the case of using the scripting frontend this will be backed
 // by a SourceRange object
 struct SourceLocation {
+  virtual ~SourceLocation() = default;
   virtual void highlight(std::ostream & out) const = 0;
   void wrapAndRethrowException(const std::exception & e, const std::string & additional = "") {
     std::stringstream msg;
