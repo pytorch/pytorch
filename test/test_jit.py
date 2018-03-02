@@ -1794,11 +1794,10 @@ class TestJit(TestCase):
         traced_model.load_state_dict(state)
         out_state = traced_model(x)
         self.assertEqual(out, out_state)
-        self.assertNotEqual(out,  out_ones)
+        self.assertNotEqual(out, out_ones)
 
     def test_shape_prop_mismatch_output(self):
-        with self.assertRaisesRegex(RuntimeError,
-        "Number of op outputs did not match number of node outputs"):
+        with self.assertRaisesRegex(RuntimeError, "Number of op outputs did not match number of node outputs"):
             cu = torch.jit.CompilationUnit('''
             def test_shape_prop_mismatch_output(a) -> (b):
                 b = slice(a, dim=0, end=-2, start=2, step=1)
@@ -1809,7 +1808,6 @@ class TestJit(TestCase):
 
             real_outs = cu.test_shape_prop_mismatch_output(*inputs)
             self.assertEqual(real_outs, outputs)
-
 
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
@@ -1849,6 +1847,16 @@ class TestJit(TestCase):
         outputs = [torch.ones(20, 10, 10)] * 3
 
         self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
+
+    def test_print_graph_executor(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_print_graph_executor(meme) -> ():
+            print(meme)
+        ''')
+
+        inputs = [torch.ones(5, 5)]
+
+        cu.test_print_graph_executor(*inputs)
 
 
 if __name__ == '__main__':

@@ -201,6 +201,9 @@ void PropagateShapeOnNode(Node * node) {
     case kPythonOp: {
       setDynamicType(node);
     } break;
+    case kPrint: {
+      setDynamicType(node);
+    } break;
     default: {
       auto op_info = getTensorOp(node);
       std::vector<at::Tensor> stack;
