@@ -219,6 +219,14 @@
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: eq(Tensor self, Scalar other) -> BoolTensor
+
+- func: eq_out(BoolTensor result, Tensor self, Scalar other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: eq_out_cpu
+    CUDA: eq_out_cuda
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
@@ -248,6 +256,14 @@
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
+
+- func: ge(Tensor self, Scalar other) -> BoolTensor
+
+- func: ge_out(BoolTensor result, Tensor self, Scalar other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: ge_out_cpu
+    CUDA: ge_out_cuda
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
 
@@ -285,6 +301,14 @@
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
+- func: le(Tensor self, Scalar other) -> BoolTensor
+
+- func: le_out(BoolTensor result, Tensor self, Scalar other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: le_out_cpu
+    CUDA: le_out_cuda
+
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
@@ -301,6 +325,14 @@
   variants: function
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
+
+- func: ne(Tensor self, Scalar other) -> BoolTensor
+
+- func: ne_out(BoolTensor result, Tensor self, Scalar other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: ne_out_cpu
+    CUDA: ne_out_cuda
 
 # TODO: Why does kW come before kH?  Hella confusing, because it
 # doesn't match the input layout.

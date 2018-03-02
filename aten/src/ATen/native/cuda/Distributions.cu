@@ -34,7 +34,7 @@ void poisson_cuda_kernel(
       ret,
       lambda,
       [seeds] __device__(
-          scalar_t & ret_val, const float& lambda, bool early_exit) {
+          scalar_t & ret_val, const float& lambda) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
