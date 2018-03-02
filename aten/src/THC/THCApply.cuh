@@ -4,7 +4,6 @@
 #include "THCTensorCopy.h"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorTypeUtils.cuh"
-#include "THCOffsetInfo.cuh"
 
 //
 // This file contains pointwise operation functions and kernels that

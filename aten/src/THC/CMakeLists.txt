@@ -102,7 +102,6 @@ INSTALL(FILES
           THCHalf.h
           THCIntegerDivider.cuh
           THCNumerics.cuh
-          THCOffsetInfo.cuh
           THCTensorSort.cuh
           THCTensorInfo.cuh
           THCTensorMathPointwise.cuh
