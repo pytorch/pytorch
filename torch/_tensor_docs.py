@@ -1795,6 +1795,13 @@ distribution:
     P(x) = \dfrac{1}{to - from}
 """)
 
+add_docstr_all('unique',
+               r"""
+unique(sorted=False, return_inverse=False)
+
+See :func:`torch.unique`
+""")
+
 add_docstr_all('unsqueeze',
                r"""
 unsqueeze(dim)
