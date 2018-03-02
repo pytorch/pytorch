@@ -34,8 +34,8 @@ class Categorical(Distribution):
         [torch.LongTensor of size 1]
 
     Args:
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): event log probabilities
+        probs (Tensor): event probabilities
+        logits (Tensor): event log probabilities
     """
     params = {'probs': constraints.simplex}
     has_enumerate_support = True

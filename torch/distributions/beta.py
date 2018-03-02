@@ -19,9 +19,9 @@ class Beta(ExponentialFamily):
         [torch.FloatTensor of size 1]
 
     Args:
-        concentration1 (float or Tensor or Variable): 1st concentration parameter of the distribution
+        concentration1 (float or Tensor): 1st concentration parameter of the distribution
             (often referred to as alpha)
-        concentration0 (float or Tensor or Variable): 2nd concentration parameter of the distribution
+        concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
     params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}

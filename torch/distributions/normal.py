@@ -20,8 +20,8 @@ class Normal(ExponentialFamily):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of the distribution (often referred to as mu)
-        scale (float or Tensor or Variable): standard deviation of the distribution
+        loc (float or Tensor): mean of the distribution (often referred to as mu)
+        scale (float or Tensor): standard deviation of the distribution
             (often referred to as sigma)
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}

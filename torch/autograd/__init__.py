@@ -100,7 +100,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         outputs (sequence of Variable): outputs of the differentiated function.
         inputs (sequence of Variable): Inputs w.r.t. which the gradient will be
             returned (and not accumulated into ``.grad``).
-        grad_outputs (sequence of Tensor or Variable): Gradients w.r.t. each output.
+        grad_outputs (sequence of Tensor): Gradients w.r.t. each output.
             Any tensors will be automatically converted to Variables that are
             volatile unless ``create_graph`` is ``True``. None values can be
             specified for scalar Variables or ones that don't require grad.

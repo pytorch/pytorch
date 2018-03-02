@@ -17,8 +17,8 @@ class Laplace(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of the distribution
-        scale (float or Tensor or Variable): scale of the distribution
+        loc (float or Tensor): mean of the distribution
+        scale (float or Tensor): scale of the distribution
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
