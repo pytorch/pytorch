@@ -1,3 +1,5 @@
+#!/bin/env python
+
 # Copyright (c) 2016-present, Facebook, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,12 +17,29 @@
 
 import sys
 import yaml
+import argparse
+import os
 from copy import deepcopy
-project_root = sys.argv[1]
-sys.path.append(project_root + "/third_party/aten/src/ATen")
-from code_template import CodeTemplate as CT
-OP_TEMPLATE = CT.from_file(project_root +
-                           '/caffe2/contrib/aten/aten_op_template.h')
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--template_dir", default=".", help="where template.h is")
+parser.add_argument("--yaml_dir", default="aten/src/ATen/ATen",
+                    help="where ATen yaml files are")
+parser.add_argument("--output_prefix", default="", help="")
+parser.add_argument(
+    "--install_dir", default=".", help="where to put generated file")
+parser.add_argument("--third_party_root", default="", help="caffe2 third_party")
+args, _ = parser.parse_known_args()
+
+if args.third_party_root:
+    sys.path.append(os.path.join(args.third_party_root, "aten/src/ATen"))
+    from code_template import CodeTemplate as CT
+else:
+    from src.ATen.code_template import CodeTemplate as CT
+
+OP_TEMPLATE = CT.from_file(
+    os.path.join(args.template_dir, 'aten_op_template.h'))
+
 
 try:
     # use faster C loader if available
@@ -40,7 +59,8 @@ def read(filename):
 
 
 def value_has_tensors(v):
-    return "Tensor" in v['dynamic_type']
+    # Sparse shouldn't appear in public API, seems to be temporary bug
+    return "Tensor" in v['dynamic_type'] and "Sparse" not in v['dynamic_type']
 
 
 def value_is_tensor_type(v):
@@ -161,7 +181,7 @@ def get_num_inputs(o):
 
 
 if __name__ == '__main__':
-    decls = yaml.load(read('aten/src/ATen/ATen/Declarations.yaml'), Loader=Loader)
+    decls = yaml.load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
     filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded)]
     top_env = {
         'mappings': [],
@@ -251,4 +271,4 @@ if __name__ == '__main__':
 
         top_env['implementations'].append(OPTION_TEMPLATE.substitute(env))
         key += 1
-    write("aten_op.h", OP_TEMPLATE.substitute(top_env))
+    write(os.path.join(args.install_dir, args.output_prefix + "aten_op.h"), OP_TEMPLATE.substitute(top_env))
