@@ -42,42 +42,6 @@ static inline float TH_lerpf(float a, float b, float weight) {
   return a + weight * (b-a);
 }
 
-#define POW_CODE(TYPE) \
-  TYPE result = 1;    \
-  while (y) {         \
-    if (y & 1) {      \
-       result *= x;   \
-    }                 \
-    y /= 2;           \
-    x *= x;           \
-  }                   \
-  return result;      \
-
-#define DEFINE_INT_POW(TYPE) \
-static inline TYPE TH_pow(TYPE x, TYPE y) { \
-  THArgCheck(y >= 0, 1, \
-      "Integers to negative integer powers are not allowed"); \
-  POW_CODE(TYPE) \
-} \
-
-#define DEFINE_UINT_POW(TYPE) \
-static inline TYPE TH_pow(TYPE x, TYPE y) { \
-  POW_CODE(TYPE) \
-} \
-
-#define DEFINE_FLOATING_POW(TYPE) \
-static inline TYPE TH_pow(TYPE x, TYPE y) { \
-  return pow(x, y); \
-} \
-
-DEFINE_INT_POW(int64_t);
-DEFINE_INT_POW(int32_t);
-DEFINE_INT_POW(int16_t);
-DEFINE_INT_POW(int8_t);
-DEFINE_UINT_POW(uint8_t);
-DEFINE_FLOATING_POW(float);
-DEFINE_FLOATING_POW(double);
-
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
 Output was modified to be inf or -inf when input is 1 or -1. */

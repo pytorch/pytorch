@@ -480,7 +480,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
 }
 
 void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real value) {
-  if (THCNumerics<real>::eq(value, 0)) {
+  if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(0))) {
     THError("cannot raise to zeroth power on sparse tensor");
   }
   THCSTensor *t = THCSTensor_(newCoalesce)(state, t_);
