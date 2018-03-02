@@ -4183,6 +4183,31 @@ class TestTorch(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda x: x)
 
+    def test_reshape(self):
+        x = torch.randn(3, 3)
+        self.assertEqual(x.data_ptr(), x.reshape(-1).data_ptr())
+        self.assertEqual(x.data_ptr(), x.reshape(1, 9, 1).data_ptr())
+        self.assertEqual(torch.reshape(x, (9,)), x.reshape(9))
+        self.assertRaises(RuntimeError, lambda: x.reshape(-1, -1))
+
+        y = torch.randn(4, 4, 4)[:, 0, :]
+        self.assertNotEqual(y.data_ptr(), y.reshape(-1).data_ptr())
+        self.assertEqual(y.contiguous().view(-1), y.reshape(-1))
+        self.assertEqual(y.reshape(2, 2, 4).data_ptr(), y.data_ptr())
+
+        s = torch.randn(())
+        self.assertEqual(s.data_ptr(), s.reshape(()).data_ptr())
+        self.assertEqual(s.reshape(-1).shape, (1,))
+        self.assertRaises(RuntimeError, lambda: s.reshape(2))
+
+        empty = torch.tensor([])
+        self.assertEqual(empty, empty.reshape(-1))
+        self.assertEqual(empty, empty.reshape([0]))
+        # TODO: fix these once we have multi-dimensional empty tensors
+        self.assertEqual(empty.reshape([0, 1]).shape, (0,))
+        self.assertEqual(empty.reshape([1, -1]).shape, (0,))
+        self.assertRaises(RuntimeError, lambda: empty.reshape(1))
+
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)
         tensor2 = torch.rand(5)

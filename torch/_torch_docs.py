@@ -3868,6 +3868,39 @@ Example::
 
 """)
 
+add_docstr(torch.reshape,
+           r"""
+reshape(input, shape) -> Tensor
+
+Returns a tensor with the same data and number of elements as :attr:`input`,
+but with the specified shape. When possible, the returned tensor will be a view
+of :attr:`input`. Otherwise, it will be a copy.
+
+A single dimension may be -1, in which case it's inferred from the remaining
+dimensions and the number of elements in :attr:`input`.
+
+Args:
+    input (Tensor): the tensor to be reshaped
+    shape (tuple of ints): the new shape
+
+Example::
+
+    >>> a = torch.arange(4)
+    >>> torch.reshape(a, (2, 2))
+     0  1
+     2  3
+    [torch.FloatTensor of size (2,2)]
+
+    >>> b = torch.tensor([[0, 1], [2, 3]])
+    >>> torch.reshape(b, (-1,))
+     0
+     1
+     2
+     3
+    [torch.FloatTensor of size (4,)]
+""")
+
+
 add_docstr(torch.round,
            r"""
 round(input, out=None) -> Tensor

@@ -252,6 +252,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: reshape
    .. automethod:: resize_
    .. automethod:: resize_as_
    .. automethod:: round

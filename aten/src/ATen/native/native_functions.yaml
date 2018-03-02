@@ -288,6 +288,8 @@
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: reshape(Tensor self, IntList shape) -> Tensor
+
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
   dispatch:

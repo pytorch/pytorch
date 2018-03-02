@@ -121,6 +121,93 @@ Tensor repeat(const Tensor& self, IntList repeats) {
   return result;
 }
 
+static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
+  auto res = shape.vec();
+  int64_t newsize = 1;
+  auto infer_dim = at::optional<int64_t>();
+  for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
+    if (shape[dim] == -1) {
+      if (infer_dim) {
+        throw std::runtime_error("only one dimension can be inferred");
+      }
+      infer_dim = dim;
+    } else if (shape[dim] >= 0) {
+      newsize *= shape[dim];
+    } else {
+      runtime_error("invalid shape dimension %zd", shape[dim]);
+    }
+  }
+
+  if (numel == newsize || (infer_dim && newsize > 0 && numel % newsize == 0)) {
+    if (infer_dim) {
+      res[*infer_dim] = numel / newsize;
+    }
+    if (numel == 0) {
+      // Collapse zero-element shapes into one dimension because TH handles zeros
+      // in sizes strangely: x.resize_(1, 0) has shape (1,). TODO: remove this
+      // once we have multi-dimensional empty tensors.
+      return {0};
+    }
+    return res;
+  }
+
+  std::ostringstream ss;
+  ss << "shape '" << shape << "' is invalid for input of size " << numel;
+  throw std::runtime_error(ss.str());
+}
+
+static at::optional<std::vector<int64_t>>
+compute_stride(const Tensor& self, IntList newshape) {
+  auto oldstride = self.strides();
+  auto oldshape = self.sizes();
+  if (oldshape.empty()) {
+    return std::vector<int64_t>(newshape.size(), 1);
+  }
+
+  std::vector<int64_t> newstride(newshape.size());
+  int64_t view_d = newshape.size() - 1;
+  // stride for each subspace in the chunk
+  int64_t chunk_base_stride = oldstride.back();
+  // numel in current chunk
+  int64_t tensor_numel = 1;
+  int64_t view_numel = 1;
+  for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
+    tensor_numel *= oldshape[tensor_d];
+    // if end of tensor size chunk, check view
+    if ((tensor_d == 0) ||
+        (oldshape[tensor_d - 1] != 1 && oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+      while (view_d >= 0 && (view_numel < tensor_numel || newshape[view_d] == 1)) {
+        newstride[view_d] = view_numel * chunk_base_stride;
+        view_numel *= newshape[view_d];
+        view_d--;
+      }
+      if (view_numel != tensor_numel) {
+        return {};
+      }
+      if (tensor_d > 0) {
+        chunk_base_stride = oldstride[tensor_d - 1];
+        tensor_numel = 1;
+        view_numel = 1;
+      }
+    }
+  }
+  if (view_d != -1) {
+    return {};
+  }
+  return newstride;
+}
+
+Tensor reshape(const Tensor& self, IntList proposed_shape) {
+  if (self.type().is_sparse()) {
+    runtime_error("reshape is not implemented for sparse tensors");
+  }
+  auto shape = infer_size(proposed_shape, self.numel());
+  if (auto stride = compute_stride(self, shape)) {
+    return self.as_strided(shape, *stride);
+  }
+  return at::_unsafe_view(self.clone(), shape);
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");

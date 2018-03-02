@@ -33,6 +33,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
+.. autofunction:: reshape
 .. autofunction:: split
 .. autofunction:: squeeze
 .. autofunction:: stack

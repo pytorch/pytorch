@@ -1259,6 +1259,20 @@ renorm_(p, dim, maxnorm) -> Tensor
 In-place version of :meth:`~Tensor.renorm`
 """)
 
+add_docstr_all('reshape',
+               r"""
+reshape(*shape) -> Tensor
+
+Returns a tensor with the same data and number of elements as :attr:`self`,
+but with the specified shape.
+
+Args:
+    shape (tuple of ints or int...): the desired shape
+
+See :func:`torch.reshape`
+""")
+
+
 add_docstr_all('resize_',
                r"""
 resize_(*sizes)
