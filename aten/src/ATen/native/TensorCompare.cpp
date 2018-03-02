@@ -40,8 +40,9 @@ template<template<typename T> class Comparator>
 struct CmpOpFloating {
   static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
     auto other_val = other.to<double>();
-    at::CPU_tensor_apply2<uint8_t, double>(result, self.toType(at::kDouble),
-        [other_val](uint8_t& result_val, double self_val) {
+    auto self_double = self.toType(at::kDouble);
+    at::CPU_tensor_apply2<uint8_t, double>(result, self_double,
+        [other_val](uint8_t& result_val, double& self_val) {
           result_val = Comparator<double>()(self_val, other_val);
       }
     );

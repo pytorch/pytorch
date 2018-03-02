@@ -59,7 +59,8 @@ template<template<typename T> class Comparator>
 struct CmpOpFloatingCUDA {
   static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
     auto other_val = at::convert<half>(other.to<double>());
-    at::cuda::CUDA_tensor_apply2<uint8_t, half>(result, self.toType(at::kHalf),
+    auto self_half = self.toType(at::kHalf);
+    at::cuda::CUDA_tensor_apply2<uint8_t, half>(result, self_half,
         [other_val] __device__ (uint8_t& result_val, const half& self_val) {
           result_val = Comparator<half>()(self_val, other_val);
       }
