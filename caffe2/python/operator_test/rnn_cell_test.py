@@ -32,7 +32,6 @@ from hypothesis import assume, given
 from hypothesis import settings as ht_settings
 import hypothesis.strategies as st
 import numpy as np
-import pytest
 import unittest
 
 
@@ -1097,13 +1096,13 @@ class RNNCellTest(hu.HypothesisTestCase):
     def test_milstm(self):
         self.lstm_base(lstm_type=(rnn_cell.MILSTM, milstm_reference))
 
-    @pytest.mark.skip(reason="This is currently numerically unstable")
+    @unittest.skip("This is currently numerically unstable")
     def test_norm_lstm(self):
         self.lstm_base(
             lstm_type=(rnn_cell.LayerNormLSTM, layer_norm_lstm_reference),
         )
 
-    @pytest.mark.skip(reason="This is currently numerically unstable")
+    @unittest.skip("This is currently numerically unstable")
     def test_norm_milstm(self):
         self.lstm_base(
             lstm_type=(rnn_cell.LayerNormMILSTM, layer_norm_milstm_reference)
