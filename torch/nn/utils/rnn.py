@@ -216,7 +216,7 @@ def pad_packed_sequence(input, *args, **kwargs):
         return _pad_packed_sequence(input, *args, **kwargs)
 
 
-def pad_sequence(sequences, batch_first=False):
+def pad_sequence(sequences, batch_first=False, padding_value=None):
     r"""Pad a list of variable length Variables with zero
 
     ``pad_sequence`` stacks a list of Variables along a new dimension,
@@ -248,6 +248,7 @@ def pad_sequence(sequences, batch_first=False):
         sequences (list[Variable]): list of variable length sequences.
         batch_first (bool, optional): output will be in BxTx* if True, or in
             TxBx* otherwise
+        padding_value (optional): values for padded elements.
 
     Returns:
         Variable of size ``T x B x * `` if batch_first is False
@@ -264,7 +265,10 @@ def pad_sequence(sequences, batch_first=False):
     else:
         out_dims = (max_len, len(sequences)) + trailing_dims
 
-    out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+    if padding_value is None:
+        out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+    else:
+        out_variable = Variable(sequences[0].data.new(*out_dims).fill_(padding_value))
     for i, variable in enumerate(sequences):
         length = variable.size(0)
         # temporary sort check, can be removed when we handle sorting internally
