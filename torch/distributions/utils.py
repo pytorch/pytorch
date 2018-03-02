@@ -70,8 +70,7 @@ def broadcast_all(*values):
         `(1,)`.
 
     Args:
-        values (list of `numbers.Number`, `torch.autograd.Variable` or
-        `torch.Tensor`)
+        values (list of `numbers.Number` or `torch.Tensor`)
 
     Raises:
         ValueError: if any of the values is not a `numbers.Number`, `torch.Tensor`
@@ -79,11 +78,9 @@ def broadcast_all(*values):
     """
     values = list(values)
     scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
-    tensor_idxs = [i for i in range(len(values)) if
-                   torch.is_tensor(values[i]) or isinstance(values[i], Variable)]
+    tensor_idxs = [i for i in range(len(values)) if isinstance(values[i], torch.Tensor)]
     if len(scalar_idxs) + len(tensor_idxs) != len(values):
-        raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or ' +
-                         'torch.autograd.Variable.')
+        raise ValueError('Input arguments must all be instances of numbers.Number or torch.Tensor.')
     if tensor_idxs:
         broadcast_shape = _broadcast_shape([values[i].size() for i in tensor_idxs])
         for idx in tensor_idxs:
