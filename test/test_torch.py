@@ -76,6 +76,21 @@ class BytesIOContext(io.BytesIO):
 
 
 class TestTorch(TestCase):
+    
+    def test_scalar_unpack(self):
+        SMALL_NUM = 1e+5
+        LARGE_NUM = 1e+40
+
+
+        # unpackdouble for small float
+        torch.Tensor(100).fill_(SMALL_NUM)
+        # unpacklong for small int
+        torch.Tensor(100).fill_(int(SMALL_NUM))
+
+        # Testing unpackdouble for large float, should warning precision loss
+        torch.Tensor(100).fill_(LARGE_NUM)
+        # unpacklong for large int, should raise exception
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(100).fill_(int(LARGE_NUM)))
 
     def test_dot(self):
         types = {
