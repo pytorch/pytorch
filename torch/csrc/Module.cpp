@@ -16,6 +16,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/DataLoader.h"
 #include "torch/csrc/Generator.h"
