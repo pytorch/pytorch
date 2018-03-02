@@ -18,7 +18,7 @@ export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
 # If we run too many parallel jobs, we will OOM
-export MAX_JOBS=3
+export MAX_JOBS=2
 python setup.py install
 cd test/
 echo "Ninja version: $(ninja --version)"
