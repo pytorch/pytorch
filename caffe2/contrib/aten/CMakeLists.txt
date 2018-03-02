@@ -12,7 +12,9 @@ if(USE_ATEN)
 
   add_custom_command(OUTPUT aten_op.h
   COMMAND
-  python ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py ${PROJECT_SOURCE_DIR}
+  python ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py
+  --third_party_root=${PROJECT_SOURCE_DIR}/third_party
+  --template_dir=${PROJECT_SOURCE_DIR}/caffe2/contrib/aten
   DEPENDS
   ATen
   ${CMAKE_CURRENT_SOURCE_DIR}/gen_op.py
