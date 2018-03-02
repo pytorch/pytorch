@@ -5,7 +5,7 @@ from .. import functional as F
 
 class PairwiseDistance(Module):
     r"""
-    Computes the batchwise pairwise distance between vectors v1,v2:
+    Computes the batchwise pairwise distance between vectors :math:`v_1`,:math:`v_2` using the p-norm:
 
     .. math ::
         \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
@@ -37,7 +37,7 @@ class PairwiseDistance(Module):
 
 
 class CosineSimilarity(Module):
-    r"""Returns cosine similarity between x1 and x2, computed along dim.
+    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
 
     .. math ::
         \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
