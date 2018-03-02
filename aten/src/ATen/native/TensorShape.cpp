@@ -2,6 +2,7 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/optional.h"
 
 #include <algorithm>
 
