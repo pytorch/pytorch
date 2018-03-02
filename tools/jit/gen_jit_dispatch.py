@@ -95,7 +95,10 @@ def gen_jit_dispatch(declarations, out):
         else:
             return CALL_METHOD.substitute(name=decl['name'], first=args[0], args=args[1:])
 
-    def emit_decl_variant(decl, is_real_input, has_tensorlist):
+    def emit_decl_variant(decl, is_positional_arg, has_tensorlist):
+        # is_positional_arg is a boolean list the same length as decl['arguments']
+        # that indicates if the argument should come from the postional list
+        # of inputs. If false, the argument comes from the constant attributes
         kw_assignments = []
         attr_names = []
         pos_assignments = []
@@ -103,13 +106,13 @@ def gen_jit_dispatch(declarations, out):
 
         if has_tensorlist:
             kw_assignments.append('size_t varargs_length = node->inputs().size();')
-            # arguments look like: [tensor list], other, static, inputs
+            # arguments look like: [tensor list], arg1, arg2, arg3
             # we use peek(<i>, static_inputs) to read the non-vararg inputs
             # from the end of the stack
-            static_inputs = sum(is_real_input) - 1
+            static_inputs = sum(is_positional_arg) - 1
             num_dynamic_inputs = 'varargs_length'
         else:
-            static_inputs = sum(is_real_input)
+            static_inputs = sum(is_positional_arg)
             num_dynamic_inputs = static_inputs
 
         real_inputs = count()
@@ -120,7 +123,7 @@ def gen_jit_dispatch(declarations, out):
                 arguments.append('peekSlice(stack, 0, varargs_length - {}, varargs_length)'.format(static_inputs))
             elif is_tensor_arg(arg):
                 arguments.append('std::move(peek(stack, {}, {}))'.format(next(real_inputs), static_inputs))
-            elif is_real_input[i]:
+            elif is_positional_arg[i]:
                 assign = POS_ASSIGNMENT.substitute(type=arg['simple_type'],
                                                    name=arg['name'],
                                                    i=next(real_inputs),
