@@ -1,7 +1,10 @@
 #ifndef THP_GENERATOR_H
 #define THP_GENERATOR_H
 
+#include <Python.h>
 #include <ATen/ATen.h>
+
+#include "THP_export.h"
 
 struct THPGenerator {
   PyObject_HEAD
