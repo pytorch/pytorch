@@ -103,4 +103,4 @@ def should_build_ib():
     return ib_util_found and ib_lib_found and ib_lib_found
 
 if WITH_DISTRIBUTED:
-    WITH_GLOO_IBVERBS = should_build_ib() or check_env_flag("WITH_GLOO_IBVERBS")
+    WITH_GLOO_IBVERBS = should_build_ib() and check_env_flag("WITH_GLOO_IBVERBS")

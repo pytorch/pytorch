@@ -106,8 +106,6 @@ from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
     WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
 
 DEBUG = check_env_flag('DEBUG')
-ENABLE_IBVERBS_ENV = check_env_flag('WITH_GLOO_IBVERBS')
-WITH_GLOO_IBVERBS = WITH_GLOO_IBVERBS and ENABLE_IBVERBS_ENV
 
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
