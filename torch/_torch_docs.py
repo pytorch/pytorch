@@ -4937,7 +4937,7 @@ Args:
     sorted (bool): Whether to sort the unique elements in ascending order
         before returning as output.
     return_inverse (bool): Whether to also return the indices for where
-        elements in the original input ended up in the returned unique list. 
+        elements in the original input ended up in the returned unique list.
 
 Returns:
     (Tensor, Tensor): A tuple containing
@@ -4952,12 +4952,12 @@ Example::
     >>>> output, inverse_indices = torch.unique(
              torch.LongTensor([1, 3, 2, 3]), sorted=True, return_inverse=True)
     >>>> output
-    
+
      1
      2
      3
     [torch.LongTensor of size (3,)]
-    
+
     >>>> inverse_indices
 
      0
