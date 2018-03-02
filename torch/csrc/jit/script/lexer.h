@@ -7,6 +7,8 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "torch/csrc/jit/source_location.h"
+
 
 namespace torch {
 namespace jit {
@@ -305,7 +307,7 @@ SharedParserData& sharedParserData();
 // a range of a shared string 'file_' with functions to help debug by highlight
 // that
 // range.
-struct SourceRange {
+struct SourceRange : public SourceLocation {
   SourceRange(
       const std::shared_ptr<std::string>& file_,
       size_t start_,
@@ -317,7 +319,7 @@ struct SourceRange {
   size_t size() const {
     return end() - start();
   }
-  void highlight(std::ostream& out) const {
+  virtual void highlight(std::ostream& out) const override {
     const std::string& str = file();
     size_t begin = start();
     size_t end = start();

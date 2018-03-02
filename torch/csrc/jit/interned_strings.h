@@ -4,159 +4,103 @@
 #include <string>
 #include <unordered_map>
 
+#include "torch/csrc/jit/generated/aten_interned_strings.h"
+
 namespace torch { namespace jit {
 
+// JIT symbols are synthetic operators that occur only in the JIT IR
+// and don't have corresponding implementations in ATen.
+//
+// TODO: We need documentation for all of these symbols.
 
-#define FORALL_BUILTIN_SYMBOLS(_) \
-_(PythonOp) \
-_(CppOp) \
-_(Param) \
-_(Select) \
-_(Return) \
-_(Eval) \
-_(add) \
-_(Add) \
-_(Div) \
-_(Mul) \
-_(Neg) \
-_(Sub) \
-_(Pow) \
-_(Sigmoid) \
-_(Tanh) \
-_(mul) \
-_(neg) \
-_(sigmoid) \
-_(tanh) \
+#define FORALL_JIT_SYMBOLS(_) \
+_(Assign) \
 _(Constant) \
-_(cat) \
-_(Slice) \
-_(Squeeze) \
-_(Undefined) \
+_(CppOp) \
+_(Drop) \
+_(Eval) \
+_(Expand) \
 _(FusionGroup) \
+_(GraphExecutor) \
+_(If) \
+_(Jump) \
+_(JumpNZ) \
+_(JumpZ) \
+_(Load) \
+_(Loop) \
+_(Param) \
+_(Placeholder) \
+_(Print) \
+_(PythonOp) \
+_(ReplaceIfUndef) \
+_(Return) \
+_(Store) \
+_(Undefined) \
+_(__JIT_END)
+
+// Workaround for some not-yet-defined ATen symbols, see
+//  - __not__: https://github.com/pytorch/pytorch/issues/5495
+//  - ones, zeros: https://github.com/pytorch/pytorch/issues/5496
+
+#define FORALL_ATEN_EXTRA_SYMBOLS(_) \
+_(__not__) \
+_(ones) \
+_(zeros) \
+_(__ATEN_EXTRA_END)
+
+// These symbols correspond to ONNX operators.  Their semantics
+// are defined in https://github.com/onnx/onnx/blob/master/docs/Operators.md
+// The particular version we are targeting is specified by '_onnx_opset_version'
+// in torch.onnx.symbolic
+
+#define FORALL_ONNX_SYMBOLS(_) \
+_(Add) \
+/* _(Constant) conflicts with JIT */ \
+_(Div) \
+_(GRU) \
 _(Gemm) \
-_(SubConstant) \
-_(Scale) \
-_(Transpose) \
-_(Reshape) \
-_(split) \
-_(chunk) \
-_(Offset) \
-_(value) \
-_(Subgraph) \
-_(BatchNormalization) \
-_(Conv) \
+_(LSTM) \
+_(Mul) \
 _(PackPadded) \
 _(PadPacked) \
-_(ConvTranspose) \
-_(is_test) \
-_(epsilon) \
-_(expand) \
-_(Expand) \
-_(order) \
-_(momentum) \
-_(consumed_inputs) \
-_(kernels) \
-_(kernel_shape) \
-_(kernel) \
-_(scale) \
-_(strides) \
-_(stride) \
-_(pads) \
-_(pad) \
+_(Pow) \
 _(RNN) \
-_(LSTM) \
-_(GRU) \
-_(beta) \
+_(Slice) /* used by test only */ \
+_(Sub) \
+_(Transpose) \
+_(__ONNX_END)
+
+// These symbols are attribute keys.  They are shared between both ONNX and ATen
+// operators (you disambiguate their meaning by looking at the operator itself)
+
+#define FORALL_ATTR_SYMBOLS(_) \
+_(Subgraph) \
 _(alpha) \
-_(dilations) \
-_(dilation) \
-_(broadcast) \
 _(axis) \
-_(size) \
-_(sizes) \
-_(dim) \
-_(perm) \
-_(shape) \
-_(axes) \
-_(group) \
+_(broadcast) \
+_(device) \
+/* _(dim) conflicts with ATen */ \
+_(exponent) \
 _(inplace) \
+_(is_zero) \
+_(keepdim) \
+_(length) \
+_(other) \
+_(perm) \
+/* _(size) conflicts with ATen */ \
+/* _(sizes) conflicts with ATen */ \
 _(transA) \
 _(transB) \
-_(other) \
-_(__and__) \
-_(__lshift__) \
-_(__not__) \
-_(__or__) \
-_(__rshift__) \
-_(__xor__) \
-_(abs) \
-_(acos) \
-_(asin) \
-_(atan) \
-_(atan2) \
-_(ceil) \
-_(clamp) \
-_(cos) \
-_(cosh) \
-_(div) \
-_(eq) \
-_(equal) \
-_(exp) \
-_(expm1) \
-_(floor) \
-_(fmod) \
-_(frac) \
-_(ge) \
-_(gt) \
-_(le) \
-_(lerp) \
-_(lgamma) \
-_(log) \
-_(log1p) \
-_(lt) \
-_(max) \
-_(min) \
-_(ne) \
-_(ones) \
-_(ones_like) \
-_(pow) \
-_(reciprocal) \
-_(remainder) \
-_(round) \
-_(rsqrt) \
-_(sin) \
-_(sinh) \
-_(sqrt) \
-_(sub) \
-_(tan) \
-_(trunc) \
-_(squeeze) \
-_(unsqueeze) \
-_(view) \
-_(narrow) \
-_(sum) \
-_(length) \
-_(keepdim) \
-_(zeros) \
-_(zeros_like) \
-_(exponent) \
-_(device) \
-_(ReplaceIfUndef) \
-_(is_zero) \
-_(GraphExecutor) \
-_(Print) \
-_(mm) \
-_(t) \
-_(Loop) \
-_(If) \
-_(Store) \
-_(Load) \
-_(Drop) \
-_(Assign) \
-_(Placeholder) \
-_(JumpZ) \
-_(JumpNZ) \
-_(Jump)
+_(value) \
+_(__ATTR_END)
+
+#define FORALL_BUILTIN_SYMBOLS(_) \
+FORALL_JIT_SYMBOLS(_) \
+FORALL_ATEN_SYMBOLS(_) \
+FORALL_ATEN_EXTRA_SYMBOLS(_) \
+FORALL_ONNX_SYMBOLS(_) \
+FORALL_ATTR_SYMBOLS(_) \
+_(__BUILTIN_END)
 
   enum BuiltinSymbol {
     #define DEFINE_SYMBOL(s) \

@@ -1,6 +1,5 @@
 import torch
 
-from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
 
@@ -41,87 +40,6 @@ class HalfStorage(_DistributedBase, torch._C.DistributedHalfStorageBase, _Storag
     pass
 
 
-class DoubleTensor(_DistributedBase, torch._C.DistributedDoubleTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return DoubleStorage
-
-
-class HalfTensor(_DistributedBase, torch._C.DistributedHalfTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return HalfStorage
-
-
-class FloatTensor(_DistributedBase, torch._C.DistributedFloatTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return FloatStorage
-
-
-class LongTensor(_DistributedBase, torch._C.DistributedLongTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return LongStorage
-
-
-class IntTensor(_DistributedBase, torch._C.DistributedIntTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return IntStorage
-
-
-class ShortTensor(_DistributedBase, torch._C.DistributedShortTensorBase, _TensorBase):
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return ShortStorage
-
-
-class CharTensor(_DistributedBase, torch._C.DistributedCharTensorBase, _TensorBase):
-    def is_signed(self):
-        # TODO
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return CharStorage
-
-
-class ByteTensor(_DistributedBase, torch._C.DistributedByteTensorBase, _TensorBase):
-    def is_signed(self):
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return ByteStorage
-
-
-# class HalfTensor(_DistributedBase, torch._C.DistributedHalfTensorBase, _TensorBase):
-    # def is_signed(self):
-        # return True
-    # @classmethod
-    # def storage_type():
-        # return HalfStorage
-
-
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(HalfStorage)
@@ -131,20 +49,6 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 
-torch._tensor_classes.add(DoubleTensor)
-torch._tensor_classes.add(FloatTensor)
-torch._tensor_classes.add(HalfTensor)
-torch._tensor_classes.add(LongTensor)
-torch._tensor_classes.add(IntTensor)
-torch._tensor_classes.add(ShortTensor)
-torch._tensor_classes.add(CharTensor)
-torch._tensor_classes.add(ByteTensor)
-
-torch._integer_tensor_classes.add(LongTensor)
-torch._integer_tensor_classes.add(IntTensor)
-torch._integer_tensor_classes.add(ShortTensor)
-torch._integer_tensor_classes.add(CharTensor)
-torch._integer_tensor_classes.add(ByteTensor)
 
 _type_names = ['Double', 'Float', 'Half', 'Long', 'Int', 'Short', 'Char', 'Byte']
 _locals = locals()

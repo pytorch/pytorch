@@ -40,9 +40,6 @@
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
 #
-#   WITH_SCALARS
-#     build with native support for scalars (zero-dim tensors)
-#
 #   PYTORCH_BINARY_BUILD
 #     toggle static linking against libstdc++, used when we're building
 #     binaries for distribution
@@ -103,7 +100,6 @@ from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, 
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
 from tools.setup_helpers.nnpack import WITH_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
-from tools.setup_helpers.split_types import split_types
 from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
@@ -114,10 +110,6 @@ DEBUG = check_env_flag('DEBUG')
 IS_WINDOWS = (platform.system() == 'Windows')
 IS_DARWIN = (platform.system() == 'Darwin')
 IS_LINUX = (platform.system() == 'Linux')
-
-if 'WITH_SCALARS' not in os.environ:
-    os.environ['WITH_SCALARS'] = '1'
-WITH_SCALARS = check_env_flag('WITH_SCALARS')
 
 NUM_JOBS = multiprocessing.cpu_count()
 max_jobs = os.getenv("MAX_JOBS")
@@ -227,10 +219,6 @@ def build_libs(libs):
 
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
-
-    if 'ATen' in libs:
-        from tools.nnwrap import generate_wrappers as generate_nn_wrappers
-        generate_nn_wrappers()
 
 
 class build_deps(Command):
@@ -392,38 +380,6 @@ class build_ext(build_ext_parent):
 
         generate_code(ninja_global)
 
-        if IS_WINDOWS:
-            build_temp = self.build_temp
-            build_dir = 'torch/csrc'
-
-            ext_filename = self.get_ext_filename('_C')
-            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
-
-            _C_LIB = os.path.join(build_temp, build_dir, lib_filename).replace('\\', '/')
-
-            THNN.extra_link_args += [_C_LIB]
-            if WITH_CUDA:
-                THCUNN.extra_link_args += [_C_LIB]
-            else:
-                # To generate .obj files for those .h files for the export class
-                # a header file cannot build, so it has to be copied to someplace as a source file
-                temp_dir = 'torch/csrc/generated'
-                hfile_list = ['torch/csrc/cuda/AutoGPU.h']
-                hname_list = [os.path.basename(hfile) for hfile in hfile_list]
-                rname_list = [os.path.splitext(hname)[0]
-                              for hname in hname_list]
-                cfile_list = [temp_dir + '/' + rname +
-                              '_cpu_win.cpp' for rname in rname_list]
-
-                if not os.path.exists(temp_dir):
-                    os.mkdir(temp_dir)
-
-                for hfile, cfile in zip(hfile_list, cfile_list):
-                    if os.path.exists(cfile):
-                        os.remove(cfile)
-                    shutil.copyfile(hfile, cfile)
-
-                C.sources += cfile_list
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
@@ -548,7 +504,7 @@ main_sources = [
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
     "torch/csrc/utils.cpp",
-    "torch/csrc/expand_utils.cpp",
+    "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -623,11 +579,11 @@ main_sources = [
     "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
+    "torch/csrc/nn/THNN.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
     "torch/csrc/onnx/onnx.pb.cpp",
     "torch/csrc/onnx/onnx.cpp",
 ]
-main_sources += split_types("torch/csrc/Tensor.cpp", ninja_global)
 
 try:
     import numpy as np
@@ -687,15 +643,12 @@ if WITH_CUDA:
         "torch/csrc/cuda/Module.cpp",
         "torch/csrc/cuda/Storage.cpp",
         "torch/csrc/cuda/Stream.cpp",
-        "torch/csrc/cuda/AutoGPU.cpp",
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/expand_utils.cpp",
-        "torch/csrc/cuda/lazy_init.cpp",
         "torch/csrc/cuda/serialization.cpp",
+        "torch/csrc/nn/THCUNN.cpp",
     ]
-    main_sources += split_types("torch/csrc/cuda/Tensor.cpp", ninja_global)
 
 if WITH_NCCL:
     if WITH_SYSTEM_NCCL:
@@ -722,9 +675,6 @@ if DEBUG:
     else:
         extra_compile_args += ['-O0', '-g']
         extra_link_args += ['-O0', '-g']
-
-if WITH_SCALARS:
-    extra_compile_args += ['-DWITH_SCALARS']
 
 if os.getenv('PYTORCH_BINARY_BUILD') and platform.system() == 'Linux':
     print('PYTORCH_BINARY_BUILD found. Static linking libstdc++ on Linux')
@@ -772,17 +722,6 @@ if not IS_WINDOWS:
                    )
     extensions.append(DL)
 
-THNN = Extension("torch._thnn._THNN",
-                 sources=['torch/csrc/nn/THNN.cpp'],
-                 language='c++',
-                 extra_compile_args=extra_compile_args,
-                 include_dirs=include_dirs,
-                 extra_link_args=extra_link_args + [
-                     ATEN_LIB,
-                     make_relative_rpath('../lib'),
-                 ]
-                 )
-extensions.append(THNN)
 
 if WITH_CUDA:
     thnvrtc_link_flags = extra_link_args + [make_relative_rpath('lib')]
@@ -806,18 +745,6 @@ if WITH_CUDA:
                         extra_link_args=thnvrtc_link_flags,
                         )
     extensions.append(THNVRTC)
-
-    THCUNN = Extension("torch._thnn._THCUNN",
-                       sources=['torch/csrc/nn/THCUNN.cpp'],
-                       language='c++',
-                       extra_compile_args=extra_compile_args,
-                       include_dirs=include_dirs,
-                       extra_link_args=extra_link_args + [
-                           ATEN_LIB,
-                           make_relative_rpath('../lib'),
-                       ]
-                       )
-    extensions.append(THCUNN)
 
 version = '0.4.0a0'
 if os.getenv('PYTORCH_BUILD_VERSION'):
@@ -863,6 +790,7 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',
                 'lib/include/ATen/cudnn/*.h',
                 'lib/include/ATen/cuda/detail/*.cuh',
@@ -873,6 +801,7 @@ if __name__ == '__main__':
                 'lib/include/THC/*.h',
                 'lib/include/THC/*.cuh',
                 'lib/include/THC/generic/*.h',
+                'lib/include/THCUNN/*.cuh',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/autograd/*.h',
                 'lib/include/torch/csrc/jit/*.h',

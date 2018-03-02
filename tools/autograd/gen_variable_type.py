@@ -476,8 +476,6 @@ def emit_body(declaration):
     body.append(pre_record_trace)
     body.append(emit_call(env))
     if requires_derivative:
-        if inplace and is_view and not os.environ.get('WITH_SCALARS'):
-            body.append('ensure_no_aten_scalars(self);')
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.extend(emit_increment_version())

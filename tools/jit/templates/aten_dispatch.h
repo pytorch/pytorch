@@ -12,6 +12,7 @@ namespace torch { namespace jit {
 
 using Stack = std::vector<at::Tensor>;
 using Operation = std::function<int(Stack&)>;
+
 // An operation with N inputs and M outputs pops the last N inputs off
 // the stack and pushes its M inputs onto the stack
 // before: <other stack items> I0, I1, ... IN <- stack.back()
@@ -50,6 +51,11 @@ struct TensorOp {
   const size_t num_inputs;
 };
 
+using operator_constructor = std::function<TensorOp(jit::Node*)>;
+using ConstructorsMap = std::unordered_map<std::string, operator_constructor>;
+
+ConstructorsMap::iterator findTensorOp(jit::Node* n);
+bool hasTensorOp(jit::Node* n);
 TensorOp getTensorOp(jit::Node* n);
 
 }} // namespace torch::jit;

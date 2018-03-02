@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/tree_views.h"
 
 #include <pybind11/pybind11.h>
@@ -73,7 +74,9 @@ void initTreeViewBindings(PyObject *module) {
     });
 
   py::class_<Ident, TreeView>(m, "Ident")
-    .def(py::init(&Ident::create));
+      .def(py::init(&Ident::create))
+      .def_property_readonly(
+          "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
     .def(py::init([](const Type& type, const Ident& name) {

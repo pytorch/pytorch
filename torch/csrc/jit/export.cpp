@@ -197,7 +197,9 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     }
     auto p_n = p_g->add_node();
     if (node->getSourceLocation()) {
-      p_n->set_doc_string(node->getSourceLocation()->python_traceback);
+      std::stringstream ss;
+      node->getSourceLocation()->highlight(ss);
+      p_n->set_doc_string(ss.str());
     }
     for(auto input : node->inputs()) {
       if (input->node()->kind() == kUndefined) {

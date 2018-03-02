@@ -21,7 +21,7 @@ class ConstantPad1d(Module):
     Examples::
 
         >>> m = nn.ConstantPad1d(3, 3.5)
-        >>> input = autograd.Variable(torch.randn(16, 2, 480))
+        >>> input = torch.randn(16, 2, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ConstantPad1d((3, 5), 3.5)
@@ -61,7 +61,7 @@ class ConstantPad2d(Module):
     Examples::
 
         >>> m = nn.ConstantPad2d(3, 3.5)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ConstantPad2d((3, 3, 6, 6), 3.5)
@@ -100,7 +100,7 @@ class ConstantPad3d(Module):
     Examples::
 
         >>> m = nn.ConstantPad3d(3, 3.5)
-        >>> input = autograd.Variable(torch.randn(16, 3, 10, 20, 30))
+        >>> input = torch.randn(16, 3, 10, 20, 30)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ConstantPad3d((3, 3, 6, 6, 0, 1), 3.5)
@@ -136,7 +136,7 @@ class ReflectionPad1d(Module):
     Examples::
 
         >>> m = nn.ReflectionPad1d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 480))
+        >>> input = torch.randn(16, 3, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReflectionPad1d((3, 6))
@@ -173,7 +173,7 @@ class ReflectionPad2d(Module):
     Examples::
 
         >>> m = nn.ReflectionPad2d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReflectionPad2d((3, 3, 6, 6))
@@ -208,7 +208,7 @@ class ReplicationPad1d(Module):
     Examples::
 
         >>> m = nn.ReplicationPad1d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 480))
+        >>> input = torch.randn(16, 3, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReplicationPad1d((3, 6))
@@ -245,7 +245,7 @@ class ReplicationPad2d(Module):
     Examples::
 
         >>> m = nn.ReplicationPad2d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReplicationPad2d((3, 3, 6, 6))
@@ -283,7 +283,7 @@ class ReplicationPad3d(Module):
     Examples::
 
         >>> m = nn.ReplicationPad3d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 8, 320, 480))
+        >>> input = torch.randn(16, 3, 8, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReplicationPad3d((3, 3, 6, 6, 1, 1))
@@ -320,7 +320,7 @@ class ZeroPad2d(ConstantPad2d):
     Examples::
 
         >>> m = nn.ZeroPad2d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ZeroPad2d((3, 3, 6, 6))

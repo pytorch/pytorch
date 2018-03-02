@@ -22,16 +22,16 @@ import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
 from torch.nn.utils import clip_grad_norm
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
-from torch.autograd import Variable, variable, gradcheck
+from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
 from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, torch_rand, torch_randn, \
+    TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, \
     smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, IS_WINDOWS, PY3
+    TEST_SCIPY, download_file, PY3
 
 if TEST_SCIPY:
     from scipy import stats
@@ -1110,7 +1110,7 @@ class TestNN(NNTestCase):
         m = pickle.loads(pickle.dumps(m))
         self.assertIsInstance(m, nn.Linear)
 
-    def test_embedding_sparse(self):
+    def test_embedding_sparse_basic(self):
         embedding = nn.Embedding(10, 20, sparse=True)
         input = Variable(torch.LongTensor([[0, 2, 4, 5], [4, 3, 0, 9]]))
         embedding(input).sum().backward()
@@ -1672,9 +1672,8 @@ class TestNN(NNTestCase):
         inputs = Variable(torch.randn(1, 2, 3, 4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.pad(x, (1, 1, 1, 1, 1, 1), mode='replicate'), (inputs,)))
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_pad_scalar_error(self):
-        inputs = variable(0, requires_grad=True)
+        inputs = torch.tensor(0, requires_grad=True)
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1, 1)))
         self.assertRaises(AssertionError, lambda: F.pad(inputs, (1,)))
 
@@ -1683,7 +1682,7 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=2, dim=-2), (inputs,)))
 
-        inputs = torch_randn((), requires_grad=True)
+        inputs = torch.randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, type=torch.FloatTensor):
@@ -2423,7 +2422,6 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
-    @unittest.skipIf(IS_WINDOWS, 'TODO: fix this test for Windows')
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_Conv2d_deterministic_cudnn(self):
@@ -2597,8 +2595,6 @@ class TestNN(NNTestCase):
                  torch.cuda.HalfTensor]
         precs = [1e-5, 1e-5, 1e-2]
         for tp, prec in zip(types, precs):
-            if IS_WINDOWS and tp == torch.cuda.HalfTensor:  # CUDA HalfTensor is not supported on Windows yet
-                continue
             for depth_multiplier in [1, 2]:
                 m = nn.Conv2d(2, 2 * depth_multiplier, kernel_size=3, groups=2).type(tp)
                 i = Variable(torch.randn(2, 2, 6, 6).type(tp) / 2, requires_grad=True)
@@ -3790,8 +3786,8 @@ class TestNN(NNTestCase):
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
-        input1 = torch_randn((), requires_grad=True)
-        input2 = torch_randn((), requires_grad=True)
+        input1 = torch.randn((), requires_grad=True)
+        input2 = torch.randn((), requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=0), (input1, input2)))
         self.assertTrue(gradcheck(lambda x, y: F.cosine_similarity(x, y, dim=-1), (input1, input2)))
 
@@ -3842,7 +3838,7 @@ class TestNN(NNTestCase):
             IH = random.randint(1, 8)
             IW = random.randint(1, 8)
             H = random.randint(IH + 1, 12)
-            W = random.randint(IH + 1, 12)
+            W = random.randint(IW + 1, 12)
             test_shape(N, C, IH, IW, H, W, padding_mode)
 
             # test smaller output
@@ -3890,6 +3886,80 @@ class TestNN(NNTestCase):
             # test CUDA against CPU
             if TEST_CUDA:
                 test_cpu_against_cuda(N, C, H, W, padding_mode)
+
+    def test_grid_sample_3d(self):
+        def test_cpu_against_cuda(N, C, D, H, W, padding_mode):
+            def test_shape(N, C, ID, IH, IW, D, H, W, padding_mode):
+
+                input_cpu = Variable(torch.randn(C, N, ID, IH, IW).transpose(0, 1), requires_grad=True)
+                grid_cpu = Variable(torch.randn(D, N, H, W, 3).transpose(0, 1), requires_grad=True)
+                out_cpu = F.grid_sample(input_cpu, grid_cpu, padding_mode=padding_mode)
+                self.assertTrue(out_cpu.size() == torch.Size([N, C, D, H, W]))
+
+                input_cuda = Variable(input_cpu.data.transpose(0, 1).cuda().transpose(0, 1), requires_grad=True)
+                grid_cuda = Variable(grid_cpu.data.transpose(0, 1).cuda().transpose(0, 1), requires_grad=True)
+                out_cuda = F.grid_sample(input_cuda, grid_cuda, padding_mode=padding_mode)
+                self.assertEqual(out_cpu, out_cuda)
+
+                gradients = out_cpu.data.new(out_cpu.size()).normal_()
+                out_cpu.backward(gradients)
+                out_cuda.backward(gradients.cuda())
+                self.assertEqual(input_cpu.grad, input_cuda.grad)
+                self.assertEqual(grid_cpu.grad, grid_cuda.grad, prec=5e-5)
+
+                # check that zero-dimensional input strides don't error out
+                base_input = torch.randn(C, ID, IH, IW)
+                input_cpu = Variable(base_input.expand(input_cuda.size()), requires_grad=True)
+                grid_cpu = Variable(torch.randn(N, D, H, W, 3), requires_grad=True)
+                out_cpu = F.grid_sample(input_cpu, grid_cpu, padding_mode=padding_mode)
+
+                input_cuda = Variable(base_input.cuda().expand(input_cuda.size()), requires_grad=True)
+                grid_cuda = Variable(grid_cpu.data.cuda(), requires_grad=True)
+                out_cuda = F.grid_sample(input_cuda, grid_cuda, padding_mode=padding_mode)
+                self.assertEqual(out_cpu, out_cuda)
+
+            # test same size output
+            test_shape(N, C, D, H, W, D, H, W, padding_mode)
+
+            # test larger output
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            ID = random.randint(1, 8)
+            IH = random.randint(1, 8)
+            IW = random.randint(1, 8)
+            D = random.randint(ID + 1, 12)
+            H = random.randint(IH + 1, 12)
+            W = random.randint(IW + 1, 12)
+            test_shape(N, C, ID, IH, IW, D, H, W, padding_mode)
+
+            # test smaller output
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            ID = random.randint(1, 8)
+            IH = random.randint(1, 8)
+            IW = random.randint(1, 8)
+            D = random.randint(1, ID)
+            H = random.randint(1, IH)
+            W = random.randint(1, IW)
+            test_shape(N, C, ID, IH, IW, D, H, W, padding_mode)
+
+        # test known input on CPU
+        for padding_mode in ['zeros', 'border']:
+            # do gradcheck
+            N = random.randint(1, 8)
+            C = random.randint(1, 8)
+            D = random.randint(1, 8)
+            H = random.randint(1, 8)
+            W = random.randint(1, 8)
+            input = Variable(torch.randn(N, C, D, H, W), requires_grad=True)
+            grid = Variable(torch.randn(N, D, H, W, 3), requires_grad=True)
+            self.assertTrue(gradcheck(
+                lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                (input, grid)))
+
+            # test CUDA against CPU
+            if TEST_CUDA:
+                test_cpu_against_cuda(N, C, D, H, W, padding_mode)
 
     def test_affine_grid(self):
         # test known input on CPU
@@ -4609,9 +4679,9 @@ new_criterion_tests = [
     ),
     dict(
         module_name='BCEWithLogitsLoss',
-        constructor_args=(torch_rand(()),),
-        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch_randn(()).gt(0).double(),
+        constructor_args=(torch.rand(()),),
+        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.randn(()).gt(0).double(),
         desc='scalar_weights'
     ),
     dict(
@@ -4681,8 +4751,8 @@ new_criterion_tests = [
     ),
     dict(
         module_name='KLDivLoss',
-        input_fn=lambda: torch_rand(()).log(),
-        target_fn=lambda: torch_rand(()),
+        input_fn=lambda: torch.rand(()).log(),
+        target_fn=lambda: torch.rand(()),
         reference_fn=lambda i, t, m:
             kldivloss_reference(i, t, get_size_average(m), reduce=True),
         check_no_size_average=True,
@@ -4698,9 +4768,9 @@ new_criterion_tests = [
     ),
     dict(
         module_name='BCELoss',
-        constructor_args_fn=lambda: (torch_rand(()),),
-        input_fn=lambda: torch_rand(()).clamp_(1e-2, 1 - 1e-2),
-        target_fn=lambda: torch_rand(()).gt(0).double(),
+        constructor_args_fn=lambda: (torch.rand(()),),
+        input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.rand(()).gt(0).double(),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
             (i.numel() if get_size_average(m) else 1),
         desc='scalar_weights',
@@ -4710,7 +4780,7 @@ new_criterion_tests = [
         module_name='HingeEmbeddingLoss',
         constructor_args=(0.5,),
         input_size=(),
-        target_fn=lambda: torch_randn(()).gt(0).double().mul_(2).sub(1),
+        target_fn=lambda: torch.randn(()).gt(0).double().mul_(2).sub(1),
         desc='scalar_margin',
         check_no_size_average=True,
     ),
@@ -4760,12 +4830,12 @@ def bceloss_no_reduce_test():
 
 
 def bceloss_no_reduce_scalar_test():
-    t = torch_randn(()).gt(0).double()
+    t = torch.randn(()).gt(0).double()
     return dict(
         fullname='BCELoss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, t.type_as(i), reduce=False)),
-        input_fn=lambda: torch_rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
+        input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()),
         check_gradgrad=False,
         pickle=False)
@@ -4786,14 +4856,14 @@ def bceloss_weights_no_reduce_test():
 
 
 def bceloss_weights_no_reduce_scalar_test():
-    t = torch_randn(()).double()
-    weights = torch_rand(())
+    t = torch.randn(()).double()
+    weights = torch.rand(())
     return dict(
         fullname='BCELoss_weights_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy(i, t.type_as(i),
                                              weight=weights.type_as(i), reduce=False)),
-        input_fn=lambda: torch_rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
+        input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * i.log() + (1 - t) * (1 - i).log()) * weights,
         check_gradgrad=False,
         pickle=False)
@@ -4813,13 +4883,13 @@ def bce_with_logistic_no_reduce_test():
 
 
 def bce_with_logistic_no_reduce_scalar_test():
-    t = torch_randn(()).gt(0).double()
+    t = torch.randn(()).gt(0).double()
     sigmoid = nn.Sigmoid()
     return dict(
         fullname='BCEWithLogitsLoss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.binary_cross_entropy_with_logits(i, t.type_as(i), reduce=False)),
-        input_fn=lambda: torch_rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
+        input_fn=lambda: torch.rand(()).clamp_(2.8e-2, 1 - 2.8e-2),
         reference_fn=lambda i, m: -(t * sigmoid(i).log() + (1 - t) * (1 - sigmoid(i)).log()),
         check_gradgrad=False,
         pickle=False)
@@ -4838,12 +4908,12 @@ def kldivloss_no_reduce_test():
 
 
 def kldivloss_no_reduce_scalar_test():
-    t = torch_randn(())
+    t = torch.randn(())
     return dict(
         fullname='KLDivLoss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.kl_div(i, t.type_as(i), reduce=False)),
-        input_fn=lambda: torch_rand(()).log(),
+        input_fn=lambda: torch.rand(()).log(),
         reference_fn=lambda i, _:
             loss_reference_fns['KLDivLoss'](i, t.type_as(i), reduce=False),
         pickle=False)
@@ -4861,12 +4931,12 @@ def l1loss_no_reduce_test():
 
 
 def l1loss_no_reduce_scalar_test():
-    t = torch_randn(())
+    t = torch.randn(())
     return dict(
         fullname='L1Loss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.l1_loss(i, t.type_as(i), reduce=False)),
-        input_fn=lambda: torch_randn(()),
+        input_fn=lambda: torch.randn(()),
         reference_fn=lambda i, m: (i - t.type_as(i)).abs(),
         pickle=False)
 
@@ -4885,7 +4955,7 @@ def mseloss_no_reduce_test():
 
 def mseloss_no_reduce_scalar_test():
     input_size = ()
-    target = torch_randn(input_size)
+    target = torch.randn(input_size)
     return dict(
         fullname='MSELoss_no_reduce_scalar',
         constructor=wrap_functional(
@@ -5073,12 +5143,12 @@ def smoothl1loss_no_reduce_test():
 
 
 def smoothl1loss_no_reduce_scalar_test():
-    t = torch_randn(())
+    t = torch.randn(())
     return dict(
         fullname='SmoothL1Loss_no_reduce_scalar',
         constructor=wrap_functional(
             lambda i: F.smooth_l1_loss(i, t.type_as(i), reduce=False)),
-        input_fn=lambda: torch_randn(()),
+        input_fn=lambda: torch.randn(()),
         reference_fn=lambda i, _:
             loss_reference_fns['SmoothL1Loss'](i, t.type_as(i), reduce=False),
         pickle=False)
@@ -5195,6 +5265,80 @@ def multilabelsoftmarginloss_weights_no_reduce_test():
         pickle=False)
 
 
+def multimarginloss_no_reduce_test():
+    t = Variable(torch.rand(5).mul(8).floor().long())
+    return dict(
+        fullname='MultiMarginLoss_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multi_margin_loss(i, t.type_as(i).long(), reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multimarginloss_1d_no_reduce_test():
+    t = Variable(torch.rand(1).mul(8).floor().long())
+    return dict(
+        fullname='MultiMarginLoss_1d_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multi_margin_loss(i, t.type_as(i).long(), reduce=False)),
+        input_fn=lambda: torch.randn(10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multimarginloss_p_no_reduce_test():
+    t = Variable(torch.rand(5).mul(8).floor().long())
+    return dict(
+        fullname='MultiMarginLoss_p_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multi_margin_loss(i, t.type_as(i).long(), p=2, reduce=False)),
+        input_fn=lambda: torch.randn(5, 10).clamp_(1e-2, 1 - 1e-2),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(), p=2, reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multimarginloss_margin_no_reduce_test():
+    t = Variable(torch.rand(5).mul(8).floor().long())
+    return dict(
+        fullname='MultiMarginLoss_margin_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multi_margin_loss(i, t.type_as(i).long(), margin=0.5, reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(),
+                                                  margin=0.5, reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
+def multimarginloss_weights_no_reduce_test():
+    t = Variable(torch.rand(5).mul(8).floor().long())
+    weights = Variable(torch.rand(10))
+    return dict(
+        fullname='MultiMarginLoss_weights_no_reduce',
+        constructor=wrap_functional(
+            lambda i: F.multi_margin_loss(i, t.type_as(i).long(), weight=weights.type_as(i),
+                                          reduce=False)),
+        input_fn=lambda: torch.randn(5, 10),
+        reference_fn=lambda i, _:
+            loss_reference_fns['MultiMarginLoss'](i, t.data.type_as(i).long(),
+                                                  weight=weights, reduce=False),
+        check_no_size_average=True,
+        check_gradgrad=False,
+        pickle=False)
+
+
 new_module_tests = [
     poissonnllloss_no_reduce_test(),
     bceloss_no_reduce_test(),
@@ -5230,6 +5374,11 @@ new_module_tests = [
     softmarginloss_no_reduce_test(),
     multilabelsoftmarginloss_no_reduce_test(),
     multilabelsoftmarginloss_weights_no_reduce_test(),
+    multimarginloss_no_reduce_test(),
+    multimarginloss_1d_no_reduce_test(),
+    multimarginloss_p_no_reduce_test(),
+    multimarginloss_margin_no_reduce_test(),
+    multimarginloss_weights_no_reduce_test(),
     dict(
         module_name='BatchNorm1d',
         constructor_args=(10,),

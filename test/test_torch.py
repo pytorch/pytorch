@@ -23,6 +23,15 @@ if TEST_SCIPY:
 
 SIZE = 100
 
+can_retrieve_source = True
+with warnings.catch_warnings(record=True) as warns:
+    with tempfile.NamedTemporaryFile() as checkpoint:
+        x = torch.save(torch.nn.Module(), checkpoint)
+        for warn in warns:
+            if "Couldn't retrieve source code" in warn.message.args[0]:
+                can_retrieve_source = False
+                break
+
 
 class TestTorch(TestCase):
 
@@ -166,12 +175,11 @@ class TestTorch(TestCase):
                         res2[i, j] += m1[i, k] * m2[k, j]
             self.assertEqual(res1, res2)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_linear_algebra_scalar_raises(self):
-        from torch.autograd import Variable, variable
+        from torch.autograd import Variable
         m = Variable(torch.randn(5, 5))
         v = Variable(torch.randn(5))
-        s = variable(7)
+        s = torch.tensor(7)
         self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
         self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
         self.assertRaises(RuntimeError, lambda: torch.ger(v, s))
@@ -1076,8 +1084,13 @@ class TestTorch(TestCase):
         for dtype in dtypes:
             # no ops on torch.float16 currently, cuda.float16 doesn't work on windows
             if dtype != torch.float16:
-                out = torch._C._VariableFunctions.zeros((2, 3), dtype=dtype)
-                self.assertEqual(out.dtype, dtype)
+                if dtype.is_cuda and torch.cuda.device_count() > 1:
+                    out = torch.zeros((2, 3), device=1, dtype=dtype)
+                    self.assertIs(dtype, out.dtype)
+                    self.assertEqual(1, out.get_device())
+                else:
+                    out = torch.zeros((2, 3), dtype=dtype)
+                    self.assertIs(dtype, out.dtype)
             self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
             self.assertEqual(is_sparse, dtype.is_sparse)
 
@@ -1086,13 +1099,39 @@ class TestTorch(TestCase):
                       torch.float16, torch.float32, torch.float64]
         cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
                        torch.cuda.float32, torch.cuda.float64]
-        if not IS_WINDOWS:  # cuda.float16 doesn't work on windows
-            cuda_dtypes.append(torch.cuda.float16)
+        cuda_dtypes.append(torch.cuda.float16)
         self._test_dtypes(self, cpu_dtypes, cuda_dtypes, False)
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
-        self.assertRaises(RuntimeError, lambda: torch._C._VariableFunctions.zeros((2, 3), out=d, dtype=torch.float32))
+        self.assertRaises(RuntimeError, lambda: torch.zeros((2, 3), out=d, dtype=torch.float32))
+
+    def test_constructor_dtypes(self):
+        default_type = torch.Tensor().type()
+        self.assertIs(torch.Tensor().dtype, torch.Tensor.dtype)
+
+        torch.set_default_tensor_type('torch.IntTensor')
+        self.assertIs(torch.int32, torch.Tensor.dtype)
+        self.assertIs(torch.int32, torch.IntTensor.dtype)
+        self.assertEqual(torch.IntStorage, torch.Storage)
+
+        torch.set_default_tensor_type(torch.int64)
+        self.assertIs(torch.int64, torch.Tensor.dtype)
+        self.assertIs(torch.int64, torch.LongTensor.dtype)
+        self.assertEqual(torch.LongStorage, torch.Storage)
+
+        torch.set_default_tensor_type('torch.Tensor')
+        self.assertIs(torch.int64, torch.Tensor.dtype)
+        self.assertIs(torch.int64, torch.LongTensor.dtype)
+        self.assertEqual(torch.LongStorage, torch.Storage)
+
+        if torch.cuda.is_available():
+            torch.set_default_tensor_type(torch.cuda.float64)
+            self.assertIs(torch.cuda.float64, torch.Tensor.dtype)
+            self.assertIs(torch.cuda.float64, torch.cuda.DoubleTensor.dtype)
+            self.assertEqual(torch.cuda.DoubleStorage, torch.Storage)
+
+        torch.set_default_tensor_type(default_type)
 
     def test_tensor_factory(self):
         expected = torch.Tensor([1, 1])
@@ -1573,15 +1612,14 @@ class TestTorch(TestCase):
     def test_contiguous(self):
         return self._test_contiguous(self, lambda t: t)
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_scalars_as_floats(self):
         "zero-dim variables that don't require grad should bind to scalar arguments"
-        x = torch.autograd.variable(2)
-        y = torch.autograd.variable(3)
+        x = torch.tensor(2)
+        y = torch.tensor(3)
         # 3 + (3 * 3) * 2
         self.assertEqual(y.addcmul(y, y, value=x), 21)
 
-        x = torch.autograd.variable(2, requires_grad=True)
+        x = torch.tensor(2, requires_grad=True)
         self.assertRaises(Exception, lambda: y.addcmul(y, y, value=x))
 
     @staticmethod
@@ -2006,11 +2044,9 @@ class TestTorch(TestCase):
         z = torch.randn(2, 2, 1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
-    @unittest.skipIf(not torch._C._with_scalars(), "scalars not enabled")
     def test_cat_scalars(self):
-        from torch.autograd import variable
-        x = variable(0)
-        y = variable(1)
+        x = torch.tensor(0)
+        y = torch.tensor(1)
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
 
     def test_stack(self):
@@ -2109,10 +2145,8 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_slice(self):
-        # TODO: remove the Variable wrapper once we merge Variable and Tensor
-        from torch.autograd import Variable
-        empty = Variable(torch.Tensor())
-        x = Variable(torch.arange(0, 16).view(4, 4))
+        empty = torch.Tensor()
+        x = torch.arange(0, 16).view(4, 4)
         self.assertEqual(x.slice(), x)
         self.assertEqual(x.slice(0, 0, 4), x)
         # start and stop are clamped to the size of dim
@@ -2129,21 +2163,17 @@ class TestTorch(TestCase):
         self.assertEqual(x.slice(0, 0, -1, 2).data.tolist(), [[0, 1, 2, 3], [8, 9, 10, 11]])
 
     def test_is_signed(self):
-        # TODO: remove the Variable wrapper once we merge Variable and Tensor
-        from torch.autograd import Variable
-        self.assertEqual(Variable(torch.IntTensor(5)).is_signed(), True)
-        self.assertEqual(Variable(torch.ByteTensor(5)).is_signed(), False)
-        self.assertEqual(Variable(torch.FloatTensor(5)).is_signed(), True)
-        self.assertEqual(Variable(torch.HalfTensor(10)).is_signed(), True)
+        self.assertEqual(torch.IntTensor(5).is_signed(), True)
+        self.assertEqual(torch.ByteTensor(5).is_signed(), False)
+        self.assertEqual(torch.FloatTensor(5).is_signed(), True)
+        self.assertEqual(torch.HalfTensor(10).is_signed(), True)
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_is_signed_cuda(self):
-        # TODO: remove the Variable wrapper once we merge Variable and Tensor
-        from torch.autograd import Variable
-        self.assertEqual(Variable(torch.IntTensor(5).cuda()).is_signed(), True)
-        self.assertEqual(Variable(torch.ByteTensor(5).cuda()).is_signed(), False)
-        self.assertEqual(Variable(torch.FloatTensor(5).cuda()).is_signed(), True)
-        self.assertEqual(Variable(torch.HalfTensor(10).cuda()).is_signed(), True)
+        self.assertEqual(torch.cuda.IntTensor(5).is_signed(), True)
+        self.assertEqual(torch.cuda.ByteTensor(5).is_signed(), False)
+        self.assertEqual(torch.cuda.FloatTensor(5).is_signed(), True)
+        self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 
     @skipIfNoLapack
     def test_gesv(self):
@@ -2645,20 +2675,16 @@ class TestTorch(TestCase):
                 M[i] = row
             return M.diag().prod() * multiplier
 
-        # TODO: remove Variable wrapper once Variable and Tensor are the same
-        Variable = torch.autograd.Variable
-
-        eye_det = Variable(conv_fn(torch.eye(5))).det()
+        eye_det = conv_fn(torch.eye(5)).det()
         self.assertEqual(eye_det, eye_det.clone().fill_(1), 1e-8, 'determinant of identity')
 
         def test(M):
             M = conv_fn(M)
-            var_M = Variable(M)
-            M_det = var_M.det().data
+            M_det = M.det().data
 
             self.assertEqual(M_det, M_det.clone().fill_(reference_det(M)), 1e-8, 'determinant')
-            self.assertEqual(M_det, var_M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
-            self.assertEqual(M_det, var_M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
+            self.assertEqual(M_det, M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
+            self.assertEqual(M_det, M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
 
             for x in [0, 2, 4]:
                 for scale in [-2, -0.1, 0, 10]:
@@ -2666,12 +2692,12 @@ class TestTorch(TestCase):
                     # dim 0
                     M_clone = M.clone()
                     M_clone[:, x] *= scale
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after scaling a row')
                     # dim 1
                     M_clone = M.clone()
                     M_clone[x, :] *= scale
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after scaling a column')
 
             for x1, x2 in [(0, 3), (4, 1), (3, 2)]:
@@ -2680,12 +2706,12 @@ class TestTorch(TestCase):
                 # dim 0
                 M_clone = M.clone()
                 M_clone[:, x2] = M_clone[:, x1]
-                det = Variable(M_clone).det().data
+                det = M_clone.det()
                 self.assertEqual(target, det, 1e-8, 'determinant when two rows are same')
                 # dim 1
                 M_clone = M.clone()
                 M_clone[x2, :] = M_clone[x1, :]
-                det = Variable(M_clone).det().data
+                det = M_clone.det()
                 self.assertEqual(target, det, 1e-8, 'determinant when two columns are same')
 
                 for scale1, scale2 in [(0.3, -1), (0, 2), (10, 0.1)]:
@@ -2695,14 +2721,14 @@ class TestTorch(TestCase):
                     t = M_clone[:, x1] * scale1
                     M_clone[:, x1] += M_clone[:, x2] * scale2
                     M_clone[:, x2] = t
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after exchanging rows')
                     # dim 1
                     M_clone = M.clone()
                     t = M_clone[x1, :] * scale1
                     M_clone[x1, :] += M_clone[x2, :] * scale2
                     M_clone[x2, :] = t
-                    det = Variable(M_clone).det().data
+                    det = M_clone.det()
                     self.assertEqual(target, det, 1e-8, 'determinant after exchanging columns')
 
         test(torch.randn(5, 5))
@@ -3124,8 +3150,6 @@ class TestTorch(TestCase):
             for inplace in (True, False):
                 for uplo in (None, True, False):
                     checkPsdCholesky(a, uplo, inplace)
-                    # TODO: remove once Variable and Tensor are merged
-                    checkPsdCholesky(torch.autograd.Variable(a), uplo, inplace)
 
     def test_numel(self):
         b = torch.ByteTensor(3, 100, 100)
@@ -4509,8 +4533,7 @@ class TestTorch(TestCase):
 
     def test_deepcopy_scalar(self):
         from copy import deepcopy
-        from torch.autograd import variable
-        a = variable(5)
+        a = torch.tensor(5)
         self.assertEqual(a.size(), deepcopy(a).size())
         self.assertEqual(a, deepcopy(a))
 
@@ -4545,24 +4568,6 @@ class TestTorch(TestCase):
         self.assertTrue(isBinary(t))
 
         p = torch.rand(10, 10)
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
-
-        q = torch.rand(5, 5)
-        self.assertTrue(isBinary(q.bernoulli()))
-
-    def test_bernoulli_variable(self):
-        # TODO: remove once we merge Variable and Tensor
-        t = torch.autograd.Variable(torch.ByteTensor(10, 10))
-
-        def isBinary(t):
-            return torch.ne(t, 0).mul_(torch.ne(t, 1)).sum() == 0
-
-        p = 0.5
-        t.bernoulli_(p)
-        self.assertTrue(isBinary(t))
-
-        p = torch.autograd.Variable(torch.rand(10))
         t.bernoulli_(p)
         self.assertTrue(isBinary(t))
 
@@ -4678,7 +4683,6 @@ class TestTorch(TestCase):
             xh2 = torch.load(f)
             self.assertEqual(xh.float(), xh2.float())
 
-    @unittest.skipIf(IS_WINDOWS, 'NYI: CUDA HalfTensor support on Windows')
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_half_tensor_cuda(self):
         x = torch.randn(5, 5).half()
@@ -4752,7 +4756,8 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
-                self.assertEquals(len(w), 0)
+                if can_retrieve_source:
+                    self.assertEquals(len(w), 0)
 
             # Replace the module with different source
             fname = os.path.join(os.path.dirname(__file__), 'data/network2.py')
@@ -4761,8 +4766,9 @@ class TestTorch(TestCase):
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
                 self.assertTrue(isinstance(loaded, module.Net))
-                self.assertEquals(len(w), 1)
-                self.assertTrue(w[0].category, 'SourceChangeWarning')
+                if can_retrieve_source:
+                    self.assertEquals(len(w), 1)
+                    self.assertTrue(w[0].category, 'SourceChangeWarning')
 
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
@@ -4820,8 +4826,6 @@ class TestTorch(TestCase):
 
     def test_print(self):
         for t in torch._tensor_classes:
-            if IS_WINDOWS and t in [torch.cuda.sparse.HalfTensor, torch.cuda.HalfTensor]:
-                return  # CUDA HalfTensor is not supported on Windows yet
             if t == torch.HalfTensor:
                 continue  # HalfTensor does not support fill
             if t.is_sparse:
@@ -4907,15 +4911,22 @@ class TestTorch(TestCase):
         z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
         self.assertEqual(x.new().shape, [0])
         self.assertEqual(x.new(), x)
+        self.assertIs(torch.uint8, x.new(dtype=torch.uint8).dtype)
         self.assertEqual(x.new(1, 2).shape, [1, 2])
         self.assertEqual(x.new(torch.Size([3, 4])).shape, [3, 4])
+        self.assertIs(torch.uint8, x.new(1, 2, dtype=torch.uint8).dtype)
+        self.assertIs(torch.uint8, x.new(torch.Size([3, 4]), dtype=torch.uint8).dtype)
         self.assertEqual(x.new([3, 4]).shape, [2])
         self.assertEqual(x.new([3, 4]).tolist(), [3, 4])
         self.assertEqual(x.new((3, 4)).tolist(), [3, 4])
+        self.assertIs(torch.uint8, x.new((3, 4), dtype=torch.uint8).dtype)
         if TEST_NUMPY:
             self.assertEqual(x.new([np.int32(3), np.float64(4)]).tolist(), [3, 4])
-        if torch._C._with_scalars():
-            self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
+            self.assertIs(torch.uint8, x.new([np.int32(3), np.float64(4)], dtype=torch.uint8).dtype)
+            self.assertEqual(x.new(np.array((3, 4))).tolist(), [3, 4])
+            self.assertIs(torch.int64, x.new(np.array((3, 4)), dtype=torch.int64).dtype)
+        self.assertEqual(x.new([z[2], z[0] + 3]).tolist(), [3, 4])
+        self.assertIs(torch.uint8, x.new([z[2], z[0] + 3], dtype=torch.uint8).dtype)
         self.assertEqual(x.new(size=(3, 4)).shape, [3, 4])
         self.assertEqual(x.new(tuple()).shape, [0])
         self.assertEqual(x.new(y.storage()).data_ptr(), y.data_ptr())
@@ -5134,11 +5145,9 @@ class TestTorch(TestCase):
                 for i in range(len(array)):
                     self.assertEqual(tensor[i], array[i])
 
-                # CUDA HalfTensor is not supported on Windows yet
-                if not IS_WINDOWS:
-                    tensor = torch.cuda.HalfTensor(array)
-                    for i in range(len(array)):
-                        self.assertEqual(tensor[i], array[i])
+                tensor = torch.cuda.HalfTensor(array)
+                for i in range(len(array)):
+                    self.assertEqual(tensor[i], array[i])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
@@ -5310,8 +5319,7 @@ class TestTorch(TestCase):
         self.assertEqual(x_clone, xor_result)
 
     def test_invert(self):
-        # TODO remove this once we merge tensor and variable
-        x = torch.autograd.Variable(torch.ByteTensor([0, 1, 1]))
+        x = torch.ByteTensor([0, 1, 1])
         self.assertEqual((~x).tolist(), [1, 0, 0])
 
     def test_apply(self):

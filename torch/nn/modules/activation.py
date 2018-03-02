@@ -27,9 +27,8 @@ class Threshold(Module):
     Examples::
 
         >>> m = nn.Threshold(0.1, 20)
-        >>> input = Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, threshold, value, inplace=False):
@@ -54,6 +53,8 @@ class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
     :math:`{ReLU}(x)= max(0, x)`
 
+    .. image:: _static/img/activation/ReLU.png
+
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
 
@@ -65,9 +66,8 @@ class ReLU(Threshold):
     Examples::
 
         >>> m = nn.ReLU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, inplace=False):
@@ -80,7 +80,42 @@ class ReLU(Threshold):
 
 
 class RReLU(Module):
+    r"""Applies the randomized leaky rectified liner unit function element-wise
+    described in the paper
+    `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
 
+    The function is defined as::
+
+    .. math::
+        f(x) = \begin{cases}
+            ax & \text{if } x < 0 \\
+            x & \text{if } x \geq 0 \\
+        \end{cases},
+
+     where :math:`a` is randomly sampled from uniform distribution
+    :math:`U(\text{lower}, \text{upper})`.
+
+     See: https://arxiv.org/pdf/1505.00853.pdf
+
+    Args:
+        lower: lower bound of the uniform distribution. Default: :math:`1/8`
+        upper: upper bound of the uniform distribution. Default: :math:`1/3`
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.RReLU(0.1, 0.3)
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+
+    .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
+        https://arxiv.org/abs/1505.00853
+    """
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
@@ -103,11 +138,17 @@ class Hardtanh(Module):
 
     HardTanh is defined as::
 
-       f(x) = +1, if x  >  1
-       f(x) = -1, if x  < -1
-       f(x) =  x,  otherwise
+    .. math::
+        f(x) = \begin{cases}
+            1 & \text{if } x > 1 \\
+            -1 & \text{if } x < -1 \\
+            x & \text{otherwise} \\
+        \end{cases}
 
-    The range of the linear region :math:`[-1, 1]` can be adjusted
+    The range of the linear region :math:`[-1, 1]` can be adjusted using
+    :attr:`min_val` and :attr:`max_val`.
+
+    .. image:: _static/img/activation/Hardtanh.png
 
     Args:
         min_val: minimum value of the linear region range. Default: -1
@@ -115,7 +156,7 @@ class Hardtanh(Module):
         inplace: can optionally do the operation in-place. Default: ``False``
 
     Keyword arguments :attr:`min_value` and :attr:`max_value`
-    have been deprecated in favor of :attr:`min_val` and :attr:`max_val`
+    have been deprecated in favor of :attr:`min_val` and :attr:`max_val`.
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -125,9 +166,8 @@ class Hardtanh(Module):
     Examples::
 
         >>> m = nn.Hardtanh(-2, 2)
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, min_val=-1, max_val=1, inplace=False, min_value=None, max_value=None):
@@ -166,12 +206,13 @@ class ReLU6(Hardtanh):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/ReLU6.png
+
     Examples::
 
         >>> m = nn.ReLU6()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, inplace=False):
@@ -191,12 +232,13 @@ class Sigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Sigmoid.png
+
     Examples::
 
         >>> m = nn.Sigmoid()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input):
@@ -215,12 +257,13 @@ class Tanh(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Tanh.png
+
     Examples::
 
         >>> m = nn.Tanh()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input):
@@ -243,12 +286,13 @@ class ELU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/ELU.png
+
     Examples::
 
         >>> m = nn.ELU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, alpha=1., inplace=False):
@@ -272,6 +316,8 @@ class SELU(Module):
     with ``alpha=1.6732632423543772848170429916717`` and
     ``scale=1.0507009873554804934193349852946``.
 
+    .. image:: _static/img/activation/SELU.png
+
     More details can be found in the paper `Self-Normalizing Neural Networks`_ .
 
     Args:
@@ -285,9 +331,8 @@ class SELU(Module):
     Examples::
 
         >>> m = nn.SELU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
@@ -320,9 +365,8 @@ class GLU(Module):
     Examples::
 
         >>> m = nn.GLU()
-        >>> input = autograd.Variable(torch.randn(4, 2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(4, 2)
+        >>> output = m(input)
     """
 
     def __init__(self, dim=-1):
@@ -351,12 +395,13 @@ class Hardshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Hardshrink.png
+
     Examples::
 
         >>> m = nn.Hardshrink()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, lambd=0.5):
@@ -384,12 +429,13 @@ class LeakyReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/LeakyReLU.png
+
     Examples::
 
         >>> m = nn.LeakyReLU(0.1)
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, negative_slope=1e-2, inplace=False):
@@ -415,12 +461,13 @@ class LogSigmoid(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/LogSigmoid.png
+
     Examples::
 
         >>> m = nn.LogSigmoid()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input):
@@ -448,12 +495,13 @@ class Softplus(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Softplus.png
+
     Examples::
 
         >>> m = nn.Softplus()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, beta=1, threshold=20):
@@ -486,12 +534,13 @@ class Softshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Softshrink.png
+
     Examples::
 
         >>> m = nn.Softshrink()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, lambd=0.5):
@@ -526,12 +575,13 @@ class PReLU(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/PReLU.png
+
     Examples::
 
         >>> m = nn.PReLU()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def __init__(self, num_parameters=1, init=0.25):
@@ -555,12 +605,13 @@ class Softsign(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Softsign.png
+
     Examples::
 
         >>> m = nn.Softsign()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input):
@@ -578,12 +629,13 @@ class Tanhshrink(Module):
           dimensions
         - Output: :math:`(N, *)`, same shape as the input
 
+    .. image:: _static/img/activation/Tanhshrink.png
+
     Examples::
 
         >>> m = nn.Tanhshrink()
-        >>> input = autograd.Variable(torch.randn(2))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2)
+        >>> output = m(input)
     """
 
     def forward(self, input):
@@ -615,9 +667,8 @@ class Softmin(Module):
     Examples::
 
         >>> m = nn.Softmin()
-        >>> input = autograd.Variable(torch.randn(2, 3))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
     """
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
@@ -658,9 +709,8 @@ class Softmax(Module):
     Examples::
 
         >>> m = nn.Softmax()
-        >>> input = autograd.Variable(torch.randn(2, 3))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
     """
 
     def __init__(self, dim=None):
@@ -698,9 +748,8 @@ class Softmax2d(Module):
 
         >>> m = nn.Softmax2d()
         >>> # you softmax over the 2nd dimension
-        >>> input = autograd.Variable(torch.randn(2, 3, 12, 13))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3, 12, 13)
+        >>> output = m(input)
     """
 
     def forward(self, input):
@@ -732,9 +781,8 @@ class LogSoftmax(Module):
     Examples::
 
         >>> m = nn.LogSoftmax()
-        >>> input = autograd.Variable(torch.randn(2, 3))
-        >>> print(input)
-        >>> print(m(input))
+        >>> input = torch.randn(2, 3)
+        >>> output = m(input)
     """
 
     def __init__(self, dim=None):

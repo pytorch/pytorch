@@ -27,7 +27,7 @@ class Dropout(Module):
     Examples::
 
         >>> m = nn.Dropout(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16))
+        >>> input = torch.randn(20, 16)
         >>> output = m(input)
 
     .. _Improving neural networks by preventing co-adaptation of feature
@@ -80,7 +80,7 @@ class Dropout2d(Module):
     Examples::
 
         >>> m = nn.Dropout2d(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 32, 32))
+        >>> input = torch.randn(20, 16, 32, 32)
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
@@ -133,7 +133,7 @@ class Dropout3d(Module):
     Examples::
 
         >>> m = nn.Dropout3d(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 4, 32, 32))
+        >>> input = torch.randn(20, 16, 4, 32, 32)
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
@@ -188,7 +188,7 @@ class AlphaDropout(Module):
     Examples::
 
         >>> m = nn.AlphaDropout(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16))
+        >>> input = torch.randn(20, 16)
         >>> output = m(input)
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
