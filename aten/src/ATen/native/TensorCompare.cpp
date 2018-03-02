@@ -23,6 +23,44 @@ void where_cpu(
         ret_val = cond_val ? self_val : other_val;
       });
 }
+
+template<template<typename T> class Comparator, typename scalar>
+struct CmpOp {
+  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
+    auto other_val = other.to<scalar>();
+    at::CPU_tensor_apply2<uint8_t, scalar>(ret, self,
+        [other_val](uint8_t& ret_val, scalar self_val) {
+          ret_val = Comparator<scalar>()(self_val, other_val);
+      }
+    );
+  }
+};
+
+template<typename scalar>
+using LeOp = CmpOp<std::less_equal, scalar>;
+template<typename scalar>
+using GeOp = CmpOp<std::greater_equal, scalar>;
+template<typename scalar>
+using EqOp = CmpOp<std::equal_to, scalar>;
+template<typename scalar>
+using NeOp = CmpOp<std::not_equal_to, scalar>;
+
+template<template<typename T> class Comparator>
+struct CmpOpFloating {
+  static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
+    auto other_val = other.to<double>();
+    at::CPU_tensor_apply2<uint8_t, double>(result, self.toType(at::kDouble),
+        [other_val](uint8_t& result_val, double self_val) {
+          result_val = Comparator<double>()(self_val, other_val);
+      }
+    );
+  }
+};
+
+using LeOpFloating = CmpOpFloating<std::less_equal>;
+using GeOpFloating = CmpOpFloating<std::greater_equal>;
+using EqOpFloating = CmpOpFloating<std::equal_to>;
+using NeOpFloating = CmpOpFloating<std::not_equal_to>;
 } // namespace
 
 namespace at { namespace native {
@@ -64,5 +102,77 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
     where_cpu<scalar_t>(ret, condition, self, other);
   });
   return ret;
+}
+
+Tensor le(const Tensor& self, Scalar other) {
+  Tensor result = self.type().toScalarType(kByte).tensor(self.sizes());
+  return at::le_out(result, self, other);
+}
+
+Tensor ge(const Tensor& self, Scalar other) {
+  Tensor result = self.type().toScalarType(kByte).tensor(self.sizes());
+  return at::ge_out(result, self, other);
+}
+
+Tensor eq(const Tensor& self, Scalar other) {
+  Tensor result = self.type().toScalarType(kByte).tensor(self.sizes());
+  return at::eq_out(result, self, other);
+}
+
+Tensor ne(const Tensor& self, Scalar other) {
+  Tensor result = self.type().toScalarType(kByte).tensor(self.sizes());
+  return at::ne_out(result, self, other);
+}
+
+Tensor & le_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+  result.resize_(self.sizes());
+  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+    LeOpFloating::apply(result, self, other);
+  }
+  else {
+    AT_DISPATCH_ALL_TYPES(self.type(), "le", [&]() {
+      LeOp<scalar_t>::apply(result, self, other);
+    });
+  }
+  return result;
+}
+
+Tensor & ge_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+  result.resize_(self.sizes());
+  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+    GeOpFloating::apply(result, self, other);
+  }
+  else {
+    AT_DISPATCH_ALL_TYPES(self.type(), "ge", [&]() {
+      GeOp<scalar_t>::apply(result, self, other);
+    });
+  }
+  return result;
+}
+
+Tensor & eq_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+  result.resize_(self.sizes());
+  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+    EqOpFloating::apply(result, self, other);
+  }
+  else {
+    AT_DISPATCH_ALL_TYPES(self.type(), "eq", [&]() {
+      EqOp<scalar_t>::apply(result, self, other);
+    });
+  }
+  return result;
+}
+
+Tensor & ne_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+  result.resize_(self.sizes());
+  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+    NeOpFloating::apply(result, self, other);
+  }
+  else {
+    AT_DISPATCH_ALL_TYPES(self.type(), "ne", [&]() {
+      NeOp<scalar_t>::apply(result, self, other);
+    });
+  }
+  return result;
 }
 }} // namespace at::native
