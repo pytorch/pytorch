@@ -44,6 +44,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   throw std::runtime_error("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
+Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
+  throw std::runtime_error("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
+}
+
 }} // namespace at::native
 
 #else // AT_CUDNN_ENABLED()
@@ -981,6 +985,16 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
   }
   return std::tuple<Tensor, Tensor, Tensor, TensorList>{dx, dhx, dcx, dw};
+}
+
+// TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
+// to initialize just the state tensor
+Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
+  auto handle = getCudnnHandle();
+  DropoutDescriptor dropout_desc;
+  auto dropout_p = train ? dropout : 0;
+  dropout_desc.initialize_rng(ty, handle, dropout_p, dropout_seed);
+  return dropout_desc.state;
 }
 
 }} // namespace at::native
