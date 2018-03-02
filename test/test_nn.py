@@ -37,6 +37,11 @@ if TEST_SCIPY:
     from scipy import stats
 
 
+# WARNING: If you add a new top-level test case to this file, you MUST
+# update test/run_test.sh to list it, otherwise it will NOT be run in
+# CI.
+
+
 class PackedSequenceTest(TestCase):
 
     _type_by_name = {
