@@ -62,7 +62,7 @@ inline int64_t THPUtils_unpackLong(PyObject* obj) {
   #endif
     Py_XDECREF(objRepr);
     throw std::runtime_error("Overflow when unpacking long."
-      " The int passed in (" + std::string(objString) + ") is not representable"
+      " The number passed in (" + std::string(objString) + ") is not representable"
       " by int64, maybe you should convert it to float first");
   }
   return (int64_t)value;
@@ -82,16 +82,16 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
   }
   if (PyLong_Check(obj)) {
     double value = PyLong_AsDouble(obj);
-    // convert from python error to C exception
+    // raise error on overflow
     if (PyErr_Occurred() &&
      PyErr_GivenExceptionMatches(PyErr_Occurred(), PyExc_OverflowError)) {
       PyErr_Clear();
       throw std::runtime_error("Overflow when unpacking double");
     }
-    // FIXME: can't find a test case to invoke following line
+    // raise warning on precision loss
     if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
-      std::cerr << "WARNING: Precision loss "
-        "when converting int to double" << std::endl;
+      auto warning_message = "Precision loss when converting int to double";
+      PyErr_WarnEx(PyExc_RuntimeWarning, warning_message, 1);
     }
     return value;
   }
