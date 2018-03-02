@@ -16,7 +16,7 @@ void THPStorage_(writeFileRaw)(THStorage *self, io fd)
   data = (real*)cpu_data.get();
   THCudaCheck(cudaMemcpy(data, self->data, size * sizeof(real), cudaMemcpyDeviceToHost));
 #endif
-  ssize_t result = doWrite<io>(fd, &size, sizeof(int64_t));
+  ssize_t result = doWrite(fd, &size, sizeof(int64_t));
   if (result != sizeof(int64_t))
     throw std::system_error(result, std::system_category());
   // fast track for bytes and little endian
@@ -25,7 +25,7 @@ void THPStorage_(writeFileRaw)(THStorage *self, io fd)
     int64_t remaining = sizeof(real) * size;
     while (remaining > 0) {
       // we write and read in 1GB blocks to avoid bugs on some OSes
-      ssize_t result = doWrite<io>(fd, bytes, THMin(remaining, 1073741824));
+      ssize_t result = doWrite(fd, bytes, THMin(remaining, 1073741824));
       if (result < 0)
         throw std::system_error(result, std::system_category());
       bytes += result;
@@ -54,7 +54,7 @@ void THPStorage_(writeFileRaw)(THStorage *self, io fd)
             THPByteOrder::THP_LITTLE_ENDIAN,
             to_convert);
       }
-      SYSCHECK(doWrite<io>(fd, le_buffer.get(), to_convert * sizeof(real)));
+      SYSCHECK(doWrite(fd, le_buffer.get(), to_convert * sizeof(real)));
     }
   }
 }
@@ -67,7 +67,7 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
 {
   real *data;
   int64_t size;
-  ssize_t result = doRead<io>(file, &size, sizeof(int64_t));
+  ssize_t result = doRead(file, &size, sizeof(int64_t));
   if (result == 0)
     throw std::runtime_error("unexpected EOF. The file might be corrupted.");
   if (result != sizeof(int64_t))
@@ -95,7 +95,7 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
     int64_t remaining = sizeof(real) * storage->size;
     while (remaining > 0) {
       // we write and read in 1GB blocks to avoid bugs on some OSes
-      ssize_t result = doRead<io>(file, bytes, THMin(remaining, 1073741824));
+      ssize_t result = doRead(file, bytes, THMin(remaining, 1073741824));
       if (result == 0) // 0 means EOF, which is also an error
         throw std::runtime_error("unexpected EOF. The file might be corrupted.");
       if (result < 0)
@@ -112,9 +112,7 @@ THStorage * THPStorage_(readFileRaw)(io file, THStorage *_storage)
 
     for (int64_t i = 0; i < size; i += buffer_size) {
       size_t to_convert = std::min(size - i, buffer_size);
-
-      //SYSCHECK(read(fd, le_buffer.get(), sizeof(real) * to_convert));
-      doRead<io>(file, le_buffer.get(), sizeof(real) * to_convert);
+      SYSCHECK(doRead(file, le_buffer.get(), sizeof(real) * to_convert));
 
       if (sizeof(real) == 2) {
         THP_decodeInt16Buffer((int16_t*)data + i,
