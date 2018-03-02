@@ -18,9 +18,9 @@ class ExpRelaxedCategorical(Distribution):
     See also: :func:`torch.distributions.OneHotCategorical`
 
     Args:
-        temperature (Tensor or Variable): relaxation temperature
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): the log probability of each event.
+        temperature (Tensor): relaxation temperature
+        probs (Tensor): event probabilities
+        logits (Tensor): the log probability of each event.
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
     (Maddison et al, 2017)
@@ -90,9 +90,9 @@ class RelaxedOneHotCategorical(TransformedDistribution):
         [torch.FloatTensor of size 4]
 
     Args:
-        temperature (Tensor or Variable): relaxation temperature
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): the log probability of each event.
+        temperature (Tensor): relaxation temperature
+        probs (Tensor): event probabilities
+        logits (Tensor): the log probability of each event.
     """
     params = {'probs': constraints.simplex}
     support = constraints.simplex

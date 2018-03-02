@@ -18,7 +18,7 @@ class Exponential(ExponentialFamily):
         [torch.FloatTensor of size 1]
 
     Args:
-        rate (float or Tensor or Variable): rate = 1 / scale of the distribution
+        rate (float or Tensor): rate = 1 / scale of the distribution
     """
     params = {'rate': constraints.positive}
     support = constraints.positive

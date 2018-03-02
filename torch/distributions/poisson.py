@@ -22,7 +22,7 @@ class Poisson(ExponentialFamily):
         [torch.LongTensor of size 1]
 
     Args:
-        rate (Number, Tensor or Variable): the rate parameter
+        rate (Number, Tensor): the rate parameter
     """
     params = {'rate': constraints.positive}
     support = constraints.nonnegative_integer

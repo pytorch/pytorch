@@ -97,7 +97,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -107,7 +107,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -117,7 +117,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -133,7 +133,7 @@ class Distribution(object):
         use `itertools.product(m.enumerate_support())`.
 
         Returns:
-            Variable or Tensor iterating over dimension 0.
+            Tensor iterating over dimension 0.
         """
         raise NotImplementedError
 
@@ -142,7 +142,7 @@ class Distribution(object):
         Returns entropy of distribution, batched over batch_shape.
 
         Returns:
-            Tensor or Variable of shape batch_shape.
+            Tensor of shape batch_shape.
         """
         raise NotImplementedError
 
@@ -165,7 +165,7 @@ class Distribution(object):
         batch and event shapes.
 
         Args:
-            value (Tensor or Variable): the tensor whose log probability is to be
+            value (Tensor): the tensor whose log probability is to be
                 computed by the `log_prob` method.
         Raises
             ValueError: when the rightmost dimensions of `value` do not match the

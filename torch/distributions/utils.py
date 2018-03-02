@@ -26,7 +26,7 @@ def _finfo(tensor):
       (much smaller than `.eps`).
 
     Args:
-        tensor (Tensor or Variable): tensor or variable of floating point data.
+        tensor (Tensor): tensor or variable of floating point data.
     Returns:
         _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
     """
@@ -35,7 +35,7 @@ def _finfo(tensor):
 
 def expand_n(v, n):
     r"""
-    Cleanly expand float or Tensor or Variable parameters.
+    Cleanly expand float or Tensor parameters.
     """
     if isinstance(v, Number):
         return torch.Tensor([v]).expand(n, 1)
@@ -102,7 +102,7 @@ def _sum_rightmost(value, dim):
     Sum out ``dim`` many rightmost dimensions of a given tensor.
 
     Args:
-        value (Tensor or Variable): A tensor of ``.dim()`` at least ``dim``.
+        value (Tensor): A tensor of ``.dim()`` at least ``dim``.
         dim (int): The number of rightmost dims to sum out.
     """
     if dim == 0:

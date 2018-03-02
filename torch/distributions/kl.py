@@ -138,7 +138,7 @@ def kl_divergence(p, q):
         q (Distribution): A :class:`~torch.distributions.Distribution` object.
 
     Returns:
-        Variable or Tensor: A batch of KL divergences of shape `batch_shape`.
+        Tensor: A batch of KL divergences of shape `batch_shape`.
 
     Raises:
         NotImplementedError: If the distribution types have not been registered via
