@@ -113,7 +113,7 @@ class MaxPool2d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          
+
           .. math::
               H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
                     * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
@@ -637,7 +637,8 @@ class AvgPool3d(Module):
 
         \begin{equation*}
         \text{out}(N_i, C_j, d, h, w)  = \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
-                \frac{\text{input}(N_i, C_j, \text{stride}[0] * d + k, \text{stride}[1] * h + m, \text{stride}[2] * w + n)}
+                \frac{\text{input}(N_i, C_j, \text{stride}[0] * d + k, \text{stride}[1] * h + m,
+                        \text{stride}[2] * w + n)}
                      {kD * kH * kW}
         \end{equation*}
 
@@ -670,7 +671,7 @@ class AvgPool3d(Module):
 
               W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[2] -
                     \text{kernel_size}[2]}{\text{stride}[2]} + 1\rfloor
-          
+
     Examples::
 
         >>> # pool of square window of size=3, stride=2
