@@ -7,6 +7,8 @@
 // The idea and interface is based on Boost.Optional library
 // authored by Fernando Luis Cacciola Carballal
 //
+// From https://github.com/akrzemi1/Optional
+//
 // ATen: move to at namespace
 
 #pragma once
