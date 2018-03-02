@@ -124,6 +124,22 @@ struct GraphFuser {
     return isSimpleMap(node) && allFloatIO(node);
   }
 
+  bool allOutputsHaveSameSize(Node * node) {
+    TensorType *tt_ptr = nullptr;
+    for (const auto i : node->inputs()) {
+      auto cur_tt_ptr = i->type()->cast<TensorType>();
+      if (!cur_tt_ptr) {
+        return false;
+      }
+
+      if (tt_ptr && tt_ptr->sizes() != cur_tt_ptr->sizes()) {
+        return false;
+      }
+      tt_ptr = cur_tt_ptr;
+    }
+    return true;
+  }
+
   // Can this node produce an _output_ of a fusion group?
   // all Fusable nodes can do this, but additionally Concat, which normally cannot be fused
   // because it is not a simple map, can be put in a fusion group
@@ -131,18 +147,12 @@ struct GraphFuser {
   bool isFusableAsExitNode(Node * node) {
     if(isFusable(node))
       return true;
-    if(node->kind() != kcat)
-      return false;
-
     // this concat fusion only works when all the inputs are the same size
     // otherwise they cannot partipate in the same map
-    auto sizes = node->input(0)->type()->expect<TensorType>()->sizes();
-    for(auto i : node->inputs()) {
-      if(sizes != i->type()->expect<TensorType>()->sizes()){
-        return false;
-      }
-    }
-    return true;
+    if(node->kind() == kcat && allOutputsHaveSameSize(node))
+      return true;
+
+    return false;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -436,9 +446,12 @@ struct GraphFuser {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      value_list inputs = consumer->inputs();
-      for(auto i : inputs) {
-        JIT_ASSERT(topological_index.count(i->node()) > 0);
+      value_list inputs;
+      for(auto i : consumer->inputs()) {
+        if (i->node()->owningBlock() == block) {
+          inputs.push_back(i);
+          JIT_ASSERT(topological_index.count(i->node()) > 0);
+        }
       }
       std::sort(inputs.begin(), inputs.end(), [&](Value * a, Value * b) {
         return topological_index.at(a->node()) > topological_index.at(b->node());

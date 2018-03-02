@@ -50,6 +50,41 @@ bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> out
 }
 
 void PropagateShapeOnNode(Node * node) {
+  // These don't require the types and present flag. Return early after we
+  // process them
+  switch(node->kind()) {
+    case kIf: {
+      auto then_block = node->blocks().at(0);
+      auto else_block = node->blocks().at(1);
+      PropagateShapeOnBlock(then_block);
+      PropagateShapeOnBlock(else_block);
+      mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
+      return;
+    }
+    case kLoop: {
+      auto body_block = node->blocks().at(0);
+      // propagate counter type
+      body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
+      // propagate loop-carried input types to block inputs
+      auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
+      auto loop_carried_block = body_block->inputs().slice(1); // skip trip
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
+      }
+      auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
+
+      do {
+        PropagateShapeOnBlock(body_block);
+      } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        node->outputs()[i]->setType(loop_carried_block[i]->type());
+      }
+      return;
+    }
+    default: ; // fall-through
+  }
+
   std::vector<TensorType*> types;
   bool present;
   std::tie(types, present) = gatherTypes(node->inputs());
@@ -162,33 +197,6 @@ void PropagateShapeOnNode(Node * node) {
     } break;
     case kUndefined: {
       node->output()->setType(DynamicType::get());
-    } break;
-    case kIf: {
-      auto then_block = node->blocks().at(0);
-      auto else_block = node->blocks().at(1);
-      PropagateShapeOnBlock(then_block);
-      PropagateShapeOnBlock(else_block);
-      mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
-    } break;
-    case kLoop: {
-      auto body_block = node->blocks().at(0);
-      // propagate counter type
-      body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
-      // propagate loop-carried input types to block inputs
-      auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
-      auto loop_carried_block = body_block->inputs().slice(1); // skip trip
-      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
-        loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
-      }
-      auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
-
-      do {
-        PropagateShapeOnBlock(body_block);
-      } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
-
-      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
-        node->outputs()[i]->setType(loop_carried_block[i]->type());
-      }
     } break;
     case kPythonOp: {
       setDynamicType(node);

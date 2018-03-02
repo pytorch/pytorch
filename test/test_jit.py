@@ -1832,5 +1832,24 @@ class TestJit(TestCase):
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
+    def test_fuser_multiple_blocks(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_fuser_multiple_blocks(this, that, theother, meme) -> (this, that, theother):
+            i = 0LL
+            while i < 20LL:
+                this = cat(this, meme, dim=0)
+                that = cat(that, meme, dim=0)
+                theother = cat(theother, meme, dim=0)
+                print(i)
+                i = i + 1
+        ''')
+
+        inputs = [torch.ones(0, 10, 10)] * 3
+        inputs += [torch.ones(1, 10, 10)]
+        outputs = [torch.ones(20, 10, 10)] * 3
+
+        self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
+
+
 if __name__ == '__main__':
     run_tests()
