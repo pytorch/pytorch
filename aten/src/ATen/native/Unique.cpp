@@ -2,18 +2,20 @@
 
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
-#include "ATen/ExpandUtils.h"
-#include "ATen/NativeFunctions.h"
 
 #include <unordered_map>
 #include <unordered_set>
+
+#include <iostream>
+using std::cout;
+using std::endl;
 
 namespace at {
 namespace native{
 
 namespace {
 template <typename scalar_t>
-std::tuple<Tensor, Tensor> unique_template(
+void unique_template(
     const Tensor& self,
     const bool sorted,
     const bool return_inverse,
