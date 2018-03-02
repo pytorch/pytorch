@@ -3,7 +3,8 @@
 // Python bindings for torch.* functions implemented through ATen.
 //
 // The functions are bound as static methods on a class
-// torch._C._VariableFunctions which is also aliased as Variable._torch.
+// torch._C._VariableFunctions which is also aliased as Variable._torch
+// and also copied into 'torch' module.
 
 #include <Python.h>
 
