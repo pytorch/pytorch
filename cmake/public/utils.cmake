@@ -70,3 +70,25 @@ macro(caffe2_interface_library SRC DST)
     INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
     $<TARGET_PROPERTY:${SRC},INTERFACE_SYSTEM_INCLUDE_DIRECTORIES>)
 endmacro()
+
+
+##############################################################################
+# Creating a Caffe2 binary target with sources specified with relative path.
+# Usage:
+#   caffe2_binary_target(target_name_or_src <src1> [<src2>] [<src3>] ...)
+# If only target_name_or_src is specified, this target is build with one single
+# source file and the target name is autogen from the filename. Otherwise, the
+# target name is given by the first argument and the rest are the source files
+# to build the target.
+function(caffe2_binary_target target_name_or_src)
+  if (${ARGN})
+    set(__target ${target_name_or_src})
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
+  else()
+    get_filename_component(__target ${target_name_or_src} NAME_WE)
+    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
+  endif()
+  add_executable(${__target} ${__srcs})
+  target_link_libraries(${__target} ${Caffe2_MAIN_LIBS})
+  install(TARGETS ${__target} DESTINATION bin)
+endfunction()
