@@ -517,14 +517,14 @@ private:
           expectOutputs(tree, output_size, 0);
           if (!apply.attributes().empty())
             throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
-          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0,
-                          AttributeMap{}, ListAttributeMap{})->outputs();
+          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0)->outputs();
         } else {
           const auto& inputs = getValues(apply.inputs());
           NodeKind kind{apply.name().name()};
 
-          AttributeMap attributes{};
-          ListAttributeMap list_attributes{};
+          auto n =
+              emitNode(kind, apply.range(), inputs, output_size);
+
           for (const auto& attr : apply.attributes()) {
             const auto& name = attr.name().name();
             const TreeRef& value = attr.value();
@@ -533,7 +533,10 @@ private:
               case TK_CONST: {
                 auto v = value.get()->tree(0)->doubleValue();
                 const auto& type = value.get()->tree(1)->stringValue();
-                attributes.insert({name, {v, type}});
+                if(type == "f")
+                  n->f_(Symbol(name), v);
+                else
+                  n->i_(Symbol(name), v);
               } break;
               case TK_LIST: {
                 std::vector<double> vs{};
@@ -541,15 +544,18 @@ private:
                   vs.push_back(tree->tree(0)->doubleValue());
                 }
                 const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
-                list_attributes.insert({name, {std::move(vs), type}});
+                if(type == "f") {
+                  n->fs_(Symbol(name), std::move(vs));
+                } else {
+                  n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
+                }
               } break;
             default:
                 throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value->kind();
                 break;
             }
           }
-          auto n =
-              emitNode(kind, apply.range(), inputs, output_size, attributes, list_attributes);
+
           std::vector<Value*> outputs = n->outputs();
           if (!hasTensorOp(n)) {
             // This will either throw or return a new node. We take
@@ -649,32 +655,10 @@ private:
       NodeKind kind,
       const SourceRange& loc,
       const std::vector<Value*> inputs,
-      const size_t output_size,
-      const AttributeMap& attributes = AttributeMap{},
-      const ListAttributeMap& list_attributes = ListAttributeMap{}) {
+      const size_t output_size) {
     Node* n = graph->insertNode(create(kind, loc, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
-    }
-    for (const auto& attr : attributes) {
-      const auto name = Symbol(attr.first);
-      auto value = attr.second.first;
-      const auto& type = attr.second.second;
-      if (type == "f") {
-        n->f_(name, value);
-      } else {
-        n->i_(name, value);
-      }
-    }
-    for (const auto& attr : list_attributes) {
-      const auto name = Symbol(attr.first);
-      const auto& values = attr.second.first;
-      const auto& type = attr.second.second;
-      if (type == "f") {
-        n->fs_(name, std::vector<double>{values.begin(), values.end()});
-      } else {
-        n->is_(name, std::vector<int64_t>{values.begin(), values.end()});
-      }
     }
     return n;
   }
@@ -695,12 +679,11 @@ private:
                Symbol("slice"),
                loc,
                {tensor},
-               output_size,
-               {{"dim", {0, "LL"}},
-                {"step", {1, "LL"}},
-                {"start", {begin, "LL"}},
-                {"end", {end, "LL"}}})
-        ->outputs();
+               output_size)
+               ->i_(kdim, 0)
+               ->i_("step"_sym, 1)
+               ->i_("start"_sym, begin)
+               ->i_("end"_sym, end)->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -717,9 +700,10 @@ private:
                Symbol("select"),
                loc,
                {tensor},
-               output_size,
-               {{"dim", {0, "LL"}}, {"index", {idx, "LL"}}})
-        ->outputs();
+               output_size)
+               ->i_(kdim, 0)
+               ->i_(kindex, idx)
+               ->outputs();
   }
 
   Value* createConstant(const SourceRange& loc, const at::Tensor& val) {
