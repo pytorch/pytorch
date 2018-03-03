@@ -345,7 +345,7 @@ def sparse(tensor, sparsity, std=0.01):
         tensor: an n-dimensional `torch.Tensor` or `autograd.Variable`
         sparsity: The fraction of elements in each column to be set to zero
         std: the standard deviation of the normal distribution used to generate
-        the non-zero values
+            the non-zero values
 
     Examples:
         >>> w = torch.Tensor(3, 5)
