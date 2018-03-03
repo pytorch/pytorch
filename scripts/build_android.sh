@@ -77,6 +77,7 @@ fi
 
 # Android specific flags
 CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
+CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON")
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 # TODO: As the toolchain file doesn't support NEON-FP16 extension,
