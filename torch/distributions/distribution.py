@@ -97,7 +97,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -107,7 +107,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -117,7 +117,7 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -133,7 +133,7 @@ class Distribution(object):
         use `itertools.product(m.enumerate_support())`.
 
         Returns:
-            Variable or Tensor iterating over dimension 0.
+            Tensor iterating over dimension 0.
         """
         raise NotImplementedError
 
@@ -142,7 +142,7 @@ class Distribution(object):
         Returns entropy of distribution, batched over batch_shape.
 
         Returns:
-            Tensor or Variable of shape batch_shape.
+            Tensor of shape batch_shape.
         """
         raise NotImplementedError
 
@@ -165,14 +165,14 @@ class Distribution(object):
         batch and event shapes.
 
         Args:
-            value (Tensor or Variable): the tensor whose log probability is to be
+            value (Tensor): the tensor whose log probability is to be
                 computed by the `log_prob` method.
         Raises
             ValueError: when the rightmost dimensions of `value` do not match the
                 distribution's batch and event shapes.
         """
-        if not (torch.is_tensor(value) or isinstance(value, Variable)):
-            raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
+        if not isinstance(value, torch.Tensor):
+            raise ValueError('The value argument to log_prob must be a Tensor')
 
         event_dim_start = len(value.size()) - len(self._event_shape)
         if value.size()[event_dim_start:] != self._event_shape:

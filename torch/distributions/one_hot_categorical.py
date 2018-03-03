@@ -28,8 +28,8 @@ class OneHotCategorical(Distribution):
         [torch.FloatTensor of size 4]
 
     Args:
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): event log probabilities
+        probs (Tensor): event probabilities
+        logits (Tensor): event log probabilities
     """
     params = {'probs': constraints.simplex}
     support = constraints.simplex

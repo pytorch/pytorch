@@ -33,7 +33,11 @@ echo "Running sparse tests"
 $PYCMD test_sparse.py $@
 
 echo "Running nn tests"
-$PYCMD test_nn.py $@
+# These tests are split up in order to avoid OOMing when
+# we have ASAN, see https://github.com/pytorch/pytorch/issues/5522
+$PYCMD test_nn.py $@ TestNN
+$PYCMD test_nn.py $@ TestNNInit
+$PYCMD test_nn.py $@ PackedSequenceTest
 
 echo "Running legacy nn tests"
 $PYCMD test_legacy_nn.py $@

@@ -47,7 +47,7 @@ def calculate_gain(nonlinearity, param=None):
 
 
 def uniform(tensor, a=0, b=1):
-    r"""Fills the input Tensor or Variable with values drawn from the uniform
+    r"""Fills the input Tensor with values drawn from the uniform
     distribution :math:`\mathcal{U}(a, b)`.
 
     Args:
@@ -64,7 +64,7 @@ def uniform(tensor, a=0, b=1):
 
 
 def normal(tensor, mean=0, std=1):
-    r"""Fills the input Tensor or Variable with values drawn from the normal
+    r"""Fills the input Tensor with values drawn from the normal
     distribution :math:`\mathcal{N}(\text{mean}, \text{std})`.
 
     Args:
@@ -81,7 +81,7 @@ def normal(tensor, mean=0, std=1):
 
 
 def constant(tensor, val):
-    r"""Fills the input Tensor or Variable with the value :math:`\text{val}`.
+    r"""Fills the input Tensor with the value :math:`\text{val}`.
 
     Args:
         tensor: an n-dimensional `torch.Tensor` or `autograd.Variable`
@@ -96,7 +96,7 @@ def constant(tensor, val):
 
 
 def eye(tensor):
-    """Fills the 2-dimensional input `Tensor` or `Variable` with the identity
+    """Fills the 2-dimensional input `Tensor` with the identity
     matrix. Preserves the identity of the inputs in `Linear` layers, where as
     many inputs are preserved as possible.
 
@@ -116,7 +116,7 @@ def eye(tensor):
 
 
 def dirac(tensor):
-    """Fills the {3, 4, 5}-dimensional input `Tensor` or `Variable` with the Dirac
+    """Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
     delta function. Preserves the identity of the inputs in `Convolutional`
     layers, where as many input channels are preserved as possible.
 
@@ -167,7 +167,7 @@ def _calculate_fan_in_and_fan_out(tensor):
 
 
 def xavier_uniform(tensor, gain=1):
-    r"""Fills the input Tensor or Variable with values according to the method
+    r"""Fills the input `Tensor` with values according to the method
     described in "Understanding the difficulty of training deep feedforward
     neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from
@@ -194,7 +194,7 @@ def xavier_uniform(tensor, gain=1):
 
 
 def xavier_normal(tensor, gain=1):
-    r"""Fills the input Tensor or Variable with values according to the method
+    r"""Fills the input `Tensor` with values according to the method
     described in "Understanding the difficulty of training deep feedforward
     neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from
@@ -230,7 +230,7 @@ def _calculate_correct_fan(tensor, mode):
 
 
 def kaiming_uniform(tensor, a=0, mode='fan_in'):
-    r"""Fills the input Tensor or Variable with values according to the method
+    r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
     uniform distribution. The resulting tensor will have values sampled from
@@ -263,7 +263,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
 
 
 def kaiming_normal(tensor, a=0, mode='fan_in'):
-    r"""Fills the input Tensor or Variable with values according to the method
+    r"""Fills the input `Tensor` with values according to the method
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
     normal distribution. The resulting tensor will have values sampled from
@@ -295,7 +295,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
 
 
 def orthogonal(tensor, gain=1):
-    """Fills the input Tensor or Variable with a (semi) orthogonal matrix, as
+    """Fills the input `Tensor` with a (semi) orthogonal matrix, as
     described in "Exact solutions to the nonlinear dynamics of learning in deep
     linear neural networks" - Saxe, A. et al. (2013). The input tensor must have
     at least 2 dimensions, and for tensors with more than 2 dimensions the
@@ -336,9 +336,9 @@ def orthogonal(tensor, gain=1):
 
 
 def sparse(tensor, sparsity, std=0.01):
-    """Fills the 2D input Tensor or Variable as a sparse matrix, where the
+    """Fills the 2D input `Tensor` as a sparse matrix, where the
     non-zero elements will be drawn from the normal distribution
-    :math:`N(0, 0.01)`, as described in "Deep learning via
+    :math:`\mathcal{N}(0, 0.01)`, as described in "Deep learning via
     Hessian-free optimization" - Martens, J. (2010).
 
     Args:

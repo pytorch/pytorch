@@ -36,6 +36,11 @@ class Adam(Optimizer):
                         weight_decay=weight_decay, amsgrad=amsgrad)
         super(Adam, self).__init__(params, defaults)
 
+    def __setstate__(self, state):
+        super(Adam, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('amsgrad', False)
+
     def step(self, closure=None):
         """Performs a single optimization step.
 

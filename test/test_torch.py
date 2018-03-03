@@ -2165,6 +2165,7 @@ class TestTorch(TestCase):
     def test_is_signed(self):
         self.assertEqual(torch.IntTensor(5).is_signed(), True)
         self.assertEqual(torch.ByteTensor(5).is_signed(), False)
+        self.assertEqual(torch.CharTensor(5).is_signed(), True)
         self.assertEqual(torch.FloatTensor(5).is_signed(), True)
         self.assertEqual(torch.HalfTensor(10).is_signed(), True)
 
@@ -2172,6 +2173,7 @@ class TestTorch(TestCase):
     def test_is_signed_cuda(self):
         self.assertEqual(torch.cuda.IntTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.ByteTensor(5).is_signed(), False)
+        self.assertEqual(torch.cuda.CharTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.FloatTensor(5).is_signed(), True)
         self.assertEqual(torch.cuda.HalfTensor(10).is_signed(), True)
 

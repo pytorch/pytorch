@@ -1354,7 +1354,8 @@ class TestJit(TestCase):
         if capture_output:
             with capture_stdout() as captured:
                 outputs_ge = ge(*inputs)
-            self.assertExpected(captured[0], subname='stdout')
+            if not WINDOWS:
+                self.assertExpected(captured[0], subname='stdout')
         else:
             outputs_ge = ge(*inputs)
         self.assertEqual(outputs, outputs_ge)
@@ -1614,10 +1615,10 @@ class TestJit(TestCase):
 
         x = Variable(torch.arange(4), requires_grad=True)
         y = Variable(torch.arange(4) * 2, requires_grad=True)
-        with capture_stdout():
-            expected_out = func(x, y)
+
         expected_out = (x + y).sigmoid().pow(2)
-        self.checkScript(func, [x, y], expected_out, False)
+
+        self.checkScript(func, [x, y], expected_out, False, capture_output=True)
 
     def test_trace_annotation(self):
         @torch.jit.trace(Variable(torch.rand(1)))
@@ -1795,6 +1796,71 @@ class TestJit(TestCase):
         out_state = traced_model(x)
         self.assertEqual(out, out_state)
         self.assertNotEqual(out, out_ones)
+
+    def test_shape_prop_mismatch_output(self):
+        with self.assertRaises(RuntimeError):
+            cu = torch.jit.CompilationUnit('''
+            def test_shape_prop_mismatch_output(a) -> (b):
+                b = slice(a, dim=0, end=-2, start=2, step=1)
+                b = topk(a, dim=0, k=2, largest=True, sorted=True)
+            ''')
+            inputs = [torch.zeros(10)]
+            outputs = [torch.zeros(2), torch.from_numpy(np.array([1, 5])).long()]
+
+            real_outs = cu.test_shape_prop_mismatch_output(*inputs)
+            self.assertEqual(real_outs, outputs)
+
+    def test_view_shape_prop(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_view_shape_prop(a) -> (b):
+            b = view(a, size=[-1])
+        ''')
+        inputs = [torch.zeros(10, 10)]
+        outputs = torch.zeros(100)
+
+        real_outs = cu.test_view_shape_prop(*inputs)
+        self.assertEqual(real_outs, outputs)
+
+    def test_integral_shape_inference(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_integral_shape_inference(a) -> (b):
+            b = a / a
+        ''')
+        inputs = [torch.ones(10, 10).type(torch.LongTensor)]
+        outputs = torch.ones(10, 10)
+
+        self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
+
+    def test_fuser_multiple_blocks(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_fuser_multiple_blocks(this, that, theother, meme) -> (this, that, theother):
+            i = 0LL
+            while i < 20LL:
+                this = cat(this, meme, dim=0)
+                that = cat(that, meme, dim=0)
+                theother = cat(theother, meme, dim=0)
+                i = i + 1
+        ''')
+
+        inputs = [torch.ones(0, 10, 10)] * 3
+        inputs += [torch.ones(1, 10, 10)]
+        outputs = [torch.ones(20, 10, 10)] * 3
+
+        self.assertEqual(cu.test_fuser_multiple_blocks(*inputs), outputs)
+
+    def test_print_graph_executor(self):
+        cu = torch.jit.CompilationUnit('''
+        def test_print_graph_executor(meme) -> ():
+            print(meme)
+        ''')
+
+        inputs = [torch.ones(5, 5)]
+
+        with capture_stdout() as captured:
+            cu.test_print_graph_executor(*inputs)
+
+        if not WINDOWS:
+            self.assertExpected(captured[0])
 
 
 if __name__ == '__main__':

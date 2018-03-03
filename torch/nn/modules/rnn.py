@@ -87,7 +87,7 @@ class RNNBase(Module):
             with torch.no_grad():
                 # NB: this is an INPLACE function on weight_arr, that's why the
                 # no_grad() is necessary.
-                weight_buf = torch._C._VariableFunctions._cudnn_rnn_flatten_weight(
+                weight_buf = torch._cudnn_rnn_flatten_weight(
                     weight_arr, weight_stride0,
                     self.input_size, rnn.get_cudnn_mode(self.mode), self.hidden_size, self.num_layers,
                     self.batch_first, bool(self.bidirectional))
