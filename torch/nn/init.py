@@ -8,16 +8,16 @@ def calculate_gain(nonlinearity, param=None):
     r"""Return the recommended gain value for the given nonlinearity function.
     The values are as follows:
 
-    ============ ==========================================
-    nonlinearity gain
-    ============ ==========================================
-    linear       :math:`1`
-    conv{1,2,3}d :math:`1`
-    sigmoid      :math:`1`
-    tanh         :math:`\frac{5}{3}`
-    relu         :math:`\sqrt{2}`
-    leaky_relu   :math:`\sqrt{\frac{2}{1 + \text{negative\_slope}^2}}`
-    ============ ==========================================
+    ================= ====================================================
+    nonlinearity      gain
+    ================= ====================================================
+    Linear / Identity :math:`1`
+    Conv{1,2,3}D      :math:`1`
+    Sigmoid           :math:`1`
+    Tanh              :math:`\frac{5}{3}`
+    ReLU              :math:`\sqrt{2}`
+    Leaky Relu        :math:`\sqrt{\frac{2}{1 + \text{negative_slope}^2}}`
+    ================= ====================================================
 
     Args:
         nonlinearity: the non-linear function (`nn.functional` name)
@@ -171,7 +171,7 @@ def xavier_uniform(tensor, gain=1):
     described in "Understanding the difficulty of training deep feedforward
     neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
     distribution. The resulting tensor will have values sampled from
-    :math:`U(-a, a)` where
+    :math:`\mathcal{U}(-a, a)` where
 
     .. math::
         a = \text{gain} \times \sqrt{\frac{6}{\text{fan_in} + \text{fan_out}}}
@@ -198,7 +198,7 @@ def xavier_normal(tensor, gain=1):
     described in "Understanding the difficulty of training deep feedforward
     neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
     distribution. The resulting tensor will have values sampled from
-    :math:`N(0, \text{std})` where
+    :math:`\mathcal{N}(0, \text{std})` where
 
     .. math::
         \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan_in} + \text{fan_out}}}
@@ -234,7 +234,7 @@ def kaiming_uniform(tensor, a=0, mode='fan_in'):
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
     uniform distribution. The resulting tensor will have values sampled from
-    :math:`U(-\text{bound}, \text{bound})` where
+    :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
 
     .. math::
         \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan_in}}}
@@ -267,7 +267,7 @@ def kaiming_normal(tensor, a=0, mode='fan_in'):
     described in "Delving deep into rectifiers: Surpassing human-level
     performance on ImageNet classification" - He, K. et al. (2015), using a
     normal distribution. The resulting tensor will have values sampled from
-    :math:`N(0, \text{std})` where
+    :math:`\mathcal{N}(0, \text{std})` where
 
     .. math::
         \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan_in}}}
