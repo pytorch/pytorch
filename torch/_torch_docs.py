@@ -5156,3 +5156,325 @@ Example::
     6.664001874625056e-08
 
 """)
+
+add_docstr(torch.fft,
+           r"""
+fft(input, signal_ndim, normalized=False) -> Tensor
+
+Complex-to-complex Discrete Fourier Transform
+
+This method computes the complex-to-complex discrete Fourier transform.
+Ignoring the batch dimension, it computes the following expression:
+
+.. math::
+    X[\omega_1, \dots, \omega_d] =
+        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+         e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
+
+where :math:`d`=:attr:`signal_ndim` is number of dimensions for the
+signal, and :math:`N_i` is the size of signal dimension :math:`i`.
+
+This method supports 1D, 2D and 3D complex-to-complex transforms, indicated
+by :attr:`signal_ndim`. :attr:`input` must be a tensor with last dimension
+of size 2, representing the real and imaginary components of complex
+numbers. Also :attr:`input` should be of ``signal_ndim + 1`` dimensions or
+``signal_ndim + 2`` dimensions with batched data. If :attr:`normalized` is
+set to ``True``, this returns the normalized Fourier transform results,
+i.e., divided by :math:`\sqrt{\prod_{i=1}^d N_i}`, to become a unitary
+operator.
+
+Returns the real and the imaginary parts together as one tensor of size
+:math:`(* \times 2)`, where :math:`*` is the shape of
+:attr:`input`.
+
+The inverse of this function is :func:`ifft`.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL
+    installed.
+
+Arguments:
+    input (Tensor): the input tensor
+    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return results
+
+Returns:
+    Tensor: A tensor containing the complex-to-complex Fourier transform result
+
+Example::
+
+    >>> # unbatched 2D FFT
+    >>> x = torch.randn(4, 3, 2)
+    >>> torch.fft(x, 2)
+
+    (0 ,.,.) =
+      6.8901 -1.7571
+      0.4166 -1.1500
+      3.9736  0.5400
+
+    (1 ,.,.) =
+     -0.3050  0.4976
+      0.2072  1.1015
+      1.3850 -0.0566
+
+    (2 ,.,.) =
+      3.1463  3.3727
+      1.4051 -3.3523
+      1.5072 -4.1700
+
+    (3 ,.,.) =
+      5.1215 -2.5402
+      5.1859  1.4077
+      2.0077  1.3137
+    [torch.FloatTensor of size (4,3,2)]
+
+    >>> # batched 1D FFT
+    >>> torch.fft(x, 1)
+
+    (0 ,.,.) =
+      3.7132 -0.1067
+      1.8037 -0.4983
+      2.2184 -0.5932
+
+    (1 ,.,.) =
+      0.1765 -2.6391
+     -0.1705 -0.6941
+      0.9592  1.0218
+
+    (2 ,.,.) =
+      1.3050  0.9145
+     -0.8929 -1.7529
+      0.5220 -1.2218
+
+    (3 ,.,.) =
+      1.6954  0.0742
+     -0.3237  1.7953
+      0.2740  1.3332
+    [torch.FloatTensor of size (4,3,2)]
+
+""")
+
+add_docstr(torch.ifft,
+           r"""
+ifft(input, signal_ndim, normalized=False) -> Tensor
+
+Complex-to-complex Inverse Discrete Fourier Transform
+
+This method computes the complex-to-complex inverse discrete Fourier
+transform. Ignoring the batch dimension, it computes the following
+expression:
+
+.. math::
+    X[\omega_1, \dots, \omega_d] =
+        \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
+         e^{j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
+
+where :math:`d`=:attr:`signal_ndim` is number of dimensions for the
+signal, and :math:`N_i` is the size of signal dimension :math:`i`.
+
+The argument specifications are almost identical with :func:`fft`. However,
+if :attr:`normalized` is set to ``True``, this instead returns the results
+multiplied by :math:`\sqrt{\prod_{i=1}^d N_i}`, to become a unitary
+operator. Therefore, to invert and :func:`fft`, the :attr:`normalized`
+argument should be set identically for :func:`ifft`.
+
+Returns the real and the imaginary parts together as one tensor of size
+:math:`(* \times 2)`, where :math:`*` is the shape of
+:attr:`input`.
+
+The inverse of this function is :func:`fft`.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL
+    installed.
+
+Arguments:
+    input (Tensor): the input tensor
+    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return normalized results
+
+Returns:
+    Tensor: A tensor containing the complex-to-complex inverse Fourier transform result
+
+Example::
+
+    >>> x = torch.randn(3, 3, 2)
+    >>> x
+
+    (0 ,.,.) =
+      1.2735 -0.9441
+     -1.0940  0.2728
+      0.8997  0.4231
+
+    (1 ,.,.) =
+     -0.5239 -1.4942
+      0.5248  3.3432
+      1.0976 -2.0426
+
+    (2 ,.,.) =
+      1.1039  1.9541
+     -0.2774  0.2631
+      0.3102  0.8129
+    [torch.FloatTensor of size (3,3,2)]
+
+    >>> y = torch.fft(x, 2)
+    >>> torch.ifft(x, 2)  # recover x
+
+    (0 ,.,.) =
+      1.2735 -0.9441
+     -1.0940  0.2728
+      0.8997  0.4231
+
+    (1 ,.,.) =
+     -0.5239 -1.4942
+      0.5248  3.3432
+      1.0976 -2.0426
+
+    (2 ,.,.) =
+      1.1039  1.9541
+     -0.2774  0.2631
+      0.3102  0.8129
+    [torch.FloatTensor of size (3,3,2)]
+
+""")
+
+add_docstr(torch.rfft,
+           r"""
+rfft(input, signal_ndim, normalized=False, onesided=True) -> Tensor
+
+Real-to-complex Discrete Fourier Transform
+
+This method computes the real-to-complex discrete Fourier transform. It is
+mathematically equivalent with :func:`fft` with differences only in formats
+of the input and output.
+
+This method supports 1D, 2D and 3D real-to-complex transforms, indicated
+by :attr:`signal_ndim`. :attr:`input` must be a tensor with ``signal_ndim``
+dimensions or ``signal_ndim + 1`` dimensions with batched data. If
+:attr:`normalized` is set to ``True``, this returns the normalized Fourier
+transform results, i.e., divided by :math:`\sqrt{\prod_{i=1}^d N_i}`, to
+become a unitary operator.
+
+The real-to-complex Fourier transform results follow conjugate symmetry:
+
+.. math::
+    X[\omega_1, \dots, \omega_d] = X^*[N_1 - \omega_1, \dots, N_d - \omega_d],
+
+where the index arithmetic is computed modulus the size of the corresponding
+dimension. Therefore, :attr:`onesided` controls whether to avoid redundancy
+in the output results. If set to ``True`` (default), the output will not be
+full complex result of shape :math:`(* \times 2)`, where :math:`*` is the
+shape of :attr:`input`, but instead the last dimension will be halfed as
+:math:`\lfloor \frac{N_d}{2} \rfloor + 1`.
+
+The inverse of this function is :func:`irfft`.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL
+    installed.
+
+Arguments:
+    input (Tensor): the input tensor
+    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    normalized (bool, optional): controls whether to return normalized results
+    onesided (bool, optional): controls whether to return half of results to
+        avoid redundancy
+
+Returns:
+    Tensor: A tensor containing the real-to-complex Fourier transform result
+
+Example::
+
+    >>> x = torch.autograd.Variable(torch.randn(5, 5))
+    >>> torch.rfft(x, 2).shape
+    torch.Size([5, 3, 2])
+    >>> torch.rfft(x, 2, onesided=False).shape
+    torch.Size([5, 5, 2])
+
+""")
+
+
+add_docstr(torch.irfft,
+           r"""
+irfft(input, signal_ndim, signal_sizes=None, normalized=False, onesided=True) -> Tensor
+
+Complex-to-real Inverse Discrete Fourier Transform
+
+This method computes the complex-to-real inverse discrete Fourier transform.
+It is mathematically equivalent with :func:`ifft` with differences only in
+formats of the input and output.
+
+The argument specifications are almost identical with :func:`ifft`. Similar
+to :func:`ifft`, if :attr:`normalized` is set to ``True``, this instead
+returns the results multiplied by :math:`\sqrt{\prod_{i=1}^K N_i}`, to
+become a unitary operator.
+
+Due to the conjugate symmetry, :attr:`input` do not need to contain the full
+complex frequency values. Roughly half of the values will be sufficient, as
+is the case when :attr:`input` is given by :func:`rfft` with
+``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
+argument of this method to ``True``. Moreover, the original signal shape
+information can sometimes be lost, optionally set :attr:`signal_sizes` to be
+the size of the original signal to recover it with correct shape.
+
+Therefore, to invert and :func:`rfft`, the :attr:`normalized` and
+:attr:`onesided` arguments should be set identically for :func:`irfft`, and
+preferrably a :func:`signal_sizes` is given to avoid size mismatch. See the
+example below for a case of size mismatch.
+
+See :func:`rfft` for details on conjugate symmetry.
+
+Returns a real signal tensor of :attr:`signal_ndim`.
+
+The inverse of this function is :func:`rfft`.
+
+.. warning::
+    Genearlly speaking, the input of this function should contain values
+    following conjugate symmetry. Note that even if :attr:`onesided` is
+    ``True``, most times some symmetry is still needed. When this
+    requirement is not satisfied, the behavior is undefined.
+
+.. warning::
+    For CPU tensors, this method is currently only available with MKL
+    installed.
+
+Arguments:
+    input (Tensor): the input tensor
+    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    signal_sizes (list or :class:`torch.Size`, optional): the size of the original signal
+    normalized (bool, optional): controls whether to return normalized results
+    onesided (bool, optional): controls whether :attr:`input` was halfed to avoid redundancy,
+        e.g., by :func:`rfft`.
+
+Returns:
+    Tensor: A tensor containing the complex-to-complex inverse Fourier transform result
+
+Example::
+
+    >>> x = torch.autograd.Variable(torch.randn(4, 4))
+    >>> torch.rfft(x, 2, onesided=True).shape
+    torch.Size([4, 3, 2])
+    >>>
+    >>> # notice that with onesided=True output size does not determine the original signal size
+    >>> x = torch.autograd.Variable(torch.randn(4, 5))
+    >>> torch.rfft(x, 2, onesided=True).shape
+    torch.Size([4, 3, 2])
+    >>>
+    >>> x
+
+    -0.5052 -0.0420  0.5773 -0.2224  1.8413
+    -0.0873 -0.7571 -0.1982  0.5722 -1.8076
+    -1.5447  0.4344  0.8692  1.7930  2.6886
+     0.4674  0.0517 -0.7564 -0.5118 -0.7023
+    [torch.FloatTensor of size (4,5)]
+
+    >>> y = torch.rfft(x, 2, onesided=True)
+    >>> torch.irfft(x, 2, signal_sizes=x.shape)  # recover x
+
+    -0.5052 -0.0420  0.5773 -0.2224  1.8413
+    -0.0873 -0.7571 -0.1982  0.5722 -1.8076
+    -1.5447  0.4344  0.8692  1.7930  2.6886
+     0.4674  0.0517 -0.7564 -0.5118 -0.7023
+    [torch.FloatTensor of size (4,5)]
+
+""")
