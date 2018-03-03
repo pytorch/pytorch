@@ -441,15 +441,6 @@ if (USE_ACL)
     if (CMAKE_SYSTEM_PROCESSOR MATCHES "^armv")
       # 32-bit ARM (armv7, armv7-a, armv7l, etc)
       set(ACL_ARCH "armv7a")
-      # Compilers for 32-bit ARM need extra flags to enable NEON-FP16
-      add_definitions("-mfpu=neon-fp16")
-
-      include(CheckCCompilerFlag)
-      CHECK_C_COMPILER_FLAG(
-          -mfp16-format=ieee CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
-      if (CAFFE2_COMPILER_SUPPORTS_FP16_FORMAT)
-        add_definitions("-mfp16-format=ieee")
-      endif()
     elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
       # 64-bit ARM
       set(ACL_ARCH "arm64-v8a")
