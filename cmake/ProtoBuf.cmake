@@ -70,7 +70,7 @@ if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lit
 endif()
 
 # TODO: enable using lite protobuf.
-list(APPEND Caffe2_DEPENDENCY_LIBS protobuf::libprotobuf)
+list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS protobuf::libprotobuf)
 
 # Protobuf generated files use <> as inclusion path, so following normal
 # convention we will use SYSTEM inclusion path.
@@ -78,8 +78,16 @@ get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
 include_directories(SYSTEM ${__tmp})
 
-# Set variable used in cmake installation path.
-set(CAFFE2_BUILT_PROTOBUF_VERSION ${Protobuf_VERSION})
+# If Protobuf_VERSION is known (true in most cases, false if we are building
+# local protobuf), then we will add a protobuf version check in
+# Caffe2Config.cmake.in.
+if (DEFINED ${Protobuf_VERSION})
+  set(CAFFE2_KNOWN_PROTOBUF_VERSION TRUE)
+else()
+  set(CAFFE2_KNOWN_PROTOBUF_VERSION FALSE)
+  set(Protobuf_VERSION "Protobuf_VERSION_NOTFOUND")
+endif()
+
 
 # Figure out which protoc to use.
 # If CAFFE2_CUSTOM_PROTOC_EXECUTABLE is set, we assume the user knows

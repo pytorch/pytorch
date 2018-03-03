@@ -170,7 +170,8 @@ unique_ptr<OperatorBase> _CreateOperator(
     } else {
       // If the above fails, we will just return the normal case with the
       // default implementation.
-      VLOG(1) << "Operator with engine " << engine << " is not available.";
+      LOG(INFO) << "Operator with engine " << engine
+                << " is not available for operator " << op_type << ".";
     }
   }
   VLOG(1) << "Using default implementation.";

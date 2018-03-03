@@ -18,6 +18,9 @@
 #define	CONV_UTIL_CUH
 
 #include "../../nvmatrix/include/nvmatrix.cuh"
+
+#include "caffe2/core/context_gpu.h"
+
 #ifndef MIN
 #define MIN(a, b) ((a) > (b) ? (b) : (a))
 #endif
@@ -68,6 +71,9 @@ void convReflectHorizontal(NVMatrix& images, NVMatrix& targets, int imgSize);
 void convCrossMapMaxPoolUndo(NVMatrix& images, NVMatrix& maxGrads, NVMatrix& maxActs, NVMatrix& target,
                              const int imgSize, const int startF, const int poolSize,
                              const int stride, const float scaleTargets, const float scaleOutputs);
+
+cudaTextureObject_t GetTensorTextureObject(caffe2::TensorCUDA* tensor);
+
 template<bool sum>
 class AvgPooler {
 public:

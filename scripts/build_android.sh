@@ -75,38 +75,17 @@ if [ "${VERBOSE:-}" == '1' ]; then
   CMAKE_ARGS+=("-DCMAKE_VERBOSE_MAKEFILE=1")
 fi
 
-# Getting some cmake Arguments
-CMAKE_ARGS+=($@)
-USE_GCC=true
-USE_ARM64=false
-for arg in ${CMAKE_ARGS[@]};do
-  if [ $arg == "-DANDROID_TOOLCHAIN=clang" ];then
-    USE_GCC=false
-  elif [ $arg == "-DANDROID_TOOLCHAIN=gcc" ];then
-    USE_GCC=true
-  elif [ $arg == "-DUSE_ARM64=ON" ] || [ $arg == "-DUSE_ARM64=1" ];then
-    USE_ARM64=true
-  fi
-done
-
 # Android specific flags
 CMAKE_ARGS+=("-DANDROID_NDK=$ANDROID_NDK")
-if $USE_ARM64;then
-CMAKE_ARGS+=("-DANDROID_ABI=arm64-v8a")
-else
 CMAKE_ARGS+=("-DANDROID_ABI=armeabi-v7a with NEON")
-fi
 CMAKE_ARGS+=("-DANDROID_NATIVE_API_LEVEL=21")
 CMAKE_ARGS+=("-DANDROID_CPP_FEATURES=rtti exceptions")
 # TODO: As the toolchain file doesn't support NEON-FP16 extension,
 # we disable USE_MOBILE_OPENGL for now, it will be re-enabled in the future.
 CMAKE_ARGS+=("-DUSE_MOBILE_OPENGL=OFF")
 
-# Compiler flags
-CMAKE_ARGS+=("-DCMAKE_C_FLAGS=")
-if $USE_GCC;then
-  CMAKE_ARGS+=("-DCMAKE_CXX_FLAGS=-s")
-fi
+# Use-specified CMake arguments go last to allow overridding defaults
+CMAKE_ARGS+=($@)
 
 cmake "$CAFFE2_ROOT" \
     -DCMAKE_INSTALL_PREFIX=../install \

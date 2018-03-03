@@ -33,14 +33,14 @@ export PATH=$PATH:$PATH_TO_TOOLCHAIN/bin
 
 use the build\_android.sh:
 
-for 32bit
+for 32-bit ARM
 ```
 ./scripts/build_android.sh -DUSE_ACL=ON -DBUILD_TEST=ON
 ```
 
-for 64bit
+for 64-bit ARM
 ```
-./scripts/build_android.sh -DUSE_ACL=ON -DBUILD_TEST=ON -DUSE_NNPACK=OFF -DUSE_ARM64=ON
+./scripts/build_android.sh -DUSE_ACL=ON -DBUILD_TEST=ON -DANDROID_ABI=arm64-v8a -DANDROID_TOOLCHAIN=clang
 ```
 
 Before switch between 32 bit and 64 bit, please make sure to delete build\_android folder:
