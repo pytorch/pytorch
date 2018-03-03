@@ -1,6 +1,5 @@
 #include "Functions.h"
 #include <ATen/WrapDimUtils.h>
-#include <iostream>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -9,6 +8,7 @@
 #endif
 #include <math.h>
 #include <algorithm>
+#include <numeric>
 
 // ${generated_comment}
 
@@ -1003,6 +1003,65 @@ Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
     src_expanded = src_expanded.unsqueeze(1);
   }
   return src_expanded.expand_as(target);
+}
+
+Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
+                    bool complex_input, bool complex_output,
+                    bool inverse, IntList checked_signal_sizes,
+                    bool normalized, bool onesided,
+                    IntList output_sizes) {
+  Tensor gI;
+  if (!complex_input && complex_output) {
+    // if forward is R2C, then do inverse C2C and project
+    // because grad can be asymmetrical so C2R can't be used.
+    if (onesided) {
+      // if onesided, make it two sided
+      std::vector<int64_t> batched_signal_size(signal_ndim + 2);
+      batched_signal_size[0] = self.size(0);
+      for (int64_t i = 1; i <= signal_ndim; i++) {
+        batched_signal_size[i] = checked_signal_sizes[i - 1];
+      }
+      batched_signal_size[signal_ndim + 1] = 2;
+      auto complex_full_grad = grad.type().tensor(batched_signal_size);
+      int64_t last_dim_slice = grad.size(signal_ndim);
+      complex_full_grad.narrow(signal_ndim, 0, last_dim_slice).copy_(grad);
+      int64_t zero_length = checked_signal_sizes[signal_ndim - 1] - last_dim_slice;
+      if (zero_length > 0) {
+        complex_full_grad.narrow(signal_ndim, last_dim_slice, zero_length).zero_();
+      }
+      gI = _fft_with_size(complex_full_grad, signal_ndim, true, true, !inverse, checked_signal_sizes, normalized, false, batched_signal_size).select(-1, 0);
+    } else {
+      gI = _fft_with_size(grad, signal_ndim, true, true, !inverse, checked_signal_sizes, normalized, false, grad.sizes()).select(-1, 0);
+    }
+  } else if (complex_input && !complex_output && onesided) {
+    // think of onesided C2R (irfft) as
+    //    1. fill the other half by Hermitian symmetry
+    //    2. inverse dft
+    //    3. discard the complex dimension
+    // so backward is
+    //    1. rfft (essentially add dummy complex dimension, and dft)
+    //    2. accumulate gradient by Hermitian symmetry
+    //       since rfft results follow Hermitian symmetry, we only need to
+    //       double some entries from onesided rfft results, i.e., the ones with
+    //       last signal dim index [1, 2, ..., N - onesided_length].
+    gI = _fft_with_size(grad, signal_ndim, false, true, false, checked_signal_sizes, normalized, true, self.sizes());
+    int64_t double_length = checked_signal_sizes[signal_ndim - 1] - self.size(signal_ndim);
+    if (double_length > 0) {  // also covers case when signal size is zero
+      gI.narrow(signal_ndim, 1, double_length).mul_(2);
+    }
+  } else {
+    gI = _fft_with_size(grad, signal_ndim, complex_output, complex_input, !inverse, checked_signal_sizes, normalized, onesided, self.sizes());
+  }
+  if (normalized) {
+    return gI;
+  } else {
+    auto signal_numel = std::accumulate(checked_signal_sizes.begin(), checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
+    if (!inverse) {
+      return gI.mul(static_cast<double>(signal_numel));
+    } else {
+      return gI.div(static_cast<double>(signal_numel));
+    }
+  }
 }
 
 // NB: This currently is PURPOSELY outside of the anonymous namespace, because

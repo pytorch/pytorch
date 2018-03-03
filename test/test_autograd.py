@@ -13,8 +13,8 @@ from functools import reduce, wraps
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-
-from common import TestCase, run_tests, skipIfNoLapack, suppress_warnings
+from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
+    suppress_warnings
 from torch.autograd import Variable, Function
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -1786,6 +1786,74 @@ class TestAutograd(TestCase):
         _test_with_size(S, S + 1)
         _test_with_size(S, S - 1)
 
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    def test_fft(self):
+        # the conv_fn to convert tensors can be slow in cuda tests, so we use
+        # a build_fn: sizes => tensor
+        Variable = torch.autograd.Variable
+
+        def _test_complex(sizes, signal_ndim):
+            x = Variable(torch.DoubleTensor(*sizes).normal_(), requires_grad=True)
+
+            for normalized in (True, False):
+                def fft(x):
+                    return x.fft(signal_ndim, normalized=normalized)
+
+                gradcheck(fft, [x])
+                gradgradcheck(fft, [x], gen_non_contig_grad_outputs=True)
+
+                def ifft(fx):
+                    return fx.ifft(signal_ndim, normalized=normalized)
+
+                fx = Variable(fft(x).clone().data, requires_grad=True)
+                gradcheck(ifft, [fx])
+                gradgradcheck(ifft, [fx], gen_non_contig_grad_outputs=True)
+
+        def _test_real(sizes, signal_ndim):
+            x = Variable(torch.DoubleTensor(*sizes).normal_(), requires_grad=True)
+            if x.dim() == signal_ndim:
+                start_dim = 0
+            else:
+                start_dim = 1
+            signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
+
+            for normalized, onesided in product((True, False), repeat=2):
+                def rfft(x):
+                    return x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+
+                gradcheck(rfft, [x])
+                gradgradcheck(rfft, [x], gen_non_contig_grad_outputs=True)
+
+                # Generally speaking, irfft won't and can't pass the current
+                # gradcheck as it assumes the input follows Hermitian
+                # symmetry, an requirement that is never true with out point
+                # numerical Jacobian estimate. Without input symmtry,
+                # irfft's behavior is undefined.
+                #
+                # Even onesided results can't remove all redundancy. For
+                # example, consider the .select(last_signal_dim, 0) slice.
+                # It is entirely represented in the onesided results (except
+                # for 1D), and will be reflected onto itself!
+                #
+                # So only 1D onesided irfft should pass grad check as it is
+                # guaranteed that the input has no symmetrical values.
+                if signal_ndim == 1 and onesided:
+                    def irfft(fx):
+                        return fx.irfft(signal_ndim, signal_sizes=signal_sizes,
+                                        normalized=normalized, onesided=onesided)
+
+                    fx = Variable(rfft(x).clone().data, requires_grad=True)
+                    gradcheck(irfft, [fx])
+                    gradgradcheck(irfft, [fx], gen_non_contig_grad_outputs=True)
+
+        _test_real((2, 10), 1)
+        _test_real((2, 3, 4), 2)
+        _test_real((2, 3, 4, 3), 3)
+
+        _test_complex((2, 10, 2), 1)
+        _test_complex((2, 3, 4, 2), 2)
+        _test_complex((2, 3, 4, 3, 2), 3)
+
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
             inp = Variable(torch.randn(10), requires_grad=True)
@@ -2776,6 +2844,7 @@ def exclude_tensor_method(name, test_name):
         'scatter',
         'scatter_add',
         'det',
+        'fft',
     }
     if test_name in exclude_all_tensor_method_by_test_name:
         return True
