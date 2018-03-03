@@ -27,7 +27,7 @@ See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Args:
     input: input tensor of shape (minibatch x in_channels x iW)
-    weight: filters of shape (out_channels x in_channels x kW)
+    weight: filters of shape (out_channels x in_channels/groups x kW)
     bias: optional bias of shape (out_channels). Default: None
     stride: the stride of the convolving kernel. Can be a single number or
       a one-element tuple (sW,). Default: 1
@@ -84,7 +84,7 @@ See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Args:
     input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
-    weight: filters tensor of shape (out_channels x in_channels x kT x kH x kW)
+    weight: filters tensor of shape (out_channels x in_channels/groups x kT x kH x kW)
     bias: optional bias tensor of shape (out_channels). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple (sT, sH, sW). Default: 1
@@ -112,7 +112,7 @@ See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
 Args:
     input: input tensor of shape (minibatch x in_channels x iW)
-    weight: filters of shape (in_channels x out_channels x kW)
+    weight: filters of shape (in_channels x out_channels/groups x kW)
     bias: optional bias of shape (out_channels). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple (sW,). Default: 1
@@ -137,7 +137,7 @@ See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
 Args:
     input: input tensor of shape (minibatch x in_channels x iH x iW)
-    weight: filters of shape (in_channels x out_channels x kH x kW)
+    weight: filters of shape (in_channels x out_channels/groups x kH x kW)
     bias: optional bias of shape (out_channels). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple (sH, sW). Default: 1
@@ -162,7 +162,7 @@ See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
 Args:
     input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
-    weight: filters of shape (in_channels x out_channels x kH x kW)
+    weight: filters of shape (in_channels x out_channels/groups x kH x kW)
     bias: optional bias of shape (out_channels). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
       tuple (sT, sH, sW). Default: 1
