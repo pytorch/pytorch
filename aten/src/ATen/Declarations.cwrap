@@ -653,20 +653,6 @@
         - THTensor* other
 ]]
 [[
-  name: lt
-  variants:
-    - method
-    - function
-  return: argument 0
-  cname: ltTensor
-  arguments:
-    - arg: THBoolTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
-]]
-[[
   name: lt_
   return: self
   options:
@@ -681,20 +667,6 @@
         - arg: THTensor* self
           broadcast: other inplace fallback
         - arg: THTensor* other
-]]
-[[
-  name: gt
-  variants:
-    - method
-    - function
-  return: argument 0
-  cname: gtTensor
-  arguments:
-    - arg: THBoolTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
 ]]
 [[
   name: gt_
@@ -713,20 +685,6 @@
         - THTensor* other
 ]]
 [[
-  name: le
-  variants:
-    - method
-    - function
-  return: argument 0
-  cname: leTensor
-  arguments:
-    - arg: THBoolTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
-]]
-[[
   name: le_
   return: self
   options:
@@ -741,20 +699,6 @@
         - arg: THTensor* self
           broadcast: other inplace fallback
         - THTensor* other
-]]
-[[
-  name: ge
-  variants:
-    - method
-    - function
-  return: argument 0
-  cname: geTensor
-  arguments:
-    - arg: THBoolTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
 ]]
 [[
   name: ge_
@@ -773,20 +717,6 @@
         - THTensor* other
 ]]
 [[
-  name: eq
-  variants:
-    - method
-    - function
-  return: argument 0
-  cname: eqTensor
-  arguments:
-    - arg: THBoolTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
-]]
-[[
   name: eq_
   return: self
   options:
@@ -801,20 +731,6 @@
         - arg: THTensor* self
           broadcast: other inplace fallback
         - THTensor* other
-]]
-[[
-  name: ne
-  variants:
-    - method
-    - function
-  return: argument 0
-  cname: neTensor
-  arguments:
-    - arg: THBoolTensor* result
-      output: True
-    - arg: THTensor* self
-      broadcast: other fallback
-    - THTensor* other
 ]]
 [[
   name: ne_

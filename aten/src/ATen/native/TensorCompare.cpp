@@ -25,6 +25,17 @@ void where_cpu(
 }
 
 template<template<typename T> class Comparator, typename scalar>
+struct CmpOpTensor {
+  static void apply(at::Tensor& ret, const at::Tensor& self, const at::Tensor& other) {
+    at::CPU_tensor_apply3<uint8_t, scalar, scalar>(ret, self, other,
+        [](uint8_t& ret_val, scalar& self_val, scalar& other_val) {
+          ret_val = Comparator<scalar>()(self_val, other_val);
+      }
+    );
+  }
+};
+
+template<template<typename T> class Comparator, typename scalar>
 struct CmpOp {
   static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
     auto other_val = other.to<scalar>();
@@ -40,22 +51,20 @@ template<template<typename T> class Comparator>
 struct CmpOpFloating {
   static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
     auto other_val = other.to<double>();
-    auto self_double = self.toType(at::kDouble);
-    at::CPU_tensor_apply2<uint8_t, double>(result, self_double,
+    at::CPU_tensor_apply2<uint8_t, double>(result, self,
         [other_val](uint8_t& result_val, double& self_val) {
-          result_val = Comparator<double>()(self_val, other_val);
+          result_val = Comparator<double>()(at::convert<double>(self_val), other_val);
       }
     );
   }
 };
 
 template<template<typename T> class Comparator>
-at::Tensor cmp_cpu(const at::Tensor& self, at::Scalar other, const char* op_name) {
-  at::Tensor result = self.type().toScalarType(at::kByte).tensor(self.sizes());
+at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
+  result.resize_(self.sizes());
   if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
     CmpOpFloating<Comparator>::apply(result, self, other);
-  }
-  else {
+  } else {
     AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
       CmpOp<Comparator, scalar_t>::apply(result, self, other);
     });
@@ -64,17 +73,30 @@ at::Tensor cmp_cpu(const at::Tensor& self, at::Scalar other, const char* op_name
 }
 
 template<template<typename T> class Comparator>
-at::Tensor & cmp_out_cpu(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
+at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, const at::Tensor& other, const char* op_name) {
+  if (other.dim() == 0) {
+    return cmp_out_cpu<Comparator>(result, self, other.pImpl->localScalar(), op_name);
+  }
   result.resize_(self.sizes());
-  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    CmpOpFloating<Comparator>::apply(result, self, other);
-  }
-  else {
-    AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
-      CmpOp<Comparator, scalar_t>::apply(result, self, other);
-    });
-  }
+  AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
+    CmpOpTensor<Comparator, scalar_t>::apply(result, self, other);
+  });
   return result;
+}
+
+template<template<typename T> class Comparator>
+at::Tensor cmp_cpu(const at::Tensor& self, at::Scalar other, const char* op_name) {
+  at::Tensor result = self.type().toScalarType(at::kByte).tensor(self.sizes());
+  return cmp_out_cpu<Comparator>(result, self, other, op_name);
+}
+
+template<template<typename T> class Comparator>
+at::Tensor cmp_cpu(const at::Tensor& self, const at::Tensor& other, const char* op_name) {
+  if (other.dim() == 0) {
+    return cmp_cpu<Comparator>(self, other.pImpl->localScalar(), op_name);
+  }
+  at::Tensor result = self.type().toScalarType(at::kByte).tensor(self.sizes());
+  return cmp_out_cpu<Comparator>(result, self, other, op_name);
 }
 } // namespace
 
@@ -143,27 +165,75 @@ Tensor ne_cpu(const Tensor& self, Scalar other) {
   return cmp_cpu<std::not_equal_to>(self, other, "ne");
 }
 
-Tensor & lt_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+Tensor& lt_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
   return cmp_out_cpu<std::less>(result, self, other, "lt");
 }
 
-Tensor & gt_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+Tensor& gt_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
   return cmp_out_cpu<std::greater>(result, self, other, "gt");
 }
 
-Tensor & le_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+Tensor& le_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
   return cmp_out_cpu<std::less_equal>(result, self, other, "le");
 }
 
-Tensor & ge_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+Tensor& ge_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
   return cmp_out_cpu<std::greater_equal>(result, self, other, "ge");
 }
 
-Tensor & eq_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+Tensor& eq_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
   return cmp_out_cpu<std::equal_to>(result, self, other, "eq");
 }
 
-Tensor & ne_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+Tensor& ne_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
+  return cmp_out_cpu<std::not_equal_to>(result, self, other, "ne");
+}
+
+Tensor lt_cpu(const Tensor& self, const Tensor& other) {
+  return cmp_cpu<std::less>(self, other, "lt");
+}
+
+Tensor gt_cpu(const Tensor& self, const Tensor& other) {
+  return cmp_cpu<std::greater>(self, other, "gt");
+}
+
+Tensor le_cpu(const Tensor& self, const Tensor& other) {
+  return cmp_cpu<std::less_equal>(self, other, "le");
+}
+
+Tensor ge_cpu(const Tensor& self, const Tensor& other) {
+  return cmp_cpu<std::greater_equal>(self, other, "le");
+}
+
+Tensor eq_cpu(const Tensor& self, const Tensor& other) {
+  return cmp_cpu<std::equal_to>(self, other, "eq");
+}
+
+Tensor ne_cpu(const Tensor& self, const Tensor& other) {
+  return cmp_cpu<std::not_equal_to>(self, other, "ne");
+}
+
+Tensor& lt_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
+  return cmp_out_cpu<std::less>(result, self, other, "lt");
+}
+
+Tensor& gt_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
+  return cmp_out_cpu<std::greater>(result, self, other, "gt");
+}
+
+Tensor& le_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
+  return cmp_out_cpu<std::less_equal>(result, self, other, "le");
+}
+
+Tensor& ge_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
+  return cmp_out_cpu<std::greater_equal>(result, self, other, "ge");
+}
+
+Tensor& eq_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
+  return cmp_out_cpu<std::equal_to>(result, self, other, "eq");
+}
+
+Tensor& ne_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
   return cmp_out_cpu<std::not_equal_to>(result, self, other, "ne");
 }
 }} // namespace at::native
