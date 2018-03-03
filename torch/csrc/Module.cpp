@@ -503,6 +503,8 @@ static PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
+  ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
+
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(
     defaultGenerator);

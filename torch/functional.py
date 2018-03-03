@@ -4,8 +4,9 @@ from functools import reduce
 import math
 
 __all__ = [
-    'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
-    'hann_window', 'hamming_window', 'bartlett_window', 'where', 'isnan'
+    'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul',
+    'det', 'stft', 'hann_window', 'hamming_window', 'bartlett_window', 'where',
+    'isnan'
 ]
 
 
@@ -314,21 +315,21 @@ def det(var):
     return var.det()
 
 
-def stft(var, frame_length, hop, fft_size=None, return_onesided=True, window=None, pad_end=0):
+def stft(signal, frame_length, hop, fft_size=None, normalized=False, onesided=True, window=None, pad_end=0):
     r"""Short-time Fourier transform (STFT).
 
     Ignoring the batch dimension, this method computes the following expression:
 
     .. math::
         X[m, \omega] = \sum_{k = 0}^{frame\_length}%
-                            window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{frame\_length}}
+                            window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{frame\_length}},
 
-    , where :math:`m` is the index of the sliding window, and :math:`\omega` is
+    where :math:`m` is the index of the sliding window, and :math:`\omega` is
     the frequency that :math:`0 \leq \omega < fft\_size`. When
     :attr:`return_onsesided` is the default value True, only values for
     :math:`\omega` in range :math:`[0, 1, 2, \dots, \lfloor \frac{fft\_size}{2} \rfloor + 1]`
     are returned because the real-to-complex transform satisfies the Hermitian
-    symmetry, i.e., :math:`X[m, \omega] = X[m, fft\_length - \omega]^*`.
+    symmetry, i.e., :math:`X[m, \omega] = X[m, fft\_size - \omega]^*`.
 
     The input :attr:`signal` must be 1-D sequence :math:`(T)` or 2-D a batch of
     sequences :math:`(N \times T)`. If :attr:`fft_size` is ``None``, it is
@@ -337,29 +338,32 @@ def stft(var, frame_length, hop, fft_size=None, return_onesided=True, window=Non
     :meth:`torch.hann_window`. If :attr:`window` is the default value ``None``,
     it is treated as if having :math:`1` everywhere in the frame.
     :attr:`pad_end` indicates the amount of zero padding at the end of
-    :attr:`signal` before STFT.
+    :attr:`signal` before STFT. If :attr:`normalized` is set to ``True``, the
+    function returns the normalized STFT results, i.e., multiplied by
+    :math:`(frame\_length)^{-0.5}`.
 
     Returns the real and the imaginary parts together as one tensor of size
-    :math:`(* \times N \times 2)`, where :math:`*` is the shape of input :attr:`signal`,
-    :math:`N` is the number of :math:`\omega`s considered depending on
-    :attr:`fft_size` and :attr:`return_onesided`, and each pair in the last
-    dimension represents a complex number as real part and imaginary part.
+    :math:`(* \times N \times 2)`, where :math:`*` is the shape of input
+    :attr:`signal`, :math:`N` is the number of :math:`\omega` s considered
+    depending on :attr:`fft_size` and :attr:`onesided`, and each pair in the
+    last dimension represents a complex number as real part and imaginary part.
 
     Arguments:
         signal (Tensor): the input tensor
         frame_length (int): the size of window frame and STFT filter
         hop (int): the distance between neighboring sliding window frames
         fft_size (int, optional): size of Fourier transform
-        return_onesided (bool, optional): controls whether to avoid redundancy in the return value
+        normalized (bool, optional): controls whether to return the normalized STFT results
+        onesided (bool, optional): controls whether to avoid redundancy in the return value
         window (Tensor, optional): the optional window function
         pad_end (int, optional): implicit zero padding at the end of :attr:`signal`
 
     Returns:
         Tensor: A tensor containing the STFT result
     """
-    if torch.is_tensor(var):
+    if torch.is_tensor(signal):
         raise ValueError("stft is currently only supported on Variable")
-    return var.stft(frame_length, hop, fft_size, return_onesided, window, pad_end)
+    return signal.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end)
 
 
 def hann_window(window_length, periodic=True):
@@ -368,9 +372,10 @@ def hann_window(window_length, periodic=True):
     This method computes the Hann window function:
 
     .. math::
-        w[n] = \frac{1}{2}\ [1 - \cos \left( \frac{2 \pi n}{N - 1} \right)] = \sin^2 \left( \frac{\pi n}{N - 1} \right)
+        w[n] = \frac{1}{2}\ [1 - \cos \left( \frac{2 \pi n}{N - 1} \right)]
+             = \sin^2 \left( \frac{\pi n}{N - 1} \right),
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
@@ -382,7 +387,7 @@ def hann_window(window_length, periodic=True):
     ``torch.hann_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     Arguments:
         window_length (int): the size of returned window
@@ -390,7 +395,7 @@ def hann_window(window_length, periodic=True):
             function. If False, return a symmetric window.
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(window\_length,)` containing the window
     """
     if window_length <= 0:
         raise ValueError('window_length must be positive')
@@ -403,9 +408,9 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
     This method computes the Hamming window function:
 
     .. math::
-        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right)
+        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
@@ -417,7 +422,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
     ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     .. note::
         This is a generalized version of :meth:`torch.hann_window`.
@@ -428,7 +433,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
             function. If False, return a symmetric window.
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(window\_length,)` containing the window
     """
     if window_length <= 0:
         raise ValueError('window_length must be positive')
@@ -451,9 +456,9 @@ def bartlett_window(window_length, periodic=True):
         w[n] = 1 - \lvert \frac{2n}{N-1} - 1 \rvert = \begin{cases}
             \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
             2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
-        \end{cases}
+        \end{cases},
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
@@ -465,7 +470,7 @@ def bartlett_window(window_length, periodic=True):
     ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
 
     .. note::
-        If :attr:`window_length` :math:`\leq 2`, the returned window contains a single value 1.
+        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
 
     Arguments:
         window_length (int): the size of returned window
@@ -473,7 +478,7 @@ def bartlett_window(window_length, periodic=True):
             function. If False, return a symmetric window.
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(window\_length,)` containing the window
     """
     if window_length <= 0:
         raise ValueError('window_length must be positive')

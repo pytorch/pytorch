@@ -12,8 +12,8 @@ import pickle
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from itertools import product, combinations
 from functools import reduce
-from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, run_tests, \
-    download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS
+from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
+    run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS
 
 if TEST_NUMPY:
     import numpy as np
@@ -2743,11 +2743,103 @@ class TestTorch(TestCase):
         self._test_det(self, lambda x: x)
 
     @staticmethod
-    def _test_stft(self, conv_fn):
+    def _test_fft_ifft_rfft_irfft(self, build_fn):
+        # the conv_fn to convert tensors can be slow in cuda tests, so we use
+        # a build_fn: sizes => tensor
         Variable = torch.autograd.Variable
 
-        def naive_stft(x, frame_length, hop, fft_size=None, return_onesided=True,
-                       window=None, pad_end=0):
+        def _test_complex(sizes, signal_ndim, prepro_fn=lambda x: x):
+            x = Variable(build_fn(*sizes))
+            x = prepro_fn(x)
+            for normalized in (True, False):
+                res = x.fft(signal_ndim, normalized=normalized)
+                rec = res.ifft(signal_ndim, normalized=normalized)
+                self.assertEqual(x, rec, 1e-8, 'fft and ifft')
+
+        def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
+            x = Variable(build_fn(*sizes))
+            x = prepro_fn(x)
+            signal_numel = 1
+            if x.dim() == signal_ndim:
+                start_dim = 0
+            else:
+                start_dim = 1
+            signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
+            for normalized, onesided in product((True, False), repeat=2):
+                res = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+                if not onesided:  # check Hermitian symmetry
+                    def test_one_sample(res, test_num=10):
+                        idxs_per_dim = [torch.LongTensor(test_num).random_(s).tolist() for s in signal_sizes]
+                        for idx in zip(*idxs_per_dim):
+                            reflected_idx = tuple((s - i) % s for i, s in zip(idx, res.size()))
+                            idx_val = res.__getitem__(idx)
+                            reflected_val = res.__getitem__(reflected_idx)
+                            self.assertEqual(idx_val[0], reflected_val[0], 'rfft hermitian symmetry on real part')
+                            self.assertEqual(idx_val[1], -reflected_val[1], 'rfft hermitian symmetry on imaginary part')
+                    if len(sizes) == signal_ndim:
+                        test_one_sample(res)
+                    else:
+                        nb = res.size(0)
+                        test_idxs = torch.LongTensor(min(nb, 4)).random_(nb)
+                        for test_idx in test_idxs.tolist():
+                            test_one_sample(res[test_idx])
+                    # compare with C2C
+                    xc = torch.stack([x, torch.zeros_like(x)], -1)
+                    xc_res = xc.fft(signal_ndim, normalized=normalized)
+                    self.assertEqual(res, xc_res)
+                test_input_signal_sizes = [signal_sizes]
+                rec = res.irfft(signal_ndim, signal_sizes=signal_sizes,
+                                normalized=normalized, onesided=onesided)
+                self.assertEqual(x, rec, 1e-8, 'rfft and irfft')
+                if not onesided:  # check that we can use C2C ifft
+                    rec = res.ifft(signal_ndim, normalized=normalized)
+                    self.assertEqual(x, rec.select(-1, 0), 1e-8, 'twosided rfft and ifft real')
+                    self.assertEqual(rec.select(-1, 1).data.abs().mean(), 0, 1e-8, 'twosided rfft and ifft imaginary')
+
+        # contiguous case
+        _test_real((100,), 1)
+        _test_real((100, 100), 1)
+        _test_real((100, 100), 2)
+        _test_real((90, 80, 60), 2)
+        _test_real((50, 80, 100), 3)
+        _test_real((30, 50, 50, 40), 3)
+
+        _test_complex((100, 2), 1)
+        _test_complex((100, 100, 2), 1)
+        _test_complex((100, 100, 2), 2)
+        _test_complex((90, 80, 60, 2), 2)
+        _test_complex((50, 80, 100, 2), 3)
+        _test_complex((30, 50, 50, 40, 2), 3)
+
+        # non-contiguous case
+        _test_real((165,), 1, lambda x: x.narrow(0, 25, 100))  # input is not aligned to complex type
+        _test_real((100, 3, 100), 1, lambda x: x[:, 1])
+        _test_real((100, 100), 2, lambda x: x.t())
+        _test_real((90, 100, 10, 10), 2, lambda x: x.view(90, 100, 100)[:, :60])
+        _test_real((65, 80, 115), 3, lambda x: x[10:60, :, 10:110])
+        _test_real((40, 50, 50, 30), 3, lambda x: x.transpose(1, 3))
+
+        _test_complex((2, 100), 1, lambda x: x.t())
+        _test_complex((100, 3, 100, 2), 1, lambda x: x[:, 1].transpose(0, 1))
+        _test_complex((300, 200, 2), 2, lambda x: x[:100, :100])
+        _test_complex((90, 90, 110, 2), 2, lambda x: x[:, 5:85].narrow(2, 5, 100))
+        _test_complex((50, 90, 3, 100, 2), 3, lambda x: x.transpose(2, 0).select(0, 2)[:, 10:])
+        _test_complex((30, 80, 80, 60, 2), 3, lambda x: x[:, 15:65, 15:65, 10:50])
+
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    def test_fft_ifft_rfft_irfft(self):
+        def randn_double(*sizes):
+            return torch.DoubleTensor(*sizes).normal_()
+        self._test_fft_ifft_rfft_irfft(self, build_fn=randn_double)
+
+    @staticmethod
+    def _test_stft(self, build_fn):
+        # the conv_fn to convert tensors can be slow in cuda tests, so we use
+        # a build_fn: sizes => tensor
+        Variable = torch.autograd.Variable
+
+        def naive_stft(x, frame_length, hop, fft_size=None, normalized=False,
+                       onesided=True, window=None, pad_end=0):
             if fft_size is None:
                 fft_size = frame_length
             if isinstance(x, Variable):
@@ -2774,19 +2866,20 @@ class TestTorch(TestCase):
                     noverlap=frame_length - hop,
                     window=window,
                     nfft=fft_size,
-                    return_onesided=return_onesided,
+                    return_onesided=onesided,
                     boundary=None,
                     padded=False,
                 )[2].transpose((0, 2, 1)) * np.abs(window.sum().item())
                 result = torch.Tensor(np.stack([sp_result.real, sp_result.imag], -1))
             else:
-                if return_onesided:
+                if onesided:
                     return_size = int(fft_size / 2) + 1
                 else:
                     return_size = fft_size
                 result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
                 for w in range(return_size):  # freq
-                    radians = conv_fn(torch.arange(frame_length)) * w * 2 * math.pi / fft_size
+                    radians = torch.arange(frame_length) * w * 2 * math.pi / fft_size
+                    radians = radians.type_as(x)
                     re_kernel = radians.cos().mul_(window)
                     im_kernel = -radians.sin().mul_(window)
                     for b in range(batch):
@@ -2796,53 +2889,64 @@ class TestTorch(TestCase):
                             im = seg.dot(im_kernel)
                             result[b, i, w, 0] = re
                             result[b, i, w, 1] = im
+            if normalized:
+                result /= frame_length ** 0.5
             if input_1d:
                 result = result[0]
-            return conv_fn(result)
+            return result
 
-        def _test(sizes, frame_length, hop, fft_size=None, return_onesided=True,
-                  window=None, pad_end=0, expected_error=None):
-            x = Variable(conv_fn(torch.randn(*sizes)))
-            if window is not None:
-                window = Variable(conv_fn(window.clone()))
+        def _test(sizes, frame_length, hop, fft_size=None, normalized=False,
+                  onesided=True, window_sizes=None, pad_end=0, expected_error=None):
+            x = Variable(build_fn(*sizes))
+            if window_sizes is not None:
+                window = Variable(build_fn(*window_sizes))
+            else:
+                window = None
             if expected_error is None:
-                result = x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end)
-                ref_result = naive_stft(x, frame_length, hop, fft_size, return_onesided, window, pad_end)
+                result = x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end)
+                ref_result = naive_stft(x, frame_length, hop, fft_size, normalized, onesided, window, pad_end)
                 self.assertEqual(result.data, ref_result, 7e-6, 'stft result')
             else:
                 self.assertRaises(expected_error,
-                                  lambda: x.stft(frame_length, hop, fft_size, return_onesided, window, pad_end))
+                                  lambda: x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end))
 
         _test((2, 5), 4, 2, pad_end=1)
         _test((4, 150), 90, 45, pad_end=0)
         _test((10,), 7, 2, pad_end=0)
         _test((10, 4000), 1024, 512, pad_end=0)
 
-        _test((2, 5), 4, 2, window=torch.randn(4), pad_end=1)
-        _test((4, 150), 90, 45, window=torch.randn(90), pad_end=0)
-        _test((10,), 7, 2, window=torch.randn(7), pad_end=0)
-        _test((10, 4000), 1024, 512, window=torch.randn(1024), pad_end=0)
+        _test((2, 5), 4, 2, window_sizes=(4,), pad_end=1)
+        _test((4, 150), 90, 45, window_sizes=(90,), pad_end=0)
+        _test((10,), 7, 2, window_sizes=(7,), pad_end=0)
+        _test((10, 4000), 1024, 512, window_sizes=(1024,), pad_end=0)
 
-        _test((2, 5), 4, 2, fft_size=5, window=torch.randn(4), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, window=torch.randn(90), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, window=torch.randn(7), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, window=torch.randn(1024), pad_end=0)
+        _test((2, 5), 4, 2, fft_size=5, window_sizes=(4,), pad_end=1)
+        _test((4, 150), 90, 45, fft_size=100, window_sizes=(90,), pad_end=0)
+        _test((10,), 7, 2, fft_size=33, window_sizes=(7,), pad_end=0)
+        _test((10, 4000), 1024, 512, fft_size=1500, window_sizes=(1024,), pad_end=0)
 
-        _test((2, 5), 4, 2, fft_size=5, return_onesided=False, window=torch.randn(4), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, return_onesided=False, window=torch.randn(90), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, return_onesided=False, window=torch.randn(7), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, return_onesided=False, window=torch.randn(1024), pad_end=0)
+        _test((2, 5), 4, 2, fft_size=5, onesided=False, window_sizes=(4,), pad_end=1)
+        _test((4, 150), 90, 45, fft_size=100, onesided=False, window_sizes=(90,), pad_end=0)
+        _test((10,), 7, 2, fft_size=33, onesided=False, window_sizes=(7,), pad_end=0)
+        _test((10, 4000), 1024, 512, fft_size=1500, onesided=False, window_sizes=(1024,), pad_end=0)
+
+        _test((2, 5), 4, 2, fft_size=5, normalized=True, onesided=False, window_sizes=(4,), pad_end=1)
+        _test((4, 150), 90, 45, fft_size=100, normalized=True, onesided=False, window_sizes=(90,), pad_end=0)
+        _test((10,), 7, 2, fft_size=33, normalized=True, onesided=False, window_sizes=(7,), pad_end=0)
+        _test((10, 4000), 1024, 512, fft_size=1500, normalized=True, onesided=False, window_sizes=(1024,), pad_end=0)
 
         _test((10, 4, 2), 1, 1, expected_error=RuntimeError)
         _test((10,), 11, 1, expected_error=RuntimeError)
         _test((10,), 0, 1, pad_end=4, expected_error=RuntimeError)
         _test((10,), 15, 1, pad_end=4, expected_error=RuntimeError)
         _test((10,), 5, -4, expected_error=RuntimeError)
-        _test((10,), 5, 4, window=torch.randn(11), expected_error=RuntimeError)
-        _test((10,), 5, 4, window=torch.randn(1, 1), expected_error=RuntimeError)
+        _test((10,), 5, 4, window_sizes=(11,), expected_error=RuntimeError)
+        _test((10,), 5, 4, window_sizes=(1, 1), expected_error=RuntimeError)
 
     def test_stft(self):
-        self._test_stft(self, lambda x: x)
+        def randn_double(*sizes):
+            return torch.DoubleTensor(*sizes).normal_()
+        self._test_stft(self, build_fn=randn_double)
 
     @unittest.skip("Not implemented yet")
     def test_conv2(self):

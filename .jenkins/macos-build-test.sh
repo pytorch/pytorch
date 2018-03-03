@@ -8,7 +8,7 @@ rm -rf $PWD/miniconda3
 bash $PWD/miniconda3.sh -b -p $PWD/miniconda3
 export PATH="$PWD/miniconda3/bin:$PATH"
 source $PWD/miniconda3/bin/activate
-conda install -y numpy pyyaml setuptools cmake cffi ninja
+conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 
 # Build and test PyTorch
 git submodule update --init --recursive

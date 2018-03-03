@@ -37,16 +37,9 @@ SET(INTEL_MKL_SEQUENTIAL OFF CACHE BOOL
   "Force using the sequential (non threaded) libraries")
 
 # Checks
-CHECK_TYPE_SIZE("void*" SIZE_OF_VOIDP)
-IF ("${SIZE_OF_VOIDP}" EQUAL 8)
-  SET(mklvers "em64t")
-  SET(iccvers "intel64")
-  SET(mkl64s "_lp64")
-ELSE ("${SIZE_OF_VOIDP}" EQUAL 8)
-  SET(mklvers "32")
-  SET(iccvers "ia32")
-  SET(mkl64s)
-ENDIF ("${SIZE_OF_VOIDP}" EQUAL 8)
+SET(mklvers "em64t")
+SET(iccvers "intel64")
+SET(mkl64s "_lp64")
 IF(CMAKE_COMPILER_IS_GNUCC)
   SET(mklthreads "mkl_gnu_thread" "mkl_intel_thread")
   SET(mklifaces  "gf" "intel")
@@ -175,7 +168,7 @@ FOREACH(mklrtl ${mklrtls} "")
         IF (NOT MKL_LIBRARIES AND NOT INTEL_MKL_SEQUENTIAL)
           CHECK_ALL_LIBRARIES(MKL_LIBRARIES cblas_sgemm
             "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
-        ENDIF (NOT MKL_LIBRARIES AND NOT INTEL_MKL_SEQUENTIAL)          
+        ENDIF (NOT MKL_LIBRARIES AND NOT INTEL_MKL_SEQUENTIAL)
       ENDFOREACH(mklthread)
     ENDFOREACH(mkl64)
   ENDFOREACH(mkliface)
@@ -200,7 +193,7 @@ FOREACH(mklrtl ${mklrtls} "")
         IF (NOT MKL_LIBRARIES)
           CHECK_ALL_LIBRARIES(MKL_LIBRARIES cblas_sgemm
             "mkl_${mkliface}${mkl64};${mklthread};mkl_core;${mklrtl};pthread;${mkl_m};${mkl_dl}" "")
-        ENDIF (NOT MKL_LIBRARIES)          
+        ENDIF (NOT MKL_LIBRARIES)
       ENDFOREACH(mklthread)
     ENDFOREACH(mkl64)
   ENDFOREACH(mkliface)
@@ -211,7 +204,7 @@ IF (NOT MKL_LIBRARIES)
   SET(MKL_VERSION 900)
   CHECK_ALL_LIBRARIES(MKL_LIBRARIES cblas_sgemm
     "mkl;guide;pthread;m" "")
-ENDIF (NOT MKL_LIBRARIES)          
+ENDIF (NOT MKL_LIBRARIES)
 
 # Include files
 IF (MKL_LIBRARIES)
@@ -228,7 +221,7 @@ IF (MKL_LIBRARIES)
         MARK_AS_ADVANCED(MKL_LAPACK_LIBRARIES)
       ENDIF (NOT MKL_LAPACK_LIBRARIES)
       IF (NOT MKL_SCALAPACK_LIBRARIES)
-        FIND_LIBRARY(MKL_SCALAPACK_LIBRARIES NAMES "mkl_scalapack${mkl64}${mkls}") 
+        FIND_LIBRARY(MKL_SCALAPACK_LIBRARIES NAMES "mkl_scalapack${mkl64}${mkls}")
         MARK_AS_ADVANCED(MKL_SCALAPACK_LIBRARIES)
       ENDIF (NOT MKL_SCALAPACK_LIBRARIES)
       IF (NOT MKL_SOLVER_LIBRARIES)
@@ -243,7 +236,7 @@ IF (MKL_LIBRARIES)
   ENDFOREACH(mkl64)
 ENDIF (MKL_LIBRARIES)
 
-# LibIRC: intel compiler always links this; 
+# LibIRC: intel compiler always links this;
 # gcc does not; but mkl kernels sometimes need it.
 IF (MKL_LIBRARIES)
   IF (CMAKE_COMPILER_IS_GNUCC)
@@ -269,7 +262,7 @@ ENDIF (MKL_LIBRARIES)
 
 # Standard termination
 IF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
-  MESSAGE(FATAL_ERROR "MKL library not found. Please specify library  location")
+  MESSAGE(FATAL_ERROR "MKL library not found. Please specify library location")
 ENDIF(NOT MKL_FOUND AND MKL_FIND_REQUIRED)
 IF(NOT MKL_FIND_QUIETLY)
   IF(MKL_FOUND)

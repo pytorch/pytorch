@@ -165,6 +165,10 @@ Comparison Ops
 
 Spectral Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: fft
+.. autofunction:: ifft
+.. autofunction:: rfft
+.. autofunction:: irfft
 .. autofunction:: stft
 .. autofunction:: hann_window
 .. autofunction:: hamming_window

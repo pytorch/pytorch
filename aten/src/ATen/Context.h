@@ -42,6 +42,7 @@ public:
       runtime_error("%s backend type not enabled.",toString(p));
     return *generator;
   }
+  bool hasMKL() const;
   bool hasCUDA() const;
   int64_t current_device() const;
   // defined in header so that getType has ability to inline
@@ -96,7 +97,7 @@ static inline void init() {
 }
 
 static inline Type& getType(Backend p, ScalarType s) {
-  return globalContext().getType(p,s);
+  return globalContext().getType(p, s);
 }
 
 static inline Type& CPU(ScalarType s) {
@@ -109,6 +110,10 @@ static inline Type& CUDA(ScalarType s) {
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
+}
+
+static inline bool hasMKL() {
+  return globalContext().hasMKL();
 }
 
 static inline int64_t current_device() {
