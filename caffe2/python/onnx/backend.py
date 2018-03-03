@@ -454,7 +454,7 @@ class Caffe2Backend(Backend):
                 input_size,
                 hidden_size,
                 name,
-                drop_states=True,
+                drop_states=False,
                 forward_only=True,
                 activation=activation
             )
@@ -467,9 +467,15 @@ class Caffe2Backend(Backend):
 
         if direction == 'forward':
             hidden_t_all, hidden_t_last = make_rnn(0)
+
+            # in the forward case, storage is shared between the two
+            # outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates n.outputs[0]
+            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+
             pred_mh.net = pred_mh.net.Clone(
                 "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0], hidden_t_last: n.outputs[1] }
+                blob_remap={ hidden_t_all: n.outputs[0] }
             )
         elif direction == 'bidirectional':
             hidden_t_all_f, hidden_t_last_f = make_rnn(0)
@@ -478,6 +484,10 @@ class Caffe2Backend(Backend):
                                [n.outputs[0], dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
                                [n.outputs[1], dummy_name()], axis=0)
+
+        if sequence_lens is not None:
+            pred_mh.net.VariableLengthSequencePadding(
+                [n.outputs[0], sequence_lens], [n.outputs[0]])
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
@@ -565,7 +575,7 @@ class Caffe2Backend(Backend):
                 input_size,
                 hidden_size,
                 name,
-                drop_states=True,
+                drop_states=False,
                 forward_only=True,
                 return_params=True
             )
@@ -578,11 +588,16 @@ class Caffe2Backend(Backend):
 
         if direction == 'forward':
             hidden_t_all, hidden_t_last, cell_last = make_lstm(0)
+
+            # in the forward case, storage is shared between the three
+            # outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates n.outputs[0]
+            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+            pred_mh.net.Copy(cell_last, n.outputs[2])
+
             pred_mh.net = pred_mh.net.Clone(
                 "dummy-clone-net",
-                blob_remap={hidden_t_all: n.outputs[0],
-                            hidden_t_last: n.outputs[1],
-                            cell_last: n.outputs[2]}
+                blob_remap={ hidden_t_all: n.outputs[0] }
             )
         elif direction == 'bidirectional':
             hidden_t_all_f, hidden_t_last_f, cell_last_f = make_lstm(0)
@@ -593,6 +608,10 @@ class Caffe2Backend(Backend):
                                [n.outputs[1], dummy_name()], axis=0)
             pred_mh.net.Concat([cell_last_f, cell_last_b],
                                [n.outputs[2], dummy_name()], axis=0)
+
+        if sequence_lens is not None:
+            pred_mh.net.VariableLengthSequencePadding(
+                [n.outputs[0], sequence_lens], [n.outputs[0]])
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),
@@ -678,7 +697,7 @@ class Caffe2Backend(Backend):
                 input_size,
                 hidden_size,
                 name,
-                drop_states=True,
+                drop_states=False,
                 forward_only=True,
                 linear_before_reset=linear_before_reset
             )
@@ -691,9 +710,15 @@ class Caffe2Backend(Backend):
 
         if direction == 'forward':
             hidden_t_all, hidden_t_last = make_gru(0)
+
+            # in the forward case, storage is shared between the two
+            # outputs. We need to decouple them so that the
+            # VariableLengthSequencePadding only mutates n.outputs[0]
+            pred_mh.net.Copy(hidden_t_last, n.outputs[1])
+
             pred_mh.net = pred_mh.net.Clone(
                 "dummy-clone-net",
-                blob_remap={ hidden_t_all: n.outputs[0], hidden_t_last: n.outputs[1] }
+                blob_remap={ hidden_t_all: n.outputs[0] }
             )
         elif direction == 'bidirectional':
             hidden_t_all_f, hidden_t_last_f = make_gru(0)
@@ -702,6 +727,10 @@ class Caffe2Backend(Backend):
                                [n.outputs[0], dummy_name()], axis=2)
             pred_mh.net.Concat([hidden_t_last_f, hidden_t_last_b],
                                [n.outputs[1], dummy_name()], axis=0)
+
+        if sequence_lens is not None:
+            pred_mh.net.VariableLengthSequencePadding(
+                [n.outputs[0], sequence_lens], [n.outputs[0]])
 
         return Caffe2Ops(list(pred_mh.Proto().op),
                          list(init_net.Proto().op),

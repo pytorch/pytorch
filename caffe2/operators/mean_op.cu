@@ -1,5 +1,4 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
+ /* Copyright (c) 2016-present, Facebook, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +13,12 @@
  * limitations under the License.
  */
 
-#include "caffe2/contrib/aten/aten_op.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/mean_op.h"
 
 namespace caffe2 {
 
-REGISTER_CUDA_OPERATOR(ATen, ATenOp<CUDAContext>);
-template<>
-at::Backend ATenOp<CUDAContext>::backend() const {
-  return at::kCUDA;
-}
+REGISTER_CUDA_OPERATOR(Mean, MeanOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(MeanGradient, MeanGradientOp<CUDAContext>);
 
-namespace math {
-template<>
-void Set<at::Half,CUDAContext>(const size_t N, const at::Half h, at::Half* v, CUDAContext * c) {
-  Set(0, h.x, (uint16_t*) v, c);
-}
-}
-
-}
+} // namespace caffe2

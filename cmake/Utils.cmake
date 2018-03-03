@@ -114,47 +114,6 @@ function(caffe_parse_header_single_define LIBNAME HDR_PATH VARNAME)
 endfunction()
 
 ##############################################################################
-# Helper function to add as-needed flag around a library.
-function(caffe_add_as_needed_flag lib output_var)
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    # TODO: Clang seems to not need this flag. Double check.
-    set(${output_var} ${lib} PARENT_SCOPE)
-  elseif(MSVC)
-    # TODO: check what is the behavior of MSVC.
-    # In MSVC, we will add whole archive in default.
-    set(${output_var} ${lib} PARENT_SCOPE)
-  else()
-    # Assume everything else is like gcc: we will need as-needed flag.
-    set(${output_var} -Wl,--no-as-needed ${lib} -Wl,--as-needed PARENT_SCOPE)
-  endif()
-endfunction()
-
-##############################################################################
-# Helper function to add whole_archive flag around a library.
-function(caffe_add_whole_archive_flag lib output_var)
-  if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang")
-    set(${output_var} -Wl,-force_load,$<TARGET_FILE:${lib}> PARENT_SCOPE)
-  elseif(MSVC)
-    # In MSVC, we will add whole archive in default.
-    set(${output_var} -WHOLEARCHIVE:$<TARGET_FILE:${lib}> PARENT_SCOPE)
-  else()
-    # Assume everything else is like gcc
-    set(${output_var} -Wl,--whole-archive $<TARGET_FILE:${lib}> -Wl,--no-whole-archive PARENT_SCOPE)
-  endif()
-endfunction()
-
-##############################################################################
-# Helper function to add either as-needed, or whole_archive flag around a library.
-function(caffe_add_linker_flag lib output_var)
-  if (BUILD_SHARED_LIBS)
-    caffe_add_as_needed_flag(${lib} tmp)
-  else()
-    caffe_add_whole_archive_flag(${lib} tmp)
-  endif()
-  set(${output_var} ${tmp} PARENT_SCOPE)
-endfunction()
-
-##############################################################################
 # Helper function to automatically generate __init__.py files where python
 # sources reside but there are no __init__.py present.
 function(caffe_autogen_init_py_files)
@@ -184,33 +143,6 @@ function(caffe_autogen_init_py_files)
     endif()
   endforeach()
 endfunction()
-
-##############################################################################
-# Creating a Caffe2 binary target with sources specified with relative path.
-# Usage:
-#   caffe2_binary_target(target_name_or_src <src1> [<src2>] [<src3>] ...)
-# If only target_name_or_src is specified, this target is build with one single
-# source file and the target name is autogen from the filename. Otherwise, the
-# target name is given by the first argument and the rest are the source files
-# to build the target.
-function(caffe2_binary_target target_name_or_src)
-  if (${ARGN})
-    set(__target ${target_name_or_src})
-    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${ARGN}")
-  else()
-    get_filename_component(__target ${target_name_or_src} NAME_WE)
-    prepend(__srcs "${CMAKE_CURRENT_SOURCE_DIR}/" "${target_name_or_src}")
-  endif()
-  add_executable(${__target} ${__srcs})
-  add_dependencies(${__target} ${Caffe2_MAIN_LIBS_ORDER})
-  if (USE_CUDA)
-    target_link_libraries(${__target} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS} ${Caffe2_CUDA_DEPENDENCY_LIBS})
-  else()
-    target_link_libraries(${__target} ${Caffe2_MAIN_LIBS} ${Caffe2_DEPENDENCY_LIBS})
-  endif()
-  install(TARGETS ${__target} DESTINATION bin)
-endfunction()
-
 
 ###
 # Removes common indentation from a block of text to produce code suitable for

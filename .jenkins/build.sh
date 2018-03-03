@@ -69,7 +69,7 @@ if [[ "${BUILD_ENVIRONMENT}" == py3* ]]; then
 fi
 
 case "${BUILD_ENVIRONMENT}" in
-  *-mkl)
+  *-mkl*)
     CMAKE_ARGS+=("-DBLAS=MKL")
     ;;
   *-cuda*)

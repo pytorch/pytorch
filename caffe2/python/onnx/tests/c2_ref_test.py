@@ -352,6 +352,15 @@ class TestCaffe2End2End(TestCase):
     def test_densenet121(self):
         self._test_net('densenet121')
 
+    def test_bvlc_googlenet(self):
+        self._test_net('bvlc_googlenet')
+
+    def test_bvlc_reference_caffenet(self):
+        self._test_net('bvlc_reference_caffenet')
+
+    def test_bvlc_reference_rcnn_ilsvrc13(self):
+        self._test_net('bvlc_reference_rcnn_ilsvrc13')
+
 
 if __name__ == '__main__':
     unittest.main()

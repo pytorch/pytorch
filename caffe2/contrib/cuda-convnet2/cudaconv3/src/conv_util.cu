@@ -14,8 +14,10 @@
  * limitations under the License.
  */
 
-#include <iostream>
 #include <assert.h>
+#include <cstring>
+#include <iostream>
+
 #include "../../nvmatrix/include/nvmatrix_kernels.cuh"
 #include "../../nvmatrix/include/nvmatrix.cuh"
 #include "../include/conv_util.cuh"
@@ -3026,4 +3028,20 @@ void convResponseNormCrossMap(NVMatrix& images, NVMatrix& target, int numFilters
  */
 void convResponseNormCrossMap(NVMatrix& images, NVMatrix& target, int numFilters, int sizeF, float addScale, float powScale, bool blocked) {
     convContrastNormCrossMap(images, images, target, numFilters, sizeF, addScale, powScale, 1, blocked);
+}
+
+cudaTextureObject_t GetTensorTextureObject(caffe2::TensorCUDA* tensor) {
+  cudaTextureObject_t tex_obj;
+  cudaResourceDesc res_desc;
+  std::memset(&res_desc, 0, sizeof(res_desc));
+  res_desc.resType = cudaResourceTypeLinear;
+  res_desc.res.linear.devPtr = tensor->mutable_data<float>();
+  res_desc.res.linear.sizeInBytes = tensor->nbytes();
+  res_desc.res.linear.desc =
+      cudaCreateChannelDesc(32, 0, 0, 0, cudaChannelFormatKindFloat);
+  cudaTextureDesc tex_desc;
+  std::memset(&tex_desc, 0, sizeof(tex_desc));
+  CUDA_ENFORCE(
+      cudaCreateTextureObject(&tex_obj, &res_desc, &tex_desc, nullptr));
+  return tex_obj;
 }

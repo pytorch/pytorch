@@ -11,6 +11,15 @@ set(CAFFE2_VERSION_PATCH 1)
 set(CAFFE2_VERSION
     "${CAFFE2_VERSION_MAJOR}.${CAFFE2_VERSION_MINOR}.${CAFFE2_VERSION_PATCH}")
 
+# One variable that determines whether the current cmake process is being run
+# with the main Caffe2 library. This is useful for building modules - if
+# modules are built with the main Caffe2 library then one does not need to do
+# find caffe2 in the cmake script. One can usually guard it in some way like
+#    if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+#      find_package(Caffe2 REQUIRED)
+#    endif()
+set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -26,7 +35,6 @@ cmake_dependent_option(
 option(BUILD_OBSERVERS "Build performance observers/loggers in caffe2/share/observers directory" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(USE_ACL "Use ARM Compute Library" OFF)
-option(USE_ARM64 "Use ARM64" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
 option(USE_ATEN "Use ATen" OFF)
 option(USE_CUDA "Use Cuda" ON)
@@ -50,12 +58,11 @@ option(USE_OPENCV "Use openCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
 option(USE_REDIS "Use Redis" OFF)
-option(USE_ROCKSDB "Use RocksDB" ON)
+option(USE_ROCKSDB "Use RocksDB" OFF)
 option(USE_SNPE "Use Qualcomm's SNPE library" OFF)
 option(USE_THREADS "Use Threads" ON)
 option(USE_ZMQ "Use ZMQ" OFF)
 option(USE_ZSTD "Use ZSTD" OFF)
-option(DEPRIORITIZE_ANACONDA "Search system include directories before Anaconda include directories" OFF)
 
 # ---[ CMake scripts + modules
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules)
@@ -73,12 +80,14 @@ enable_testing()
 
 # ---[ Misc checks to cope with various compiler modes
 include(cmake/MiscCheck.cmake)
+include(cmake/BuildVariables.cmake)
 
 # External projects
 include(ExternalProject)
 
+# TODO: merge the following 3 files into cmake/public/utils.cmake.
 include(cmake/Utils.cmake)
-include(cmake/Summary.cmake)
+include(cmake/public/utils.cmake)
 
 set(CAFFE2_WHITELIST "" CACHE STRING "A whitelist file of files that one should build.")
 
@@ -123,6 +132,14 @@ else()
     endif()
     set(${flag_var} "${${flag_var}} /MP /bigobj")
   endforeach(flag_var)
+endif()
+
+if(ANDROID)
+  if(CMAKE_COMPILER_IS_GNUCXX)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -s")
+  else()
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
+  endif()
 endif()
 
 if(NOT APPLE AND UNIX)
@@ -182,9 +199,6 @@ if(BUILD_DOCS)
   endif (DOXYGEN_FOUND)
 endif (BUILD_DOCS)
 
-
-caffe2_print_configuration_summary()
-
 # ---[ CMake related files
 # Uninistall option.
 if(NOT TARGET caffe2_uninstall)
@@ -200,22 +214,6 @@ endif()
 
 # ---[ Make configuration files for cmake to allow dependent libraries
 # easier access to Caffe2.
-# Since one would use glog, gflags, and protobuf functionalities, any
-# dependent library will have to depend on glog, gflags, and protobuf
-# as well, so we mark them as INTERFACE transitive dependency.
-set(CAFFE2_INTERFACE_LIBS)
-if (USE_GLOG)
-  list(APPEND CAFFE2_INTERFACE_LIBS glog::glog)
-endif()
-if (USE_GFLAGS)
-  list(APPEND CAFFE2_INTERFACE_LIBS gflags)
-endif()
-list(APPEND CAFFE2_INTERFACE_LIBS protobuf::libprotobuf)
-
-# TODO: figure out how we should remove this public dependency.
-if (USE_OPENCV)
-  list(APPEND CAFFE2_INTERFACE_LIBS ${OpenCV_LIBS})
-endif()
 
 if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
   message(WARNING
@@ -224,12 +222,10 @@ if ((NOT USE_GLOG) OR (NOT USE_GFLAGS) OR BUILD_CUSTOM_PROTOBUF)
       "generate files that are not well tested.")
 endif()
 
-target_link_libraries(caffe2 INTERFACE ${CAFFE2_INTERFACE_LIBS})
 if (USE_CUDA)
   # TODO: check if we should include other cuda dependency libraries
   # to the interface as well.
-  target_link_libraries(caffe2_gpu INTERFACE
-      ${CAFFE2_INTERFACE_LIBS} caffe2::cudart)
+
 endif()
 
 # Note(jiayq): when building static libraries, all PRIVATE dependencies
@@ -257,6 +253,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
   install(EXPORT Caffe2Targets DESTINATION share/cmake/Caffe2
@@ -270,3 +267,6 @@ endif()
 
 # ---[ Modules
 add_subdirectory(modules)
+
+include(cmake/Summary.cmake)
+caffe2_print_configuration_summary()

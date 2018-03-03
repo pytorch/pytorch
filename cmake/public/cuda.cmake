@@ -132,10 +132,6 @@ set_property(
 # Note: in theory, we can add similar dependent library wrappers. For
 # now, Caffe2 only uses the above libraries, so we will only wrap
 # these.
-# A helper variable recording the list of Caffe2 dependent librareis
-set(Caffe2_CUDA_DEPENDENCY_LIBS
-    caffe2::cuda caffe2::cudart caffe2::curand
-    caffe2::cublas caffe2::cudnn caffe2::nvrtc)
 
 # ---[ Cuda flags
 
