@@ -26,7 +26,7 @@ import numpy as np
 
 class TestLars(hu.HypothesisTestCase):
 
-    @given(offset=st.floats(min_value=0, max_value=100), **hu.gcs_cpu_only)
+    @given(offset=st.floats(min_value=0, max_value=100), **hu.gcs)
     def test_lars(self, offset, dc, gc):
         X = np.random.rand(6, 7, 8, 9).astype(np.float32)
         dX = np.random.rand(6, 7, 8, 9).astype(np.float32)

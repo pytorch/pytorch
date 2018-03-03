@@ -43,6 +43,7 @@ class Optimizer(object):
         self._instance_num = _optimizer_instance_count[self.__class__.__name__]
         _optimizer_instance_count[self.__class__.__name__] += 1
         self._lr_multiplier = None
+        self._lr_multiplier_on_gpu = False
 
     '''
     Adds optimization operators to the net for given parameter and its gradient
@@ -128,9 +129,16 @@ class Optimizer(object):
             lr = net.GetBlobRef(learning_rate_blob)
 
         if self._lr_multiplier is not None:
-            lr_multiplier = net.CopyFromCPUInput(
-                self._lr_multiplier, self.make_unique_blob_name('lr_multiplier')
-            )
+            if self._lr_multiplier_on_gpu:
+                lr_multiplier = net.Copy(
+                    self._lr_multiplier,
+                    self.make_unique_blob_name('lr_multiplier')
+                )
+            else:
+                lr_multiplier = net.CopyFromCPUInput(
+                    self._lr_multiplier,
+                    self.make_unique_blob_name('lr_multiplier')
+                )
             scaled_lr = net.Mul(
                 [lr, lr_multiplier],
                 self.make_unique_blob_name('scaled_lr'),
@@ -140,8 +148,9 @@ class Optimizer(object):
 
         return lr, iteration
 
-    def add_lr_multiplier(self, lr_multiplier):
+    def add_lr_multiplier(self, lr_multiplier, is_gpu_blob=False):
         self._lr_multiplier = lr_multiplier
+        self._lr_multiplier_on_gpu = is_gpu_blob
 
     @staticmethod
     def dedup(net, sparse_dedup_aggregator, grad):
@@ -212,7 +221,11 @@ class SgdOptimizer(Optimizer):
                 [param, grad],
                 self.make_unique_blob_name(str(param) + "_lars"),
                 offset=self.lars)
-            self.add_lr_multiplier(lr_lars_multiplier)
+            current_scope = scope.CurrentDeviceScope()
+            self.add_lr_multiplier(
+                lr_lars_multiplier,
+                is_gpu_blob=(current_scope.device_type == caffe2_pb2.CUDA),
+            )
 
         # We need negative sign for LR when used directly with WeightedSum
         # below.
