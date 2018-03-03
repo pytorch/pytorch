@@ -256,6 +256,17 @@
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: eq(Tensor self, Tensor other) -> BoolTensor
+  dispatch:
+    CPU: eq_cpu
+    CUDA: eq_cuda
+
+- func: eq_out(BoolTensor result, Tensor self, Tensor other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: eq_out_cpu
+    CUDA: eq_out_cuda
+
 - func: eq(Tensor self, Scalar other) -> BoolTensor
   dispatch:
     CPU: eq_cpu
@@ -297,6 +308,17 @@
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
+- func: ge(Tensor self, Tensor other) -> BoolTensor
+  dispatch:
+    CPU: ge_cpu
+    CUDA: ge_cuda
+
+- func: ge_out(BoolTensor result, Tensor self, Tensor other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: ge_out_cpu
+    CUDA: ge_out_cuda
+
 - func: ge(Tensor self, Scalar other) -> BoolTensor
   dispatch:
     CPU: ge_cpu
@@ -315,6 +337,17 @@
 
 - func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
   variants: function
+
+- func: gt(Tensor self, Tensor other) -> BoolTensor
+  dispatch:
+    CPU: gt_cpu
+    CUDA: gt_cuda
+
+- func: gt_out(BoolTensor result, Tensor self, Tensor other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: gt_out_cpu
+    CUDA: gt_out_cuda
 
 - func: gt(Tensor self, Scalar other) -> BoolTensor
   dispatch:
@@ -349,6 +382,17 @@
 
 - func: is_sparse(Tensor self) -> bool
 
+- func: le(Tensor self, Tensor other) -> BoolTensor
+  dispatch:
+    CPU: le_cpu
+    CUDA: le_cuda
+
+- func: le_out(BoolTensor result, Tensor self, Tensor other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: le_out_cpu
+    CUDA: le_out_cuda
+
 - func: le(Tensor self, Scalar other) -> BoolTensor
   dispatch:
     CPU: le_cpu
@@ -377,6 +421,17 @@
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
+- func: lt(Tensor self, Tensor other) -> BoolTensor
+  dispatch:
+    CPU: lt_cpu
+    CUDA: lt_cuda
+
+- func: lt_out(BoolTensor result, Tensor self, Tensor other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: lt_out_cpu
+    CUDA: lt_out_cuda
+
 - func: lt(Tensor self, Scalar other) -> BoolTensor
   dispatch:
     CPU: lt_cpu
@@ -404,6 +459,17 @@
   variants: function
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
+
+- func: ne(Tensor self, Tensor other) -> BoolTensor
+  dispatch:
+    CPU: ne_cpu
+    CUDA: ne_cuda
+
+- func: ne_out(BoolTensor result, Tensor self, Tensor other) -> BoolTensor
+  variants: function
+  dispatch:
+    CPU: ne_out_cpu
+    CUDA: ne_out_cuda
 
 - func: ne(Tensor self, Scalar other) -> BoolTensor
   dispatch:
