@@ -102,7 +102,6 @@ if(USE_CUDA)
 
   target_include_directories(
       caffe2_gpu INTERFACE $<INSTALL_INTERFACE:include>)
-  add_dependencies(caffe2_gpu Caffe2_PROTO)
   target_link_libraries(
       caffe2_gpu PUBLIC caffe2 ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
   target_link_libraries(
