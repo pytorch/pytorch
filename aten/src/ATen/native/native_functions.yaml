@@ -212,6 +212,21 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
+# FFT
+
+- func: fft(Tensor self, int64_t signal_ndim, bool normalized=false) -> Tensor
+
+- func: ifft(Tensor self, int64_t signal_ndim, bool normalized=false) -> Tensor
+
+- func: rfft(Tensor self, int64_t signal_ndim, bool normalized=false, bool onesided=true) -> Tensor
+
+- func: irfft(Tensor self, int64_t signal_ndim, IntList signal_sizes={}, bool normalized=false, bool onesided=true) -> Tensor
+
+- func: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes) -> Tensor
+  dispatch:
+    CPU: _fft_mkl
+    CUDA: _fft_cufft
+
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
@@ -348,7 +363,7 @@
 - func: stack_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
-- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool return_onesided=true, Tensor window={}, int64_t pad_end=0) -> Tensor
+- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool normalized=false, bool onesided=true, Tensor? window={}, int64_t pad_end=0) -> Tensor
   python_default_init:
     fft_size: frame_length
 
