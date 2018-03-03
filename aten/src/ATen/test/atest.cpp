@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 #include<iostream>
 using namespace std;
@@ -23,6 +24,8 @@ void trace() {
   cout << trace << "\n" << foo << "\n";
 }
 int main() {
+  manual_seed(123);
+
   auto foo = CPU(kFloat).rand({12,6});
   ASSERT(foo.data<float>() == foo.toFloatData());
 
