@@ -659,7 +659,7 @@ struct WeightedSumReducerDef {
         1,
         "SCALARS",
         "Scalar multipliers for the input slices. Must be a vector with the "
-        "length matching the first dimension of DATA");
+        "length matching the number of slices");
     schema.Arg(
         "grad_on_weights",
         "Produce also gradient for `weights`. For now it's only supported in "
