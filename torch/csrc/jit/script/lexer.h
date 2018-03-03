@@ -134,8 +134,8 @@ struct SharedParserData {
 
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
-      const char str[] = {*c, '\0'};
-      head->insert(str, *c);
+      std::string str(1, *c);
+      head->insert(str.c_str(), *c);
     }
 
 #define ADD_CASE(tok, _, tokstring) \

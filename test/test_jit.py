@@ -1610,8 +1610,8 @@ class TestJit(TestCase):
             return c
         ''')
         self.assertEqual(
-            str(cu.cu.get_graph('test_ternary_control')),
-            str(cu2.cu.get_graph('test_ternary')),
+            str(cu.test_ternary_control.graph()),
+            str(cu2.test_ternary.graph()),
         )
 
     def test_python_frontend_run(self):

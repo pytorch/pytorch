@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/error_report.h"
 #include "torch/csrc/jit/script/tree_views.h"
+#include "torch/csrc/jit/script/module.h"
 
 namespace torch {
 namespace jit {
@@ -19,24 +20,15 @@ struct Resolver {
   // The function simply instatntiates the new node and returns it. It is the
   // responsiblity of the caller to insert the node into the graph and delete
   // the original node.
+
   virtual Node* resolveCall(SourceRange location, Node* n) const {
     throw ErrorReport(location) << "Unknown function " << n->kind().toString();
   }
 };
 
-struct CompilationUnitImpl;
-struct CompilationUnit {
-  CompilationUnit();
-  void define(const std::string& source, const Resolver& resolver);
-  void defineFunction(const Def& def, const Resolver& resolver);
-  std::shared_ptr<Graph> getGraph(const std::string& func_name);
-  ~CompilationUnit();
-
- private:
-  std::unique_ptr<CompilationUnitImpl> pImpl;
-};
-
-std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver);
+void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver);
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const Resolver& resolver);
+std::shared_ptr<Graph> defineFunction(Def def, const Resolver& resolver);
 
 } // namespace script
 } // namespace jit

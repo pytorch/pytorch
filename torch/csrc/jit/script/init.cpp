@@ -38,25 +38,65 @@ struct VISIBILITY_HIDDEN PythonResolver : public Resolver {
   ResolutionCallback rcb;
 };
 
+
+
+// TODO: dedup with other init
+
+// we cannot use the default py:cast<autograd::Variable> because it currently
+// unwraps the data tensor in the conversion process
+
+variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
+  variable_tensor_list result;
+  result.reserve(tuple.size() + reserve_extra_space);
+  for(auto e : tuple) {
+    result.push_back(py::cast<autograd::Variable>(e));
+  }
+  return result;
+}
+
+py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
+  // if we don't tell pybind these are variables it chokes on the
+  // conversion.
+  // TODO: fix conversions to be sane and make sure this works.
+  if(outputs.size() == 1) {
+    return py::cast(static_cast<autograd::Variable&>(outputs[0]));
+  } else {
+    py::tuple tuple(outputs.size());
+    for(size_t i = 0; i < outputs.size(); i++) {
+      tuple[i] = py::cast(static_cast<autograd::Variable&>(outputs[i]));
+    }
+    return tuple;
+  }
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<CompilationUnit>(m, "CompilationUnit")
-      .def(
-          "get_graph",
-          &CompilationUnit::getGraph,
-          py::return_value_policy::reference)
+  py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<>())
       .def(
           "define",
-          [](CompilationUnit* self,
+          [](Module& self,
              const std::string& script,
              ResolutionCallback rcb) {
-            PythonResolver r(rcb);
-            return self->define(script, r);
-          });
+            return defineMethodsInModule(self, script, PythonResolver(rcb));
+          })
+      .def("get_method",
+      [](Module& self, const std::string& name) {
+        return self.get_method(name);
+      }, py::return_value_policy::reference_internal);
+
+  py::class_<Method>(m, "ScriptMethod")
+    .def("graph", [&](Method& self) {
+      return self.graph();
+    })
+    .def("__call__", [](Method& m, py::args args) -> py::object {
+      auto inputs = createVariableTensorList(args);
+      auto outputs = m.run(std::move(inputs));
+      return unpackVariableTensorList(std::move(outputs));
+    });
+
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
-    PythonResolver r(rcb);
-    return jitScriptCompile(def, r);
+    return defineFunction(def, PythonResolver(rcb));
   });
 }
 

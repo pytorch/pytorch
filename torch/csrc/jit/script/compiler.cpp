@@ -11,27 +11,7 @@ namespace torch {
 namespace jit {
 namespace script {
 
-namespace {
-
-// record of defined function
-// Graph + metadata
-struct FunctionDefinition {
-  explicit FunctionDefinition(Def tree_)
-      : tree(new Def(tree_)), graph(new Graph()) {}
-
-  explicit FunctionDefinition(std::unique_ptr<Graph> graph_)
-      : tree(nullptr), graph(std::move(graph_)) {}
-
-  bool isExtern() const {
-    return tree == nullptr;
-  }
-  std::unique_ptr<Def> tree;
-  std::shared_ptr<Graph> graph;
-};
-
-} // namespace
-
-using FunctionTable = std::unordered_map<std::string, FunctionDefinition>;
+using FunctionTable = std::unordered_map<std::string, std::shared_ptr<Graph>>;
 using ValueTable = std::unordered_map<std::string, Value*>;
 using AttributeMap =
     std::unordered_map<std::string, std::pair<double, std::string>>;
@@ -168,33 +148,49 @@ struct Environment {
 };
 
 struct to_ir {
+  // the graph being constructed that this class produces
+  std::shared_ptr<Graph> graph;
+
   to_ir(
-      FunctionDefinition& def,
+      Def def,
       FunctionTable& function_table,
       const Resolver& resolver)
-      : def(def), function_table(function_table), resolver(resolver) {
-    environment_stack = std::make_shared<Environment>(def.graph->block());
+      : graph(std::make_shared<Graph>())
+      , def(def)
+      , function_table(function_table)
+      , resolver(resolver) {
+    environment_stack = std::make_shared<Environment>(graph->block());
     // populate def->graph
-    auto& tree = *def.tree;
-    for (auto input : tree.params()) {
+    for (auto input : def.params()) {
       auto& name = input.ident().name();
-      environment_stack->setVar(name, def.graph->addInput(name));
+      environment_stack->setVar(name, graph->addInput(name));
     }
 
-    auto stmts = tree.statements();
+    auto stmts = def.statements();
     auto stmts_begin = stmts.begin();
     auto stmts_end = stmts.end();
     if (stmts_begin == stmts_end)
-      throw ErrorReport(tree) << "functions need to have a non-empty body";
+      throw ErrorReport(def) << "functions need to have a non-empty body";
     --stmts_end;
     if ((*stmts_end).kind() != TK_RETURN)
       throw ErrorReport(*stmts_end) << "functions need to end with a return statement";
 
     emitStatements(stmts_begin, stmts_end);
     for (auto output : Return(*stmts_end).values()) {
-      def.graph->registerOutput(emitExpr(output, 1)[0]);
+      graph->registerOutput(emitExpr(output, 1)[0]);
     }
   }
+
+private:
+
+  Def def;
+  FunctionTable& function_table;
+  const Resolver& resolver;
+
+  // Singly-linked list of environments. This top element contains a member
+  // `next` that points to the most immediate enclosing scope's value.
+  std::shared_ptr<Environment> environment_stack;
+
   void emitStatements(const List<Stmt>& statements) {
     return emitStatements(statements.begin(), statements.end());
   }
@@ -214,7 +210,7 @@ struct to_ir {
         case TK_GLOBAL:
           for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
-            environment_stack->setVar(name, def.graph->addInput(name));
+            environment_stack->setVar(name, graph->addInput(name));
           }
           break;
         case TK_EXPR_STMT:
@@ -233,7 +229,7 @@ struct to_ir {
       const List<Stmt> branch,
       std::unordered_set<std::string>* mutated_parent_values) {
     environment_stack = std::make_shared<Environment>(b, environment_stack);
-    WithInsertPoint guard(*def.graph, b);
+    WithInsertPoint guard(b);
     emitStatements(branch);
 
     for (const auto& kv : environment_stack->value_table) {
@@ -247,7 +243,7 @@ struct to_ir {
   }
 
   Node* create(Symbol kind, const SourceRange& loc,  size_t num_outputs) {
-    return def.graph
+    return graph
              ->create(kind, num_outputs)
              ->setSourceLocation(std::make_shared<SourceRange>(loc));
   }
@@ -255,14 +251,14 @@ struct to_ir {
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kIf, expr.range(), 0));
+    Node* n = graph->insertNode(create(kIf, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
     auto emit_if_expr = [this](Block* b, const Expr& expr) {
       environment_stack = std::make_shared<Environment>(b, environment_stack);
-      WithInsertPoint guard(*def.graph, b);
+      WithInsertPoint guard(b);
       Value* out_val = emitExpr(expr, 1)[0];
       b->registerOutput(out_val);
 
@@ -281,7 +277,7 @@ struct to_ir {
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kIf, stmt.range(), 0));
+    Node* n = graph->insertNode(create(kIf, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -330,7 +326,7 @@ struct to_ir {
     Value* max_trip_count_dummy = emitConst(stmt.range(), INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kLoop, stmt.range(), 0));
+    Node* n = graph->insertNode(create(kLoop, stmt.range(), 0));
     n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
@@ -345,7 +341,7 @@ struct to_ir {
     {
       environment_stack =
           std::make_shared<Environment>(body_block, environment_stack);
-      WithInsertPoint guard(*def.graph, body_block);
+      WithInsertPoint guard(body_block);
       emitStatements(stmt.body());
 
       // Also emit the conditional
@@ -449,19 +445,18 @@ struct to_ir {
     std::unordered_map<Value*, Value*> value_map;
     auto value_map_func = [&](Value* v) { return value_map.at(v); };
     for (size_t i = 0; i < inputs.size(); ++i) {
-      value_map[fn.graph->inputs()[i]] = inputs[i];
+      value_map[fn->inputs()[i]] = inputs[i];
     }
-    for (auto* node : fn.graph->nodes()) {
+    for (auto* node : fn->nodes()) {
       auto* new_node =
-          def.graph->insertNode(def.graph->createClone(node, value_map_func));
+          graph->insertNode(graph->createClone(node, value_map_func));
       for (size_t i = 0; i < node->outputs().size(); ++i) {
         value_map[node->outputs()[i]] = new_node->outputs()[i];
-        new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
       }
     }
 
     std::vector<Value*> outputs{};
-    for (auto* output : fn.graph->outputs()) {
+    for (auto* output : fn->outputs()) {
       outputs.push_back(value_map_func(output));
     }
     return outputs;
@@ -657,7 +652,7 @@ struct to_ir {
       const size_t output_size,
       const AttributeMap& attributes = AttributeMap{},
       const ListAttributeMap& list_attributes = ListAttributeMap{}) {
-    Node* n = def.graph->insertNode(create(kind, loc, output_size));
+    Node* n = graph->insertNode(create(kind, loc, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -727,77 +722,38 @@ struct to_ir {
         ->outputs();
   }
 
-  FunctionDefinition& def; // the def being constructed
-  FunctionTable& function_table;
-  const Resolver& resolver;
-
-  // Singly-linked list of environments. This top element contains a member
-  // `next` that points to the most immediate enclosing scope's value.
-  std::shared_ptr<Environment> environment_stack;
-
- private:
   Value* createConstant(const SourceRange& loc, const at::Tensor& val) {
-    auto n = def.graph->createConstant(val);
+    auto n = graph->createConstant(val);
     n->setSourceLocation(std::make_shared<SourceRange>(loc));
-    return def.graph->insertNode(n)->output();
+    return graph->insertNode(n)->output();
   }
 };
 
-struct CompilationUnitImpl {
-  CompilationUnitImpl() {}
-  void defineFunction(const Def& def, const Resolver& resolver) {
-    const auto& name = def.name().name();
-
-    if (functions.count(name) > 0) {
-      throw ErrorReport(def) << name << " already defined.";
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const Resolver& resolver) {
+  FunctionTable table;
+  for(auto def : definitions) {
+    const std::string& name = def.name().name();
+    auto result = table.emplace(name, to_ir(def, table, resolver).graph);
+    if(!result.second) {
+      throw ErrorReport(def) << "duplicate definition of function '" << name << "'";
     }
-
-    auto it = functions.emplace(name, FunctionDefinition{def}).first;
-    to_ir(it->second, functions, resolver);
+    m.register_method(name, result.first->second, {});
   }
-
-  void define(const std::string& script, const Resolver& resolver) {
-    Parser p(script);
-    while (p.lexer().cur().kind != TK_EOF) {
-      defineFunction(Def(p.parseFunction()), resolver);
-    }
-  }
-
-  std::shared_ptr<Graph> getGraph(const std::string& func_name) {
-    if (functions.count(func_name) == 0)
-      throw ErrorReport() << "undefined function: " << func_name << "\n";
-    auto& def = functions.at(func_name);
-    return def.graph;
-  }
-
- private:
-  friend struct to_ir;
-  FunctionTable functions;
-};
-
-CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
-
-void CompilationUnit::define(
-    const std::string& script,
-    const Resolver& resolver) {
-  return pImpl->define(script, resolver);
 }
 
-void CompilationUnit::defineFunction(const Def& def, const Resolver& resolver) {
-  return pImpl->defineFunction(def, resolver);
+void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver) {
+  Parser p(source);
+  std::vector<Def> definitions;
+  while (p.lexer().cur().kind != TK_EOF) {
+    definitions.push_back(Def(p.parseFunction()));
+  }
+  defineMethodsInModule(m, definitions, resolver);
 }
 
-std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
-  return pImpl->getGraph(func_name);
-}
-
-CompilationUnit::~CompilationUnit() {}
-
-std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver) {
-  FunctionTable empty;
-  FunctionDefinition fd(def);
-  to_ir(fd, empty, resolver);
-  return fd.graph;
+std::shared_ptr<Graph> defineFunction(Def def, const Resolver& resolver) {
+  Module m;
+  defineMethodsInModule(m, {def}, resolver);
+  return m.get_method(def.name().name()).graph();
 }
 
 } // namespace script

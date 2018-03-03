@@ -621,22 +621,18 @@ def createResolutionCallback(frame_id=2):
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
-        self.cu = torch._C.CompilationUnit()
+        self.module = torch._C.ScriptModule()
         if lang is not None:
             self.define(lang, frame_id=3)
-        self.execution_engines = {}
         self.optimize = optimize
 
     def define(self, lang, rcb=None, frame_id=2):
         if not rcb:
             rcb = createResolutionCallback(frame_id)
-        self.cu.define(lang, rcb)
+        self.module.define(lang, rcb)
 
     def __getattr__(self, attr):
-        if attr not in self.execution_engines:
-            graph = self.cu.get_graph(attr)
-            self.execution_engines[attr] = torch._C.GraphExecutor(graph, self.optimize)
-        return self.execution_engines[attr]
+        return self.module.get_method(attr)
 
 
 def script(fn):

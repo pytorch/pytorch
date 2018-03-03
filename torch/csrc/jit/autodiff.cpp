@@ -244,7 +244,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   // std::cout << *reverse_node << to view its state.
   auto reverse_node = graph.create("Reverse"_sym, 0);
   auto reverse_block = reverse_node->addBlock();
-  WithInsertPoint guard(graph, reverse_block);
+  WithInsertPoint guard(reverse_block);
 
   auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
@@ -433,7 +433,7 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
     {
-      WithInsertPoint guard(graph, tmp_vjp_prev->node());
+      WithInsertPoint guard(tmp_vjp_prev->node());
       auto zeroes = createZerosLike(tmp);
       tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
     }
@@ -479,7 +479,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
   std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
-  WithInsertPoint guard(*grad_desc.f, grad_desc.f->block());
+  WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc, requires_grad);
   // addReverseInline has to call gradientForNode if *any* of the outputs

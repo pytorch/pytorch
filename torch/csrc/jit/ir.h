@@ -996,15 +996,15 @@ private:
 };
 
 struct WithInsertPoint : public ResourceGuard {
-  WithInsertPoint(Graph & g, Node * n)
+  WithInsertPoint(Node * n)
   : ResourceGuard([this] {
     prev->owningGraph()->setInsertPoint(prev);
   })
-  , prev(g.insertPoint()) {
-    g.setInsertPoint(n);
+  , prev(n->owningGraph()->insertPoint()) {
+    n->owningGraph()->setInsertPoint(n);
   }
-  WithInsertPoint(Graph & g, Block * b)
-  : WithInsertPoint(g, b->return_node()) {}
+  WithInsertPoint(Block * b)
+  : WithInsertPoint(b->return_node()) {}
 private:
   Node * prev;
 };
