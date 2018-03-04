@@ -22,7 +22,7 @@ C++ extensions are a mechanism we have developed to allow users (you) to create
 PyTorch operators defined *out-of-source*, i.e. separate from the PyTorch
 backend. This approach is *different* from the way native PyTorch operations are
 implemented. C++ extensions are intended to spare you much of the boilerplate
-associated with integrating an operation with Pytorch's backend while providing
+associated with integrating an operation with PyTorch's backend while providing
 you with a high degree of flexibility for your PyTorch-based projects.
 Nevertheless, once you have defined your operation as a C++ extension, turning
 it into a native PyTorch function is largely a matter of code organization,
