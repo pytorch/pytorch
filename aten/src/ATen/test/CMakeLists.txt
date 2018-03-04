@@ -28,6 +28,11 @@ target_link_libraries(undefined_tensor_test ATen)
 add_executable(verify_api_visibility verify_api_visibility.cpp)
 target_link_libraries(verify_api_visibility ATen)
 
+if(NOT NO_CUDA)
+  cuda_add_executable(integer_divider_test integer_divider_test.cu)
+  target_link_libraries(integer_divider_test ATen)
+endif()
+
 if (CUDNN_FOUND)
   add_executable(cudnn_test cudnn_test.cpp)
   target_link_libraries(cudnn_test ATen)
