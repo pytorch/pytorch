@@ -13,6 +13,7 @@ __all__ = [
     'BoltzmannTransform',
     'ComposeTransform',
     'ExpTransform',
+    'InvertibleBoltzmannTransform',
     'LowerCholeskyTransform',
     'SigmoidTransform',
     'StickBreakingTransform',
@@ -412,17 +413,18 @@ class BoltzmannTransform(Transform):
         return probs.log()
 
 
-class InvertableBoltzmannTransform(Transform):
+class InvertibleBoltzmannTransform(Transform):
     """
     Transform from unconstrained space to the simplex via `y = [exp(x), 1]` and
     then normalizing. Note that dimensionality of `y.dim() == x.dim() + 1`.
     """
     domain = constraints.real
     codomain = constraints.simplex
+    bijective = True
     event_dim = 1
 
     def __eq__(self, other):
-        return isinstance(other, InvertableBoltzmannTransform)
+        return isinstance(other, InvertibleBoltzmannTransform)
 
     def _call(self, x):
         ones = torch.ones(*(x.size()[:-1] + (1, )))
@@ -431,8 +433,10 @@ class InvertableBoltzmannTransform(Transform):
         return probs
 
     def _inverse(self, y):
-        logprobs = y[:, :-1].log() - y[:, -1:].log()
-        return logprobs
+        return y[:, :-1].log() - y[:, -1:].log()
+
+    def log_abs_det_jacobian(self, x, y):
+        return y.log().sum(-1)
 
 
 class StickBreakingTransform(Transform):

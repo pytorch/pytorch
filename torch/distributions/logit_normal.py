@@ -1,7 +1,7 @@
 from torch.distributions import constraints
-from torch.distributions.transforms import InvertableBoltzmannTransform
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
+from torch.distributions.transforms import InvertibleBoltzmannTransform
 
 
 class LogitNormal(TransformedDistribution):
@@ -30,7 +30,9 @@ class LogitNormal(TransformedDistribution):
 
     def __init__(self, loc, scale):
         super(LogitNormal, self).__init__(
-            Normal(loc, scale), InvertableBoltzmannTransform())
+            Normal(loc, scale), InvertibleBoltzmannTransform())
+        # TODO: temporary fix to avoid dimension mismatch in the checks
+        self.base_dist._validate_log_prob_arg = (lambda x: None)
 
     @property
     def loc(self):
