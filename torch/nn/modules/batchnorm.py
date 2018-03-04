@@ -2,6 +2,7 @@ import torch
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 
 
 # TODO: check contiguous in THNN
@@ -35,8 +36,8 @@ class _BatchNorm(Module):
             self.running_mean.zero_()
             self.running_var.fill_(1)
         if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
+            init.constant(self.weight, 1.)
+            init.constant(self.bias, 0.)
 
     def _check_input_dim(self, input):
         return NotImplemented

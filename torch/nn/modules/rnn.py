@@ -4,6 +4,7 @@ import warnings
 import itertools
 
 from .module import Module
+from .. import init
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 
@@ -101,9 +102,13 @@ class RNNBase(Module):
         return ret
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                init.xavier_uniform(param)
+            elif "weight_hh" in name:
+                init.orthogonal(param)
+            elif "bias" in name:
+                init.constant(param, 0.)
 
     def check_forward_args(self, input, hidden, batch_sizes):
         is_input_packed = batch_sizes is not None
@@ -551,9 +556,13 @@ class RNNCell(RNNCellBase):
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                init.xavier_uniform(param)
+            elif "weight_hh" in name:
+                init.orthogonal(param)
+            elif "bias" in name:
+                init.constant(param, 0.)
 
     def forward(self, input, hx):
         self.check_forward_input(input)
@@ -644,9 +653,13 @@ class LSTMCell(RNNCellBase):
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                init.xavier_uniform(param)
+            elif "weight_hh" in name:
+                init.orthogonal(param)
+            elif "bias" in name:
+                init.constant(param, 0.)
 
     def forward(self, input, hx):
         self.check_forward_input(input)
@@ -723,9 +736,13 @@ class GRUCell(RNNCellBase):
         self.reset_parameters()
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
-        for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+        for name, param in self.named_parameters():
+            if "weight_ih" in name:
+                init.xavier_uniform(param)
+            elif "weight_hh" in name:
+                init.orthogonal(param)
+            elif "bias" in name:
+                init.constant(param, 0.)
 
     def forward(self, input, hx):
         self.check_forward_input(input)
