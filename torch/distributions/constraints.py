@@ -225,7 +225,7 @@ class _RealVector(Constraint):
     but additionally reduces across the `event_shape` dimension.
     """
     def check(self, value):
-        return (value == value).min(-1)[0]  # False for NANs.
+        return (value == value).all()  # False for NANs.
 
 
 # Public interface.
