@@ -36,6 +36,11 @@ class enable_grad(object):
     Enables gradient calculation inside a :class:`~no_grad` context. This has
     no effect outside of :class:`~no_grad`.
 
+    Parameter:
+        mode (bool): Flag whether to enable grad (True, default), or disable
+                     (False). This can be used to conditionally enable
+                     gradients.
+
 
     Example::
 
@@ -50,11 +55,12 @@ class enable_grad(object):
 
     """
 
-    def __init__(self):
+    def __init__(self, mode=True):
         self.prev = torch.is_grad_enabled()
+        self.mode = mode
 
     def __enter__(self):
-        torch.set_grad_enabled(True)
+        torch.set_grad_enabled(self.mode)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
