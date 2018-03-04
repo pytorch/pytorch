@@ -216,7 +216,7 @@ def pad_packed_sequence(input, *args, **kwargs):
         return _pad_packed_sequence(input, *args, **kwargs)
 
 
-def pad_sequence(sequences, batch_first=False, padding_value=0.):
+def pad_sequence(sequences, batch_first=False, padding_value=0):
     r"""Pad a list of variable length Variables with zero
 
     ``pad_sequence`` stacks a list of Variables along a new dimension,
