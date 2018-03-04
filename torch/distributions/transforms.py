@@ -425,7 +425,8 @@ class InvertableBoltzmannTransform(Transform):
         return isinstance(other, InvertableBoltzmannTransform)
 
     def _call(self, x):
-        probs = torch.cat([x.exp(), torch.ones(*x.size()[:-1], 1)], dim=-1)
+        ones = torch.ones(*(x.size()[:-1] + (1, )))
+        probs = torch.cat([x.exp(), ones], dim=-1)
         probs /= probs.sum(-1, True)
         return probs
 
