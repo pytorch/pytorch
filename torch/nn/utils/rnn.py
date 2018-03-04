@@ -248,7 +248,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         sequences (list[Variable]): list of variable length sequences.
         batch_first (bool, optional): output will be in BxTx* if True, or in
             TxBx* otherwise
-        padding_value (float, optional): values for padded elements.
+        padding_value (float, optional): value for padded elements.
 
     Returns:
         Variable of size ``T x B x * `` if batch_first is False
