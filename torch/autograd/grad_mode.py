@@ -64,9 +64,6 @@ class enable_grad(object):
 class grad_mode(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
-    Enables gradient calculation inside a :class:`~no_grad` context. This has
-    no effect outside of :class:`~no_grad`.
-
     Parameter:
         mode (bool): Flag whether to enable grad (True), or disable
                      (False). This can be used to conditionally enable
