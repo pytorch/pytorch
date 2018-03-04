@@ -10,7 +10,7 @@ before_install:
     - sudo apt-get install -qq valgrind
 
 install:
-    - travis_retry pip install pyyaml
+    - travis_retry pip install pyyaml typing
 
 script:
     - mkdir build install

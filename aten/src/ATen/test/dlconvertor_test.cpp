@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sstream>
 #include "test_assert.h"
+#include "test_seed.h"
 
 using namespace at;
 
@@ -24,6 +25,8 @@ static void test() {
 
 int main(int argc, char ** argv)
 {
+  manual_seed(123);
+
   std::cout << "======================= CPU =====================" << std::endl;
   test();
   return 0;
