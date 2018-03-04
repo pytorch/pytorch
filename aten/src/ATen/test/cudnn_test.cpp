@@ -2,11 +2,14 @@
 #include "ATen/cudnn/Descriptors.h"
 #include "ATen/cudnn/Handles.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 using namespace at;
 using namespace at::native;
 
 int main() {
+  manual_seed(123);
+
 #if CUDNN_VERSION < 7000
   auto handle = getCudnnHandle();
   DropoutDescriptor desc1, desc2;

@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 using namespace at;
 
@@ -176,6 +177,8 @@ void test(Type & T, Type & AccT) {
 }
 
 int main() {
+  manual_seed(123);
+
   test(CPU(kFloat), CPU(kDouble));
 
   if (at::hasCUDA()) {
