@@ -412,6 +412,28 @@ class BoltzmannTransform(Transform):
         return probs.log()
 
 
+class InvertableBoltzmannTransform(Transform):
+    """
+    Transform from unconstrained space to the simplex via `y = [exp(x), 1]` and
+    then normalizing. Note that dimensionality of `y.dim() == x.dim() + 1`.
+    """
+    domain = constraints.real
+    codomain = constraints.simplex
+    event_dim = 1
+
+    def __eq__(self, other):
+        return isinstance(other, InvertableBoltzmannTransform)
+
+    def _call(self, x):
+        probs = torch.cat([x.exp(), torch.ones(*x.size()[:-1], 1)], dim=-1)
+        probs /= probs.sum(-1, True)
+        return probs
+
+    def _inverse(self, y):
+        logprobs = y[:, :-1].log() - y[:, -1:].log()
+        return logprobs
+
+
 class StickBreakingTransform(Transform):
     """
     Transform from unconstrained space to the simplex of one additional

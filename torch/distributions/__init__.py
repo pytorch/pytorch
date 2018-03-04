@@ -86,6 +86,7 @@ from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
+from .logit_normal import LogitNormal
 from .multinomial import Multinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -114,6 +115,7 @@ __all__ = [
     'Gumbel',
     'Laplace',
     'LogNormal',
+    'LogitNormal',
     'Multinomial',
     'Normal',
     'OneHotCategorical',
