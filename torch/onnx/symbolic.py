@@ -418,8 +418,8 @@ def upsample_nearest2d(g, input, scale_factor):
 
 def upsample_bilinear2d(g, input, output_size):
     input_width, input_height = input.type().sizes()[2:]
-    width_scale = input_width / output_size[0]
-    height_scale = input_height / output_size[1]
+    width_scale = output_size[0] / input_width
+    height_scale = output_size[1] / input_height
     return g.op("Upsample", input, width_scale_f=width_scale,
                 height_scale_f=height_scale, mode_s="bilinear")
 
