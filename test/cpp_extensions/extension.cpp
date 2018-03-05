@@ -8,7 +8,7 @@ Tensor sigmoid_add(Tensor x, Tensor y) {
 
 struct MatrixMultiplier {
   MatrixMultiplier(int A, int B) {
-     tensor_ = ones(CPU(kDouble), {A, B});
+     tensor_ = at::ones(CPU(kDouble), {A, B});
   }
   Tensor forward(Tensor weights) {
     return tensor_.mm(weights);
@@ -17,7 +17,7 @@ struct MatrixMultiplier {
     return tensor_;
   }
 
-private:
+ private:
   Tensor tensor_;
 };
 

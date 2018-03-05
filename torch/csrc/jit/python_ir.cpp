@@ -155,11 +155,35 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Strings,ss)
     .CREATE_ACCESSOR(Int,i)
     .CREATE_ACCESSOR(Ints,is)
-    .CREATE_ACCESSOR(Tensor,t)
-    .CREATE_ACCESSOR(Tensors,ts)
     .CREATE_ACCESSOR(Graph,g)
     .CREATE_ACCESSOR(Graphs,gs)
 #undef CREATE_ACCESSOR
+    // Tensor (t_)
+    .def("t_",[](Node & n, const char * name, torch::autograd::Variable v) {
+      return n.t_(Symbol(name), std::move(v.data()));
+    })
+    .def("t", [](Node & n, const char * name) {
+      return torch::autograd::make_variable(n.t(Symbol(name)), /*requires_grad=*/false);
+    })
+    // Tensors (ts_)
+    .def("ts_",[](Node & n, const char * name, std::vector<torch::autograd::Variable> vs) {
+      std::vector<at::Tensor> tensors;
+      tensors.reserve(vs.size());
+      for (auto& variable : vs) {
+        tensors.push_back(std::move(variable.data()));
+      }
+      return n.ts_(Symbol(name), std::move(tensors));
+    })
+    .def("ts", [](Node & n, const char * name) {
+      auto tensors = n.ts(Symbol(name));
+      std::vector<torch::autograd::Variable> variables;
+      variables.reserve(tensors.size());
+      for (auto& tensor : tensors) {
+        variables.push_back(torch::autograd::make_variable(
+            std::move(tensor), /*requires_grad=*/false));
+      }
+      return variables;
+    })
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
         return n.t_(Symbol(name), std::move(v.view({})));
     })

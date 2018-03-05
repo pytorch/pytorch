@@ -122,14 +122,12 @@ struct Variable : public at::Tensor {
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
-  /// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
-  /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
-  /// throws a `std::runtime_error` exception.
+  /// Returns true if the `tensor`'s dynamic type is `Variable`, else false.
   /// NOTE: Has to be a friend function because runtime type information is
   /// available only for `TensorImpl`/`Impl` and not the `Tensor`/`Variable`
   /// classes, as the latter are not polymorphic classes (`Tensor` has no
   /// virtual methods).
-  friend Variable& as_variable_ref(at::Tensor& tensor);
+  friend bool is_variable(at::Tensor& tensor) noexcept;
 
   const at::Tensor& data() const noexcept;
   at::Tensor& data() noexcept;
@@ -428,11 +426,18 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline Variable& as_variable_ref(at::Tensor& tensor) {
-#ifdef DEBUG
+inline bool is_variable(at::Tensor& tensor) noexcept {
   // dynamic_cast will return a nullptr if the `TensorImpl`'s dynamic type is
   // not `Variable::Impl`.
-  if (dynamic_cast<Variable::Impl*>(tensor.get()) == nullptr) {
+  return dynamic_cast<Variable::Impl*>(tensor.get()) != nullptr;
+}
+
+/// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
+/// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
+/// throws a `std::runtime_error` exception.
+inline Variable& as_variable_ref(at::Tensor& tensor) {
+#ifdef DEBUG
+  if (!is_variable(tensor)) {
     throw std::runtime_error(
         "Attempted to cast a Tensor to a Variable, but "
         "the dynamic type of the value is not Variable.");

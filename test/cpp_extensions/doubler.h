@@ -11,6 +11,6 @@ struct Doubler {
     return tensor_;
   }
 
-private:
+ private:
   at::Tensor tensor_;
 };
