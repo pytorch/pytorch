@@ -538,7 +538,20 @@ TEST(TensorTest, Tensor64BitDimension) {
   EXPECT_EQ(tensor.ndim(), 1);
   EXPECT_EQ(tensor.dim(0), large_number);
   EXPECT_EQ(tensor.size(), large_number);
-  EXPECT_TRUE(tensor.mutable_data<char>() != nullptr);
+  try {
+    EXPECT_TRUE(tensor.mutable_data<char>() != nullptr);
+  } catch (const EnforceNotMet& e) {
+    string msg = e.what();
+    size_t found = msg.find("posix_memalign");
+    if (found != string::npos) {
+      msg = msg.substr(0, msg.find('\n'));
+      LOG(WARNING) << msg;
+      LOG(WARNING) << "Out of memory issue with posix_memalign;\n";
+      return;
+    } else {
+      throw e; 
+    }
+  }
   EXPECT_EQ(tensor.nbytes(), large_number * sizeof(char));
   EXPECT_EQ(tensor.itemsize(), sizeof(char));
   // Try to go even larger, but this time we will not do mutable_data because we
