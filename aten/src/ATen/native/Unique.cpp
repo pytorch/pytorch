@@ -18,22 +18,23 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
     const Tensor& self,
     const bool return_inverse) {
   const Tensor& input = self.contiguous();
-  set_type<scalar_t> set(
-      input.data<scalar_t>(), input.data<scalar_t>() + input.numel());
-  Tensor output = input.type().tensor({static_cast<long long>(set.size())});
-  std::copy(set.begin(), set.end(), output.data<scalar_t>());
+  const scalar_t* input_data = input.data<scalar_t>();
+  set_type<scalar_t> set(input_data, input_data + input.numel());
+  Tensor output = input.type().tensor({static_cast<int64_t>(set.size())});
+  scalar_t* output_data = output.data<scalar_t>();
+  std::copy(set.begin(), set.end(), output_data);
 
   Tensor inverse_indices = self.type().toScalarType(kLong).tensor({0});
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
+    int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
     std::unordered_map<scalar_t, int64_t> inverse_map;
     inverse_map.reserve(output.numel());
     for (int i = 0; i < output.numel(); ++i) {
-      inverse_map[output.data<scalar_t>()[i]] = i;
+      inverse_map[output_data[i]] = i;
     }
     for (int i = 0; i < input.numel(); ++i) {
-      inverse_indices.data<int64_t>()[i] =
-          inverse_map[input.data<scalar_t>()[i]];
+      inverse_indices_data[i] = inverse_map[input_data[i]];
     }
   }
   return std::make_tuple(output, inverse_indices);
