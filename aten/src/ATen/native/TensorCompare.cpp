@@ -40,19 +40,19 @@ struct CmpOp {
   static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
     auto other_val = other.to<scalar>();
     at::CPU_tensor_apply2<uint8_t, scalar>(ret, self,
-        [other_val](uint8_t& ret_val, scalar self_val) {
+        [other_val](uint8_t& ret_val, scalar& self_val) {
           ret_val = Comparator<scalar>()(self_val, other_val);
       }
     );
   }
 };
 
-template<template<typename T> class Comparator>
+template<template<typename T> class Comparator, typename scalar>
 struct CmpOpFloating {
   static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
     auto other_val = other.to<double>();
-    at::CPU_tensor_apply2<uint8_t, double>(result, self,
-        [other_val](uint8_t& result_val, double& self_val) {
+    at::CPU_tensor_apply2<uint8_t, scalar>(result, self,
+        [other_val](uint8_t& result_val, scalar& self_val) {
           result_val = Comparator<double>()(at::convert<double>(self_val), other_val);
       }
     );
@@ -63,7 +63,9 @@ template<template<typename T> class Comparator>
 at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
   result.resize_(self.sizes());
   if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    CmpOpFloating<Comparator>::apply(result, self, other);
+    AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
+      CmpOpFloating<Comparator, scalar_t>::apply(result, self, other);
+    });
   } else {
     AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
       CmpOp<Comparator, scalar_t>::apply(result, self, other);
@@ -77,9 +79,12 @@ at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, const at::Te
   if (other.dim() == 0) {
     return cmp_out_cpu<Comparator>(result, self, other.pImpl->localScalar(), op_name);
   }
-  result.resize_(self.sizes());
+
+  at::Tensor b_self, b_other;
+  std::tie(b_self, b_other) = at::expand_outplace(self, other, op_name);
+  result.resize_(b_self.sizes());
   AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
-    CmpOpTensor<Comparator, scalar_t>::apply(result, self, other);
+    CmpOpTensor<Comparator, scalar_t>::apply(result, b_self, b_other);
   });
   return result;
 }
