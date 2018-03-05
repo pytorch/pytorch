@@ -158,14 +158,14 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Graph,g)
     .CREATE_ACCESSOR(Graphs,gs)
 #undef CREATE_ACCESSOR
-    // Tensor (t_)
+    // Tensor (t_) -- manually written to unwrap the variable into a tensor.
     .def("t_",[](Node & n, const char * name, torch::autograd::Variable v) {
       return n.t_(Symbol(name), std::move(v.data()));
     })
     .def("t", [](Node & n, const char * name) {
       return torch::autograd::make_variable(n.t(Symbol(name)), /*requires_grad=*/false);
     })
-    // Tensors (ts_)
+    // Tensors (ts_) -- manually written to unwrap variables into tensors.
     .def("ts_",[](Node & n, const char * name, std::vector<torch::autograd::Variable> vs) {
       std::vector<at::Tensor> tensors;
       tensors.reserve(vs.size());
