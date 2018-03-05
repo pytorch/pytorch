@@ -936,6 +936,7 @@ class TestTorch(TestCase):
         m = torch.randn(10, 10)
         self.assertEqual(torch.pow(2, m), 2**m)
 
+    @staticmethod
     def _test_int_pow(self, cast):
         if not TEST_NUMPY:
             return
@@ -968,7 +969,7 @@ class TestTorch(TestCase):
                 check_against_np(t, e)
 
     def test_int_pow(self):
-        self._test_int_pow(lambda x: x)
+        self._test_int_pow(self, lambda x: x)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
