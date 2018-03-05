@@ -2767,6 +2767,11 @@ class TestNN(NNTestCase):
         padded = rnn_utils.pad_sequence([a, b, c])
         self.assertEqual(padded, expected.transpose(0, 1))
 
+        # pad with non-zero value
+        expected = Variable(torch.Tensor([[1, 2, 3], [4, 5, 1], [6, 1, 1]]))
+        padded = rnn_utils.pad_sequence([a, b, c], True, 1)
+        self.assertEqual(padded, expected)
+
         # more dimensional
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
