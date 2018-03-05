@@ -115,7 +115,7 @@ static void fusionTests() {
     o0.addAsOutput();
     auto a = at::CUDA(at::kFloat).rand({3,4});
     auto b = at::CUDA(at::kFloat).rand({4,3}).transpose(0,1);
-    auto o = at::CUDA(at::kFloat).zeros({3,4});
+    auto o = at::zeros(at::CUDA(at::kFloat), {3,4});
     comp.debugLaunchGraph(graph, 0, {a,b}, {o});
     auto o2 = a*b;
     float max_diff = (o2 - o).abs().max().toCDouble();
@@ -162,7 +162,7 @@ static void fusionTests() {
     for(size_t i = 0; i < graph.outputs().size(); i++) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[toi],dims[toj]);
-      outputs.push_back(at::CUDA(at::kFloat).zeros(dims).transpose(toi,toj));
+      outputs.push_back(at::zeros(at::CUDA(at::kFloat), dims).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -204,11 +204,11 @@ static void fusionTests() {
 
     auto a = at::CUDA(at::kFloat).rand({3,4,5});
     auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
-    auto o = at::CUDA(at::kFloat).zeros({3,4,5});
+    auto o = at::zeros(at::CUDA(at::kFloat), {3,4,5});
 
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto o2 = at::CUDA(at::kFloat).zeros(o2_r.sizes());
+    auto o2 = at::zeros(at::CUDA(at::kFloat), o2_r.sizes());
     comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
 
     float max_diff = (o_r - o).abs().max().toCDouble();

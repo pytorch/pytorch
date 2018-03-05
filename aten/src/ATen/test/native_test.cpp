@@ -167,7 +167,7 @@ void test(Type & T, Type & AccT) {
     // check scalar equals one element
     auto x_scalar = ones(T, {}).mul(5);
     auto y_scalar = ones(T, {}).mul(7);
-    auto cond_scalar = bT.zeros({});
+    auto cond_scalar = zeros(bT, {});
     auto x_1d = x_scalar.unsqueeze(0);
     auto y_1d = y_scalar.unsqueeze(0);
     auto cond_1d = cond_scalar.unsqueeze(0);

@@ -57,7 +57,7 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   }
   // pad zeros
   if (pad_end != 0) {
-    Tensor padded_input = self.type().zeros({batch, len + pad_end});
+    Tensor padded_input = at::zeros(self.type(), {batch, len + pad_end});
     padded_input.narrow(1, 0, len).copy_(input);
     len += pad_end;
     input = padded_input;

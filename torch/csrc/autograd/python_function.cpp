@@ -45,7 +45,7 @@ VariableInfo::VariableInfo(const Variable& var)
 
 Variable VariableInfo::zeros(AutoGPU& gpu_guard) const {
   gpu_guard.setDevice(device);
-  return type->zeros(size);
+  return at::zeros(*type, size);
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {

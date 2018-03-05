@@ -389,6 +389,12 @@
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
 
+- func: zeros(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: zeros_out(Tensor result, IntList size) -> Tensor
+  variants: function
+
 - func: zeros_like(Tensor self) -> Tensor
   variants: function
 

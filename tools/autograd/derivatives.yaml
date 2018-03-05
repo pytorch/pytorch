@@ -264,7 +264,7 @@
   self: grad
 
 - name: gather(Tensor self, int64_t dim, Tensor index)
-  self: grad.type().zeros(self.sizes()).scatter_add_(dim, index, grad)
+  self: at::zeros(grad.type(), self.sizes()).scatter_add_(dim, index, grad)
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -317,7 +317,7 @@
   value: grad.index_select(dim, index).sum()
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
-  self: grad.type().zeros(self.sizes()).index_add_(dim, index, grad)
+  self: at::zeros(grad.type(), self.sizes()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
   self: -at::mm(output.t(), at::mm(grad, output.t()))
@@ -445,14 +445,14 @@
   self: zeros_like(grad)
 
 - name: normal(Tensor mean, double std, Generator generator)
-  mean: grad.type().zeros(mean.sizes())
+  mean: at::zeros(grad.type(), mean.sizes())
 
 - name: normal(double mean, Tensor std, Generator generator)
-  std: grad.type().zeros(std.sizes())
+  std: at::zeros(grad.type(), std.sizes())
 
 - name: normal(Tensor mean, Tensor std, Generator generator)
-  mean: grad.type().zeros(mean.sizes())
-  std: grad.type().zeros(std.sizes())
+  mean: at::zeros(grad.type(), mean.sizes())
+  std: at::zeros(grad.type(), std.sizes())
 
 - name: orgqr(Tensor self, Tensor input2)
   self: not_implemented("orgqr")

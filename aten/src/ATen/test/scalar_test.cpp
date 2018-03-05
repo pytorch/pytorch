@@ -94,7 +94,7 @@ int main() {
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
     auto & CUDAFloat = C.getType(Backend::CPU,ScalarType::Float);
-    auto t2 = CUDAFloat.zeros({4,4});
+    auto t2 = zeros(CUDAFloat, {4,4});
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
     cout << "STORAGE: " << CUDAFloat.storage(4).get() << "\n";
@@ -104,7 +104,7 @@ int main() {
   }
   auto t = ones(CPU(Float), {4,4});
 
-  auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
+  auto wha2 = zeros(CPU(Float), {4,4}).add(t).sum();
   cout << wha2.toCDouble() << " <-ndim\n";
 
   cout << t.sizes() << " " << t.strides() << "\n";

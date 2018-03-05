@@ -92,7 +92,7 @@ static void test(Type & type) {
     std::cout << "loads of adds:" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
     Tensor d = ones(type, {3, 4});
-    Tensor r = type.zeros({3,4});
+    Tensor r = zeros(type, {3, 4});
     for(auto i = 0; i < 100000; i++) {
       add_out(r, r, d);
     }
@@ -106,7 +106,7 @@ static void test(Type & type) {
     std::cout << "loads of adds (with copy):" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
     Tensor d = ones(type, {3, 4});
-    Tensor r = type.zeros({3, 4});
+    Tensor r = zeros(type, {3, 4});
     for(auto i = 0; i < 100000; i++) {
       r = add(r, d);
     }
@@ -140,7 +140,7 @@ static void test(Type & type) {
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     std::cout << c << std::endl;
-    ASSERT(c.equal(addmv(type.zeros({3}), a, b, 0, 1)));
+    ASSERT(c.equal(addmv(zeros(type, {3}), a, b, 0, 1)));
   }
 
   {
@@ -159,7 +159,7 @@ static void test(Type & type) {
 
   {
     std::cout << "copy:" << std::endl;
-    Tensor a = type.zeros({4, 3});
+    Tensor a = zeros(type, {4, 3});
     std::cout << a << std::endl;
     Tensor e = type.rand({4, 3});
     std::cout << e << std::endl;
@@ -170,7 +170,7 @@ static void test(Type & type) {
 
   {
     std::cout << "copy [broadcasting]:" << std::endl;
-    Tensor a = type.zeros({4, 3});
+    Tensor a = zeros(type, {4, 3});
     Tensor e = type.rand({3});
     a.copy_(e);
     for (int i = 0; i < 4; ++i) {
@@ -227,7 +227,7 @@ static void test(Type & type) {
       std::cout << c[1][2] << std::endl;
 
       auto f = type.rand({3,4});
-      f[2] = type.zeros({4});
+      f[2] = zeros(type, {4});
       f[1][0] = -1;
       std:: cout << f << std::endl;
       ASSERT(Scalar(f[2][0]).toDouble() == 0);
@@ -240,7 +240,7 @@ static void test(Type & type) {
     std::cout << tt << std::endl;
   }
   {
-      Tensor a = CPU(kFloat).zeros({3,4});
+      Tensor a = zeros(CPU(kFloat), {3,4});
       Tensor b = ones(CPU(kFloat), {3,7});
       Tensor c = cat({a,b},1);
       std::cout << c.sizes() << std::endl;
