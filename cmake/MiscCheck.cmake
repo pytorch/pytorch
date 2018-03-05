@@ -52,6 +52,29 @@ else()
 endif()
 cmake_pop_check_state()
 
+# ---[ Check if std::exception_ptr is supported.
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+CHECK_CXX_SOURCE_COMPILES(
+    "#include <string>
+    #include <exception>
+    int main(int argc, char** argv) {
+      std::exception_ptr eptr;
+      try {
+          std::string().at(1);
+      } catch(...) {
+          eptr = std::current_exception();
+      }
+    }" CAFFE2_EXCEPTION_PTR_SUPPORTED)
+
+if (CAFFE2_EXCEPTION_PTR_SUPPORTED)
+  message(STATUS "std::exception_ptr is supported.")
+  set(CAFFE2_USE_EXCEPTION_PTR 1)
+else()
+  message(STATUS "std::exception_ptr is NOT supported.")
+endif()
+cmake_pop_check_state()
+
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
 # is being deprecated. As a result, we will test if this is the environment we
@@ -145,11 +168,11 @@ if (${CMAKE_CXX_COMPILER_ID} STREQUAL "MSVC")
       #/wd4267 # (3): Conversion of size_t to smaller type. Same as 4244.
       #/wd4996 # (3): Use of deprecated POSIX functions. Since we develop
       #        #      mainly on Linux, this is ignored.
-      /wd4273 # (1): inconsistent dll linkage. This is related to the 
+      /wd4273 # (1): inconsistent dll linkage. This is related to the
               #      caffe2 FLAGS_* definition using dllimport in header and
               #      dllexport in cc file. The strategy is copied from gflags.
   )
-  
+
   # Exception handing for compiler warining C4530, see
   # https://msdn.microsoft.com/en-us/library/2axwkyt4.aspx
   add_definitions("/EHsc")
