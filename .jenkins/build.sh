@@ -85,6 +85,15 @@ fi
 if [[ "$JOB_NAME" != *pynightly* ]]; then
    pip install cffi
    git clone https://github.com/pytorch/extension-ffi.git
-   cd extension-ffi/script
+   pushd extension-ffi/script
    python build.py
+   popd
+fi
+
+# Test documentation build
+if [[ "$JOB_NAME" == *xenial-cuda8-cudnn6-py3* ]]; then
+  pushd docs
+  pip install -r requirements.txt || true
+  make html
+  popd
 fi
