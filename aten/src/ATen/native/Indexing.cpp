@@ -144,6 +144,7 @@ static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
 
 static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   auto strides = computeLinearStride(src);
+  Type& longType = src.type().toScalarType(kLong);
 
   // Compute the linear index by multiplying the indexing tensors by the
   // stride and summing them. All the indexing tensors have the same shape at
@@ -153,7 +154,9 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1;
   for (int64_t i = 0; i < src.dim(); i++) {
     if (indices[i].defined()) {
-      Tensor index = indices[i] * strides[i];
+      // Cast index to the longType matching src's backend
+      // This allows us to support ie indexing a cuda tensor with a cpu tensor
+      Tensor index = (indices[i] * strides[i]).toType(longType);
       if (linearIndex.defined()) {
         linearIndex += index;
       } else {
@@ -167,8 +170,6 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
       nElemBefore *= src.size(i);
     }
   }
-
-  Type& longType = src.type().toScalarType(kLong);
 
   // Compute the linear indices for the parts of the tensor not being indexed
   Tensor beforeIndex;
