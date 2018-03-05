@@ -22,7 +22,7 @@ int main() {
     ASSERT((a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
 
     // with scalar
-    auto aScalar = ones({1}, T);
+    auto aScalar = ones(T, {1});
     aScalar.get()->maybeScalar(true);
     b = T.randn({3, 5});
     ASSERT((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
@@ -52,7 +52,7 @@ int main() {
     ASSERT((a + b + c).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes) + c.expand(expanded_sizes)));
 
     // with scalar
-    auto aTensorScalar = ones({1}, T);
+    auto aTensorScalar = ones(T, {1});
     aTensorScalar.get()->maybeScalar(true);
     b = T.randn({3, 2, 1});
     c = T.randn({1, 2, 5});
@@ -82,7 +82,7 @@ int main() {
     ASSERT((a + b).equal(a + b.expand({3, 5})));
 
     // with scalar
-    auto bScalar = ones({1}, T);
+    auto bScalar = ones(T, {1});
     bScalar.get()->maybeScalar(true);
     ASSERT((a + bScalar).equal(a + bScalar.expand(a.sizes())));
 
@@ -105,7 +105,7 @@ int main() {
     ASSERT(a.addcmul_(b, c).equal(aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
 
     // with scalar
-    auto bScalar = ones({1}, T);
+    auto bScalar = ones(T, {1});
     bScalar.get()->maybeScalar(true);
     ASSERT(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
 
@@ -127,7 +127,7 @@ int main() {
     ASSERT(a.addmm(b, c).equal(a.expand({5,7}).addmm(b, c)));
 
     // with scalar
-    Tensor aScalar = ones({1}, T);
+    Tensor aScalar = ones(T, {1});
     aScalar.get()->maybeScalar(true);
     ASSERT(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
 

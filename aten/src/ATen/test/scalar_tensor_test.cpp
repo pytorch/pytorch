@@ -31,7 +31,7 @@ void test(Type &T) {
   // single-tensor/size tests
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
-    auto t = ones(*s, T);
+    auto t = ones(T, *s);
     ASSERT((std::size_t)t.dim() == s->size());
     ASSERT((std::size_t)t.ndimension() == s->size());
     ASSERT(t.sizes().equals(*s));
@@ -42,9 +42,9 @@ void test(Type &T) {
     std::cout << t << std::endl;
 
     // set_
-    auto t2 = ones(*s, T);
+    auto t2 = ones(T, *s);
     t2.set_();
-    assert_equal_size_dim(t2, ones({0}, T));
+    assert_equal_size_dim(t2, ones(T, {0}));
 
     // unsqueeze
     if (t.numel() != 0) {
@@ -55,7 +55,7 @@ void test(Type &T) {
 
     // unsqueeze_
     {
-      auto t2 = ones(*s, T);
+      auto t2 = ones(T, *s);
       if (t2.numel() != 0) {
         auto r = t2.unsqueeze_(0);
         ASSERT(r.dim() == t.dim() + 1);
@@ -82,12 +82,12 @@ void test(Type &T) {
         }
       }
       auto result = t.squeeze();
-      assert_equal_size_dim(result, ones(size_without_ones, T));
+      assert_equal_size_dim(result, ones(T, size_without_ones));
     }
 
     {
       // squeeze_ (with dimension argument)
-      auto t2 = ones(*s, T);
+      auto t2 = ones(T, *s);
       if (t2.dim() == 0 ||  t2.sizes()[0] == 1) {
         ASSERT(t2.squeeze_(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
       } else {
@@ -99,7 +99,7 @@ void test(Type &T) {
 
     // squeeze_ (with no dimension argument)
     {
-      auto t2 = ones(*s, T);
+      auto t2 = ones(T, *s);
       std::vector<int64_t> size_without_ones;
       for (auto size : *s) {
         if (size != 1) {
@@ -107,7 +107,7 @@ void test(Type &T) {
         }
       }
       auto r = t2.squeeze_();
-      assert_equal_size_dim(t2, ones(size_without_ones, T));
+      assert_equal_size_dim(t2, ones(T, size_without_ones));
     }
 
     // reduce (with dimension argument and with 1 return argument)
@@ -145,8 +145,8 @@ void test(Type &T) {
     for (auto rhs_it = sizes.begin(); rhs_it != sizes.end(); ++rhs_it) {
       // is_same_size should only match if they are the same shape
       {
-          auto lhs = ones(*lhs_it, T);
-          auto rhs = ones(*rhs_it, T);
+          auto lhs = ones(T, *lhs_it);
+          auto rhs = ones(T, *rhs_it);
           if(*lhs_it != *rhs_it) {
             ASSERT(!lhs.is_same_size(rhs));
             ASSERT(!rhs.is_same_size(lhs));
@@ -156,15 +156,15 @@ void test(Type &T) {
       {
         // resize_
         {
-          auto lhs = ones(*lhs_it, T);
-          auto rhs = ones(*rhs_it, T);
+          auto lhs = ones(T, *lhs_it);
+          auto rhs = ones(T, *rhs_it);
           lhs.resize_(*rhs_it);
           assert_equal_size_dim(lhs, rhs);
         }
         // resize_as_
         {
-          auto lhs = ones(*lhs_it, T);
-          auto rhs = ones(*rhs_it, T);
+          auto lhs = ones(T, *lhs_it);
+          auto rhs = ones(T, *rhs_it);
           lhs.resize_as_(rhs);
           assert_equal_size_dim(lhs, rhs);
         }
@@ -172,15 +172,15 @@ void test(Type &T) {
         {
           {
             // with tensor
-            auto lhs = ones(*lhs_it, T);
-            auto rhs = ones(*rhs_it, T);
+            auto lhs = ones(T, *lhs_it);
+            auto rhs = ones(T, *rhs_it);
             lhs.set_(rhs);
             assert_equal_size_dim(lhs, rhs);
           }
           {
             // with storage
-            auto lhs = ones(*lhs_it, T);
-            auto rhs = ones(*rhs_it, T);
+            auto lhs = ones(T, *lhs_it);
+            auto rhs = ones(T, *rhs_it);
             auto storage = T.storage(rhs.numel());
             lhs.set_(*storage);
             // should not be dim 0 because an empty storage is dim 1; all other storages aren't scalars
@@ -188,8 +188,8 @@ void test(Type &T) {
           }
           {
             // with storage, offset, sizes, strides
-            auto lhs = ones(*lhs_it, T);
-            auto rhs = ones(*rhs_it, T);
+            auto lhs = ones(T, *lhs_it);
+            auto rhs = ones(T, *rhs_it);
             auto storage = T.storage(rhs.numel());
             lhs.set_(*storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
             assert_equal_size_dim(lhs, rhs);
@@ -199,8 +199,8 @@ void test(Type &T) {
 
       // view
       {
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(T, *lhs_it);
+        auto rhs = ones(T, *rhs_it);
         auto rhs_size = *rhs_it;
         TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
                        ASSERT(lhs.numel() != rhs.numel()),
@@ -209,7 +209,7 @@ void test(Type &T) {
 
       // take
       {
-        auto lhs = ones(*lhs_it, T);
+        auto lhs = ones(T, *lhs_it);
         auto rhs = T.zeros(*rhs_it).toType(ScalarType::Long);
         TRY_CATCH_ELSE(auto result = lhs.take(rhs),
                        ASSERT(lhs.numel() == 0 && rhs.numel() != 0),
@@ -219,8 +219,8 @@ void test(Type &T) {
 
       // ger
       {
-        auto lhs = ones(*lhs_it, T);
-        auto rhs = ones(*rhs_it, T);
+        auto lhs = ones(T, *lhs_it);
+        auto rhs = ones(T, *rhs_it);
         TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
                        ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() != 1 || rhs.dim() != 1),
                        [&]() {
@@ -232,9 +232,9 @@ void test(Type &T) {
 
       // expand
       {
-        auto lhs = ones(*lhs_it, T);
+        auto lhs = ones(T, *lhs_it);
         auto lhs_size = *lhs_it;
-        auto rhs = ones(*rhs_it, T);
+        auto rhs = ones(T, *rhs_it);
         auto rhs_size = *rhs_it;
         bool should_pass = should_expand(lhs_size, rhs_size);
         TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
@@ -248,7 +248,7 @@ void test(Type &T) {
           bool should_pass_inplace = should_expand(rhs_size, lhs_size);
           TRY_CATCH_ELSE(lhs.add_(rhs),
                          ASSERT(!should_pass_inplace),
-                         ASSERT(should_pass_inplace); assert_equal_size_dim(lhs, ones(*lhs_it, T)););
+                         ASSERT(should_pass_inplace); assert_equal_size_dim(lhs, ones(T, *lhs_it)););
         }
       }
     }

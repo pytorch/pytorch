@@ -2,7 +2,7 @@
 
 struct Doubler {
   Doubler(int A, int B) {
-     tensor_ = at::ones({A, B}, at::CPU(at::kDouble));
+     tensor_ = at::ones(at::CPU(at::kDouble), {A, B});
   }
   at::Tensor forward() {
     return tensor_ * 2;

@@ -613,7 +613,7 @@ struct to_ir {
     return emitNode(
                Symbol("type_as"),
                input->range(),
-               {emitExpr(input, 1)[0], createConstant(input->range(), at::ones({1}, at::CPU(t)))},
+               {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
         ->outputs();
   }

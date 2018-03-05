@@ -99,7 +99,7 @@ int main() {
     s->fill(7);
     cout << "GET " << s->get(3).toFloat() << "\n";
   }
-  auto t = ones({4,4}, CPU(Float));
+  auto t = ones(CPU(Float), {4,4});
 
   auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
   cout << wha2.toCDouble() << " <-ndim\n";
@@ -131,7 +131,7 @@ int main() {
   // check Scalar.toTensor on Scalars backed by different data types
   ASSERT(bar.toTensor().type().scalarType() == kDouble);
   ASSERT(what.toTensor().type().scalarType() == kLong);
-  ASSERT(Scalar(ones({}, CPU(kFloat))).toTensor().type().scalarType() == kFloat);
+  ASSERT(Scalar(ones(CPU(kFloat), {})).toTensor().type().scalarType() == kFloat);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
@@ -144,10 +144,10 @@ int main() {
 
   // test direct C-scalar type conversions
   {
-    auto x = ones({1,2}, T);
+    auto x = ones(T, {1,2});
     ASSERT_THROWS(x.toCFloat());
   }
-  auto float_one = ones({}, T);
+  auto float_one = ones(T, {});
   ASSERT(float_one.toCFloat() == 1);
   ASSERT(float_one.toCInt() == 1);
   ASSERT(float_one.toCHalf() == 1);

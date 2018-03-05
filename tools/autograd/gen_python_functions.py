@@ -620,7 +620,7 @@ def get_python_signature(declaration, include_out):
     # the function signatures between the out and non-out variant.
     assert len(type_dispatch_args) <= 1
     for arg in type_dispatch_args:
-        if arg.get('kwarg_only', False) and positional:
+        if positional:  # assume type_dispatch_args should be kwarg_only.
             typed_args.append('*')
             positional = False
         typed_args.append(get_typed_arg(arg))
