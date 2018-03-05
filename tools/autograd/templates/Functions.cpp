@@ -148,7 +148,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 
   std::vector<int64_t> ones_size(inp.sizes());
   ones_size[dim] = 1;
-  Tensor ones = grad.type().ones(ones_size);
+  Tensor ones = at::ones(ones_size, grad.type());
   Tensor exclusive_normal_nocp = at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
@@ -301,7 +301,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
 
   std::vector<int64_t> ones_size(input.sizes());
   ones_size[dim] = 1;
-  Tensor ones = grad.type().ones({1}).expand(ones_size);
+  Tensor ones = at::ones({1}, grad.type()).expand(ones_size);
   Tensor grad_input = grad.type().zeros(input.sizes());
   Tensor prods_from_k_plus_1;
   Tensor omitted_products;
@@ -604,7 +604,7 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   if (dim < 0) dim += input.dim();
   std::vector<int64_t> sizes = input.sizes();
   sizes[dim] /= 2;
-  auto tmp = grad * glu_backward(input.type().ones(sizes), input, dim);
+  auto tmp = grad * glu_backward(at::ones(sizes, input.type()), input, dim);
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
 }
 

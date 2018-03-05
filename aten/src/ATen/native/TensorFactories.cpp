@@ -12,12 +12,22 @@ Tensor empty_like(const Tensor& self, const Type& dtype) {
   return dtype.tensor(self.sizes());
 }
 
+Tensor ones(IntList size, const Type& dtype) {
+  auto result = dtype.tensor(size);
+  return result.fill_(1);
+}
+
+Tensor& ones_out(Tensor& result, IntList size) {
+  result.resize_(size);
+  return result.fill_(1);
+}
+
 Tensor ones_like(const Tensor& self) {
-  return self.type().ones(self.sizes());
+  return at::native::ones(self.sizes(), self.type());
 }
 
 Tensor ones_like(const Tensor& self, const Type& dtype) {
-  return dtype.ones(self.sizes());
+  return at::native::ones(self.sizes(), dtype);
 }
 
 Tensor rand_like(const Tensor& self) {

@@ -132,12 +132,12 @@ void test(Type & T, Type & AccT) {
   // _standard_gamma_grad
   if (!T.is_cuda()) {
     // check empty
-    auto empty = T.ones({0});
+    auto empty = ones({0}, T);
     ASSERT_EQUAL(empty, empty._standard_gamma_grad(empty));
 
     // check scalar equals one element
-    auto one_scalar = T.ones({}).mul(5);
-    auto one_with_dim = T.ones({1}).mul(5);
+    auto one_scalar = ones({}, T).mul(5);
+    auto one_with_dim = ones({1}, T).mul(5);
     ASSERT_ALLCLOSE(one_scalar._standard_gamma_grad(one_scalar),
                     one_with_dim._standard_gamma_grad(one_with_dim).sum());
 
@@ -158,14 +158,14 @@ void test(Type & T, Type & AccT) {
   // where
   {
     // empty
-    auto empty = T.ones({0});
+    auto empty = ones({0}, T);
     auto &bT = T.toScalarType(ScalarType::Byte);
-    auto empty_byte = bT.ones({0});
+    auto empty_byte = ones({0}, bT);
     ASSERT_EQUAL(empty, at::where(empty_byte, empty, empty));
 
     // check scalar equals one element
-    auto x_scalar = T.ones({}).mul(5);
-    auto y_scalar = T.ones({}).mul(7);
+    auto x_scalar = ones({}, T).mul(5);
+    auto y_scalar = ones({}, T).mul(7);
     auto cond_scalar = bT.zeros({});
     auto x_1d = x_scalar.unsqueeze(0);
     auto y_1d = y_scalar.unsqueeze(0);

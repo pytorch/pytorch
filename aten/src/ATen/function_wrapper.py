@@ -370,6 +370,7 @@ AtFormal = TypedDict('AtFormal', {
     'python_default_init': str,
     'output': bool,
     'size': int,
+    'is_type_dispatched': bool,
 }, total=False)
 
 ReturnType = TypedDict('ReturnType', {
@@ -884,12 +885,22 @@ def create_generic(top_env, declarations):
         option['method_actuals'] = [
             f['name'] if f['name'] != 'self' else '*this' for f in formals]
 
+        def find_dispatch_type(formals):
+            for formal in formals:
+                if 'Type' == formal['dynamic_type']:
+                    return formal
+            return None
+
+        dispatch_tensor = find_dispatch_tensor(formals)
+        dispatch_type = None if dispatch_tensor else find_dispatch_type(formals)
+        if dispatch_type:
+            dispatch_type['is_type_dispatched'] = True
+
         option['const_mark'] = '' if option['inplace'] else ' const'
 
         is_method = 'method' in option['variants']
         is_function = 'function' in option['variants']
-        dispatch_tensor = find_dispatch_tensor(formals)
-        is_namespace_function = is_function and dispatch_tensor is not None
+        is_namespace_function = is_function and (dispatch_tensor or dispatch_type)
 
         option['method_prefix_derived'] = ''
         env = nested_dict(option, top_env)
@@ -946,7 +957,10 @@ def create_generic(top_env, declarations):
             method_of.append('Tensor')
 
         if is_namespace_function:
-            option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
+            if dispatch_type:
+                option['inferred_type'] = dispatch_type['name']
+            else:
+                option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
             top_env['function_declarations'].append(
                 FUNCTION_DECLARATION.substitute(env))
             top_env['function_definitions'].append(

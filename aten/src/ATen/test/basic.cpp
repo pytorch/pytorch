@@ -31,7 +31,7 @@ static void test(Type & type) {
 
   {
     std::cout << "ones and dot:" << std::endl;
-    Tensor b = type.ones({3, 4});
+    Tensor b = ones({3, 4}, type);
     std::cout << b << std::endl;
     ASSERT(24 == (b+b).sum().toCDouble());
     std::cout << b.numel() << std::endl;
@@ -90,7 +90,7 @@ static void test(Type & type) {
   {
     std::cout << "loads of adds:" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
-    Tensor d = type.ones({3, 4});
+    Tensor d = ones({3, 4}, type);
     Tensor r = type.zeros({3,4});
     for(auto i = 0; i < 100000; i++) {
       add_out(r, r, d);
@@ -104,7 +104,7 @@ static void test(Type & type) {
   {
     std::cout << "loads of adds (with copy):" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
-    Tensor d = type.ones({3, 4});
+    Tensor d = ones({3, 4}, type);
     Tensor r = type.zeros({3, 4});
     for(auto i = 0; i < 100000; i++) {
       r = add(r, d);
@@ -200,7 +200,7 @@ static void test(Type & type) {
     Tensor a = type.rand({4, 3});
     std::cout << a << std::endl;
     std::cout << add(a, 1) << std::endl;
-    ASSERT((type.ones({4,3}) + a).equal(add(a,1)));
+    ASSERT((ones({4,3}, type) + a).equal(add(a,1)));
   }
 
   {
@@ -240,7 +240,7 @@ static void test(Type & type) {
   }
   {
       Tensor a = CPU(kFloat).zeros({3,4});
-      Tensor b = CPU(kFloat).ones({3,7});
+      Tensor b = ones({3,7}, CPU(kFloat));
       Tensor c = cat({a,b},1);
       std::cout << c.sizes() << std::endl;
       ASSERT(c.size(1) == 11);
@@ -250,7 +250,7 @@ static void test(Type & type) {
       ASSERT(*e.data<float>()== e.sum().toCFloat());
   }
   {
-    Tensor b = CPU(kFloat).ones({3,7})*.0000001f;
+    Tensor b = ones({3,7}, CPU(kFloat))*.0000001f;
     std::stringstream s;
     s << b << "\n";
     std::string expect = "1e-07 *";

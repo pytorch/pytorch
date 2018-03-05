@@ -45,18 +45,6 @@
       long_args: True
 ]]
 [[
-  name: ones
-  variants:
-    - function
-  auto_gpu: False
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THSize* size
-      long_args: True
-]]
-[[
   name: numel
   return: long
   cname: nElement
