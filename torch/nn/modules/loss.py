@@ -806,9 +806,6 @@ class CosineEmbeddingLoss(_Loss):
     using the cosine distance, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
-    `margin` should be a number from `-1` to `1`, `0` to `0.5` is suggested.
-    If `margin` is missing, the default value is `0`.
-
     The loss function for each sample is::
 
     .. math::
@@ -818,10 +815,17 @@ class CosineEmbeddingLoss(_Loss):
         \max(0, \cos(x_1, x_2) - \text{margin}), & \text{if } y == -1
         \end{cases}
 
-    If the internal variable `size_average` is equal to ``True``,
-    the loss function averages the loss over the batch samples;
-    if `size_average` is ``False``, then the loss function sums over the
-    batch samples. By default, `size_average = True`.
+    Args:
+        margin (float, optional): Should be a number from `-1` to `1`, `0` to `0.5`
+            is suggested. If `margin` is missing, the default value is `0`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
     """
 
     def __init__(self, margin=0, size_average=True, reduce=True):

@@ -408,16 +408,13 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_av
 
 
 def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
-    cos = input1.new(input1.size(0)).zero_()
-    output = input1.new(input1.size(0)).zero_()
-    for i in range(0, input1.size(0)):
-        cos[i] += (input1[i] * input2[i]).sum()
-        cos[i] /= (((input1[i] * input1[i]).sum() + 1e-12) * ((input2[i] * input2[i]).sum() + 1e-12)) ** 0.5
+    def _cos(a, b):
+        cos = a.new(a.size(0))
+        for i in range(0, a.size(0)):
+            cos[i] = (a[i] * b[i]).sum() / ((((a[i] * a[i]).sum() + 1e-12) * ((b[i] * b[i]).sum() + 1e-12)) ** 0.5)
+        return cos
 
-        if target[i] == 1:
-            output[i] = 1 - cos[i]
-        if target[i] == -1:
-            output[i] = max(0, cos[i] - margin)
+    output = torch.where(target == 1, 1 - _cos(input1, input2), (_cos(input1, input2) - margin).clamp(min=0))
 
     if reduce and size_average:
         return output.mean()
