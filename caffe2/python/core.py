@@ -36,6 +36,7 @@ import pickle
 import numpy as np
 import sys
 import traceback
+import os
 
 # Mac os specific message
 if (sys.platform == 'darwin' and 'leveldb' in C.registered_dbs()):
@@ -322,8 +323,9 @@ def CreateOperator(
     registered with Caffe2.
     """
     operator = caffe2_pb2.OperatorDef()
-    stack = traceback.format_stack()
-    operator.debug_info = "".join(stack[:-1])
+    if (os.environ.get('CAFFE2_DEBUG')):
+        stack = traceback.format_stack()
+        operator.debug_info = "".join(stack[:-1])
 
     operator.type = operator_type
     operator.name = name
