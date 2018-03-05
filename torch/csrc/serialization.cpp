@@ -88,23 +88,7 @@ static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, boo
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
 #else
-  // PyMemoryView_FromMemory doesn't exist in Python 2.7, so we manually
-  // create a Py_buffer that describes the memory and create a memoryview from it.
-  auto readonly_flag = is_read ? 1 : 0;
-  Py_buffer pyBuf;
-  pyBuf.buf = buf;
-  pyBuf.obj = nullptr;
-  pyBuf.len = (Py_ssize_t)nbytes;
-  pyBuf.itemsize = 1;
-  pyBuf.readonly = readonly_flag;
-  pyBuf.ndim = 0;
-  pyBuf.format = nullptr;
-  pyBuf.shape = nullptr;
-  pyBuf.strides = nullptr;
-  pyBuf.suboffsets = nullptr;
-  pyBuf.internal = nullptr;
-
-  THPObjectPtr memview(PyMemoryView_FromBuffer(&pyBuf));
+  THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
 #endif
   if (!memview) throw python_error();
 
