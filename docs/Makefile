@@ -7,13 +7,14 @@ SPHINXBUILD   = sphinx-build
 SPHINXPROJ    = PyTorch
 SOURCEDIR     = source
 BUILDDIR      = build
+PYCMD         = python
 
 # Put it first so that "make" without argument is like "make help".
 help:
 	@$(SPHINXBUILD) -M help "$(SOURCEDIR)" "$(BUILDDIR)" $(SPHINXOPTS) $(O)
 
 figures:
-	python3 source/scripts/build_activation_images.py
+	@$(PYCMD) source/scripts/build_activation_images.py
 
 docset: html
 	doc2dash --name $(SPHINXPROJ) --icon $(SOURCEDIR)/_static/img/pytorch-logo-flame.png --enable-js --online-redirect-url http://pytorch.org/docs/ --force $(BUILDDIR)/html/
