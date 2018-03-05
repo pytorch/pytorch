@@ -5,7 +5,7 @@ from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
-from torch.nn.functional import sigmoid
+from torch.nn.functional import pad, sigmoid
 
 __all__ = [
     'AbsTransform',
@@ -427,8 +427,7 @@ class InvertibleBoltzmannTransform(Transform):
         return isinstance(other, InvertibleBoltzmannTransform)
 
     def _call(self, x):
-        ones = torch.ones(*(x.size()[:-1] + (1, )))
-        probs = torch.cat([x.exp(), ones], dim=-1)
+        probs = pad(x.exp(), (0, 1), value=1)
         probs /= probs.sum(-1, True)
         return probs
 
