@@ -2738,6 +2738,7 @@ EXCLUDE_FUNCTIONAL = {
     'addmv_',
     'addr',
     'addr_',
+    'reshape',
     'where'  # argument order
 }
 EXCLUDE_GRADCHECK = {
