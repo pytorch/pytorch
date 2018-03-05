@@ -2,7 +2,6 @@
 
 #include "DynamicTypes.h"
 #include "PythonTypes.h"
-#include "THP.h"
 #include "Exceptions.h"
 
 #include <vector>

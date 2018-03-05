@@ -12,6 +12,7 @@
 #include <TH/TH.h>
 #include <libshm.h>
 #include "THP.h"
+#include "allocators.h"
 #include "copy_utils.h"
 #include "DynamicTypes.h"
 

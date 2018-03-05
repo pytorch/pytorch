@@ -124,16 +124,6 @@ THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
-#define THPUtils_assert_PyImport(name, module)                          \
-  PyObject* module = PyImport_ImportModule(name);                       \
-  if (!module) {                                                        \
-    if (PyErr_Occurred()) {                                             \
-      PyErr_Print();                                                    \
-    }                                                                   \
-    THPUtils_setError("class loader couldn't access %s", name);         \
-    return NULL;                                                        \
-  }
-
 #ifdef _THP_CORE
 
 bool THPUtils_checkIntTuple(PyObject *arg);
