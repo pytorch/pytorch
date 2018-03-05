@@ -1,5 +1,6 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/Dispatch.h"
+#include "ATen/ExpandUtils.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/cuda/CUDAHalf.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"
@@ -96,9 +97,12 @@ at::Tensor& cmp_out_cuda(at::Tensor& result, const at::Tensor& self, const at::T
   if (other.dim() == 0) {
     return cmp_out_cuda<Comparator>(result, self, other.pImpl->localScalar(), op_name);
   }
-  result.resize_(self.sizes());
+
+  at::Tensor b_self, b_other;
+  std::tie(b_self, b_other) = at::expand_outplace(self, other, op_name);
+  result.resize_(b_self.sizes());
   AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
-      CmpOpTensorCUDA<Comparator, scalar_t>::apply(result, self, other);
+      CmpOpTensorCUDA<Comparator, scalar_t>::apply(result, b_self, b_other);
   });
   return result;
 }
