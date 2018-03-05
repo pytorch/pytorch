@@ -199,10 +199,10 @@ To confirm whether the operator is standardized or not, please check the
 If the operator is an ATen operator, which means you can find the declaration
 of the function in ``torch/csrc/autograd/generated/VariableType.h``
 (available in generated code in PyTorch install dir), you should add the symbolic
-function in ``torch/onnx/symbolic.py`` and follow the instructions listed as below:
+function in ``torch/onnx/core/symbolic.py`` and follow the instructions listed as below:
 
 * Define the symbolic function in
-  `torch/onnx/symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic.py>`_.
+  `torch/onnx/core/symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/core/symbolic.py>`_.
   Make sure the function has the same name as the ATen operator/function
   defined in ``VariableType.h``.
 * The first parameter is always the exported ONNX graph.
@@ -290,7 +290,7 @@ The ONNX graph C++ definition is in ``torch/csrc/jit/ir.h``.
 Here is an example of handling missing symbolic function for ``elu`` operator.
 We try to export the model and see the error message as below::
 
-    UserWarning: ONNX export failed on elu because torch.onnx.symbolic.elu does not exist
+    UserWarning: ONNX export failed on elu because torch.onnx.core.symbolic.elu does not exist
     RuntimeError: ONNX export failed: Couldn't export operator elu
 
 The export fails because PyTorch does not support exporting ``elu`` operator.
@@ -306,7 +306,7 @@ We add the following lines to ``symbolic.py``::
 Now PyTorch is able to export ``elu`` operator.
 
 There are more examples in
-`symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/symbolic.py>`_,
+`symbolic.py <https://github.com/pytorch/pytorch/blob/master/torch/onnx/core/symbolic.py>`_,
 `tensor.py <https://github.com/pytorch/pytorch/blob/99037d627da68cdf53d3d0315deceddfadf03bba/torch/autograd/_functions/tensor.py#L24>`_,
 `padding.py <https://github.com/pytorch/pytorch/blob/99037d627da68cdf53d3d0315deceddfadf03bba/torch/nn/_functions/padding.py#L8>`_.
 

@@ -335,7 +335,9 @@ class Module(object):
         return None
 
     def _slow_forward(self, *input, **kwargs):
+        import torch
         input_vars = tuple(torch.autograd.function._iter_variables(input))
+        import torch.jit
         tracing_state = torch.jit.get_tracing_state(input_vars)
         if not tracing_state:
             return self.forward(*input, **kwargs)
@@ -357,6 +359,7 @@ class Module(object):
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             hook(self, input)
+        import torch.jit
         if torch.jit._tracing:
             result = self._slow_forward(*input, **kwargs)
         else:
