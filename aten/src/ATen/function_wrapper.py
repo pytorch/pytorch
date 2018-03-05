@@ -340,24 +340,10 @@ THFormal = TypedDict('THFormal', {
     'resize': str,
     'cpu_zero': bool,
     'zero': bool,
+    'is_type_dispatched': bool,
 }, total=False)
 
-# A native_functions.yaml formal argument
-# type can contain Tensor, BoolTensor, IndexTensor types
-NativeFormal = TypedDict('NativeFormal', {
-    'name': str,
-    'type': str,
-    'dynamic_type': str,
-    'kwarg_only': bool,
-    'is_nullable': bool,
-    'default': str,
-    'default_init': str,
-    'python_default_init': str,
-    'output': bool,
-    'size': int,
-}, total=False)
-
-# Generic ATen formal.
+# Generic ATen formal or native_functions.yaml formal argument.
 # type can contain Tensor& reference types.
 AtFormal = TypedDict('AtFormal', {
     'name': str,
@@ -790,7 +776,7 @@ def create_generic(top_env, declarations):
         kwd_args = []
 
         def insert(argument):
-            # type: (NativeFormal) -> None
+            # type: (AtFormal) -> None
             if argument['name'] not in seen:
                 seen.add(argument['name'])
                 if argument.get('kwarg_only', False):
@@ -804,7 +790,7 @@ def create_generic(top_env, declarations):
         # not clear we need dynamic_type translation as we can specify the correct type
         # directly in native functions
         def add_type_as_dynamic_type(argument, option):
-            # type: (NativeFormal, FunctionOption) -> NativeFormal
+            # type: (AtFormal, FunctionOption) -> AtFormal
             argument['dynamic_type'] = argument['type']
             return argument
 
@@ -813,7 +799,7 @@ def create_generic(top_env, declarations):
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
-            # type: (NativeFormal, FunctionOption) -> AtFormal
+            # type: (AtFormal, FunctionOption) -> AtFormal
             def translate_map(const):
                 # type: (bool) -> Dict[str, str]
                 return {
