@@ -8,9 +8,9 @@
 #include <TH/THGenerateHalfType.h>
 
 template <class io>
-inline ssize_t doRead(io fildes, void* buf, size_t nbytes);
+ssize_t doRead(io fildes, void* buf, size_t nbytes);
 
 template <class io>
-inline ssize_t doWrite(io fildes, void* buf, size_t nbytes);
+ssize_t doWrite(io fildes, void* buf, size_t nbytes);
 
 #endif

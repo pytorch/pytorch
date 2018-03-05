@@ -11,17 +11,17 @@
 
 #include "serialization.h"
 
-ssize_t doPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes);
-ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes);
-ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes);
+static ssize_t doPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes);
+static ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes);
+static ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes);
 
 template <>
-inline ssize_t doRead<int>(int fildes, void* buf, size_t nbytes) {
+ssize_t doRead<int>(int fildes, void* buf, size_t nbytes) {
   return read(fildes, buf, nbytes);
 }
 
 template <>
-inline ssize_t doRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
+ssize_t doRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
   // Try to use fildes.readinto() instead of fildes.read()
   // because it is more memory efficient.
   auto has_readinto = PyObject_HasAttrString(fildes, "readinto") == 1;
@@ -32,12 +32,12 @@ inline ssize_t doRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
 }
 
 template <>
-inline ssize_t doWrite<int>(int fildes, void* buf, size_t nbytes) {
+ssize_t doWrite<int>(int fildes, void* buf, size_t nbytes) {
   return write(fildes, buf, nbytes);
 }
 
 template <>
-inline ssize_t doWrite<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
+ssize_t doWrite<PyObject*>(PyObject* fildes, void* buf, size_t nbytes) {
   return doPythonWrite(fildes, buf, nbytes);
 }
 
@@ -50,7 +50,7 @@ static inline bool isUnsupportedOperation() {
 }
 
 // Call Python fildes.read(nbytes) and copy it to buf.
-inline ssize_t doPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes) {
+static inline ssize_t doPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes) {
   const size_t buffer_size = 262144;  // 2^18
   size_t read_bytes = 0;
 
@@ -90,6 +90,7 @@ static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, boo
 #else
   THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
 #endif
+
   if (!memview) throw python_error();
 
   char* method = "write";
@@ -110,11 +111,11 @@ static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, boo
 }
 
 // Call Python fildes.readinto(buf)
-ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
+static inline ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
   return doPythonIO(fildes, buf, nbytes, /* is_read */ true);
 }
 
 // Call Python fildes.write(buf)
-ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
+static inline ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
   return doPythonIO(fildes, buf, nbytes, /* is_read */ false);
 }
