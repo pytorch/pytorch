@@ -13,4 +13,16 @@ ssize_t doRead(io fildes, void* buf, size_t nbytes);
 template <class io>
 ssize_t doWrite(io fildes, void* buf, size_t nbytes);
 
+template <>
+ssize_t doRead<int>(int fildes, void* buf, size_t nbytes);
+
+template <>
+ssize_t doRead<PyObject*>(PyObject* fildes, void* buf, size_t nbytes);
+
+template <>
+ssize_t doWrite<int>(int fildes, void* buf, size_t nbytes);
+
+template <>
+ssize_t doWrite<PyObject*>(PyObject* fildes, void* buf, size_t nbytes);
+
 #endif
