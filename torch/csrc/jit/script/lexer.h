@@ -36,7 +36,6 @@ namespace script {
   _(TK_LONG, "long", "long")                     \
   _(TK_INT, "int", "int")                        \
   _(TK_DEF, "def", "def")                        \
-  _(TK_ARROW, "arrow", "->")                     \
   _(TK_EQUIVALENT, "equivalent", "<=>")          \
   _(TK_IDENT, "ident", "")                       \
   _(TK_STRING, "string", "")                     \
@@ -58,6 +57,7 @@ namespace script {
   _(TK_ELIF, "elif", "elif")                     \
   _(TK_WHILE, "while", "while")                  \
   _(TK_EXPR_STMT, "expression statement", "")    \
+  _(TK_RETURN, "return", "return")               \
   _(TK_NE, "ne", "!=")                           \
   _(TK_EQ, "eq", "==")                           \
   _(TK_LE, "le", "<=")                           \
@@ -77,7 +77,8 @@ namespace script {
   _(TK_BUILT_IN, "built-in", "")                 \
   _(TK_SLICE, "slice", "")                       \
   _(TK_VAR, "variable", "")                      \
-  _(TK_GATHER, "gather", "")
+  _(TK_GATHER, "gather", "")                     \
+  _(TK_NOTHING, "nothing", "")
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
 enum TokenKind {
