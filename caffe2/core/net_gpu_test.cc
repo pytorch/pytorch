@@ -104,12 +104,12 @@ void checkChainingAndRun(
     auto* dag = dynamic_cast_if_rtti<DAGNetBase*>(net.get());
     CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
-    EXPECT_TRUE(chains == expected);
+    EXPECT_EQ(chains, expected);
     testExecution(net, net_def.op().size());
   }
 }
 
-TEST(NetTest, ChainingForDifferentDevices) {
+TEST(NetTest, DISABLED_ChainingForDifferentDevices) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
