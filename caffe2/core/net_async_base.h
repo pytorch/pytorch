@@ -74,12 +74,18 @@ class AsyncNetBase : public NetBase {
 
   // Pools and streams
   std::mutex pools_mutex_;
-  std::vector<std::shared_ptr<TaskThreadPool>> gpu_pools_;
   std::shared_ptr<TaskThreadPool> cpu_pool_;
-  std::shared_ptr<TaskThreadPool> gpu_pool_;
+  std::vector<std::shared_ptr<TaskThreadPool>> cpu_pools_;
+  std::vector<std::shared_ptr<TaskThreadPool>> gpu_pools_;
   static thread_local std::vector<int> stream_counters_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
+
+ private:
+  std::shared_ptr<TaskThreadPool> pool_getter(
+      std::vector<std::shared_ptr<TaskThreadPool>>& pools,
+      int pool_idx,
+      const DeviceOption& device_option);
 };
 
 CAFFE_DECLARE_SHARED_REGISTRY(
@@ -87,7 +93,7 @@ CAFFE_DECLARE_SHARED_REGISTRY(
     TaskThreadPool,
     const DeviceOption&);
 
-std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool();
+std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(int numa_node_id);
 
 } // namespace caffe2
 

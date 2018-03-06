@@ -27,16 +27,6 @@ CAFFE2_DEFINE_int(
 CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
 
 CAFFE2_DEFINE_bool(
-    caffe2_net_async_use_single_pool,
-    false,
-    "Use single thread pool for all chain types");
-
-CAFFE2_DEFINE_bool(
-    caffe2_net_async_use_single_gpu_pool,
-    false,
-    "Use single thread pool for all GPU chains");
-
-CAFFE2_DEFINE_bool(
     caffe2_net_async_finish_chain,
     false,
     "Wait for chain to finish");
@@ -45,6 +35,11 @@ CAFFE2_DEFINE_int(
     caffe2_net_async_max_gpus,
     16,
     "Max number of GPUs allowed in net async executor");
+
+CAFFE2_DEFINE_int(
+    caffe2_net_async_max_numa_nodes,
+    8,
+    "Max number of NUMA nodes allowed in net async executor");
 
 CAFFE2_DEFINE_int(
     caffe2_net_async_cpu_pool_size,
@@ -83,45 +78,47 @@ AsyncNetBase::AsyncNetBase(
     events_.push_back(&op->event());
   }
 
+  gpu_pools_.resize(FLAGS_caffe2_net_async_max_gpus);
+  cpu_pools_.resize(FLAGS_caffe2_net_async_max_numa_nodes);
   DeviceOption cpu_option;
   cpu_option.set_device_type(CPU);
   cpu_pool_ = ThreadPoolRegistry()->Create(
       DeviceTypeName(cpu_option.device_type()), cpu_option);
-  gpu_pools_.resize(FLAGS_caffe2_net_async_max_gpus);
-  if (FLAGS_caffe2_net_async_use_single_gpu_pool) {
-    DeviceOption gpu_option;
-    gpu_option.set_device_type(CUDA);
-    gpu_option.set_cuda_gpu_id(0);
-    gpu_pool_ = ThreadPoolRegistry()->Create(
-        DeviceTypeName(gpu_option.device_type()), gpu_option);
+}
+
+std::shared_ptr<TaskThreadPool> AsyncNetBase::pool_getter(
+    std::vector<std::shared_ptr<TaskThreadPool>>& pools,
+    int pool_idx,
+    const DeviceOption& device_option) {
+  std::unique_lock<std::mutex> pools_lock(pools_mutex_);
+  auto pool = pools[pool_idx];
+  if (!pool) {
+    pool = ThreadPoolRegistry()->Create(
+        DeviceTypeName(device_option.device_type()), device_option);
+    pools[pool_idx] = pool;
   }
+  return pool;
 }
 
 std::shared_ptr<TaskThreadPool> AsyncNetBase::pool(
     const DeviceOption& device_option) {
-  if (FLAGS_caffe2_net_async_use_single_pool ||
-      device_option.device_type() == CPU) {
-    return cpu_pool_;
-  } else if (device_option.device_type() == CUDA) {
-    if (FLAGS_caffe2_net_async_use_single_gpu_pool) {
-      return gpu_pool_;
+  if (device_option.device_type() == CPU) {
+    auto numa_node_id = device_option.numa_node_id();
+    if (numa_node_id == -1) {
+      return cpu_pool_;
     } else {
-      auto gpu_id = device_option.cuda_gpu_id();
       CAFFE_ENFORCE(
-          gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
-          "Invalid GPU id: " + caffe2::to_string(gpu_id));
-      auto pool = gpu_pools_[gpu_id];
-      if (!pool) {
-        std::unique_lock<std::mutex> pools_lock(pools_mutex_);
-        pool = gpu_pools_[gpu_id];
-        if (!pool) {
-          pool = ThreadPoolRegistry()->Create(
-              DeviceTypeName(device_option.device_type()), device_option);
-          gpu_pools_[gpu_id] = pool;
-        }
-      }
-      return pool;
+          numa_node_id >= 0 &&
+              numa_node_id < FLAGS_caffe2_net_async_max_numa_nodes,
+          "Invalid NUMA node id: " + caffe2::to_string(numa_node_id));
+      return pool_getter(cpu_pools_, numa_node_id, device_option);
     }
+  } else if (device_option.device_type() == CUDA) {
+    auto gpu_id = device_option.cuda_gpu_id();
+    CAFFE_ENFORCE(
+        gpu_id >= 0 && gpu_id < FLAGS_caffe2_net_async_max_gpus,
+        "Invalid GPU id: " + caffe2::to_string(gpu_id));
+    return pool_getter(gpu_pools_, gpu_id, device_option);
   } else {
     CAFFE_THROW(
         "Unsupported device type " +
@@ -269,19 +266,24 @@ std::shared_ptr<TaskThreadPool> AsyncNetCPUThreadPoolCreator(
       device_option.device_type(),
       CPU,
       "Unexpected device type for CPU thread pool");
-  return GetAsyncNetCPUThreadPool();
+  return GetAsyncNetCPUThreadPool(device_option.numa_node_id());
 }
 } // namespace
 
 CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CPU, AsyncNetCPUThreadPoolCreator);
 
 /* static */
-std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool() {
-  static std::weak_ptr<TaskThreadPool> pool;
+std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(int numa_node_id) {
+  // Note: numa_node_id = -1 (DeviceOption's default value) corresponds to
+  // no NUMA used
+  static std::unordered_map<int, std::weak_ptr<TaskThreadPool>> pools;
   static std::mutex pool_mutex;
   std::lock_guard<std::mutex> lock(pool_mutex);
 
-  auto shared_pool = pool.lock();
+  std::shared_ptr<TaskThreadPool> shared_pool = nullptr;
+  if (pools.count(numa_node_id)) {
+    shared_pool = pools.at(numa_node_id).lock();
+  }
   if (!shared_pool) {
     auto pool_size = FLAGS_caffe2_net_async_cpu_pool_size;
     if (pool_size <= 0) {
@@ -290,8 +292,8 @@ std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool() {
       pool_size = num_cores;
     }
     LOG(INFO) << "Using cpu pool size: " << pool_size;
-    shared_pool = std::make_shared<TaskThreadPool>(pool_size);
-    pool = shared_pool;
+    shared_pool = std::make_shared<TaskThreadPool>(pool_size, numa_node_id);
+    pools[numa_node_id] = shared_pool;
   }
   return shared_pool;
 }

@@ -72,6 +72,9 @@ else:
     GetCudaPeerAccessPattern = lambda: np.array([]) # noqa
     GetDeviceProperties = lambda x: None # noqa
 
+IsNUMAEnabled = C.is_numa_enabled
+GetNumNUMANodes = C.get_num_numa_nodes
+GetBlobNUMANode = C.get_blob_numa_node
 
 def _GetFreeFlaskPort():
     """Get a free flask port."""

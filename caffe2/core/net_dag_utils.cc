@@ -193,16 +193,15 @@ ExecutionChains computeChains(std::vector<OperatorNode>& orig_nodes) {
              // operator and passing the same stream id on each call.
              // RunAsync may schedule an async computation on device.
              // In order to be scheduled on the same chain two operators
-             // (parent and dependent) need to satisfy one of:
-             //  1. Parent op does not have an async part
-             //  2. Parent op has async part _and_
-             //     both ops are on the same device _and_
+             // (parent and dependent) need to satisfy:
+             //  1. Both ops are on the same device _and_
+             //  2. Parent op does not have an async part or
              //     dependent op can be executed as an async dependency
 
-             !orig_nodes[chain.back()].operator_->HasAsyncPart() ||
-             (IsSameDevice(
-                  orig_nodes[cur.first].operator_->device_option(),
-                  orig_nodes[chain.back()].operator_->device_option()) &&
+             IsSameDevice(
+                 orig_nodes[cur.first].operator_->device_option(),
+                 orig_nodes[chain.back()].operator_->device_option()) &&
+             (!orig_nodes[chain.back()].operator_->HasAsyncPart() ||
               orig_nodes[cur.first].operator_->SupportsAsyncScheduling()))));
   };
   auto commit_chain = [&]() {
