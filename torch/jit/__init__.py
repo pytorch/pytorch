@@ -500,8 +500,9 @@ class TracedModuleBase(torch.nn.Module):
         if not self.__frozen:
             return super(TracedModuleBase, self).__setattr__(name, value)
         if name in self._parameters or name in self._buffers:
+            result = super(TracedModuleBase, self).__setattr__(name, value)
             self._recompute_captures()
-            return super(TracedModuleBase, self).__setattr__(name, value)
+            return result
         raise RuntimeError("Only parameters and buffers of compiled modules can be re-assigned.")
 
     def __delattr__(self, name):
@@ -560,7 +561,6 @@ class TracedModule(TracedModuleBase):
 
         self._executor = executor
         self._recompute_captures()
-
         self._freeze()
 
     def __call__(self, *args):
