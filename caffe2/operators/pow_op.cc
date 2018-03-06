@@ -100,6 +100,7 @@ OPERATOR_SCHEMA(Pow)
     .NumOutputs(1)
     .Arg("exponent", "The exponent of the power function.")
     .AllowInplace({{0, 0}, {1, 0}})
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 Pow takes input data (Tensor<T>) and an argument exponent, which can be a
 scalar or another tensor. It produces one output data (Tensor<T>), where
