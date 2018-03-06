@@ -22,6 +22,11 @@ CMAKE_ARGS=()
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$BUILD_ROOT")
 CMAKE_ARGS+=("-Dprotobuf_BUILD_TESTS=OFF")
 
+# If Ninja is installed, prefer it to Make
+if [ -x "$(command -v ninja)" ]; then
+  CMAKE_ARGS+=("-GNinja")
+fi
+
 while true; do
     case "$1" in
         --other-flags)
@@ -45,7 +50,7 @@ fi
 cmake "$CAFFE2_ROOT/third_party/protobuf/cmake" ${CMAKE_ARGS[@]}
 
 if [ "$(uname)" == 'Darwin' ]; then
-  make "-j$(sysctl -n hw.ncpu)" install
+  cmake --build . -- "-j$(sysctl -n hw.ncpu)" install
 else
-  make "-j$(nproc)" install
+  cmake --build . -- "-j$(nproc)" install
 fi
