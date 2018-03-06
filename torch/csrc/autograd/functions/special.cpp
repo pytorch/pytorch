@@ -1,6 +1,3 @@
-#ifndef NO_PYTHON
-#include <Python.h>
-#endif
 #include "torch/csrc/autograd/functions/special.h"
 
 #include "torch/csrc/assertions.h"
