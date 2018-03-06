@@ -317,7 +317,7 @@
   }
 
 
-#define TH_TENSOR_APPLY_REDUCTION_OMP(TYPE, TENSOR, OPERATION, CODE) \
+#define TH_TENSOR_APPLY_REDUCTION_OMP(TYPE, TENSOR, OPERATION, CODE, OMP_THRESHOLD) \
 {\
   TYPE *rp = TENSOR->storage->data+TENSOR->storageOffset;                   \
   int TENSOR##Contg = THTensor_(isContiguous)(TENSOR);                      \
@@ -325,7 +325,7 @@
   ptrdiff_t iter = 0;                                                         \
   if(TENSOR##Contg){                                                         \
     TYPE *TENSOR##_data = NULL;         \
-    PRAGMA( omp parallel for if (TENSOR##Size > TH_OMP_OVERHEAD_THRESHOLD_OMP) private(TENSOR##_data,  iter) reduction(OPERATION) ) \
+    PRAGMA( omp parallel for if (TENSOR##Size > OMP_THRESHOLD * 10) private(TENSOR##_data,  iter) reduction(OPERATION) ) \
     for (iter = 0; iter < TENSOR##Size; iter++) { \
       TENSOR##_data = rp+iter;                    \
       CODE                                         \
@@ -334,7 +334,7 @@
     int TH_TENSOR_APPLY_hasFinished = 0;           \
     int64_t TH_TENSOR_dim_index = 0;               \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE, TENSOR, -1, 1);\
-    PRAGMA(omp parallel if (TENSOR##Size > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(TENSOR##_sizes, TENSOR##_strides, TENSOR##_dim, TENSOR##_stride, TENSOR##_size, TENSOR##_i) reduction(OPERATION))\
+    PRAGMA(omp parallel if (TENSOR##Size > OMP_THRESHOLD) firstprivate(TENSOR##_sizes, TENSOR##_strides, TENSOR##_dim, TENSOR##_stride, TENSOR##_size, TENSOR##_i) reduction(OPERATION))\
     {\
       size_t num_threads = omp_get_num_threads();\
       size_t tid = omp_get_thread_num();\
@@ -362,7 +362,7 @@
   }\
 }
 
-#define TH_TENSOR_APPLY2_OMP(SIZE, CONTIG1, CONTIG2, TYPE1, TENSOR1, TYPE2, TENSOR2, CODE) \
+#define TH_TENSOR_APPLY2_OMP(SIZE, CONTIG1, CONTIG2, TYPE1, TENSOR1, TYPE2, TENSOR2, CODE, OMP_THRESHOLD) \
 {                                                                                              \
   /* for advanced searching index*/                                                            \
   TYPE1 *rp = TENSOR1->storage->data+TENSOR1->storageOffset;                                    \
@@ -371,7 +371,7 @@
     ptrdiff_t iter = 0;                                                                        \
     if(tp != rp) {                                                                             \
       PRAGMA(ivdep) \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp)) \
+      PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) firstprivate(rp, tp)) \
       for (iter = 0; iter < SIZE; iter++) {                             \
         TYPE2 *TENSOR2##_data = tp+iter;                                \
         TYPE1 *TENSOR1##_data = rp+iter;                                \
@@ -379,7 +379,7 @@
       }\
     } else {\
       PRAGMA(simd) \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(rp, tp) )  \
+      PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) firstprivate(rp, tp) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE2* TENSOR2##_data = tp+iter;\
         TYPE1* TENSOR1##_data = rp+iter;\
@@ -399,7 +399,7 @@
     /*step 1*/                           \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
-    PRAGMA(omp parallel if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(TENSOR2##_sizes, TENSOR2##_strides, TENSOR2##_dim, TENSOR2##_stride, TENSOR2##_size, TENSOR2##_i, TENSOR1##_sizes, TENSOR1##_strides, TENSOR1##_dim, TENSOR1##_stride, TENSOR1##_size, TENSOR1##_i)) \
+    PRAGMA(omp parallel if (SIZE > OMP_THRESHOLD) firstprivate(TENSOR2##_sizes, TENSOR2##_strides, TENSOR2##_dim, TENSOR2##_stride, TENSOR2##_size, TENSOR2##_i, TENSOR1##_sizes, TENSOR1##_strides, TENSOR1##_dim, TENSOR1##_stride, TENSOR1##_size, TENSOR1##_i)) \
     {                                   \
       /*step 2*/                                                                 \
       size_t num_threads = omp_get_num_threads();                                                        \
@@ -439,7 +439,7 @@
   }\
 }
 
-#define TH_TENSOR_APPLY3_OMP(SIZE, CONTIG1, CONTIG2, CONTIG3, TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE) \
+#define TH_TENSOR_APPLY3_OMP(SIZE, CONTIG1, CONTIG2, CONTIG3, TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, CODE, OMP_THRESHOLD) \
 {                                                                             \
   /* for adveanced searching index*/                                                                    \
   TYPE1 *rp = TENSOR1->storage->data+TENSOR1->storageOffset;                                             \
@@ -449,7 +449,7 @@
     ptrdiff_t iter = 0;\
     if (rp != tp) { \
       PRAGMA(ivdep) \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
+      PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
         TYPE2 *TENSOR2##_data = tp+iter; \
@@ -458,7 +458,7 @@
       } \
     } else {\
       PRAGMA(simd) \
-      PRAGMA( omp parallel for if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) )  \
+      PRAGMA( omp parallel for if (SIZE > OMP_THRESHOLD * 10) )  \
       for (iter = 0; iter < SIZE; iter++) {\
         TYPE1 *TENSOR1##_data = rp+iter;\
         TYPE2 *TENSOR2##_data = tp+iter; \
@@ -472,7 +472,7 @@
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE1, TENSOR1, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, -1, 1) \
     __TH_TENSOR_APPLYX_PREAMBLE(TYPE3, TENSOR3, -1, 1) \
-    PRAGMA(omp parallel if (SIZE > TH_OMP_OVERHEAD_THRESHOLD_OMP) firstprivate(TENSOR1##_sizes, TENSOR1##_strides, TENSOR1##_dim, TENSOR1##_stride, TENSOR1##_size, TENSOR1##_i, TENSOR2##_sizes, TENSOR2##_strides, TENSOR2##_dim, TENSOR2##_stride, TENSOR2##_size, TENSOR2##_i, TENSOR3##_sizes, TENSOR3##_strides, TENSOR3##_dim, TENSOR3##_stride, TENSOR3##_size, TENSOR3##_i))\
+    PRAGMA(omp parallel if (SIZE > OMP_THRESHOLD) firstprivate(TENSOR1##_sizes, TENSOR1##_strides, TENSOR1##_dim, TENSOR1##_stride, TENSOR1##_size, TENSOR1##_i, TENSOR2##_sizes, TENSOR2##_strides, TENSOR2##_dim, TENSOR2##_stride, TENSOR2##_size, TENSOR2##_i, TENSOR3##_sizes, TENSOR3##_strides, TENSOR3##_dim, TENSOR3##_stride, TENSOR3##_size, TENSOR3##_i))\
     {\
       size_t num_threads = omp_get_num_threads();\
       size_t tid = omp_get_thread_num();\
