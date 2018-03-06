@@ -13,7 +13,7 @@ namespace script {
 //
 // A few notes on types and their aliases:
 // - List<T> is really a Tree with kind TK_LIST and elements as subtrees
-// - Maybe<T> is really either a Tree with kind TK_OPTION or T
+// - Maybe<T> is really either a Tree with kind TK_NOTHING or T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING),
 //                      Number (TK_NUMBER) and Bool (TK_BOOL)
 //
@@ -21,12 +21,13 @@ namespace script {
 // Param = Param(Type type, Ident name)                                 TK_PARAM
 //
 // -- TODO: change returns to be a list of expressions
-// Def   = Def(Ident name, List<Param> params, List<Param> returns, List<Stmt> body) TK_DEF
+// Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
+//       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(Expr expr)                                          TK_EXPR_STMT
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
@@ -114,6 +115,7 @@ struct List : public TreeView {
   struct Iterator {
     Iterator(TreeList::const_iterator it) : it(it) {}
     bool operator!=(const Iterator& rhs) const { return it != rhs.it; }
+    bool operator==(const Iterator& rhs) const { return it == rhs.it; }
     T operator*() const { return T(*it); }
     void operator++() { ++it; }
     void operator--() { --it; }
@@ -158,7 +160,7 @@ struct List : public TreeView {
 template <typename T>
 struct Maybe : public TreeView {
   explicit Maybe(const TreeRef& tree) : TreeView(tree) {
-    if (tree->kind() != TK_OPTION) {
+    if (tree->kind() != TK_NOTHING) {
       std::cout << kindToString(tree->kind()) << std::endl;
       T{tree}; // invoke the constructor to check the type
     }
@@ -209,6 +211,7 @@ struct Stmt : public TreeView {
       case TK_WHILE:
       case TK_GLOBAL:
       case TK_ASSIGN:
+      case TK_RETURN:
       case TK_EXPR_STMT:
         return;
       default:
@@ -330,20 +333,16 @@ struct Def : public TreeView {
   List<Param> params() const {
     return List<Param>(subtree(1));
   }
-  List<Param> returns() const {
-    return List<Param>(subtree(2));
-  }
   List<Stmt> statements() const {
-    return List<Stmt>(subtree(3));
+    return List<Stmt>(subtree(2));
   }
   static Def create(
       const SourceRange& range,
       const Ident& name,
       const List<Param>& params,
-      const List<Param>& returns,
       const List<Stmt>& stmts) {
     return Def(Compound::create(
-        TK_DEF, range, {name, params, returns, stmts}));
+        TK_DEF, range, {name, params, stmts}));
   }
 };
 
@@ -435,6 +434,18 @@ struct Assign : public Stmt {
   }
   Expr rhs() const {
     return Expr(subtree(2));
+  }
+};
+
+struct Return : public Stmt {
+  explicit Return(const TreeRef& tree) : Stmt(tree) {
+    tree_->match(TK_RETURN);
+  }
+  List<Expr> values() const {
+    return List<Expr>(subtree(0));
+  }
+  static Return create(const SourceRange& range, const List<Expr>& values) {
+    return Return(Compound::create(TK_RETURN, range, {values}));
   }
 };
 
