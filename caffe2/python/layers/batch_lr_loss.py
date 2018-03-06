@@ -33,7 +33,7 @@ import numpy as np
 class BatchLRLoss(ModelLayer):
 
     def __init__(self, model, input_record, name='batch_lr_loss',
-                 average_loss=True, **kwargs):
+                 average_loss=True, jsd_weight=0.0, **kwargs):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
 
         self.average_loss = average_loss
@@ -45,6 +45,17 @@ class BatchLRLoss(ModelLayer):
             ),
             input_record
         ))
+
+        assert jsd_weight >= 0 and jsd_weight <= 1
+        self.jsd_weight = jsd_weight
+        if self.jsd_weight > 0:
+            assert 'prediction' in input_record
+            self.jsd_weight_const = model.add_global_constant(
+                'jsd_weight', self.jsd_weight
+            )
+            self.xent_weight_const = model.add_global_constant(
+                'xent_weight', 1 - self.jsd_weight
+            )
 
         self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
@@ -69,6 +80,19 @@ class BatchLRLoss(ModelLayer):
             [self.input_record.logit(), label],
             net.NextScopedBlob('cross_entropy'),
         )
+        # fuse with JSD
+        if self.jsd_weight > 0:
+            jsd = net.BernoulliJSD(
+                [self.input_record.prediction(), label],
+                net.NextScopedBlob('jsd'),
+            )
+            loss = net.WeightedSum(
+                [xent, self.xent_weight_const, jsd, self.jsd_weight_const],
+                net.NextScopedBlob('loss'),
+            )
+        else:
+            loss = xent
+
 
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()
@@ -82,12 +106,12 @@ class BatchLRLoss(ModelLayer):
                 [weight_blob],
                 [net.NextScopedBlob('weight_stop_gradient')],
             )
-            xent = net.Mul(
-                [xent, weight_blob],
+            loss = net.Mul(
+                [loss, weight_blob],
                 net.NextScopedBlob('weighted_cross_entropy'),
             )
 
         if self.average_loss:
-            net.AveragedLoss(xent, self.output_schema.field_blobs())
+            net.AveragedLoss(loss, self.output_schema.field_blobs())
         else:
-            net.ReduceFrontSum(xent, self.output_schema.field_blobs())
+            net.ReduceFrontSum(loss, self.output_schema.field_blobs())
