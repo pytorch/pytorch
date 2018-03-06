@@ -1,7 +1,7 @@
 from .module import Module
 from .linear import Linear, Bilinear
 from .conv import Conv1d, Conv2d, Conv3d, \
-    ConvTranspose1d, ConvTranspose2d, Conv2dBackward, ConvTranspose3d
+    ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
     Softmax, Softmax2d, LogSoftmax, ELU, SELU, Hardshrink, LeakyReLU, LogSigmoid, \
     Softplus, Softshrink, PReLU, Softsign, Softmin, Tanhshrink, RReLU, GLU
@@ -28,7 +28,7 @@ from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
 
 __all__ = [
-    'Module', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'Conv2dBackward', 'ConvTranspose1d',
+    'Module', 'Linear', 'Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d',
     'ConvTranspose2d', 'ConvTranspose3d', 'Threshold', 'ReLU', 'Hardtanh', 'ReLU6',
     'Sigmoid', 'Tanh', 'Softmax', 'Softmax2d', 'LogSoftmax', 'ELU', 'SELU', 'GLU', 'Hardshrink',
     'LeakyReLU', 'LogSigmoid', 'Softplus', 'Softshrink', 'PReLU', 'Softsign', 'Softmin',
