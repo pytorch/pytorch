@@ -15,30 +15,43 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-struct VISIBILITY_HIDDEN PythonResolver : public Resolver {
-  PythonResolver(ResolutionCallback rcb) : rcb(rcb) {}
 
-  Node* resolveCall(SourceRange location, Node* n) const override {
-    AutoGIL ag;
-    py::function func;
-    func = rcb(n->kind().toString());
-    auto* py_func = func.ptr();
-    if (py_func == Py_None) {
-      throw ErrorReport(location)
-          << "Unknown function " << n->kind().toString();
-    }
+struct PythonValue : public SugaredValue {
+  PythonValue(py::object self)
+  : self(std::move(self)) {}
+
+  // call it like a function, e.g. `outputs = this(inputs)`
+  virtual std::vector<Value*> call(SourceRange loc, Graph& g, at::ArrayRef<Value*> inputs, size_t n_outputs) override {
     // Release the function object so we can wrap it in a PythonOp
-    auto fn_ptr = THPObjectPtr(func.release().ptr());
-    std::string cconv(n->inputs().size(), 't');
-    Node* new_node = n->owningGraph()->createPythonOp(
-        std::move(fn_ptr), cconv, false, {}, {}, false);
-    return new_node;
+    py::object func = self;
+    std::string cconv(inputs.size(), 't');
+    Node* new_node = g.insertNode(g.createPythonOp(
+      THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+    for(auto i : inputs)
+      new_node->addInput(i);
+    std::vector<Value*> outputs;
+    for(size_t i = 0; i < n_outputs; ++i)
+      outputs.push_back(new_node->addOutput());
+    return outputs;
   }
 
-  ResolutionCallback rcb;
+  virtual std::string kind() const override {
+    return py::repr(self);
+  }
+private:
+  py::object self;
 };
 
-
+Resolver pythonResolver(ResolutionCallback rcb) {
+  return [=](const std::string& name) -> std::shared_ptr<SugaredValue> {
+      AutoGIL ag;
+      py::object obj = rcb(name);
+      if(obj.is(py::none())) {
+        return nullptr;
+      }
+      return std::make_shared<PythonValue>(obj);
+  };
+}
 
 // TODO: dedup with other init
 
@@ -78,7 +91,7 @@ void initJitScriptBindings(PyObject* module) {
           [](Module& self,
              const std::string& script,
              ResolutionCallback rcb) {
-            return defineMethodsInModule(self, script, PythonResolver(rcb));
+            return defineMethodsInModule(self, script, pythonResolver(rcb));
           })
       .def("get_method",
       [](Module& self, const std::string& name) {
@@ -96,7 +109,7 @@ void initJitScriptBindings(PyObject* module) {
     });
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
-    return defineFunction(def, PythonResolver(rcb));
+    return defineFunction(def, pythonResolver(rcb));
   });
 }
 

@@ -11,13 +11,33 @@ namespace torch {
 namespace jit {
 namespace script {
 
+using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 using FunctionTable = std::unordered_map<std::string, std::shared_ptr<Graph>>;
-using ValueTable = std::unordered_map<std::string, Value*>;
+using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap =
     std::unordered_map<std::string, std::pair<double, std::string>>;
 using ListAttributeMap = std::unordered_map<
     std::string,
     std::pair<const std::vector<double>, std::string>>;
+
+// most things in the environment are just simple value types
+// and are represented using this subclass
+struct SimpleValue : public SugaredValue {
+  SimpleValue(Value * value)
+  : value(value) {}
+  virtual std::string kind() const override {
+    return "value";
+  }
+  virtual Value * asValue(SourceRange range, Graph & g) override {
+    return value;
+  }
+  static SugaredValuePtr create(Value* v) {
+    return std::make_shared<SimpleValue>(v);
+  }
+private:
+
+  Value* value;
+};
 
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
@@ -51,19 +71,18 @@ struct Environment {
       : b(b), next(next) {}
 
   std::vector<std::string> captured_inputs;
-  ValueTable value_table;
   Block* b;
 
   std::shared_ptr<Environment> next;
 
-  Value* findInThisFrame(const std::string& name) {
+  SugaredValuePtr findInThisFrame(const std::string& name) {
     if (value_table.count(name)) {
       return value_table.at(name);
     }
     return nullptr;
   }
 
-  Value* findInParentFrame(const std::string& name) {
+  SugaredValuePtr findInParentFrame(const std::string& name) {
     for (auto runner = next; runner; runner = runner->next) {
       if (runner->value_table.count(name)) {
         return runner->value_table.at(name);
@@ -72,17 +91,22 @@ struct Environment {
     return nullptr;
   }
 
-  Value* createCapturedInput(const std::string& name) {
+  Value* getValueInThisFrame(const SourceRange& loc, const std::string& name) {
+    return value_table.at(name)->asValue(loc, *b->owningGraph());
+  }
+
+  SugaredValuePtr createCapturedInput(const std::string& name) {
     // Create the input
     Value* new_input = b->addInput();
 
     // Associate this name with this value
-    value_table[name] = new_input;
+    auto sv = SimpleValue::create(new_input);
+    value_table[name] = sv;
 
     // List as a positional input
     captured_inputs.push_back(name);
 
-    return new_input;
+    return sv;
   }
 
   Symbol getBlockOwningKind() {
@@ -97,15 +121,20 @@ struct Environment {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
         getBlockOwningKind() == kLoop)
       createCapturedInput(name);
-    value_table[name] = value;
+    value_table[name] = SimpleValue::create(value);
   }
+  // note: no setSugaredVar because we expect non-first-class values
+  // to be read only
 
+  SugaredValuePtr getSugaredVar(const Ident& ident) {
+    return getSugaredVar(ident.name(), ident);
+  }
   Value* getVar(const Ident& ident) {
-    return getVar(ident.name(), ident);
+    return getSugaredVar(ident)->asValue(ident.range(), *b->owningGraph());
   }
 
-  Value* getVar(const std::string& ident, const TreeView& tv) {
-    Value* retval = findInThisFrame(ident);
+  SugaredValuePtr getSugaredVar(const std::string& ident, const TreeView& tv) {
+    auto retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
         getBlockOwningKind() == kLoop)
@@ -114,18 +143,21 @@ struct Environment {
     if (!retval) {
       throw ErrorReport(tv) << "undefined value " << ident;
     }
-
     return retval;
+  }
+
+  Value* getVar(const std::string& ident, const TreeView& tv) {
+    return getSugaredVar(ident, tv)->asValue(tv.range(), *b->owningGraph());
   }
 
   // Given that after emitting statements in a block, we've added block inputs
   // for all value references and assignments, delete inputs for which there was
   // no assignment, only references.
-  void deleteExtraInputs(size_t skip_num = 0) {
+  void deleteExtraInputs(const SourceRange& loc, size_t skip_num = 0) {
     std::vector<size_t> inputs_to_delete;
     int i = skip_num;
     for (const auto& x : captured_inputs) {
-      if (b->inputs()[i] == value_table[x]) {
+      if (b->inputs()[i] == getValueInThisFrame(loc, x)) {
         inputs_to_delete.push_back(i);
       }
       i++;
@@ -134,8 +166,8 @@ struct Environment {
     for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
          ++ritr) {
       auto name = captured_inputs[*ritr - skip_num];
-      Value* v = value_table[name];
-      Value* orig = findInParentFrame(name);
+      Value* v = getValueInThisFrame(loc, name);
+      Value* orig = findInParentFrame(name)->asValue(loc, *b->owningGraph());
       // Replace all matching node inputs with original value
       // from an enclosing scope
       v->replaceAllUsesWith(orig);
@@ -145,6 +177,15 @@ struct Environment {
       captured_inputs.erase(captured_inputs.begin() + *ritr - skip_num);
     }
   }
+  std::vector<std::string> definedVariables() {
+    std::vector<std::string> result;
+    for(auto & kv : value_table) {
+      result.push_back(kv.first);
+    }
+    return result;
+  }
+private:
+  ValueTable value_table;
 };
 
 struct to_ir {
@@ -232,9 +273,9 @@ private:
     WithInsertPoint guard(b);
     emitStatements(branch);
 
-    for (const auto& kv : environment_stack->value_table) {
-      if (environment_stack->findInParentFrame(kv.first)) {
-        mutated_parent_values->insert(kv.first);
+    for (const auto & n : environment_stack->definedVariables()) {
+      if (environment_stack->findInParentFrame(n)) {
+        mutated_parent_values->insert(n);
       }
     }
     auto save_env = environment_stack;
@@ -350,12 +391,12 @@ private:
 
       // Remove inputs for values that did not mutate within the
       // block
-      environment_stack->deleteExtraInputs(skip_inputs_num);
+      environment_stack->deleteExtraInputs(stmt.range(), skip_inputs_num);
 
       // Add block outputs
       auto curr_frame = environment_stack;
       for (const auto& x : curr_frame->captured_inputs) {
-        body_block->registerOutput(curr_frame->value_table[x]);
+        body_block->registerOutput(curr_frame->getValueInThisFrame(stmt.range(), x));
       }
 
       auto next_frame = curr_frame->next;
@@ -511,69 +552,61 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
+        //TODO: apply is not an identifier....
         if (function_table.count(apply.name().name()) > 0) {
           return emitFunctionCall(apply, output_size);
         } else if (apply.name().name() == "print") {
           expectOutputs(tree, output_size, 0);
           if (!apply.attributes().empty())
             throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
-          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0)->outputs();
-        } else {
-          const auto& inputs = getValues(apply.inputs());
-          NodeKind kind{apply.name().name()};
-
-          auto n =
-              emitNode(kind, apply.range(), inputs, output_size);
-
-          for (const auto& attr : apply.attributes()) {
-            const auto& name = attr.name().name();
-            const TreeRef& value = attr.value();
-            // TODO: handle non-float attributes
-            switch (value->kind()) {
-              case TK_CONST: {
-                auto v = value.get()->tree(0)->doubleValue();
-                const auto& type = value.get()->tree(1)->stringValue();
-                if(type == "f")
-                  n->f_(Symbol(name), v);
-                else
-                  n->i_(Symbol(name), v);
-              } break;
-              case TK_LIST: {
-                std::vector<double> vs{};
-                for (const auto& tree : value.get()->trees()) {
-                  vs.push_back(tree->tree(0)->doubleValue());
-                }
-                const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
-                if(type == "f") {
-                  n->fs_(Symbol(name), std::move(vs));
-                } else {
-                  n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
-                }
-              } break;
-            default:
-                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value->kind();
-                break;
-            }
-          }
-
-          std::vector<Value*> outputs = n->outputs();
-          if (!hasTensorOp(n)) {
-            // This will either throw or return a new node. We take
-            // responsibility for inserting the node with inputs and outputs and
-            // destroying the old node
-            auto new_node = resolver.resolveCall(tree->range(), n);
-            new_node->insertBefore(n);
-            for (const auto& i : n->inputs()) {
-              new_node->addInput(i);
-            }
-            for (size_t i = 0; i < n->outputs().size(); ++i) {
-              new_node->addOutput();
-            }
-            n->destroy();
-            n = new_node;
-          }
-          return n->outputs();
+          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0 )->outputs();
+        } else if(auto fn_value = resolver(apply.name().name())) {
+          return fn_value->call(apply.range(), *graph, getValues(apply.inputs()), output_size);
         }
+
+        // we presume this is a call to a built-in function, and construct it
+        const auto& inputs = getValues(apply.inputs());
+        NodeKind kind{apply.name().name()};
+
+        auto n =
+            emitNode(kind, apply.range(), inputs, output_size);
+
+        for (const auto& attr : apply.attributes()) {
+          const auto& name = attr.name().name();
+          const Expr& value = attr.value();
+          // TODO: handle non-float attributes
+          switch (value.kind()) {
+            case TK_CONST: {
+              auto v = value.get()->tree(0)->doubleValue();
+              const auto& type = value.get()->tree(1)->stringValue();
+              if(type == "f")
+                n->f_(Symbol(name), v);
+              else
+                n->i_(Symbol(name), v);
+            } break;
+            case TK_LIST: {
+              std::vector<double> vs{};
+              for (const auto& tree : value.get()->trees()) {
+                vs.push_back(tree->tree(0)->doubleValue());
+              }
+              const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
+              if(type == "f") {
+                n->fs_(Symbol(name), std::move(vs));
+              } else {
+                n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
+              }
+            } break;
+          default:
+              throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+              break;
+          }
+        }
+        std::vector<Value*> outputs = n->outputs();
+        if (!hasTensorOp(n)) {
+          throw ErrorReport(apply.name())
+            << "Unknown function " << n->kind().toString();
+        }
+        return n->outputs();
       } break;
       case TK_CAST: {
         expectOutputs(tree, output_size, 1);
