@@ -192,6 +192,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_height,
           &dilation_width,
           &mode,
+
           &dataType));
 
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
@@ -287,8 +288,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           stride_w(),
           1,
           1,
-          CUDNN_CROSS_CORRELATION,
-          compute_type_));
+          CUDNN_CROSS_CORRELATION));
     } else {
       vector<int> ones(dilation_.size(), 1);
       CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
@@ -324,8 +324,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &stride_width,
           &dilation_height,
           &dilation_width,
-          &mode,
-          &dataType));
+          &mode
+#if CUDNN_VERSION_MIN(6, 0, 0)
+          , &dataType
+#endif
+      ));
 
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc,
@@ -335,8 +338,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           stride_width,
           dilation_height,
           dilation_width,
-          mode,
-          math));
+          mode
+#if CUDNN_VERSION_MIN(6, 0, 0)
+          , math
+#endif
+      ));
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
