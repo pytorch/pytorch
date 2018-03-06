@@ -1477,6 +1477,9 @@ void CopyMatrix<CPUContext>(
     const int ldb,
     CPUContext* /*context*/,
     TypeMeta::TypedCopy copy) {
+  if (A == nullptr) {
+    return;
+  }
   if (lda == N && ldb == N) {
     // can coalese to a single memcpy of size M * N
     if (copy) {
