@@ -290,6 +290,14 @@ def load(name,
 
     Returns:
         The loaded PyTorch extension as a Python module.
+
+    Example:
+        >>> from torch.utils.cpp_extension import load
+        >>> module = load(
+                name='extension',
+                sources=['extension.cpp', 'extension_kernel.cu'],
+                extra_cflags=['-O2'],
+                verbose=True)
     '''
 
     verify_ninja_availability()
