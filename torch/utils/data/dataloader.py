@@ -319,7 +319,6 @@ class DataLoaderIter(object):
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-
                 # if worker_manager_thread is waiting to put, make place for it
                 try:
                     while not self.data_queue.empty():
