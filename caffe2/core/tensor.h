@@ -53,7 +53,7 @@ inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
 /**
  * Return product of all dimensions starting from K
  */
-inline TIndex size_from_dim_(int k, vector<TIndex> dims) {
+inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
   TIndex r = 1;
   for (int i = k; i < dims.size(); ++i) {
     r *= dims[i];
@@ -62,7 +62,7 @@ inline TIndex size_from_dim_(int k, vector<TIndex> dims) {
 }
 
 // Product of all dims up to
-inline TIndex size_to_dim_(int k, vector<TIndex> dims) {
+inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
   CAFFE_ENFORCE(k <= dims.size());
   TIndex r = 1;
   for (int i = 0; i < k; ++i) {
@@ -72,7 +72,7 @@ inline TIndex size_to_dim_(int k, vector<TIndex> dims) {
 }
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
-inline TIndex size_between_dim_(int k, int l, vector<TIndex> dims) {
+inline TIndex size_between_dim_(int k, int l, const vector<TIndex>& dims) {
   CAFFE_ENFORCE(l < dims.size());
   TIndex r = 1;
   if (k < l) {
