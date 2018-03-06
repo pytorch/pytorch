@@ -82,7 +82,7 @@ def NumpyArrayToCaffe2Tensor(arr, name=None):
         tensor.double_data.extend(list(arr.flatten().astype(np.float64)))
     elif arr.dtype == np.int or arr.dtype == np.int32:
         tensor.data_type = caffe2_pb2.TensorProto.INT32
-        tensor.int32_data.extend(list(arr.flatten().astype(np.int)))
+        tensor.int32_data.extend(arr.flatten().astype(np.int).tolist())
     elif arr.dtype == np.int16:
         tensor.data_type = caffe2_pb2.TensorProto.INT16
         tensor.int32_data.extend(list(arr.flatten().astype(np.int16)))  # np.int16=>pb.INT16 use int32_data
