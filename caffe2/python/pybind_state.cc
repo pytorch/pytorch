@@ -22,6 +22,7 @@
 #include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
 #include "caffe2/core/db.h"
+#include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/predictor.h"
 #include "caffe2/core/stats.h"
@@ -1222,6 +1223,17 @@ void addGlobalMethods(py::module& m) {
       stats_map[stat.key] = stat.value;
     }
     return stats_map;
+  });
+  m.def("is_numa_enabled", []() { return IsNUMAEnabled(); });
+  m.def("get_num_numa_nodes", []() { return GetNumNUMANodes(); });
+  m.def("get_blob_numa_node", [](const std::string& blob_name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* blob = gWorkspace->GetBlob(blob_name);
+    CAFFE_ENFORCE(blob);
+    const TensorCPU& tensor = blob->Get<TensorCPU>();
+    const void* raw_data = tensor.raw_data();
+    CAFFE_ENFORCE(raw_data);
+    return GetNUMANode(raw_data);
   });
 
 #define CAFFE2_CPU_FEATURE_SUPPORT(feature) \

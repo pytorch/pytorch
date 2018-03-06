@@ -136,6 +136,8 @@ message DeviceOption {
   // [general] What node this op should execute on.
   // Used for net transformation purposes. Must be empty at execution time.
   optional string node_name = 4;
+  // [CPU and Linux specific] NUMA node id
+  optional int32 numa_node_id = 5 [default = -1];
 }
 
 // Operator Definition.
