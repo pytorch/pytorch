@@ -135,10 +135,15 @@ class SparseLookup(ModelLayer):
     def get_fp16_compatible_parameters(self):
         return [self.w]
 
-    def get_8bits_compatible_parameters(self, fused=True):
+    def support_8bit(self):
         # Rowwise quantization makes sense only if shape it's 2D matrix with
         # second dimension >= 8
         if len(self.shape) != 2 or self.shape[1] < 8:
+            return False
+        return True
+
+    def get_8bits_compatible_parameters(self, fused=True):
+        if not self.support_8bit():
             return []
         if fused:
             RowwiseQuantized8BitsWeight = collections.namedtuple(
@@ -330,6 +335,12 @@ class SparseLookup(ModelLayer):
         version = get_sparse_lookup_predictor_version(
             **cur_scope.get(get_sparse_lookup_predictor_version.__name__,
                             {'version': 'fp32'}))
+
+        # TODO(amalevich): Layer should not be responsible for decision about
+        # quantization.
+        if not self.support_8bit() and version in {'uint8rowwise',
+                                                   'fused_uint8rowwise'}:
+            version = 'fp32'
 
         if _is_id_list(self.input_record):
             self._add_ops_id_list(net, version=version)
