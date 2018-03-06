@@ -67,13 +67,13 @@ struct CmpOpCUDA<Comparator, half> {
   }
 };
 
-template<template<typename T> class Comparator>
+template<template<typename T> class Comparator, typename scalar>
 struct CmpOpFloatingCUDA {
   static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
     auto other_val = at::convert<half>(other.to<double>());
-    at::cuda::CUDA_tensor_apply2<uint8_t, half>(result, self.toType(at::kHalf),
-        [other_val] __device__ (uint8_t& result_val, const half& self_val) {
-          result_val = Comparator<half>()(self_val, other_val);
+    at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(result, self,
+        [other_val] __device__ (uint8_t& result_val, const scalar& self_val) {
+          result_val = Comparator<half>()(ScalarConvert<scalar, half>::to(self_val), other_val);
       }
     );
   }
@@ -83,7 +83,9 @@ template<template<typename T> class Comparator>
 at::Tensor& cmp_out_cuda(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
   result.resize_(self.sizes());
   if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    CmpOpFloatingCUDA<Comparator>::apply(result, self, other);
+    AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
+      CmpOpFloatingCUDA<Comparator, scalar_t>::apply(result, self, other);
+    });
   } else {
     AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
       CmpOpCUDA<Comparator, scalar_t>::apply(result, self, other);
@@ -102,14 +104,14 @@ at::Tensor& cmp_out_cuda(at::Tensor& result, const at::Tensor& self, const at::T
   std::tie(b_self, b_other) = at::expand_outplace(self, other, op_name);
   result.resize_(b_self.sizes());
   AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
-      CmpOpTensorCUDA<Comparator, scalar_t>::apply(result, b_self, b_other);
+    CmpOpTensorCUDA<Comparator, scalar_t>::apply(result, b_self, b_other);
   });
   return result;
 }
 
 template<template<typename T> class Comparator>
 at::Tensor cmp_cuda(const at::Tensor& self, at::Scalar other, const char* op_name) {
-  at::Tensor result = self.type().toScalarType(at::kByte).tensor(self.sizes());
+  at::Tensor result = self.type().toScalarType(at::kByte).tensor();
   return cmp_out_cuda<Comparator>(result, self, other, op_name);
 }
 
@@ -118,7 +120,8 @@ at::Tensor cmp_cuda(const at::Tensor& self, const at::Tensor& other, const char*
   if (other.dim() == 0) {
     return cmp_cuda<Comparator>(self, other.pImpl->localScalar(), op_name);
   }
-  at::Tensor result = self.type().toScalarType(at::kByte).tensor(self.sizes());
+
+  at::Tensor result = self.type().toScalarType(at::kByte).tensor();
   return cmp_out_cuda<Comparator>(result, self, other, op_name);
 }
 } // namespace
