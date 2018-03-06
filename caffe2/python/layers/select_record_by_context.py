@@ -38,12 +38,14 @@ class SelectRecordByContext(ModelLayer):
     """
 
     def __init__(self, model, input_record, name='select_record_by_context',
-                 check_field_metas=True, **kwargs):
+                 check_field_metas=True, use_copy=False, **kwargs):
         super(SelectRecordByContext, self).__init__(model, name, input_record,
                                                     **kwargs)
 
         assert isinstance(input_record, schema.Struct)
         assert len(input_record) > 1
+
+        self.use_copy = use_copy
 
         ref_record = input_record[0]
         for record in input_record:
@@ -61,7 +63,10 @@ class SelectRecordByContext(ModelLayer):
         for in_blob, out_blob in zip(
                 record.field_blobs(), self.output_schema.field_blobs()
         ):
-            net.Alias(in_blob, out_blob)
+            if self.use_copy:
+                net.Copy(in_blob, out_blob)
+            else:
+                net.Alias(in_blob, out_blob)
 
     def add_ops(self, net):
         self._set_output_blobs(net, InstantiationContext.PREDICTION)
