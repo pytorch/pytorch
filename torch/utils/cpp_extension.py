@@ -160,11 +160,19 @@ def CppExtension(name, sources, *args, **kwargs):
     All arguments are forwarded to the `setuptools.Extension` constructor.
 
     Example:
-        >>> from torch.utils.cpp_extension import CppExtension
-        >>> CppExtension(
+        >>> from setuptools import setup
+        >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
+        >>> setup(
                 name='extension',
-                sources=['extension.cpp'],
-                extra_compile_args=['-g'])
+                ext_modules=[
+                    CppExtension(
+                        name='extension',
+                        sources=['extension.cpp'],
+                        extra_compile_args=['-g'])),
+                ],
+                cmdclass={
+                    'build_ext': BuildExtension
+                })
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -184,12 +192,20 @@ def CUDAExtension(name, sources, *args, **kwargs):
     All arguments are forwarded to the `setuptools.Extension` constructor.
 
     Example:
-        >>> from torch.utils.cpp_extension import CUDAExtension
-        >>> CUDAExtension(
+        >>> from setuptools import setup
+        >>> from torch.utils.cpp_extension import BuildExtension, CppExtension
+        >>> setup(
                 name='cuda_extension',
-                sources=['extension.cpp', 'extension_kernel.cu'],
-                extra_compile_args={'cxx': ['-g'],
-                                    'nvcc': ['-O2']})
+                ext_modules=[
+                    CUDAExtension(
+                            name='cuda_extension',
+                            sources=['extension.cpp', 'extension_kernel.cu'],
+                            extra_compile_args={'cxx': ['-g'],
+                                                'nvcc': ['-O2']})
+                ],
+                cmdclass={
+                    'build_ext': BuildExtension
+                })
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs.append(_join_cuda_home('lib64'))
