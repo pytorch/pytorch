@@ -149,7 +149,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(X=hu.tensor(elements=st.floats(0.02,1)), **hu.gcs)
+    @given(X=hu.tensor(elements=st.floats(0.05,1)), **hu.gcs)
     def test_sqrt_inplace(self, X, gc, dc):
 
         def sqrt_op(X):

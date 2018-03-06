@@ -193,9 +193,10 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_width,
           &mode
 #if CUDNN_VERSION_MIN(6, 0, 0)
-          , &dataType
+          ,
+          &dataType
 #endif
-        ));
+          ));
 
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           copy,
@@ -207,9 +208,10 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           dilation_width,
           mode
 #if CUDNN_VERSION_MIN(6, 0, 0)
-          , dataType
+          ,
+          dataType
 #endif
-        ));
+          ));
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
@@ -331,9 +333,10 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_width,
           &mode
 #if CUDNN_VERSION_MIN(6, 0, 0)
-          , &dataType
+          ,
+          &dataType
 #endif
-      ));
+          ));
 
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc,
@@ -345,9 +348,10 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           dilation_width,
           mode
 #if CUDNN_VERSION_MIN(6, 0, 0)
-          , math
+          ,
+          math
 #endif
-      ));
+          ));
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;

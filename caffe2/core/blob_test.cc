@@ -549,7 +549,7 @@ TEST(TensorTest, Tensor64BitDimension) {
       LOG(WARNING) << "Out of memory issue with posix_memalign;\n";
       return;
     } else {
-      throw e; 
+      throw e;
     }
   }
   EXPECT_EQ(tensor.nbytes(), large_number * sizeof(char));

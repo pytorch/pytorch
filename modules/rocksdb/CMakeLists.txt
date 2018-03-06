@@ -1,6 +1,6 @@
 # ---[ RocksDB module
 # In addition to being a useful module itself, RocksDB is also an exemplar
-# case where show how one should built a Caffe2 module inside the Caffe2 
+# case where show how one should built a Caffe2 module inside the Caffe2
 # repository.
 #
 # This cmake file achieves two build modes:

@@ -139,4 +139,3 @@ class MeanGradientOp : public Operator<Context> {
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_MEAN_OPS_H_
-
