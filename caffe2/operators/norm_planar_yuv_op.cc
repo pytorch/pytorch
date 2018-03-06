@@ -62,6 +62,10 @@ class NormalizePlanarYUVOp : public Operator<CPUContext> {
 };
 
 REGISTER_CPU_OPERATOR(NormalizePlanarYUV, NormalizePlanarYUVOp);
-OPERATOR_SCHEMA(NormalizePlanarYUV).NumInputs(3).NumOutputs(1);
+OPERATOR_SCHEMA(NormalizePlanarYUV)
+    .NumInputs(3)
+    .NumOutputs(1)
+    .AllowInplace({{0, 0}});
+;
 } // namespace
 } // namespace caffe2
