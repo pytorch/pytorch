@@ -3666,21 +3666,6 @@
     - THIntegerTensor* LU_pivots
 ]]
 [[
-  name: randperm
-  backends:
-    - CPU
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - long n
-]]
-[[
   name: random_
   backends:
     - CPU

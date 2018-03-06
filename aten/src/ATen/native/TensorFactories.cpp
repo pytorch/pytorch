@@ -1,5 +1,8 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include "TH/THRandom.h"
+#include "ATen/CheckGenerator.h"
+#include "ATen/CPUGenerator.h"
 
 namespace at {
 namespace native {
@@ -64,6 +67,58 @@ Tensor randn_like(const Tensor& self) {
 
 Tensor randn_like(const Tensor& self, const Type& dtype) {
   return at::native::randn(dtype, self.sizes(), nullptr);
+}
+
+namespace {
+template <typename scalar_t>
+void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
+  scalar_t *r__data = result.data<scalar_t>();
+
+  result.resize_({n});
+  int64_t r__stride_0 = result.stride(0);
+
+  for(int64_t i = 0; i < n; i++) {
+    r__data[i*r__stride_0] = static_cast<scalar_t>(i);
+  }
+
+  for(int64_t i = 0; i < n - 1; i++)
+  {
+    int64_t z = THRandom_random(generator) % (n-i);
+    scalar_t sav = r__data[i*r__stride_0];
+    r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
+    r__data[(z+i)*r__stride_0] = sav;
+  }
+}
+} // namespace
+
+
+THGenerator* get_generator(at::Generator* gen) {
+  auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
+  auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
+  return gen_->generator;
+}
+
+Tensor randperm(const Type& dtype, int64_t n, Generator* generator) {
+  Tensor result = dtype.tensor(n);
+  return at::native::randperm_out(result, n, generator);
+}
+
+Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
+  if (n <= 0) {
+    std::ostringstream oss;
+    oss << "n must be strictly positive, got " << n;
+    throw std::runtime_error(oss.str());
+  }
+  if (result.type().backend() != at::kCPU) {
+    throw std::runtime_error("randperm is only implemented for CPU");
+  }
+
+  auto gen = get_generator(generator);
+  AT_DISPATCH_ALL_TYPES(result.type(), "randperm", [&]() -> void {
+    randperm_cpu<scalar_t>(result, n, gen);
+  });
+
+  return result;
 }
 
 Tensor zeros(const Type& dtype, IntList size) {

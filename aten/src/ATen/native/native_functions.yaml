@@ -303,6 +303,12 @@
 - func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 

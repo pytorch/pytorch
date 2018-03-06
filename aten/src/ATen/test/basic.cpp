@@ -61,7 +61,7 @@ static void test(Type & type) {
   if(type.backend() != kCUDA)
   {
     std::cout << "randperm:" << std::endl;
-    Tensor b = type.randperm(15);
+    Tensor b = randperm(type, 15);
     std::cout << b << std::endl;
     Tensor rv, ri;
     std::tie(rv, ri) = sort(b, 0);

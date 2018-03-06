@@ -199,6 +199,13 @@ def group_declarations_by_name(declarations, should_bind_fn):
     return groups
 
 
+def get_type_default(declaration):
+    if declaration['name'].startswith('randperm'):
+        return 'torch.int64'
+    else:
+        return 'None'
+
+
 def create_python_bindings(python_functions, has_self, is_module=False):
     """Generates Python bindings to ATen functions"""
     py_methods = []
@@ -431,10 +438,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_return = True
 
         if has_tensor_return and not has_tensor_input_arg and not has_type_dispatched:
-            if declaration['name'].startswith('randperm'):
-                default_type = 'torch.int64'
-            else:
-                default_type = 'None'
+            default_type = get_type_default(declaration)
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',
@@ -579,7 +583,7 @@ def get_python_signature(declaration, include_out):
             # this is necessary because ATen does not have default_types; in this case,
             # the type exists in the public API (at:: namespace), but not in the type interface;
             # to match the PyTorch default_type API, we set the default to None.
-            default = 'None'
+            default = get_type_default(declaration)
         if default is not None:
             param += '=' + str(default)
         return param
