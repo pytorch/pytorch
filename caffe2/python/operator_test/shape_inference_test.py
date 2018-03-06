@@ -482,6 +482,12 @@ class TestShapeInference(test_util.TestCase):
                 np.random.rand(2, 5).astype(np.float32))
             self.InferTensorRunAndCompare(model)
 
+    def testShapeInferencePow(self):
+        model = model_helper.ModelHelper(name="powtest")
+        model.Pow("x", 'y', exponent=-1.0)
+        workspace.FeedBlob('x', np.random.rand(1, 2, 3, 4).astype(np.float32))
+        self.InferTensorRunAndCompare(model)
+
     def InferTensorRunAndCompare(self, model, expected_uninferred_blobs=None):
         '''
         Runs shape inference, and then the model to check
