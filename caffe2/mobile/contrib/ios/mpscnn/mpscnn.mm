@@ -40,13 +40,13 @@
        options:NSNumericSearch] != NSOrderedAscending)
 
 // Only compiles against Base SDK iOS 11.0 or greater
-@interface ConvTransposeDataSource : NSObject<MPSCNNConvolutionDataSource>
+@interface ConvDataSource : NSObject<MPSCNNConvolutionDataSource>
 @property float* weights_;
 @property float* bias_;
 @property MPSCNNConvolutionDescriptor* desc_;
 @end
 
-@implementation ConvTransposeDataSource
+@implementation ConvDataSource
 - (id)initWithWeight:(float*)weights
                 bias:(float*)bias
                 desc:(MPSCNNConvolutionDescriptor*)desc {
@@ -796,7 +796,7 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
       // now
       if (runtimeAtLeastIOS11 && this->group_ > 1 && Cf == 1 &&
           M == this->group_) {
-        const MPSCNNDepthWiseConvolutionDescriptor* desc =
+        MPSCNNDepthWiseConvolutionDescriptor* desc =
             [MPSCNNDepthWiseConvolutionDescriptor
                 cnnConvolutionDescriptorWithKernelWidth:kW
                                            kernelHeight:kH
@@ -806,12 +806,13 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
         desc.strideInPixelsX = stride_w();
         desc.strideInPixelsY = stride_h();
         desc.groups = 1;
-        conv_ = [[MPSCNNConvolution alloc]
-                   initWithDevice:getMPSCNNContext().device
-            convolutionDescriptor:desc
-                    kernelWeights:refilter.data()
-                        biasTerms:bias.template data<float>()
-                            flags:MPSCNNConvolutionFlagsNone];
+        auto data_source = [[ConvDataSource alloc]
+            initWithWeight:refilter.data()
+                      bias:const_cast<float*>(bias.template data<float>())
+                      desc:desc];
+        conv_ =
+            [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
+                                              weights:data_source];
       } else {
         if (this->group_ > 1) {
           CAFFE_ENFORCE_EQ(
@@ -830,12 +831,13 @@ class MPSCNNConvOp final : public ConvPoolOpBase<CPUContext> {
         desc.strideInPixelsX = stride_w();
         desc.strideInPixelsY = stride_h();
         desc.groups = this->group_;
-        conv_ = [[MPSCNNConvolution alloc]
-                   initWithDevice:getMPSCNNContext().device
-            convolutionDescriptor:desc
-                    kernelWeights:refilter.data()
-                        biasTerms:bias.template data<float>()
-                            flags:MPSCNNConvolutionFlagsNone];
+        auto data_source = [[ConvDataSource alloc]
+            initWithWeight:refilter.data()
+                      bias:const_cast<float*>(bias.template data<float>())
+                      desc:desc];
+        conv_ =
+            [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
+                                              weights:data_source];
       }
 
       [conv_ setEdgeMode:MPSImageEdgeModeZero];
@@ -1381,12 +1383,12 @@ class MPSCNNFullyConnectedOp final : public Operator<CPUContext> {
                              inputFeatureChannels:input_channels
                             outputFeatureChannels:output_channels
                                      neuronFilter:Neuron::t()];
-      fc_ =
-          [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
-                              convolutionDescriptor:desc
-                                      kernelWeights:refilter.data()
-                                          biasTerms:b.template data<float>()
-                                              flags:MPSCNNConvolutionFlagsNone];
+      auto data_source = [[ConvDataSource alloc]
+          initWithWeight:refilter.data()
+                    bias:const_cast<float*>(b.template data<float>())
+                    desc:desc];
+      fc_ = [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
+                                              weights:data_source];
     }
     // Note that X.numberOfImages can change between calls, but X.height and
     // X.width are static by definition.
@@ -1537,14 +1539,14 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
         desc.strideInPixelsX = this->stride_w();
         desc.strideInPixelsY = this->stride_h();
         desc.groups = 1;
-        auto data_source_ = [[ConvTransposeDataSource alloc]
+        auto data_source = [[ConvDataSource alloc]
             initWithWeight:refilter.data()
                       bias:const_cast<float*>(bias.data<float>())
                       desc:desc];
 
         conv_trans_ = [[MPSCNNConvolutionTranspose alloc]
             initWithDevice:getMPSCNNContext().device
-                   weights:data_source_];
+                   weights:data_source];
         MPSOffset offset;
         offset.x = 0;
         offset.y = 0;
@@ -1568,12 +1570,13 @@ class MPSCNNConvTransposeOp final : public ConvTransposeUnpoolBase<CPUContext> {
 
         desc.strideInPixelsX = 1;
         desc.strideInPixelsY = 1;
-        conv_ = [[MPSCNNConvolution alloc]
-                   initWithDevice:getMPSCNNContext().device
-            convolutionDescriptor:desc
-                    kernelWeights:refilter.data()
-                        biasTerms:fakeBias.data() /* TODO: fix */
-                            flags:MPSCNNConvolutionFlagsNone];
+        auto data_source =
+            [[ConvDataSource alloc] initWithWeight:refilter.data()
+                                              bias:fakeBias.data()
+                                              desc:desc];
+        conv_ =
+            [[MPSCNNConvolution alloc] initWithDevice:getMPSCNNContext().device
+                                              weights:data_source];
         [conv_ setEdgeMode:MPSImageEdgeModeZero];
         MPSOffset offset;
         offset.x = 0;
