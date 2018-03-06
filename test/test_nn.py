@@ -795,10 +795,11 @@ class TestNN(NNTestCase):
         l3 = nn.Linear(30, 40)
         l4 = nn.Linear(40, 50)
         n = nn.Sequential(l1, l2, l3, l4)
-        self.assertEqual(n[0], l1)
-        self.assertEqual(n[1], l2)
-        self.assertEqual(n[2], l3)
-        self.assertEqual(n[3], l4)
+        self.assertIs(n[0], l1)
+        self.assertIs(n[1], l2)
+        self.assertIs(n[2], l3)
+        self.assertIs(n[3], l4)
+        self.assertIs(n[torch.tensor(3, dtype=torch.int64)], l4)
         self.assertEqual(n[1:], nn.Sequential(l2, l3, l4))
         self.assertEqual(n[3:], nn.Sequential(l4))
         self.assertEqual(n[:-1], nn.Sequential(l1, l2, l3))
@@ -813,8 +814,10 @@ class TestNN(NNTestCase):
         n = nn.Sequential(l1, l2, l3)
         n[0] = l4
         n[-1] = l4
-        self.assertEqual(n[0], l4)
-        self.assertEqual(n[2], l4)
+        n[torch.tensor(1, dtype=torch.int16)] = l1
+        self.assertIs(n[0], l4)
+        self.assertIs(n[1], l1)
+        self.assertIs(n[2], l4)
 
     def test_Sequential_setitem_named(self):
         l1 = nn.Linear(10, 20)
@@ -837,7 +840,6 @@ class TestNN(NNTestCase):
         l2 = nn.Linear(20, 30)
         l3 = nn.Linear(30, 40)
         l4 = nn.Linear(40, 50)
-        l5 = nn.Linear(50, 60)
         n = nn.Sequential(l1, l2, l3, l4)
         del n[-1]
         self.assertEqual(n, nn.Sequential(l1, l2, l3))
@@ -870,6 +872,11 @@ class TestNN(NNTestCase):
         check()
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[2] = modules[2]
+        check()
+        idx = torch.tensor(2, dtype=torch.int32)
+        modules[2] = nn.Conv2d(5, 3, 2)
+        module_list[idx] = modules[2]
+        self.assertIs(module_list[idx], modules[2])
         check()
         self.assertEqual(module_list[1:], nn.ModuleList(modules[1:]))
         self.assertEqual(module_list[3:], nn.ModuleList(modules[3:]))
@@ -933,6 +940,11 @@ class TestNN(NNTestCase):
         check()
         parameters[2] = make_param()
         param_list[2] = parameters[2]
+        check()
+        idx = torch.tensor(2, dtype=torch.int32)
+        parameters[2] = make_param()
+        param_list[idx] = parameters[2]
+        self.assertIs(param_list[idx], parameters[2])
         check()
         self.assertEqual(param_list[1:], nn.ParameterList(parameters[1:]))
         self.assertEqual(param_list[3:], nn.ParameterList(parameters[3:]))
