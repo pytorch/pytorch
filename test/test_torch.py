@@ -5439,7 +5439,7 @@ class TestTorch(TestCase):
         x_unique = x.unique(sorted=True)
         self.assertEqual(expected_unique, x_unique)
 
-        x_unique, x_inverse = torch._unique(
+        x_unique, x_inverse = torch.unique(
             x, sorted=True, return_inverse=True)
         self.assertEqual(expected_unique, x_unique)
         self.assertEqual(expected_inverse, x_inverse)
