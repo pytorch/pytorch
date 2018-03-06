@@ -174,8 +174,8 @@ This is how a ``Linear`` module can be implemented::
             return LinearFunction.apply(input, self.weight, self.bias)
 
 
-Writing custom C extensions
+Writing custom C++ extensions
 ---------------------------
 
-Coming soon. For now you can find an example at
-`GitHub <https://github.com/pytorch/extension-ffi>`_.
+See `here <cpp-extensions.html>`__ for an in-depth discussion of custom C++/CUDA
+extensions.
