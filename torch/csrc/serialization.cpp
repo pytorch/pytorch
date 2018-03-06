@@ -88,7 +88,8 @@ static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, boo
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
 #else
-  THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
+  THPObjectPtr memview(
+      PyMemoryView_FromBuffer(PyBuffer_FromReadWriteMemory(buf, nbytes)));
 #endif
 
   if (!memview) throw python_error();
@@ -111,11 +112,11 @@ static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, boo
 }
 
 // Call Python fildes.readinto(buf)
-static inline ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
+static ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
   return doPythonIO(fildes, buf, nbytes, /* is_read */ true);
 }
 
 // Call Python fildes.write(buf)
-static inline ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
+static ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
   return doPythonIO(fildes, buf, nbytes, /* is_read */ false);
 }
