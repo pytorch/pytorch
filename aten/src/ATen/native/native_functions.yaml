@@ -279,6 +279,12 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: rand_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: rand_like(Tensor self) -> Tensor
   variants: function
 

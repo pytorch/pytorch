@@ -113,8 +113,8 @@ static void fusionTests() {
     Var i1 = Var::asNewInput(graph);
     auto o0 = i0 * i1;
     o0.addAsOutput();
-    auto a = at::CUDA(at::kFloat).rand({3,4});
-    auto b = at::CUDA(at::kFloat).rand({4,3}).transpose(0,1);
+    auto a = at::rand(at::CUDA(at::kFloat), {3,4});
+    auto b = at::rand(at::CUDA(at::kFloat), {4,3}).transpose(0,1);
     auto o = at::zeros(at::CUDA(at::kFloat), {3,4});
     comp.debugLaunchGraph(graph, 0, {a,b}, {o});
     auto o2 = a*b;
@@ -157,7 +157,7 @@ static void fusionTests() {
     for(size_t i = 0; i < graph.inputs().size(); i++) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti],dims[tj]);
-      inputs.push_back(at::CUDA(at::kFloat).rand(dims).transpose(ti, tj));
+      inputs.push_back(at::rand(at::CUDA(at::kFloat), dims).transpose(ti, tj));
     }
     for(size_t i = 0; i < graph.outputs().size(); i++) {
       std::vector<int64_t> dims = {128, 128, 32};
@@ -202,8 +202,8 @@ static void fusionTests() {
     o0.addAsOutput();
     Var::cat({i0, o0}, dim).addAsOutput();
 
-    auto a = at::CUDA(at::kFloat).rand({3,4,5});
-    auto b = at::CUDA(at::kFloat).rand({4,3,5}).transpose(0,1);
+    auto a = at::rand(at::CUDA(at::kFloat), {3,4,5});
+    auto b = at::rand(at::CUDA(at::kFloat), {4,3,5}).transpose(0,1);
     auto o = at::zeros(at::CUDA(at::kFloat), {3,4,5});
 
     auto o_r = a*b;
@@ -648,7 +648,7 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
 }
 
 autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
-  return autograd::make_variable(t.rand(sizes), requires_grad);
+  return autograd::make_variable(at::rand(t, sizes), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();

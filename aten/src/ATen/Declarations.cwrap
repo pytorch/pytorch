@@ -3866,25 +3866,6 @@
       default: 1
 ]]
 [[
-  name: rand
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - arg: THSize* size
-      long_args: True
-]]
-[[
   name: geometric_
   backends:
     - CPU

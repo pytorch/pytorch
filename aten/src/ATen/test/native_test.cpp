@@ -40,9 +40,9 @@ void test(Type & T, Type & AccT) {
 
   // stack
   {
-    auto x = T.rand({2, 3, 4});
-    auto y = T.rand({2, 3, 4});
-    auto z = T.rand({2, 3, 4});
+    auto x = rand(T, {2, 3, 4});
+    auto y = rand(T, {2, 3, 4});
+    auto z = rand(T, {2, 3, 4});
     for (int64_t dim = 0; dim < 4; ++dim) {
       auto res = at::stack({x, y, z}, dim);
       auto res_neg = at::stack({x, y, z}, dim - 4);

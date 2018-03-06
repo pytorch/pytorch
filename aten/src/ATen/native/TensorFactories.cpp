@@ -30,12 +30,22 @@ Tensor ones_like(const Tensor& self, const Type& dtype) {
   return at::native::ones(dtype, self.sizes());
 }
 
+Tensor rand(const Type& dtype, IntList size, Generator* generator) {
+  Tensor result = dtype.tensor(size);
+  return result.uniform_(0, 1, generator);
+}
+
+Tensor& rand_out(Tensor& result, IntList size, Generator* generator) {
+  result.resize_(size);
+  return result.uniform_(0, 1, generator);
+}
+
 Tensor rand_like(const Tensor& self) {
-  return self.type().rand(self.sizes());
+  return at::native::rand_like(self, self.type());
 }
 
 Tensor rand_like(const Tensor& self, const Type& dtype) {
-  return dtype.rand(self.sizes());
+  return at::native::rand(dtype, self.sizes());
 }
 
 Tensor randn(const Type& dtype, IntList size, Generator* generator) {
