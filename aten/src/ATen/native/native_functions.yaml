@@ -484,8 +484,6 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
-- func: _svd_with_positive_UV_det(Tensor self, double det_sign) -> (Tensor, Tensor, Tensor)
-
 - func: sum(Tensor self) -> Tensor
   dispatch:
     CPU: _sum_cpu

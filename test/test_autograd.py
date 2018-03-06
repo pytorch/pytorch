@@ -2584,6 +2584,7 @@ method_tests = [
     ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_psd_matrix(S), NO_ARGS, 'symmetric_psd', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_pd_matrix(S), NO_ARGS, 'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
@@ -2598,12 +2599,16 @@ method_tests = [
     # `logdet`, we also set `make_nonzero_det(matrix, sign=1)` to make the
     # matrix have positive det.
     ('logdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('logdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
     ('logdet', lambda: make_nonzero_det(random_symmetric_matrix(S), 1), NO_ARGS,
      'symmetric', NO_ARGS, [skipIfNoLapack]),
     ('logdet', lambda: make_nonzero_det(random_symmetric_pd_matrix(S), 1), NO_ARGS,
      'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
     ('logdet', lambda: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S), 1, 0), NO_ARGS,
      'distinct_singular_values', NO_ARGS, [skipIfNoLapack]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1_pos_det', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), -1), NO_ARGS,
+     '1x1_neg_det', NO_ARGS, [skipIfNoLapack], [1]),
     ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, 'pos_det', NO_ARGS, [skipIfNoLapack], [1]),
     ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), -1), NO_ARGS, 'neg_det', NO_ARGS, [skipIfNoLapack], [1]),
     ('slogdet', lambda: make_nonzero_det(random_symmetric_matrix(S)), NO_ARGS,
@@ -2612,6 +2617,7 @@ method_tests = [
     ('slogdet', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
      'distinct_singular_values', NO_ARGS, [skipIfNoLapack], [1]),
     ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS, 'large', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
@@ -2815,22 +2821,23 @@ EXCLUDE_GRADCHECK = {
 EXCLUDE_GRADGRADCHECK = {
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
-    # Some of the following det ones pass because random matrix has full rank
-    # with high probability. But we can't rely on this. So only test gradgrad on
+    # *det methods uses svd in backward when matrix is not invertible. However,
+    # svd backward is unstable unless the matrix has positive distinct singular
+    # values. Generated random matrices satisfy this with high probability, but
+    # we can't rely on it. So only test gradgrad on invertible test cases and
     # _distinct_singular_values.
     'test_det',
+    'test_det_1x1',
     'test_det_symmetric',
-    'test_det_symmetric_pd',
     'test_det_symmetric_psd',
     'test_det_dim2_null',
     'test_det_rank1',
     'test_det_rank2',
     'test_logdet',
-    'test_logdet_symmetric_pd',
+    'test_logdet_1x1',
     'test_logdet_symmetric',
-    'test_slogdet_pos_det',
+    'test_slogdet_1x1_neg_det',
     'test_slogdet_neg_det',
-    'test_slogdet_symmetric_pd',
     'test_slogdet_symmetric',
 }
 

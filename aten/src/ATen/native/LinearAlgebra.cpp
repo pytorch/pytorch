@@ -8,33 +8,6 @@
 namespace at {
 namespace native {
 
-// This method calculates svd with an additional constraint (det(UV) = +1),
-// which will be used in det methods backward.
-//
-// http://www.ics.forth.gr/cvrl/publications/conferences/2000_eccv_SVD_jacobian.pdf
-// Instead of gesvd SVD A = U(A) Sig(A) V(A)^T, which doesn't specify signs
-// of determinants of U and V, we consider det(A) = \prod Sig_(A), where
-//   1. A = U_(A) Sig_(A) V(A)^T
-//   2. Sig_(A) and U_(A) can be different in signs in first row/col from
-//      their counterparts so that U_(A) * V_(A) have +1 determinant
-//
-// In particular, this is not regular svd anymore as Sig_(A) can have a negative
-// diagonal entry (top left).
-std::tuple<Tensor, Tensor, Tensor> _svd_with_positive_UV_det(const Tensor& self, double det_sign) {
-  // find svd, which gives det up to a sign
-  auto svd = self.svd(true);
-  auto u = std::get<0>(svd);
-  auto sigma = std::get<1>(svd);
-  auto v = std::get<2>(svd);
-  auto prod_sigma = sigma.prod();
-
-  if ((prod_sigma.toCDouble() < 0) ^ (det_sign < 0)) {  // if different sign
-    u.narrow(1, 0, 1).mul_(-1);
-    sigma.narrow(0, 0, 1).mul_(-1);
-  }
-  return std::make_tuple(u, sigma, v);
-}
-
 // Helper function for det methods.
 // QR can give us the accurate det:
 //   1. Q has \pm 1 det, which can be determined by counting the non-zero values

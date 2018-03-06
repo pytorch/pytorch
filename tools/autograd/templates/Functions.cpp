@@ -922,43 +922,49 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
+// Invertible case is derived from Jacobi's formula, and also can be found at:
+// http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
-  Tensor u, sigma, v;
-  std::tie(u, sigma, v) = self._svd_with_positive_UV_det(det.toCDouble());
-  auto gsigma = prod_backward(grad, sigma, det);
-  return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+  auto det_val = det.toCDouble();
+  if (det_val != 0 /* invertible */) {
+    return grad * det * self.inverse().t();
+  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+    Tensor u, sigma, v;
+    std::tie(u, sigma, v) = self.svd();
+    auto gsigma = prod_backward(grad, sigma, det);
+    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
+  }
 }
 
 Tensor logdet_backward(const Tensor & grad, const Tensor& self, const Tensor& logdet) {
-  Tensor u, sigma, v;
   auto logdet_val = logdet.toCDouble();
-  if (logdet_val != logdet_val /* nan, det < 0 */ ) {
-    std::tie(u, sigma, v) = self._svd_with_positive_UV_det(-1.);
-  } else if (logdet_val == -INFINITY /* -inf, det = 0 */ ) {
-    std::tie(u, sigma, v) = self._svd_with_positive_UV_det(0.);
-  } else {
-    std::tie(u, sigma, v) = self._svd_with_positive_UV_det(1.);
+  if (logdet_val != -INFINITY /* det != 0, invertible */) {
+    return grad * self.inverse().t();
+  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+    Tensor u, sigma, v;
+    std::tie(u, sigma, v) = self.svd();
+    // backward det = \sum log(sigma)
+    auto gsigma = grad.div(sigma);
+    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
   }
-  // backward \sum log(sigma)
-  auto gsigma = grad.div(sigma);
-  return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
 }
 
 Tensor slogdet_backward(const std::vector<torch::autograd::Variable> &grads,
                         const Tensor& self,
                         const Tensor& signdet, const Tensor& logabsdet) {
   AT_ASSERT(!grads[0].defined(), "slogdet's sign output should never have gradient");
-  Tensor u, sigma, v;
   auto signdet_val = signdet.toCDouble();
-  std::tie(u, sigma, v) = self._svd_with_positive_UV_det(signdet_val);
-  auto grad_logabsdet = grads[1].expand_as(sigma).contiguous();
-  // sigma here has at most 1 negative entry (topleft)
-  // so backward \sum log(abs(sigma))
-  if (signdet_val < 0) {
-    grad_logabsdet.select(0, 0).neg_();
+  if (signdet_val != 0 /* det != 0, invertible */) {
+    return grads[1] * self.inverse().t();
+  } else /* otherwise det = \prod(sigma) = 0, use svd */ {
+    Tensor u, sigma, v;
+    std::tie(u, sigma, v) = self.svd();
+    // sigma has all non-negative entries (also with at least one zero entry)
+    // so logabsdet = \sum log(abs(sigma))
+    // but det = 0, so backward logabsdet = \sum log(sigma)
+    auto gsigma = grads[1].div(sigma);
+    return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
   }
-  auto gsigma = grads[1].div(sigma);
-  return svd_backward({{}, gsigma, {}}, self, true, u, sigma, v);
 }
 
 // Reference:

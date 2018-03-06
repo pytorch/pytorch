@@ -604,9 +604,6 @@
 - name: svd(Tensor self, bool some)
   self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
-- name: _svd_with_positive_UV_det(Tensor self, double det_sign)
-  self: svd_backward(grads, self, true, result0, result1, result2)
-
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: not_implemented("symeig")
 
