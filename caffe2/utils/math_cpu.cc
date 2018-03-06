@@ -1477,7 +1477,7 @@ void CopyMatrix<CPUContext>(
     const int ldb,
     CPUContext* /*context*/,
     TypeMeta::TypedCopy copy) {
-  if (A == nullptr) {
+  if (A == nullptr || B == nullptr) {
     return;
   }
   if (lda == N && ldb == N) {
