@@ -1,5 +1,5 @@
-#include "caffe2/share/contrib/observers/perf_observer.h"
-#include "caffe2/share/contrib/observers/observer_config.h"
+#include "observers/perf_observer.h"
+#include "observers/observer_config.h"
 
 #include <random>
 #include "caffe2/core/common.h"

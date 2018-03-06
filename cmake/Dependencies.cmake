@@ -3,8 +3,8 @@ include("cmake/ProtoBuf.cmake")
 
 # ---[ Threads
 if(USE_THREADS)
-  find_package(Threads REQUIRED)
-  list(APPEND Caffe2_DEPENDENCY_LIBS ${CMAKE_THREAD_LIBS_INIT})
+  include(cmake/public/threads.cmake)
+  list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS Threads::Threads)
 endif()
 
 # ---[ protobuf
@@ -75,10 +75,6 @@ if(USE_NNPACK)
     message(WARNING "Not compiling with NNPACK. Suppress this warning with -DUSE_NNPACK=OFF")
     set(USE_NNPACK OFF)
   endif()
-endif()
-
-if(USE_OBSERVERS)
-  list(APPEND Caffe2_DEPENDENCY_LIBS Caffe2_CPU_OBSERVER)
 endif()
 
 # ---[ On Android, Caffe2 uses cpufeatures library in the thread pool

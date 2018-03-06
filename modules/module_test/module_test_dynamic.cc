@@ -19,7 +19,7 @@
 
 // An explicitly defined module, testing correctness when we dynamically link a
 // module
-CAFFE2_MODULE(caffe2_module_test_dynamic, "Dynamic module for testing.");
+CAFFE2_MODULE(caffe2_module_test_dynamic, "Dynamic module only used for testing.");
 
 namespace caffe2 {
 

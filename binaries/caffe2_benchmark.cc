@@ -7,9 +7,10 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "caffe2/share/contrib/observers/observer_config.h"
 #include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
+
+#include "observers/observer_config.h"
 
 CAFFE2_DEFINE_string(
     backend,

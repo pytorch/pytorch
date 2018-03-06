@@ -1,3 +1,0 @@
-caffe2_binary_target("caffe2_benchmark.cc")
-caffe2_interface_library(Caffe2_CPU_OBSERVER Caffe2_CPU_OBSERVER_LINK)
-target_link_libraries(caffe2_benchmark ${Caffe2_CPU_OBSERVER_LINK})

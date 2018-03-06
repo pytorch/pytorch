@@ -1,7 +1,7 @@
-#include "caffe2/share/contrib/observers/net_observer_reporter_print.h"
+#include "observers/net_observer_reporter_print.h"
 
 #include "caffe2/core/init.h"
-#include "caffe2/share/contrib/observers/observer_config.h"
+#include "observers/observer_config.h"
 
 namespace caffe2 {
 

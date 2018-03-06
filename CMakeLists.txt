@@ -32,7 +32,6 @@ option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(
     CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
     "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_OBSERVERS "Build performance observers/loggers in caffe2/share/observers directory" OFF)
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
@@ -54,7 +53,7 @@ option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
 option(USE_NUMA "Use NUMA (only available on Linux)" ON)
-option(USE_OBSERVERS "Use Observer Library" OFF)
+option(USE_OBSERVERS "Use observers module." OFF)
 option(USE_OPENCV "Use openCV" ON)
 option(USE_OPENMP "Use OpenMP for parallel code" OFF)
 option(USE_PROF "Use profiling" OFF)
@@ -254,6 +253,7 @@ if (BUILD_SHARED_LIBS)
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/threads.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/utils.cmake
       DESTINATION share/cmake/Caffe2/public
       COMPONENT dev)
@@ -268,6 +268,16 @@ endif()
 
 # ---[ Modules
 add_subdirectory(modules)
+
+# ---[ Binaries
+# Binaries will be built after the Caffe2 main libraries and the modules
+# are built. For the binaries, they will be linked to the Caffe2 main
+# libraries, as well as all the modules that are built with Caffe2 (the ones
+# built in the previous Modules section above).
+
+if (BUILD_BINARY)
+  add_subdirectory(binaries)
+endif()
 
 include(cmake/Summary.cmake)
 caffe2_print_configuration_summary()
