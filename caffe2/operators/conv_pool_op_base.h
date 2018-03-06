@@ -350,8 +350,22 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
+    bool reset_tensor_device_ = false;
+
     if (tensor->size() != data.size()) {
       tensor->Resize(data.size());
+      reset_tensor_device_ = true;
+    } else {
+      const int* tensor_data = tensor->template data<int>();
+      for (int d_i = 0; d_i < data.size(); ++d_i) {
+        if (tensor_data[d_i] != data[d_i]) {
+          reset_tensor_device_ = true;
+          break;
+        }
+      }
+    }
+
+    if (reset_tensor_device_) {
       context_.template Copy<int, CPUContext, Context>(
           data.size(), data.data(), tensor->template mutable_data<int>());
     }
