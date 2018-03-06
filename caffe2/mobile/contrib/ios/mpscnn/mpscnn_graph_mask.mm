@@ -582,13 +582,8 @@ bool tryConvertToMPSCNNIntermediateCopies(const NetDef& initNet,
 #define SYSTEM_VERSION_EQUAL_TO(v) \
   ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] == NSOrderedSame)
 
-  if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"10.0")) {
-    LOG(ERROR) << "The iOS version is < 10.0, so MPSCNN is not available";
-    return false;
-  }
-
-  if (SYSTEM_VERSION_EQUAL_TO(@"10.1.1")) {
-    LOG(ERROR) << "MPSCNN doesn't work for 10.1.1";
+  if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"11.0")) {
+    LOG(ERROR) << "MPSCNN is only supported for ios version above 11.0.";
     return false;
   }
 #undef SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO

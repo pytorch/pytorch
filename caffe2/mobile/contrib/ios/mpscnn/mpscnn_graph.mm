@@ -326,8 +326,8 @@ bool tryConvertToMPSCNN(
   ([[[UIDevice currentDevice] systemVersion]       \
        compare:v                                   \
        options:NSNumericSearch] != NSOrderedAscending)
-  if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"10.2")) {
-    LOG(ERROR) << "MPSCNN is unstable for ios version under 10.2.";
+  if (!SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"11.0")) {
+    LOG(ERROR) << "MPSCNN is only supported for ios version above 11.0.";
     return false;
   }
 #undef SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO
