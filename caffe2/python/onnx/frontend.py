@@ -239,7 +239,7 @@ class Caffe2Frontend(object):
                 # So we use the explicit padding to replace legacy_pad.
                 # pad[end] = output_size[start + 2] * stride[start] - pad[start] - 1 + kernel[start] - input[start + 2]
                 # end = start + len(pad) / 2
-                logger.warning('Converting legacy padding to explict padding.')
+                logger.warning('Converting legacy padding to explicit padding.')
                 for i in range(2):
                     attrs['pads'].ints[i + 2] = (output_size[i + 2] * attrs['strides'].ints[i] - attrs['pads'].ints[i]
                                                  - 1 + attrs['kernel_shape'].ints[i] - input_size[i + 2])

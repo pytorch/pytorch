@@ -17,7 +17,9 @@
 #include "variable_length_sequence_padding.h"
 
 namespace caffe2 {
-REGISTER_CPU_OPERATOR(VariableLengthSequencePadding, VariableLengthSequencePaddingOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    VariableLengthSequencePadding,
+    VariableLengthSequencePaddingOp<float, CPUContext>);
 OPERATOR_SCHEMA(VariableLengthSequencePadding)
     .NumInputs(2)
     .NumOutputs(1)

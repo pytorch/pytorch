@@ -44,9 +44,10 @@ void VariableLengthSequencePadding(
 template <typename T, typename Context>
 class VariableLengthSequencePaddingOp : public Operator<Context> {
  public:
-  VariableLengthSequencePaddingOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws)
-      {}
+  VariableLengthSequencePaddingOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   bool RunOnDevice() override {
@@ -59,7 +60,7 @@ class VariableLengthSequencePaddingOp : public Operator<Context> {
     auto seqLengths = Input(SEQ_LENGTHS).template data<int32_t>();
 
     detail::VariableLengthSequencePadding<T, Context>(
-      N, B, M, X, seqLengths, 0, &context_);
+        N, B, M, X, seqLengths, 0, &context_);
     return true;
   }
 
