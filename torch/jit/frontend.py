@@ -134,50 +134,15 @@ class Builder(object):
         return method(ctx, node)
 
 
-class CountReturns(ast.NodeVisitor):
-    def __init__(self):
-        self.num_returns = 0
-
-    def visit_Return(self, ret):
-        self.num_returns += 1
-
-    @staticmethod
-    def get_count(py_def):
-        counter = CountReturns()
-        counter.visit(py_def)
-        return counter.num_returns
-
-
-_ret_err_msg = ("JIT-ed functions can only have a single return, "
-                "and it has to be the last statement in the body")
-
-
 def build_def(ctx, py_def):
     returns = []
     ret_body = []
     body = py_def.body
-    num_returns = CountReturns.get_count(py_def)
-    # TODO: change TorchScript AST to have a Return statement
-    if num_returns == 1:
-        ret_stmt, body = body[-1], body[:-1]
-        if not isinstance(ret_stmt, ast.Return):
-            raise ValueError(_ret_err_msg)
-        ret_expr = ret_stmt.value
-        ret_vals = ret_expr.elts if isinstance(ret_expr, ast.Tuple) else [ret_expr]
-        for i, val in enumerate(ret_vals):
-            val_expr = build_expr(ctx, val)
-            val_name = _reserved_prefix + '_' + str(i)
-            r = val_expr.range()
-            returns.append(Param(TensorType(r), Ident(r, val_name)))
-            ret_body.append(Assign([Ident(r, val_name)], '=', val_expr))
-    elif num_returns > 1:
-        raise ValueError(_ret_err_msg)
     r = ctx.make_range(py_def.lineno, py_def.col_offset,
                        py_def.col_offset + len("def"))
     return Def(Ident(r, py_def.name),
                build_param_list(ctx, py_def.args),
-               returns,
-               [build_stmt(ctx, stmt) for stmt in body] + ret_body)
+               [build_stmt(ctx, stmt) for stmt in body])
 
 
 _vararg_kwarg_err = ("Compiled functions can't take variable number of arguments, "
@@ -227,6 +192,12 @@ class StmtBuilder(Builder):
         return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in stmt.targets],
                       '=',
                       build_expr(ctx, stmt.value))
+
+    @staticmethod
+    def build_Return(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("return"))
+        values = (stmt.value,) if not isinstance(stmt.value, ast.Tuple) else stmt.value.elts
+        return Return(r, [build_expr(ctx, val) for val in values])
 
     @staticmethod
     def build_AugAssign(ctx, stmt):

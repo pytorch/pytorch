@@ -1362,9 +1362,10 @@ class TestJit(TestCase):
 
     def test_script_add(self):
         script = '''
-        def func(a, b) -> (c):
+        def func(a, b):
             c = a + b
             c += a
+            return c
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
@@ -1374,8 +1375,8 @@ class TestJit(TestCase):
 
     def test_script_mul(self):
         script = '''
-        def func(a, b) -> (c):
-            c = a * b
+        def func(a, b):
+            return a * b
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
@@ -1385,8 +1386,8 @@ class TestJit(TestCase):
 
     def test_script_triple(self):
         script = '''
-        def func(x) -> (y):
-            y = 3f * x
+        def func(x):
+            return 3f * x
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
@@ -1394,8 +1395,8 @@ class TestJit(TestCase):
 
     def test_script_slice(self):
         script = '''
-        def func(x) -> (head):
-            head = x[:5]
+        def func(x):
+            return x[:5]
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[:5]
@@ -1403,8 +1404,8 @@ class TestJit(TestCase):
 
     def test_script_gather(self):
         script = '''
-        def func(x) -> (y):
-            y = x[0]
+        def func(x):
+            return x[0]
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[0]
@@ -1412,14 +1413,14 @@ class TestJit(TestCase):
 
     def test_script_func_call(self):
         script = '''
-        def add(a, b) -> (c):
-            c = a + b
+        def add(a, b):
+            return a + b
 
-        def mul(a, x) -> (y):
-            y = a * x
+        def mul(a, x):
+            return a * x
 
-        def func(alpha, beta, x, y) -> (z):
-            z = add(mul(alpha, x), mul(beta, y))
+        def func(alpha, beta, x, y):
+            return add(mul(alpha, x), mul(beta, y))
         '''
         alpha = Variable(torch.rand(1).float(), requires_grad=True)
         beta = Variable(torch.rand(1).float(), requires_grad=True)
@@ -1433,8 +1434,8 @@ class TestJit(TestCase):
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_script_cast(self):
         script = '''
-        def to_int(x) -> (y):
-            y = int(x)
+        def to_int(x):
+            return int(x)
         '''
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
@@ -1462,11 +1463,12 @@ class TestJit(TestCase):
 
     def test_script_while(self):
         script = '''
-        def test_while(a, b, max) -> (c):
+        def test_while(a, b, max):
             while a < max:
                 a = a + 1
                 b = b + 1
             c = a + b
+            return c
         '''
         inputs = self._make_scalar_vars([1, 1, 10], np.int32)
         outputs = self._make_scalar_vars([20], np.int32)
@@ -1474,7 +1476,7 @@ class TestJit(TestCase):
 
     def test_script_fibb(self):
         script = '''
-        def test_while(lim) -> (third, st, fs):
+        def test_while(lim):
             first = 1
             second = 1
             i = 1
@@ -1494,6 +1496,7 @@ class TestJit(TestCase):
 
             st = second + third
             fs = first + second
+            return third, st, fs
         '''
         inputs = self._make_scalar_vars([10], np.int32)
         outputs = self._make_scalar_vars([2, 4, 3], np.int32)
@@ -1501,7 +1504,7 @@ class TestJit(TestCase):
 
     def test_script_if(self):
         script = '''
-        def test_if(a, b) -> (c):
+        def test_if(a, b):
             d = 3
             if a > 10:
                 a = 3 + d
@@ -1509,6 +1512,7 @@ class TestJit(TestCase):
                 b = 3 + d
                 d = 4
             c = a + b
+            return c
         '''
         inputs = self._make_scalar_vars([1, -1], np.int32)
         outputs = self._make_scalar_vars([7], np.int32)
@@ -1516,10 +1520,11 @@ class TestJit(TestCase):
 
     def test_script_if_noelse(self):
         script = '''
-        def test_if_noelse(a, b) -> (c):
+        def test_if_noelse(a, b):
             if a > 10:
                 a = 3 + b
             c = a + b
+            return c
         '''
         inputs = self._make_scalar_vars([-1, 1], np.int32)
         outputs = self._make_scalar_vars([0], np.int32)
@@ -1528,30 +1533,30 @@ class TestJit(TestCase):
     def test_script_while_nonexistant_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
             torch.jit.CompilationUnit('''
-            def test_while(a, b) -> (c):
+            def test_while(a, b):
                 while a < 10:
                     a = a + x
                     b = b + 1
-                c = a + b
+                return a + b
             ''')
 
     def test_script_while_nonexistant_cond_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
             torch.jit.CompilationUnit('''
-            def test_while(a, b) -> (c):
+            def test_while(a, b):
                 while a < x:
                     a = a + 1
                     b = b + 1
-                c = a + b
+                return a + b
             ''')
 
     def test_script_while_write_outer_then_read(self):
         script = '''
-        def test_while(a, b) -> (c):
+        def test_while(a, b):
             while a < 10:
                 a = a + 1
                 b = a + 1
-            c = a + b
+            return a + b
         '''
         inputs = self._make_scalar_vars([42, 1337], np.int32)
         outputs = self._make_scalar_vars([1379], np.int32)
@@ -1559,7 +1564,7 @@ class TestJit(TestCase):
 
     def test_script_while_nest_if(self):
         script = '''
-        def test_while_if(a, b) -> (c):
+        def test_while_if(a, b):
             c = 0
             while a < 10:
                 a = a + 1
@@ -1568,7 +1573,7 @@ class TestJit(TestCase):
                     c = -a
                 else:
                     c = -b
-            c = c + 1
+            return c + 1
         '''
         inputs = self._make_scalar_vars([-1234, 4321], np.int32)
         outputs = self._make_scalar_vars([-5564], np.int32)
@@ -1576,12 +1581,13 @@ class TestJit(TestCase):
 
     def test_script_if_nest_while(self):
         script = '''
-        def test_if_while(a, b) -> (c):
+        def test_if_while(a, b):
             c = 0
             if a > b:
                 while a > b:
                     b = b + 1
                     c = -b
+            return c
         '''
         inputs = self._make_scalar_vars([4321, 1234], np.int32)
         outputs = self._make_scalar_vars([-4321], np.int32)
@@ -1589,17 +1595,19 @@ class TestJit(TestCase):
 
     def test_script_ternary(self):
         cu = torch.jit.CompilationUnit('''
-        def test_ternary_control(a, b) -> (c):
+        def test_ternary_control(a, b):
             c = 3
             if a > 3:
                 c = a + b
             else:
                 c = b
+            return c
         ''')
         cu2 = torch.jit.CompilationUnit('''
-        def test_ternary(a, b) -> (c):
+        def test_ternary(a, b):
             c = 3
             c = a + b if a > 3 else b
+            return c
         ''')
         self.assertEqual(
             str(cu.cu.get_graph('test_ternary_control')),
@@ -1629,8 +1637,9 @@ class TestJit(TestCase):
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
-            def foo(a) -> (b):
+            def foo(a):
                 b = a
+                return b
         ''')
         a = Variable(torch.rand(1))
         self.assertEqual(a, cu.foo(a))
@@ -1662,10 +1671,10 @@ class TestJit(TestCase):
             return a * 3.0
 
         cu = torch.jit.CompilationUnit('''
-        def other_func(a) -> (b):
-            b = a + a
+        def other_func(a):
+            return a + a
 
-        def test_call_python(a) -> (b):
+        def test_call_python(a):
             b = pyfunc(a)
             b = other_func(b)
             i = 0
@@ -1675,6 +1684,7 @@ class TestJit(TestCase):
                 if b > 3.0:
                     b = pyfunc(b)
                 i = 11
+            return b
         ''')
         inputs = self._make_scalar_vars([1], np.float32)
         outputs = self._make_scalar_vars([54], np.float32)
@@ -1687,10 +1697,10 @@ class TestJit(TestCase):
                 return a * 3.0
 
             cu = torch.jit.CompilationUnit('''
-            def other_func(a) -> (b):
-                b = a + a
+            def other_func(a):
+                return a + a
 
-            def test_call_python(a) -> (b):
+            def test_call_python(a):
                 b = pyfunc(a)
                 b = other_func(b)
                 i = 0
@@ -1700,6 +1710,7 @@ class TestJit(TestCase):
                     if b > 3.0:
                         b = pyfunc(b)
                     i = 11
+                return b
             ''')
             inputs = self._make_scalar_vars([1], np.float32)
             outputs = self._make_scalar_vars([54], np.float32)
@@ -1800,9 +1811,10 @@ class TestJit(TestCase):
     def test_shape_prop_mismatch_output(self):
         with self.assertRaises(RuntimeError):
             cu = torch.jit.CompilationUnit('''
-            def test_shape_prop_mismatch_output(a) -> (b):
+            def test_shape_prop_mismatch_output(a):
                 b = slice(a, dim=0, end=-2, start=2, step=1)
                 b = topk(a, dim=0, k=2, largest=True, sorted=True)
+                return b
             ''')
             inputs = [torch.zeros(10)]
             outputs = [torch.zeros(2), torch.from_numpy(np.array([1, 5])).long()]
@@ -1812,8 +1824,8 @@ class TestJit(TestCase):
 
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
-        def test_view_shape_prop(a) -> (b):
-            b = view(a, size=[-1])
+        def test_view_shape_prop(a):
+            return view(a, size=[-1])
         ''')
         inputs = [torch.zeros(10, 10)]
         outputs = torch.zeros(100)
@@ -1823,8 +1835,8 @@ class TestJit(TestCase):
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
-        def test_integral_shape_inference(a) -> (b):
-            b = a / a
+        def test_integral_shape_inference(a):
+            return a / a
         ''')
         inputs = [torch.ones(10, 10).type(torch.LongTensor)]
         outputs = torch.ones(10, 10)
@@ -1833,13 +1845,14 @@ class TestJit(TestCase):
 
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
-        def test_fuser_multiple_blocks(this, that, theother, meme) -> (this, that, theother):
+        def test_fuser_multiple_blocks(this, that, theother, meme):
             i = 0LL
             while i < 20LL:
                 this = cat(this, meme, dim=0)
                 that = cat(that, meme, dim=0)
                 theother = cat(theother, meme, dim=0)
                 i = i + 1
+            return this, that, theother
         ''')
 
         inputs = [torch.ones(0, 10, 10)] * 3
@@ -1850,8 +1863,9 @@ class TestJit(TestCase):
 
     def test_print_graph_executor(self):
         cu = torch.jit.CompilationUnit('''
-        def test_print_graph_executor(meme) -> ():
+        def test_print_graph_executor(meme):
             print(meme)
+            return meme
         ''')
 
         inputs = [torch.ones(5, 5)]
