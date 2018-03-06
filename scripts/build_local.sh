@@ -11,6 +11,11 @@ CAFFE2_ROOT="$( cd "$(dirname "$0")"/.. ; pwd -P)"
 
 CMAKE_ARGS=()
 
+# If Ninja is installed, prefer it to Make
+if [ -x "$(command -v ninja)" ]; then
+  CMAKE_ARGS+=("-GNinja")
+fi
+
 # Use ccache if available (this path is where Homebrew installs ccache symlinks)
 if [ "$(uname)" == 'Darwin' ]; then
   CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
