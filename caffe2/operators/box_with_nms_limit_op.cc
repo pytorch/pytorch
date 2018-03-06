@@ -209,7 +209,7 @@ OPERATOR_SCHEMA(BoxWithNMSLimit)
 Apply NMS to each class (except background) and limit the number of
 returned boxes.
 )DOC")
-    .Arg("score_thres", "(float) TEST.SCORE_THRES")
+    .Arg("score_thresh", "(float) TEST.SCORE_THRESH")
     .Arg("nms", "(float) TEST.NMS")
     .Arg("detections_per_im", "(int) TEST.DEECTIONS_PER_IM")
     .Arg("soft_nms_enabled", "(bool) TEST.SOFT_NMS.ENABLED")
