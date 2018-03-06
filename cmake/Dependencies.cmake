@@ -181,6 +181,23 @@ if(USE_LEVELDB)
   endif()
 endif()
 
+# ---[ NUMA
+if(USE_NUMA)
+  if(NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
+    message(WARNING "NUMA is currently only supported under Linux.")
+    set(USE_NUMA OFF)
+  else()
+    find_package(Numa)
+    if(NUMA_FOUND)
+      include_directories(${Numa_INCLUDE_DIR})
+      list(APPEND Caffe2_DEPENDENCY_LIBS ${Numa_LIBRARIES})
+    else()
+      message(WARNING "Not compiling with NUMA. Suppress this warning with -DUSE_NUMA=OFF")
+      set(USE_NUMA OFF)
+    endif()
+  endif()
+endif()
+
 # ---[ ZMQ
 if(USE_ZMQ)
   find_package(ZMQ)
