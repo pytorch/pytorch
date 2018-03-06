@@ -50,7 +50,8 @@ def check_compiler_abi_compatibility(compiler):
     Verifies that the given compiler is ABI-compatible with PyTorch.
 
     Arguments:
-        compiler (str): The compiler executable name to check (e.g. 'g++')
+        compiler (str): The compiler executable name to check (e.g. 'g++').
+            Must be executable in a shell process.
 
     Returns:
         False if the compiler is (likely) ABI-incompatible with PyTorch,
@@ -80,7 +81,19 @@ def check_compiler_abi_compatibility(compiler):
 
 
 class BuildExtension(build_ext):
-    '''A custom build extension for adding compiler-specific options.'''
+    '''
+    A custom `setuptools` build extension .
+
+    This `setuptools.build_ext` subclass takes care of passing the minimum
+    required compiler flags (e.g. `-std=c++11`) as well as mixed C++/CUDA
+    compilation (and support for CUDA files in general).
+
+    When using `BuildExtension`, it is allowed to supply a dictionary for
+    `extra_compile_args` (rather than the usual list) that maps from languages
+    (`cxx` or `cuda`) to a list of additional compiler flags to supply to the
+    compiler. This makes it possible to supply different flags to the C++ and
+    CUDA compiler during mixed compilation.
+    '''
 
     def build_extensions(self):
         self._check_abi()
@@ -139,12 +152,19 @@ class BuildExtension(build_ext):
 
 def CppExtension(name, sources, *args, **kwargs):
     '''
-    Create a setuptools.Extension instance for C++.
+    Create a `setuptools.Extension` for C++.
 
     Convenience method that creates a `setuptools.Extension` with the bare
     minimum (but often sufficient) arguments to build a C++ extension.
 
-    All arguments are forwarded to the setuptools.Extension constructor.
+    All arguments are forwarded to the `setuptools.Extension` constructor.
+
+    Example:
+        >>> from torch.utils.cpp_extension import CppExtension
+        >>> CppExtension(
+                name='extension',
+                sources=['extension.cpp'],
+                extra_compile_args=['-g'])
     '''
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
@@ -155,13 +175,21 @@ def CppExtension(name, sources, *args, **kwargs):
 
 def CUDAExtension(name, sources, *args, **kwargs):
     '''
-    Create a setuptools.Extension instance for CUDA/C++.
+    Create a `setuptools.Extension` for CUDA/C++.
 
     Convenience method that creates a `setuptools.Extension` with the bare
     minimum (but often sufficient) arguments to build a CUDA/C++ extension.
     This includes the CUDA include path, library path and runtime library.
 
-    All arguments are forwarded to the setuptools.Extension constructor.
+    All arguments are forwarded to the `setuptools.Extension` constructor.
+
+    Example:
+        >>> from torch.utils.cpp_extension import CUDAExtension
+        >>> CUDAExtension(
+                name='cuda_extension',
+                sources=['extension.cpp', 'extension_kernel.cu'],
+                extra_compile_args={'cxx': ['-g'],
+                                    'nvcc': ['-O2']})
     '''
     library_dirs = kwargs.get('library_dirs', [])
     library_dirs.append(_join_cuda_home('lib64'))
@@ -185,7 +213,7 @@ def include_paths(cuda=False):
     Return include paths required to build a C++ extension.
 
     Args:
-        cuda: If `True`, includes CUDA include paths.
+        cuda: If `True`, includes CUDA-specific include paths.
 
     Returns:
         A list of include path strings.
@@ -222,13 +250,14 @@ def load(name,
     returned from this function, ready for use.
 
     By default, the directory to which the build file is emitted and the
-    resulting library compiled to is `<tmp>/torch_extensions`, where `<tmp>` is
-    the temporary folder on the current platform. This location can be
-    overriden in two ways. First, if the `TORCH_EXTENSIONS_DIR` environment
-    variable is set, it replaces `<tmp>` and all extensions will be compiled
-    into subfolders of this directory. Second, if the `build_directory`
-    argument to this function is supplied, it overrides the entire path, i.e.
-    the library will be compiled into that folder directly.
+    resulting library compiled to is `<tmp>/torch_extensions/<name>`, where
+    `<tmp>` is the temporary folder on the current platform and `<name>` the
+    name of the extension. This location can be overriden in two ways. First,
+    if the `TORCH_EXTENSIONS_DIR` environment variable is set, it replaces
+    `<tmp>/torch_extensions` and all extensions will be compiled into
+    subfolders of this directory. Second, if the `build_directory` argument to
+    this function is supplied, it overrides the entire path, i.e. the library
+    will be compiled into that folder directly.
 
     To compile the sources, the default system compiler (`c++`) is used, which
     can be overriden by setting the CXX environment variable. To pass
