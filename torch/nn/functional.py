@@ -15,6 +15,7 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
+from . import gradients as G
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -208,6 +209,10 @@ def conv_tbc(input, weight, bias, pad=0):
         pad: number of timesteps to pad
     """
     return input.conv_tbc(weight, bias, pad)
+
+
+# Interface for the gradients of various operators
+grad = G
 
 
 # Pooling
