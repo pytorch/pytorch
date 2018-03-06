@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 
 #include <tuple>
-A
+
 namespace at {
 namespace native{
 
