@@ -614,6 +614,7 @@ class TestIndividualWorkerQueue(TestCase):
             if current_worker_idx == num_workers:
                 current_worker_idx = 0
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_ind_worker_queue(self):
         for batch_size in (8, 16, 32, 64):
             for num_workers in range(1, 6):
