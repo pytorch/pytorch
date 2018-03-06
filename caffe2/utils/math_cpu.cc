@@ -757,7 +757,9 @@ DEFINE_BROADCAST_BINARY_FUNCTION(Div, /)
   template <>                                                                 \
   void Set<T, CPUContext>(const size_t N, const T alpha, T* Y, CPUContext*) { \
     if (alpha == (T)0) {                                                      \
-      memset(Y, 0, N * sizeof(T));                                            \
+      if (Y != nullptr) {                                                     \
+        memset(Y, 0, N * sizeof(T));                                          \
+      }                                                                       \
     } else {                                                                  \
       EigenVectorMap<T>(Y, N).setConstant(alpha);                             \
     }                                                                         \
