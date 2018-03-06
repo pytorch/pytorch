@@ -75,6 +75,24 @@ else()
 endif()
 cmake_pop_check_state()
 
+# ---[ Check for NUMA support
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_FLAGS "-std=c++11")
+CHECK_CXX_SOURCE_COMPILES(
+    "#include <numa.h>
+    #include <numaif.h>
+
+    int main(int argc, char** argv) {
+    }" CAFFE2_IS_NUMA_AVAILABLE)
+
+if (CAFFE2_IS_NUMA_AVAILABLE)
+  message(STATUS "NUMA is available")
+else()
+  message(STATUS "NUMA is not available")
+  set(CAFFE2_DISABLE_NUMA 1)
+endif()
+cmake_pop_check_state()
+
 # ---[ Check if we want to turn off deprecated warning due to glog.
 # Note(jiayq): on ubuntu 14.04, the default glog install uses ext/hash_set that
 # is being deprecated. As a result, we will test if this is the environment we

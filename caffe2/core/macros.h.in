@@ -43,6 +43,7 @@ static_assert(
 #cmakedefine CAFFE2_USE_LITE_PROTO
 #cmakedefine CAFFE2_USE_MKL
 #cmakedefine CAFFE2_USE_NVTX
+#cmakedefine CAFFE2_DISABLE_NUMA
 
 #ifndef EIGEN_MPL2_ONLY
 #cmakedefine EIGEN_MPL2_ONLY
@@ -75,4 +76,5 @@ static_assert(
   {"USE_LITE_PROTO", "${CAFFE2_USE_LITE_PROTO}"}, \
   {"USE_MKL", "${CAFFE2_USE_MKL}"}, \
   {"USE_NVTX", "${CAFFE2_USE_NVTX}"}, \
+  {"DISABLE_NUMA", "${CAFFE2_DISABLE_NUMA}"}, \
 }
