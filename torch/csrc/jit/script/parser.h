@@ -228,17 +228,17 @@ struct Parser {
       if (L.nextIf(']')) {
         return Gather::create(range, Expr(value), Expr(first));
       } else {
-        first = c(TK_NOTHING, range, {first});
+        first = c(TK_OPTION, range, {first});
       }
     } else {
-      first = c(TK_NOTHING, range, {});
+      first = c(TK_OPTION, range, {});
     }
     L.expect(':');
     // Now we *may* have an expression.
     if (L.cur().kind != ']') {
-      second = c(TK_NOTHING, range, {parseExp()});
+      second = c(TK_OPTION, range, {parseExp()});
     } else {
-      second = c(TK_NOTHING, range, {});
+      second = c(TK_OPTION, range, {});
     }
     L.expect(']');
 
