@@ -22,7 +22,6 @@ CAFFE2_DEFINE_bool(
     "Use NUMA whenever possible.");
 
 #if defined(__linux__) && !defined(CAFFE2_DISABLE_NUMA) && CAFFE2_MOBILE == 0
-#include <errno.h>
 #include <numa.h>
 #include <numaif.h>
 #define CAFFE2_NUMA_ENABLED
@@ -94,15 +93,15 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
   // Avoid extra dynamic allocation and NUMA api calls
   CAFFE_ENFORCE(numa_node_id >= 0 && numa_node_id < sizeof(unsigned long) * 8);
   unsigned long mask = 1UL << numa_node_id;
-  if (mbind(
+  CAFFE_ENFORCE(
+      mbind(
           (void*)page_start_ptr,
           size + offset,
           MPOL_BIND,
           &mask,
           sizeof(mask) * 8,
-          MPOL_MF_MOVE | MPOL_MF_STRICT) != 0) {
-    LOG(ERROR) << "Could not move memory to a NUMA node: " << strerror(errno);
-  }
+          MPOL_MF_MOVE | MPOL_MF_STRICT) == 0,
+      "Could not move memory to a NUMA node");
 }
 
 int GetCurrentNUMANode() {

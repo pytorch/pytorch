@@ -24,6 +24,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/numa.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
@@ -304,7 +305,14 @@ struct PinnedCPUAllocator final : CPUAllocator {
   std::pair<void*, MemoryDeleter> New(size_t nbytes) override {
     void* data;
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+    if (IsNUMAEnabled()) {
+      auto ptr_and_deleter = baseAllocator_.New(nbytes);
+      data = ptr_and_deleter.first;
+      CAFFE_ENFORCE(data);
+      CUDA_ENFORCE(cudaHostRegister(data, nbytes, cudaHostRegisterDefault));
+    } else {
+      CUDA_ENFORCE(cudaMallocHost(&data, nbytes));
+    }
     memset(data, 0, nbytes);
     return {data, Delete};
   }
@@ -321,16 +329,23 @@ struct PinnedCPUAllocator final : CPUAllocator {
     // But, if one calls CPUContext::New() before any cuda allocations,
     // PinnedCPUAllocator can still delete the corresponding memory.
     std::lock_guard<std::mutex> lock(CUDAContext::mutex());
-    cudaError_t err = cudaFreeHost(data);
-    if (err == cudaErrorInvalidValue) {
-      free(data);
-      // Calling cudaGetLastError will reset the cuda error.
-      cudaGetLastError();
+    if (IsNUMAEnabled()) {
+      CUDA_ENFORCE(cudaHostUnregister(data));
+      DefaultCPUAllocator::Delete(data);
     } else {
-      // For all other errors, still do a cuda check.
-      CUDA_ENFORCE(err);
+      cudaError_t err = cudaFreeHost(data);
+      if (err == cudaErrorInvalidValue) {
+        free(data);
+        // Calling cudaGetLastError will reset the cuda error.
+        cudaGetLastError();
+      } else {
+        // For all other errors, still do a cuda check.
+        CUDA_ENFORCE(err);
+      }
     }
   }
+
+  DefaultCPUAllocator baseAllocator_;
 };
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
