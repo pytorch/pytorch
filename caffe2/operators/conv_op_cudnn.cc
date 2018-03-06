@@ -191,9 +191,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &stride_width,
           &dilation_height,
           &dilation_width,
-          &mode,
-
-          &dataType));
+          &mode
+#if CUDNN_VERSION_MIN(6, 0, 0)
+          , &dataType
+#endif
+        ));
 
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           copy,
@@ -203,8 +205,11 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           stride_width,
           dilation_height,
           dilation_width,
-          mode,
-          dataType));
+          mode
+#if CUDNN_VERSION_MIN(6, 0, 0)
+          , dataType
+#endif
+        ));
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
