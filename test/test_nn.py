@@ -3790,6 +3790,9 @@ class TestNN(NNTestCase):
         target = Variable(torch.randn(15).sign())
         self.assertTrue(gradcheck(lambda x, y, z: F.cosine_embedding_loss(
             x, y, z), (input1, input2, target)))
+        self.assertEqual(F.cosine_embedding_loss(input1, input2, target),
+                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target))
+
 
     def test_cosine_embedding_loss_margin_no_reduce(self):
         input1 = Variable(torch.randn(15, 10), requires_grad=True)
@@ -3797,6 +3800,8 @@ class TestNN(NNTestCase):
         target = Variable(torch.randn(15).sign())
         self.assertTrue(gradcheck(lambda x, y, z: F.cosine_embedding_loss(
             x, y, z, margin=0.5), (input1, input2, target)))
+        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, margin=0.5),
+                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, margin=0.5))
 
     def test_triplet_margin_loss(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
