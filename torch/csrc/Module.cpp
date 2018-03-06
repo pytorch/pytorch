@@ -16,7 +16,10 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/DataLoader.h"
+#include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/autograd/python_variable.h"
@@ -32,9 +35,7 @@
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
-#include "THP.h"
-
-#include "DataLoader.cpp"
+#include "torch/csrc/utils/numpy_stub.h"
 
 namespace py = pybind11;
 
@@ -442,7 +443,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
-  ASSERT_TRUE(THPSize_init(module));
+  THPSize_init(module);
   ASSERT_TRUE(THPDtype_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));

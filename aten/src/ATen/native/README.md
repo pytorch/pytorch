@@ -162,7 +162,9 @@ mandatory).
 There are a few situations where you might like to use this functionality:
 
 - You want a default value which is fine in Python but would cause ambiguity in C++.
-  TODO: Explain this in more detail.
+  For example, `norm(Tensor self, real p=2, int64_t dim=1)` would cause ambiguity
+  with long tensors in C++. Therefore, we need to make `p=2` a python only default
+  initialization value.
 
 - You want a value to default to the same value as another argument (this cannot
   be expressed in C++ default arguments).

@@ -11,6 +11,7 @@ extern "C" void THFloatTensor_fill(THFloatTensor *, float v);
 #include <string.h>
 #include <sstream>
 #include "test_assert.h"
+#include "test_seed.h"
 
 using namespace at;
 
@@ -261,6 +262,8 @@ static void test(Type & type) {
 
 int main(int argc, char ** argv)
 {
+  manual_seed(123);
+
   std::cout << "=========================== CPU ===========================" << std::endl;
   test(CPU(kFloat));
   if(at::hasCUDA()) {

@@ -1,9 +1,12 @@
 #include "ATen/ATen.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 using namespace at;
 
 int main() {
+  manual_seed(123);
+
   Type & T = CPU(kFloat);
 
   // 0) pre-req tests:

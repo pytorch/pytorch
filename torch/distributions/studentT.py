@@ -19,7 +19,7 @@ class StudentT(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        df (float or Tensor or Variable): degrees of freedom
+        df (float or Tensor): degrees of freedom
     """
     params = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real

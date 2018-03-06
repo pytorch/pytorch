@@ -7,6 +7,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 using std::cout;
 using namespace at;
@@ -81,6 +82,8 @@ void test_overflow() {
 }
 
 int main() {
+  manual_seed(123);
+
   Scalar what = 257;
   Scalar bar = 3.0;
   Half h = bar.toHalf();

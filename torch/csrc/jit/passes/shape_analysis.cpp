@@ -50,6 +50,41 @@ bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> out
 }
 
 void PropagateShapeOnNode(Node * node) {
+  // These don't require the types and present flag. Return early after we
+  // process them
+  switch(node->kind()) {
+    case kIf: {
+      auto then_block = node->blocks().at(0);
+      auto else_block = node->blocks().at(1);
+      PropagateShapeOnBlock(then_block);
+      PropagateShapeOnBlock(else_block);
+      mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
+      return;
+    }
+    case kLoop: {
+      auto body_block = node->blocks().at(0);
+      // propagate counter type
+      body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
+      // propagate loop-carried input types to block inputs
+      auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
+      auto loop_carried_block = body_block->inputs().slice(1); // skip trip
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
+      }
+      auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
+
+      do {
+        PropagateShapeOnBlock(body_block);
+      } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
+
+      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
+        node->outputs()[i]->setType(loop_carried_block[i]->type());
+      }
+      return;
+    }
+    default: ; // fall-through
+  }
+
   std::vector<TensorType*> types;
   bool present;
   std::tie(types, present) = gatherTypes(node->inputs());
@@ -126,7 +161,29 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(tp->withSizesStrides(sizes, strides));
     } break;
     case kview: {
-      node->output()->setType(types.at(0)->withSizes(node->is(ksizes)));
+      JIT_ASSERT(types.size() == 1);
+      auto sizes = node->is(ksize);
+      bool inferred = false;
+      size_t inferred_idx;
+      int64_t size_product = 1;
+      for (size_t i=0; i<sizes.size(); ++i) {
+        if (sizes[i] == -1) {
+          if (inferred)
+            throw std::runtime_error("-1 occured in more than 1 size position");
+          inferred = true;
+          inferred_idx = i;
+        } else {
+          size_product *= sizes[i];
+        }
+      }
+
+      if (inferred) {
+        auto rep_ten = representativeTensor(types[0]);
+        JIT_ASSERT(size_product != 0);
+        int64_t inferred_size = rep_ten.numel() / size_product;
+        sizes[inferred_idx] = inferred_size;
+      }
+      node->output()->setType(types.at(0)->withSizes(sizes));
     } break;
     case kReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
@@ -140,43 +197,33 @@ void PropagateShapeOnNode(Node * node) {
     case kUndefined: {
       node->output()->setType(DynamicType::get());
     } break;
-    case kIf: {
-      auto then_block = node->blocks().at(0);
-      auto else_block = node->blocks().at(1);
-      PropagateShapeOnBlock(then_block);
-      PropagateShapeOnBlock(else_block);
-      mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
-    } break;
-    case kLoop: {
-      auto body_block = node->blocks().at(0);
-      // propagate counter type
-      body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
-      // propagate loop-carried input types to block inputs
-      auto loop_carried_inputs = node->inputs().slice(2); // skip max, cond
-      auto loop_carried_block = body_block->inputs().slice(1); // skip trip
-      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
-        loop_carried_block[i]->setType(loop_carried_inputs[i]->type());
-      }
-      auto loop_carried_outputs = body_block->outputs().slice(1); // skip cond
-
-      do {
-        PropagateShapeOnBlock(body_block);
-      } while(mergeTypes(loop_carried_block, loop_carried_outputs, loop_carried_block));
-
-      for(size_t i = 0; i < loop_carried_inputs.size(); ++i) {
-        node->outputs()[i]->setType(loop_carried_block[i]->type());
-      }
-    } break;
     case kPythonOp: {
+      setDynamicType(node);
+    } break;
+    case kPrint: {
       setDynamicType(node);
     } break;
     default: {
       auto op_info = getTensorOp(node);
       std::vector<at::Tensor> stack;
+      bool shape_inferenceable = true;
+      // Integral typed inputs are often an indicator that we're indexing into
+      // a tensor, so we should special-case these ops in the shape propagation.
+      // Additionally, passing in a zero representative tensor into an integer
+      // division op causes divide-by-zero errors
       for(auto & type : types) {
+        if (at::isIntegralType(type->scalarType())) {
+          shape_inferenceable = false;
+          break;
+        }
         stack.push_back(representativeTensor(type));
       }
+      if (!shape_inferenceable) {
+        setDynamicType(node);
+        break;
+      }
       op_info.op(stack);
+      JIT_ASSERT(stack.size() == node->outputs().size());
       for(size_t i = 0; i < stack.size(); ++i) {
         node->outputs()[i]->inferTypeFrom(stack[i]);
       }

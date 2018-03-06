@@ -49,7 +49,7 @@ class Dirichlet(ExponentialFamily):
         [torch.FloatTensor of size 2]
 
     Args:
-        concentration (Tensor or Variable): concentration parameter of the distribution
+        concentration (Tensor): concentration parameter of the distribution
             (often referred to as alpha)
     """
     params = {'concentration': constraints.positive}

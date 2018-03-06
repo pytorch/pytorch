@@ -2,18 +2,18 @@
 # "what has to be done to add a Operation ..." first!
 
 import re
-from collections import OrderedDict
 from code_template import CodeTemplate
 
 try:
-    import typing
+    import typing  # noqa: F401
 except ImportError:
     raise RuntimeError(
         'Missing build dependency: Unable to import the `typing` module. '
         'Please install it via `conda install typing` or `pip install typing`')
 
-from typing import Any, Dict, List, Generic, Optional, Set, Tuple, \
-    Union, TypeVar, NamedTuple
+# flake8 doesn't take into account usages in type annotations.
+from typing import Union, Set  # noqa: F401
+from typing import Any, Dict, List, Optional, Tuple, NamedTuple
 
 try:
     from mypy_extensions import TypedDict
@@ -291,6 +291,7 @@ class nested_dict(object):
         if r is not None:
             return r
         return self.parent[x]
+
 
 Environment = TypedDict('Environment', {
     'ScalarName': str,

@@ -1,5 +1,6 @@
 #include "ATen/ATen.h"
 #include "test_assert.h"
+#include "test_seed.h"
 #include <algorithm>
 #include <iostream>
 #include <numeric>
@@ -256,6 +257,8 @@ void test(Type &T) {
 }
 
 int main() {
+  manual_seed(123);
+
   test(CPU(kFloat));
 
   if (at::hasCUDA()) {

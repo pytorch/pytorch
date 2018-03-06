@@ -403,7 +403,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
         } else if (arg_type == 't') {
           py_inputs[i] = py::reinterpret_steal<py::object>(
               THPVariable_Wrap(builder.addInput(
-                  std::move(fromLast(stack, num_inputs - next_tensor)),
+                  std::move(peek(stack, next_tensor, num_inputs)),
                   op->var_flags.at(next_tensor))));
           next_tensor++;
         }
@@ -450,7 +450,7 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
           py_inputs[i] = py::reinterpret_borrow<py::object>(
               op->scalar_args[next_scalar++].get());
         } else if (arg_type == 't') {
-          auto var = fromLast(stack, num_inputs - next_tensor);
+          auto var = peek(stack, next_tensor, num_inputs);
           if (!values_are_variables) {
             var = autograd::make_variable(var);
           }
@@ -503,7 +503,7 @@ Operation createCppOperation(CppOp* op) {
     HandleBuilder builder(has_handle);
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs; i++) {
-      v_inputs.push_back(builder.addInput(std::move(fromLast(stack, num_inputs - i)), op->var_flags[i]));
+      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
     }
     drop(stack, num_inputs);
     autograd::variable_list v_outputs = (*func)(v_inputs);
@@ -526,7 +526,7 @@ Operation createEvalOperation(CppOp * op) {
     auto& engine = autograd::python::PythonEngine::getDefaultEngine();
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs - 1; i++) {
-      v_inputs.push_back(builder.addInput(std::move(fromLast(stack, num_inputs - i)), op->var_flags[i]));
+      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
     }
     drop(stack, num_inputs);
     // TODO: handle create_graph appropriately
