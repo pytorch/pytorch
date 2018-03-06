@@ -8,7 +8,7 @@ from itertools import product, chain
 import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
-import torch.onnx.core
+import torch.onnx.utils
 from common import TestCase, run_tests, IS_WINDOWS
 import io
 import sys
@@ -216,7 +216,7 @@ class TestJit(TestCase):
         net = Net()
         t = Variable(torch.ones(2), requires_grad=True)
         trace, _ = torch.jit.get_trace_graph(net, (t, ))
-        torch.onnx.core._optimize_trace(trace, False)
+        torch.onnx.utils._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
 
@@ -240,10 +240,10 @@ class TestJit(TestCase):
 
         t = Variable(torch.ones(1, 3, 227, 227), requires_grad=True)
 
-        with torch.onnx.core.set_training(model, False):
+        with torch.onnx.utils.set_training(model, False):
             trace, _ = torch.jit.get_trace_graph(model, (t, ))
 
-        torch.onnx.core._optimize_trace(trace, False)
+        torch.onnx.utils._optimize_trace(trace, False)
 
         self.assertExpectedTrace(trace)
 

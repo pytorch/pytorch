@@ -6,13 +6,13 @@ from torch.autograd import Function, function
 
 
 def export(*args, **kwargs):
-    import torch.onnx.core
-    return torch.onnx.core.export(*args, **kwargs)
+    import torch.onnx.utils
+    return torch.onnx.utils.export(*args, **kwargs)
 
 
 def _export(*args, **kwargs):
-    import torch.onnx.core
-    return torch.onnx.core._export(*args, **kwargs)
+    import torch.onnx.utils
+    return torch.onnx.utils._export(*args, **kwargs)
 
 
 def _symbolic_override_wrapper_maker(symbolic_fn, do_skip, fn):

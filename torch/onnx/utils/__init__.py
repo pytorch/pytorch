@@ -143,7 +143,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         print(trace)
 
     # TODO: Don't allocate a in-memory string for the protobuf
-    from torch.onnx.core.symbolic import _onnx_opset_version
+    from torch.onnx.symbolic import _onnx_opset_version
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
@@ -291,7 +291,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
 
 def _run_symbolic_function(g, n, inputs, aten=False):
-    import torch.onnx.core.symbolic
+    import torch.onnx.symbolic
 
     try:
         # See Note [Export inplace]
@@ -308,11 +308,11 @@ def _run_symbolic_function(g, n, inputs, aten=False):
 
         # Export ONNX regular ops.
         attrs = {k: n[k] for k in n.attributeNames()}
-        if not hasattr(torch.onnx.core.symbolic, op_name):
-            warnings.warn("ONNX export failed on {} because torch.onnx.core.symbolic.{} does not exist"
+        if not hasattr(torch.onnx.symbolic, op_name):
+            warnings.warn("ONNX export failed on {} because torch.onnx.symbolic.{} does not exist"
                           .format(op_name, op_name))
             return None
-        fn = getattr(torch.onnx.core.symbolic, op_name)
+        fn = getattr(torch.onnx.symbolic, op_name)
         return fn(g, *inputs, **attrs)
 
     except TypeError as e:

@@ -58,7 +58,7 @@ class FeatureDropout(Dropout):
     def symbolic(g, input, p=0.5, train=False, inplace=False):
         # See Note [Export inplace]
         # NB: In inference mode, FeatureDropout is exported as an identity op.
-        from torch.onnx.core.symbolic import _unimplemented
+        from torch.onnx.symbolic import _unimplemented
         if train:
             return _unimplemented("FeatureDropout", "training mode")
         return input
