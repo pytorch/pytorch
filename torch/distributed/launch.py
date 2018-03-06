@@ -24,8 +24,9 @@ GPU (nproc_per_node - 1)*.
 
 1. Single-Node multi-process distributed training
 
-  ``python -m torch.distributed.launch YOUR_TRAINING_SCRIPT.py (--arg1
-  --arg2 --arg3 and all other arguments of your training script)``
+  ``python -m torch.distributed.launch --nproc_per_node=NUM_GPUS_YOU_HAVE
+  YOUR_TRAINING_SCRIPT.py (--arg1 --arg2 --arg3 and all other arguments of
+  your training script)``
 
 2. Multi-Node multi-process distributed training: (e.g. two nodes)
 
@@ -112,8 +113,9 @@ def parse_args():
                              "training")
     parser.add_argument("--nproc_per_node", type=int, default=1,
                         help="The number of processes to launch on each node, "
-                             "will default to the number of GPUs on your "
-                             "system if not specified")
+                             "for GPU training, this is recommended to be set"
+                             "to the number of GPUs in your system so that "
+                             "each process can be bound to a single GPU.")
     parser.add_argument("--master_addr", default="127.0.0.1", type=str,
                         help="Master node (rank 0)'s address, should be either "
                              "the IP address or the hostname of node 0, for "
