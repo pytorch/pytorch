@@ -48,7 +48,7 @@ bool BernoulliJSDOp<float, CPUContext>::RunOnDevice() {
   auto* L = Output(0); // JSD loss output
   int N = X.size();
   CAFFE_ENFORCE_EQ(T.size(), N);
-  L->Resize(N);
+  L->ResizeLike(X);
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
   auto* l_data = L->mutable_data<float>();
@@ -69,7 +69,7 @@ bool BernoulliJSDGradientOp<float, CPUContext>::RunOnDevice() {
   auto& T = Input(2);
   auto* gi = Output(0);
   int N = X.size();
-  gi->Resize(N);
+  gi->ResizeLike(X);
   auto* go_data = go.data<float>();
   auto* x_data = X.data<float>();
   auto* t_data = T.data<float>();
