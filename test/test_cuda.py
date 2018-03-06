@@ -3,7 +3,6 @@ import tempfile
 import re
 import unittest
 from itertools import repeat
-import random
 
 import torch
 import torch.cuda
