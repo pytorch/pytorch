@@ -4,8 +4,21 @@ from functools import reduce
 import math
 
 __all__ = [
-    'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
-    'hann_window', 'hamming_window', 'bartlett_window', 'where', 'isnan', 'unique'
+    'bartlett_window',
+    'btriunpack',
+    'chunk',
+    'det',
+    'empty_like',
+    'hamming_window',
+    'hann_window',
+    'isnan',
+    'matmul',
+    'split',
+    'stack',
+    'stft',
+    'unbind',
+    'unique',
+    'where',
 ]
 
 
@@ -549,11 +562,14 @@ def unique(input, sorted=False, return_inverse=False):
             elements in the original input ended up in the returned unique list.
 
     Returns:
-        Tensor: the output list of unique scalar elements.
-        Tensor (optional): if :attr:`return_inverse` is True, there will be a
-            2nd returned tensor (same shape as input) representing the indices
-            for where elements in the original input map to in the output;
-            otherwise, this function will only return a single tensor.
+        (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
+
+            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **inverse_indices** (*Tensor*): (optional) if
+              :attr:`return_inverse` is True, there will be a
+              2nd returned tensor (same shape as input) representing the indices
+              for where elements in the original input map to in the output;
+              otherwise, this function will only return a single tensor.
 
     Example::
 
