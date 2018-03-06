@@ -13,7 +13,7 @@ namespace script {
 //
 // A few notes on types and their aliases:
 // - List<T> is really a Tree with kind TK_LIST and elements as subtrees
-// - Maybe<T> is really either a Tree with kind TK_NOTHING or T
+// - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
 // - Builtin types are: Ident (TK_IDENT), String (TK_STRING),
 //                      Number (TK_NUMBER) and Bool (TK_BOOL)
 //
@@ -160,10 +160,9 @@ struct List : public TreeView {
 template <typename T>
 struct Maybe : public TreeView {
   explicit Maybe(const TreeRef& tree) : TreeView(tree) {
-    if (tree->kind() != TK_NOTHING) {
-      std::cout << kindToString(tree->kind()) << std::endl;
-      T{tree}; // invoke the constructor to check the type
-    }
+    tree_->match(TK_OPTION);
+    if (tree_->trees().size() > 1)
+      throw ErrorReport(tree) << "Maybe trees can have at most one subtree";
   }
   /* implicit */ Maybe(const T& tree) : TreeView(tree) {}
   bool present() const {

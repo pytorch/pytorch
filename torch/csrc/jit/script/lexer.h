@@ -41,6 +41,7 @@ namespace script {
   _(TK_STRING, "string", "")                     \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
+  _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
   _(TK_COMPREHENSION, "comprehension", "")       \
   _(TK_TENSOR_TYPE, "tensor_type", "")           \
