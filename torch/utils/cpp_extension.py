@@ -50,7 +50,7 @@ def check_compiler_abi_compatibility(compiler):
     Verifies that the given compiler is ABI-compatible with PyTorch.
 
     Arguments:
-        compiler (str): The compiler executable name to check (e.g. 'g++').
+        compiler (str): The compiler executable name to check (e.g. ``g++``).
             Must be executable in a shell process.
 
     Returns:
