@@ -354,11 +354,6 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
 
 
 def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
-    # needed for legacy tests
-    if not isinstance(input, Variable):
-        input = Variable(input)
-        target = Variable(target)
-
     margin_clamp = (margin - input).clamp(min=0).type_as(input)
     output = torch.where(target == 1, input, margin_clamp)
 
