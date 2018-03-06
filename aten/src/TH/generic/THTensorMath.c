@@ -3659,6 +3659,22 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
     ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
     int r_Contig = THTensor_(isContiguous)(r_);               \
     int tContig = THTensor_(isContiguous)(t);                 \
+    int inOMP = omp_in_parallel();                            \
+    if( (r_Size > TH_OMP_OVERHEAD_THRESHOLD) && (!inOMP) ){   \
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = CFUNC(*t_data););        \
+    }                                                                                                        \
+    else {                                                                                                   \
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                       \
+    }                                                                                                        \
+  }
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION(NAME, CFUNC)             \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
+  {                                                           \
+    THTensor_(resizeAs)(r_, t);                               \
+    ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
+    int r_Contig = THTensor_(isContiguous)(r_);               \
+    int tContig = THTensor_(isContiguous)(t);                 \
     if (r_Contig && tContig) {                                \
       TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););                   \
     } else {                                                                                                   \
@@ -3671,9 +3687,17 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
       }                                                                                                        \
     }                                                                                                          \
   }
+
 #else
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC)             \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
+  {                                                           \
+    THTensor_(resizeAs)(r_, t);                               \
+    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
+  }                                                           \
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION(NAME, CFUNC)             \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
@@ -3727,7 +3751,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
-LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
 LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
 LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))
@@ -3750,6 +3773,8 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
+
+LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 
 
 void THTensor_(pow)(THTensor *r_, THTensor *t, real value)
