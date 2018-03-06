@@ -243,7 +243,7 @@ import torch.onnx
 import torch.random
 import torch.distributions
 import torch.testing
-from torch.autograd import no_grad, enable_grad, grad_mode
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))
 

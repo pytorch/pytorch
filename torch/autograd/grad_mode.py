@@ -23,7 +23,7 @@ class no_grad(object):
         self.prev = torch.is_grad_enabled()
 
     def __enter__(self):
-        torch.set_grad_enabled(False)
+        torch._C.set_grad_enabled(False)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
@@ -54,17 +54,17 @@ class enable_grad(object):
         self.prev = torch.is_grad_enabled()
 
     def __enter__(self):
-        torch.set_grad_enabled(True)
+        torch._C.set_grad_enabled(True)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
         return False
 
 
-class grad_mode(object):
+class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
-    Parameter:
+    Arguments:
         mode (bool): Flag whether to enable grad (True), or disable
                      (False). This can be used to conditionally enable
                      gradients.
@@ -83,10 +83,10 @@ class grad_mode(object):
 
     def __init__(self, mode):
         self.prev = torch.is_grad_enabled()
-        self.mode = mode
+        torch._C.set_grad_enabled(mode)
 
     def __enter__(self):
-        torch.set_grad_enabled(self.mode)
+        pass
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
