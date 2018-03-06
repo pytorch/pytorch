@@ -42,7 +42,7 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
 } // namespace
 
 std::tuple<Tensor, Tensor>
-unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
+_unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
   if (sorted) {
     return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
       return _unique_cpu_template<std::set, scalar_t>(self, return_inverse);

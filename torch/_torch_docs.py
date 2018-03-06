@@ -4926,62 +4926,6 @@ Example::
 
 """)
 
-add_docstr(torch.unique,
-           r"""
-unique(input, sorted=False, return_inverse=False) -> (Tensor, Tensor)
-
-Returns the unique scalar elements of the input tensor as list.
-
-Args:
-    input (Tensor): the input tensor
-    sorted (bool): Whether to sort the unique elements in ascending order
-        before returning as output.
-    return_inverse (bool): Whether to also return the indices for where
-        elements in the original input ended up in the returned unique list.
-
-Returns:
-    (Tensor, Tensor): A tuple containing
-
-        - **output** (*Tensor*): the list of unique scalar elements
-        - **inverse_indices** (*Tensor*): the indices (same shape as input)
-            for where elements in the original input map to in the output
-            if ``return_inverse`` is ``True``; otherwise, an empty tensor.
-
-Example::
-
-    >>>> output, inverse_indices = torch.unique(
-             torch.LongTensor([1, 3, 2, 3]), sorted=True, return_inverse=True)
-    >>>> output
-
-     1
-     2
-     3
-    [torch.LongTensor of size (3,)]
-
-    >>>> inverse_indices
-
-     0
-     2
-     1
-     2
-    [torch.LongTensor of size (4,)]
-
-    >>>> output, inverse_indices = torch.unique(
-             torch.LongTensor([[1, 3], [2, 3]]), sorted=True, return_inverse=True)
-    >>>> output
-
-     1
-     2
-     3
-    [torch.LongTensor of size (3,)]
-
-    >>>> inverse_indices
-
-     0  2
-     1  2
-    [torch.LongTensor of size (2,2)]
-""")
-
 add_docstr(torch.unsqueeze,
            r"""
 unsqueeze(input, dim, out=None)

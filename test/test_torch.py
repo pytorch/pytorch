@@ -5426,23 +5426,20 @@ class TestTorch(TestCase):
         x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
         expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
         expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
-        empty_inverse = torch.LongTensor([])
 
-        x_unique, x_inverse = torch.unique(x)
+        x_unique = torch.unique(x)
         self.assertEqual(
             expected_unique.tolist(), sorted(x_unique.tolist()))
-        self.assertEqual(empty_inverse, x_inverse)
 
         x_unique, x_inverse = x.unique(return_inverse=True)
         self.assertEqual(
             expected_unique.tolist(), sorted(x_unique.tolist()))
         self.assertEqual(expected_inverse.numel(), x_inverse.numel())
 
-        x_unique, x_inverse = x.unique(sorted=True)
+        x_unique = x.unique(sorted=True)
         self.assertEqual(expected_unique, x_unique)
-        self.assertEqual(empty_inverse, x_inverse)
 
-        x_unique, x_inverse = torch.unique(
+        x_unique, x_inverse = torch._unique(
             x, sorted=True, return_inverse=True)
         self.assertEqual(expected_unique, x_unique)
         self.assertEqual(expected_inverse, x_inverse)
