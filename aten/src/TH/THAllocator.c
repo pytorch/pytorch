@@ -1,5 +1,6 @@
 #include "THAllocator.h"
 #include "THAtomic.h"
+#include "stdio.h"
 
 /* needed for ATOMIC_INT_LOCK_FREE */
 /* cannot go in THAtomic.h because of interactions with OpenMP giving
@@ -53,6 +54,9 @@ struct THMapAllocatorContext_ {
   ptrdiff_t size; /* mapped size */
 #ifdef _WIN32
   HANDLE handle;
+  HANDLE event;
+  char *eventname;
+  void *data;
 #else
   int fd;
 #endif
@@ -82,10 +86,20 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
   } else {
     ctx->filename = unknown_filename;
   }
+
+  #ifdef _WIN32
+  char *suffixname = "_event";
+  size_t namelen = strlen(filename)+1+strlen(suffixname);
+  ctx->eventname = THAlloc(namelen);
+  strcpy_s(ctx->eventname, namelen, ctx->filename);
+  strcat_s(ctx->eventname, namelen, suffixname);
+  #endif
+
   ctx->flags = flags;
   ctx->size = 0;
 #ifdef _WIN32
   ctx->handle = INVALID_HANDLE_VALUE;
+  ctx->data = INVALID_HANDLE_VALUE;
 #else
   ctx->fd = -1;
 #endif
@@ -126,10 +140,66 @@ ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx)
 
 void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
 {
-  if (ctx->filename != unknown_filename)
+  if (ctx->filename != unknown_filename) {
     THFree(ctx->filename);
+    THFree(ctx->eventname);
+  }
   THFree(ctx);
 }
+
+#ifdef _WIN32
+typedef struct{
+  HANDLE event;
+  HANDLE handle;
+  void *data;
+  int released;
+  int file;
+} ReleaseContext;
+static DWORD WINAPI WaitForReleaseHandle(LPVOID lpParam) {
+  ReleaseContext *cxt = (ReleaseContext *)lpParam;
+
+  HANDLE event = cxt->event;
+  HANDLE handle = cxt->handle;
+  void *data = cxt->data;
+
+  while (TRUE) {
+    WaitForSingleObject(event, INFINITE);
+
+    printf("force_free\n"); 
+    if (cxt->released) {
+      CloseHandle(event);
+      CloseHandle(handle);
+
+      printf("%p\n", (void *)data);
+      THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+      printf("%d\n", info->refcount);
+      printf("%d\n", cxt->file);
+
+      if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0) {
+        // Just try to close it if it's not closed
+      }
+      break;
+    }
+
+    THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+    printf("thread_free: %d\n", THAtomicGet(&info->refcount));
+    if (THAtomicGet(&info->refcount) == 0) {
+      CloseHandle(event);
+      CloseHandle(handle);
+
+      if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0) {
+        // Just try to close it if it's not closed
+      }
+
+      break;
+    }
+  }
+
+  THFree(cxt);
+
+  return 0;
+}
+#endif
 
 static void *_map_alloc(void* ctx_, ptrdiff_t size)
 {
@@ -143,6 +213,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
   if (ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)
   {
     char *filename;
+    char *eventname;
     LARGE_INTEGER hfilesz;
 
     if (ctx->filename[0] == '/')
@@ -150,20 +221,30 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
     else
       filename = ctx->filename;
 
+    if (ctx->eventname[0] == '/')
+      eventname = ctx->eventname + 1;
+    else
+      eventname = ctx->eventname;
+
     hfilesz.QuadPart = size;
 
     if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
     {
       ctx->handle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, hfilesz.HighPart, hfilesz.LowPart, filename);
+      ctx->event = CreateEvent(NULL, FALSE, FALSE, eventname);
     }
     else if (ctx->flags & TH_ALLOCATOR_MAPPED_NOCREATE)
     {
       ctx->handle = OpenFileMapping(FILE_MAP_ALL_ACCESS, FALSE, filename);
+      ctx->event = OpenEvent(EVENT_ALL_ACCESS, FALSE, eventname);
     }
     else
     {
       THError("Excpected either TH_ALLOCATOR_MAPPED_EXCLUSIVE or TH_ALLOCATOR_MAPPED_NOCREATE");
     }
+
+    if (ctx->event == NULL)
+      THError("Couldn't open shared event: <%s>, error code: <%d>", eventname, GetLastError());
 
     if (ctx->handle == NULL)
       THError("Couldn't open shared file mapping: <%s>, error code: <%d>", filename, GetLastError());
@@ -478,8 +559,23 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   char *data = ((char*)ptr) + TH_ALLOC_ALIGNMENT;
   THMapInfo *map_info = (THMapInfo*)ptr;
 
-  if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
+  if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE) {
     map_info->refcount = 1;
+#ifdef _WIN32
+    ReleaseContext* cxt = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
+    cxt->handle = ctx->handle;
+    cxt->event = ctx->event;
+    cxt->data = (void*)data;
+    cxt->released = FALSE;
+    cxt->file = ctx->flags & TH_ALLOCATOR_MAPPED_SHAREDMEM;
+    HANDLE thread = CreateThread(NULL, 0, WaitForReleaseHandle, (LPVOID)cxt, 0, NULL);
+    if (!thread) {
+      THError("Couldn't create daemon thread, error code: <%d>", GetLastError());
+    }
+    CloseHandle(thread);
+    ctx->data = (void *)cxt;
+#endif
+  }
   else
     THAtomicIncrementRef(&map_info->refcount);
 
@@ -496,11 +592,25 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
+  printf("normal_free: %d", THAtomicGet(&info->refcount));
   if (THAtomicDecrementRef(&info->refcount)) {
-    CloseHandle(ctx->handle);
+   printf(" %d", THAtomicGet(&info->refcount));
+   if (ctx->data != INVALID_HANDLE_VALUE) {
+    ReleaseContext *cxt = (ReleaseContext *)ctx->data;
+    cxt->released = TRUE;
+   }
+   SetEvent(ctx->event); 
+   CloseHandle(ctx->handle);
+   CloseHandle(ctx->event);
   }
-  if(UnmapViewOfFile(data) == 0)
-    THError("could not unmap the shared memory file");
+  if (ctx->data == INVALID_HANDLE_VALUE) {
+    printf(" main process\n");
+    if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
+      THError("could not unmap the shared memory file");
+  }
+  else {
+    printf(" child process\n");
+  }
 #else /* _WIN32 */
 
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
