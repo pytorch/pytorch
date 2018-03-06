@@ -21,7 +21,7 @@ CAFFE2_DEFINE_bool(
     false,
     "Use NUMA whenever possible.");
 
-#if defined(__linux__) && CAFFE2_MOBILE == 0
+#if defined(__linux__) && !defined(CAFFE2_DISABLE_NUMA) && CAFFE2_MOBILE == 0
 #include <errno.h>
 #include <numa.h>
 #include <numaif.h>
