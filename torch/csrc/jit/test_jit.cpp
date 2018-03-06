@@ -400,11 +400,11 @@ void interpTest() {
 
     int hidden_size = 2*input_size;
 
-    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
-    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
-    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+    auto input = at::randn(at::CUDA(at::kFloat), {seq_len, batch_size, input_size});
+    auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+    auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+    auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
 
     auto lstm_g = build_lstm();
     Code lstm_function(lstm_g, /*values_are_variables=*/false);
@@ -424,12 +424,12 @@ void interpStageTest() {
     constexpr int seq_len = 32;
 
     int hidden_size = 2*input_size;
-    auto input = at::CUDA(at::kFloat).randn({seq_len, batch_size, input_size});
-    auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-    auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-    auto cx1 = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-    auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
-    auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+    auto input = at::randn(at::CUDA(at::kFloat), {seq_len, batch_size, input_size});
+    auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+    auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+    auto cx1 = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+    auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
+    auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
 
 
     auto lstm_g = build_lstm_stages();
@@ -733,11 +733,11 @@ void shapeAnalysisTest() {
 
   auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
 
-  auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
-  auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-  auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-  auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
-  auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+  auto input = at::randn(at::CUDA(at::kFloat), {batch_size, input_size});
+  auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+  auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+  auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
+  auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
 
   auto g = build_lstm();
   ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
@@ -759,11 +759,11 @@ void testGraphExecutor() {
 
   auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
 
-  auto input = at::CUDA(at::kFloat).randn({batch_size, input_size});
-  auto hx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-  auto cx    = at::CUDA(at::kFloat).randn({batch_size, hidden_size});
-  auto w_ih  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, input_size}));
-  auto w_hh  = t_def(at::CUDA(at::kFloat).randn({4 * hidden_size, hidden_size}));
+  auto input = at::randn(at::CUDA(at::kFloat), {batch_size, input_size});
+  auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+  auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
+  auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
+  auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
 
   std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
   auto g = build_lstm();

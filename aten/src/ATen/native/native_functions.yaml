@@ -285,6 +285,12 @@
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randn_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: randn_like(Tensor self) -> Tensor
   variants: function
 

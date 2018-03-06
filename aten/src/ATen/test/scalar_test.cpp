@@ -110,10 +110,10 @@ int main() {
   cout << t.sizes() << " " << t.strides() << "\n";
 
   Type & T = CPU(Float);
-  Tensor x = T.randn({1,10});
-  Tensor prev_h = T.randn({1,20});
-  Tensor W_h = T.randn({20,20});
-  Tensor W_x = T.randn({20,10});
+  Tensor x = randn(T, {1,10});
+  Tensor prev_h = randn(T, {1,20});
+  Tensor W_h = randn(T, {20,20});
+  Tensor W_x = randn(T, {20,10});
   Tensor i2h = at::mm(W_x, x.t());
   Tensor h2h = at::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
@@ -129,7 +129,7 @@ int main() {
 
     cout << r << "\n";
   }
-  cout << T.randn({10,10,2}) << "\n";
+  cout << randn(T, {10,10,2}) << "\n";
 
   // check Scalar.toTensor on Scalars backed by different data types
   ASSERT(bar.toTensor().type().scalarType() == kDouble);
