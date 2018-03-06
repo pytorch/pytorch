@@ -1,6 +1,6 @@
 #pragma once
 
-#include "caffe2/share/contrib/observers/net_observer_reporter.h"
+#include "observers/net_observer_reporter.h"
 
 namespace caffe2 {
 

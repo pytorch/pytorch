@@ -1,4 +1,4 @@
-#include "caffe2/share/contrib/observers/observer_config.h"
+#include "observers/observer_config.h"
 
 namespace caffe2 {
 

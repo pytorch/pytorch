@@ -110,4 +110,6 @@ REGISTER_CAFFE2_DB(RocksDB, RocksDB);
 REGISTER_CAFFE2_DB(rocksdb, RocksDB);
 
 }  // namespace db
+
+CAFFE2_MODULE(caffe2_rocksdb, "RocksDB implementation for caffe2::DB.");
 }  // namespace caffe2

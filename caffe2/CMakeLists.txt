@@ -78,6 +78,7 @@ install(FILES ${PROJECT_BINARY_DIR}/caffe2/core/macros.h
 
 # Compile exposed libraries.
 add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
+add_dependencies(caffe2 Caffe_PROTO Caffe2_PROTO)
 target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
@@ -262,15 +263,7 @@ if (BUILD_PYTHON)
           FILES_MATCHING PATTERN "*.py")
 endif()
 
+# Finally, set the Caffe2_MAIN_LIBS variable in the parent scope.
+set(Caffe2_MAIN_LIBS ${Caffe2_MAIN_LIBS} PARENT_SCOPE)
 
-# ---[ Any builds that should happen after the main targets should be added here.
-# Binaries
-if (BUILD_BINARY)
-  add_subdirectory(binaries)
-  # Benchmarking binaries require observers included in the build
-  # There is a linking issue that happens in some of the Windows builds.
-  # TODO(Yangqing): after the module redesign, enable this back.
-  if (BUILD_OBSERVERS AND NOT MSVC)
-    add_subdirectory(share/contrib/binaries)
-  endif()
-endif()
+

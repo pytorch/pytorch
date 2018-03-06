@@ -8,10 +8,7 @@ caffe2_binary_target("run_plan.cc")
 caffe2_binary_target("speed_benchmark.cc")
 caffe2_binary_target("split_db.cc")
 
-if (USE_THREADS)
-  caffe2_binary_target("db_throughput.cc")
-  target_link_libraries(db_throughput ${CMAKE_THREAD_LIBS_INIT})
-endif()
+caffe2_binary_target("db_throughput.cc")
 
 if (USE_CUDA)
   caffe2_binary_target("inspect_gpus.cc")
@@ -44,7 +41,11 @@ endif()
 
 if (USE_OPENCV)
   caffe2_binary_target("make_image_db.cc")
-  target_link_libraries(make_image_db ${OpenCV_LIBS} ${CMAKE_THREAD_LIBS_INIT})
+  target_link_libraries(make_image_db ${OpenCV_LIBS})
+endif()
+
+if (USE_OBSERVERS)
+  caffe2_binary_target("caffe2_benchmark.cc")
 endif()
 
 # ---[ tutorials

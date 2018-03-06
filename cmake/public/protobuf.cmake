@@ -64,7 +64,7 @@ elseif(Protobuf_FOUND OR PROTOBUF_FOUND)
           IMPORTED_LOCATION_DEBUG "${PROTOBUF_LITE_LIBRARY_DEBUG}")
     endif()
   endif()
-  
+
   if(PROTOBUF_PROTOC_EXECUTABLE)
     if (NOT TARGET protobuf::protoc)
       add_executable(protobuf::protoc IMPORTED)
