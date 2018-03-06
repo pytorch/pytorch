@@ -228,17 +228,17 @@ struct Parser {
       if (L.nextIf(']')) {
         return Gather::create(range, Expr(value), Expr(first));
       } else {
-        first = c(TK_OPTION, range, {first});
+        first = c(TK_NOTHING, range, {first});
       }
     } else {
-      first = c(TK_OPTION, range, {});
+      first = c(TK_NOTHING, range, {});
     }
     L.expect(':');
     // Now we *may* have an expression.
     if (L.cur().kind != ']') {
-      second = c(TK_OPTION, range, {parseExp()});
+      second = c(TK_NOTHING, range, {parseExp()});
     } else {
-      second = c(TK_OPTION, range, {});
+      second = c(TK_NOTHING, range, {});
     }
     L.expect(']');
 
@@ -286,15 +286,11 @@ struct Parser {
       case TK_GLOBAL: {
         auto range = L.next().range;
         auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
-        if (idents.empty())
-          throw ErrorReport(range) << "global statement needs a list of variable names";
         return Global::create(range, idents);
       }
       case TK_RETURN: {
         auto range = L.next().range;
         auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
-        if (values.empty())
-          throw ErrorReport(range) << "return statement needs a list of variable names";
         return Return::create(range, values);
       }
       default: {
