@@ -3793,7 +3793,6 @@ class TestNN(NNTestCase):
         self.assertEqual(F.cosine_embedding_loss(input1, input2, target),
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target))
 
-
     def test_cosine_embedding_loss_margin_no_reduce(self):
         input1 = Variable(torch.randn(15, 10), requires_grad=True)
         input2 = Variable(torch.randn(15, 10), requires_grad=True)
