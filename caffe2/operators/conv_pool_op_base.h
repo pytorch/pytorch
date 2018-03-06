@@ -56,6 +56,8 @@ class ConvPoolOpBase : public Operator<Context> {
         dilation_(OperatorBase::GetRepeatedArgument<int>("dilations")),
         stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
         pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
+        float16_compute_(
+            OperatorBase::GetSingleArgument<bool>("float16_compute", false)),
         group_(OperatorBase::GetSingleArgument<int>("group", 1)),
         order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
@@ -570,6 +572,8 @@ class ConvPoolOpBase : public Operator<Context> {
   vector<int> dilation_;
   vector<int> stride_;
   vector<int> pads_;
+
+  bool float16_compute_;
 
   // We need the above parameters to be available for the devices.
   Tensor<Context> kernel_device_;

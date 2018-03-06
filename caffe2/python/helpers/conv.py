@@ -42,6 +42,7 @@ def _ConvBase(
     order="NCHW",
     cudnn_exhaustive_search=False,
     ws_nbytes_limit=None,
+    float16_compute=False,
     **kwargs
 ):
     kernels = []
@@ -116,6 +117,10 @@ def _ConvBase(
 
     if transform_inputs is not None:
         transform_inputs(model, blob_out, inputs)
+
+    # Enable float 16 compute kernel (relevant for CUDA)
+    if float16_compute:
+        kwargs['float16_compute'] = True
 
     # For the operator, we no longer need to provide the no_bias field
     # because it can automatically figure this out from the number of

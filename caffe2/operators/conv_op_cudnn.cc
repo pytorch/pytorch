@@ -15,59 +15,15 @@
  */
 
 #include "caffe2/core/context_gpu.h"
+
+#include "caffe2/core/common_gpu.h"
 #include "caffe2/core/cudnn_wrappers.h"
 #include "caffe2/operators/conv_op.h"
 #include "caffe2/operators/conv_op_cache_cudnn.h"
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/operators/op_utils_cudnn.h"
 
 namespace caffe2 {
-
-// Earlier in the days Caffe sets the default cudnn workspace to 8MB. We bump
-// it up to 64MB in Caffe2, as this enables the use of Winograd in many cases,
-// something very beneficial to more recent CNN models.
-static constexpr size_t kCONV_CUDNN_WORKSPACE_LIMIT_BYTES = 64 * 1024 * 1024;
-
-// Manually specified number of algorithms implemented in CuDNN.
-// This does not have any performance implications, as we will always find the
-// fastest algorithm; setting them to the right number of algorithms will enable
-// us to best report the statistics when doing an exhaustive search, though.
-#if CUDNN_VERSION_MIN(7,0,0)
-// Note: Double each of these due to potential
-// tensorcode + non-tensorcore versions
-// which are treated as seperate returned algos
-static constexpr size_t kNUM_CUDNN_FWD_ALGS =
-                                      2*CUDNN_CONVOLUTION_FWD_ALGO_COUNT;
-static constexpr size_t kNUM_CUDNN_BWD_FILTER_ALGS =
-                                      2*CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT;
-static constexpr size_t kNUM_CUDNN_BWD_DATA_ALGS =
-                                      2*CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT;
-#else
-static constexpr size_t kNUM_CUDNN_FWD_ALGS = 7;
-static constexpr size_t kNUM_CUDNN_BWD_FILTER_ALGS = 4;
-static constexpr size_t kNUM_CUDNN_BWD_DATA_ALGS = 5;
-#endif
-
-namespace {
-template <typename ArrayOfcudnnConvolutionAlgoPerf_t>
-inline void LogCuDNNPerfStats(
-    const ArrayOfcudnnConvolutionAlgoPerf_t& perf_stat,
-    int returned_algo_count) {
-  VLOG(1) << "Perf result: (algo: stat, time, memory)";
-  for (int i = 0; i < returned_algo_count; ++i) {
-    const auto& stat = perf_stat[i];
-    VLOG(1) << stat.algo << ": " << stat.status << " " << stat.time << " "
-            << stat.memory;
-  }
-}
-
-// Easier indexing into force_algo_ vector
-enum {
-  ALGO_FWD = 0,
-  ALGO_WGRAD = 1,
-  ALGO_DGRAD = 2
-} algoIndex_t;
-
-}  // namespace
 
 class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
  public:
@@ -98,6 +54,13 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
     OPERATOR_NEEDS_FEATURE(
         dilation_h() == 1 && dilation_w() == 1,
         "The cudnn convolution does not support dilation yet.");
+#endif
+
+#if CUDNN_VERSION_MIN(7, 0, 0)
+    // verify TensorCore math is supported
+    enable_tensor_core_ &= TensorCoreAvailable();
+#else
+    enable_tensor_core_ = false;
 #endif
 
     bool individual_force_algo = OperatorBase::HasArgument("force_algo_fwd") ||
@@ -140,7 +103,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   template <typename T>
   void SetTensorNdDescriptorWithGroup(
       int size,
-      cudnnTensorDescriptor_t desc_,
+      cudnnTensorDescriptor_t tensorDesc,
       int N,
       int C,
       int H,
@@ -155,7 +118,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       case StorageOrder::NHWC:
         if (size == 4) {
           CUDNN_ENFORCE(cudnnSetTensor4dDescriptorEx(
-              desc_,
+              tensorDesc,
               cudnnTypeWrapper<T>::type,
               N,
               CC,
@@ -169,7 +132,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           vector<int> dims = {N, H, W, D, CC};
           vector<int> strides = {H * W * D * CC, W * D * CC, D * CC, CC, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-              desc_,
+              tensorDesc,
               cudnnTypeWrapper<T>::type,
               size > 3 ? size : 4,
               dims.data(),
@@ -179,7 +142,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       case StorageOrder::NCHW:
         if (size == 4) {
           CUDNN_ENFORCE(cudnnSetTensor4dDescriptorEx(
-              desc_,
+              tensorDesc,
               cudnnTypeWrapper<T>::type,
               N,
               CC,
@@ -193,7 +156,7 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           vector<int> dims = {N, CC, H, W, D};
           vector<int> strides = {CC * H * W * D, H * W * D, W * D, D, 1};
           CUDNN_ENFORCE(cudnnSetTensorNdDescriptor(
-              desc_,
+              tensorDesc,
               cudnnTypeWrapper<T>::type,
               size > 3 ? size : 4,
               dims.data(),
@@ -202,6 +165,201 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
         break;
       default:
         LOG(FATAL) << "Unknown storage order: " << order_;
+    }
+  }
+
+  void DuplicateConvDesc(
+      cudnnConvolutionDescriptor_t input,
+      size_t kernelDims,
+      size_t dilationDims,
+      cudnnConvolutionDescriptor_t copy) {
+    if (kernelDims == 2) {
+      cudnnConvolutionMode_t mode;
+      cudnnDataType_t dataType;
+      int pad_height = 0;
+      int pad_width = 0;
+      int stride_height = 0;
+      int stride_width = 0;
+      int dilation_height = 0;
+      int dilation_width = 0;
+
+      CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
+          input,
+          &pad_height,
+          &pad_width,
+          &stride_height,
+          &stride_width,
+          &dilation_height,
+          &dilation_width,
+          &mode,
+          &dataType));
+
+      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
+          copy,
+          pad_height,
+          pad_width,
+          stride_height,
+          stride_width,
+          dilation_height,
+          dilation_width,
+          mode,
+          dataType));
+    } else {
+      cudnnConvolutionMode_t mode;
+      cudnnDataType_t dataType;
+      int arrayLength = 0;
+      vector<int> ones(dilationDims, 1);
+      CUDNN_ENFORCE(cudnnGetConvolutionNdDescriptor(
+          input,
+          kernel_.size(),
+          &arrayLength,
+          pads_.data(),
+          stride_.data(),
+          ones.data(),
+          &mode,
+          &dataType));
+
+      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
+          copy,
+          kernel_.size(),
+          pads_.data(),
+          stride_.data(),
+          ones.data(),
+          mode,
+          dataType));
+    }
+  }
+
+  template <typename T>
+  cudnnDataType_t DetermineComputeTypeFromInput(const T& X) {
+    const cudaDeviceProp& prop = GetDeviceProperty(0);
+    cudnnDataType_t computeType = CUDNN_DATA_FLOAT;
+    if (X.template IsType<float16>()) {
+      if (float16_compute_ && prop.major >= 6) {
+        VLOG(1) << "CUDNN Convolution: float16_compute specified and "
+                << "supported, input data is float16 - using float16 "
+                << "compute.";
+        computeType = CUDNN_DATA_HALF;
+      } else if (float16_compute_) {
+        VLOG(1) << "CUDNN Convolution: float16_compute specified but"
+                << "not supported, input data is float16 - using float32 "
+                << "compute.";
+      } else {
+        VLOG(1) << "CUDNN Convolution: float16_compute not specified but "
+                << "input data is float16 - using float32 compute.";
+      }
+    } else {
+      VLOG(1) << "CUDNN Convolution: using float32 compute.";
+    }
+    return computeType;
+  }
+
+  void SetConvDescFromArguments() {
+#if CUDNN_VERSION_MIN(6, 0, 0)
+    if (kernel_.size() == 2) {
+      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
+          conv_desc_,
+          pad_t(),
+          pad_l(),
+          stride_h(),
+          stride_w(),
+          dilation_h(),
+          dilation_w(),
+          CUDNN_CROSS_CORRELATION,
+          compute_type_));
+    } else {
+      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
+          conv_desc_,
+          kernel_.size(),
+          pads_.data(),
+          stride_.data(),
+          dilation_.data(),
+          CUDNN_CROSS_CORRELATION,
+          compute_type_));
+    }
+#else
+    if (kernel_.size() == 2) {
+      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
+          conv_desc_,
+          pad_t(),
+          pad_l(),
+          stride_h(),
+          stride_w(),
+          1,
+          1,
+          CUDNN_CROSS_CORRELATION,
+          compute_type_));
+    } else {
+      vector<int> ones(dilation_.size(), 1);
+      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
+          conv_desc_,
+          kernel_.size(),
+          pads_.data(),
+          stride_.data(),
+          ones.data(),
+          CUDNN_CROSS_CORRELATION,
+          compute_type_));
+    }
+#endif
+  }
+
+  void SetConvDescComputeType(
+      cudnnConvolutionDescriptor_t conv_desc,
+      cudnnDataType_t math) {
+    if (kernel_.size() == 2) {
+      cudnnConvolutionMode_t mode;
+      cudnnDataType_t dataType;
+      int pad_height = 0;
+      int pad_width = 0;
+      int stride_height = 0;
+      int stride_width = 0;
+      int dilation_height = 0;
+      int dilation_width = 0;
+
+      CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
+          conv_desc,
+          &pad_height,
+          &pad_width,
+          &stride_height,
+          &stride_width,
+          &dilation_height,
+          &dilation_width,
+          &mode,
+          &dataType));
+
+      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
+          conv_desc,
+          pad_height,
+          pad_width,
+          stride_height,
+          stride_width,
+          dilation_height,
+          dilation_width,
+          mode,
+          math));
+    } else {
+      cudnnConvolutionMode_t mode;
+      cudnnDataType_t dataType;
+      int arrayLength = 0;
+      vector<int> ones(dilation_.size(), 1);
+      CUDNN_ENFORCE(cudnnGetConvolutionNdDescriptor(
+          conv_desc,
+          kernel_.size(),
+          &arrayLength,
+          pads_.data(),
+          stride_.data(),
+          ones.data(),
+          &mode,
+          &dataType));
+
+      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
+          conv_desc,
+          kernel_.size(),
+          pads_.data(),
+          stride_.data(),
+          ones.data(),
+          mode,
+          math));
     }
   }
 
@@ -223,24 +381,25 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
   size_t cudnn_state_;
   vector<int> force_algo_; // stored as FWD, dFILTER, dDATA
   bool enable_tensor_core_;
+  cudnnDataType_t compute_type_;
 };
-
 
 class CudnnConvOp final : public CudnnConvOpBase {
  public:
   CudnnConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : CudnnConvOpBase(operator_def, ws)  {}
+      : CudnnConvOpBase(operator_def, ws) {}
 
   ~CudnnConvOp() {}
 
-  template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
+  template <typename T_X, typename T_W, typename T_B, typename T_Y>
   bool DoRunWithType();
 
   bool RunOnDevice() override;
 
  private:
   cudnnConvolutionFwdAlgo_t algo_;
-  AlgorithmsCache<cudnnConvolutionFwdAlgo_t> algo_cache_;
+  using ConvFwdAlgorithmWithCost = std::tuple<cudnnConvolutionFwdAlgo_t, float>;
+  AlgorithmsCache<ConvFwdAlgorithmWithCost> algo_cache_;
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -254,22 +413,39 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
+
+    CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&bwd_data_conv_desc_));
+    CUDNN_ENFORCE(cudnnCreateConvolutionDescriptor(&bwd_filter_conv_desc_));
   }
 
-  ~CudnnConvGradientOp() {}
+  ~CudnnConvGradientOp() {
+    CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(bwd_data_conv_desc_));
+    CUDNN_ENFORCE(cudnnDestroyConvolutionDescriptor(bwd_filter_conv_desc_));
+  }
 
-  template <typename T_X, typename T_DY, typename T_W, typename T_B,
-            typename MATH,
-            typename T_DX, typename T_DW, typename T_DB>
+  template <
+      typename T_X,
+      typename T_DY,
+      typename T_W,
+      typename T_B,
+      typename T_DX,
+      typename T_DW,
+      typename T_DB>
   bool DoRunWithType();
 
   bool RunOnDevice() override;
 
  private:
+  cudnnConvolutionDescriptor_t bwd_filter_conv_desc_;
+  cudnnConvolutionDescriptor_t bwd_data_conv_desc_;
   cudnnConvolutionBwdFilterAlgo_t bwd_filter_algo_;
   cudnnConvolutionBwdDataAlgo_t bwd_data_algo_;
-  AlgorithmsCache<cudnnConvolutionBwdFilterAlgo_t> filter_algo_cache_;
-  AlgorithmsCache<cudnnConvolutionBwdDataAlgo_t> data_algo_cache_;
+  using ConvBwdFilterAlgorithmWithCost =
+      std::tuple<cudnnConvolutionBwdFilterAlgo_t, float>;
+  using ConvBwdDataAlgorithmWithCost =
+      std::tuple<cudnnConvolutionBwdDataAlgo_t, float>;
+  AlgorithmsCache<ConvBwdFilterAlgorithmWithCost> filter_algo_cache_;
+  AlgorithmsCache<ConvBwdDataAlgorithmWithCost> data_algo_cache_;
   bool no_bias_;
   // input: X, W, dY
   // output: dW, db, and optionally dX
@@ -281,7 +457,14 @@ class CudnnConvGradientOp final : public CudnnConvOpBase {
 // Implementations
 ////////////////////////////////////////////////////////////////////////////////
 
-template <typename T_X, typename T_W, typename T_B, typename MATH, typename T_Y>
+static constexpr std::array<cudnnDataType_t, 2> kComputeTypesToTry = {
+    CUDNN_DATA_FLOAT,
+    CUDNN_DATA_HALF};
+static constexpr std::array<const char*, 2> kComputePassNames = {
+    "fp32 compute",
+    "fp16 compute"};
+
+template <typename T_X, typename T_W, typename T_B, typename T_Y>
 bool CudnnConvOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
@@ -372,7 +555,7 @@ bool CudnnConvOp::DoRunWithType() {
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
         dims[0] /= group_;
-#if !CUDNN_VERSION_MIN(7,0,0)
+#if !CUDNN_VERSION_MIN(7, 0, 0)
         order_ == StorageOrder::NCHW ? dims[1] /= group_
                                      : dims[filter.ndim() - 1] /= group_;
 #endif
@@ -434,59 +617,14 @@ bool CudnnConvOp::DoRunWithType() {
           dims.data(),
           strides.data()));
     }
-    // Set the convolution descriptor
-#if CUDNN_VERSION_MIN(6,0,0)
-    if (kernel_.size() == 2) {
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          conv_desc_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          dilation_h(),
-          dilation_w(),
-          CUDNN_CROSS_CORRELATION,
-          cudnnTypeWrapper<MATH>::type));
-    } else {
-      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
-          conv_desc_,
-          kernel_.size(),
-          pads_.data(),
-          stride_.data(),
-          dilation_.data(),
-          CUDNN_CROSS_CORRELATION,
-          cudnnTypeWrapper<MATH>::type));
-    }
-#else
-    if (kernel_.size() == 2) {
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          conv_desc_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          1,
-          1,
-          CUDNN_CROSS_CORRELATION));
-    } else {
-      vector<int> ones(dilation_.size(), 1);
-      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
-          conv_desc_,
-          kernel_.size(),
-          pads_.data(),
-          stride_.data(),
-          ones.data(),
-          CUDNN_CROSS_CORRELATION,
-          cudnnTypeWrapper<MATH>::type));
-    }
-#endif
 
-#if CUDNN_VERSION_MIN(7,0,0)
-    // enable TensorCore math if desired
-    enable_tensor_core_ &= TensorCoreAvailable();
+    compute_type_ = DetermineComputeTypeFromInput(X);
+    SetConvDescFromArguments();
+
+#if CUDNN_VERSION_MIN(7, 0, 0)
     if (enable_tensor_core_) {
-      CUDNN_ENFORCE(cudnnSetConvolutionMathType(
-            conv_desc_, CUDNN_TENSOR_OP_MATH));
+      CUDNN_ENFORCE(
+          cudnnSetConvolutionMathType(conv_desc_, CUDNN_TENSOR_OP_MATH));
     }
 
     // enable cuDNN conv groups
@@ -498,36 +636,68 @@ bool CudnnConvOp::DoRunWithType() {
     } else if (deterministic_) {
       algo_ = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
     } else if (exhaustive_search_) {
-      algo_ = algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
-        VLOG(1) << "CUDNN Convolution: doing exhaustive search.";
-        // When we do an exhaustive search, we will ignore the workspace size
-        // limit and simply go for the fastest algorithm. If you happen to run
-        // out of memory later, you will be on your own...
-        int returned_algo_count;
-        std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS>
-            perf_stat;
+      // Even when FP16 compute is supported and requested, try FP32
+      // because it may be faster. However, if FP32 compute is specified,
+      // FP16 is not a suitable alternative - early out from the loop.
+      std::array<ConvFwdAlgorithmWithCost, 2> algosToCompare;
+      for (int i = 0; i < 2; i++) {
+        SetConvDescComputeType(conv_desc_, kComputeTypesToTry[i]);
 
-        // no need to clean up workspace,
-        cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
-          // Actually run the search.
-          CUDNN_ENFORCE(cudnnFindConvolutionForwardAlgorithmEx(
-              state->cudnn_handle(),
-              bottom_desc_,
-              X.template data<T_X>(),
-              filter_desc_,
-              filter.template data<T_W>(),
-              conv_desc_,
-              top_desc_,
-              Y->template mutable_data<T_Y>(),
-              kNUM_CUDNN_FWD_ALGS,
-              &returned_algo_count,
-              perf_stat.data(),
-              state->workspace().get(cudnn_ws_nbytes_limit_),
-              cudnn_ws_nbytes_limit_));
-        });
-        LogCuDNNPerfStats(perf_stat, returned_algo_count);
-        return perf_stat[0].algo;
-      });
+        algosToCompare[i] = algo_cache_.getAlgorithm(
+            X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+              VLOG(1) << "CUDNN Convolution fwd: doing exhaustive "
+                      << "search for " << kComputePassNames[i];
+              // When we do an exhaustive search, we will ignore the workspace
+              // size limit and simply go for the fastest algorithm. If you
+              // happen to run out of memory later, you will be on your own...
+              int returned_algo_count;
+              std::array<cudnnConvolutionFwdAlgoPerf_t, kNUM_CUDNN_FWD_ALGS>
+                  fwd_perf_stat;
+
+              // no need to clean up workspace,
+              cudnn_wrapper_.with_cudnn_state(
+                  cudnn_state_, [&](CuDNNState* state) {
+                    // Actually run the search.
+                    CUDNN_ENFORCE(cudnnFindConvolutionForwardAlgorithmEx(
+                        state->cudnn_handle(),
+                        bottom_desc_,
+                        X.template data<T_X>(),
+                        filter_desc_,
+                        filter.template data<T_W>(),
+                        conv_desc_,
+                        top_desc_,
+                        Y->template mutable_data<T_Y>(),
+                        kNUM_CUDNN_FWD_ALGS,
+                        &returned_algo_count,
+                        fwd_perf_stat.data(),
+                        state->workspace().get(cudnn_ws_nbytes_limit_),
+                        cudnn_ws_nbytes_limit_));
+                  });
+              LogCuDNNPerfStats(fwd_perf_stat, returned_algo_count);
+              float algo_time = fwd_perf_stat[0].status == CUDNN_STATUS_SUCCESS
+                  ? fwd_perf_stat[0].time
+                  : 1e10;
+              return ConvFwdAlgorithmWithCost(fwd_perf_stat[0].algo, algo_time);
+            });
+
+        // When set to fp32 compute, don't try fp16
+        if (compute_type_ == CUDNN_DATA_FLOAT) {
+          break;
+        }
+      }
+
+      if (compute_type_ == CUDNN_DATA_FLOAT) {
+        // For FP32 compute, just use the best FP32 algorithm
+        algo_ = std::get<0>(algosToCompare[0]);
+      } else {
+        // For FP16 compute, choose algo with fastest execution
+        int bestAlgoIndex =
+            (std::get<1>(algosToCompare[0]) < std::get<1>(algosToCompare[1]))
+            ? 0
+            : 1;
+        algo_ = std::get<0>(algosToCompare[bestAlgoIndex]);
+        SetConvDescComputeType(conv_desc_, kComputeTypesToTry[bestAlgoIndex]);
+      }
     } else {
       // Get the convolution algorithm based on the workspace limit.
       CUDNN_ENFORCE(cudnnGetConvolutionForwardAlgorithm(
@@ -613,19 +783,18 @@ bool CudnnConvOp::DoRunWithType() {
 }
 
 bool CudnnConvOp::RunOnDevice() {
-
   if (Input(0).IsType<float>()) {
-    return DoRunWithType<float,      // X
-                         float,      // W
-                         float,      // B
-                         float,      // Math
-                         float>();   // Y
+    return DoRunWithType<
+        float, // X
+        float, // W
+        float, // B
+        float>(); // Y
   } else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16,      // X
-                         float16,      // W
-                         float16,      // B
-                         float,      // Math
-                         float16>();   // Y
+    return DoRunWithType<
+        float16, // X
+        float16, // W
+        float16, // B
+        float16>(); // Y
   } else {
     LOG(FATAL) << "Only float (32bit) and float16 are supported by "
                << "cudnn convolution, but input " << debug_def().input(0)
@@ -634,9 +803,14 @@ bool CudnnConvOp::RunOnDevice() {
   return true;
 }
 
-template <typename T_X, typename T_DY, typename T_W, typename T_B,
-          typename MATH,
-          typename T_DX, typename T_DW, typename T_DB>
+template <
+    typename T_X,
+    typename T_DY,
+    typename T_W,
+    typename T_B,
+    typename T_DX,
+    typename T_DW,
+    typename T_DB>
 bool CudnnConvGradientOp::DoRunWithType() {
   auto& X = Input(INPUT);
   auto& filter = Input(FILTER);
@@ -736,7 +910,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             kernel_w()));
       } else {
         vector<int> dims(filter.dims().begin(), filter.dims().end());
-#if !CUDNN_VERSION_MIN(7,0,0)
+#if !CUDNN_VERSION_MIN(7, 0, 0)
         dims[0] /= group_;
 #endif
         order_ == StorageOrder::NCHW ? dims[1] /= group_
@@ -798,118 +972,110 @@ bool CudnnConvGradientOp::DoRunWithType() {
           dims.data(),
           strides.data()));
     }
-    // Set the convolution descriptor
-#if CUDNN_VERSION_MIN(6,0,0)
-    if (kernel_.size() == 2) {
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          conv_desc_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          dilation_h(),
-          dilation_w(),
-          CUDNN_CROSS_CORRELATION,
-          cudnnTypeWrapper<MATH>::type));
-    } else {
-      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
-          conv_desc_,
-          kernel_.size(),
-          pads_.data(),
-          stride_.data(),
-          dilation_.data(),
-          CUDNN_CROSS_CORRELATION,
-          cudnnTypeWrapper<MATH>::type));
-    }
-#else
-    if (kernel_.size() == 2) {
-      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
-          conv_desc_,
-          pad_t(),
-          pad_l(),
-          stride_h(),
-          stride_w(),
-          1,
-          1,
-          CUDNN_CROSS_CORRELATION));
-    } else {
-      vector<int> ones(dilation_.size(), 1);
-      CUDNN_ENFORCE(cudnnSetConvolutionNdDescriptor(
-          conv_desc_,
-          kernel_.size(),
-          pads_.data(),
-          stride_.data(),
-          ones.data(),
-          CUDNN_CROSS_CORRELATION,
-          cudnnTypeWrapper<MATH>::type));
-    }
-#endif
 
-#if CUDNN_VERSION_MIN(7,0,0)
-    // enable TensorCore math if desired
-    enable_tensor_core_ &= TensorCoreAvailable();
+    compute_type_ = DetermineComputeTypeFromInput(X);
+    SetConvDescFromArguments();
+
+    DuplicateConvDesc(
+        conv_desc_, kernel_.size(), dilation_.size(), bwd_filter_conv_desc_);
+    DuplicateConvDesc(
+        conv_desc_, kernel_.size(), dilation_.size(), bwd_data_conv_desc_);
+
+#if CUDNN_VERSION_MIN(7, 0, 0)
     if (enable_tensor_core_) {
       CUDNN_ENFORCE(cudnnSetConvolutionMathType(
-            conv_desc_, CUDNN_TENSOR_OP_MATH));
+          bwd_filter_conv_desc_, CUDNN_TENSOR_OP_MATH));
+      CUDNN_ENFORCE(cudnnSetConvolutionMathType(
+          bwd_data_conv_desc_, CUDNN_TENSOR_OP_MATH));
     }
 
     // set cuDNN groups if appropriate
-    CUDNN_CHECK(cudnnSetConvolutionGroupCount(conv_desc_, group_));
+    CUDNN_CHECK(cudnnSetConvolutionGroupCount(bwd_filter_conv_desc_, group_));
+    CUDNN_CHECK(cudnnSetConvolutionGroupCount(bwd_data_conv_desc_, group_));
 #endif
-
-    // Set the workspace
-    size_t bwd_filter_ws_size, bwd_data_ws_size;
 
     // Choose dW algorithm
     if (force_algo_[ALGO_WGRAD] >= 0) {
-      bwd_filter_algo_ = (cudnnConvolutionBwdFilterAlgo_t)force_algo_[ALGO_WGRAD];
+      bwd_filter_algo_ =
+          (cudnnConvolutionBwdFilterAlgo_t)force_algo_[ALGO_WGRAD];
     } else if (deterministic_) {
       bwd_filter_algo_ = CUDNN_CONVOLUTION_BWD_FILTER_ALGO_1;
     } else if (exhaustive_search_) {
-      bwd_filter_algo_ =
-          filter_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
-            VLOG(1) << "CUDNN Convolution bwd: doing filter exhaustive search.";
-            // When we do an exhaustive search, we will ignore the workspace
-            // size
-            // limit and simply go for the fastest algorithm. If you happen to
-            // run
-            // out of memory later, you will be on your own...
-            int returned_algo_count;
-            // We clean up the current workspace memory so that the forward
-            // algorithm is free to allocate memory.
-            // Actually run the search.
-            std::array<
-                cudnnConvolutionBwdFilterAlgoPerf_t,
-                kNUM_CUDNN_BWD_FILTER_ALGS>
-                filter_perf_stat;
+      // Even when FP16 compute is supported and requested, try FP32
+      // because it may be faster. However, if FP32 compute is specified,
+      // FP16 is not a suitable alternative - early out from the loop.
+      std::array<ConvBwdFilterAlgorithmWithCost, 2> algosToCompare;
+      for (int i = 0; i < 2; i++) {
+        SetConvDescComputeType(bwd_filter_conv_desc_, kComputeTypesToTry[i]);
 
-            cudnn_wrapper_.with_cudnn_state(
-                cudnn_state_, [&](CuDNNState* state) {
-                  CUDNN_ENFORCE(cudnnFindConvolutionBackwardFilterAlgorithmEx(
-                      state->cudnn_handle(),
-                      bottom_desc_,
-                      X.template data<T_X>(),
-                      top_desc_,
-                      dY.template data<T_DY>(),
-                      conv_desc_,
-                      filter_desc_,
-                      dfilter->template mutable_data<T_DW>(),
-                      kNUM_CUDNN_BWD_FILTER_ALGS,
-                      &returned_algo_count,
-                      filter_perf_stat.data(),
-                      state->workspace().get(cudnn_ws_nbytes_limit_),
-                      cudnn_ws_nbytes_limit_));
-                });
-            LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
-            return filter_perf_stat[0].algo;
-          });
+        algosToCompare[i] = filter_algo_cache_.getAlgorithm(
+            X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+              VLOG(1) << "CUDNN Convolution bwd: doing filter exhaustive"
+                      << "search for " << kComputePassNames[i];
+              // When we do an exhaustive search, we will ignore the workspace
+              // size limit and simply go for the fastest algorithm. If you
+              // happen to run out of memory later, you will be on your own...
+              int returned_algo_count;
+              // We clean up the current workspace memory so that the forward
+              // algorithm is free to allocate memory.
+              // Actually run the search.
+              std::array<
+                  cudnnConvolutionBwdFilterAlgoPerf_t,
+                  kNUM_CUDNN_BWD_FILTER_ALGS>
+                  filter_perf_stat;
+
+              cudnn_wrapper_.with_cudnn_state(
+                  cudnn_state_, [&](CuDNNState* state) {
+                    CUDNN_ENFORCE(cudnnFindConvolutionBackwardFilterAlgorithmEx(
+                        state->cudnn_handle(),
+                        bottom_desc_,
+                        X.template data<T_X>(),
+                        top_desc_,
+                        dY.template data<T_DY>(),
+                        bwd_filter_conv_desc_,
+                        filter_desc_,
+                        dfilter->template mutable_data<T_DW>(),
+                        kNUM_CUDNN_BWD_FILTER_ALGS,
+                        &returned_algo_count,
+                        filter_perf_stat.data(),
+                        state->workspace().get(cudnn_ws_nbytes_limit_),
+                        cudnn_ws_nbytes_limit_));
+                  });
+              LogCuDNNPerfStats(filter_perf_stat, returned_algo_count);
+              float algo_time =
+                  filter_perf_stat[0].status == CUDNN_STATUS_SUCCESS
+                  ? filter_perf_stat[0].time
+                  : 1e10;
+              return ConvBwdFilterAlgorithmWithCost(
+                  filter_perf_stat[0].algo, algo_time);
+            });
+
+        // When set to fp32 compute, don't try fp16
+        if (compute_type_ == CUDNN_DATA_FLOAT) {
+          break;
+        }
+      }
+
+      if (compute_type_ == CUDNN_DATA_FLOAT) {
+        // For FP32 compute, just use the best FP32 algorithm
+        bwd_filter_algo_ = std::get<0>(algosToCompare[0]);
+      } else {
+        // For FP16 compute, choose algo with fastest execution
+        int bestAlgoIndex =
+            (std::get<1>(algosToCompare[0]) < std::get<1>(algosToCompare[1]))
+            ? 0
+            : 1;
+        bwd_filter_algo_ = std::get<0>(algosToCompare[bestAlgoIndex]);
+        SetConvDescComputeType(
+            bwd_filter_conv_desc_, kComputeTypesToTry[bestAlgoIndex]);
+      }
     } else {
       // choose backward algorithm for filter
       CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterAlgorithm(
           cudnn_wrapper_.inline_cudnn_handle(),
           bottom_desc_,
           top_desc_,
-          conv_desc_,
+          bwd_filter_conv_desc_,
           filter_desc_,
           CUDNN_CONVOLUTION_BWD_FILTER_SPECIFY_WORKSPACE_LIMIT,
           cudnn_ws_nbytes_limit_,
@@ -922,48 +1088,81 @@ bool CudnnConvGradientOp::DoRunWithType() {
       } else if (deterministic_) {
         bwd_data_algo_ = CUDNN_CONVOLUTION_BWD_DATA_ALGO_1;
       } else if (exhaustive_search_) {
-        bwd_data_algo_ =
-            data_algo_cache_.getAlgorithm(X.dims(), filter.dims(), [&]() {
-              VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive search.";
-              int returned_algo_count;
+        // Even when FP16 compute is supported and requested, try FP32
+        // because it may be faster. However, if FP32 compute is specified,
+        // FP16 is not a suitable alternative - early out from the loop.
+        std::array<ConvBwdDataAlgorithmWithCost, 2> algosToCompare;
+        for (int i = 0; i < 2; i++) {
+          SetConvDescComputeType(bwd_data_conv_desc_, kComputeTypesToTry[i]);
 
-              std::array<
-                  cudnnConvolutionBwdDataAlgoPerf_t,
-                  kNUM_CUDNN_BWD_DATA_ALGS>
-                  data_perf_stat;
-              cudnn_wrapper_.with_cudnn_state(
-                  cudnn_state_, [&](CuDNNState* state) {
-                    auto* dX =
-                        Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
-                    dX->ResizeLike(X);
-                    const T_W* filter_data = filter.template data<T_W>();
-                    const T_DY* dYdata = dY.template data<T_DY>();
-                    T_DX* dXdata = dX->template mutable_data<T_DX>();
-                    CUDNN_ENFORCE(cudnnFindConvolutionBackwardDataAlgorithmEx(
-                        state->cudnn_handle(),
-                        filter_desc_,
-                        filter_data,
-                        top_desc_,
-                        dYdata,
-                        conv_desc_,
-                        bottom_desc_,
-                        dXdata,
-                        kNUM_CUDNN_BWD_DATA_ALGS,
-                        &returned_algo_count,
-                        data_perf_stat.data(),
-                        state->workspace().get(cudnn_ws_nbytes_limit_),
-                        cudnn_ws_nbytes_limit_));
-                  });
+          algosToCompare[i] = data_algo_cache_.getAlgorithm(
+              X.dims(), filter.dims(), kComputeTypesToTry[i], [&]() {
+                VLOG(1) << "CUDNN Convolution bwd: doing data exhaustive"
+                        << "search for " << kComputePassNames[i];
+                int returned_algo_count;
 
-              LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
-              return data_perf_stat[0].algo;
-            });
+                std::array<
+                    cudnnConvolutionBwdDataAlgoPerf_t,
+                    kNUM_CUDNN_BWD_DATA_ALGS>
+                    data_perf_stat;
+                cudnn_wrapper_.with_cudnn_state(
+                    cudnn_state_, [&](CuDNNState* state) {
+                      auto* dX =
+                          Output(no_bias_ ? BIAS_OR_INPUT_GRAD : INPUT_GRAD);
+                      dX->ResizeLike(X);
+                      const T_W* filter_data = filter.template data<T_W>();
+                      const T_DY* dYdata = dY.template data<T_DY>();
+                      T_DX* dXdata = dX->template mutable_data<T_DX>();
+                      CUDNN_ENFORCE(cudnnFindConvolutionBackwardDataAlgorithmEx(
+                          state->cudnn_handle(),
+                          filter_desc_,
+                          filter_data,
+                          top_desc_,
+                          dYdata,
+                          bwd_data_conv_desc_,
+                          bottom_desc_,
+                          dXdata,
+                          kNUM_CUDNN_BWD_DATA_ALGS,
+                          &returned_algo_count,
+                          data_perf_stat.data(),
+                          state->workspace().get(cudnn_ws_nbytes_limit_),
+                          cudnn_ws_nbytes_limit_));
+                    });
+
+                LogCuDNNPerfStats(data_perf_stat, returned_algo_count);
+                float algo_time =
+                    data_perf_stat[0].status == CUDNN_STATUS_SUCCESS
+                    ? data_perf_stat[0].time
+                    : 1e10;
+                return ConvBwdDataAlgorithmWithCost(
+                    data_perf_stat[0].algo, algo_time);
+              });
+
+          // When set to fp32 compute, don't try fp16
+          if (compute_type_ == CUDNN_DATA_FLOAT) {
+            break;
+          }
+        }
+
+        if (compute_type_ == CUDNN_DATA_FLOAT) {
+          // For FP32 compute, just use the best FP32 algorithm
+          bwd_data_algo_ = std::get<0>(algosToCompare[0]);
+        } else {
+          // For FP16 compute, choose algo with fastest execution
+          int bestAlgoIndex =
+              (std::get<1>(algosToCompare[0]) < std::get<1>(algosToCompare[1]))
+              ? 0
+              : 1;
+          bwd_data_algo_ = std::get<0>(algosToCompare[bestAlgoIndex]);
+          SetConvDescComputeType(
+              bwd_data_conv_desc_, kComputeTypesToTry[bestAlgoIndex]);
+        }
       } else {
         CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataAlgorithm(
             cudnn_wrapper_.inline_cudnn_handle(),
             filter_desc_,
             top_desc_,
-            conv_desc_,
+            bwd_data_conv_desc_,
             bottom_desc_,
             CUDNN_CONVOLUTION_BWD_DATA_SPECIFY_WORKSPACE_LIMIT,
             cudnn_ws_nbytes_limit_,
@@ -971,22 +1170,24 @@ bool CudnnConvGradientOp::DoRunWithType() {
       }
     }
 
-    // get workspace for backwards filter algorithm
+    // get workspace size for backwards filter algorithm
+    size_t bwd_filter_ws_size, bwd_data_ws_size;
+
     CUDNN_ENFORCE(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         cudnn_wrapper_.inline_cudnn_handle(),
         bottom_desc_,
         top_desc_,
-        conv_desc_,
+        bwd_filter_conv_desc_,
         filter_desc_,
         bwd_filter_algo_,
         &bwd_filter_ws_size));
     if (OutputSize() == 3 || (no_bias_ && (OutputSize() == 2))) {
-      // get workspace for backwards data algorithm
+      // get workspace size for backwards data algorithm
       CUDNN_ENFORCE(cudnnGetConvolutionBackwardDataWorkspaceSize(
           cudnn_wrapper_.inline_cudnn_handle(),
           filter_desc_,
           top_desc_,
-          conv_desc_,
+          bwd_data_conv_desc_,
           bottom_desc_,
           bwd_data_algo_,
           &bwd_data_ws_size));
@@ -995,8 +1196,8 @@ bool CudnnConvGradientOp::DoRunWithType() {
     }
     cudnn_ws_nbytes_ = std::max(bwd_filter_ws_size, bwd_data_ws_size);
 
-    VLOG(1) << "CuDNN bwd algorithm: " << bwd_filter_algo_ << ", "
-            << bwd_data_algo_;
+    VLOG(1) << "CuDNN bwd data & filter algorithm: " << bwd_data_algo_ << ", "
+            << bwd_filter_algo_;
     VLOG(1) << "CuDNN workspace size: " << cudnn_ws_nbytes_;
   }
 
@@ -1014,7 +1215,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
         dbias->template mutable_data<T_DB>()));
   }
 
-#if CUDNN_VERSION_MIN(7,0,0)
+#if CUDNN_VERSION_MIN(7, 0, 0)
   cudnn_wrapper_.with_cudnn_state(cudnn_state_, [&](CuDNNState* state) {
     CUDNN_ENFORCE(cudnnConvolutionBackwardFilter(
         state->cudnn_handle(),
@@ -1023,7 +1224,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
         X.template data<T_X>(),
         top_desc_,
         dY.template data<T_DY>(),
-        conv_desc_,
+        bwd_filter_conv_desc_,
         bwd_filter_algo_,
         state->workspace().get(cudnn_ws_nbytes_),
         cudnn_ws_nbytes_,
@@ -1041,7 +1242,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
           filter.template data<T_W>(),
           top_desc_,
           dY.template data<T_DY>(),
-          conv_desc_,
+          bwd_data_conv_desc_,
           bwd_data_algo_,
           state->workspace().get(cudnn_ws_nbytes_),
           cudnn_ws_nbytes_,
@@ -1060,7 +1261,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
           X.template data<T_X>() + i * group_offset_X,
           top_desc_,
           dY.template data<T_DY>() + i * group_offset_Y,
-          conv_desc_,
+          bwd_filter_conv_desc_,
           bwd_filter_algo_,
           state->workspace().get(cudnn_ws_nbytes_),
           cudnn_ws_nbytes_,
@@ -1078,7 +1279,7 @@ bool CudnnConvGradientOp::DoRunWithType() {
             filter.template data<T_W>() + i * group_offset_filter,
             top_desc_,
             dY.template data<T_DY>() + i * group_offset_Y,
-            conv_desc_,
+            bwd_data_conv_desc_,
             bwd_data_algo_,
             state->workspace().get(cudnn_ws_nbytes_),
             cudnn_ws_nbytes_,
@@ -1096,24 +1297,23 @@ bool CudnnConvGradientOp::DoRunWithType() {
 // consolidating them.
 bool CudnnConvGradientOp::RunOnDevice() {
   if (Input(0).IsType<float>()) {
-    return DoRunWithType<float,    //  X
-                         float,    // dY
-                         float,    //  W
-                         float,    //  b
-                         float,    // Math
-                         float,    // dX
-                         float,    // dW
-                         float>(); // db
-  }
-  else if (Input(0).IsType<float16>()) {
-    return DoRunWithType<float16,    //  X
-                         float16,    // dY
-                         float16,    //  W
-                         float16,    //  b
-                         float,    // Math
-                         float16,    // dX
-                         float16,    // dW
-                         float16>(); // db
+    return DoRunWithType<
+        float, //  X
+        float, // dY
+        float, //  W
+        float, //  b
+        float, // dX
+        float, // dW
+        float>(); // db
+  } else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<
+        float16, //  X
+        float16, // dY
+        float16, //  W
+        float16, //  b
+        float16, // dX
+        float16, // dW
+        float16>(); // db
   } else {
     LOG(FATAL) << "Unsupported input types";
   }
@@ -1132,4 +1332,4 @@ REGISTER_CUDNN_OPERATOR(Conv2DGradient, CudnnConvGradientOp);
 REGISTER_CUDNN_OPERATOR(Conv3D, CudnnConvOp);
 REGISTER_CUDNN_OPERATOR(Conv3DGradient, CudnnConvGradientOp);
 
-}  // namespace caffe2
+} // namespace caffe2
