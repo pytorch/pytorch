@@ -43,7 +43,7 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
   T max_length = 0;
-  T total_length = 0;
+  TIndex total_length = 0;
   for (T i = 0; i < lengths.dim(0); ++i) {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
@@ -91,11 +91,11 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     memset(presence_mask_data, (int)false, presence_mask->size());
   }
 
-  int block_size = data.size() / data.dim(0);
-  int block_bytesize = data.nbytes() / data.dim(0);
+  auto block_size = data.size_from_dim(1);
+  auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  int start = 0;
-  for (int i = 0; i < lengths.dim(0); ++i) {
+  TIndex start = 0;
+  for (TIndex i = 0; i < lengths.dim(0); ++i) {
     context_.template CopyItems<CPUContext, CPUContext>(
         data.meta(),
         l[i] * block_size,
@@ -130,7 +130,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
 
   const T* l = lengths.template data<T>();
 
-  T total_l = std::accumulate(l, l + lengths.dim(0), 0);
+  TIndex total_l = std::accumulate(l, l + lengths.dim(0), (TIndex)0);
 
   auto shape = data.dims();
   CAFFE_ENFORCE(
@@ -143,11 +143,11 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   if (!(data.dim(0) * data.dim(1))) {
     return true;
   }
-  int block_size = data.size() / (data.dim(0) * data.dim(1));
-  int block_bytesize = data.nbytes() / (data.dim(0) * data.dim(1));
+  auto block_size = data.size_from_dim(2);
+  auto block_bytesize = data.itemsize() * block_size;
   const auto* d = static_cast<const char*>(data.raw_data());
-  int start = 0;
-  for (int i = 0; i < lengths.dim(0); ++i) {
+  TIndex start = 0;
+  for (TIndex i = 0; i < lengths.dim(0); ++i) {
     context_.template CopyItems<CPUContext, CPUContext>(
         data.meta(),
         l[i] * block_size,
