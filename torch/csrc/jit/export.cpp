@@ -10,9 +10,13 @@
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
 
-#include <fstream>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <fstream>
+#include <memory>
+#include <vector>
+#include <string>
 
 namespace py = pybind11;
 
@@ -31,37 +35,29 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
   for(auto d : tensor.sizes()) {
     p->add_dims(d);
   }
-  at::ScalarType at_type;
   onnx::DataType onnx_type;
   switch(tensor.type().scalarType()) {
     case at::kDouble:
       onnx_type = onnx::kDOUBLE;
-      at_type = at::kDouble;
       break;
     case at::kFloat:
       onnx_type = onnx::kFLOAT;
-      at_type = at::kFloat;
       break;
     case at::kHalf:
       onnx_type = onnx::kFLOAT16;
-      at_type = at::kHalf;
       break;
     case at::kByte:
     case at::kChar:
       onnx_type = onnx::kINT8;
-      at_type = at::kByte;
       break;
     case at::kShort:
       onnx_type = onnx::kINT16;
-      at_type = at::kShort;
       break;
     case at::kInt:
       onnx_type = onnx::kINT32;
-      at_type = at::kInt;
       break;
     case at::kLong:
       onnx_type = onnx::kINT64;
-      at_type = at::kLong;
       break;
     default:
       torch::barf("unexpected tensor scalar type");
@@ -69,8 +65,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
   }
   p->set_data_type(onnx_type);
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  at::Tensor cont = tensor.contiguous().toType(at::CPU(at_type));
-  p->set_raw_data(cont);
+  p->set_raw_data(tensor.contiguous().toBackend(at::kCPU));
 }
 
 void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
