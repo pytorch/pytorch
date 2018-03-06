@@ -137,14 +137,24 @@ THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices,
 }
 
 THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes)
-{  // If sizes are not given, it is inferred as max index of each dim.
+{
+  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
+
+  // If sizes are not given, it is inferred as max index of each dim.
   int64_t nDimI, nDimV;
 
   THCSTensor *self = (THCSTensor *)THAlloc(sizeof(THCSTensor));
   THCSTensor_(rawInit)(state, self);
 
-  nDimI = THCIndexTensor_(size)(state, indices, 0);
-  nDimV = THCTensor_(nDimension)(state, values) - 1;
+  // TODO: we may need to special case when only one of these are empty.
+  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0
+      && sizes != NULL) {
+    nDimI = THLongStorage_size(sizes);
+    nDimV = 0;
+  } else {
+    nDimI = THCIndexTensor_(size)(state, indices, 0);
+    nDimV = THCTensor_(nDimension)(state, values) - 1;
+  }
   if (!sizes) {
     // TODO Make it work with N-dimensional values
     THArgCheck(nDimV > 0, 3, "size must be provided when nDimV > 0");
@@ -377,7 +387,6 @@ int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned
   va_list(args);
   va_start(args, nTensors);
   int valid = 1;
-  int sparse = 1;
   for (unsigned int i = 0; i < nSparseTensors + nDenseTensors; i++) {
     THCSTensor *sparseTensor;
     THCTensor *denseTensor;

@@ -1,11 +1,16 @@
 #pragma once
 
 #include <Python.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/THP.h"
+#include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/tracer.h"
+
+#include <pybind11/functional.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace py = pybind11;
 
@@ -19,9 +24,6 @@ public:
     if (THPVariable_Check(source)) {
       value = torch::jit::tracer::TraceInput(((THPVariable*)source)->cdata);
       return true;
-    } else if (THPModule_isTensor(source)) {
-      value = torch::jit::tracer::TraceInput(torch::createTensor(source));
-      return true;
     } else {
       return false;
     }
@@ -30,7 +32,7 @@ public:
     if (src.variable.defined()) {
       return handle(THPVariable_Wrap(src.variable));
     } else {
-      return handle(torch::createPyObject(src.buffer));
+      return handle(THPVariable_Wrap(torch::autograd::make_variable(src.buffer, false)));
     }
   }
 };

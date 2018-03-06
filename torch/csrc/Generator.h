@@ -1,7 +1,9 @@
-#ifndef THP_GENERATOR_H
-#define THP_GENERATOR_H
+#pragma once
 
+#include <Python.h>
 #include <ATen/ATen.h>
+
+#include "THP_export.h"
 
 struct THPGenerator {
   PyObject_HEAD
@@ -26,6 +28,4 @@ THP_API PyObject *THPGeneratorClass;
 
 #ifdef _THP_CORE
 bool THPGenerator_init(PyObject *module);
-#endif
-
 #endif

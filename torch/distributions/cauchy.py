@@ -21,8 +21,8 @@ class Cauchy(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mode or median of the distribution.
-        scale (float or Tensor or Variable): half width at half maximum.
+        loc (float or Tensor): mode or median of the distribution.
+        scale (float or Tensor): half width at half maximum.
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
@@ -52,6 +52,14 @@ class Cauchy(Distribution):
     def log_prob(self, value):
         self._validate_log_prob_arg(value)
         return -math.log(math.pi) - self.scale.log() - (1 + ((value - self.loc) / self.scale)**2).log()
+
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        return torch.atan((value - self.loc) / self.scale) / math.pi + 0.5
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        return torch.tan(math.pi * (value - 0.5)) * self.scale + self.loc
 
     def entropy(self):
         return math.log(4 * math.pi) + self.scale.log()

@@ -19,7 +19,7 @@ struct ${op} : public ${superclass} {
   using ${superclass}::${superclass};
   variable_list apply(const variable_list& grads) override;
   std::string name() override { return "${op}"; }
-  void releaseVariables() override {
+  void release_variables() override {
     ${release_variables}
   }
   ${will_release_variables}
@@ -30,7 +30,7 @@ struct ${op} : public ${superclass} {
 
 WILL_RELEASE_VARIABLES = CodeTemplate("""\
 bool retain_variables = true;
-virtual void willReleaseVariables() override {
+virtual void will_release_variables() override {
   retain_variables = false;
 }
 """)
@@ -129,7 +129,7 @@ def process_function(func):
         name = arg['name']
         if arg['type'] == 'Tensor' or (arg['type'] == 'Scalar' and is_output):
             saved_variables.append('SavedVariable {}_;'.format(name))
-            release_variables.append('{}_.data.reset();'.format(name))
+            release_variables.append('{}_.reset_data();'.format(name))
             ptr = 'shared_from_this()' if is_output else ''
             unpack.append('auto {} = {}_.unpack({});'.format(name, name, ptr))
         elif arg['type'] == 'TensorList':

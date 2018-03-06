@@ -1,9 +1,12 @@
+#include <Python.h>
+
 #include "python_compiled_function.h"
 
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
@@ -15,8 +18,10 @@
 #include "torch/csrc/jit/interpreter_autograd_function.h"
 
 #include <algorithm>
-#include <functional>
 #include <atomic>
+#include <functional>
+#include <memory>
+#include <vector>
 
 namespace torch { namespace jit { namespace python {
 
@@ -25,7 +30,7 @@ using namespace torch::jit::tracer;
 
 namespace {
 
-// pybind casts are really verobse...
+// pybind casts are really verbose...
 py::object steal(py::handle x) {
   return py::reinterpret_steal<py::object>(x);
 }
@@ -95,7 +100,7 @@ struct CompiledFunction {
       JIT_ASSERT(is_ready_);
       AutoNoGIL _gil_guard;
       auto fn = factory_->construct();
-      fn->willReleaseVariables(); // forward pass is never reused, so it is safe to release anything it can
+      fn->will_release_variables(); // forward pass is never reused, so it is safe to release anything it can
       return fn->apply(inputs);
     }
 
@@ -113,7 +118,7 @@ struct CompiledFunction {
       std::size_t num_captured = fn_.captured_vars_.size();
       // Check that no captured Variables were replaced by enter. It's hard to handle that.
       for (std::size_t i = num_all_inputs - num_captured; i < num_all_inputs; ++i) {
-        TORCH_EXPECTM(input_info.vars[i].get() == new_vars[i].get(),
+        TORCH_EXPECTM(input_info.vars[i].is_same(new_vars[i]),
                       "Some of the Variables captured by the JIT are repeated");
       }
       // Now only arguments to this function could have changed. Slice their vars out, and

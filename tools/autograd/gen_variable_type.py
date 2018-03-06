@@ -61,7 +61,7 @@ DONT_PROFILE = {
 # not examine or modify requires_grad or grad_fn.
 DONT_REQUIRE_DERIVATIVE = {
     # These  only depend on the input Tensor's shape and device, not the data
-    'ones_like', 'zeros_like', 'randn_like',
+    'ones_like', 'zeros_like', 'rand_like', 'randn_like',
     # Tensor constructors
     'sparse_coo_tensor',
     # These are only implemented on integral types
@@ -94,7 +94,7 @@ if (compute_requires_grad( ${args_with_derivatives} )) {
 
 ASSIGN_GRAD_FN = CodeTemplate("""\
 grad_fn = std::make_shared<${op}>(${op_ctor});
-grad_fn->next_functions = get_next_functions( ${args_with_derivatives} );
+grad_fn->set_next_edges(collect_next_edges( ${args_with_derivatives} ));
 """)
 
 CALL_VIA_TYPE = CodeTemplate("""\
@@ -316,9 +316,9 @@ def emit_body(declaration):
             return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
     def emit_record_trace(env):
-        # Operations involving Generator and Storage are not traceable
+        # Operations involving Generator, Storage, Type are not traceable
         # at the moment
-        if any(arg['simple_type'] in {'Generator', 'Storage'} for arg in declaration['arguments']):
+        if any(arg['simple_type'] in {'Generator', 'Storage', 'Type'} for arg in declaration['arguments']):
             return ('', '')
         # We can't trace functions which don't have any Tensor or TensorList returns
         if 'Tensor' not in declaration['return_type']:
@@ -476,8 +476,6 @@ def emit_body(declaration):
     body.append(pre_record_trace)
     body.append(emit_call(env))
     if requires_derivative:
-        if inplace and is_view and not os.environ.get('WITH_SCALARS'):
-            body.append('ensure_no_aten_scalars(self);')
         # set_flags has to appear after version_counter, because rebase_history
         # requires that the counter is incremented before it is called
         body.extend(emit_increment_version())

@@ -3,15 +3,19 @@
 
 #include <ATen/ATen.h>
 
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Size.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
+#include "torch/csrc/utils/cuda_lazy_init.h"
+#include "torch/csrc/utils/numpy_stub.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/python_scalars.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_numpy.h"
-#include "torch/csrc/autograd/variable.h"
 
 static const int MAX_DIMS = 128;
 
@@ -19,7 +23,14 @@ using namespace at;
 
 namespace torch { namespace utils {
 
+static void maybe_initialize_cuda(const at::Type &type) {
+  if (type.is_cuda()) {
+    torch::utils::cuda_lazy_init();
+  }
+}
+
 static Tensor new_with_sizes(const Type& type, int device, IntList sizes) {
+  maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);
   return type.tensor(sizes);
@@ -39,16 +50,14 @@ static Tensor new_with_tensor(const Type& type, Tensor other) {
 }
 
 static Tensor new_with_tensor_copy(const Type& type, Tensor other) {
-  if (other.type() != type) {
-    throw TypeError("expected %s (got %s)", type.toString(), other.type().toString());
-  }
+  maybe_initialize_cuda(type);
   return type.copy(other);
 }
 
 static std::vector<int64_t> compute_sizes(PyObject* seq) {
   std::vector<int64_t> sizes;
   THPObjectPtr handle;
-  do {
+  while (PySequence_Check(seq)) {
     auto length = PySequence_Length(seq);
     if (length < 0) throw python_error();
     sizes.push_back(length);
@@ -58,7 +67,7 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
     if (length == 0) break;
     handle = THPObjectPtr(PySequence_GetItem(seq, 0));
     seq = handle.get();
-  } while (PySequence_Check(seq));
+  }
 
   return sizes;
 }
@@ -87,30 +96,28 @@ static void recursive_store(char* data, IntList sizes, IntList strides, int64_t 
   }
 }
 
-static Tensor new_from_sequence(ScalarType scalarType, PyObject* data) {
-  if (!PySequence_Check(data)) {
-    throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
-  }
+static Tensor new_from_data(ScalarType scalarType, PyObject* data) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
 #ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
-    return autograd::make_variable(tensor_from_numpy(data), false);
+    return autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
   }
 #endif
 
   auto sizes = compute_sizes(data);
-  auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), false);
+  auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
       scalarType, tensor.type().elementSizeInBytes(), data);
   return tensor;
 }
 
-static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
-  auto tensor = new_from_sequence(type.scalarType(), data);
+Tensor new_from_data(const Type & type, int device, PyObject *data) {
+  auto tensor = new_from_data(type.scalarType(), data);
   if (tensor.type() != type) {
+    maybe_initialize_cuda(type);
     AutoNoGIL no_gil;
     AutoGPU auto_gpu(device);
     tensor = tensor.toType(type);
@@ -118,35 +125,86 @@ static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
   return tensor;
 }
 
-static Tensor new_from_data(const Type & type, int device, PyObject *data) {
-  if (PySequence_Check(data)) {
-    return new_from_sequence(type, device, data);
-  } else {
-    // could use scalarTensor but using store_scalar for consistency with the sequence path;
-    // this has stricter checking (i.e. a floating-point number passed to an integral type will error).
-    auto tensor = type.tensor({});
-    torch::utils::store_scalar((char*)tensor.data_ptr(), type.scalarType(), data);
-    return tensor;
+static Tensor new_from_sequence(const Type & type, int device, PyObject* data) {
+  if (!PySequence_Check(data)) {
+    throw TypeError("new(): data must be a sequence (got %s)", Py_TYPE(data)->tp_name);
+  }
+  return new_from_data(type, device, data);
+}
+
+static void check_is_dense(const Type& type) {
+  if (type.is_sparse()) {
+    std::ostringstream oss;
+    oss << "new(..) on a dense tensor can only be called with a dense dtype, got: ";
+    oss << torch::getDtype(type)->name;
+    throw TypeError(oss.str().c_str());
   }
 }
 
-Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
-  static PythonArgParser parser({
-    "new(*, int64_t device=-1)",
-    "new(IntList size, *, int64_t device=-1)",
-    "new(Storage storage)",
-    "new(*, int64_t cdata)|hidden",
-    "new(Tensor other)",
-    "new(PyObject* data, *, int64_t device=-1)",
-  });
+static void check_is_sparse(const Type& type) {
+  if (!type.is_sparse()) {
+    std::ostringstream oss;
+    oss << "new(..) on a spase tensor can only be called with a sparse dtype, got: ";
+    oss << torch::getDtype(type)->name;
+    throw TypeError(oss.str().c_str());
+  }
+}
 
-  PyObject* parsed_args[2];
+static Tensor legacy_sparse_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new(*, int64_t? device=-1)",
+    "new(IntList size, *, int64_t? device=-1)",
+    "new(*, int64_t cdata)|hidden",
+    "new(Tensor indices, Tensor values, *, int64_t? device=-1)",
+    "new(Tensor indices, Tensor values, IntList size, *, int64_t? device=-1)",
+  });
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     AutoGPU auto_gpu(r.toInt64(0));
     return type.tensor();
   } else if (r.idx == 1) {
-    PyObject* arg = parsed_args[0];
+    PyObject* arg = r.pyobject(0);
+    if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
+      // new(sequence) binds to this signature but should be treated differently
+      // unless the sequences is a torch.Size
+      return new_from_sequence(type, r.toInt64(1), r.pyobject(0));
+    }
+    return new_with_sizes(type, r.toInt64(1), r.intlist(0));
+  } else if (r.idx == 2) {
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 3) {
+    AutoGPU auto_gpu(r.toInt64(2));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
+  } else if (r.idx == 4) {
+    AutoGPU auto_gpu(r.toInt64(3));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+  }
+  throw std::runtime_error("new(): invalid arguments");
+}
+
+Tensor legacy_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new(*, int64_t? device=-1)",
+    "new(IntList size, *, int64_t? device=-1)",
+    "new(Storage storage)",
+    "new(*, int64_t cdata)|hidden",
+    "new(Tensor other)",
+    "new(PyObject* data, *, int64_t? device=-1)",
+  });
+
+  if (type.is_sparse()) {
+    return legacy_sparse_tensor_ctor(type, args, kwargs);
+  }
+
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    AutoGPU auto_gpu(r.toInt64(0));
+    return type.tensor();
+  } else if (r.idx == 1) {
+    PyObject* arg = r.pyobject(0);
     if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
       // new(sequence) binds to this signature but should be treated differently
       // unless the sequences is a torch.Size
@@ -166,26 +224,115 @@ Tensor tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
   throw std::runtime_error("new(): invalid arguments");
 }
 
+static Tensor legacy_sparse_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new(*, Type dtype=None, int64_t? device=-1)",
+    "new(IntList size, *, Type dtype=None, int64_t? device=-1)",
+    "new(*, int64_t cdata)|hidden",
+    "new(Tensor indices, Tensor values, *, int64_t? device=-1)",
+    "new(Tensor indices, Tensor values, IntList size, *, int64_t? device=-1)",
+  });
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto& actual_type = r.typeWithDefault(0, type);
+    check_is_sparse(actual_type);
+    maybe_initialize_cuda(actual_type);
+    AutoGPU auto_gpu(r.toInt64(1));
+    return actual_type.tensor();
+  } else if (r.idx == 1) {
+    PyObject* arg = r.pyobject(0);
+    const auto& actual_type = r.typeWithDefault(1, type);
+    check_is_sparse(actual_type);
+    if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
+      // new(sequence) binds to this signature but should be treated differently
+      // unless the sequences is a torch.Size
+      return new_from_sequence(actual_type, r.toInt64(2), r.pyobject(0));
+    }
+    return new_with_sizes(actual_type, r.toInt64(2), r.intlist(0));
+  } else if (r.idx == 2) {
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 3) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
+    AutoGPU auto_gpu(r.toInt64(2));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1));
+  } else if (r.idx == 4) {
+    // Note: this signature doesn't have a dtype, even though it has a device; it probably shouldn't
+    // have a device (we should infer it).
+    AutoGPU auto_gpu(r.toInt64(3));
+    return type.sparse_coo_tensor(r.tensor(0), r.tensor(1), r.intlist(2));
+  }
+  throw std::runtime_error("new(): invalid arguments");
+}
+
+Tensor legacy_tensor_new(const Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new(*, Type dtype=None, int64_t? device=-1)",
+    "new(IntList size, *, Type dtype=None, int64_t? device=-1)",
+    "new(Storage storage)",
+    "new(*, int64_t cdata)|hidden",
+    "new(Tensor other)",  // this doesn't have a dtype/device because it creates an alias.
+    "new(PyObject* data, *, Type dtype=None, int64_t? device=-1)",
+  });
+
+  if (type.is_sparse()) {
+    return legacy_sparse_tensor_new(type, args, kwargs);
+  }
+
+  ParsedArgs<3> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto& actual_type = r.typeWithDefault(0, type);
+    check_is_dense(actual_type);
+    maybe_initialize_cuda(actual_type);
+    AutoGPU auto_gpu(r.toInt64(1));
+    return actual_type.tensor();
+  } else if (r.idx == 1) {
+    PyObject* arg = r.pyobject(0);
+    const auto& actual_type = r.typeWithDefault(1, type);
+    check_is_dense(actual_type);
+    if (!THPSize_Check(arg) && PyTuple_GET_SIZE(args) >= 1 && arg == PyTuple_GET_ITEM(args, 0)) {
+      // new(sequence) binds to this signature but should be treated differently
+      // unless the sequences is a torch.Size
+      return new_from_sequence(actual_type, r.toInt64(2), r.pyobject(0));
+    }
+    return new_with_sizes(actual_type, r.toInt64(2), r.intlist(0));
+  } else if (r.idx == 2) {
+    return new_with_storage(type, *r.storage(0));
+  } else if (r.idx == 3) {
+    auto cdata = reinterpret_cast<void*>(r.toInt64(0));
+    return type.unsafeTensorFromTH(cdata, true);
+  } else if (r.idx == 4) {
+    return new_with_tensor(type, r.tensor(0));
+  } else if (r.idx == 5) {
+    const auto& actual_type = r.typeWithDefault(1, type);
+    check_is_dense(actual_type);
+    return new_from_sequence(actual_type, r.toInt64(2), r.pyobject(0));
+  }
+  throw std::runtime_error("new(): invalid arguments");
+}
+
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<torch::autograd::Variable&>(self).get()->_requires_grad = requires_grad;
+  static_cast<torch::autograd::Variable&>(self).set_requires_grad(requires_grad);
   return self;
 }
 
-Tensor variable_data_factory(const Type& type, PyObject* args, PyObject* kwargs) {
+Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new(Tensor other, *, bool requires_grad=False)",
-    "new(PyObject* data, *, int64_t device=-1, bool requires_grad=False)",
+    "new_tensor(Tensor other, *, Type dtype=None, bool requires_grad=False)",
+    "new_tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
-  PyObject* parsed_args[3];
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return set_requires_grad(new_with_tensor_copy(type, r.tensor(0)), r.toBool(1));
-    return set_requires_grad(new_with_tensor(type, r.tensor(0)), r.toBool(1));
+    return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0)), r.toBool(2));
   } else if (r.idx == 1) {
-    return set_requires_grad(new_from_data(type, r.toInt64(1), r.pyobject(0)), r.toBool(2));
+    return set_requires_grad(new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0)), r.toBool(3));
   }
-  throw std::runtime_error("variable(): invalid arguments");
+  throw std::runtime_error("new_tensor(): invalid arguments");
 }
 
 }} // namespace torch::utils

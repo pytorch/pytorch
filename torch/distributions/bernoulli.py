@@ -23,8 +23,8 @@ class Bernoulli(ExponentialFamily):
         [torch.FloatTensor of size 1]
 
     Args:
-        probs (Number, Tensor or Variable): the probabilty of sampling `1`
-        logits (Number, Tensor or Variable): the log-odds of sampling `1`
+        probs (Number, Tensor): the probabilty of sampling `1`
+        logits (Number, Tensor): the log-odds of sampling `1`
     """
     params = {'probs': constraints.unit_interval}
     support = constraints.boolean
@@ -72,7 +72,8 @@ class Bernoulli(ExponentialFamily):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        return torch.bernoulli(self.probs.expand(shape))
+        with torch.no_grad():
+            return torch.bernoulli(self.probs.expand(shape))
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

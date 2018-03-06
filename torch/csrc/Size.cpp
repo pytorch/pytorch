@@ -1,11 +1,9 @@
 #include "Size.h"
 
 #include <string>
+#include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_tuples.h"
-#include "THP.h"
-
-PyObject* THPSizeClass = NULL;
 
 struct THPSize {
   PyTupleObject tuple;
@@ -13,13 +11,10 @@ struct THPSize {
 
 PyObject * THPSize_New(int dim, const int64_t *sizes)
 {
-  PyTypeObject* type = (PyTypeObject*)THPSizeClass;
-  PyObject* self = type->tp_alloc(type, dim);
-  if (!self) {
-    return NULL;
-  }
+  auto self = THPObjectPtr(THPSizeType.tp_alloc(&THPSizeType, dim));
+  if (!self) throw python_error();
   THPUtils_packInt64Array(self, dim, sizes);
-  return self;
+  return self.release();
 }
 
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
@@ -39,6 +34,7 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
 
 static PyObject * THPSize_repr(THPSize *self)
 {
+  HANDLE_TH_ERRORS
   std::string repr("torch.Size([");
   for (Py_ssize_t i = 0; i < PyTuple_Size((PyObject*)self); ++i) {
     if (i != 0) {
@@ -48,6 +44,7 @@ static PyObject * THPSize_repr(THPSize *self)
   }
   repr += "])";
   return THPUtils_packString(repr);
+  END_HANDLE_TH_ERRORS
 }
 
 extern PyTypeObject THPSizeType;
@@ -138,12 +135,13 @@ PyTypeObject THPSizeType = {
   THPSize_pynew,                         /* tp_new */
 };
 
-bool THPSize_init(PyObject *module)
+void THPSize_init(PyObject *module)
 {
-  THPSizeClass = (PyObject*)&THPSizeType;
-  if (PyType_Ready(&THPSizeType) < 0)
-    return false;
+  if (PyType_Ready(&THPSizeType) < 0) {
+    throw python_error();
+  }
   Py_INCREF(&THPSizeType);
-  PyModule_AddObject(module, "Size", (PyObject *)&THPSizeType);
-  return true;
+  if (PyModule_AddObject(module, "Size", (PyObject*)&THPSizeType) < 0) {
+    throw python_error();
+  }
 }

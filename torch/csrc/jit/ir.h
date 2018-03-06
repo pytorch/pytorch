@@ -25,6 +25,7 @@
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/variable_flags.h"
+#include "torch/csrc/jit/source_location.h"
 
 namespace torch { namespace autograd {
 
@@ -68,14 +69,7 @@ static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
 }
 
-// SourceLocation represents source code-level debug information for a node.
-// It contains a Python stack trace that represents the provenance of a given
-// node in the trace.
-struct SourceLocation {
-  SourceLocation(std::string python_traceback)
-  : python_traceback(std::move(python_traceback)) {}
-  std::string python_traceback;
-};
+
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a
@@ -159,10 +153,8 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  bool hasType() const {
-    return type_ != nullptr;
-  }
   Value* setType(const TypePtr type) {
+    JIT_ASSERT(type);
     type_ = type;
     return this;
   }
@@ -173,11 +165,11 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
-  const TypePtr & typeOption() const {
-    return type_;
-  }
   bool isHandle() const {
-    return hasType() && type()->kind() == TypeKind::HandleType;
+    return type()->kind() == TypeKind::HandleType;
+  }
+  bool isTensor() const {
+    return type()->kind() == TypeKind::TensorType;
   }
   size_t unique() const {
     return unique_;
@@ -211,6 +203,8 @@ public:
     return uses_;
   }
 
+  void replaceFirstUseWith(Value * newValue);
+
   // Replaces all uses of this node with 'newValue'.
   //
   // Given:   %3 = f(%1, %2)
@@ -223,7 +217,7 @@ public:
   void replaceAllUsesWith(Value * newValue);
 
   Value* copyMetadata(Value * from) {
-    if(from->hasType()) setType(from->type());
+    setType(from->type());
     if (from->unique_name_ != "")
       setUniqueName(from->uniqueName());
     return this;
@@ -274,7 +268,7 @@ public:
     return kind_;
   }
   Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
-    source_location_ = sl;
+    source_location_ = std::move(sl);
     return this;
   }
   std::shared_ptr<SourceLocation> getSourceLocation() const {
@@ -435,7 +429,7 @@ public:
     return outputs_.back();
   }
   void eraseOutput(size_t i);
-  
+
   Block * addBlock();
   void eraseBlock(size_t i);
 
@@ -694,6 +688,9 @@ struct Block {
     output_->addInput(n);
     return outputs().size() - 1;
   }
+  void eraseOutput(size_t i) {
+    output_->removeInput(i);
+  }
   Node * appendNode(Node * n) {
     JIT_ASSERT(n->graph_ == graph_ && !n->inBlockList());
     n->insertBefore(output_);
@@ -832,6 +829,9 @@ public:
   void eraseInput(size_t i) {
     block_->eraseInput(i);
   }
+  void eraseOutput(size_t i) {
+    block_->eraseOutput(i);
+  }
   void advanceStage() {
     new_node_stage_++;
   }
@@ -882,7 +882,13 @@ public:
     n->i_(kdevice, device);
     return n;
   }
-  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args);
+  Node* createPythonOp(
+      THPObjectPtr&& pyobj,
+      const std::string& cconv,
+      bool is_legacy,
+      std::vector<VariableFlags>&& var_flags,
+      pyobj_list&& scalar_args,
+      bool tracing_autograd_python_function = true);
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
@@ -1019,7 +1025,8 @@ inline Value::Value(Node * node_, size_t offset_)
 : node_(node_),
   offset_(offset_),
   unique_(node_->graph_->next_unique_++),
-  stage_(node_->graph_->new_node_stage_) {
+  stage_(node_->graph_->new_node_stage_),
+  type_(DynamicType::get()) {
   node_->graph_->all_values.emplace(this);
 }
 
@@ -1031,13 +1038,18 @@ inline const Graph * Value::owningGraph() const {
   return node()->owningGraph();
 }
 
-inline void Value::replaceAllUsesWith(Value * newValue) {
+inline void Value::replaceFirstUseWith(Value * newValue) {
   JIT_ASSERT(owningGraph() == newValue->owningGraph());
-  for(auto u : uses()) {
-    u.user->inputs_[u.offset] = newValue;
-    newValue->uses_.push_back(u);
+  auto u = uses()[0];
+  u.user->inputs_[u.offset] = newValue;
+  newValue->uses_.push_back(u);
+  uses_.erase(uses_.begin());
+}
+
+inline void Value::replaceAllUsesWith(Value * newValue) {
+  while (!uses().empty()) {
+    replaceFirstUseWith(newValue);
   }
-  uses_.clear();
 }
 
 inline Node::Node(Graph * graph_, NodeKind kind_) :
@@ -1091,15 +1103,19 @@ inline void Node::cloneFrom(Node * s) {
 	copyAttributes(*s);
 }
 
-inline Value* Value::setUniqueName(const std::string & name) {
-  if (name.find_first_not_of("0123456789") == std::string::npos) {
-    throw std::runtime_error("names may not be integers: " + name);
+inline Value* Value::setUniqueName(const std::string & orig_name) {
+  if (orig_name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + orig_name);
   }
-  if (node_->graph_->unique_names_.find(name) != node_->graph_->unique_names_.end()) {
-    throw std::runtime_error("name is already in use in this graph: " + name);
+  auto & names = node()->owningGraph()->unique_names_;
+  auto name = orig_name;
+  for(size_t i = 1; names.find(name) != names.end(); i++) {
+    std::stringstream ss;
+    ss << orig_name << "." << i;
+    name = ss.str();
   }
-  node_->graph_->unique_names_.insert(name);
-  unique_name_ = name;
+  names.insert(name);
+  unique_name_ = std::move(name);
   return this;
 }
 
@@ -1174,12 +1190,19 @@ struct PythonOp : public Node {
   static const BuiltinSymbol Kind = kPythonOp;
   PythonOp(Graph * graph)
   : Node(graph,kPythonOp) {}
-  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
+  PythonOp* init(
+      THPObjectPtr&& pyobj,
+      const std::string& cconv,
+      bool is_legacy,
+      std::vector<VariableFlags>&& var_flags,
+      pyobj_list&& scalar_args,
+      bool tracing_autograd_python_function = true) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
     this->var_flags = std::move(var_flags);
     this->is_legacy = is_legacy;
+    this->tracing_autograd_python_function = tracing_autograd_python_function;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1197,6 +1220,7 @@ struct PythonOp : public Node {
   // 't' -- tensor argument
   std::string cconv;
   bool is_legacy;
+  bool tracing_autograd_python_function;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
@@ -1204,9 +1228,21 @@ struct PythonOp : public Node {
   std::string name() const;
   virtual void cloneFrom(Node * other_) override;
 };
-inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
+inline Node* Graph::createPythonOp(
+    THPObjectPtr&& pyobj,
+    const std::string& cconv,
+    bool is_legacy,
+    std::vector<VariableFlags>&& var_flags,
+    pyobj_list&& scalar_args,
+    bool tracing_autograd_python_function) {
   auto op = new PythonOp(this);
-  return op->init(std::move(pyobj),cconv,is_legacy,std::move(var_flags), std::move(scalar_args));
+  return op->init(
+      std::move(pyobj),
+      cconv,
+      is_legacy,
+      std::move(var_flags),
+      std::move(scalar_args),
+      tracing_autograd_python_function);
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.

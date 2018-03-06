@@ -58,7 +58,7 @@ class L1Loss(_Loss):
            each minibatch. Ignored when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed
            for each minibatch. When reduce is ``False``, the loss function returns
-           a loss per batch element instead and ignores size_average.
+           a loss per input/target element instead and ignores size_average.
            Default: ``True``
 
     Shape:
@@ -71,8 +71,8 @@ class L1Loss(_Loss):
     Examples::
 
         >>> loss = nn.L1Loss()
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -145,7 +145,7 @@ class NLLLoss(_WeightedLoss):
             non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed
             for each minibatch. When :attr:`reduce` is ``False``, the loss
-            function returns a loss per batch element instead and
+            function returns a loss per batch instead and
             ignores :attr:`size_average`. Default: ``True``
 
     Shape:
@@ -165,9 +165,9 @@ class NLLLoss(_WeightedLoss):
         >>> m = nn.LogSoftmax()
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C = 3 x 5
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
+        >>> input = torch.randn(3, 5, requires_grad=True)
         >>> # each element in target has to have 0 <= value < C
-        >>> target = autograd.Variable(torch.LongTensor([1, 0, 4]))
+        >>> target = torch.LongTensor([1, 0, 4])
         >>> output = loss(m(input), target)
         >>> output.backward()
         >>>
@@ -176,10 +176,10 @@ class NLLLoss(_WeightedLoss):
         >>> N, C = 5, 4
         >>> loss = nn.NLLLoss()
         >>> # input is of size N x C x height x width
-        >>> data = Variable(torch.randn(N, 16, 10, 10))
+        >>> data = torch.randn(N, 16, 10, 10)
         >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = Variable(torch.LongTensor(N, 8, 8).random_(0, C))
+        >>> target = torch.LongTensor(N, 8, 8).random_(0, C)
         >>> output = loss(m(data), target)
         >>> output.backward()
     """
@@ -229,14 +229,14 @@ class PoissonNLLLoss(_Loss):
             log_input==``False``. Default: 1e-8
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
-            size_average. When reduce is ``False``, returns a loss per batch
+            size_average. When reduce is ``False``, returns a loss per input/target
             element instead and ignores size_average. Default: ``True``
 
     Examples::
 
         >>> loss = nn.PoissonNLLLoss()
-        >>> log_input = autograd.Variable(torch.randn(5, 2), requires_grad=True)
-        >>> target = autograd.Variable(torch.randn(5, 2))
+        >>> log_input = torch.randn(5, 2, requires_grad=True)
+        >>> target = torch.randn(5, 2)
         >>> output = loss(log_input, target)
         >>> output.backward()
     """
@@ -294,7 +294,7 @@ class KLDivLoss(_Loss):
             dimensions. However, if ``False`` the losses are instead summed.
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
-            size_average. When reduce is ``False``, returns a loss per batch
+            size_average. When reduce is ``False``, returns a loss per input/target
             element instead and ignores size_average. Default: ``True``
 
     Shape:
@@ -332,8 +332,6 @@ class MSELoss(_Loss):
             \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
         \end{cases}
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each.
-
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
@@ -350,7 +348,7 @@ class MSELoss(_Loss):
            each minibatch. Only applies when reduce is ``True``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged
            over observations for each minibatch, or summed, depending on
-           size_average. When reduce is ``False``, returns a loss per batch
+           size_average. When reduce is ``False``, returns a loss per input/target
            element instead and ignores size_average. Default: ``True``
 
     Shape:
@@ -361,8 +359,8 @@ class MSELoss(_Loss):
     Examples::
 
         >>> loss = nn.MSELoss()
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.randn(3, 5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -407,7 +405,7 @@ class BCELoss(_WeightedLoss):
             each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per batch element instead and ignores
+            is False, returns a loss per input/target element instead and ignores
             size_average. Default: True
 
     Shape:
@@ -421,8 +419,8 @@ class BCELoss(_WeightedLoss):
 
         >>> m = nn.Sigmoid()
         >>> loss = nn.BCELoss()
-        >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
-        >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
+        >>> input = torch.randn(3, requires_grad=True)
+        >>> target = torch.FloatTensor(3).random_(2)
         >>> output = loss(m(input), target)
         >>> output.backward()
     """
@@ -472,7 +470,7 @@ class BCEWithLogitsLoss(Module):
             each minibatch. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
-            is False, returns a loss per batch element instead and ignores
+            is False, returns a loss per input/target element instead and ignores
             size_average. Default: True
 
      Shape:
@@ -482,11 +480,11 @@ class BCEWithLogitsLoss(Module):
 
      Examples::
 
-         >>> loss = nn.BCEWithLogitsLoss()
-         >>> input = autograd.Variable(torch.randn(3), requires_grad=True)
-         >>> target = autograd.Variable(torch.FloatTensor(3).random_(2))
-         >>> output = loss(input, target)
-         >>> output.backward()
+        >>> loss = nn.BCEWithLogitsLoss()
+        >>> input = torch.randn(3, requires_grad=True)
+        >>> target = torch.FloatTensor(3).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
     def __init__(self, weight=None, size_average=True, reduce=True):
         super(BCEWithLogitsLoss, self).__init__()
@@ -496,8 +494,9 @@ class BCEWithLogitsLoss(Module):
 
     def forward(self, input, target):
         if self.weight is not None:
+            var = Variable(self.weight) if not isinstance(self.weight, Variable) else self.weight
             return F.binary_cross_entropy_with_logits(input, target,
-                                                      Variable(self.weight),
+                                                      var,
                                                       self.size_average,
                                                       reduce=self.reduce)
         else:
@@ -531,22 +530,31 @@ class HingeEmbeddingLoss(_Loss):
 
     where :math:`L = \{l_1,\dots,l_N\}^\top`.
 
-    `x` and `y` can be of arbitrary shapes with a total of `n` elements each.
-    The sum operation operates over all the elements.
+    Args:
+        margin (float, optional): Has a default value of `1`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
-    The division by `n` can be avoided if one sets the internal
-    variable `size_average=False`.
-
-    The `margin` has a default value of `1`, or can be set in the constructor.
+    Shape:
+        - Input: Tensor of arbitrary shape. The sum operation operates over all the elements.
+        - Target: Same shape as input.
+        - Output: scalar. If reduce is ``False``, then same shape as the input
     """
 
-    def __init__(self, margin=1.0, size_average=True):
-        super(HingeEmbeddingLoss, self).__init__()
+    def __init__(self, margin=1.0, size_average=True, reduce=True):
+        super(HingeEmbeddingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input, target):
-        return F.hinge_embedding_loss(input, target, self.margin, self.size_average)
+        return F.hinge_embedding_loss(input, target, self.margin, self.size_average,
+                                      self.reduce)
 
 
 class MultiLabelMarginLoss(_Loss):
@@ -616,7 +624,8 @@ class SmoothL1Loss(_Loss):
            the losses are instead summed. Ignored when reduce is ``False``. Default: ``True``
         reduce (bool, optional): By default, the losses are averaged or summed
            over elements. When reduce is ``False``, the loss function returns
-           a loss per element instead and ignores size_average. Default: ``True``
+           a loss per input/target element instead and ignores size_average.
+           Default: ``True``
 
     Shape:
         - Input: :math:`(N, *)` where `*` means, any number of additional
@@ -638,19 +647,37 @@ class SmoothL1Loss(_Loss):
 
 class SoftMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a two-class classification
-    logistic loss between input `x` (a 2D mini-batch Tensor) and
-    target `y` (which is a tensor containing either `1` or `-1`).
+    logistic loss between input tensor `x` and target tensor `y` (containing 1 or
+    -1).
 
     ::
 
         loss(x, y) = sum_i (log(1 + exp(-y[i]*x[i]))) / x.nelement()
 
-    The normalization by the number of elements in the input can be disabled by
-    setting `self.size_average` to ``False``.
+    Args:
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
+
+    Shape:
+        - Input: Tensor of arbitrary shape.
+        - Target: Same shape as input.
+        - Output: scalar. If reduce is ``False``, then same shape as the input
+
     """
+    def __init__(self, size_average=True, reduce=True):
+        super(SoftMarginLoss, self).__init__(size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
         _assert_no_grad(target)
-        return F.soft_margin_loss(input, target, size_average=self.size_average)
+        return F.soft_margin_loss(input, target, size_average=self.size_average,
+                                  reduce=self.reduce)
 
 
 class CrossEntropyLoss(_WeightedLoss):
@@ -690,7 +717,7 @@ class CrossEntropyLoss(_WeightedLoss):
             ``True``, the loss is averaged over non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed over
             observations for each minibatch depending on size_average. When reduce
-            is ``False``, returns a loss per batch element instead and ignores
+            is ``False``, returns a loss per batch instead and ignores
             size_average. Default: ``True``
 
     Shape:
@@ -701,8 +728,8 @@ class CrossEntropyLoss(_WeightedLoss):
     Examples::
 
         >>> loss = nn.CrossEntropyLoss()
-        >>> input = autograd.Variable(torch.randn(3, 5), requires_grad=True)
-        >>> target = autograd.Variable(torch.LongTensor(3).random_(5))
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.LongTensor(3).random_(5)
         >>> output = loss(input, target)
         >>> output.backward()
     """
@@ -720,18 +747,40 @@ class CrossEntropyLoss(_WeightedLoss):
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-label one-versus-all
-    loss based on max-entropy, between input `x`  (a 2D mini-batch `Tensor`) and
-    target `y` (a binary 2D `Tensor`). For each sample in the minibatch::
+    loss based on max-entropy, between input `x` and target `y` of size `(N, C)`.
+    For each sample in the minibatch::
 
        loss(x, y) = - sum_i (y[i] * log( 1 / (1 + exp(-x[i])) )
                          + ( (1-y[i]) * log(exp(-x[i]) / (1 + exp(-x[i])) ) )
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
-    `y` and `x` must have the same size.
+
+    Args:
+        weight (Tensor, optional): a manual rescaling weight given to each
+           class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+           treated as if having all ones.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
+        - Target: :math:`(N, C)`, same shape as the input.
+        - Output: scalar. If `reduce` is False, then `(N)`.
     """
 
+    def __init__(self, weight=None, size_average=True, reduce=True):
+        super(MultiLabelSoftMarginLoss, self).__init__(weight, size_average)
+        self.reduce = reduce
+
     def forward(self, input, target):
-        return F.multilabel_soft_margin_loss(input, target, self.weight, self.size_average)
+        return F.multilabel_soft_margin_loss(input, target, self.weight, self.size_average,
+                                             self.reduce)
 
 
 class CosineEmbeddingLoss(Module):
@@ -793,42 +842,48 @@ class MarginRankingLoss(Module):
         return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average)
 
 
-class MultiMarginLoss(Module):
+class MultiMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-class classification hinge
     loss (margin-based loss) between input `x` (a 2D mini-batch `Tensor`) and
     output `y` (which is a 1D tensor of target class indices,
     `0` <= `y` <= `x.size(1)`):
 
-    For each mini-batch sample::
+    For each mini-batch sample, the loss in terms of the 1D input `x` and scalar
+    output `y` is::
 
-        loss(x, y) = sum_i(max(0, (margin - x[y] + x[i]))^p) / x.size(0)
+        loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] + x[i]))^p) / x.size(0)
                      where `i == 0` to `x.size(0)` and `i != y`.
 
-    Optionally, you can give non-equal weighting on the classes by passing
-    a 1D `weight` tensor into the constructor.
+    Args:
+        p (int, optional): Has a default value of `1`. `1` and `2` are the only
+            supported values
+        margin (float, optional): Has a default value of `1`.
+        weight (Tensor, optional): a manual rescaling weight given to each
+            class. If given, it has to be a Tensor of size `C`. Otherwise, it is
+            treated as if having all ones.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
-    The loss function then becomes:
-
-        loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] - x[i]))^p) / x.size(0)
-
-    By default, the losses are averaged over observations for each minibatch.
-    However, if the field `size_average` is set to ``False``,
-    the losses are instead summed.
     """
 
-    def __init__(self, p=1, margin=1, weight=None, size_average=True):
-        super(MultiMarginLoss, self).__init__()
+    def __init__(self, p=1, margin=1, weight=None, size_average=True, reduce=True):
+        super(MultiMarginLoss, self).__init__(weight, size_average)
         if p != 1 and p != 2:
             raise ValueError("only p == 1 and p == 2 supported")
         assert weight is None or weight.dim() == 1
         self.p = p
         self.margin = margin
-        self.size_average = size_average
-        self.weight = weight
+        self.reduce = reduce
 
     def forward(self, input, target):
-        return F.multi_margin_loss(input, target, self.p, self.margin,
-                                   self.weight, self.size_average)
+        return F.multi_margin_loss(input, target, self.p, self.margin, self.weight,
+                                   self.size_average, self.reduce)
 
 
 class TripletMarginLoss(Module):
@@ -859,9 +914,9 @@ class TripletMarginLoss(Module):
         - Output: :math:`(N, 1)`
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> input3 = autograd.Variable(torch.randn(100, 128))
+    >>> input1 = torch.randn(100, 128, requires_grad=True)
+    >>> input2 = torch.randn(100, 128, requires_grad=True)
+    >>> input3 = torch.randn(100, 128, requires_grad=True)
     >>> output = triplet_loss(input1, input2, input3)
     >>> output.backward()
 

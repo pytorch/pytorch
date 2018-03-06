@@ -34,11 +34,11 @@
 #define TH_TENSOR_DIM_APPLY3(TYPE1, TENSOR1, TYPE2, TENSOR2, TYPE3, TENSOR3, DIMENSION, SIZE_CHECK, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
+  TH_UNUSED int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
   TYPE2 *TENSOR2##_data = NULL; \
-  int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
+  TH_UNUSED int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
   TYPE3 *TENSOR3##_data = NULL; \
-  int64_t TENSOR3##_stride = 0, TENSOR3##_size = 0; \
+  TH_UNUSED int64_t TENSOR3##_stride = 0, TENSOR3##_size = 0; \
   int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
@@ -143,9 +143,9 @@
 #define TH_TENSOR_DIM_APPLY2(TYPE1, TENSOR1, TYPE2, TENSOR2, DIMENSION, CODE) \
 { \
   TYPE1 *TENSOR1##_data = NULL; \
-  int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
+  TH_UNUSED int64_t TENSOR1##_stride = 0, TENSOR1##_size = 0; \
   TYPE2 *TENSOR2##_data = NULL; \
-  int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
+  TH_UNUSED int64_t TENSOR2##_stride = 0, TENSOR2##_size = 0; \
   int64_t *TH_TENSOR_DIM_APPLY_counter = NULL; \
   int TH_TENSOR_DIM_APPLY_hasFinished = 0; \
   int TH_TENSOR_DIM_APPLY_i; \
@@ -158,7 +158,7 @@
     THError("inconsistent tensor size, expected %s %s and %s %s to have the same " \
             "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str);        \
   }                                                                     \
-  int shape_check_flag = 0;                                             \
+  TH_UNUSED int shape_check_flag = 0;                                             \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->nDimension; TH_TENSOR_DIM_APPLY_i++) \
   { \
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \

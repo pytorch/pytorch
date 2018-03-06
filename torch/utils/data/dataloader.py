@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
@@ -19,7 +20,7 @@ else:
 
 
 class ExceptionWrapper(object):
-    r"Wraps an exception plus traceback to communicate across threads"
+    r"""Wraps an exception plus traceback to communicate across threads"""
 
     def __init__(self, exc_info):
         self.exc_type = exc_info[0]
@@ -27,7 +28,7 @@ class ExceptionWrapper(object):
 
 
 _use_shared_memory = False
-"""Whether to use shared memory in default_collate"""
+r"""Whether to use shared memory in default_collate"""
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -41,6 +42,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
+    random.seed(seed)
     torch.manual_seed(seed)
 
     if init_fn is not None:
@@ -97,7 +99,7 @@ numpy_type_map = {
 
 
 def default_collate(batch):
-    "Puts each data field into a tensor with outer dimension batch size"
+    r"""Puts each data field into a tensor with outer dimension batch size"""
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
@@ -151,7 +153,7 @@ def pin_memory_batch(batch):
 
 
 _SIGCHLD_handler_set = False
-"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
+r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
 handler needs to be set for all DataLoaders in a process."""
 
 
@@ -181,7 +183,7 @@ def _set_SIGCHLD_handler():
 
 
 class DataLoaderIter(object):
-    "Iterates once over the DataLoader's dataset, as specified by the sampler"
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
     def __init__(self, loader):
         self.dataset = loader.dataset
@@ -314,9 +316,15 @@ class DataLoaderIter(object):
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-                # if worker_manager_thread is waiting to put
-                while not self.data_queue.empty():
-                    self.data_queue.get()
+                # if worker_manager_thread is waiting to put, make place for it
+                try:
+                    while not self.data_queue.empty():
+                        self.data_queue.get()
+                except FileNotFoundError:
+                    # FileNotFoundError can happen when we rebuild the fd
+                    # fetched from the queue but the socket is already closed
+                    # from the worker side (e.g. due to Python shutting down).
+                    pass
                 for _ in self.workers:
                     self.index_queue.put(None)
                 # done_event should be sufficient to exit worker_manager_thread,
@@ -334,7 +342,7 @@ class DataLoaderIter(object):
 
 
 class DataLoader(object):
-    """
+    r"""
     Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
 
@@ -371,7 +379,7 @@ class DataLoader(object):
               this value in :attr:`worker_init_fn`, which can be used to set other seeds
               (e.g. NumPy) before data loading.
 
-    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be an
+    .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
     """
 

@@ -21,12 +21,20 @@ namespace {
 
 Tensor batch_norm(
     const Tensor& input, const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    const Tensor& running_mean, const Tensor& running_var,
+    const Tensor& running_mean /* optional */, const Tensor& running_var /* optional */,
     bool training, double momentum, double eps, bool cudnn_enabled) {
 
   auto num_features = input.sizes()[1];
-  check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
-  check_dims_match_num_input_features("running_var", num_features, running_var.numel());
+  if (running_mean.defined()) {
+    check_dims_match_num_input_features("running_mean", num_features, running_mean.numel());
+  } else if (!training) {
+    throw std::runtime_error("running_mean must be defined in evaluation mode");
+  }
+  if (running_var.defined()) {
+    check_dims_match_num_input_features("running_var", num_features, running_var.numel());
+  } else if (!training) {
+    throw std::runtime_error("running_var must be defined in evaluation mode");
+  }
   if (weight.defined()) {
     check_dims_match_num_input_features("weight", num_features, weight.numel());
   }
@@ -38,8 +46,10 @@ Tensor batch_norm(
 #if AT_CUDNN_ENABLED()
   use_cudnn = (input.type().is_cuda()
                && (input.type().scalarType() != at::kHalf
-               || weight.type().scalarType() == at::kFloat)
+                 || weight.type().scalarType() == at::kFloat)
                && weight.defined() && bias.defined()
+               && ((running_mean.defined() && running_var.defined())
+                 || (!running_mean.defined() && !running_var.defined() && training))
                && input.size(0) <= 131070
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
 #endif

@@ -18,11 +18,12 @@
 - func: addr(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
 - func: addr_(Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
 
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
 
-- func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
+- func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
@@ -77,7 +78,6 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
   variants: function
 
-
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
     - type: Tensor
@@ -92,11 +92,11 @@
       name: grad_theta
   variants: function
 
-- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
+- func: cudnn_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
 
 # NB: You can only use this if you used cudnn_batch_norm training=True
-- func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor running_mean, Tensor running_var, Tensor? save_mean, Tensor? save_var, double epsilon) -> (Tensor, Tensor, Tensor)
+- func: cudnn_batch_norm_backward(Tensor input, Tensor grad_output, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, double epsilon) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: cudnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation, int64_t groups, bool benchmark, bool deterministic) -> Tensor
@@ -177,11 +177,35 @@
 - func: empty_like(Tensor self) -> Tensor
   variants: function
 
+- func: empty_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
+- func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: embedding_bag_cpu
+    CUDA: embedding_bag_cuda
+
+- func: embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
+  variants: function
+
+- func: embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+
+- func: embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: embedding_bag_backward_cpu
+    CUDA: embedding_bag_backward_cuda
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+  variants: function
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
 
@@ -212,6 +236,11 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+- func: mm(Tensor self, Tensor mat2) -> Tensor
+
+- func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
 
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
@@ -233,15 +262,31 @@
 - func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
   variants: function
 
+- func: ones_like(Tensor self) -> Tensor
+  variants: function
+
+- func: ones_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: rand_like(Tensor self) -> Tensor
+  variants: function
+
+- func: rand_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
 - func: randn_like(Tensor self) -> Tensor
   variants: function
 
+- func: randn_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
 - func: repeat(Tensor self, IntList repeats) -> Tensor
+  variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
@@ -273,6 +318,8 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
+- func: smm(Tensor self, Tensor mat2) -> Tensor
+
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
 - func: squeeze(Tensor self) -> Tensor
@@ -280,8 +327,20 @@
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
 
 - func: squeeze_(Tensor self) -> Tensor
+  variants: method
 
 - func: squeeze_(Tensor self, int64_t dim) -> Tensor
+  variants: method
+
+- func: sspaddmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+
+- func: sspaddmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sspaddmm_out_only_sparse
+    CUDA: _sspaddmm_out_only_sparse
+    SparseCPU: _sspaddmm_out_cpu
+    SparseCUDA: _sspaddmm_out_cuda
 
 - func: stack(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
@@ -296,16 +355,24 @@
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+  variants: method
 
 - func: t_(Tensor self) -> Tensor
+  variants: method
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: _unsafe_view(Tensor self, IntList size) -> Tensor
+  variants: function
 
 - func: unsqueeze(Tensor self, int64_t dim) -> Tensor
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
+  variants: method
 
 - func: view_as(Tensor self, Tensor other) -> Tensor
+  variants: method
 
 # we define both of these because 'where' does the broadcast and '_s_where' doesn't;
 # this allows us to implicitly calculate the broadcast derivative, while only dealing with the
@@ -315,6 +382,12 @@
   dispatch:
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
+
+- func: zeros_like(Tensor self) -> Tensor
+  variants: function
+
+- func: zeros_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:
@@ -334,4 +407,7 @@
   variants: function
 
 - func: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state, Tensor reserve, std::array<bool,4> output_mask) -> (Tensor, Tensor, Tensor, TensorList)
+  variants: function
+
+- func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
   variants: function

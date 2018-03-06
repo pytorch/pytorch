@@ -104,7 +104,7 @@ numerical approximations using small finite differences::
 
     from torch.autograd import gradcheck
 
-    # gradchek takes a tuple of tensor as input, check if your gradient
+    # gradcheck takes a tuple of tensors as input, check if your gradient
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
     input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)
@@ -155,8 +155,7 @@ This is how a ``Linear`` module can be implemented::
             # they won't appear in .parameters() (doesn't apply to buffers), and
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
-            # nn.Parameters can never be volatile and, different than Variables,
-            # they require gradients by default.
+            # nn.Parameters require gradients by default.
             self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
             if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))

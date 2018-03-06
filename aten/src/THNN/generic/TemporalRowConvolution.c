@@ -66,14 +66,14 @@ static void THNN_(unfolded_acc_row)(
 	int64_t nInputFrame,
 	int64_t nOutputFrame) {
 
-	size_t c;
+	int64_t c;
 	real *input_data = THTensor_(data)(input);
 	real *finput_data = THTensor_(data)(finput);
 
 // #pragma omp parallel for private(c)
 	for (c = 0; c < inputFrameSize; c++) {
-		size_t kw, x;
-		size_t ix = 0;
+		int64_t kw, x;
+		int64_t ix = 0;
 
 		for (kw = 0; kw < kW; kw++) {
 			real *src = finput_data
@@ -112,11 +112,11 @@ static void THNN_(unfolded_copy_row)(
 
 // #pragma omp parallel for private(k)
 	for (k = 0; k < inputFrameSize * kW; k++) {
-		size_t c = k / kW;
-		size_t rest = k % kW;
-		size_t kw = rest % kW;
-		size_t x;
-		size_t ix;
+		int64_t c = k / kW;
+		int64_t rest = k % kW;
+		int64_t kw = rest % kW;
+		int64_t x;
+		int64_t ix;
 		real *dst = finput_data + c * (kW * nOutputFrame) + kw * (nOutputFrame);
 		real *src = input_data + c * (nInputFrame);
 
@@ -436,10 +436,6 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
 
 	THNN_(TemporalRowConvolution_shapeCheck)
 	        (state, input, gradOutput, gradWeight, gradBias, kW, dW, padW);
-
-	int64_t inputFrameSize = gradWeight->size[0];
-	int64_t nInputFrame = input->size[ndim - 1];
-	int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
 	if (ndim == 2) {
 		THNN_(TemporalRowConvolution_accGradParameters_frame)(

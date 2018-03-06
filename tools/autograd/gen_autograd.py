@@ -88,32 +88,46 @@ def load_deprecated_signatures(aten_decls):
 
     def get_signature(name, params, call_args):
         # create a mapping of parameter name to parameter type
-        types = dict([param.split(' ')[::-1] for param in params])
+        types = dict([param.split(' ')[::-1] for param in params if param != '*'])
         # if the name in the call is not in the parameter list, assume it's
         # a literal Scalar
         rearranged_types = [types.get(arg, 'Scalar') for arg in call_args]
         return '{}({})'.format(name, ', '.join(rearranged_types))
 
     for deprecated in deprecated_defs:
-        python_signature = deprecated['name']
-        call_args = split_name_params(deprecated['aten'])[1]
-        name, params = split_name_params(python_signature)
-        signature = get_signature(name, params, call_args)
+        aten_name, call_args = split_name_params(deprecated['aten'])
+        name, params = split_name_params(deprecated['name'])
+        signature = get_signature(aten_name, params, call_args)
 
         for declaration in declarations_by_signature[signature]:
             declaration = copy.deepcopy(declaration)
             declaration['deprecated'] = True
             declaration['call_args'] = call_args
-            if declaration['inplace']:
-                declaration['python_signature'] = python_signature.replace(name, name + '_')
-            else:
-                declaration['python_signature'] = python_signature
 
-            args_by_name = {arg['name']: arg for arg in declaration['arguments']}
-            declaration['arguments'] = []
-            for arg in params:
-                _, arg_name = arg.split(' ')
-                declaration['arguments'].append(args_by_name[arg_name])
+            call_arg_to_idx = {arg: i for i, arg in enumerate(call_args)}
+            original_args = declaration['arguments']
+
+            # Create an arguments list that uses the types from the original
+            # ATen declaration, but the ordering and parameter names from
+            # the deprecated overload. Any default parameter values from the
+            # original ATen declaration are ignored.
+            arguments = []
+            kwarg_only = False
+            for param in params:
+                if param == '*':
+                    kwarg_only = True
+                    continue
+                _, param_name = param.split(' ')
+                original = original_args[call_arg_to_idx[param_name]]
+                arguments.append({
+                    'name': param_name,
+                    'kwarg_only': kwarg_only,
+                    'type': original['type'],
+                    'simple_type': original['simple_type'],
+                    'dynamic_type': original['dynamic_type'],
+                    'output': original.get('output', False),
+                })
+            declaration['arguments'] = arguments
             declarations.append(declaration)
     return declarations
 

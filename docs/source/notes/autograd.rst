@@ -11,9 +11,8 @@ programs, and can aid you in debugging.
 Excluding subgraphs from backward
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Every Variable has two flags: :attr:`requires_grad` and :attr:`volatile`.
-They both allow for fine grained exclusion of subgraphs from gradient
-computation and can increase efficiency.
+Every Variable has a flag: :attr:`requires_grad` that allows for fine grained
+exclusion of subgraphs from gradient computation and can increase efficiency.
 
 .. _excluding-requires_grad:
 

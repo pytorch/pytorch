@@ -45,18 +45,6 @@
       long_args: True
 ]]
 [[
-  name: zeros_like
-  cname: zerosLike
-  aten_sparse: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
-]]
-[[
   name: ones
   variants:
     - function
@@ -67,17 +55,6 @@
       output: True
     - arg: THSize* size
       long_args: True
-]]
-[[
-  name: ones_like
-  cname: onesLike
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
 ]]
 [[
   name: numel
@@ -265,6 +242,7 @@
   cname: newClone
   return: THTensor*
   aten_sparse: True
+  cpu_half: True
   arguments:
     - THTensor* self
 ]]
@@ -528,7 +506,6 @@
   name: __iand__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitand
@@ -568,7 +545,6 @@
   name: __ior__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitor
@@ -608,7 +584,6 @@
   name: __ixor__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitxor
@@ -648,7 +623,6 @@
   name: __ilshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: lshift
@@ -688,7 +662,6 @@
   name: __irshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: rshift
@@ -2028,11 +2001,19 @@
     - function
   options:
     - cname: normall
+      aten_sparse: True
       return: accreal
       arguments:
         - THTensor* self
         - arg: real p
           default: AS_REAL(2)
+      aten_custom_call: |
+        // norm(value) for a sparse tensor returns a DENSE 0-dim tensor
+        if (self.is_sparse()) {
+          auto result = ${THTensor}_normall(${state,} self_->tensor, convert<${THScalarType}>(p_));
+          return toBackend(toDense(backend())).tensor({}).fill_(result);
+        }
+        // aten_custom_call is followed by the generated call to normall
     - cname: norm
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -2588,6 +2569,7 @@
     - method
     - function
   return: argument 0
+  aten_sparse: True
   options:
     - cname: mul
       arguments:
@@ -2596,7 +2578,6 @@
         - THTensor* self
         - real other
     - cname: cmul
-      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2607,6 +2588,7 @@
 [[
   name: mul_
   return: argument 0
+  aten_sparse: True
   options:
     - cname: mul
       arguments:
@@ -2614,7 +2596,6 @@
         - THTensor* self
         - real other
     - cname: cmul
-      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -3108,7 +3089,7 @@
     - THTensor* vec
 ]]
 [[
-  name: mm
+  name: _mm
   variants:
     - method
     - function
@@ -3131,15 +3112,6 @@
         - argument 0
         - CONSTANT AS_REAL(1)
         - THTensor* self
-        - THTensor* mat2
-    - cname: spaddmm
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - CONSTANT AS_REAL(0)
-        - argument 0
-        - CONSTANT AS_REAL(1)
-        - THSTensor* self
         - THTensor* mat2
 ]]
 [[
@@ -3737,6 +3709,7 @@
   name: random_
   backends:
     - CPU
+    - CUDA
   return: self
   options:
     - cname: random
@@ -3751,15 +3724,15 @@
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - long to
+        - int64_t to
     - cname: clampedRandom
       arguments:
         - THTensor* self
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - long from
-        - long to
+        - int64_t from
+        - int64_t to
 ]]
 [[
   name: multinomial
@@ -4119,7 +4092,7 @@
 
 [[
   name: as_strided_
-  variants: [method,function]
+  variants: [method]
   cpu_half: True
   return: argument 0
   arguments:
@@ -4308,4 +4281,20 @@
   cname: newValues
   arguments:
      - THTensor* self
+]]
+[[
+  name: hspmm
+  variants:
+    - function
+  cname: hspmm
+  backends:
+    - SparseCPU
+    - SparseCUDA
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - CONSTANT AS_REAL(1)
+    - THTensor* mat1
+    - THDenseTensor* mat2
 ]]

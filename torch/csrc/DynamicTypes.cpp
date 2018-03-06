@@ -2,7 +2,6 @@
 
 #include "DynamicTypes.h"
 #include "PythonTypes.h"
-#include "THP.h"
 #include "Exceptions.h"
 
 #include <vector>
@@ -26,10 +25,13 @@ static std::unordered_map<std::string, at::ScalarType> attype_names = {
   {"Long", at::kLong},
 };
 
-static std::unordered_map<PyTypeObject*, at::Type*> pytype_to_attype;
-static std::unordered_map<at::Type*, PyTypeObject*> attype_to_pytype;
 static std::unordered_map<at::Type*, PyTypeObject*> attype_to_py_storage_type;
 static std::unordered_map<PyTypeObject*, at::Type*> py_storage_type_to_attype;
+static std::unordered_map<const at::Type*, THPDtype*> attype_to_dtype;
+
+static THPDtype* dtype_registry
+  [static_cast<int>(at::Backend::NumOptions)]
+  [static_cast<int>(at::ScalarType::NumOptions)] = {};
 
 static at::Backend get_backend(bool is_cuda, bool is_sparse) {
   if (is_cuda) {
@@ -55,15 +57,6 @@ static at::Type* get_type(const std::string& name, bool is_cuda, bool is_sparse)
   return &at::getType(backend, attype_names.at(name));
 }
 
-void registerPyTypeObject(PyTypeObject *pytype, const std::string& name, bool is_cuda, bool is_sparse)
-{
-  auto attype = get_type(name, is_cuda, is_sparse);
-  if (attype) {
-    pytype_to_attype[pytype] = attype;
-    attype_to_pytype[attype] = pytype;
-  }
-}
-
 void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, bool is_cuda, bool is_sparse)
 {
   auto attype = get_type(name, is_cuda, is_sparse);
@@ -73,16 +66,14 @@ void registerStoragePyTypeObject(PyTypeObject *pytype, const std::string& name, 
   }
 }
 
-PyTypeObject* getPyTypeObject(const at::Tensor& tensor)
-{
-  if(!tensor.defined())
-    throw std::invalid_argument("trying to get type of undefined at::Tensor");
-  if(attype_to_pytype.count(&tensor.type()) == 0)
-    throw std::invalid_argument("unsupported Tensor type.");
-  return attype_to_pytype.at(&tensor.type());
+void registerDtypeObject(THPDtype *dtype, at::Backend backend, at::ScalarType scalarType, const at::Type* type) {
+  dtype_registry[static_cast<int>(backend)][static_cast<int>(scalarType)] = dtype;
+  if (type != nullptr) {
+    attype_to_dtype[type] = dtype;
+  }
 }
 
-PyTypeObject* getPyTypeObject(const at::Storage& storage)
+static PyTypeObject* getPyTypeObject(const at::Storage& storage)
 {
   auto it = attype_to_py_storage_type.find(&storage.type());
   if (it != attype_to_py_storage_type.end()) {
@@ -91,33 +82,20 @@ PyTypeObject* getPyTypeObject(const at::Storage& storage)
   throw std::invalid_argument("unsupported Storage type");
 }
 
-at::Type& getATenType(PyTypeObject* type)
-{
-  auto it = pytype_to_attype.find(type);
-  if (it != pytype_to_attype.end()) {
-    return *it->second;
+THPDtype* getDtype(const at::Type& type) {
+  auto it = attype_to_dtype.find(&type);
+  if (it != attype_to_dtype.end()) {
+    return it->second;
   }
-  throw std::invalid_argument("unsupported Python type");
+  throw std::invalid_argument("unsupported at::Type");
 }
 
-at::Tensor createTensor(PyObject *data)
-{
-  if (THPVariable_Check(data)) {
-    return ((THPVariable*)data)->cdata;
+THPDtype* getDtype(at::Backend backend, at::ScalarType scalarType) {
+  auto dtype = dtype_registry[static_cast<int>(backend)][static_cast<int>(scalarType)];
+  if (!dtype) {
+    throw std::invalid_argument("unsupported backend, scalarType");
   }
-  auto tensor_type = pytype_to_attype.at(Py_TYPE(data));
-  auto tensor = ((THPVoidTensor *)data)->cdata;
-  return tensor_type->unsafeTensorFromTH(tensor, true); // Calls retain on underlying TH Tensor
-}
-PyObject* createPyObject(const at::Tensor& tensor)
-{
-  auto type = getPyTypeObject(tensor);
-  PyObject *obj = type->tp_alloc(type, 0);
-  if (obj) {
-    // Retain underlying TH Tensor
-    ((THPVoidTensor*)obj)->cdata = (THVoidTensor *)tensor.unsafeGetTH(true);
-  }
-  return obj;
+  return dtype;
 }
 
 PyObject* createPyObject(const at::Storage& storage)

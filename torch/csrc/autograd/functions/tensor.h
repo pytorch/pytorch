@@ -1,13 +1,15 @@
 #pragma once
 
 #include <Python.h>
-#include <memory>
-#include "ATen/Type.h"
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 
+#include "ATen/Type.h"
 #include <ATen/TensorGeometry.h>
+
+#include <cstdint>
+#include <memory>
 
 namespace torch { namespace autograd {
 
@@ -25,7 +27,7 @@ struct CopySlices : public Function {
   CopySlices(const Variable& base, at::TensorGeometry view, std::shared_ptr<Function> fn);
 
   virtual variable_list apply(const variable_list& grads) override;
-  virtual void releaseVariables() override;
+  virtual void release_variables() override;
 
   at::TensorGeometry base;
   at::TensorGeometry view;

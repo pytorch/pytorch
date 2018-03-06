@@ -1,6 +1,6 @@
 graph(%0 : Double(20, 16, 50, 40)
       %1 : Double(13, 16, 3, 3)) {
-  %2 : UNKNOWN_TYPE = Undefined(), scope: Conv2d
+  %2 : Dynamic = Undefined(), scope: Conv2d
   %3 : Double(20, 13, 48, 38) = _convolution[stride=[1, 1], padding=[0, 0], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%0, %1, %2), scope: Conv2d
   return (%3);
 }

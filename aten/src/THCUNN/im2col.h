@@ -40,15 +40,12 @@ __global__ void im2col_kernel(const int n, const Dtype* data_im,
 template <typename Dtype>
 void im2col(cudaStream_t stream, const Dtype* data_im, const int channels,
             const int height, const int width,
+            const int height_col, const int width_col,
             const int ksize_h, const int ksize_w, const int pad_h,
             const int pad_w, const int stride_h, const int stride_w,
             const int dilation_h, const int dilation_w, Dtype* data_col) {
   // We are going to launch channels * height_col * width_col kernels, each
   // kernel responsible for copying a single-channel grid.
-  int height_col = (height + 2 * pad_h - (dilation_h * (ksize_h - 1) + 1))
-                   / stride_h + 1;
-  int width_col = (width + 2 * pad_w - (dilation_w * (ksize_w - 1) + 1))
-                  / stride_w + 1;
   int num_kernels = channels * height_col * width_col;
   // Launch
   im2col_kernel <<<GET_BLOCKS(num_kernels), CUDA_NUM_THREADS, 0, stream>>> (

@@ -16,6 +16,8 @@ class Multinomial(Distribution):
     Note that `total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
+    .. note:: :attr:`probs` will be normalized to be summing to 1.
+
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
     -   :meth:`log_prob` allows different `total_count` for each parameter and
@@ -37,8 +39,8 @@ class Multinomial(Distribution):
 
     Args:
         total_count (int): number of trials
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): event log probabilities
+        probs (Tensor): event probabilities
+        logits (Tensor): event log probabilities
     """
     params = {'logits': constraints.real}  # Let logits be the canonical parameterization.
 

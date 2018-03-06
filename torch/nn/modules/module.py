@@ -172,26 +172,32 @@ class Module(object):
 
         Example:
             >>> def init_weights(m):
-            >>>     print(m)
-            >>>     if type(m) == nn.Linear:
-            >>>         m.weight.data.fill_(1.0)
-            >>>         print(m.weight)
-            >>>
+                    print(m)
+                    if type(m) == nn.Linear:
+                        m.weight.data.fill_(1.0)
+                        print(m.weight)
+
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
-            Linear (2 -> 2)
-            Parameter containing:
+            Linear(in_features=2, out_features=2, bias=True)
+
              1  1
              1  1
-            [torch.FloatTensor of size 2x2]
-            Linear (2 -> 2)
-            Parameter containing:
+            [torch.FloatTensor of size (2,2)]
+
+            Linear(in_features=2, out_features=2, bias=True)
+
              1  1
              1  1
-            [torch.FloatTensor of size 2x2]
-            Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            [torch.FloatTensor of size (2,2)]
+
+            Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            )
+            Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             )
         """
         for module in self.children():
@@ -240,7 +246,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
     def double(self):
         """Casts all floating point parameters and buffers to double datatype.
@@ -248,7 +254,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
     def half(self):
         """Casts all floating point parameters and buffers to half datatype.
@@ -256,7 +262,7 @@ class Module(object):
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
     def register_backward_hook(self, hook):
         """Registers a backward hook on the module.
@@ -690,8 +696,11 @@ class Module(object):
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())
 
+    def _get_name(self):
+        return self.__class__.__name__
+
     def __repr__(self):
-        tmpstr = self.__class__.__name__ + '(\n'
+        tmpstr = self._get_name() + '(\n'
         for key, module in self._modules.items():
             modstr = module.__repr__()
             modstr = _addindent(modstr, 2)

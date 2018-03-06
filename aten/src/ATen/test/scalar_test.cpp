@@ -7,6 +7,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 using std::cout;
 using namespace at;
@@ -81,6 +82,8 @@ void test_overflow() {
 }
 
 int main() {
+  manual_seed(123);
+
   Scalar what = 257;
   Scalar bar = 3.0;
   Half h = bar.toHalf();
@@ -133,7 +136,14 @@ int main() {
   ASSERT(what.toTensor().type().scalarType() == kLong);
   ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
 
-  dispatch_all<void, Foo>(x.type(),"foo",x,prev_h);
+  if (x.type().scalarType() != ScalarType::Half) {
+    AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
+      scalar_t s = 1;
+      cout << "hello, dispatch: " << x.type().toString() << s << "\n";
+      auto data = (scalar_t*)x.data_ptr();
+      (void)data;
+    });
+  }
 
   // test direct C-scalar type conversions
   {

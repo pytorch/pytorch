@@ -26,9 +26,11 @@ def zero_gradients(x):
 
 
 def make_jacobian(input, num_out):
-    if isinstance(input, Variable) and not input.requires_grad:
-        return None
-    elif torch.is_tensor(input) or isinstance(input, Variable):
+    if isinstance(input, Variable):
+        if not input.is_floating_point():
+            return None
+        if not input.requires_grad:
+            return None
         return torch.zeros(input.nelement(), num_out)
     elif isinstance(input, Iterable):
         jacobians = list(filter(
@@ -41,9 +43,7 @@ def make_jacobian(input, num_out):
 
 
 def iter_tensors(x, only_requiring_grad=False):
-    if torch.is_tensor(x):
-        yield x
-    elif isinstance(x, Variable):
+    if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x.data
     elif isinstance(x, Iterable):
@@ -53,9 +53,7 @@ def iter_tensors(x, only_requiring_grad=False):
 
 
 def contiguous(input):
-    if torch.is_tensor(input):
-        return input.contiguous()
-    elif isinstance(input, Variable):
+    if isinstance(input, torch.Tensor):
         return input.contiguous()
     elif isinstance(input, Iterable):
         return type(input)(contiguous(e) for e in input)
@@ -75,22 +73,19 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
     x_tensors = [t for t in iter_tensors(target, True)]
     j_tensors = [t for t in iter_tensors(jacobian)]
 
-    outa = torch.DoubleTensor(output_size)
-    outb = torch.DoubleTensor(output_size)
-
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        flat_tensor = x_tensor.view(-1)
+        flat_tensor = x_tensor.view(-1).detach()
         for i in range(flat_tensor.nelement()):
-            orig = flat_tensor[i]
+            orig = flat_tensor[i].item()
             flat_tensor[i] = orig - eps
-            outa.copy_(fn(input), broadcast=False)
+            outa = fn(input).clone()
             flat_tensor[i] = orig + eps
-            outb.copy_(fn(input), broadcast=False)
+            outb = fn(input).clone()
             flat_tensor[i] = orig
 
-            outb.add_(-1, outa).div_(2 * eps)
-            d_tensor[i] = outb
+            r = (outb - outa) / (2 * eps)
+            d_tensor[i] = r.detach().contiguous().view(-1)
 
     return jacobian
 
@@ -115,7 +110,9 @@ def get_analytical_jacobian(input, output):
                     if d_x is None:
                         jacobian_x[:, i].zero_()
                     else:
-                        jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
+                        d_x_dense = d_x.to_dense() if d_x.is_sparse else d_x
+                        assert jacobian_x[:, i].numel() == d_x_dense.numel()
+                        jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
                 if d_x is not None and d_x.size() != x.size():
                     correct_grad_sizes = False
 

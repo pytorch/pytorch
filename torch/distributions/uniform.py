@@ -21,8 +21,8 @@ class Uniform(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        low (float or Tensor or Variable): lower range (inclusive).
-        high (float or Tensor or Variable): upper range (exclusive).
+        low (float or Tensor): lower range (inclusive).
+        high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
     params = {'low': constraints.dependent, 'high': constraints.dependent}
@@ -62,6 +62,16 @@ class Uniform(Distribution):
         lb = value.ge(self.low).type_as(self.low)
         ub = value.lt(self.high).type_as(self.low)
         return torch.log(lb.mul(ub)) - torch.log(self.high - self.low)
+
+    def cdf(self, value):
+        self._validate_log_prob_arg(value)
+        result = (value - self.low) / (self.high - self.low)
+        return result
+
+    def icdf(self, value):
+        self._validate_log_prob_arg(value)
+        result = value * (self.high - self.low) + self.low
+        return result
 
     def entropy(self):
         return torch.log(self.high - self.low)

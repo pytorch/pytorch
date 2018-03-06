@@ -23,8 +23,8 @@ class Geometric(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        probs (Number, Tensor or Variable): the probabilty of sampling `1`. Must be in range (0, 1]
-        logits (Number, Tensor or Variable): the log-odds of sampling `1`.
+        probs (Number, Tensor): the probabilty of sampling `1`. Must be in range (0, 1]
+        logits (Number, Tensor): the log-odds of sampling `1`.
     """
     params = {'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer
@@ -63,8 +63,9 @@ class Geometric(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        u = self.probs.new(shape).uniform_(_finfo(self.probs).tiny, 1)
-        return (u.log() / (-self.probs).log1p()).floor()
+        with torch.no_grad():
+            u = self.probs.new(shape).uniform_(_finfo(self.probs).tiny, 1)
+            return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

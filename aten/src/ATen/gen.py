@@ -165,19 +165,25 @@ def postprocess_output_declarations(output_declarations):
     # ensure each return has a name associated with it
     for decl in output_declarations:
         has_named_ret = False
-        for n, ret in enumerate(decl['returns']):
+        for n, ret in enumerate(decl.returns):
             if 'name' not in ret:
                 assert not has_named_ret
-                if decl['inplace']:
+                if decl.inplace:
                     ret['name'] = 'self'
-                elif len(decl['returns']) == 1:
+                elif len(decl.returns) == 1:
                     ret['name'] = 'result'
                 else:
                     ret['name'] = 'result' + str(n)
             else:
                 has_named_ret = True
 
-    return output_declarations
+    def remove_key_if_none(dictionary, key):
+        if key in dictionary.keys() and dictionary[key] is None:
+            del dictionary[key]
+        return dictionary
+
+    return [remove_key_if_none(decl._asdict(), 'buffers')
+            for decl in output_declarations]
 
 
 def format_yaml(data):

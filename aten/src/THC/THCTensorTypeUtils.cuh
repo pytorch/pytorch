@@ -51,6 +51,11 @@ struct TensorUtils {
                          TENSOR_TYPE* src);                             \
     static void squeeze1d(THCState *state, TENSOR_TYPE *dst,            \
                           TENSOR_TYPE *src, int dimension);             \
+    static void unsqueeze1d(THCState *state, TENSOR_TYPE *dst,          \
+                          TENSOR_TYPE *src, int dimension);             \
+    static void preserveReduceDimSemantics(                             \
+                          THCState *state, TENSOR_TYPE *tensor,         \
+                          int in_dims, int64_t dimension, int keepdim); \
     static DATA_TYPE* getData(THCState* state, TENSOR_TYPE* t);         \
     static ptrdiff_t getNumElements(THCState* state, TENSOR_TYPE* t);   \
     static int64_t getSize(THCState* state, TENSOR_TYPE* t, int dim);   \
@@ -67,7 +72,7 @@ struct TensorUtils {
     /* the same piece of data)? */                                      \
     static bool overlappingIndices(THCState* state, TENSOR_TYPE* t);    \
     /* Can we use 32 bit math for indexing? */                          \
-    static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t, ptrdiff_t max_elem=UINT32_MAX);  \
+    static bool canUse32BitIndexMath(THCState* state, TENSOR_TYPE* t, ptrdiff_t max_elem=INT32_MAX);  \
     /* Are all tensors 32-bit indexable? */                             \
     static bool all32BitIndexable(THCState* state, TENSOR_TYPE** inputs, int numInputs); \
   }

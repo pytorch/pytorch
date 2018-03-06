@@ -9,6 +9,7 @@ Tensors
 .. autofunction:: set_default_tensor_type
 .. autofunction:: numel
 .. autofunction:: set_printoptions
+.. autofunction:: set_flush_denormal
 
 
 Creation Ops
@@ -151,6 +152,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
 .. autofunction:: lt

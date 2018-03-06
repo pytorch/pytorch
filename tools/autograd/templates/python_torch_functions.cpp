@@ -3,7 +3,8 @@
 // Python bindings for torch.* functions implemented through ATen.
 //
 // The functions are bound as static methods on a class
-// torch._C._VariableFunctions which is also aliased as Variable._torch.
+// torch._C._VariableFunctions which is also aliased as Variable._torch
+// and also copied into 'torch' module.
 
 #include <Python.h>
 
@@ -25,8 +26,15 @@ using namespace torch::autograd::utils;
 namespace torch { namespace autograd {
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<Variable&>(self).get()->_requires_grad = requires_grad;
+  as_variable_ref(self).set_requires_grad(requires_grad);
   return self;
+}
+
+static void check_out_dtype_matches(Tensor result, const at::Type &type) {
+  if (result.type() != type) {
+    at::runtime_error("dtype corresponding to %s does not match type of out parameter (%s)",
+                      type.toString(), result.type().toString());
+  }
 }
 
 static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
@@ -52,7 +60,7 @@ static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* 
   static PythonArgParser parser({
     "clamp(Tensor input, Scalar min=None, Scalar max=None)",
   });
-  PyObject* parsed_args[4];
+  ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(1) && !r.isNone(2)) {
     return THPVariable_Wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
@@ -70,14 +78,14 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data)));
+  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_variable(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPVariable_Wrap(torch::utils::variable_data_factory(default_type(), args, kwargs));
+  return THPVariable_Wrap(torch::utils::new_tensor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -87,8 +95,12 @@ ${py_methods}
 
 static PyMethodDef torch_functions[] = {
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
-  {"variable", (PyCFunction)THPVariable_variable, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"spmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"tensor", (PyCFunction)THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };
