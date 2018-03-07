@@ -137,7 +137,7 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, int64_t dim, bool keepdi
 }
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
-  Tensor index = t.type().toScalarType(at::ScalarType::Long).arange(t.size(dim) - 1, -1, -1);
+  Tensor index = at::arange(t.type().toScalarType(at::ScalarType::Long), t.size(dim) - 1, -1, -1);
   return t.index_select(dim, index);
 }
 
@@ -472,7 +472,7 @@ Tensor trace_backward(const Tensor & grad, IntList sizes) {
   auto& long_type = grad.type().toScalarType(at::kLong);
 
   auto grad_input = at::zeros(grad.type(), sizes[0] * sizes[1]);
-  auto indices = long_type.arange(0, grad_input.numel(), sizes[1] + 1);
+  auto indices = at::arange(long_type, 0, grad_input.numel(), sizes[1] + 1);
   grad_input.index_fill_(0, indices, grad);
   return grad_input.view(sizes);
 }
@@ -485,7 +485,7 @@ Tensor unfold_backward(const Tensor & grad, IntList input_sizes, int64_t dim, in
     numel *= size;
   }
 
-  auto idx = long_type.arange(0, numel).view(input_sizes);
+  auto idx = at::arange(long_type, 0, numel).view(input_sizes);
   auto idx_unfolded = idx.unfold(dim, size, step).contiguous().view(-1);
   auto grad_input = at::zeros(grad.type(), {numel});
   grad_input.index_add_(0, idx_unfolded, grad.contiguous().view(-1));
@@ -876,7 +876,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
   auto F = (sigma_expanded_sq - sigma_expanded_sq.t()).pow(-1);
   auto& long_type = sigma.type().toScalarType(at::kLong);
-  auto diag_indices = long_type.arange(0, F.numel(), k + 1);
+  auto diag_indices = at::arange(long_type, 0, F.numel(), k + 1);
   F.view({-1}).index_fill_(0, diag_indices, 0);
 
   Tensor u_term, sigma_term, v_term;

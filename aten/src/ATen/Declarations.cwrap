@@ -364,7 +364,7 @@
       default: 1
 ]]
 [[
-  name: arange
+  name: _arange
   variants:
     - function
   backends:

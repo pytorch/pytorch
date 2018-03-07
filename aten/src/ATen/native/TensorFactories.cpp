@@ -10,6 +10,22 @@
 namespace at {
 namespace native {
 
+Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
+  return dtype._arange(start, end, step);
+}
+
+Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+  return at::_arange_out(result, start, end, step);
+}
+
+Tensor arange(const Type&dtype, Scalar end) {
+  return dtype._arange(end);
+}
+
+Tensor& arange_out(Tensor &result, Scalar end) {
+  return at::_arange_out(result, end);
+}
+
 Tensor empty_like(const Tensor& self) {
   return self.type().tensor(self.sizes());
 }

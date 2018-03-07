@@ -17,7 +17,7 @@ SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'clamp.*', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_out', '.*_forward', '.*_forward_out',
     'sparse_raw_resize_', '_unsafe_view', 'tensor', 'sparse_coo_tensor',
-    '_linspace.*', '_logspace.*'
+    '_arange.*', '_linspace.*', '_logspace.*'
 ]
 
 PY_VARIABLE_METHODS_CPP = CodeTemplate.from_file(template_path + '/python_variable_methods.cpp')
@@ -554,7 +554,8 @@ def group_declarations(declarations):
 
     result = []
     for _, dictionary in sorted(grouped.items()):
-        assert 'base' in dictionary
+        if 'base' not in dictionary:
+            raise RuntimeError('\'base\' not in dictionary', dictionary)
         result.append(dictionary)
     return result
 
