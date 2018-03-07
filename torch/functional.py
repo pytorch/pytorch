@@ -106,6 +106,7 @@ def stack(sequence, dim=0, out=None):
         sequence (Sequence): sequence of tensors to concatenate
         dim (int): dimension to insert. Has to be between 0 and the number
             of dimensions of concatenated tensors (inclusive)
+        out (Tensor, optional): the output tensor
     """
     if len(sequence) == 0:
         raise ValueError("stack expects a non-empty sequence of tensors")
