@@ -156,12 +156,16 @@ Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
 
 Tensor zeros(const Type& dtype, IntList size) {
   auto result = dtype.tensor(size);
-  return result.fill_(0);
+  return at::native::zeros_out(result, size);
 }
 
 Tensor& zeros_out(Tensor& result, IntList size) {
-  result.resize_(size);
-  return result.fill_(0);
+  if (result.is_sparse()) {
+    result.sparse_raw_resize_(size, size.size(), 0);
+  } else {
+    result.resize_(size);
+  }
+  return result.zero_();
 }
 
 Tensor zeros_like(const Tensor& self) {
