@@ -68,6 +68,7 @@ class DAGNetBase : public NetBase {
   bool DoRunAsync() override;
 
   virtual bool RunAt(int chain_id, const std::vector<int>& chain) = 0;
+  void HandleException(int operator_idx, const std::string& exception_str);
 
   vector<dag_utils::OperatorNode> operator_nodes_;
   vector<OperatorBase*> operators_;
@@ -79,6 +80,11 @@ class DAGNetBase : public NetBase {
   int remaining_ops_;
 
   bool success_;
+  // Use an atomic to guard caught_exception_ so it is written to only once
+  std::atomic<bool> caught_exception_yet_;
+#ifdef CAFFE2_USE_EXCEPTION_PTR
+  std::exception_ptr caught_exception_;
+#endif // CAFFE2_USE_EXCEPTION_PTR
   int iter_;
   std::mutex remaining_ops_mutex_;
   std::condition_variable cv_;
