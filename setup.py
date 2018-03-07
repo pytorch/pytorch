@@ -806,6 +806,7 @@ if __name__ == '__main__':
                 'lib/include/THCUNN/*.cuh',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/autograd/*.h',
+                'lib/include/torch/csrc/autograd/generated/VariableType.h',
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/torch.h',

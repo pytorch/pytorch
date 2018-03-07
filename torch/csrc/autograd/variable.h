@@ -127,7 +127,7 @@ struct Variable : public at::Tensor {
   /// available only for `TensorImpl`/`Impl` and not the `Tensor`/`Variable`
   /// classes, as the latter are not polymorphic classes (`Tensor` has no
   /// virtual methods).
-  friend bool is_variable(at::Tensor& tensor) noexcept;
+  friend bool is_variable(const at::Tensor& tensor) noexcept;
 
   const at::Tensor& data() const noexcept;
   at::Tensor& data() noexcept;
@@ -426,24 +426,39 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline bool is_variable(at::Tensor& tensor) noexcept {
+inline bool is_variable(const at::Tensor& tensor) noexcept {
   // dynamic_cast will return a nullptr if the `TensorImpl`'s dynamic type is
   // not `Variable::Impl`.
-  return dynamic_cast<Variable::Impl*>(tensor.get()) != nullptr;
+  return dynamic_cast<const Variable::Impl*>(tensor.get()) != nullptr;
 }
 
 /// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
 /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
-/// throws a `std::runtime_error` exception.
-inline Variable& as_variable_ref(at::Tensor& tensor) {
+/// throws a `std::invalid_argument` exception.
+inline Variable& as_variable_ref(at::Tensor& tensor, bool check = false) {
 #ifdef DEBUG
-  if (!is_variable(tensor)) {
-    throw std::runtime_error(
+  check = true;
+#endif
+  if (check && !is_variable(tensor)) {
+    throw std::invalid_argument(
         "Attempted to cast a Tensor to a Variable, but "
         "the dynamic type of the value is not Variable.");
   }
-#endif
   return static_cast<Variable&>(tensor);
+}
+
+inline const Variable& as_variable_ref(
+    const at::Tensor& tensor,
+    bool check = false) {
+#ifdef DEBUG
+  check = true;
+#endif
+  if (check && !is_variable(tensor)) {
+    throw std::invalid_argument(
+        "Attempted to cast a Tensor to a Variable, but "
+        "the dynamic type of the value is not Variable.");
+  }
+  return static_cast<const Variable&>(tensor);
 }
 
 inline const at::Tensor& Variable::data() const noexcept {
