@@ -1561,7 +1561,7 @@ def _pointwise_loss(lambd, lambd_optimized, input, target, size_average=True, re
 
 
 smooth_l1_loss = _add_docstr(torch._C._nn.smooth_l1_loss, r"""
-smooth_l1_loss(input, target, size_average=True) -> Tensor
+smooth_l1_loss(input, target, size_average=True, reduce=True) -> Tensor
 
 Function that uses a squared term if the absolute
 element-wise error falls below 1 and an L1 term otherwise.
