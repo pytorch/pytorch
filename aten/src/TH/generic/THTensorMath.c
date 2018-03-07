@@ -2818,7 +2818,7 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound incoherent with step sign");
 
-  size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
+  size = (ptrdiff_t) ((xmax / step - xmin / step) + 1);
 
   if (THTensor_(nElement)(r_) != size) {
     THTensor_(resize1d)(r_, size);
