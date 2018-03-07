@@ -477,7 +477,7 @@ void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xma
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound incoherent with step sign");
+              , 2, "upper bound and larger bound inconsistent with step sign");
   ptrdiff_t size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
   if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
   THCTensor *r = THCTensor_(isContiguous)(state, r_)
@@ -494,7 +494,7 @@ void THCTensor_(arange)(THCState* state, THCTensor *r_, accreal xmin, accreal xm
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
   THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound incoherent with step sign");
+              , 2, "upper bound and larger bound inconsistent with step sign");
   ptrdiff_t size = (ptrdiff_t) ceil(ScalarConvert<accreal, float>::to(xmax - xmin) / step);
   if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
   THCTensor *r = THCTensor_(isContiguous)(state, r_)
