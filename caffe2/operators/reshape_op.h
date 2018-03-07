@@ -45,8 +45,15 @@ class ReshapeOp : public Operator<Context> {
 
   template <typename T>
   bool DoRunWithType() {
-    auto& input = Input(0);
+    DoRunWithTypeImpl<T>(Input(0), Output(0));
+    return true;
+  }
 
+ protected:
+  template <typename T>
+  void DoRunWithTypeImpl(
+      const Tensor<Context>& input,
+      Tensor<Context>* output) {
     vector<int64_t> actual_new_shape = new_shape_;
     if (InputSize() == 2) {
       CAFFE_ENFORCE(
@@ -121,7 +128,6 @@ class ReshapeOp : public Operator<Context> {
       math::Set<T, Context>(1, input.dim(i), old_shape_data + i, &context_);
     }
 
-    auto* output = Output(0);
     output->Resize(actual_new_shape);
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
@@ -131,8 +137,6 @@ class ReshapeOp : public Operator<Context> {
           input.raw_data(),
           output->raw_mutable_data(input.meta()));
     }
-
-    return true;
   }
 
  private:
