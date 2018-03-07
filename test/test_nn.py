@@ -1222,45 +1222,6 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st_cuda(self):
         self._test_gumbel_softmax_st(True)
 
-    def _test_nms(self, cuda):
-        # check a small test case
-        nms = nn.NonMaxSuppression(0.7)
-        boxes = Variable(torch.Tensor([
-            [[10.2, 23., 50., 20.],
-             [11.3, 23., 52., 20.1],
-             [23.2, 102.3, 23.3, 50.3],
-             [101.2, 32.4, 70.6, 70.],
-             [100.2, 30.9, 70.7, 69.]],
-            [[200.3, 234., 530., 320.],
-             [110.3, 223., 152., 420.1],
-             [243.2, 240.3, 50.3, 30.3],
-             [243.2, 236.4, 48.6, 30.],
-             [100.2, 310.9, 170.7, 691.]]]))
-
-        scores = Variable(torch.Tensor([
-            [0.9, 0.7, 0.11, 0.23, 0.8],
-            [0.13, 0.89, 0.45, 0.23, 0.3]]))
-
-        if cuda:
-            boxes = boxes.cuda()
-            scores = scores.cuda()
-
-        expected_output = (
-            torch.ByteTensor(
-                [[1, 1, 0, 1, 1], [1, 1, 1, 0, 1]]),
-            torch.LongTensor(
-                [[0, 4, 1, 3, 2], [1, 2, 4, 3, 0]])
-        )
-
-        mask, inds = nms(boxes, scores)
-        self.assertEqual(mask, expected_output[0])
-        self.assertEqual(inds, expected_output[1])
-
-    def test_non_max_suppression(self):
-        self._test_nms(False)
-
-    def test_non_max_suppression_cuda(self):
-        self._test_nms(True)
 
     def _test_EmbeddingBag(self, cuda, mode, sparse):
         # check a known test example
@@ -3344,6 +3305,46 @@ class TestNN(NNTestCase):
                     channel_idx = (upscale_factor * (h % upscale_factor)) + (w % upscale_factor) + \
                                   (c * upscale_factor ** 2)
                     self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
+
+    def _test_nms(self, cuda):
+        # check a small test case
+        nms = nn.NonMaxSuppression(0.7)
+        boxes = Variable(torch.Tensor([
+            [[10.2, 23., 50., 20.],
+             [11.3, 23., 52., 20.1],
+             [23.2, 102.3, 23.3, 50.3],
+             [101.2, 32.4, 70.6, 70.],
+             [100.2, 30.9, 70.7, 69.]],
+            [[200.3, 234., 530., 320.],
+             [110.3, 223., 152., 420.1],
+             [243.2, 240.3, 50.3, 30.3],
+             [243.2, 236.4, 48.6, 30.],
+             [100.2, 310.9, 170.7, 691.]]]))
+
+        scores = Variable(torch.Tensor([
+            [0.9, 0.7, 0.11, 0.23, 0.8],
+            [0.13, 0.89, 0.45, 0.23, 0.3]]))
+
+        if cuda:
+            boxes = boxes.cuda()
+            scores = scores.cuda()
+
+        expected_output = (
+            Variable(torch.ByteTensor(
+                [[1, 1, 0, 0, 1], [1, 1, 1, 0, 1]])),
+            Variable(torch.LongTensor(
+                [[0, 4, 1, 3, 2], [1, 2, 4, 3, 0]]))
+        )
+
+        mask, inds = nms(boxes, scores)
+        self.assertEqual(mask, expected_output[0])
+        self.assertEqual(inds, expected_output[1])
+
+    def test_non_max_suppression(self):
+        self._test_nms(False)
+
+    def test_non_max_suppression_cuda(self):
+        self._test_nms(True)
 
     def test_inplace_thnn(self):
         modules = [nn.ReLU, nn.ELU, nn.SELU, nn.RReLU]

@@ -38,7 +38,7 @@ class NonMaxSuppression(Module):
       >>> surviving_box_indices = indices[mask]
       """
 
-    def __init__(self, threshold, use_buffer=False, num_boxes=None):
+    def __init__(self, threshold):
         super(NonMaxSuppression, self).__init__()
         assert (threshold >= 0 and threshold <= 1), "threshold must be between 0 and 1."
         self.threshold = threshold

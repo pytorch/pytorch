@@ -2048,5 +2048,5 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
 
 
 non_max_suppression = _add_docstr(torch._C._VariableFunctions.non_max_suppression, r"""
-See :class:`~torch.nn.NonMaxSuppression` for details.
+See :class:`torch.nn.NonMaxSuppression` for details.
 """)

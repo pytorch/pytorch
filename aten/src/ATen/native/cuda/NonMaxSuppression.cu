@@ -4,38 +4,42 @@
 namespace at {
 namespace native {
 
-__device__ __forceinline__ float fmin(float a, float b)
+template <typename scalar>
+__device__ __forceinline__ scalar fmin(scalar a, scalar b)
 {
   return a > b ? b : a;
 }
 
-__device__ __forceinline__ float fmax(float a, float b)
+template <typename scalar>
+__device__ __forceinline__ scalar fmax(scalar a, scalar b)
 {
   return a > b ? a : b;
 }
 
-__device__ __forceinline__ float IoU(const float* box_x, const float* box_y)
+template <typename scalar>
+__device__ __forceinline__ scalar IoU(const scalar* box_x, const scalar* box_y)
 {
   // Calculate IoU between the boxes.
-  float rightmost_l = fmax(box_x[0], box_y[0]);
-  float leftmost_r = fmin(box_x[0] + box_x[2], box_y[0] + box_y[2]);
-  float delta_x = fmax(0., leftmost_r - rightmost_l);
+  scalar rightmost_l = fmax(box_x[0], box_y[0]);
+  scalar leftmost_r = fmin(box_x[0] + box_x[2], box_y[0] + box_y[2]);
+  scalar delta_x = fmax((scalar)0., leftmost_r - rightmost_l);
 
-  float bottommost_tp = fmax(box_x[1], box_y[1]);
-  float topmost_b = fmin(box_x[1] + box_x[3], box_y[1] + box_y[3]);
-  float delta_y = fmax(0., topmost_b - bottommost_tp);
+  scalar bottommost_tp = fmax(box_x[1], box_y[1]);
+  scalar topmost_b = fmin(box_x[1] + box_x[3], box_y[1] + box_y[3]);
+  scalar delta_y = fmax((scalar)0., topmost_b - bottommost_tp);
 
-  float uni = box_x[2] * box_x[3] + box_y[2] * box_y[3];
+  scalar uni = box_x[2] * box_x[3] + box_y[2] * box_y[3];
 
   return delta_x * delta_y / (uni - delta_x * delta_y);
 
 }
 
+template <typename scalar>
 __global__ void nms_kernel(unsigned char* mask, 
-                          const float* boxes,
+                          const scalar* boxes,
                           const int64_t* inds,
                           const int64_t num_boxes,
-                          const float thresh)
+                          double thresh)
 {
 //A pretty straightforward implementation, analogous to the standard serial
 //version but with the IoUs computed and mask updated in parallel. We access
@@ -47,11 +51,10 @@ __global__ void nms_kernel(unsigned char* mask,
   int col = 0;
   while(col < num_boxes-1)
   {
-#pragma unroll
     for(int i = threadIdx.x; i < num_boxes-1; i+=blockDim.x)
       if(i >= col)
       {
-        float iou = IoU(&boxes[4*inds[i+1+num_boxes*blockIdx.x] + 4*num_boxes*blockIdx.x],
+        scalar iou = IoU(&boxes[4*inds[i+1+num_boxes*blockIdx.x] + 4*num_boxes*blockIdx.x],
                         &boxes[4*inds[col+num_boxes*blockIdx.x] + 4*num_boxes*blockIdx.x]);
         mask[i+1+blockIdx.x*num_boxes] *= (iou>thresh) ? 0 : 1;
       }
@@ -65,7 +68,7 @@ __global__ void nms_kernel(unsigned char* mask,
 std::tuple<Tensor, Tensor> non_max_suppression_cuda(
                                 const Tensor& input,
                                 const Tensor& scores,
-                                const double thresh)
+                                double thresh)
 {
   AT_ASSERT(input.ndimension() == 3,
             "First argument should be a 3D Tensor, (batch_sz x n_boxes x 4)");
@@ -79,6 +82,10 @@ std::tuple<Tensor, Tensor> non_max_suppression_cuda(
            "First argument dimension 2 must have size 4, and should be of the form [x, y, w, h]");
   AT_ASSERT(input.is_contiguous(), "First argument must be a contiguous Tensor");
   AT_ASSERT(scores.is_contiguous(), "Second argument must be a contiguous Tensor");
+  AT_ASSERT(input.type().scalarType() == kFloat || input.type().scalarType() == kDouble,
+      "First argument must be Float or Double Tensor")
+  AT_ASSERT(scores.type().scalarType() == kFloat || scores.type().scalarType() == kDouble,
+      "Second argument must be Float or Double Tensor")
 
 
   auto num_boxes = input.size(1);
@@ -95,13 +102,26 @@ std::tuple<Tensor, Tensor> non_max_suppression_cuda(
                         //cudaGetDeviceProperties in the funcion body...
 
   dim3 mask_grid(batch_size);
-  nms_kernel<<<mask_grid, mask_block, 0, globalContext().getCurrentCUDAStream()>>>(
-                                    mask.data<unsigned char>(),
-                                    input.data<float>(),
-                                    sorted_inds.data<int64_t>(),
-                                    num_boxes,
-                                    thresh);
-  AT_ASSERT(cudaGetLastError() == cudaSuccess, "nms_mask_kernel failed");
+  if(input.type().scalarType() == kFloat)
+  {
+      nms_kernel<<<mask_grid, mask_block, 0, globalContext().getCurrentCUDAStream()>>>(
+                                        mask.data<unsigned char>(),
+                                        input.data<float>(),
+                                        sorted_inds.data<int64_t>(),
+                                        num_boxes,
+                                        thresh);
+      AT_ASSERT(cudaGetLastError() == cudaSuccess, "nms_mask_kernel failed");
+  }
+  else
+  {
+      nms_kernel<<<mask_grid, mask_block, 0, globalContext().getCurrentCUDAStream()>>>(
+                                        mask.data<unsigned char>(),
+                                        input.data<double>(),
+                                        sorted_inds.data<int64_t>(),
+                                        num_boxes,
+                                        thresh);
+      AT_ASSERT(cudaGetLastError() == cudaSuccess, "nms_mask_kernel failed");
+  }
 
   //It's not entirely clear what the best thing to return is here. The algorithm will
   //produce a different number of boxes for each batch, so there is no obvious way of
@@ -111,4 +131,5 @@ std::tuple<Tensor, Tensor> non_max_suppression_cuda(
   return std::make_tuple(mask, sorted_inds);
 }
 
-}}
+}//native
+}//at
