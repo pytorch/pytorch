@@ -47,6 +47,22 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
+Tensor linspace(const Type& dtype, Scalar start, Scalar end, int64_t steps) {
+  return dtype._linspace(start, end, steps);
+}
+
+Tensor& linspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+  return at::_linspace_out(result, start, end, steps);
+}
+
+Tensor logspace(const Type& dtype, Scalar start, Scalar end, int64_t steps) {
+  return dtype._logspace(start, end, steps);
+}
+
+Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+  return at::_logspace_out(result, start, end, steps);
+}
+
 Tensor ones(const Type& dtype, IntList size) {
   auto result = dtype.tensor(size);
   return result.fill_(1);

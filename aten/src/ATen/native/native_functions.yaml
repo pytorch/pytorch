@@ -240,6 +240,18 @@
 
 - func: is_sparse(Tensor self) -> bool
 
+- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)

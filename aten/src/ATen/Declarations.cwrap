@@ -2252,7 +2252,8 @@
     - real weight
 ]]
 [[
-  name: linspace
+  name: _linspace
+  cname: linspace
   types:
     - Float
     - Double
@@ -2270,7 +2271,8 @@
       default: 100
 ]]
 [[
-  name: logspace
+  name: _logspace
+  cname: logspace
   types:
     - Float
     - Double
