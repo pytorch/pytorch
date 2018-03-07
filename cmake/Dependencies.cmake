@@ -60,6 +60,12 @@ else()
   message(FATAL_ERROR "Unrecognized blas option:" ${BLAS})
 endif()
 
+# Directory where NNPACK and cpuinfo will download and build all dependencies
+set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
+  CACHE PATH "Confu-style dependencies source directory")
+set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
+  CACHE PATH "Confu-style dependencies binary directory")
+
 # ---[ NNPACK
 if(USE_NNPACK)
   include("cmake/External/nnpack.cmake")
@@ -77,17 +83,25 @@ if(USE_NNPACK)
   endif()
 endif()
 
-# ---[ On Android, Caffe2 uses cpufeatures library in the thread pool
-if (ANDROID)
-  if (NOT TARGET cpufeatures)
-    add_library(cpufeatures STATIC
-        "${ANDROID_NDK}/sources/android/cpufeatures/cpu-features.c")
-    target_include_directories(cpufeatures
-        PUBLIC "${ANDROID_NDK}/sources/android/cpufeatures")
-    target_link_libraries(cpufeatures PUBLIC dl)
+# ---[ Caffe2 uses cpuinfo library in the thread pool
+if (NOT TARGET cpuinfo)
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/cpuinfo" CACHE STRING "cpuinfo source directory")
   endif()
-  list(APPEND Caffe2_DEPENDENCY_LIBS cpufeatures)
+
+  set(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  add_subdirectory(
+    "${CPUINFO_SOURCE_DIR}"
+    "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
+  # We build static version of cpuinfo but link
+  # them into a shared library for Caffe2, so they need PIC.
+  set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
 endif()
+list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 
 # ---[ gflags
 if(USE_GFLAGS)

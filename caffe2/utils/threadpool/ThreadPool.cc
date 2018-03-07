@@ -18,9 +18,7 @@
 #include "WorkersPool.h"
 #include "caffe2/core/logging.h"
 
-#if CAFFE2_ANDROID
-#include <cpu-features.h>
-#endif
+#include <cpuinfo.h>
 
 CAFFE2_DEFINE_bool(caffe2_threadpool_force_inline, false,
                    "Force to always run jobs on the calling thread");
@@ -43,18 +41,7 @@ constexpr size_t kDefaultMinWorkSize = 80;
 #endif
 
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
-  int numThreads = std::thread::hardware_concurrency();
-
-#ifdef CAFFE2_ANDROID
-  // std::thread::hardware_concurrency returns online cores
-  // (sysconf(_SC_NPROCESSORS_ONLN)), but we want the total number of CPUs. In
-  // most cases they will match, but since the threadpool is instantiated once,
-  // we want the number of threads for each device to be predictable.
-  int numCpus = android_getCpuCount();
-  LOG(INFO) << "Android cpu count: " << numCpus
-            << ", hardware_concurrency: " << numThreads;
-  numThreads = numCpus;
-#endif
+  int numThreads = cpuinfo_get_processors_count();
 
   bool applyCap = false;
 #if CAFFE2_ANDROID
@@ -65,9 +52,9 @@ std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
 
   if (applyCap) {
     switch (numThreads) {
-#if CAFFE2_ANDROID && defined(__arm__)
+#if CAFFE2_ANDROID && (CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64)
       case 4:
-          switch (android_getCpuIdArm() & UINT32_C(0xFF00FFF0)) {
+          switch (cpuinfo_get_core(0)->midr & UINT32_C(0xFF00FFF0)) {
             case UINT32_C(0x51002110): /* Snapdragon 820 Kryo Silver */
             case UINT32_C(0x51002010): /* Snapdragon 821 Kryo Silver */
             case UINT32_C(0x51002050): /* Snapdragon 820/821 Kryo Gold */
