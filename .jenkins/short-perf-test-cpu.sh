@@ -12,7 +12,11 @@ echo "Running CPU perf test for PyTorch..."
 export PYTORCH_COMMIT_ID=$(git log --format="%H" -n 1)
 
 # Get baseline file from https://github.com/yf225/perf-tests
-cp /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json perf_test_numbers_cpu.json
+if [ -f /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json ]; then
+    cp /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json perf_test_numbers_cpu.json
+else
+    curl https://raw.githubusercontent.com/yf225/perf-tests/master/perf_test_numbers_cpu.json -O
+fi
 
 if [[ "$GIT_COMMIT" == *origin/master* ]]; then
     # Prepare new baseline file
