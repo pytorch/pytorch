@@ -410,6 +410,9 @@ class DataLoader(object):
             raise ValueError('num_workers cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
+        if sys.platform == "win32" and self.num_workers > 0:
+            raise ValueError('num_workers > 0 is not supported on Windows')
+
         if batch_sampler is None:
             if sampler is None:
                 if shuffle:
