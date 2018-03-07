@@ -48,11 +48,12 @@ def get_shell_output(command):
     return subprocess.check_output(command, shell=True).decode().strip()
 
 
-def run_test(python, test_module, cwd):
-    shell('{} {}'.format(python, test_module), cwd)
+def run_test(python, test_module, cwd, verbose):
+    verbose = '--verbose' if verbose else ''
+    shell('{} {} {}'.format(python, test_module, verbose), cwd)
 
 
-def test_cpp_extensions(python, test_module, test_directory):
+def test_cpp_extensions(python, test_module, test_directory, verbose):
     shell('{} setup.py install --root ./install'.format(python),
           os.path.join(test_directory, 'cpp_extensions'))
 
@@ -61,22 +62,22 @@ def test_cpp_extensions(python, test_module, test_directory):
         "find cpp_extensions/install -name '*-packages'")
     install_directory = os.path.join(test_directory, install_directory)
     os.environ['PYTHONPATH'] = '{}:{}'.format(install_directory, python_path)
-    run_test(python, test_module, test_directory)
+    run_test(python, test_module, test_directory, verbose)
     os.environ['PYTHONPATH'] = python_path
 
 
-def test_distributed(python, test_module, cwd):
+def test_distributed(python, test_module, cwd, verbose):
     os.environ['PYCMD'] = python
     shell('./run_distributed_tests.sh', cwd)
 
 
-def test_multiprocessing(python, test_module, cwd):
-    run_test(python, test_module, cwd)
+def test_multiprocessing(python, test_module, cwd, verbose):
+    run_test(python, test_module, cwd, verbose)
     if sys.platform != 'win32':
         os.environ['MULTIPROCESSING_METHOD'] = 'spawn'
-        run_test(python, test_module, cwd)
+        run_test(python, test_module, cwd, verbose)
         os.environ['MULTIPROCESSING_METHOD'] = 'forkserver'
-        run_test(python, test_module, cwd)
+        run_test(python, test_module, cwd, verbose)
 
 
 CUSTOM_HANDLERS = {
@@ -88,6 +89,7 @@ CUSTOM_HANDLERS = {
 
 def parse_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-p', '--python')
     parser.add_argument('-c', '--coverage', action='store_true')
     parser.add_argument(
@@ -148,7 +150,7 @@ def main():
         test_module = 'test_{}.py'.format(test)
         print('Running {} ...'.format(test_module))
         handler = CUSTOM_HANDLERS.get(test, run_test)
-        if not handler(python, test_module, test_directory):
+        if not handler(python, test_module, test_directory, options.verbose):
             break
 
     if options.coverage:
