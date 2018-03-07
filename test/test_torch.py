@@ -1361,13 +1361,13 @@ class TestTorch(TestCase):
         res1 = torch.arange(0.6, 0.89, 0.1, out=torch.FloatTensor())
         self.assertEqual(res1.size(0), 3)
         res1 = torch.arange(1, 10, 0.3, out=torch.FloatTensor())
-        self.assertEqual(res1.size(0), 31)
+        self.assertEqual(res1.size(0), 30)
 
         # DoubleTensor
         res1 = torch.arange(0.6, 0.89, 0.1, out=torch.DoubleTensor())
         self.assertEqual(res1.size(0), 3)
         res1 = torch.arange(1, 10, 0.3, out=torch.DoubleTensor())
-        self.assertEqual(res1.size(0), 31)
+        self.assertEqual(res1.size(0), 30)
 
         # Check that it's exclusive
         r = torch.arange(0, 5)
