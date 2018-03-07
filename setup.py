@@ -91,6 +91,7 @@ import sys
 import os
 import json
 import glob
+import importlib
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
@@ -104,6 +105,23 @@ from tools.setup_helpers.generate_code import generate_code
 from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
     WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
+
+################################################################################
+# Check Python build dependencies
+################################################################################
+missing_pydep = '''
+Missing build dependency: Unable to `import {importname}`.
+Please install it via `conda install {module}` or `pip install {module}`
+'''.strip()
+
+
+def check_pydep(importname, module):
+    try:
+        importlib.import_module(importname)
+    except ImportError:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
+check_pydep('yaml', 'pyyaml')
 
 DEBUG = check_env_flag('DEBUG')
 
