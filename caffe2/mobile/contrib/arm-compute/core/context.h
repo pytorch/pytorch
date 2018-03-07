@@ -324,6 +324,18 @@ private:
   unique_ptr<arm_compute::GCTensor> tensor_;
 };
 
+template<typename T = half>
+void getTensorCPU(const GLTensor<T>& g_, TensorCPU& g) {
+  g.Resize(g_.dims());
+  T *buffer = g_.map();
+
+  for (auto i = 0; i < g.size(); ++i) {
+    auto tmp = buffer[i];
+    g.mutable_data<float>()[i] = tmp;
+  }
+  g_.unmap();
+}
+
 
 } // namespace caffe2
 

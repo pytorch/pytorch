@@ -53,16 +53,9 @@ void compareNetResult(Workspace& ws,
   EXPECT_NE(nullptr, cpu_out);
   EXPECT_NE(nullptr, gpu_out);
 
-  auto &g_ = gpu_out->Get<GLTensor<T>>();
   TensorCPU g;
-  g.Resize(g_.dims());
-  T *buffer = g_.map();
-
-  for (auto i = 0; i < g.size(); ++i) {
-    auto tmp = buffer[i];
-    g.mutable_data<float>()[i] = tmp;
-  }
-  g_.unmap();
+  auto& g_ = gpu_out->Get<GLTensor<T>>();
+  getTensorCPU(g_, g);
 
   auto &t = cpu_out->Get<TensorCPU>();
   EXPECT_EQ(g.size(), t.size());
