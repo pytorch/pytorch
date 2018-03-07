@@ -113,6 +113,7 @@ Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
     throw std::runtime_error("randperm is only implemented for CPU");
   }
 
+  result.resize_({n});
   auto gen = get_generator(generator);
   AT_DISPATCH_ALL_TYPES(result.type(), "randperm", [&]() -> void {
     randperm_cpu<scalar_t>(result, n, gen);
