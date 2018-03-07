@@ -244,6 +244,7 @@ struct Expr : public TreeView {
       case TK_SLICE:
       case TK_GATHER:
       case TK_VAR:
+      case TK_LIST: /* temporarily */
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -262,8 +263,8 @@ struct Attribute : public TreeView {
   Ident name() const {
     return Ident(subtree(0));
   }
-  TreeRef value() const {
-    return subtree(1);
+  Expr value() const {
+    return Expr(subtree(1));
   }
   static Attribute create(const SourceRange& range, const Ident& name, const TreeRef& value) {
     return Attribute(Compound::create(TK_ATTRIBUTE, range, {name, value}));

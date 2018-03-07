@@ -630,7 +630,7 @@ class CompilationUnit(object):
     def define(self, lang, rcb=None, frame_id=2):
         if not rcb:
             rcb = createResolutionCallback(frame_id)
-        self.module._define(lang, rcb)
+        self.module._define(lang, rcb, False)
 
     def __getattr__(self, attr):
         return self.module._get_method(attr)
@@ -683,6 +683,10 @@ class ScriptModule(torch._C.ScriptModule):
         if r is None:
             raise AttributeError("'{}' object has no attribute '{}'".format(self.__class__.__name__, attr))
         return r
+
+    def define(self, lang):
+        rcb = createResolutionCallback()
+        self._define(lang, rcb, True)
 
     # TODO: wrap in metaclass to force ScriptMethodStub to run _after_
     # subclass __init__ is finished, rather than rely on user

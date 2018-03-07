@@ -160,10 +160,11 @@ void initJitScriptBindings(PyObject* module) {
       .def(py::init<bool>())
       .def(
           "_define",
-          [](Module& self,
+          [](Module& m,
              const std::string& script,
-             ResolutionCallback rcb) {
-            return defineMethodsInModule(self, script, pythonResolver(rcb), nullptr);
+             ResolutionCallback rcb, bool has_self) {
+            auto self = has_self ? std::make_shared<ModuleValue>(m.shared_from_this()) : nullptr;
+            return defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
       .def("_create_method", [](Module& m, Def def, ResolutionCallback rcb) {
         defineMethodsInModule(
