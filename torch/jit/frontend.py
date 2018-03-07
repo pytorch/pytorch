@@ -105,7 +105,8 @@ class NotSupportedError(FrontendError):
 class UnsupportedNodeError(NotSupportedError):
     def __init__(self, ctx, offending_node):
         # If we don't have a specific token, we default to length of 1
-        range_len = len(node_start_tokens.get(type(offending_node), ' '))
+        node_type = type(offending_node)
+        range_len = len(node_start_tokens.get(node_type, ' '))
         source_range = ctx.make_range(offending_node.lineno,
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)

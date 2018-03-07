@@ -2,8 +2,9 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ParameterList, Parameter
+from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from
-from collections import defaultdict, OrderedDict
+from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
 import itertools
@@ -637,9 +638,52 @@ class CompilationUnit(object):
 
 def script(fn):
     rcb = createResolutionCallback()
-    ast = torch.jit.frontend.get_jit_ast(fn)
+    ast = get_jit_ast(fn)
     graph = _jit_script_compile(ast, rcb)
     return torch._C.GraphExecutor(graph, True)
+
+
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast'))
+
+
+def script_method(fn):
+    return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
+
+
+# TODO: make this a subclass of nn.Module, implement most nn.Module
+# methods and disble the ones that cannot work
+class ScriptModule(object):
+
+    def __init__(self, optimize=True):
+        self.module = torch._C.ScriptModule(optimize)
+
+    def __setattr__(self, name, value):
+        if isinstance(value, Variable):
+            self.module.register_or_set_parameter(name, value)
+        elif isinstance(value, ScriptModule):
+            self.module.register_module(name, value.module)
+        else:
+            object.__setattr__(self, name, value)
+
+    # override the stubs
+    def __getattribute__(self, name):
+        cls_dict = type(self).__dict__
+        if name in cls_dict and isinstance(cls_dict[name], ScriptMethodStub):
+            return self.module.get_method(name)
+        return object.__getattribute__(self, name)
+
+    def __getattr__(self, name):
+        return getattr(self.module, name)
+
+    # TODO: wrap in metaclass to force ScriptMethodStub to run _after_
+    # subclass __init__ is finished, rather than rely on user
+    # call super in the right place
+    def finalize(self):
+        # register a method for each of the script stubs in the class
+        for _, v in sorted(type(self).__dict__.items()):
+            if isinstance(v, ScriptMethodStub):
+                self.module.create_method(v.ast, v.resolution_callback)
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

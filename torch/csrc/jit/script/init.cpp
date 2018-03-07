@@ -178,11 +178,28 @@ void initJitScriptBindings(PyObject* module) {
       [](Module& self, const std::string& name) -> const Method& {
         return self.get_method(name);
       }, py::return_value_policy::reference_internal)
-      .def("register_parameter", &Module::register_parameter)
+      .def("register_or_set_parameter", &Module::register_or_set_parameter)
       .def("register_module", &Module::register_module)
       .def("set_parameter", &Module::set_parameter)
       .def("get_parameter", &Module::get_parameter)
-      .def("get_module", &Module::get_module);
+      .def("get_module", &Module::get_module)
+      .def("__getattr__",[](Module& self, const std::string& name) -> py::object {
+        std::cout << "ATTR: " << name << "\n";
+        switch(self.find_attribute(name)) {
+          case NamedMember::Parameter:
+            return py::cast(self.get_parameter(name));
+          case NamedMember::Module:
+            return py::cast(self.get_module(name));
+          case NamedMember::Method:
+            return py::cast(self.get_method(name), py::return_value_policy::reference_internal);
+          case NamedMember::None:
+          default: {
+            std::stringstream ss;
+            ss << "unknown attribute '" << name << "' in script module";
+            throw std::runtime_error(ss.str());
+          }
+        }
+      });
 
   py::class_<Method>(m, "ScriptMethod")
     .def("graph", [&](Method& self) {

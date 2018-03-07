@@ -293,6 +293,7 @@ void PropagateShapeOnBlock(Block * block) {
       setDynamicType(node);
     } catch(std::exception & e) {
       if(auto sl = node->getSourceLocation()) {
+        std::cout << *block->owningGraph() << "\n";
         sl->wrapAndRethrowException(e, "operation failed shape propagation");
       } else {
         throw;

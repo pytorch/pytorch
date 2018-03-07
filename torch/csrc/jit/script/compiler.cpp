@@ -245,6 +245,7 @@ struct to_ir {
       if(it == end)
         throw ErrorReport(def.params().range()) << "methods must have a self argument";
       environment_stack->setSugaredVar((*it).ident().name(), self);
+      ++it;
     }
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();

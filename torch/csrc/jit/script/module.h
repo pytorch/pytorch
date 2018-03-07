@@ -1,6 +1,7 @@
 #pragma once
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/graph_executor.h"
+#include "torch/csrc/autograd/variable.h"
 
 namespace torch { namespace jit { namespace script {
 
@@ -146,6 +147,13 @@ struct Module : public std::enable_shared_from_this<Module> {
   void register_parameter(const std::string & name, at::Tensor v) {
     parameters.push_back(NamedParameter(name, std::move(v)));
     add_member(name, NamedMember::Parameter, parameters.size() - 1);
+  }
+  void register_or_set_parameter(const std::string & name, autograd::Variable v) {
+    if(find_attribute(name) == NamedMember::Parameter) {
+      set_parameter(name, v);
+    } else {
+      register_parameter(name, v);
+    }
   }
   void register_module(const std::string& name, std::shared_ptr<Module> module) {
     modules.push_back(NamedModule {name, std::move(module)});
