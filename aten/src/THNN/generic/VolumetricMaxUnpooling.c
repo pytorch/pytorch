@@ -75,15 +75,16 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
     real *input_p_k = input_p + k * iT * iH * iW;
     THIndex_t *ind_p_k = ind_p + k * iT * iH * iW;
 
-    int ti, i, j;
+    int t, i, j, index;
     THIndex_t maxp;
-    for (ti = 0; ti < iT; ti++)
+    for (t = 0; t < iT; t++)
     {
       for (i = 0; i < iH; i++)
       {
         for (j = 0; j < iW; j++)
         {
-          maxp = ind_p_k[ti * iH * iW + i * iW + j] - TH_INDEX_BASE;  /* retrieve position of max */
+          index = t * iH * iW + i * iW + j;
+          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
           if (maxp < 0 || maxp >= oT * oW * oH)
           {
 #pragma omp critical
@@ -92,7 +93,7 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
               error_index = maxp;
             }
           } else {
-            output_p_k[maxp] = input_p_k[ti * iH * iW + i * iW + j]; /* update output */
+            output_p_k[maxp] = input_p_k[index]; /* update output */
           }
         }
       }
@@ -222,20 +223,21 @@ static void THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
     real *gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
     THIndex_t *ind_p_k = ind_p + k * iT * iH * iW;
 
-    int ti, i, j;
+    int t, i, j, index;
     THIndex_t maxp;
-    for (ti = 0; ti < iT; ti++)
+    for (t = 0; t < iT; t++)
     {
       for (i = 0; i < iH; i++)
       {
         for (j = 0; j < iW; j++)
         {
-          maxp = ind_p_k[ti * iH * iW + i * iW  + j] - TH_INDEX_BASE;  /* retrieve position of max */
+          index = t * iH * iW + i * iW  + j;
+          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
           if (maxp < 0 || maxp >= oT * oH * oW)
           {
             THError("invalid max index %ld, oT= %d, oW= %d, oH= %d", maxp, oT, oW, oH);
           }
-          gradInput_p_k[ti * iH * iW + i * iW  + j] = gradOutput_p_k[maxp];  /* update gradient */
+          gradInput_p_k[index] = gradOutput_p_k[maxp];  /* update gradient */
         }
       }
     }
