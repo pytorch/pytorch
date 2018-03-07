@@ -10,6 +10,7 @@ namespace caffe2 {
 CAFFE_KNOWN_TYPE(GLTensor<GLfloat>);
 CAFFE_KNOWN_TYPE(GLTensor<GLhalf>);
 CAFFE_KNOWN_TYPE(GLTensor<half>);
+CAFFE_KNOWN_TYPE(Tensor<GLContext>);
 
 bool GLContext::initialized = false;
 
