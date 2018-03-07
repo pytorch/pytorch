@@ -19,8 +19,6 @@ endif()
 # Custom build rules to build nnpack, if external dependency is not found 
 ##############################################################################
 
-set(NNPACK_PREFIX ${PROJECT_SOURCE_DIR}/third_party/NNPACK)
-
 ##############################################################################
 # (1) MSVC - unsupported 
 ##############################################################################
@@ -52,17 +50,14 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
   message(STATUS "Brace yourself, we are building NNPACK")
   set(CAFFE2_THIRD_PARTY_ROOT ${PROJECT_SOURCE_DIR}/third_party)
 
-  # Directory where NNPACK will download and build all dependencies
-  set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
-    CACHE PATH "Confu-style dependencies source directory")
-  set(CONFU_DEPENDENCIES_BINARY_DIR ${PROJECT_BINARY_DIR}/confu-deps
-    CACHE PATH "Confu-style dependencies binary directory")
-
   # Directories for NNPACK dependencies submoduled in Caffe2
   set(PYTHON_SIX_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-six" CACHE STRING "six (Python package) source directory")
   set(PYTHON_ENUM_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-enum" CACHE STRING "enum34 (Python package) source directory")
   set(PYTHON_PEACHPY_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/python-peachpy" CACHE STRING "PeachPy (Python package) source directory")
-  set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+  if (NOT DEFINED CPUINFO_SOURCE_DIR)
+    set(CPUINFO_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/cpuinfo" CACHE STRING "cpuinfo source directory")
+  endif()
+  set(NNPACK_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/NNPACK" CACHE STRING "NNPACK source directory")
   set(FP16_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FP16" CACHE STRING "FP16 source directory")
   set(FXDIV_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/FXdiv" CACHE STRING "FXdiv source directory")
   set(PSIMD_SOURCE_DIR "${CAFFE2_THIRD_PARTY_ROOT}/psimd" CACHE STRING "PSimd source directory")
@@ -76,8 +71,8 @@ if (ANDROID OR IOS OR ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR ${CMAKE_SYSTEM_NA
     set(PTHREADPOOL_LIBRARY_TYPE "static" CACHE STRING "")
     set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
     add_subdirectory(
-      "${NNPACK_PREFIX}"
-      "${CONFU_DEPENDENCIES_BINARY_DIR}")
+      "${NNPACK_SOURCE_DIR}"
+      "${CONFU_DEPENDENCIES_BINARY_DIR}/NNPACK")
     # We build static versions of nnpack and pthreadpool but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET nnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
