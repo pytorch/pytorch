@@ -162,23 +162,10 @@ def gen_py_nn_functions(out, declarations):
 
 
 def gen_py_torch_functions(out, declarations):
-    def is_namespace_or_type_api_function(declaration):
-        # These are functions that should end up on the torch module. This
-        # includes functions on the at:: namespace and ones that are typically
-        # called via the type (e.g. Type::randn()). Since every function is
-        # implemented on the Type, we exclude functions that are also declared
-        # as methods on Tensor, since one shouldn't generally call these from
-        # the Type object.
-        if 'namespace' in declaration['method_of']:
-            return True
-        if 'Tensor' in declaration['method_of']:
-            return False
-        return 'Type' in declaration['method_of']
-
     def should_bind(declaration):
         return (should_generate_python_binding(declaration) and
                 declaration['mode'] != 'NN' and
-                is_namespace_or_type_api_function(declaration))
+                'namespace' in declaration['method_of'])
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
@@ -377,14 +364,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
-            if has_dtype_bind:
-                raise RuntimeError(("dtype with namespace dispatch currently not supported, "
-                                   "consider writing as a native function"))
             env['dispatch_call'] = 'at::{}'.format(declaration['name'])
-        elif has_dtype_bind:
-            env['dispatch_call'] = 'dtype.{}'.format(declaration['name'])
         else:
-            env['dispatch_call'] = 'default_type().{}'.format(declaration['name'])
+            raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;'
         env['AutoGPU'] = auto_gpu(declaration, has_device_bind)
 
