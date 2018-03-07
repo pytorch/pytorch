@@ -20,6 +20,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/operators/create_scope_op.h"
 
 namespace caffe2 {
 
@@ -28,34 +29,18 @@ class ONNXWhileOp final : public Operator<Context> {
  public:
   ONNXWhileOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        ws_(ws),
+        parent_ws_(ws),
         has_trip_count_(
             OperatorBase::GetSingleArgument<int64_t>("has_trip_count", 0)),
-        has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)) {
+        has_cond_(OperatorBase::GetSingleArgument<int64_t>("has_cond", 0)),
+        save_scopes_(OperatorBase::GetSingleArgument<int64_t>("save_scopes", 0)) {
     CAFFE_ENFORCE(
         this->template HasSingleArgumentOfType<NetDef>("body"),
         "body net must be specified in ONNXWhile operator");
     body_net_def_ = this->template GetSingleArgument<NetDef>("body", NetDef());
-
-    // Create loop-carried deps in Workspace
-    for (int i = 2; i < body_net_def_.external_input_size(); ++i) {
-      Blob* b = ws_->CreateBlob(body_net_def_.external_input(i));
-      Tensor<Context>* t = b->template GetMutable<Tensor<Context>>();
-      lcd_tensors_.push_back(t);
+    if (!body_net_def_.has_name()) {
+      body_net_def_.set_name("loop_net");
     }
-    // First output is the iteration variable
-    auto* iteration_var_blob = ws_->CreateBlob(body_net_def_.external_input(0));
-    iteration_var_ = iteration_var_blob->template GetMutable<Tensor<Context>>();
-
-    input_condition_var_ = ws_->CreateBlob(body_net_def_.external_input(1))
-                               ->template GetMutable<Tensor<Context>>();
-
-    auto* condition_var_blob =
-        ws_->CreateBlob(body_net_def_.external_output(0));
-    condition_var_ = condition_var_blob->template GetMutable<Tensor<Context>>();
-
-    body_net_ = CreateNet(body_net_def_, ws);
-    CAFFE_ENFORCE(body_net_, "Failed to initialize loop subnet");
   }
 
   USE_OPERATOR_CONTEXT_FUNCTIONS;
@@ -67,6 +52,12 @@ class ONNXWhileOp final : public Operator<Context> {
   //  Inputs: iteration number, condition, loop-carried dependencies
   //  Outputs: condition, loop-carried dependencies, scan_outputs
   bool RunOnDevice() override {
+    // Clear workspaces from the previous invocations of the loop
+    // and setup a local scope for the first iteration
+    ws_stack_.clear();
+    auto loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_);
+    scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
+
     constexpr int64_t num_inputs_before_lcds = 2;
     // First input is the maximumt trip count. Second input is the condition
     // variable (for the first iteration). The rest of the inputs are
@@ -79,14 +70,14 @@ class ONNXWhileOp final : public Operator<Context> {
     // loop-carried dependencies
     CAFFE_ENFORCE_EQ(
         num_loop_carried_deps + 2,
-        body_net_->external_input().size(),
+        scope_->net()->external_input().size(),
         "Body graph must have 2+N inputs, where N is the number of "
         "loop carried dependencies.");
 
     // Body graph has 1+N+K outputs: recalculated condition variable, N
     // loop-carried dependencies, and K scan_outputs
     int num_scan_outputs =
-        body_net_->external_output().size() - num_loop_carried_deps - 1;
+        scope_->net()->external_output().size() - num_loop_carried_deps - 1;
 
     CAFFE_ENFORCE_GE(
         num_scan_outputs,
@@ -97,25 +88,14 @@ class ONNXWhileOp final : public Operator<Context> {
 
     // Copy initial loop-carried dependencies
     for (int i = 0; i < num_loop_carried_deps; ++i) {
-      lcd_tensors_[i]->CopyFrom(Input(i + num_inputs_before_lcds));
+      scope_->lcd_tensor(i)->CopyFrom(Input(i + num_inputs_before_lcds));
     }
 
     // Initialize iteration variable
-    iteration_var_->Resize(1);
-    auto* iteration_var_ptr = iteration_var_->template mutable_data<int64_t>();
-    *iteration_var_ptr = 0ll;
+    scope_->set_iteration(0ll);
 
-    // Input condition var. This requires special handling
-    input_condition_var_->Resize(1);
-    auto* input_condition_var_ptr =
-        input_condition_var_->template mutable_data<bool>();
-    *input_condition_var_ptr = first_iter_condition;
-
-    // Output condition var. This is yielded by the body net and we will use its
-    // value to determine further iteration
-
-    condition_var_->Resize(1);
-    auto* condition_var_ptr = condition_var_->template mutable_data<bool>();
+    // Initialize input condition variable
+    scope_->set_input_condition(first_iter_condition);
 
     auto valid_iter_num = [this, max_trip_count](int64_t i) {
       if (has_trip_count_) {
@@ -126,12 +106,12 @@ class ONNXWhileOp final : public Operator<Context> {
     };
 
     auto condition_true =
-        [this, first_iter_condition, condition_var_ptr](int64_t i) {
+        [this, first_iter_condition](int64_t i, bool cond_value) {
           if (has_cond_) {
             if (i == 0) {
               return (bool)first_iter_condition;
             } else {
-              return (bool)*condition_var_ptr;
+              return cond_value;
             }
           } else {
             return true;
@@ -148,23 +128,36 @@ class ONNXWhileOp final : public Operator<Context> {
     // they're the same across iterations.
     std::vector<std::vector<TIndex>> scan_outputs_sizes;
 
+    std::shared_ptr<Workspace> cur_ws = nullptr;
+    bool cur_output_condition = false;
+
     while (true) {
-      int64_t itr = *iteration_var_ptr;
-      if (valid_iter_num(itr) && condition_true(itr)) {
-        if (!body_net_->Run()) {
+      int64_t itr = scope_->iteration();
+      if (valid_iter_num(itr) && condition_true(itr, cur_output_condition)) {
+        if (!scope_->net()->Run()) {
           return false;
         }
+
+        cur_ws = scope_->workspace();
+        cur_output_condition = scope_->output_condition();
+        if (save_scopes_) {
+          auto loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_);
+          scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
+        }
+
         // Copy forward loop-carried dependencies
         for (int i = 0; i < num_loop_carried_deps; ++i) {
-          Blob* b = ws_->GetBlob(body_net_->external_output()[i + 1]);
+          Blob* b = cur_ws->GetBlob(
+              scope_->net()->external_output()[i + 1]);
           const Tensor<Context>& t = b->template Get<Tensor<Context>>();
-          lcd_tensors_[i]->CopyFrom(t);
+          scope_->lcd_tensor(i)->CopyFrom(t);
         }
         // Copy out scan_outputs
         for (int i = 0; i < num_scan_outputs; ++i) {
           int net_output_idx = i + 1 + num_loop_carried_deps;
           const Tensor<Context>& scan_output =
-              ws_->GetBlob(body_net_->external_output()[net_output_idx])
+              cur_ws->GetBlob(
+                  scope_->net()->external_output()[net_output_idx])
                   ->template Get<Tensor<Context>>();
           auto* scan_output_target = Output(i + num_loop_carried_deps);
           if (itr == 0) {
@@ -195,17 +188,17 @@ class ONNXWhileOp final : public Operator<Context> {
             memcpy(dst_data, src_data, timestep_size * scan_output.itemsize());
           }
         }
+        scope_->set_iteration(itr + 1ll);
+        scope_->set_input_condition(cur_output_condition);
       } else {
         break;
       }
-      *iteration_var_ptr += 1ll;
-      *input_condition_var_ptr = *condition_var_ptr;
     }
 
-    if (*iteration_var_ptr > 0) {
+    if (scope_->iteration() > 0) {
       // Copy out final loop-carried dependencies
       for (int i = 0; i < num_loop_carried_deps; ++i) {
-        Output(i)->CopyFrom(*lcd_tensors_[i]);
+        Output(i)->CopyFrom(*scope_->lcd_tensor(i));
       }
     } else {
       // Copy out final loop-carried dependencies
@@ -217,15 +210,103 @@ class ONNXWhileOp final : public Operator<Context> {
     return true;
   }
 
+ private:
+  class LocalScope {
+   public:
+    LocalScope(
+        const std::shared_ptr<Workspace>& loop_ws,
+        const NetDef& body_net_def) : loop_ws_(loop_ws) {
+      CAFFE_ENFORCE(loop_ws_,
+          "Failed to initialize local loop workspace");
+
+      // Create loop-carried deps in Workspace
+      lcd_tensors_.clear();
+      for (int i = 2; i < body_net_def.external_input_size(); ++i) {
+        Blob* b = loop_ws_->CreateBlob(body_net_def.external_input(i));
+        Tensor<Context>* t = b->template GetMutable<Tensor<Context>>();
+        lcd_tensors_.push_back(t);
+      }
+      // First output is the iteration variable
+      auto* iteration_var_blob = loop_ws_->CreateBlob(
+          body_net_def.external_input(0));
+      iteration_var_ =
+          iteration_var_blob->template GetMutable<Tensor<Context>>();
+
+      input_condition_var_ = loop_ws_->CreateBlob(
+          body_net_def.external_input(1))
+          ->template GetMutable<Tensor<Context>>();
+
+      auto* condition_var_blob =
+          loop_ws_->CreateBlob(body_net_def.external_output(0));
+      condition_var_ = condition_var_blob->template GetMutable<Tensor<Context>>();
+      condition_var_->Resize(1);
+      condition_var_->template mutable_data<bool>();
+
+      body_net_ = loop_ws_->GetNet(body_net_def.name());
+      if (!body_net_) {
+        body_net_ = loop_ws_->CreateNet(body_net_def, true);
+      }
+      CAFFE_ENFORCE(body_net_, "Failed to initialize loop subnet");
+    }
+
+    NetBase* net() const {
+      return body_net_;
+    }
+
+    std::shared_ptr<Workspace> workspace() const {
+      return loop_ws_;
+    }
+
+    int64_t iteration() const {
+      auto* iteration_var_ptr =
+          iteration_var_->template mutable_data<int64_t>();
+      return *iteration_var_ptr;
+    }
+
+    Tensor<Context>* lcd_tensor(int idx) {
+      return lcd_tensors_[idx];
+    }
+
+    void set_iteration(int64_t itr) {
+      iteration_var_->Resize(1);
+      auto* iteration_var_ptr =
+          iteration_var_->template mutable_data<int64_t>();
+      *iteration_var_ptr = itr;
+    }
+
+    void set_input_condition(bool cond_value) {
+      input_condition_var_->Resize(1);
+      auto* input_condition_var_ptr =
+          input_condition_var_->template mutable_data<bool>();
+      *input_condition_var_ptr = cond_value;
+    }
+
+    bool output_condition() const {
+      auto* condition_var_ptr =
+          condition_var_->template mutable_data<bool>();
+      return *condition_var_ptr;
+    }
+
+   private:
+    std::shared_ptr<Workspace> loop_ws_;
+
+    NetBase* body_net_; // owned by a workspace
+    Tensor<Context>* iteration_var_;
+    Tensor<Context>* input_condition_var_;
+    Tensor<Context>* condition_var_;
+
+    std::vector<Tensor<Context>*> lcd_tensors_;
+  };
+
   NetDef body_net_def_;
-  std::unique_ptr<NetBase> body_net_;
-  Workspace* ws_;
+  Workspace* parent_ws_;
+  detail::WorkspaceStack ws_stack_;
 
-  bool has_trip_count_, has_cond_;
+  bool has_trip_count_;
+  bool has_cond_;
+  bool save_scopes_;
 
-  Tensor<Context>*iteration_var_, *input_condition_var_, *condition_var_;
-
-  std::vector<Tensor<Context>*> lcd_tensors_;
+  std::shared_ptr<LocalScope> scope_;
 };
 
 } // namespace caffe2

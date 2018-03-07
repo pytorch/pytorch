@@ -40,6 +40,11 @@ class WorkspaceStack {
  public:
   explicit WorkspaceStack() : parent_ws_(nullptr), top_(-1) {}
 
+  std::shared_ptr<Workspace> pushForwardWorkspace(Workspace* parent_ws) {
+    return pushForwardWorkspace(
+        parent_ws, std::unordered_map<std::string, std::string>());
+  }
+
   std::shared_ptr<Workspace> pushForwardWorkspace(
       Workspace* parent_ws,
       const std::unordered_map<std::string, std::string>& blob_bindings) {
@@ -106,6 +111,11 @@ class WorkspaceStack {
     grad_workspace->AddBlobMapping(parent_ws, grad_blob_bindings, true);
     --top_;
     return grad_workspace;
+  }
+
+  std::shared_ptr<Workspace> reuseLastForwardWorkspace(Workspace* parent_ws) {
+    return reuseLastForwardWorkspace(
+        parent_ws, std::unordered_map<std::string, std::string>());
   }
 
   std::shared_ptr<Workspace> reuseLastForwardWorkspace(
