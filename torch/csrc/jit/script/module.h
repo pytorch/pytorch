@@ -156,6 +156,7 @@ struct Module : public std::enable_shared_from_this<Module> {
     }
   }
   void register_module(const std::string& name, std::shared_ptr<Module> module) {
+    JIT_ASSERT(module);
     modules.push_back(NamedModule {name, std::move(module)});
     add_member(name, NamedMember::Module, modules.size() - 1);
   }
@@ -185,7 +186,8 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules.at(find_member(name, NamedMember::Module)).module;
+    auto loc = find_member(name, NamedMember::Module);
+    return modules.at(loc).module;
   }
 
   NamedMember::Kind find_attribute(const std::string& name) {
@@ -193,6 +195,12 @@ struct Module : public std::enable_shared_from_this<Module> {
     if(it == members.end())
       return NamedMember::None;
     return it->second.kind;
+  }
+
+  void dump() const {
+    for(auto entry : members) {
+      std::cout << entry.first << ": " << NamedMember::kind_string(entry.second.kind) << "\n";
+    }
   }
 
 private:

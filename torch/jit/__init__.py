@@ -630,10 +630,10 @@ class CompilationUnit(object):
     def define(self, lang, rcb=None, frame_id=2):
         if not rcb:
             rcb = createResolutionCallback(frame_id)
-        self.module.define(lang, rcb)
+        self.module._define(lang, rcb)
 
     def __getattr__(self, attr):
-        return self.module.get_method(attr)
+        return self.module._get_method(attr)
 
 
 def script(fn):
@@ -652,16 +652,22 @@ def script_method(fn):
 
 # TODO: make this a subclass of nn.Module, implement most nn.Module
 # methods and disble the ones that cannot work
-class ScriptModule(object):
+class ScriptModule(torch._C.ScriptModule):
 
     def __init__(self, optimize=True):
-        self.module = torch._C.ScriptModule(optimize)
+        super(ScriptModule, self).__init__(optimize)
 
     def __setattr__(self, name, value):
         if isinstance(value, Variable):
-            self.module.register_or_set_parameter(name, value)
+            self._register_or_set_parameter(name, value)
         elif isinstance(value, ScriptModule):
-            self.module.register_module(name, value.module)
+            self._register_module(name, value)
+            # note: script modules are subclassed in python and the
+            # C++ script::Module class will not hold references to them
+            # to ensure that you always get the same python value here
+            # we store it as a native attribute _in addition to_
+            # registering it with the C++ script::Module
+            object.__setattr__(self, name, value)
         else:
             object.__setattr__(self, name, value)
 
@@ -669,11 +675,14 @@ class ScriptModule(object):
     def __getattribute__(self, name):
         cls_dict = type(self).__dict__
         if name in cls_dict and isinstance(cls_dict[name], ScriptMethodStub):
-            return self.module.get_method(name)
+            return self._get_method(name)
         return object.__getattribute__(self, name)
 
-    def __getattr__(self, name):
-        return getattr(self.module, name)
+    def __getattr__(self, attr):
+        r = self._get_attribute(attr)
+        if r is None:
+            raise AttributeError("'{}' object has no attribute '{}'".format(self.__class__.__name__, attr))
+        return r
 
     # TODO: wrap in metaclass to force ScriptMethodStub to run _after_
     # subclass __init__ is finished, rather than rely on user
@@ -682,7 +691,7 @@ class ScriptModule(object):
         # register a method for each of the script stubs in the class
         for _, v in sorted(type(self).__dict__.items()):
             if isinstance(v, ScriptMethodStub):
-                self.module.create_method(v.ast, v.resolution_callback)
+                self._create_method(v.ast, v.resolution_callback)
 
 
 if not torch._C._jit_init():

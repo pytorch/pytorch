@@ -153,38 +153,35 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  // instead of being a subclass of nn.Module this is intended
-  // to be an object used by a purely python nn.Module subclass.
-  // The intention is that Module itself can then be loaded in C++ without
-  // python being present
-  // here we just implement thin wrappers around its functionality
+  // torch.jit.ScriptModule is a subclass of this C++ object.
+  // Methods here are prefixed with _ since they should not be
+  // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
       .def(py::init<bool>())
       .def(
-          "define",
+          "_define",
           [](Module& self,
              const std::string& script,
              ResolutionCallback rcb) {
             return defineMethodsInModule(self, script, pythonResolver(rcb), nullptr);
           })
-      .def("create_method", [](Module& m, Def def, ResolutionCallback rcb) {
+      .def("_create_method", [](Module& m, Def def, ResolutionCallback rcb) {
         defineMethodsInModule(
           m,
           { def },
           pythonResolver(rcb),
           std::make_shared<ModuleValue>(m.shared_from_this()));
       })
-      .def("get_method",
+      .def("_get_method",
       [](Module& self, const std::string& name) -> const Method& {
         return self.get_method(name);
       }, py::return_value_policy::reference_internal)
-      .def("register_or_set_parameter", &Module::register_or_set_parameter)
-      .def("register_module", &Module::register_module)
-      .def("set_parameter", &Module::set_parameter)
-      .def("get_parameter", &Module::get_parameter)
-      .def("get_module", &Module::get_module)
-      .def("__getattr__",[](Module& self, const std::string& name) -> py::object {
-        std::cout << "ATTR: " << name << "\n";
+      .def("_register_or_set_parameter", &Module::register_or_set_parameter)
+      .def("_register_module", &Module::register_module)
+      .def("_set_parameter", &Module::set_parameter)
+      .def("_get_parameter", &Module::get_parameter)
+      .def("_get_module", &Module::get_module)
+      .def("_get_attribute",[](Module& self, const std::string& name) -> py::object {
         switch(self.find_attribute(name)) {
           case NamedMember::Parameter:
             return py::cast(self.get_parameter(name));
@@ -194,9 +191,7 @@ void initJitScriptBindings(PyObject* module) {
             return py::cast(self.get_method(name), py::return_value_policy::reference_internal);
           case NamedMember::None:
           default: {
-            std::stringstream ss;
-            ss << "unknown attribute '" << name << "' in script module";
-            throw std::runtime_error(ss.str());
+            return py::none();
           }
         }
       });
