@@ -478,7 +478,7 @@ void THCTensor_(range)(THCState *state, THCTensor *r_, accreal xmin, accreal xma
   THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound incoherent with step sign");
-  ptrdiff_t size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
+  ptrdiff_t size = (ptrdiff_t) ((xmax / step - xmin / step) + 1);
   if (THCTensor_(nElement)(state, r_) != size) THCTensor_(resize1d)(state, r_, size);
   THCTensor *r = THCTensor_(isContiguous)(state, r_)
                  ? r_
