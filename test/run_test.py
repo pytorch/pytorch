@@ -103,7 +103,6 @@ def parse_args():
 
 def get_python_command(options):
     if options.coverage:
-        shell('coverage erase')
         return 'coverage run --parallel-mode --source torch'
     elif options.python:
         return options.python
@@ -141,6 +140,9 @@ def main():
     selected_tests = get_selected_tests(options)
     print('Selected tests: {}'.format(', '.join(selected_tests)))
     test_directory = get_test_directory(options)
+
+    if options.coverage:
+        shell('coverage erase')
 
     for test in selected_tests:
         test_module = 'test_{}.py'.format(test)
