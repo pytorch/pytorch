@@ -4,8 +4,21 @@ from functools import reduce
 import math
 
 __all__ = [
-    'split', 'chunk', 'empty_like', 'stack', 'unbind', 'btriunpack', 'matmul', 'det', 'stft',
-    'hann_window', 'hamming_window', 'bartlett_window', 'where', 'isnan'
+    'bartlett_window',
+    'btriunpack',
+    'chunk',
+    'det',
+    'empty_like',
+    'hamming_window',
+    'hann_window',
+    'isnan',
+    'matmul',
+    'split',
+    'stack',
+    'stft',
+    'unbind',
+    'unique',
+    'where',
 ]
 
 
@@ -536,3 +549,76 @@ def isnan(tensor):
     if not torch.is_tensor(tensor):
         raise ValueError("The argument is not a tensor")
     return tensor != tensor
+
+
+def unique(input, sorted=False, return_inverse=False):
+    r"""Returns the unique scalar elements of the input tensor as a 1-D tensor.
+
+    Arguments:
+        input (Tensor): the input tensor
+        sorted (bool): Whether to sort the unique elements in ascending order
+            before returning as output.
+        return_inverse (bool): Whether to also return the indices for where
+            elements in the original input ended up in the returned unique list.
+
+    Returns:
+        (Tensor, Tensor (optional)): A tensor or a tuple of tensors containing
+
+            - **output** (*Tensor*): the output list of unique scalar elements.
+            - **inverse_indices** (*Tensor*): (optional) if
+              :attr:`return_inverse` is True, there will be a
+              2nd returned tensor (same shape as input) representing the indices
+              for where elements in the original input map to in the output;
+              otherwise, this function will only return a single tensor.
+
+    Example::
+
+        >>>> output = torch.unique(torch.LongTensor([1, 3, 2, 3]))
+        >>>> output
+
+         2
+         3
+         1
+        [torch.LongTensor of size (3,)]
+
+        >>>> output, inverse_indices = torch.unique(
+                 torch.LongTensor([1, 3, 2, 3]), sorted=True, return_inverse=True)
+        >>>> output
+
+         1
+         2
+         3
+        [torch.LongTensor of size (3,)]
+
+        >>>> inverse_indices
+
+         0
+         2
+         1
+         2
+        [torch.LongTensor of size (4,)]
+
+        >>>> output, inverse_indices = torch.unique(
+                 torch.LongTensor([[1, 3], [2, 3]]), sorted=True, return_inverse=True)
+        >>>> output
+
+         1
+         2
+         3
+        [torch.LongTensor of size (3,)]
+
+        >>>> inverse_indices
+
+         0  2
+         1  2
+        [torch.LongTensor of size (2,2)]
+    """
+    output, inverse_indices = torch._C._VariableBase._unique(
+        input,
+        sorted=sorted,
+        return_inverse=return_inverse,
+    )
+    if return_inverse:
+        return output, inverse_indices
+    else:
+        return output

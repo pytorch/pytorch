@@ -5424,6 +5424,67 @@ class TestTorch(TestCase):
         self.assertEqual(double_tensor[2], 0.0, prec=0.0)  # tiny_double to zero
         torch.set_flush_denormal(False)
 
+    def test_unique_cpu(self):
+        x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
+        expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
+        expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
+
+        x_unique = torch.unique(x)
+        self.assertEqual(
+            expected_unique.tolist(), sorted(x_unique.tolist()))
+
+        x_unique, x_inverse = x.unique(return_inverse=True)
+        self.assertEqual(
+            expected_unique.tolist(), sorted(x_unique.tolist()))
+        self.assertEqual(expected_inverse.numel(), x_inverse.numel())
+
+        x_unique = x.unique(sorted=True)
+        self.assertEqual(expected_unique, x_unique)
+
+        x_unique, x_inverse = torch.unique(
+            x, sorted=True, return_inverse=True)
+        self.assertEqual(expected_unique, x_unique)
+        self.assertEqual(expected_inverse, x_inverse)
+
+        # Tests per-element unique on a higher rank tensor.
+        y = x.view(2, 2, 2)
+        y_unique, y_inverse = y.unique(sorted=True, return_inverse=True)
+        self.assertEqual(expected_unique, y_unique)
+        self.assertEqual(expected_inverse.view(y.size()), y_inverse)
+
+        # Tests unique on other types.
+        int_unique, int_inverse = torch.unique(
+            torch.IntTensor([2, 1, 2]), sorted=True, return_inverse=True)
+        self.assertEqual(torch.IntTensor([1, 2]), int_unique)
+        self.assertEqual(torch.LongTensor([1, 0, 1]), int_inverse)
+
+        double_unique, double_inverse = torch.unique(
+            torch.DoubleTensor([2., 1.5, 2.1, 2.]),
+            sorted=True,
+            return_inverse=True,
+        )
+        self.assertEqual(torch.DoubleTensor([1.5, 2., 2.1]), double_unique)
+        self.assertEqual(torch.LongTensor([1, 0, 2, 1]), double_inverse)
+
+        byte_unique, byte_inverse = torch.unique(
+            torch.ByteTensor([133, 7, 7, 7, 42, 128]),
+            sorted=True,
+            return_inverse=True,
+        )
+        self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
+        self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_unique_cuda(self):
+        # unique currently does not support CUDA.
+        self.assertRaises(
+            RuntimeError, lambda: torch.cuda.LongTensor([0, 1]).unique())
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.unique(torch.cuda.FloatTensor([0., 1.])),
+        )
+
+
 # Functions to test negative dimension wrapping
 METHOD = 1
 INPLACE_METHOD = 2
