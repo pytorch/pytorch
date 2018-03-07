@@ -103,4 +103,9 @@ def should_build_ib():
     return ib_util_found and ib_lib_found and ib_lib_found
 
 if WITH_DISTRIBUTED:
-    WITH_GLOO_IBVERBS = should_build_ib() or check_env_flag("WITH_GLOO_IBVERBS")
+    # If the env variable is specified, use the value,
+    # otherwise only build with IB when IB support is detected on the system
+    if "WITH_GLOO_IBVERBS" in os.environ:
+        WITH_GLOO_IBVERBS = check_env_flag("WITH_GLOO_IBVERBS")
+    else:
+        WITH_GLOO_IBVERBS = should_build_ib()
