@@ -344,7 +344,8 @@
     - long step
 ]]
 [[
-  name: range
+  name: _range
+  cname: range
   variants:
     - function
   backends:

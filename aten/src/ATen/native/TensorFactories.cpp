@@ -186,6 +186,14 @@ Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
   return result;
 }
 
+Tensor range(const Type& dtype, Scalar start, Scalar end, Scalar step) {
+  return dtype._range(start, end, step);
+}
+
+Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+  return at::_range_out(result, start, end, step);
+}
+
 Tensor zeros(const Type& dtype, IntList size) {
   auto result = dtype.tensor(size);
   return at::native::zeros_out(result, size);

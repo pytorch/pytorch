@@ -342,6 +342,12 @@
 - func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
 
+- func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
