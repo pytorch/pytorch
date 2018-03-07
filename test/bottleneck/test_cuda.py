@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 
 
 class Model(nn.Module):
@@ -14,7 +13,7 @@ class Model(nn.Module):
 
 
 def main():
-    data = Variable(torch.randn(10, 50).cuda())
+    data = torch.randn(10, 50).cuda()
     model = Model().cuda()
     optimizer = torch.optim.SGD(model.parameters(), lr=0.0001)
     for i in range(10):
