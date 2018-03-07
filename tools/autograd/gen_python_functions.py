@@ -355,7 +355,9 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['formal_args'] = formal_args
         env['actuals'] = actuals
         has_any_dtype = has_dtype_bind or any(a['name'] == 'dtype' and a['simple_type'] == 'Type' for a in inputs)
-        env['initialize_cuda'] = 'maybe_initialize_cuda(dtype);' if has_any_dtype else []
+        type_dispatched_name = type_dispatched_args[0]['name'] if len(type_dispatched_args) > 0 else None
+        maybe_init_cuda = 'dtype' if has_any_dtype else type_dispatched_name
+        env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(maybe_init_cuda) if maybe_init_cuda else []
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
         else:
