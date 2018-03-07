@@ -88,10 +88,8 @@ static inline ssize_t doPythonIO(PyObject* fildes, void* buf, size_t nbytes, boo
   THPObjectPtr memview(PyMemoryView_FromMemory(
       reinterpret_cast<char*>(buf), nbytes, rw_flag));
 #else
-  THPObjectPtr memview(
-      PyMemoryView_FromBuffer(PyBuffer_FromReadWriteMemory(buf, nbytes)));
+  THPObjectPtr memview(PyBuffer_FromReadWriteMemory(buf, nbytes));
 #endif
-
   if (!memview) throw python_error();
 
   char* method = "write";
