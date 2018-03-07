@@ -1284,11 +1284,6 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     set(_target_is_phony false)
   endif()
 
-  # If CMake doesn't support separable compilation, complain
-  if(CUDA_SEPARABLE_COMPILATION AND CMAKE_VERSION VERSION_LESS "2.8.10.1")
-    message(SEND_ERROR "CUDA_SEPARABLE_COMPILATION isn't supported for CMake versions less than 2.8.10.1")
-  endif()
-
   # Set up all the command line flags here, so that they can be overridden on a per target basis.
 
   set(nvcc_flags "")
