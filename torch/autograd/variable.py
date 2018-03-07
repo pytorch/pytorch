@@ -305,6 +305,18 @@ class Variable(_C._VariableBase):
     def expand_as(self, tensor):
         return self.expand(tensor.size())
 
+    def unique(self, sorted=False, return_inverse=False):
+        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+
+        See :func:`torch.unique`
+        """
+        output, inverse_indices = self._unique(
+            sorted=sorted, return_inverse=return_inverse)
+        if return_inverse:
+            return output, inverse_indices
+        else:
+            return output
+
     def __rsub__(self, other):
         return -self + other
 

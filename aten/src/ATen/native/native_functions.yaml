@@ -363,6 +363,11 @@
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
+- func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_cpu
+    CUDA: _unique_cuda
+
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
 
