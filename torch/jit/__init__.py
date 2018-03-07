@@ -621,7 +621,7 @@ def createResolutionCallback(frame_id=2):
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
-        self.module = torch._C.ScriptModule()
+        self.module = torch._C.ScriptModule(optimize)
         if lang is not None:
             self.define(lang, frame_id=3)
         self.optimize = optimize

@@ -16,13 +16,22 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 #endif
 
 
-struct PythonValue : public SugaredValue {
+
+static void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
+  if(expected != actual) {
+    throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
+  }
+}
+
+struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::vector<Value*> call(SourceRange loc, Graph& g, at::ArrayRef<Value*> inputs, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+    ensureSizeMatches(loc, 0, attributes.size(), "keyword arguments");
     // Release the function object so we can wrap it in a PythonOp
+    Graph& g = *m.graph();
     py::object func = self;
     std::string cconv(inputs.size(), 't');
     Node* new_node = g.insertNode(g.createPythonOp(
@@ -52,6 +61,66 @@ Resolver pythonResolver(ResolutionCallback rcb) {
       return std::make_shared<PythonValue>(obj);
   };
 }
+
+// defines how a modules/methods behave inside the script subset.
+// for now this does not have any interaction with python.
+// in the future, we will add the ability to resolve `self.foo` to python
+// {functions, modules, contants} so this SugaredValue is defined here
+// anticipating we will eventually need to replace Module with a py::object
+// holding the actual nn.Module class.
+
+// defines how a method obtained from a module behaves in script
+struct MethodValue : public SugaredValue {
+  MethodValue(std::shared_ptr<Module> module, Method& method)
+  : module(std::move(module)) //insurance that method stays alive
+  , method(method) {}
+  std::string kind() const override {
+    return "method";
+  }
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+    ensureSizeMatches(loc, 0, attributes.size(), "keyword arguments");
+    ensureSizeMatches(loc, caller.num_inputs(), inputs.size(), "inputs");
+    auto outputs = caller.emit_call_to(method, inputs);
+    ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
+    return outputs;
+  }
+private:
+  std::shared_ptr<Module> module;
+  Method& method;
+
+};
+
+
+struct ModuleValue : public SugaredValue {
+  ModuleValue(std::shared_ptr<Module> module)
+  : module(std::move(module)) {}
+
+  virtual std::string kind() const override {
+    return "module";
+  }
+
+  // select an attribute on it, e.g. `this.field`
+  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
+    auto kind = module->find_attribute(field);
+    switch(kind) {
+      case NamedMember::None:
+        throw ErrorReport(loc) << "module has no attribute '" << field << "'";
+      case NamedMember::Module:
+        return std::make_shared<ModuleValue>(module->get_module(field));
+      case NamedMember::Method:
+        return std::make_shared<MethodValue>(module, module->get_method(field));
+      case NamedMember::Parameter:
+        return std::make_shared<SimpleValue>(m.get_or_add_parameter(module->parameter_slot(field)));
+    }
+    return nullptr; // silence warning
+  }
+  // call module.forward
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_outputs);
+  }
+private:
+  std::shared_ptr<Module> module;
+};
 
 // TODO: dedup with other init
 
@@ -84,19 +153,36 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+  // instead of being a subclass of nn.Module this is intended
+  // to be an object used by a purely python nn.Module subclass.
+  // The intention is that Module itself can then be loaded in C++ without
+  // python being present
+  // here we just implement thin wrappers around its functionality
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
-      .def(py::init<>())
+      .def(py::init<bool>())
       .def(
           "define",
           [](Module& self,
              const std::string& script,
              ResolutionCallback rcb) {
-            return defineMethodsInModule(self, script, pythonResolver(rcb));
+            return defineMethodsInModule(self, script, pythonResolver(rcb), nullptr);
           })
+      .def("create_method", [](Module& m, Def def, ResolutionCallback rcb) {
+        defineMethodsInModule(
+          m,
+          { def },
+          pythonResolver(rcb),
+          std::make_shared<ModuleValue>(m.shared_from_this()));
+      })
       .def("get_method",
-      [](Module& self, const std::string& name) {
+      [](Module& self, const std::string& name) -> const Method& {
         return self.get_method(name);
-      }, py::return_value_policy::reference_internal);
+      }, py::return_value_policy::reference_internal)
+      .def("register_parameter", &Module::register_parameter)
+      .def("register_module", &Module::register_module)
+      .def("set_parameter", &Module::set_parameter)
+      .def("get_parameter", &Module::get_parameter)
+      .def("get_module", &Module::get_module);
 
   py::class_<Method>(m, "ScriptMethod")
     .def("graph", [&](Method& self) {

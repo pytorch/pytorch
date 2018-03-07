@@ -534,8 +534,8 @@ struct Apply : public Expr {
   explicit Apply(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_APPLY);
   }
-  Ident name() const {
-    return Ident(subtree(0));
+  Expr callee() const {
+    return Expr(subtree(0));
   }
   List<Expr> inputs() const {
     return List<Expr>(subtree(1));
@@ -545,10 +545,10 @@ struct Apply : public Expr {
   }
   static Apply create(
       const SourceRange& range,
-      const Ident& name,
+      const Expr& callee,
       const List<Expr>& inputs,
       const List<Attribute>& attributes) {
-    return Apply(Compound::create(TK_APPLY, range, {name, inputs, attributes}));
+    return Apply(Compound::create(TK_APPLY, range, {callee, inputs, attributes}));
   }
 };
 

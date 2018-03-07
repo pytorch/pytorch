@@ -18,13 +18,14 @@ struct Parser {
     // of the Compound tree are in the same place.
     return Ident::create(t.range, t.text());
   }
-  TreeRef createApply(TreeRef ident, TreeList& inputs) {
+  TreeRef createApply(Expr expr) {
     TreeList attributes;
     auto range = L.cur().range;
+    TreeList inputs;
     parseOperatorArguments(inputs, attributes);
     return Apply::create(
         range,
-        Ident(ident),
+        expr,
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
@@ -55,23 +56,15 @@ struct Parser {
       } break;
       default: {
         Ident name = parseIdent();
-        if (L.cur().kind == '(') {
-          TreeList inputs;
-          prefix = createApply(name, inputs);
-        } else {
-          prefix = Var::create(name.range(), name);
-        }
+        prefix = Var::create(name.range(), name);
       } break;
     }
     while (true) {
       if (L.nextIf('.')) {
         const auto name = parseIdent();
-        if (L.cur().kind == '(') {
-          TreeList inputs = {prefix};
-          prefix = createApply(name, inputs);
-        } else {
-          prefix = Select::create(name.range(), Expr(prefix), Ident(name));
-        }
+        prefix = Select::create(name.range(), Expr(prefix), Ident(name));
+      } else if (L.cur().kind == '(') {
+        prefix = createApply(Expr(prefix));
       } else if (L.cur().kind == '[') {
         prefix = parseSliceOrGather(prefix);
       } else {

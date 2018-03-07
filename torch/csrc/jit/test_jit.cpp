@@ -834,8 +834,8 @@ const static auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  script::Module cu;
-  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver());
+  script::Module cu(/*optimize=*/true);
+  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.get_method(name).graph();
     Code code(graph, /*values_are_variables=*/false);
