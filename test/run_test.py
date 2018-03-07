@@ -71,19 +71,9 @@ def test_distributed(python, test_module, cwd, verbose):
     shell('./run_distributed_tests.sh', cwd)
 
 
-def test_multiprocessing(python, test_module, cwd, verbose):
-    run_test(python, test_module, cwd, verbose)
-    if sys.platform != 'win32':
-        os.environ['MULTIPROCESSING_METHOD'] = 'spawn'
-        run_test(python, test_module, cwd, verbose)
-        os.environ['MULTIPROCESSING_METHOD'] = 'forkserver'
-        run_test(python, test_module, cwd, verbose)
-
-
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
     'distributed': test_distributed,
-    'multiprocessing': test_multiprocessing,
 }
 
 
