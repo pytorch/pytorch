@@ -3,6 +3,9 @@
 #include "TH/THRandom.h"
 #include "ATen/CheckGenerator.h"
 #include "ATen/CPUGenerator.h"
+#include "ATen/Dispatch.h"
+#include <algorithm>
+#include <sstream>
 
 namespace at {
 namespace native {
@@ -13,6 +16,35 @@ Tensor empty_like(const Tensor& self) {
 
 Tensor empty_like(const Tensor& self, const Type& dtype) {
   return dtype.tensor(self.sizes());
+}
+
+Tensor eye(const Type& dtype, int64_t n, int64_t m) {
+  auto result = dtype.tensor();
+  return at::eye_out(result, n, m);
+}
+
+Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
+  if (n <= 0) {
+    std::ostringstream oss;
+    oss << "n must be greater than 0, got: " << n;
+    std::runtime_error(oss.str());
+  }
+  if(m <= 0) {
+    m = n;
+  }
+
+  result.resize_({n, m});
+  result.zero_();
+
+  int64_t sz = std::min<int64_t>(n, m);
+  AT_DISPATCH_ALL_TYPES(result.type(), "eye", [&]() -> void {
+    scalar_t* result_data = result.data<scalar_t>();
+    for(int64_t i = 0; i < sz; i++) {
+      result_data[i*(result.strides()[0] + result.strides()[1])] = 1;
+    }
+  });
+
+  return result;
 }
 
 Tensor ones(const Type& dtype, IntList size) {

@@ -2842,21 +2842,6 @@
       default: -1
 ]]
 [[
-  name: eye
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - long n
-    - arg: long m
-      default: -1
-]]
-[[
   name: diag
   variants:
     - method

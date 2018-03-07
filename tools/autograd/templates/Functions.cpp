@@ -867,8 +867,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   auto gu = grads[0];
   auto gsigma = grads[1];
   auto gv = grads[2];
-  auto im = self.type().eye(m);
-  auto in = self.type().eye(n);
+  auto im = at::eye(self.type(), m);
+  auto in = at::eye(self.type(), n);
   auto ut = u.t();
   auto vt = v.t();
   auto sigma_mat = sigma.diag();
