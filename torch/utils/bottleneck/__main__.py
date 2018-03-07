@@ -5,10 +5,7 @@ import subprocess
 import sys
 import os
 import re
-try:
-    from StringIO import StringIO
-except ImportError:
-    from io import StringIO
+import contextlib
 
 import torch
 from torch.autograd import profiler
@@ -26,6 +23,10 @@ def run(command):
         output = output.decode("ascii")
         err = err.decode("ascii")
     return (rc, output, err)
+
+
+def redirect_argv(new_argv):
+    sys.argv[:] = new_argv[:]
 
 
 def check_running_cuda_version():
@@ -217,6 +218,8 @@ def parse_args():
     parser.add_argument('scriptfile', type=str,
                         help='Path to the script to be run. '
                         'Usually run with `python path/to/script`.')
+    parser.add_argument('args', type=str, nargs='*',
+                        help='Command-line arguments to be passed to the script.')
     return parser.parse_args()
 
 
@@ -229,10 +232,14 @@ def main():
 
     # Customizable constants.
     scriptfile = args.scriptfile
+    scriptargs = [] if args.args is None else args.args
+    scriptargs.insert(0, scriptfile)
     cprofile_sortby = 'tottime'
     cprofile_topk = 15
     autograd_prof_sortby = 'cpu_time_total'
     autograd_prof_topk = 15
+
+    redirect_argv(scriptargs)
 
     sys.path.insert(0, os.path.dirname(scriptfile))
     with open(scriptfile, 'rb') as stream:

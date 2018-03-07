@@ -401,12 +401,27 @@ class TestBottleneck(TestCase):
             err = err.decode("ascii")
         return (rc, output, err)
 
-    def _run_bottleneck(self, test_file):
+    def _run_bottleneck(self, test_file, scriptargs=''):
         import os
         curdir = os.path.dirname(os.path.abspath(__file__))
         filepath = '{}/{}'.format(curdir, test_file)
-        rc, out, err = self._run('python -m torch.utils.bottleneck {}'.format(filepath))
+        if scriptargs != '':
+            mark = '-- '
+            scriptargs = ' {}'.format(scriptargs)
+        else:
+            mark = ''
+        rc, out, err = self._run(
+            'python -m torch.utils.bottleneck {}{}{}'.format(mark, filepath, scriptargs))
         return rc, out, err
+
+    def _check_run_args(self):
+        # Check that this fails due to missing args
+        rc, out, err = self._run_bottleneck('bottleneck/test_args.py')
+        self.assertEqual(rc, 2, None, self._fail_msg('Missing args should error', out + err))
+
+        # This should succeed
+        rc, out, err = self._run_bottleneck('bottleneck/test_args.py', '--foo foo --bar bar')
+        self.assertEqual(rc, 0, None, self._fail_msg('Should pass args to script', out + err))
 
     def _fail_msg(self, msg, output):
         return '{}, output was:\n{}'.format(msg, output)
@@ -452,6 +467,7 @@ class TestBottleneck(TestCase):
         rc, out, err = self._run_bottleneck('bottleneck/test.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
+        self._check_run_args()
         self._check_environment_summary(out)
         self._check_autograd_summary(out)
         self._check_cprof_summary(out)
@@ -462,6 +478,7 @@ class TestBottleneck(TestCase):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
+        self._check_run_args()
         self._check_environment_summary(out)
         self._check_autograd_summary(out)
         self._check_cprof_summary(out)
