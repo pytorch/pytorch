@@ -12,7 +12,7 @@ class no_grad(object):
 
     Example::
 
-        >>> x = Variable(torch.Tensor([1]), requires_grad=True)
+        >>> x = torch.tensor([1], requires_grad=True)
         >>> with torch.no_grad():
         ...   y = x * 2
         >>> y.requires_grad
@@ -39,7 +39,7 @@ class enable_grad(object):
 
     Example::
 
-        >>> x = Variable(torch.Tensor([1]), requires_grad=True)
+        >>> x = torch.tensor([1], requires_grad=True)
         >>> with torch.no_grad():
         ...   with torch.enable_grad():
         ...     y = x * 2
@@ -64,6 +64,9 @@ class enable_grad(object):
 class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
+    `set_grad_enabled` will enable or disable grads based on its argument `mode`.
+    It can be used as a context-manager or as a function.
+
     Arguments:
         mode (bool): Flag whether to enable grad (True), or disable
                      (False). This can be used to conditionally enable
@@ -74,10 +77,18 @@ class set_grad_enabled(object):
 
         >>> x = Variable(torch.Tensor([1]), requires_grad=True)
         >>> is_train = False
-        >>> with torch.grad_mode(is_train):
+        >>> with torch.set_grad_enabled(is_train):
         ...   y = x * 2
         >>> y.requires_grad
         False
+        >>> set_grad_enabled(True)
+        >>> y = x * 2
+        >>> y.requires_grad
+        True
+        >>> set_grad_enabled(False)
+        >>> y = x * 2
+        >>> y.requires_grad
+        True
 
     """
 
