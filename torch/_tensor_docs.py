@@ -259,7 +259,7 @@ Fills the tensor with numbers drawn from the Cauchy distribution:
 
 .. math::
 
-    P(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - median)^2 + \sigma^2}
+    f(x) = \dfrac{1}{\pi} \dfrac{\sigma}{(x - median)^2 + \sigma^2}
 """)
 
 add_docstr_all('ceil',
@@ -514,7 +514,7 @@ Fills :attr:`self` tensor with elements drawn from the exponential distribution:
 
 .. math::
 
-    P(x) = \lambda e^{-\lambda x}
+    f(x) = \lambda e^{-\lambda x}
 """)
 
 add_docstr_all('fill_',
@@ -602,7 +602,7 @@ Fills :attr:`self` tensor with elements drawn from the geometric distribution:
 
 .. math::
 
-    P(X=k) = (1 - p)^{k - 1} p
+    f(X=k) = (1 - p)^{k - 1} p
 
 """)
 
@@ -861,7 +861,7 @@ the underlying normal distribution, and not of the returned distribution:
 
 .. math::
 
-    P(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
+    f(x) = \\dfrac{1}{x \\sigma \\sqrt{2\\pi}}\ e^{-\\dfrac{(\\ln x - \\mu)^2}{2\\sigma^2}}
 """)
 
 add_docstr_all('lt',

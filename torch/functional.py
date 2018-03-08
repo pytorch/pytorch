@@ -531,13 +531,13 @@ def where(condition, x, y):
 
 
 def isnan(tensor):
-    r"""Returns a new tensor with boolean elements representing if each element is NaN or not.
+    r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
     Arguments:
         tensor (Tensor): A tensor to check
 
     Returns:
-        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of NaN elements.
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `NaN` elements.
 
     Example::
 

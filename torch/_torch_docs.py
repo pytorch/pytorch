@@ -8,6 +8,9 @@ add_docstr(torch.abs,
 
 Computes the element-wise absolute value of the given :attr:`input` tensor.
 
+.. math::
+    \text{out}_{i} = |\text{input}_{i}|
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -23,6 +26,9 @@ add_docstr(torch.acos,
 acos(input, out=None) -> Tensor
 
 Returns a new tensor with the arccosine  of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = cos^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -153,14 +159,14 @@ along the first dimension).
 same number of matrices.
 
 If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
-:math:`(b \times m \times p)` tensor, ::attr:`mat` must be
+:math:`(b \times m \times p)` tensor, :attr:`mat` must be
 :ref:`broadcastable <broadcasting-semantics>` with a :math:`(n \times p)` tensor
 and attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
     out = \beta\ mat + \alpha\ (\sum_{i=0}^{b} batch1_i \mathbin{@} batch2_i)
 
-For inputs of type `FloatTensor` or `DoubleTensor`, args `beta` and `alpha`
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments `beta` and `alpha`
 must be real numbers, otherwise they should be integers.
 
 Args:
@@ -267,12 +273,13 @@ If :attr:`mat1` is a :math:`(n \times m)` tensor, :attr:`mat2` is a
 :ref:`broadcastable <broadcasting-semantics>` with a :math:`(n \times p)` tensor
 and :attr:`out` will be a :math:`(n \times p)` tensor.
 
-`alpha` and `beta` are scaling factors on `mat1 @ mat2` and `mat` respectively.
+:attr:`alpha` and :attr:`beta` are scaling factors on matrix-vector product between
+:attr:`mat1` and :attr`mat2` and the added matrix :attr:`mat` respectively.
 
 .. math::
     out = \beta\ mat + \alpha\ (mat1_i \mathbin{@} mat2_i)
 
-For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
@@ -308,12 +315,13 @@ size `m`, then :attr:`tensor` must be
 :ref:`broadcastable <broadcasting-semantics>` with a 1-D tensor of size `n` and
 :attr:`out` will be 1-D tensor of size `n`.
 
-`alpha` and `beta` are scaling factors on `mat * vec` and `tensor` respectively.
+:attr:`alpha` and :attr:`beta` are scaling factors on matrix-vector product between
+:attr:`mat` and :attr:`vec` and the added tensor :attr:`tensor` respectively.
 
 .. math::
     out = \beta\ tensor + \alpha\ (mat \mathbin{@} vec)
 
-For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
@@ -343,8 +351,9 @@ addr(beta=1, mat, alpha=1, vec1, vec2, out=None) -> Tensor
 Performs the outer-product of vectors :attr:`vec1` and :attr:`vec2`
 and adds it to the matrix :attr:`mat`.
 
-Optional values :attr:`beta` and :attr:`alpha` are scalars that multiply
-:attr:`mat` and :math:`(vec1 \otimes vec2)` respectively.
+Optional values :attr:`beta` and :attr:`alpha` are scaling factors on the
+outer product between :attr:`vec1` and :attr:`vec2` and the added matrix
+:attr:`mat` respectively.
 
 .. math::
     out = \beta\ mat + \alpha\ (vec1 \otimes vec2)
@@ -355,7 +364,7 @@ of size `m`, then :attr:`mat` must be
 :math:`(n \times m)` and :attr:`out` will be a matrix of size
 :math:`(n \times m)`.
 
-For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
@@ -384,6 +393,9 @@ asin(input, out=None) -> Tensor
 
 Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = sin^{-1}(\text{input}_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -411,6 +423,9 @@ add_docstr(torch.atan,
 atan(input, out=None) -> Tensor
 
 Returns a new tensor with the arctangent  of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = tan^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -482,12 +497,13 @@ If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 :math:`(b \times m \times p)` tensor, then :attr:`mat` must be
 :ref:`broadcastable <broadcasting-semantics>` with a
 :math:`(b \times n \times p)` tensor and :attr:`out` will be a
-:math:`(b \times n \times p)` tensor.
+:math:`(b \times n \times p)` tensor. Both :attr:`alpha` and :attr:`beta` mean the
+same as the scaling factors used in :meth:`torch.addbmm`.
 
 .. math::
     out_i = \beta\ mat_i + \alpha\ (batch1_i \mathbin{@} batch2_i)
 
-For inputs of type `FloatTensor` or `DoubleTensor`, args :attr:`beta` and
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
@@ -518,8 +534,12 @@ to be used for drawing the binary random number.
 Hence, all values in :attr:`input` have to be in the range:
 :math:`0 \leq input_i \leq 1`
 
-The `i-th` element of the output tensor will draw a value `1` according
-to the `i-th` probability value given in :attr:`input`.
+The :math:`\text{i}^{th}` element of the output tensor will draw a
+value `1` according to the :math:`\text{i}^{th}` probability value given
+in :attr:`input`.
+
+.. math::
+    \text{out}_{i} \sim \mathrm{Bernoulli}(p = \text{input}_{i})
 
 The returned :attr:`out` tensor only has values 0 or 1 and is of the same
 shape as :attr:`input`
@@ -602,13 +622,13 @@ add_docstr(torch.cat,
 cat(seq, dim=0, out=None) -> Tensor
 
 Concatenates the given sequence of :attr:`seq` tensors in the given dimension.
-All tensors must either have the same shape (except in the cat dimension) or be
-empty.
+All tensors must either have the same shape (except in the concatenating
+dimension) or be empty.
 
 :func:`torch.cat` can be seen as an inverse operation for :func:`torch.split`
 and :func:`torch.chunk`
 
-:func:`cat` can be best understood via examples.
+:func:`torch.cat` can be best understood via examples.
 
 Args:
     seq (sequence of tensors): any python sequence of tensors of the same type.
@@ -651,6 +671,9 @@ ceil(input, out=None) -> Tensor
 Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
+.. math::
+    \text{out}_{i} = \lceil \text{input}_{i} \rceil = \lfloor \text{input}_{i} \rfloor + 1
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -680,8 +703,10 @@ add_docstr(torch.reciprocal,
            r"""
 reciprocal(input, out=None) -> Tensor
 
-Returns a new tensor with the reciprocal of the elements of :attr:`input`,
-i.e. :math:`x^{-1} = \frac{1}{x}`.
+Returns a new tensor with the reciprocal of the elements of :attr:`input`
+
+.. math::
+    \text{out}_{i} = \frac{1}{\text{input}_{i}}
 
 Args:
     input (Tensor): the input tensor
@@ -820,6 +845,9 @@ cos(input, out=None) -> Tensor
 
 Returns a new tensor with the cosine  of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \cos(\text{input}_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -848,6 +876,9 @@ cosh(input, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic cosine  of the elements of
 :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \cosh(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -1222,7 +1253,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4,4)
+    >>> a = torch.randn(4, 4)
     >>> a
 
     -0.1810  0.4017  0.2863 -0.1013
@@ -1329,7 +1360,10 @@ add_docstr(torch.erf,
            r"""
 erf(tensor, out=None) -> Tensor
 
-Computes the error function of each element.
+Computes the error function of each element. The error function is defined as follows:
+
+.. math::
+    \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 
 Args:
     tensor (Tensor): the input tensor
@@ -1345,7 +1379,11 @@ add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
 
-Computes the inverse error function of each element.
+Computes the inverse error function of each element. The inverse error function is defined
+in the range :math:`(-1, 1)` as:
+
+.. math::
+    \mathrm{erfinv}(\mathrm{erf}(x)) = x
 
 Args:
     tensor (Tensor): the input tensor
@@ -1361,7 +1399,15 @@ add_docstr(torch.exp,
            r"""
 exp(tensor, out=None) -> Tensor
 
-Computes the exponential of each element.
+Returns a new tensor with the exponential of the elements
+of :attr:`input`.
+
+.. math::
+    y_{i} = e^{x_{i}}
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Args:
     tensor (Tensor): the input tensor
@@ -1377,7 +1423,15 @@ add_docstr(torch.expm1,
            r"""
 expm1(tensor, out=None) -> Tensor
 
-Computes the exponential of each element minus 1.
+Returns a new tensor with the exponential of the elements minus 1
+of :attr:`input`.
+
+.. math::
+    y_{i} = e^{x_{i}} - 1
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Args:
     tensor (Tensor): the input tensor
@@ -1418,6 +1472,9 @@ floor(input, out=None) -> Tensor
 
 Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
+
+.. math::
+    \text{out}_{i} = \lfloor \text{input}_{i} \rfloor
 
 Args:
     input (Tensor): the input tensor
@@ -1481,6 +1538,9 @@ frac(tensor, out=None) -> Tensor
 
 Computes the fractional portion of each element in :attr:`tensor`.
 
+.. math::
+    \text{out}_{i} = \text{input}_{i} - \lfloor \text{input}_{i} \rfloor
+
 Example::
 
     >>> torch.frac(torch.Tensor([1, 2.5, -3.2])
@@ -1522,9 +1582,9 @@ For a 3-D tensor the output is specified by::
 
 If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and :attr:`dim` = i, then :attr:`index` must be an n-dimensional tensor with
-size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where y >= 1 and
-:attr:`out` will have the same size as :attr:`index`.
+and :attr:`dim` = `i`, then :attr:`index` must be an n-dimensional tensor with
+size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
+and :attr:`out` will have the same size as :attr:`index`.
 
 Args:
     input (Tensor): the source tensor
@@ -1545,7 +1605,7 @@ add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor
 
-Computes `input >= other` element-wise.
+Computes :math:`input \geq other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -1641,18 +1701,18 @@ This is a low-level function for calling LAPACK directly.
 You'll generally want to use :func:`torch.qr` instead.
 
 Computes a QR decomposition of :attr:`input`, but without constructing
-`Q` and `R` as explicit separate matrices.
+:math:`Q` and :math:`R` as explicit separate matrices.
 
 Rather, this directly calls the underlying LAPACK function `?geqrf`
 which produces a sequence of 'elementary reflectors'.
 
-See `LAPACK documentation`_ for further details.
+See `LAPACK documentation for geqrf`_ for further details.
 
 Args:
     input (Tensor): the input matrix
     out (tuple, optional): the output tuple of (Tensor, Tensor)
 
-.. _LAPACK documentation:
+.. _LAPACK documentation for geqrf:
     https://software.intel.com/en-us/node/521004
 
 """)
@@ -1662,8 +1722,8 @@ add_docstr(torch.ger,
 ger(vec1, vec2, out=None) -> Tensor
 
 Outer product of :attr:`vec1` and :attr:`vec2`.
-If :attr:`vec1` is a vector of size `n` and :attr:`vec2` is a vector of
-size `m`, then :attr:`out` must be a matrix of size :math:`(n \times m)`.
+If :attr:`vec1` is a vector of size :math:`n` and :attr:`vec2` is a vector of
+size :math:`m`, then :attr:`out` must be a matrix of size :math:`(n \times m)`.
 
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
 
@@ -1690,8 +1750,9 @@ add_docstr(torch.gesv,
            r"""
 gesv(B, A, out=None) -> (Tensor, Tensor)
 
-`X, LU = torch.gesv(B, A)` returns the solution to the system of linear
-equations represented by :math:`AX = B`
+This function returns the solution to the system of linear
+equations represented by :math:`AX = B` and the LU factorization of
+A, in order as a tuple `X, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
@@ -1956,7 +2017,7 @@ add_docstr(torch.le,
            r"""
 le(input, other, out=None) -> Tensor
 
-Computes `input <= other` element-wise.
+Computes :math:`input \leq other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2080,6 +2141,9 @@ log(input, out=None) -> Tensor
 Returns a new tensor with the natural logarithm of the elements
 of :attr:`input`.
 
+.. math::
+    y_{i} = \log_{e} (x_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -2114,7 +2178,7 @@ log1p(input, out=None) -> Tensor
 Returns a new tensor with the natural logarithm of (1 + :attr:`input`).
 
 .. math::
-    y_i = \log (x_i + 1)
+    y_i = \log_{e} (x_i + 1)
 
 .. note:: This function is more accurate than :func:`torch.log` for small
           values of :attr:`input`
@@ -2768,7 +2832,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4,4)
+    >>> a = torch.randn(4, 4)
     >>> a
 
     -0.7280  0.0598 -1.4327 -0.5825
@@ -2857,7 +2921,7 @@ Performs a matrix-vector product of the matrix :attr:`mat` and the vector
 :attr:`vec`.
 
 If :attr:`mat` is a :math:`(n \times m)` tensor, :attr:`vec` is a 1-D tensor of
-size `m`, :attr:`out` will be 1-D of size `n`.
+size :math:`m`, :attr:`out` will be 1-D of size :math:`n`.
 
 .. note:: This function does not :ref:`broadcast <broadcasting-semantics>`.
 
@@ -2880,7 +2944,7 @@ add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
 
-Computes `input != other` element-wise.
+Computes :math:`input \neq other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2982,6 +3046,9 @@ add_docstr(torch.norm,
 
 Returns the p-norm of the :attr:`input` tensor.
 
+.. math::
+    ||x||_{p} = \sqrt[p]{x_{1}^{p} + x_{2}^{p} + \ldots + x_{N}^{p}}
+
 Args:
     input (Tensor): the input tensor
     p (float, optional): the exponent value in the norm formulation
@@ -3048,7 +3115,7 @@ add_docstr(torch.normal,
 .. function:: normal(means, std, out=None)
 
 Returns a tensor of random numbers drawn from separate normal distributions
-who's mean and standard deviation are given.
+whose mean and standard deviation are given.
 
 The :attr:`means` is a tensor with the mean of
 each output element's normal distribution
@@ -3056,8 +3123,8 @@ each output element's normal distribution
 The :attr:`std` is a tensor with the standard deviation of
 each output element's normal distribution
 
-The shapes of :attr:`means` and :attr:`std` don't need to match.
-The total number of elements in each tensor need to be the same.
+The shapes of :attr:`means` and :attr:`std` don't need to match, but the
+total number of elements in each tensor need to be the same.
 
 .. note:: When the shapes do not match, the shape of :attr:`means`
           is used as the shape for the returned output tensor
@@ -3138,7 +3205,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(1,2,3,4,5)
+    >>> a = torch.randn(1, 2, 3, 4, 5)
     >>> torch.numel(a)
     120
     >>> a = torch.zeros(4,4)
@@ -3152,7 +3219,7 @@ add_docstr(torch.ones,
 ones(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with the scalar value `1`, with the shape defined
-by the varargs :attr:`sizes`.
+by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of integers defining the shape of the output tensor
@@ -3202,17 +3269,17 @@ add_docstr(torch.orgqr,
            r"""
 orgqr(a, tau) -> Tensor
 
-Computes the orthogal matrix `Q` of a QR factorization, from the `(a, tau)`
+Computes the orthogonal matrix `Q` of a QR factorization, from the `(a, tau)`
 tuple returned by :func:`torch.geqrf`.
 
 This directly calls the underlying LAPACK function `?orgqr`.
-See `?orgqr LAPACK documentation`_ for further details.
+See `LAPACK documentation for orgqr`_ for further details.
 
 Args:
     a (Tensor): the `a` from :func:`torch.geqrf`.
-    tau (Tensor): the `tau` from `torch.geqrf`.
+    tau (Tensor): the `tau` from :func:`torch.geqrf`.
 
-.. _?orgqr LAPACK documentation:
+.. _LAPACK documentation for orgqr:
     https://software.intel.com/en-us/mkl-developer-reference-c-orgqr
 
 """)
@@ -3225,9 +3292,14 @@ Multiplies `mat` by the orthogonal `Q` matrix of the QR factorization
 formed by :func:`torch.geqrf` that is represented by `(a, tau)`.
 
 This directly calls the underlying LAPACK function `?ormqr`.
-See `?ormqr LAPACK documentation`_ for further details.
+See `LAPACK documentation for ormqr`_ for further details.
 
-.. _?ormqr LAPACK documentation:
+Args:
+    a (Tensor): the `a` from :func:`torch.geqrf`.
+    tau (Tensor): the `tau` from :func:`torch.geqrf`.
+    mat (Tensor): the matrix to be multiplied.
+
+.. _LAPACK documentation for ormqr:
     https://software.intel.com/en-us/mkl-developer-reference-c-ormqr
 
 """)
@@ -3236,7 +3308,7 @@ add_docstr(torch.potrf, r"""
 potrf(a, upper=True, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
-matrix :attr:`A`.
+matrix :math:`A`.
 
 If :attr:`upper` is ``True``, the returned matrix `U` is upper-triangular, and
 the decomposition has the form:
@@ -3260,7 +3332,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
@@ -3291,10 +3363,18 @@ potri(u, upper=True, out=None) -> Tensor
 
 Computes the inverse of a positive semidefinite matrix given its
 Cholesky factor :attr:`u`: returns matrix `inv`
-If `upper` is ``True`` or not provided, `u` is upper triangular
-such that :math:`inv = (u^T u)^{-1}`.
-If `upper` is ``False``, `u` is lower triangular
-such that :math:`inv = (u u^T)^{-1}`.
+
+If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper
+triangular such that:
+
+.. math::
+    inv = (u^T u)^{-1}
+
+If :attr:`upper` is ``False``, :attr:`u` is lower triangular
+such that:
+
+.. math::
+    inv = (uu^{T})^{-1}
 
 Args:
     u (Tensor): the input 2-D tensor, a upper or lower triangular
@@ -3304,7 +3384,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
@@ -3334,14 +3414,21 @@ add_docstr(torch.potrs, r"""
 potrs(b, u, upper=True, out=None) -> Tensor
 
 Solves a linear system of equations with a positive semidefinite
-matrix to be inverted given its Cholesky factor
-matrix :attr:`u`: returns matrix `c`
-If `upper` is ``True`` or not provided, `u` is and upper triangular
-such that :math:`c = (u^T u)^{-1} b`.
-If `upper` is ``False``, `u` is and lower triangular
-such that :math:`c = (u u^T)^{-1} b`.
+matrix to be inverted given its Cholesky factor matrix :attr:`u`.
 
-.. note:: `b` is always a 2-D tensor, use `b.unsqueeze(1)` to convert a vector.
+If :attr:`upper` is ``True`` or not provided, :attr:`u` is upper triangular
+and `c` is returned such that:
+
+.. math::
+    c = (u^T u)^{-1} b
+
+If :attr:`upper` is ``False``, :attr:`u` is and lower triangular and `c` is
+returned such that:
+
+.. math::
+    c = (u u^T)^{-1} b
+
+.. note:: :attr:`b` is always a 2-D tensor, use `b.unsqueeze(1)` to convert a vector.
 
 Args:
     b (Tensor): the right hand side 2-D tensor
@@ -3351,7 +3438,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
@@ -3361,7 +3448,7 @@ Example::
     -0.9406 -2.1618  2.2443
     [torch.FloatTensor of size 3x3]
 
-    >>> b = torch.randn(3,2)
+    >>> b = torch.randn(3, 2)
     >>> b
 
     -0.3119 -1.8224
@@ -3550,11 +3637,13 @@ add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
 
 Computes the pivoted Cholesky decomposition of a positive semidefinite
-matrix :attr:`a`: returns matrices `u` and `piv`.
-If `upper` is ``True`` or not provided, `u` is and upper triangular
+matrix :attr:`a`. returns matrices `u` and `piv`.
+
+If :attr:`upper` is ``True`` or not provided, `u` is upper triangular
 such that :math:`a = p^T u^T u p`, with `p` the permutation given by `piv`.
-If `upper` is ``False``, `u` is and lower triangular
-such that :math:`a = p^T u u^T p`.
+
+If :attr:`upper` is ``False``, `u` is lower triangular such that
+:math:`a = p^T u u^T p`.
 
 Args:
     a (Tensor): the input 2-D tensor
@@ -3563,7 +3652,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> a
 
@@ -3662,7 +3751,7 @@ rand(*sizes, out=None) -> Tensor
 Returns a tensor filled with random numbers from a uniform distribution
 on the interval :math:`[0, 1)`
 
-The shape of the tensor is defined by the varargs :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of ints defining the shape of the output tensor.
@@ -3691,9 +3780,10 @@ add_docstr(torch.randn,
 randn(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
-with zero mean and variance of one.
+with zero mean and variance of one (also called the standard normal
+distirbution).
 
-The shape of the tensor is defined by the varargs :attr:`sizes`.
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of ints defining the shape of the output tensor.
@@ -3783,8 +3873,11 @@ add_docstr(torch.arange,
 arange(start=0, end, step=1, out=None) -> Tensor
 
 Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor`
-with values from the interval ``[start, end)`` taken with step :attr:`step`
-starting from `start`.
+with values from the interval ``[start, end)`` taken with common difference
+:attr:`step` beginning from `start`.
+
+.. math::
+    out_{i+1} = out_{i} + \mathrm{step}
 
 Args:
     start (float): the starting value for the set of points
@@ -3928,6 +4021,9 @@ rsqrt(input, out=None) -> Tensor
 Returns a new tensor with the reciprocal of the square-root of each of
 the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \frac{1}{\sqrt{\text{input}_{i}}}
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -3997,6 +4093,9 @@ sigmoid(input, out=None) -> Tensor
 
 Returns a new tensor with the sigmoid of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \frac{1}{1 + e^{-\text{input}_{i}}}
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -4057,6 +4156,9 @@ sin(input, out=None) -> Tensor
 
 Returns a new tensor with the sine of the elements of :attr:`input`.
 
+.. math::
+    \text{out}_{i} = \sin(\text{input}_{i})
+
 Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
@@ -4085,6 +4187,9 @@ sinh(input, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic sine of the elements of
 :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sinh(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4170,6 +4275,9 @@ add_docstr(torch.sqrt,
 sqrt(input, out=None) -> Tensor
 
 Returns a new tensor with the square-root of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \sqrt{\text{input}_{i}}
 
 Args:
     input (Tensor): the input tensor
@@ -4453,14 +4561,14 @@ add_docstr(torch.symeig,
            r"""
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
-`e, V = torch.symeig(input)` returns eigenvalues and eigenvectors
-of a real symmetric matrix :attr:`input`.
+This function returns eigenvalues and eigenvectors
+of a real symmetric matrix :attr:`input`, represented by a tuple :math:`(e, V)`.
 
-`input` and `V` are :math:`(m \times m)` matrices and `e` is a `m` dimensional
+:attr:`input` and `V` are :math:`(m \times m)` matrices and `e` is a `m` dimensional
 vector.
 
-This function calculates all eigenvalues (and vectors) of `input`
-such that :math:`input = V diag(e) V^T`.
+This function calculates all eigenvalues (and vectors) of :attr:`input`
+such that :math:`input = V \diag(e) V^T`.
 
 The boolean argument :attr:`eigenvectors` defines computation of
 eigenvectors or eigenvalues only.
@@ -4468,7 +4576,7 @@ eigenvectors or eigenvalues only.
 If it is ``False``, only eigenvalues are computed. If it is ``True``,
 both eigenvalues and eigenvectors are computed.
 
-Since the input matrix `input` is supposed to be symmetric,
+Since the input matrix :attr:`input` is supposed to be symmetric,
 only the upper triangular portion is used by default.
 
 If :attr:`upper` is ``False``, then lower triangular portion is used.
@@ -4543,7 +4651,8 @@ Example::
 
 """)
 
-add_docstr(torch.take, r"""\
+add_docstr(torch.take,
+           r"""\
 take(input, indices) -> Tensor
 
 Returns a new tensor with the elements of :attr:`input` at the given indices.
@@ -4570,6 +4679,9 @@ add_docstr(torch.tan,
 tan(input, out=None) -> Tensor
 
 Returns a new tensor with the tangent of the elements of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \tan(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4599,6 +4711,9 @@ tanh(input, out=None) -> Tensor
 
 Returns a new tensor with the hyperbolic tangent of the elements
 of :attr:`input`.
+
+.. math::
+    \text{out}_{i} = \tanh(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -4755,11 +4870,13 @@ the other elements of the result tensor :attr:`out` are set to 0.
 The lower triangular part of the matrix is defined as the elements on and
 below the diagonal.
 
-The argument :attr:`diagonal` controls which diagonal to consider:
-
-- If :attr:`diagonal` = 0, it is the main diagonal.
-- If :attr:`diagonal` > 0, it is above the main diagonal.
-- If :attr:`diagonal` < 0, it is below the main diagonal.
+The argument :attr:`diagonal` controls which diagonal to consider. If
+:attr:`diagonal` = 0, all elements on and below the main diagonal are
+retained. A positive value includes just as many diagonals above the main
+diagonal, and similarly a negative value excludes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for `i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
+:math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
 Args:
     input (Tensor): the input tensor
@@ -4768,7 +4885,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a
 
      1.3225  1.7304  1.4573
@@ -4783,19 +4900,30 @@ Example::
      1.2469  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
 
-    >>> torch.tril(a, diagonal=1)
+    >>> b = torch.randn(4, 6)
+    >>> b
 
-     1.3225  1.7304  0.0000
-    -0.3052 -0.3111 -0.1809
-     1.2469  0.0064 -1.6250
-    [torch.FloatTensor of size 3x3]
+     0.2762  0.1640  0.3947 -0.8633 -0.4150  2.4491
+    -2.8177 -1.0580  0.3659 -0.0797  0.2294  1.3660
+    -1.8665 -0.4127 -0.7031 -0.4697 -0.2383 -0.1321
+     1.0998  0.2726  0.2512  0.4557  0.7012 -0.9356
+    [torch.FloatTensor of size (4,6)]
+
+    >>> torch.tril(b, diagonal=1)
+
+     0.2762  0.1640  0.0000  0.0000  0.0000  0.0000
+    -2.8177 -1.0580  0.3659  0.0000  0.0000  0.0000
+    -1.8665 -0.4127 -0.7031 -0.4697  0.0000  0.0000
+     1.0998  0.2726  0.2512  0.4557  0.7012  0.0000
+    [torch.FloatTensor of size (4,6)]
 
     >>> torch.tril(a, diagonal=-1)
 
-     0.0000  0.0000  0.0000
-    -0.3052  0.0000  0.0000
-     1.2469  0.0064  0.0000
-    [torch.FloatTensor of size 3x3]
+     0.0000  0.0000  0.0000  0.0000  0.0000  0.0000
+    -2.8177  0.0000  0.0000  0.0000  0.0000  0.0000
+    -1.8665 -0.4127  0.0000  0.0000  0.0000  0.0000
+     1.0998  0.2726  0.2512  0.0000  0.0000  0.0000
+    [torch.FloatTensor of size (4,6)]
 
 """)
 
@@ -4809,11 +4937,13 @@ the other elements of the result tensor :attr:`out` are set to 0.
 The upper triangular part of the matrix is defined as the elements on and
 above the diagonal.
 
-The argument :attr:`diagonal` controls which diagonal to consider:
-
-- If :attr:`diagonal` = 0, it is the main diagonal.
-- If :attr:`diagonal` > 0, it is above the main diagonal.
-- If :attr:`diagonal` < 0, it is below the main diagonal.
+The argument :attr:`diagonal` controls which diagonal to consider. If
+:attr:`diagonal` = 0, all elements on and below the main diagonal are
+retained. A positive value excludes just as many diagonals above the main
+diagonal, and similarly a negative value includes just as many diagonals below
+the main diagonal. The main diagonal are the set of indices
+:math:`\lbrace (i, i) \rbrace` for `i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
+:math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
 Args:
     input (Tensor): the input tensor
@@ -4822,7 +4952,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(3,3)
+    >>> a = torch.randn(3, 3)
     >>> a
 
      1.3225  1.7304  1.4573
@@ -4850,6 +4980,31 @@ Example::
     -0.3052 -0.3111 -0.1809
      0.0000  0.0064 -1.6250
     [torch.FloatTensor of size 3x3]
+
+    >>> b = torch.randn(4, 6)
+    >>> b
+
+     0.2762  0.1640  0.3947 -0.8633 -0.4150  2.4491
+    -2.8177 -1.0580  0.3659 -0.0797  0.2294  1.3660
+    -1.8665 -0.4127 -0.7031 -0.4697 -0.2383 -0.1321
+     1.0998  0.2726  0.2512  0.4557  0.7012 -0.9356
+    [torch.FloatTensor of size (4,6)]
+
+    >>> torch.tril(b, diagonal=1)
+
+     0.0000  0.1640  0.3947 -0.8633 -0.4150  2.4491
+     0.0000  0.0000  0.3659 -0.0797  0.2294  1.3660
+     0.0000  0.0000  0.0000 -0.4697 -0.2383 -0.1321
+     0.0000  0.0000  0.0000  0.0000  0.7012 -0.9356
+    [torch.FloatTensor of size (4,6)]
+
+    >>> torch.tril(a, diagonal=-1)
+
+     0.2762  0.1640  0.3947 -0.8633 -0.4150  2.4491
+    -2.8177 -1.0580  0.3659 -0.0797  0.2294  1.3660
+     0.0000 -0.4127 -0.7031 -0.4697 -0.2383 -0.1321
+     0.0000  0.0000  0.2512  0.4557  0.7012 -0.9356
+    [torch.FloatTensor of size (4,6)]
 
 """)
 
@@ -4890,14 +5045,14 @@ Shape:
 
 Examples::
 
-    >>> A = torch.randn(2,2).triu()
+    >>> A = torch.randn(2, 2).triu()
     >>> A
 
     -1.8793  0.1567
      0.0000 -2.1972
     [torch.FloatTensor of size 2x2]
 
-    >>> b = torch.randn(2,3)
+    >>> b = torch.randn(2, 3)
     >>> b
 
      1.8776 -0.0759  1.6590
@@ -4957,8 +5112,9 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A negative dim value can be used and will correspond to
-:math:`dim + input.dim() + 1`
+A negative `dim` value within the range
+[-`input.dim()`, `input.dim`) can be used and
+will correspond to :meth:`unsqueeze` applied at `dim` = `dim + input.dim() + 1`
 
 Args:
     input (Tensor): the input tensor
@@ -5049,7 +5205,7 @@ add_docstr(torch.zeros,
 zeros(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with the scalar value `0`, with the shape defined
-by the varargs :attr:`sizes`.
+by the variable argument :attr:`sizes`.
 
 Args:
     sizes (int...): a set of integers defining the shape of the output tensor
@@ -5106,8 +5262,8 @@ Returns a tuple containing the LU factorization and pivots. Pivoting is done if
 
 The optional argument :attr:`info` stores information if the factorization
 succeeded for each minibatch example. The :attr:`info` is provided as an
-`IntTensor`, its values will be filled from dgetrf and a non-zero value
-indicates an error occurred. Specifically, the values are from cublas if cuda is
+`IntTensor`, its values will be filled from `dgetrf` and a non-zero value
+indicates an error occurred. Specifically, the values are from cuBLAS if CUDA is
 being used, otherwise LAPACK.
 
 .. warning::
@@ -5143,7 +5299,7 @@ Arguments:
     pivot (bool, optional): controls whether pivoting is done
 
 Returns:
-    A tuple containing factorization, pivots, and an `IntTensor` where nonzero
+    A tuple containing factorization, pivots, and an `IntTensor` where non-zero
     values indicate whether factorization for each minibatch sample succeeds.
 
 Example::

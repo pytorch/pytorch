@@ -97,7 +97,7 @@ class NLLLoss(_WeightedLoss):
     The input given through a forward call is expected to contain
     log-probabilities of each class. input has to be a Tensor of size either
     :math:`(minibatch, C)` or :math:`(minibatch, C, d_1, d_2, ..., d_K)`
-    with :math:`K >= 2` for the `K`-dimensional case (described later).
+    with :math:`K \geq 2` for the `K`-dimensional case (described later).
 
     Obtaining log-probabilities in a neural network is easily achieved by
     adding a  `LogSoftmax`  layer in the last layer of your network.
@@ -126,7 +126,7 @@ class NLLLoss(_WeightedLoss):
         \end{cases}
 
     Can also be used for higher dimension inputs, such as 2D images, by providing
-    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`,
+    an input of size :math:`(minibatch, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`,
     where :math:`K` is the number of dimensions, and a target of appropriate shape
     (see below). In the case of images, it computes NLL loss per-pixel.
 
@@ -150,14 +150,14 @@ class NLLLoss(_WeightedLoss):
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`, or
-            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K >= 2`
+            :math:`(N, C, d_1, d_2, ..., d_K)` with :math:`K \geq 2`
             in the case of `K`-dimensional loss.
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`, or
-            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case of
+        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`, or
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case of
             K-dimensional loss.
         - Output: :math:`(1)`. If reduce is ``False``, then the same size
             as the target: :math:`(N)`, or
-            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K >= 2` in the case
+            :math:`(N, d_1, d_2, ..., d_K)` with :math:`K \geq 2` in the case
             of K-dimensional loss.
 
     Examples::
@@ -206,10 +206,13 @@ class NLLLoss2d(NLLLoss):
 class PoissonNLLLoss(_Loss):
     r"""Negative log likelihood loss with Poisson distribution of target.
 
-    The loss can be described as::
+    The loss can be described as:
 
-        target ~ Pois(input)
-        loss(input, target) = input - target * log(input) + log(target!)
+    .. math::
+        \text{target} \sim \mathrm{Poisson}(\text{input})
+
+        \text{loss}(\text{input}, \text{target}) = \text{input} - \text{target} * \log(\text{input})
+                                    + \log(\text{target!})
 
     The last term can be omitted or approximised with Stirling formula. The
     approximation is used for target values more than 1. For targets less or
@@ -217,20 +220,22 @@ class PoissonNLLLoss(_Loss):
 
     Args:
         log_input (bool, optional): if ``True`` the loss is computed as
-            `exp(input) - target * input`, if ``False`` the loss is
-            `input - target * log(input+eps)`.
+            :math:`\exp(\text{input}) - \text{target}*\text{input}`, if ``False`` the loss is
+            :math:`\text{input} - \text{target}*\log(\text{input}+\text{eps})`.
         full (bool, optional): whether to compute full loss, i. e. to add the
             Stirling approximation term
-            `target * log(target) - target + 0.5 * log(2 * pi * target)`.
+
+            .. math::
+                \text{target}*\log(\text{target}) - \text{target} + 0.5 * \log(2\pi\text{target}).
         size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field size_average
+            observations for each minibatch. However, if the field `size_average`
             is set to ``False``, the losses are instead summed for each minibatch.
-        eps (float, optional): Small value to avoid evaluation of log(0) when
-            log_input==``False``. Default: 1e-8
+        eps (float, optional): Small value to avoid evaluation of :math:`\log(0)` when
+            :attr:`log_input == False`. Default: 1e-8
         reduce (bool, optional): By default, the losses are averaged
             over observations for each minibatch, or summed, depending on
             size_average. When reduce is ``False``, returns a loss per input/target
-            element instead and ignores size_average. Default: ``True``
+            element instead and ignores `size_average`. Default: ``True``
 
     Examples::
 
@@ -561,12 +566,13 @@ class MultiLabelMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a multi-class multi-classification
     hinge loss (margin-based loss) between input `x`  (a 2D mini-batch `Tensor`)
     and output `y` (which is a 2D `Tensor` of target class indices).
-    For each sample in the mini-batch::
+    For each sample in the mini-batch:
 
-        loss(x, y) = sum_ij(max(0, 1 - (x[y[j]] - x[i]))) / x.size(0)
+    .. math::
+        \text{loss}(x, y) = \sum_{ij}\frac{\max(0, 1 - (x[y[j]] - x[i]))}{\text{x.size}(0)}
 
     where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`,
-    `y[j] >= 0`, and `i != y[j]` for all `i` and `j`.
+    :math:`y[j] \geq 0`, and :math:`i \neq y[j]` for all `i` and `j`.
 
     `y` and `x` must have the same size.
 
@@ -606,11 +612,19 @@ class SmoothL1Loss(_Loss):
     element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see "Fast R-CNN" paper by Ross Girshick).
-    Also known as the Huber loss::
+    Also known as the Huber loss:
 
-                              { 0.5 * (x_i - y_i)^2, if |x_i - y_i| < 1
-        loss(x, y) = 1/n \sum {
-                              { |x_i - y_i| - 0.5,   otherwise
+    .. math::
+        \text{loss}(x, y) = \frac{1}{n} \sum_{i} z_{i}
+
+    where :math:`z_{i}` is given by:
+
+    .. math::
+        z_{i} =
+        \begin{cases}
+        0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < 1 \\
+        |x_i - y_i| - 0.5, & \text{otherwise }
+        \end{cases}
 
     `x` and `y` arbitrary shapes with a total of `n` elements each
     the sum operation still operates over all the elements, and divides by `n`.
@@ -650,9 +664,8 @@ class SoftMarginLoss(_Loss):
     logistic loss between input tensor `x` and target tensor `y` (containing 1 or
     -1).
 
-    ::
-
-        loss(x, y) = sum_i (log(1 + exp(-y[i]*x[i]))) / x.nelement()
+    .. math::
+        \text{loss}(x, y) = \sum_i \frac{\log(1 + \exp(-y[i]*x[i]))}{\text{x.nelement}()}
 
     Args:
         size_average (bool, optional): By default, the losses are averaged over
@@ -681,10 +694,10 @@ class SoftMarginLoss(_Loss):
 
 
 class CrossEntropyLoss(_WeightedLoss):
-    r"""This criterion combines `LogSoftMax` and `NLLLoss` in one single class.
+    r"""This criterion combines :func:`nn.LogSoftmax` and :func:`nn.NLLLoss` in one single class.
 
     It is useful when training a classification problem with `C` classes.
-    If provided, the optional argument `weight` should be a 1D `Tensor`
+    If provided, the optional argument :attr:`weight` should be a 1D `Tensor`
     assigning weight to each of the classes.
     This is particularly useful when you have an unbalanced training set.
 
@@ -692,37 +705,39 @@ class CrossEntropyLoss(_WeightedLoss):
 
     `input` has to be a 2D `Tensor` of size `(minibatch, C)`.
 
-    This criterion expects a class index (0 to C-1) as the
+    This criterion expects a class index (0 to `C-1`) as the
     `target` for each value of a 1D tensor of size `minibatch`
 
-    The loss can be described as::
+    The loss can be described as:
 
-        loss(x, class) = -log(exp(x[class]) / (\sum_j exp(x[j])))
-                       = -x[class] + log(\sum_j exp(x[j]))
+    .. math::
+        \text{loss}(x, class) = -\log\left(\frac{\exp(x[class])}{\sum_j \exp(x[j])}\right)
+                       = -x[class] + \log\left(\sum_j \exp(x[j])\right)
 
-    or in the case of the `weight` argument being specified::
+    or in the case of the `weight` argument being specified:
 
-        loss(x, class) = weight[class] * (-x[class] + log(\sum_j exp(x[j])))
+    .. math::
+        \text{loss}(x, class) = weight[class] \left(-x[class] + \log\left(\sum_j \exp(x[j])\right)\right)
 
     The losses are averaged across observations for each minibatch.
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
-           If given, has to be a Tensor of size "C"
+           If given, has to be a Tensor of size `C`
         size_average (bool, optional): By default, the losses are averaged over observations for each minibatch.
-           However, if the field size_average is set to ``False``, the losses are
+           However, if the field `size_average` is set to ``False``, the losses are
            instead summed for each minibatch. Ignored if reduce is ``False``.
         ignore_index (int, optional): Specifies a target value that is ignored
-            and does not contribute to the input gradient. When size_average is
+            and does not contribute to the input gradient. When `size_average` is
             ``True``, the loss is averaged over non-ignored targets.
         reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on size_average. When reduce
+            observations for each minibatch depending on `size_average`. When reduce
             is ``False``, returns a loss per batch instead and ignores
             size_average. Default: ``True``
 
     Shape:
         - Input: :math:`(N, C)` where `C = number of classes`
-        - Target: :math:`(N)` where each value is `0 <= targets[i] <= C-1`
+        - Target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`
         - Output: scalar. If reduce is ``False``, then :math:`(N)` instead.
 
     Examples::
@@ -748,10 +763,11 @@ class CrossEntropyLoss(_WeightedLoss):
 class MultiLabelSoftMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-label one-versus-all
     loss based on max-entropy, between input `x` and target `y` of size `(N, C)`.
-    For each sample in the minibatch::
+    For each sample in the minibatch:
 
-       loss(x, y) = - sum_i (y[i] * log( 1 / (1 + exp(-x[i])) )
-                         + ( (1-y[i]) * log(exp(-x[i]) / (1 + exp(-x[i])) ) )
+    .. math::
+        loss(x, y) = - \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
+                         + (1-y[i]) * \log\left(\frac{\exp(-x[i])}{(1 + \exp(-x[i]))}\right)
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
 
@@ -785,16 +801,22 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
 class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given  an input tensors
-    x1, x2 and a `Tensor` label `y` with values 1 or -1.
+    :math:`x_1`, :math:`x_2` and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
     using the cosine distance, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
+    `margin` should be a number from `-1` to `1`, `0` to `0.5` is suggested.
+    If `margin` is missing, the default value is `0`.
+
     The loss function for each sample is::
 
-                     { 1 - cos(x1, x2),              if y ==  1
-        loss(x, y) = {
-                     { max(0, cos(x1, x2) - margin), if y == -1
+    .. math::
+        \text{loss}(x, y) =
+        \begin{cases}
+        1 - \cos(x_1, x_2), & \text{if } y == 1 \\
+        \max(0, \cos(x_1, x_2) - \text{margin}), & \text{if } y == -1
+        \end{cases}
 
     Args:
         margin (float, optional): Should be a number from `-1` to `1`, `0` to `0.5`
@@ -827,9 +849,10 @@ class MarginRankingLoss(Module):
     If `y == 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for `y == -1`.
 
-    The loss function for each sample in the mini-batch is::
+    The loss function for each sample in the mini-batch is:
 
-        loss(x, y) = max(0, -y * (x1 - x2) + margin)
+    .. math::
+        \text{loss}(x, y) = \max(0, -y * (x1 - x2) + \text{margin})
 
     if the internal variable `size_average = True`,
     the loss function averages the loss over the batch samples;
@@ -851,13 +874,23 @@ class MultiMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-class classification hinge
     loss (margin-based loss) between input `x` (a 2D mini-batch `Tensor`) and
     output `y` (which is a 1D tensor of target class indices,
-    `0` <= `y` <= `x.size(1)`):
+    :math:`0 \leq y \leq \text{x.size}(1)`):
 
     For each mini-batch sample, the loss in terms of the 1D input `x` and scalar
-    output `y` is::
+    output `y` is:
 
-        loss(x, y) = sum_i(max(0, w[y] * (margin - x[y] + x[i]))^p) / x.size(0)
-                     where `i == 0` to `x.size(0)` and `i != y`.
+    .. math::
+        \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i]))^p}{\text{x.size}(0)}
+
+    where `i == 0` to `x.size(0)` and :math:`i \neq y`.
+
+    Optionally, you can give non-equal weighting on the classes by passing
+    a 1D `weight` tensor into the constructor.
+
+    The loss function then becomes:
+
+    .. math::
+        \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] - x[i]))^p)}{\text{x.size}(0)}
 
     Args:
         p (int, optional): Has a default value of `1`. `1` and `2` are the only
