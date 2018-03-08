@@ -44,6 +44,7 @@ ${return_type} ${api_name}(${formals_with_defaults}) const;
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} Type::${api_name}(${formals}) const {
+    ${zero_dim_dispatch}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
@@ -479,6 +480,20 @@ def to_return_type(arg, option):
     }
 
 
+def get_zero_dim_dispatch(env, option, want_same_size):
+    # type: (Environment, FunctionOption) -> List[str]
+    is_same_size = option['method_prefix_derived'] == 's_'
+    if is_same_size != want_same_size:
+        return []
+    zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar')
+    if not zero_dim_dispatch:
+        return []
+    zero_dim_actuals = [arg['name']
+                        if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
+                        for arg in option['formals_list']]
+    return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
+
+
 def create_generic(top_env, declarations):
     # type: (TopEnvironment, List[FunctionOption]) -> List[OutputDeclaration]
     # translates defaults from cwrap types to C++ values
@@ -750,7 +765,8 @@ def create_generic(top_env, declarations):
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
+                TYPE_METHOD_DEFINITION_BROADCAST.substitute(
+                    env, zero_dim_dispatch=get_zero_dim_dispatch(env, option, want_same_size=True)))
 
         method_of = ['Type']
         if is_method:
@@ -1065,24 +1081,10 @@ def create_derived(backend_type_env, declarations):
             return backend_type_env['AccScalarName'] == 'Long'
         return False
 
-    def get_zero_dim_dispatch_when_scalar(option):
-        # type: (FunctionOption) -> str
-        return option.get('zero_dim_dispatch_when_scalar', False)  # type: ignore
-
-    def handle_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = get_zero_dim_dispatch_when_scalar(option)
-        if not zero_dim_dispatch:
-            return []
-        zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
-                            for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
     def handle_only_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         if option.get('zero_dim_tensor_only', False):
-            check_name = get_zero_dim_dispatch_when_scalar(option)
+            check_name = option['zero_dim_dispatch_when_scalar']
             return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
         else:
             return None
@@ -1151,7 +1153,8 @@ def create_derived(backend_type_env, declarations):
         # type: (Environment, FunctionOption) -> List[str]
         body = []  # type: List[str]
         body += handle_sparse(env, option)
-        body += handle_zero_dim(env, option)
+        # NB: Same size zero dim dispatch is handled in the broadcasting method
+        body += get_zero_dim_dispatch(env, option, want_same_size=False)
         only_zero_dim_check = handle_only_zero_dim(env, option)
         if only_zero_dim_check is not None:
             #  code below only_zero_dim_check is unreachable so we do not need to generate the rest.

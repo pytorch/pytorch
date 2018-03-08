@@ -544,23 +544,112 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   END_HANDLE_TH_ERRORS
 }
 
+namespace {
+
+template<const char *name, template<typename, typename> typename Op>
+struct binary_op {
+  static Tensor dispatch(const Tensor& self, const Tensor& other) {
+    AutoNoGIL no_gil;
+    AutoGPU auto_gpu(self);
+    return Op<const Tensor&, const Tensor&>{}(self, other);
+  }
+  static Tensor dispatch(const Tensor& self, Scalar other) {
+    AutoNoGIL no_gil;
+    AutoGPU auto_gpu(self);
+    return Op<const Tensor&, Scalar>{}(self, other);
+  }
+  static PyObject* py_function(PyObject* self, PyObject* args, PyObject* kwargs)
+  {
+    HANDLE_TH_ERRORS
+    static PythonArgParser parser({
+        std::string(name) + "(Tensor other)",
+        std::string(name) + "(Scalar other)",
+    });
+    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+    ParsedArgs<1> parsed_args;
+    auto r = parser.parse(args, kwargs, parsed_args);
+    if (r.idx == 0) {
+      return wrap(dispatch(self_, r.tensor(0)));
+    } else if (r.idx == 1) {
+      return wrap(dispatch(self_, r.scalar(0)));
+    }
+    Py_RETURN_NONE;
+    END_HANDLE_TH_ERRORS
+  }
+};
+
+#define DEFINE_BINARY_OP(__name__, op)                                         \
+constexpr char __name__##str[] = #__name__;                                    \
+template<typename A, typename B>                                               \
+struct __name__##impl { Tensor operator()(A a, B b) const { return a op b; } };\
+using __name__ = binary_op<__name__##str, __name__##impl>;
+
+DEFINE_BINARY_OP(__add__, +)
+DEFINE_BINARY_OP(__mul__, *)
+DEFINE_BINARY_OP(__sub__, -)
+DEFINE_BINARY_OP(__div__, /)
+DEFINE_BINARY_OP(__mod__, %)
+DEFINE_BINARY_OP(__lt__, <)
+DEFINE_BINARY_OP(__le__, <=)
+DEFINE_BINARY_OP(__gt__, >)
+DEFINE_BINARY_OP(__ge__, >=)
+DEFINE_BINARY_OP(__eq__, ==)
+DEFINE_BINARY_OP(__ne__, !=)
+
+// We don't have a pow operator in C++, so we need to handle the scalar case ourselves
+constexpr char pow_str[] = "__pow__";
+template<typename A, typename B>
+struct pow_impl {};
+
+template<>
+struct pow_impl<const Tensor&, Scalar> {
+  Tensor operator()(const Tensor& a, Scalar b) const {
+    return a.pow(b);
+  }
+};
+
+template<>
+struct pow_impl<const Tensor&, const Tensor&> {
+  Tensor operator()(const Tensor& a, const Tensor& b) const {
+    if (a.dim() == 0) {
+      return b.type().tensor(b.sizes()).fill_(a).pow_(b);
+    }
+    return a.pow(b);
+  }
+};
+
+using __pow__ = binary_op<pow_str, pow_impl>;
+
+#undef DEFINE_BINARY_OP
+
+} // namespace
+
 // generated methods start here
 
 ${py_methods}
 
 PyMethodDef variable_methods[] = {
-  {"__add__", (PyCFunction)THPVariable_add, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__radd__", (PyCFunction)THPVariable_add, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__add__", (PyCFunction)__add__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__radd__", (PyCFunction)__add__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__rmul__", (PyCFunction)__mul__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__mul__", (PyCFunction)__mul__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__sub__", (PyCFunction)__sub__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__div__", (PyCFunction)__div__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__truediv__", (PyCFunction)__div__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__pow__", (PyCFunction)__pow__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__mod__", (PyCFunction)__mod__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__lt__", (PyCFunction)__lt__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__le__", (PyCFunction)__le__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__gt__", (PyCFunction)__gt__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ge__", (PyCFunction)__ge__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__eq__", (PyCFunction)__eq__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"__ne__", (PyCFunction)__ne__::py_function, METH_VARARGS | METH_KEYWORDS, NULL},
+  // NOTE: we don't need to be quite as careful about scalars with in-place ops
+  // because they don't broadcast
   {"__iadd__", (PyCFunction)THPVariable_add_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__rmul__", (PyCFunction)THPVariable_mul, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__mul__", (PyCFunction)THPVariable_mul, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__imul__", (PyCFunction)THPVariable_mul_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__sub__", (PyCFunction)THPVariable_sub, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__isub__", (PyCFunction)THPVariable_sub_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__div__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__truediv__", (PyCFunction)THPVariable_div, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__idiv__", (PyCFunction)THPVariable_div_, METH_VARARGS | METH_KEYWORDS, NULL},
-  {"__mod__", (PyCFunction)THPVariable_remainder, METH_VARARGS | METH_KEYWORDS, NULL},
   {"__bool__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__float__", (PyCFunction)THPVariable_float_scalar, METH_NOARGS, NULL},
   {"__int__", (PyCFunction)THPVariable_integral_scalar, METH_NOARGS, NULL},

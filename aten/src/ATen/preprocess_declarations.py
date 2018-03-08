@@ -148,8 +148,6 @@ def set_mode(option):
 # where 'name' is the name of the argument that should be a scalar
 # during dispatch, if that argument is marked internally as holding a scalar
 # then the method will dispatch to that function.
-
-
 def discover_zero_dim_tensor_operations(declaration):
     def exclude(arg):
         return arg.get('ignore_check')
@@ -173,12 +171,6 @@ def discover_zero_dim_tensor_operations(declaration):
                     names = [arg['name'] for arg in tensor_version['arguments']
                              if not exclude(arg)]
                     tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
-                    # print("FOUND "+str(i)   )
-                    # print("Scalar Version ===== ")
-                    # print(yaml.dump(option))
-                    # print("Tensor Version ===== ")
-                    # print(yaml.dump(tensor_version))
-                    # print("SHARED "+names[i])
 
 
 def discover_sparse_tensor_operations(declaration):

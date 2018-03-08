@@ -328,12 +328,6 @@ class Variable(_C._VariableBase):
 
     __neg__ = _C._VariableBase.neg
 
-    __eq__ = _C._VariableBase.eq
-    __ne__ = _C._VariableBase.ne
-    __lt__ = _C._VariableBase.lt
-    __le__ = _C._VariableBase.le
-    __gt__ = _C._VariableBase.gt
-    __ge__ = _C._VariableBase.ge
     __abs__ = _C._VariableBase.abs
 
     def __len__(self):
