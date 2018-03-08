@@ -265,6 +265,13 @@
 - func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
   variants: function
 
+- func: non_max_suppression(Tensor input, Tensor scores, double thresh) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: non_max_suppression_cpu
+    CUDA: non_max_suppression_cuda
+
+
 - func: ones_like(Tensor self) -> Tensor
   variants: function
 
