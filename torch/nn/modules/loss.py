@@ -783,15 +783,12 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
                                              self.reduce)
 
 
-class CosineEmbeddingLoss(Module):
+class CosineEmbeddingLoss(_Loss):
     r"""Creates a criterion that measures the loss given  an input tensors
     x1, x2 and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
     using the cosine distance, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
-
-    `margin` should be a number from `-1` to `1`, `0` to `0.5` is suggested.
-    If `margin` is missing, the default value is `0`.
 
     The loss function for each sample is::
 
@@ -799,19 +796,27 @@ class CosineEmbeddingLoss(Module):
         loss(x, y) = {
                      { max(0, cos(x1, x2) - margin), if y == -1
 
-    If the internal variable `size_average` is equal to ``True``,
-    the loss function averages the loss over the batch samples;
-    if `size_average` is ``False``, then the loss function sums over the
-    batch samples. By default, `size_average = True`.
+    Args:
+        margin (float, optional): Should be a number from `-1` to `1`, `0` to `0.5`
+            is suggested. If `margin` is missing, the default value is `0`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
     """
 
-    def __init__(self, margin=0, size_average=True):
-        super(CosineEmbeddingLoss, self).__init__()
+    def __init__(self, margin=0, size_average=True, reduce=True):
+        super(CosineEmbeddingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input1, input2, target):
-        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average)
+        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average,
+                                       self.reduce)
 
 
 class MarginRankingLoss(Module):
