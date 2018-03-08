@@ -136,7 +136,7 @@ def default_collate(batch):
         transposed = zip(*batch)
         return [default_collate(samples) for samples in transposed]
 
-    raise TypeError((error_msg.format(type(batch[0]))))
+    return batch
 
 
 def pin_memory_batch(batch):
