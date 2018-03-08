@@ -179,7 +179,7 @@ namespace {
 OpSchema::Cost CostInferenceForSpatialBN(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
-  struct OpSchema::Cost cost = PointwiseCostInference<2>(def, in);
+  struct OpSchema::Cost cost = PointwiseCostInference<4>(def, in);
   ArgumentHelper helper(def);
   auto order =
       StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));

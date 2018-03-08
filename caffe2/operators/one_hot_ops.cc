@@ -34,10 +34,14 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
 
   const auto* lens_data = lens.template data<int32_t>();
   TIndex output_dim = 0;
+  valsOffsets_.resize(D + 1);
   for (TIndex i = 0; i < D; i++) {
     CAFFE_ENFORCE_GE(lens_data[i], 0);
+    valsOffsets_[i] = output_dim;
     output_dim += lens_data[i];
   }
+  valsOffsets_[D] = output_dim;
+
   CAFFE_ENFORCE_EQ(vals.size(), output_dim);
   auto* output = Output(ONE_HOT);
   output->Resize(N, output_dim);
@@ -45,21 +49,17 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   const auto* input_data = input.template data<T>();
   const auto* vals_data = vals.template data<T>();
   auto* output_data = output->template mutable_data<T>();
-  // eigen is column-major
-  auto input_m = ConstEigenMatrixMap<T>(input_data, D, N);
-  auto output_m = EigenMatrixMap<T>(output_data, output_dim, N);
 
-  // `p` is the column position in output_data, that points to the next
-  // column to be filled.
-  TIndex p = 0;
-  // one-hot encoding for each example.
-  for (TIndex j = 0; j < D; j++) {
-    for (TIndex t = 0; t < lens_data[j]; t++) {
-      output_m.row(p) =
-          input_m.row(j).cwiseEqual(vals_data[p]).template cast<T>();
-      p++;
+  for (TIndex i = 0; i < N; ++i) {
+    for (TIndex j = 0; j < D; j++) {
+      const auto input_val = input_data[i * D + j];
+      for (TIndex k = valsOffsets_[j]; k < valsOffsets_[j + 1]; ++k) {
+        output_data[k] = vals_data[k] == input_val;
+      }
     }
+    output_data += output_dim;
   }
+
   return true;
 }
 

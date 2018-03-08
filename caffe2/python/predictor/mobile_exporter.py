@@ -22,6 +22,38 @@ from __future__ import print_function
 from __future__ import unicode_literals
 from caffe2.python import core, utils
 from caffe2.proto import caffe2_pb2
+import numpy as np
+
+
+def add_tensor(net, name, blob):
+    ''' Create an operator to store the tensor 'blob',
+        run the operator to put the blob to workspace.
+        uint8 is stored as an array of string with one element.
+    '''
+    kTypeNameMapper = {
+        np.dtype('float32'): "GivenTensorFill",
+        np.dtype('int32'): "GivenTensorIntFill",
+        np.dtype('int64'): "GivenTensorInt64Fill",
+        np.dtype('uint8'): "GivenTensorStringFill",
+    }
+
+    shape = blob.shape
+    values = blob
+    # pass array of uint8 as a string to save storage
+    # storing uint8_t has a large overhead for now
+    if blob.dtype == np.dtype('uint8'):
+        shape = [1]
+        values = [str(blob.data)]
+
+    op = core.CreateOperator(
+        kTypeNameMapper[blob.dtype],
+        [], [name],
+        arg=[
+            utils.MakeArgument("shape", shape),
+            utils.MakeArgument("values", values),
+        ]
+    )
+    net.op.extend([op])
 
 
 def Export(workspace, net, params):
@@ -49,17 +81,7 @@ def Export(workspace, net, params):
     for blob_ref in params:
         blob_name = str(blob_ref)
         blob = workspace.FetchBlob(blob_name)
-        init_net.op.extend(
-            [
-                core.CreateOperator(
-                    "GivenTensorFill", [], [blob_name],
-                    arg=[
-                        utils.MakeArgument("shape", blob.shape),
-                        utils.MakeArgument("values", blob)
-                    ]
-                )
-            ]
-        )
+        add_tensor(init_net, blob_name, blob)
     # We have to make sure the blob exists in the namespace
     # and we can do so with fake data. (Which is immediately overwritten
     # by any typical usage)

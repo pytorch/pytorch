@@ -22,6 +22,8 @@
 #include "caffe2/mkl/utils/mkl_memory.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+CAFFE2_DECLARE_bool(caffe2_mkl_memonger_in_use);
+
 namespace caffe2 {
 
 CAFFE_DECLARE_REGISTRY(

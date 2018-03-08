@@ -42,7 +42,7 @@ class MKLSumOp final : public MKLOperator<T> {
     MKLMemory<T>* Y = Output(0);
     bool dims_changed;
     CHECK_INPUT_DIMS(X0, dims_changed);
-    if (dims_changed) {
+    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
       primitive_.Reset(
           dnnSumCreate<T>,
           nullptr,
@@ -63,14 +63,18 @@ class MKLSumOp final : public MKLOperator<T> {
       input_views_[i] = Xi.View(X0.layout());
       resources_[dnnResourceMultipleSrc + i] = input_views_[i].get();
     }
+    bool shared = false;
     if (Y != &X0) {
       // TODO: MKLDNN seems broken in the in-place case, so when we specify
       // in-place we will need to use buffer differnt from X0/Y.
-      buffer_.ShareFrom(*Y);
+      shared = buffer_.ShareFrom(*Y);
     }
     resources_[dnnResourceDst] = buffer_.buffer();
     MKLDNN_SAFE_CALL(mkl::dnnExecute<T>(primitive_, resources_));
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
+    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+      buffer_.Reset();
+    }
     return true;
   }
 

@@ -61,6 +61,13 @@ class PrimitiveWrapper {
     creator(&primitive_, args...);
   }
 
+  void Reset() {
+    if (primitive_) {
+      MKLDNN_SAFE_CALL(dnnDelete<T>(primitive_));
+      primitive_ = nullptr;
+    }
+  }
+
   operator dnnPrimitive_t() const {
     return primitive_;
   }
@@ -132,6 +139,13 @@ class LayoutWrapper {
     if (layout_)
       MKLDNN_CHECK(dnnLayoutDelete<T>(layout_));
     MKLDNN_SAFE_CALL(dnnLayoutCreate<T>(&layout_, dimension, size, strides));
+  }
+
+  void Reset() {
+    if (layout_) {
+      MKLDNN_CHECK(dnnLayoutDelete<T>(layout_));
+      layout_ = nullptr;
+    }
   }
 
   operator dnnLayout_t() const {
@@ -249,6 +263,16 @@ class MKLMemory {
       // memory upfront.
       buffer();
     }
+  }
+
+  void Reset() {
+    buffer_.reset();
+    dims_.clear();
+    size_ = 0;
+    user_layout_.Reset();
+    layout_.Reset();
+    convert_in_.Reset();
+    convert_out_.Reset();
   }
 
   /**
