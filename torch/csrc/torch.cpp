@@ -1,17 +1,17 @@
 #include <torch/torch.h>
+#include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
-autograd::VariableType getType(at::Backend backend, at::ScalarType type) {
-  return autograd::VariableType(
-      &at::globalContext(), &at::getType(backend, type));
+at::Type& getType(at::Backend backend, at::ScalarType type) {
+  return *autograd::VariableType::getType(at::getType(backend, type));
 }
 
-autograd::VariableType CPU(at::ScalarType type) {
+at::Type& CPU(at::ScalarType type) {
   return torch::getType(at::kCPU, type);
 }
 
-autograd::VariableType CUDA(at::ScalarType type) {
+at::Type& CUDA(at::ScalarType type) {
   return torch::getType(at::kCUDA, type);
 }
 
