@@ -85,6 +85,14 @@ void THDTensor_(logNormal)(THDTensor *self, THDGenerator *_generator, double mea
   );
 }
 
+void THDTensor_(truncatedNormal)(THDTensor *self, THDGenerator *_generator, double mean,
+                           double stdv, double min_val, double max_val) {
+  masterCommandChannel->sendMessage(
+    packMessage(Functions::tensorTruncatedNormal, self, _generator, mean, stdv, min_val, max_val),
+    THDState::s_current_worker
+  );
+}
+
 void THDTensor_(multinomial)(THDLongTensor *self, THDGenerator *_generator,
                              THDTensor *prob_dist, int n_sample,
                              int with_replacement) {

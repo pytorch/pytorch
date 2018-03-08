@@ -11,6 +11,7 @@ THC_API void THCTensor_(normal)(struct THCState *state, THCTensor *self, double 
 THC_API void THCTensor_(normal_means)(struct THCState *state, THCTensor *self, THCTensor *means, double stddev);
 THC_API void THCTensor_(normal_stddevs)(struct THCState *state, THCTensor *self, double mean, THCTensor *stddevs);
 THC_API void THCTensor_(normal_means_stddevs)(struct THCState *state, THCTensor *self, THCTensor *means, THCTensor *stddevs);
+THC_API void THCTensor_(truncatedNormal)(struct THCState *state, THCTensor *self, double mean, double stdv, double min_val, double max_val);
 THC_API void THCTensor_(logNormal)(struct THCState *state, THCTensor *self, double mean, double stdv);
 THC_API void THCTensor_(exponential)(struct THCState *state, THCTensor *self, double lambda);
 THC_API void THCTensor_(cauchy)(struct THCState *state, THCTensor *self, double median, double sigma);

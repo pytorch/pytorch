@@ -285,6 +285,68 @@ double THRandom_normal(THGenerator *_generator, double mean, double stdv)
     return _generator->gen_state.normal_rho*sin(2.*M_PI*_generator->gen_state.normal_x)*stdv+mean;
 }
 
+double THRandom_truncatedNormal(THGenerator *_generator, double mean, double stdv, double min_val, double max_val)
+{
+  //Port from tensorflow
+
+  THArgCheck(stdv > 0, 2, "standard deviation must be strictly positive");
+  THArgCheck(min_val < max_val, 3, "min_val mush be smaller than max_val");
+  THArgCheck(!isinf(min_val) || !isinf(max_val), 3, "min_val and max_val can not both be infinite");
+
+  // If possible, make one-sided bound be the lower bound, or make both
+  // bounds positive. Otherwise, the bounds are on either side of the
+  // mean.
+  if ((isinf(min_val) && min_val < 0) || max_val < mean) {
+    // Reverse all calculations. normMin and normMax will be flipped.
+    double temp = min_val; min_val = max_val; max_val = temp;
+    stdv = -stdv;
+  }
+  // Calculate normalized samples, then convert them.
+  double normMin = (min_val - mean) / stdv;
+  double normMax = (max_val - mean) / stdv;
+
+  // Determine the method to use.
+  double sqrtFactor = sqrt((normMin * normMin) + 4);
+  double cutoff =
+      2 * exp(0.5 + (normMin * (normMin - sqrtFactor)) / 4) /
+      (normMin + sqrtFactor);
+  double diff = normMax - normMin;
+
+  if (diff < cutoff) {
+    // Sample from a uniform distribution on [normMin, normMax].
+
+    double plusFactor = (normMin < 0) ? 0 : normMin * normMin;
+
+    while (1) {
+      double rand = uniform_double(_generator);
+      double z = rand * diff + normMin;
+      double g = (plusFactor - z * z) / 2.0;
+
+      double u = uniform_double(_generator);
+      if (u <= exp(g)){
+        // Accept the sample z.
+        return z * stdv + mean;
+      }
+    }
+  }else {
+    // Sample from an exponential distribution with alpha maximizing
+    // acceptance probability, offset by normMin from the origin.
+    // Accept only if less than normMax.
+    double alpha =
+        (normMin + sqrt((normMin * normMin) + 4)) / 2;
+    while (1) {
+      double rand = uniform_double(_generator);
+      double z = -log(rand + 2e-10) / alpha + normMin;
+      double x = normMin < alpha ? alpha - z : normMin - alpha;
+      double g = exp(-x * x / 2.0);
+      double u = uniform_double(_generator);
+      if (u <= g && z < normMax) {
+        return z * stdv + mean;
+      }
+    }
+  }
+}
+
 double THRandom_exponential(THGenerator *_generator, double lambda)
 {
   return(-1. / lambda * log(1-uniform_double(_generator)));

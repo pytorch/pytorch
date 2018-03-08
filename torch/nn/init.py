@@ -80,6 +80,26 @@ def normal(tensor, mean=0, std=1):
         return tensor.normal_(mean, std)
 
 
+def truncated_normal(tensor, mean=0, std=1):
+    """Fills the input Tensor with values drawn from the truncated
+    normal distribution :math:`truncnorm(mean, std, -2, 2)`.
+    The generated values follow a normal distribution with specified mean and
+    standard deviation, except that values whose magnitude is more than 2
+    standard deviations from the mean are dropped and re-picked.
+
+    Args:
+        tensor: an n-dimensional torch.Tensor or autograd.Variable
+        mean: the mean of the truncated normal distribution
+        std: the standard deviation of the truncated normal distribution
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.truncated_normal(w)
+    """
+    with torch.no_grad():
+        return tensor.truncated_normal_(mean, std, mean - 2 * std, mean + 2 * std)
+
+
 def constant(tensor, val):
     """Fills the input Tensor with the value `val`.
 

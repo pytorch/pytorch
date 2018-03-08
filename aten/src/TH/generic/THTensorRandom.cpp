@@ -162,6 +162,12 @@ void THTensor_(logNormal)(THTensor *self, THGenerator *_generator, double mean, 
   TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_logNormal(_generator, mean, stdv););
 }
 
+void THTensor_(truncatedNormal)(THTensor *self, THGenerator *_generator, double mean, double stdv, double min_val, double max_val)
+{
+  std::lock_guard<std::mutex> lock(_generator->mutex);
+  TH_TENSOR_APPLY(real, self, *self_data = (real)THRandom_truncatedNormal(_generator, mean, stdv, min_val, max_val););
+}
+
 void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor *q)
 {
   int64_t inputsize = THTensor_(nElement)(probs);

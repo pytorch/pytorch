@@ -23,6 +23,8 @@ THD_API void THDTensor_(cauchy)(THDTensor *self, THDGenerator *_generator,
                                 double median, double sigma);
 THD_API void THDTensor_(logNormal)(THDTensor *self, THDGenerator *_generator,
                                    double mean, double stdv);
+THD_API void THDTensor_(truncatedNormal)(THDTensor *self, THDGenerator *_generator,
+                                   double mean, double stdv, double min_val, double max_val);
 THD_API void THDTensor_(multinomial)(THDLongTensor *self,
                                      THDGenerator *_generator,
                                      THDTensor *prob_dist,

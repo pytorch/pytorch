@@ -38,6 +38,107 @@ __global__ void generateLogNormal<double>(curandStateMtgp32 *state, int size, do
 }
 
 template <typename T>
+inline __device__ T curand_uniform_type(curandStateMtgp32 *state)
+{
+  return ScalarConvert<float, T>::to(curand_uniform(state));
+}
+
+template <>
+inline __device__ double curand_uniform_type<double>(curandStateMtgp32 *state)
+{
+  return curand_uniform_double(state);
+}
+
+template <typename T>
+__global__ void generateTruncatedNormal(curandStateMtgp32 *state, int size, T *result,
+                                        double mean, double stddev, double min_val, double max_val)
+{
+  // Port from tensorflow
+  if (isinf(min_val) || max_val < mean) {
+    double temp = min_val;
+    min_val = max_val;
+    max_val = temp;
+    stddev = -stddev;
+  }
+  const int kMaxIterations = 100;
+
+  // Calculate normalized samples, then scale them.
+  double normMin = (min_val - mean) / stddev;
+  double normMax = (max_val - mean) / stddev;
+
+  // Determine the method to use.
+  double sqrtFactor = sqrt((normMin * normMin) + 4);
+  double cutoff =
+      2 * exp(0.5 + (normMin * (normMin - sqrtFactor)) / 4) /  
+      (normMin + sqrtFactor);
+  double diff = normMax - normMin;
+
+  if (diff < cutoff) {
+    // Sample from a uniform distribution on [normMin, normMax].
+    
+    T plusFactor = (normMin < 0) ? ScalarConvert<double, T>::to(0.0): ScalarConvert<double, T>::to(normMin * normMin);
+    T diff_T = ScalarConvert<double, T>::to(diff);
+    T normMin_T = ScalarConvert<double, T>::to(normMin);
+    T stddev_T = ScalarConvert<double, T>::to(stddev);
+    T mean_T = ScalarConvert<double, T>::to(mean);
+    T two = ScalarConvert<double, T>::to(2.0);
+
+    int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+    for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+      T rand[200];
+      for (int j = 0; j < kMaxIterations * 2; j+=1){
+        rand[j] = curand_uniform_type<T>(&state[blockIdx.x]);
+      }
+
+      for (int numIter = 0; numIter < kMaxIterations; numIter += 1) {
+        T z = THCNumerics<T>::add(THCNumerics<T>::mul(rand[numIter * 2], diff_T), normMin_T);
+        T g = THCNumerics<T>::div(THCNumerics<T>::sub(plusFactor, THCNumerics<T>::mul(z, z)), two);
+        T u = rand[numIter * 2 + 1];
+        if (THCNumerics<T>::le(u, THCNumerics<T>::exp(g)) || numIter + 1 >= kMaxIterations) {
+          if (i < size){
+            result[i] = THCNumerics<T>::add(THCNumerics<T>::mul(z, stddev_T), mean_T);
+          }
+          break;
+        }
+      }
+    }
+  } else {
+    // Sample from an exponential distribution with alpha maximizing
+    // acceptance probability, offset by normMin from the origin.
+    // Accept only if less than normMax.
+    T alpha =
+        ScalarConvert<double, T>::to((normMin + sqrt((normMin * normMin) + 4)) / 2);
+    T normMin_T = ScalarConvert<double, T>::to(normMin);
+    T normMax_T = ScalarConvert<double, T>::to(normMax);
+    T stddev_T = ScalarConvert<double, T>::to(stddev);
+    T mean_T = ScalarConvert<double, T>::to(mean);
+    T two = ScalarConvert<double, T>::to(2.0);
+
+    int idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;
+    int rounded_size = THCCeilDiv(size, BLOCK_SIZE) * BLOCK_SIZE;
+    for (int i = idx; i < rounded_size; i += BLOCK_SIZE * MAX_NUM_BLOCKS) {
+      T rand[200];
+      for (int j = 0; j < kMaxIterations * 2; j+=1){
+        rand[j] = curand_uniform_type<T>(&state[blockIdx.x]);
+      }
+      for (int numIter = 0; numIter < kMaxIterations; numIter += 1) {
+        T z = THCNumerics<T>::sub(normMin_T, THCNumerics<T>::div(THCNumerics<T>::log(rand[numIter * 2]), alpha));
+        T x = THCNumerics<T>::lt(normMin_T, alpha) ? THCNumerics<T>::sub(alpha, z) : THCNumerics<T>::sub(normMin_T, alpha);
+        T g =  THCNumerics<T>::exp(THCNumerics<T>::neg(THCNumerics<T>::div(THCNumerics<T>::mul(x, x), two)));
+        T u = rand[numIter * 2 + 1];
+        if ((THCNumerics<T>::le(u, g) && THCNumerics<T>::lt(z, normMax_T)) || numIter + 1 >= kMaxIterations) {
+          if (i < size){
+            result[i] = THCNumerics<T>::add(THCNumerics<T>::mul(z, stddev_T), mean_T);
+          }
+          break;
+        }
+      }
+    }
+  }
+}
+
+template <typename T>
 __global__ void
 multinomialAliasDrawKernel(int size, int64_t *output, int64_t *J, T *q, int64_t K,  T *uniform, T *bernoulli){
   int64_t idx = blockIdx.x * BLOCK_SIZE + threadIdx.x;

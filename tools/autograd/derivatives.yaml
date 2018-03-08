@@ -354,6 +354,9 @@
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
 
+- name: truncated_normal_(Tensor self, double mean, double std, double min_val, double max_val, Generator generator)
+  self: zeros_like(grad)
+
 - name: lt_(Tensor self, Scalar other)
   self: zeros_like(self)
 

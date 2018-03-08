@@ -307,6 +307,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: trtrs
    .. automethod:: trunc
    .. automethod:: trunc_
+   .. automethod:: truncated_normal_
    .. automethod:: type
    .. automethod:: type_as
    .. automethod:: unfold

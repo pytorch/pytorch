@@ -3874,6 +3874,30 @@
       default: 2
 ]]
 [[
+  name: truncatedNormal_
+  cname: truncatedNormal
+  python_name: truncated_normal_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  return: self
+  arguments:
+    - THTensor* self
+    - arg: THGenerator* generator
+      default: nullptr
+      kwarg_only: True
+    - arg: double mean
+      default: 0
+    - arg: double std
+      default: 1
+    - arg: double min_val
+      default: -2
+    - arg: double max_val
+      default: 2
+]]
+[[
   name: exponential_
   types:
     - floating_point
