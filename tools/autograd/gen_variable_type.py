@@ -496,9 +496,9 @@ def unpack_args(env, declaration):
     body = []
     unpacked_args = []
     for i, arg in enumerate(declaration['arguments']):
-        # we shouldn't get type dispatched args here, because those should
-        # always go through CALL_VIA_TYPE
-        assert not arg.get('is_type_dispatched')
+        # these arguments are skipped from the Type method.
+        if arg.get('is_type_dispatched'):
+            continue
         if not requires_unpack(arg):
             unpacked_args.append(arg['name'])
             continue
@@ -540,14 +540,22 @@ def dispatch_strategy(declaration):
           get dispatched back to VariableType (which will ensure that they
           are differentiable.)
     """
-    if declaration['abstract'] or declaration['derivative'] is not None:
+    if (declaration['abstract'] or declaration['derivative'] is not None or
+            any(arg.get('is_type_dispatched') for arg in declaration['arguments'])):
         # If the function is abstract (not implemented on at::Type), we must
         # call the implementation on the derived type with unpacked tensors.
+
         # If the function has a derivative specified and is concrete, we could
         # call either implementation. We prefer the calling the derived
         # type's implementation with unpacked tensors because it is more
         # performant in some cases: any internal calls to other ATen functions
         # won't have the history tracked.
+
+        # If the function has a type dispatched argument (i.e. is a factory),
+        # we prefer calling the derived type's implementation both because it is
+        # more performant and to ensure factory functions return tensors with _version
+        # of 0 (probably not strictly necessary, but nice to have to keeps versions simple
+        # to understand.
         return 'use_derived'
     else:
         # If the function is concrete (we don't have to override it) and we
