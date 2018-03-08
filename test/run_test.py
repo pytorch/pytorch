@@ -38,7 +38,7 @@ def shell(command, cwd):
         cwd=cwd,
         shell=True)
     for stdout_line in iter(popen.stdout.readline, ''):
-        print(stdout_line.strip())
+        print(stdout_line.strip('\n'))
     popen.stdout.close()
     return_code = popen.wait()
     return return_code == 0
@@ -78,18 +78,47 @@ CUSTOM_HANDLERS = {
 
 
 def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('-v', '--verbose', action='store_true')
-    parser.add_argument('-p', '--python')
-    parser.add_argument('-c', '--coverage', action='store_true')
+    parser = argparse.ArgumentParser(description='Run PyTorch unit test suite')
     parser.add_argument(
-        '-i', '--include', nargs='+', choices=TESTS, default=TESTS)
+        '-v',
+        '--verbose',
+        action='store_true',
+        help='Print verbose information and test-by-test results')
     parser.add_argument(
-        '-x', '--exclude', nargs='+', choices=TESTS, default=[])
-    parser.add_argument('-f', '--first', choices=TESTS)
-    parser.add_argument('-l', '--last', choices=TESTS)
-    parser.add_argument('--with-windows', action='store_true')
-    parser.add_argument('--test-dir')
+        '-p', '--python', help='The Python interpreter to execute tests with')
+    parser.add_argument(
+        '-c',
+        '--coverage',
+        action='store_true',
+        help='Enable coverage support')
+    parser.add_argument(
+        '-i',
+        '--include',
+        nargs='+',
+        choices=TESTS,
+        default=TESTS,
+        help='Select a set of tests to include')
+    parser.add_argument(
+        '-x',
+        '--exclude',
+        nargs='+',
+        choices=TESTS,
+        default=[],
+        help='Select a set of tests to exclude')
+    parser.add_argument(
+        '-f',
+        '--first',
+        choices=TESTS,
+        help='Select the test to start from (excludes previous tests)')
+    parser.add_argument(
+        '-l',
+        '--last',
+        choices=TESTS,
+        help='Select the last test to run (excludes following tests)')
+    parser.add_argument(
+        '--ignore-win-blacklist',
+        action='store_true',
+        help='Always run blacklisted Windows tests')
     return parser.parse_args()
 
 
@@ -122,16 +151,12 @@ def get_selected_tests(options):
     return selected_tests
 
 
-def get_test_directory(options):
-    return options.test_dir or os.path.dirname(os.path.abspath(__file__))
-
-
 def main():
     options = parse_args()
     python = get_python_command(options)
     selected_tests = get_selected_tests(options)
     print('Selected tests: {}'.format(', '.join(selected_tests)))
-    test_directory = get_test_directory(options)
+    test_directory = os.path.dirname(os.path.abspath(__file__))
 
     if options.coverage:
         shell('coverage erase')
