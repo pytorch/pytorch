@@ -75,7 +75,7 @@ class set_grad_enabled(object):
 
     Example::
 
-        >>> x = Variable(torch.Tensor([1]), requires_grad=True)
+        >>> x = torch.tensor([1], requires_grad=True)
         >>> is_train = False
         >>> with torch.set_grad_enabled(is_train):
         ...   y = x * 2
