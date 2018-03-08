@@ -18,11 +18,11 @@ Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return at::_arange_out(result, start, end, step);
 }
 
-Tensor arange(const Type&dtype, Scalar end) {
+Tensor arange(const Type& dtype, Scalar end) {
   return dtype._arange(end);
 }
 
-Tensor& arange_out(Tensor &result, Scalar end) {
+Tensor& arange_out(Tensor& result, Scalar end) {
   return at::_arange_out(result, end);
 }
 
@@ -43,7 +43,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   if (n <= 0) {
     std::ostringstream oss;
     oss << "n must be greater than 0, got: " << n;
-    std::runtime_error(oss.str());
+    throw std::runtime_error(oss.str());
   }
   if(m <= 0) {
     m = n;
