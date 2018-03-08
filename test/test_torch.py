@@ -77,25 +77,6 @@ class BytesIOContext(io.BytesIO):
 
 class TestTorch(TestCase):
 
-    def test_scalar_unpack(self):
-        SMALL_NUM = 1e+5
-        LARGE_NUM = 1e+40
-
-
-        # unpackdouble for small float
-        torch.Tensor(100).fill_(SMALL_NUM)
-        # unpacklong for small int
-        torch.Tensor(100).fill_(int(SMALL_NUM))
-
-        # unpackdouble for large float
-        torch.Tensor(100).fill_(LARGE_NUM)
-        # unpacklong for large int, should raise exception
-        self.assertRaises(RuntimeError, lambda: torch.Tensor(100).fill_(int(LARGE_NUM)))
-        # unpackdouble for larget int, should print a warning to stderr
-        with warnings.catch_warnings(record=True) as w:
-            torch.Tensor([int(LARGE_NUM)])
-        self.assertGreater(len(w), 0)
-
     def test_dot(self):
         types = {
             'torch.DoubleTensor': 1e-8,
@@ -5572,6 +5553,28 @@ class TestTorch(TestCase):
         t /= 2
         id_after = id(t)
         self.assertEqual(id_before, id_after)
+
+    def test_scalar_unpack(self):
+        SMALL_NUM = 1e+5
+        LARGE_NUM = 1e+40
+
+        # unpackdouble for small float
+        torch.Tensor(100).fill_(SMALL_NUM)
+        # unpacklong for small int
+        torch.Tensor(100).fill_(int(SMALL_NUM))
+
+        # unpackdouble for large float
+        torch.Tensor(100).fill_(LARGE_NUM)
+        # unpacklong for large int, should raise exception
+        self.assertRaises(RuntimeError, lambda: torch.Tensor(100).fill_(int(LARGE_NUM)))
+        if sys.version_info[0] < 3:
+            self.assertRaises(RuntimeError, lambda: torch.Tensor(100).fill_(long(LARGE_NUM)))
+        # unpackdouble for larget int, should print a warning to stderr
+        with warnings.catch_warnings(record=True) as w:
+            torch.Tensor([int(LARGE_NUM)])
+            if sys.version_info[0] < 3:
+                torch.Tensor([long(LARGE_NUM)])
+        self.assertGreater(len(w), 0)
 
     def test_simple_scalar_cast(self):
         ok = [torch.Tensor([1.5]), torch.zeros(1, 1, 1, 1)]
