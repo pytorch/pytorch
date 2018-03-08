@@ -5,7 +5,8 @@
 #define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
   cuda_VolumetricDilatedMaxPooling_updateOutput<KW><<<grid, block,             \
     0, THCState_getCurrentStream(state)>>>(                             \
-    cudaInput, cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW,\
+    inputData, inputTime, inputHeight, inputWidth, \
+    cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW,\
     dilationT, dilationH, dilationW, offsetZ); \
     break
 
@@ -233,10 +234,10 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   } else {
     THCTensor_(retain)(state, output);
   }
+  
+  real* inputData = THCTensor_(data)(state, input);
 
-  THCDeviceTensor<real, 4> cudaInput;
   THCDeviceTensor<real, 4> cudaOutput;
-  cudaInput  = toDeviceTensor<real, 4>(state, input);
   cudaOutput = toDeviceTensor<real, 4>(state, output);
 
   THLongStorage *indicesSize = THLongStorage_newWithSize(4);
@@ -275,7 +276,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
       default:
         cuda_VolumetricDilatedMaxPooling_updateOutput<<<grid, block,
           0, THCState_getCurrentStream(state)>>>(
-                             cudaInput, cudaIndices, cudaOutput,
+                             inputData, inputTime, inputHeight, inputWidth,
+                             cudaIndices, cudaOutput,
                              kT, kH, kW, dT, dH, dW,
                              padT, padH, padW, dilationT, dilationH, dilationW, offsetZ);
       }
@@ -306,14 +308,14 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   // TODO: gradOutput shape check
   // Resize and initialize result tensor.
   THCTensor_(resizeAs)(state, gradInput, input);
+  THCTensor_(newContiguous)(state, gradInput);
   THCTensor_(zero)(state, gradInput);
 
   int batchSize;
   int inputSlices;
 
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
+  int outputTime, outputHeight, outputWidth;
+  int inputTime, inputHeight, inputWidth;
 
   int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
 
@@ -331,6 +333,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
     outputTime   = THCTensor_(size)(state, gradOutput, 1);
     outputHeight = THCTensor_(size)(state, gradOutput, 2);
     outputWidth  = THCTensor_(size)(state, gradOutput, 3);
+    inputTime   = THCTensor_(size)(state, gradInput, 1);
+    inputHeight = THCTensor_(size)(state, gradInput, 2);
+    inputWidth  = THCTensor_(size)(state, gradInput, 3);
   }
   else
   {
@@ -340,6 +345,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
     outputTime   = THCTensor_(size)(state, gradOutput, 2);
     outputHeight = THCTensor_(size)(state, gradOutput, 3);
     outputWidth  = THCTensor_(size)(state, gradOutput, 4);
+    inputTime   = THCTensor_(size)(state, gradInput, 2);
+    inputHeight = THCTensor_(size)(state, gradInput, 3);
+    inputWidth  = THCTensor_(size)(state, gradInput, 4);
   }
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -354,10 +362,9 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
     THCTensor_(retain)(state, gradInput);
   }
 
-  THCDeviceTensor<real, 4> cudaGradInput;
   THCDeviceTensor<real, 4> cudaGradOutput;
-  cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
   cudaGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
+  real* gradInputData = THCTensor_(data)(state, gradInput);
 
   THLongStorage *indicesSize = THLongStorage_newWithSize(4);
   int64_t indicesSizeRaw[4] = { batchSize * inputSlices,
@@ -384,7 +391,8 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
       0, THCState_getCurrentStream(state)>>>(
                                              cudaGradOutput,
                                              cudaIndices,
-                                             cudaGradInput,
+                                             gradInputData,
+                                             inputTime, inputHeight, inputWidth,
                                              dT, dH, dW,
                                              padT, padH, padW,
                                              dilationT, dilationH, dilationW, offsetZ);
