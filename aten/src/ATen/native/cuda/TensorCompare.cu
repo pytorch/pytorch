@@ -38,7 +38,7 @@ struct CmpOpTensorCUDA {
     at::cuda::CUDA_tensor_apply3<uint8_t, scalar, scalar>(ret, self, other,
         [] __device__ (uint8_t& ret_val, const scalar& self_val, const scalar& other_val) {
           ret_val = Comparator<scalar>()(self_val, other_val);
-      }
+        }
     );
   }
 };
@@ -46,51 +46,107 @@ struct CmpOpTensorCUDA {
 template<template<typename T> class Comparator, typename scalar>
 struct CmpOpCUDA {
   static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
-    auto other_val = other.to<scalar>();
+    auto other_val = at::convert<scalar>(other.to<double>());
     at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(ret, self,
         [other_val] __device__ (uint8_t& ret_val, const scalar& self_val) {
           ret_val = Comparator<scalar>()(self_val, other_val);
-      }
+        }
     );
   }
 };
 
-template<template<typename T> class Comparator>
-struct CmpOpCUDA<Comparator, half> {
+// <=, >=, ==, != have special cases for integral tensors and floating scalars due to
+// the floating scalars being automatically cast to integral types during the comparison
+template<typename scalar>
+struct CmpOpCUDA<std::less_equal, scalar> {
   static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
-    auto other_val = at::convert<half>(other.to<double>());
-    at::cuda::CUDA_tensor_apply2<uint8_t, half>(ret, self,
-        [other_val] __device__ (uint8_t& ret_val, const half& self_val) {
-          ret_val = Comparator<half>()(self_val, other_val);
+    auto other_val = at::convert<scalar>(other.to<double>());
+
+    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+      auto other_double = other.to<double>();
+      auto other_long = other.to<long>();
+      if (other_double != other_long) {
+        other_val = at::convert<scalar>(floor(other_double));
       }
+    }
+
+    at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(ret, self,
+        [other_val] __device__ (uint8_t& ret_val, const scalar& self_val) {
+          ret_val = std::less_equal<scalar>()(self_val, other_val);
+        }
     );
   }
 };
 
-template<template<typename T> class Comparator, typename scalar>
-struct CmpOpFloatingCUDA {
-  static void apply(at::Tensor& result, const at::Tensor& self, at::Scalar other) {
-    auto other_val = at::convert<half>(other.to<double>());
-    at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(result, self,
-        [other_val] __device__ (uint8_t& result_val, const scalar& self_val) {
-          result_val = Comparator<half>()(ScalarConvert<scalar, half>::to(self_val), other_val);
+template<typename scalar>
+struct CmpOpCUDA<std::greater_equal, scalar> {
+  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
+    auto other_val = at::convert<scalar>(other.to<double>());
+
+    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+      auto other_double = other.to<double>();
+      auto other_long = other.to<long>();
+      if (other_double != other_long) {
+        other_val =  at::convert<scalar>(ceil(other_double));
       }
+    }
+
+    at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(ret, self,
+        [other_val] __device__ (uint8_t& ret_val, const scalar& self_val) {
+          ret_val = std::greater_equal<scalar>()(self_val, other_val);
+        }
     );
+  }
+};
+
+template<typename scalar>
+struct CmpOpCUDA<std::equal_to, scalar> {
+  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
+    auto other_val = at::convert<scalar>(other.to<double>());
+
+    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+      auto other_double = other.to<double>();
+      auto other_long = other.to<long>();
+      if (other_double != other_long) {
+        ret.fill_(0);
+      }
+    } else {
+      at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(ret, self,
+          [other_val] __device__ (uint8_t& ret_val, const scalar& self_val) {
+            ret_val = std::equal_to<scalar>()(self_val, other_val);
+          }
+      );
+    }
+  }
+};
+
+template<typename scalar>
+struct CmpOpCUDA<std::not_equal_to, scalar> {
+  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
+    auto other_val = at::convert<scalar>(other.to<double>());
+
+    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
+      auto other_double = other.to<double>();
+      auto other_long = other.to<long>();
+      if (other_double != other_long) {
+        ret.fill_(1);
+      }
+    } else {
+      at::cuda::CUDA_tensor_apply2<uint8_t, scalar>(ret, self,
+          [other_val] __device__ (uint8_t& ret_val, const scalar& self_val) {
+            ret_val = std::not_equal_to<scalar>()(self_val, other_val);
+          }
+      );
+    }
   }
 };
 
 template<template<typename T> class Comparator>
 at::Tensor& cmp_out_cuda(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
   result.resize_(self.sizes());
-  if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-    AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
-      CmpOpFloatingCUDA<Comparator, scalar_t>::apply(result, self, other);
-    });
-  } else {
-    AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
-      CmpOpCUDA<Comparator, scalar_t>::apply(result, self, other);
-    });
-  }
+  AT_DISPATCH_ALL_MATH_TYPES(self.type(), op_name, [&]() {
+    CmpOpCUDA<Comparator, scalar_t>::apply(result, self, other);
+  });
   return result;
 }
 
