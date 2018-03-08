@@ -825,5 +825,4 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/torch.h',
             ]
-        },
-        install_requires=['pyyaml', 'numpy'], )
+        })
