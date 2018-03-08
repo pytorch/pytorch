@@ -1222,7 +1222,6 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st_cuda(self):
         self._test_gumbel_softmax_st(True)
 
-
     def _test_EmbeddingBag(self, cuda, mode, sparse):
         # check a known test example
         es = nn.EmbeddingBag(5, 2, mode=mode, sparse=sparse)
