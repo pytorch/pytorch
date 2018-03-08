@@ -537,6 +537,39 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
+# Cast operators
+def cast_uint8_t(g, input, non_blocking):
+    return g.op("Cast", input, to_s="UINT8")
+
+
+def cast_int8_t(g, input, non_blocking):
+    return g.op("Cast", input, to_s="INT8")
+
+
+def cast_double(g, input, non_blocking):
+    return g.op("Cast", input, to_s="DOUBLE")
+
+
+def cast_float(g, input, non_blocking):
+    return g.op("Cast", input, to_s="FLOAT")
+
+
+def cast_Half(g, input, non_blocking):
+    return g.op("Cast", input, to_s="FLOAT16")
+
+
+def cast_int(g, input, non_blocking):
+    return g.op("Cast", input, to_s="INT32")
+
+
+def cast_int64_t(g, input, non_blocking):
+    return g.op("Cast", input, to_s="INT64")
+
+
+def cast_int16_t(g, input, non_blocking):
+    return g.op("Cast", input, to_s="INT16")
+
+
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
