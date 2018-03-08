@@ -799,7 +799,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
                                              self.reduce)
 
 
-class CosineEmbeddingLoss(_Loss):
+class CosineEmbeddingLoss(Module):
     r"""Creates a criterion that measures the loss given  an input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
@@ -818,27 +818,19 @@ class CosineEmbeddingLoss(_Loss):
         \max(0, \cos(x_1, x_2) - \text{margin}), & \text{if } y == -1
         \end{cases}
 
-    Args:
-        margin (float, optional): Should be a number from `-1` to `1`, `0` to `0.5`
-            is suggested. If `margin` is missing, the default value is `0`.
-        size_average (bool, optional): By default, the losses are averaged over
-            observations for each minibatch. However, if the field :attr:`size_average`
-            is set to ``False``, the losses are instead summed for each minibatch.
-            Default: ``True``
-        reduce (bool, optional): By default, the losses are averaged or summed over
-            observations for each minibatch depending on :attr:`size_average`. When
-            :attr:`reduce` is ``False``, returns a loss per batch element instead and
-            ignores :attr:`size_average`. Default: ``True``
+    If the internal variable `size_average` is equal to ``True``,
+    the loss function averages the loss over the batch samples;
+    if `size_average` is ``False``, then the loss function sums over the
+    batch samples. By default, `size_average = True`.
     """
 
-    def __init__(self, margin=0, size_average=True, reduce=True):
-        super(CosineEmbeddingLoss, self).__init__(size_average)
+    def __init__(self, margin=0, size_average=True):
+        super(CosineEmbeddingLoss, self).__init__()
         self.margin = margin
-        self.reduce = reduce
+        self.size_average = size_average
 
     def forward(self, input1, input2, target):
-        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average,
-                                       self.reduce)
+        return F.cosine_embedding_loss(input1, input2, target, self.margin, self.size_average)
 
 
 class MarginRankingLoss(Module):
