@@ -27,6 +27,8 @@ from caffe2.python.modeling.parameter_info import (
 from caffe2.python.modeling.parameter_sharing import (
     parameter_sharing_context,
 )
+from caffe2.python.modeling.net_modifier import NetModifier
+
 from caffe2.python.optimizer import get_param_device
 from caffe2.python.regularizer import Regularizer
 from caffe2.python.layers import layers
@@ -73,6 +75,9 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._default_optimizer = None
         self._loss = None
         self._output_schema = None
+
+        self._post_grad_net_modifiers = []
+        self._final_net_modifiers = []
 
         # breakdown map; breakdown features are categorical (like dense) but not
         # necessarily used to represent data for training
@@ -326,6 +331,20 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         return param_blobs
 
+    def add_post_grad_net_modifiers(self, modifier):
+        assert modifier not in self._post_grad_net_modifiers,\
+            "{0} is already in {1}".format(modifier, self._post_grad_net_modifiers)
+        assert isinstance(modifier, NetModifier),\
+            "{} has to be a NetModifier instance".format(modifier)
+        self._post_grad_net_modifiers.append(modifier)
+
+    def add_final_net_modifiers(self, modifier):
+        assert modifier not in self._final_net_modifiers,\
+            "{0} is already in {1}".format(modifier, self._final_net_modifiers)
+        assert isinstance(modifier, NetModifier),\
+            "{} has to be a NetModifier instance".format(modifier)
+        self._final_net_modifiers.append(modifier)
+
     @property
     def seed(self):
         return self._seed
@@ -487,6 +506,28 @@ class LayerModelHelper(model_helper.ModelHelper):
             assert isinstance(regularizer, Regularizer)
             regularizer(
                 train_net, train_init_net, param, grad_map.get(str(param)))
+
+    def apply_post_grad_net_modifiers(
+        self,
+        trainer_net,
+        trainer_init_net,
+        grad_map,
+        blob_to_device=None,
+    ):
+        for modifier in self._post_grad_net_modifiers:
+            modifier(trainer_net, trainer_init_net, grad_map,
+                     blob_to_device=blob_to_device)
+
+    def apply_final_net_modifiers(
+        self,
+        trainer_net,
+        trainer_init_net,
+        grad_map,
+        blob_to_device=None,
+    ):
+        for modifier in self._final_net_modifiers:
+            modifier(trainer_net, trainer_init_net, grad_map,
+                     blob_to_device=blob_to_device)
 
     def apply_optimizers(
         self,
