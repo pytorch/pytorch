@@ -2,13 +2,6 @@
 #include <system_error>
 
 #include "THP.h"
-
-#include "generic/serialization.cpp"
-#include <TH/THGenerateAllTypes.h>
-
-#include "generic/serialization.cpp"
-#include <TH/THGenerateHalfType.h>
-
 #include "serialization.h"
 
 static ssize_t doPythonReadBuffered(PyObject* fildes, void* buf, size_t nbytes);
@@ -118,3 +111,9 @@ static ssize_t doPythonReadInto(PyObject* fildes, void* buf, size_t nbytes) {
 static ssize_t doPythonWrite(PyObject* fildes, void* buf, size_t nbytes) {
   return doPythonIO(fildes, buf, nbytes, /* is_read */ false);
 }
+
+#include "generic/serialization.cpp"
+#include <TH/THGenerateAllTypes.h>
+
+#include "generic/serialization.cpp"
+#include <TH/THGenerateHalfType.h>
