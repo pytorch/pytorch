@@ -401,13 +401,13 @@ class install(setuptools.command.install.install):
         if not self.skip_build:
             self.run_command('build_deps')
 
+        setuptools.command.install.install.run(self)
+
         # Copy headers necessary to compile C++ extensions.
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
         self.copy_tree('torch/lib/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
         self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
-
-        setuptools.command.install.install.run(self)
 
 
 class clean(distutils.command.clean.clean):
