@@ -9,22 +9,27 @@ namespace at {
 namespace native {
 
 // Helper function for det methods.
-// QR can give us the accurate det:
-//   1. Q has \pm 1 det, which can be determined by counting the non-zero values
-//      in tau that represent Householder reflectors, which has -1 det
-//   2. R has determinant equal to product of its diagonal entries, which can be
-//      found by calculating prod(diag(A))
-//
-// This helper returns det(Q)=num_nonzero(tau) and diag(R)=diag(A).
-static inline std::tuple<double, Tensor> _qr_det_Q_diag_R(const Tensor& self) {
-  auto qr = self.geqrf();
-  auto a = std::get<0>(qr);
-  auto tau = std::get<1>(qr);
-  int64_t num_reflectors = tau.nonzero().size(0);
-  if (num_reflectors % 2 == 1) {
-    return std::make_tuple(-1., a.diag());
+// For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
+// det(P) = \pm 1, this method returns a 3-tuple:
+//   (det(P), diag(U), info),
+// where info helps us identify singular matrices.
+static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor& self) {
+  Tensor p, lu, info;
+  std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
+  p.squeeze_(0);
+  lu.squeeze_(0);
+  int int_info = info.squeeze_().toCInt();
+  if (int_info < 0) {
+    std::ostringstream ss;
+    ss << "LU factorization (getrf) failed with info = " << int_info;
+    throw std::runtime_error(ss.str());
+  }
+  auto n = self.size(0);
+  auto num_exchanges = (p.type().arange(1, n + 1) != p).nonzero().size(0);
+  if (num_exchanges % 2 == 1) {
+    return std::make_tuple(-1., lu.diag(), int_info);
   } else {
-    return std::make_tuple(1., a.diag());
+    return std::make_tuple(1., lu.diag(), int_info);
   }
 }
 
@@ -36,10 +41,15 @@ Tensor det(const Tensor& self) {
        << "square tensor of floating types";
     throw std::runtime_error(ss.str());
   }
-  Tensor diag_R;
-  double det_Q;
-  std::tie(det_Q, diag_R) = _qr_det_Q_diag_R(self);
-  return diag_R.prod().mul(det_Q);
+  double det_P;
+  Tensor diag_U;
+  int info;
+  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
+  if (info > 0) {
+    return at::zeros(self.type(), {});
+  } else {
+    return diag_U.prod().mul_(det_P);
+  }
 }
 
 Tensor logdet(const Tensor& self) {
@@ -50,15 +60,19 @@ Tensor logdet(const Tensor& self) {
        << "2D square tensor of floating types";
     throw std::runtime_error(ss.str());
   }
-  Tensor diag_R;
-  double det_Q;
-  std::tie(det_Q, diag_R) = _qr_det_Q_diag_R(self);
-  auto det = diag_R.prod().mul(det_Q);
-  auto sign_det = det.sign().toCDouble();
-  if (sign_det <= 0) {
-    return det.log();  // in order to get proper -inf (det=0) or nan (det<0)
+  double det_P;
+  Tensor diag_U, det;
+  int info;
+  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
+  if (info > 0) {
+    det = at::zeros(self.type(), {});
   } else {
-    return diag_R.abs().log().sum();
+    det = diag_U.prod().mul_(det_P);
+  }
+  if (det.sign().toCDouble() <= 0) {
+    return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
+  } else {
+    return diag_U.abs().log().sum();
   }
 }
 
@@ -70,11 +84,16 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
        << "2D square tensor of floating types";
     throw std::runtime_error(ss.str());
   }
-  Tensor diag_R;
-  double det_Q;
-  std::tie(det_Q, diag_R) = _qr_det_Q_diag_R(self);
-  auto det = diag_R.prod().mul(det_Q);
-  return std::make_tuple(det.sign(), diag_R.abs().log().sum());
+  double det_P;
+  Tensor diag_U, det;
+  int info;
+  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
+  if (info > 0) {
+    det = at::zeros(self.type(), {});
+  } else {
+    det = diag_U.prod().mul_(det_P);
+  }
+  return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
