@@ -614,7 +614,7 @@ def main():
                         help='Data type used for training')
     parser.add_argument('--float16_compute', action='store_true',
                         help="Use float 16 compute, if available")
-    parser.add_argument('--enable-tensor-core', action='store_true',
+    parser.add_argument('--enable_tensor_core', action='store_true',
                         help='Enable Tensor Core math for Conv and FC ops')
     parser.add_argument("--distributed_transport", type=str, default="tcp",
                         help="Transport to use for distributed run [tcp|ibverbs]")
