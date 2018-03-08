@@ -25,6 +25,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/WrapDimUtils.h"
 
 #include <algorithm>
 #include <functional>
@@ -248,6 +249,50 @@ Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {
   std::tie(src, linearIndex) = makeLinearIndex(self, indices);
   std::tie(expandedValue) = expand_inplace(linearIndex, value);
   return src.put_(linearIndex, expandedValue);
+}
+
+Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & source) {
+  dim = maybe_wrap_dim(dim, self.dim());
+
+  if (index.dim() != 1) {
+    runtime_error("index_copy_(): Index should have dimension 1 (got %d)", (int) index.dim());
+  }
+  int64_t numIndices = index.size(0);
+  if (numIndices != source.size(dim)) {
+    runtime_error("index_copy_(): Number of indices (%d) should be equal to source.size(dim) (%d)",
+        (int)numIndices, (int)source.size(dim));
+  }
+  if (index.type().scalarType() != ScalarType::Long) {
+    runtime_error("index_copy_(): Expected LongTensor for index");
+  }
+
+  auto selfSlicedSizes = std::vector<int64_t>(self.sizes());
+  selfSlicedSizes.erase(selfSlicedSizes.begin() + dim);
+  auto sourceSlicedSizes = std::vector<int64_t>(source.sizes());
+  sourceSlicedSizes.erase(sourceSlicedSizes.begin());
+  if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
+      !std::equal(selfSlicedSizes.begin(), selfSlicedSizes.end(),
+                  sourceSlicedSizes.begin())) {
+    std::stringstream ss;
+    ss << "index_copy_(): Source/destination tensor must have same slice shapes. ";
+    ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
+    ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
+    throw std::runtime_error(ss.str());
+  }
+
+  // Fast path for cuda
+  if (self.is_cuda()) {
+    return self._indexCopy_(dim, index, source);
+  }
+
+  auto workingIndices = index.contiguous();
+  int64_t* index_data = reinterpret_cast<int64_t*>(workingIndices.data_ptr());
+  for (int64_t i = 0; i < numIndices; i++) {
+    auto selfSlice = self.select(dim, index_data[i]);
+    auto sourceSlice = source.select(dim, i);
+    selfSlice.copy_(sourceSlice);
+  }
+  return self;
 }
 
 }} // at::native

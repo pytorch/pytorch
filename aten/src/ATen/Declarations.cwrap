@@ -283,8 +283,7 @@
     - THIndexTensor* index
 ]]
 [[
-  name: indexCopy_
-  python_name: index_copy_
+  name: _indexCopy_
   cname: indexCopy
   return: argument 0
   arguments:
