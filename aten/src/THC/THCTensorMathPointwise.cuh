@@ -791,11 +791,7 @@ struct TensorDigammaOp {
   using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-#if (defined __CUDA_ARCH__) && (CUDART_VERSION < 8000)
     const compute_type PI = 3.14159265358979323846;
-#else
-    static const compute_type PI = 3.14159265358979323846;
-#endif
     compute_type x = ScalarConvert<real, compute_type>::to(*in);
     compute_type result = 0;
     if (x < 0.5f) {
@@ -817,11 +813,7 @@ struct TensorTrigammaOp {
   using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-#if (defined __CUDA_ARCH__) && (CUDART_VERSION < 8000)
     const compute_type PI = 3.14159265358979323846;
-#else
-    static const compute_type PI = 3.14159265358979323846;
-#endif
     compute_type x = ScalarConvert<real, compute_type>::to(*in);
     compute_type sign = +1;
     compute_type result = 0;
