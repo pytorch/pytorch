@@ -308,7 +308,16 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
   }
-  return self.toType(type, non_blocking);
+  // return self.toType(type, non_blocking);
+  switch (type.scalarType()) {
+#define DEFINE_CAST_DISPATCH(_1, n, _2)  \
+  case ScalarType::n: {                  \
+    return self.cast_##_1(non_blocking); \
+  } break;
+    AT_FORALL_SCALAR_TYPES(DEFINE_CAST_DISPATCH)
+#undef DEFINE_CAST_DISPATCH
+    default: { return self.toType(type, non_blocking); } break;
+  }
 }
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type) {

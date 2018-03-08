@@ -1,11 +1,15 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+<<<<<<< 582d0450922c6178920d2401751adce02cd34fbb
 #include "TH/THRandom.h"
 #include "ATen/CheckGenerator.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/Dispatch.h"
 #include <algorithm>
 #include <sstream>
+=======
+#include "ATen/ScalarType.h"
+>>>>>>> Traceable dispatch for Variable cast methods
 
 namespace at {
 namespace native {
@@ -38,6 +42,15 @@ Tensor& empty_out(Tensor& result, IntList size) {
   }
   return result;
 }
+
+#define DEFINE_CAST_OP(_1, n, _2)                                            \
+  Tensor cast_##_1(const Tensor& self, bool non_blocking) {                  \
+    return self.type().toScalarType(ScalarType::n).copy(self, non_blocking); \
+  }
+
+AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
+
+#undef DEFINE_CAST_OP
 
 Tensor empty_like(const Tensor& self) {
   return at::native::empty_like(self, self.type());

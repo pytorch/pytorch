@@ -1,5 +1,29 @@
 # See README.md in this directory for more guidance
 
+- func: cast_uint8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_int8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_double(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_float(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_int(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_int64_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_int16_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: cast_Half(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
