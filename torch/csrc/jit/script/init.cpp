@@ -185,7 +185,7 @@ void initJitScriptBindings(PyObject* module) {
       .def("_get_attribute",[](Module& self, const std::string& name) -> py::object {
         switch(self.find_attribute(name)) {
           case NamedMember::Parameter:
-            return py::cast(self.get_parameter(name));
+            return py::cast(static_cast<const autograd::Variable&>(self.get_parameter(name)));
           case NamedMember::Module:
             return py::cast(self.get_module(name));
           case NamedMember::Method:
