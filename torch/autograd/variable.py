@@ -313,8 +313,6 @@ class Variable(_C._VariableBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._VariableBase.__idiv__
 
-    __pow__ = _C._VariableBase.pow
-
     def __format__(self, format_spec):
         if self.dim() == 0:
             return self.item().__format__(format_spec)

@@ -2,6 +2,7 @@
 # "what has to be done to add a Operation ..." first!
 
 import re
+from collections import OrderedDict
 from code_template import CodeTemplate
 
 try:
@@ -443,6 +444,7 @@ FunctionOption = TypedDict('FunctionOption', {
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
     ('method_prefix_derived', str),
+    ('zero_dim_dispatch_from', Optional[str]),
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
@@ -480,11 +482,16 @@ def to_return_type(arg, option):
     }
 
 
-def get_zero_dim_dispatch(env, option, want_same_size):
+def signature(args, i=None, value=None, exclude=lambda arg: False):
+    elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
+                if i is None or j != i else value
+                for j, arg in enumerate(args)
+                if not exclude(arg)]
+    return '#'.join(elements)
+
+
+def get_zero_dim_dispatch(env, option):
     # type: (Environment, FunctionOption) -> List[str]
-    is_same_size = option['method_prefix_derived'] == 's_'
-    if is_same_size != want_same_size:
-        return []
     zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar')
     if not zero_dim_dispatch:
         return []
@@ -766,7 +773,7 @@ def create_generic(top_env, declarations):
                                                     for y in option['actuals']]
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_BROADCAST.substitute(
-                    env, zero_dim_dispatch=get_zero_dim_dispatch(env, option, want_same_size=True)))
+                    env, zero_dim_dispatch=get_zero_dim_dispatch(env, option)))
 
         method_of = ['Type']
         if is_method:
@@ -789,6 +796,7 @@ def create_generic(top_env, declarations):
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             method_prefix_derived=option['method_prefix_derived'],
+            zero_dim_dispatch_from=None,
             arguments=formals,
             method_of=method_of,
             mode=mode,
@@ -973,6 +981,7 @@ def create_generic(top_env, declarations):
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             method_prefix_derived=option['method_prefix_derived'],
+            zero_dim_dispatch_from=None,
             arguments=formals,
             method_of=method_of,
             mode=option['mode'],
@@ -983,17 +992,37 @@ def create_generic(top_env, declarations):
             abstract=abstract,
         ))
 
+    # Register reverse of the zero_dim_dispatch relation in zero_dim_dispatch_from
+    def link_zero_dispatch(output_options, processed_options):
+        assert len(output_options) == len(processed_options)
+        opt_dict = OrderedDict([((option.name, signature(option.arguments)), option)
+                                 for option in output_options])
+        for option, raw_option in zip(output_options, processed_options):
+            zero_dim_dispatch = raw_option.get('zero_dim_dispatch_when_scalar', '')
+            if zero_dim_dispatch:
+                arg_idx = [arg['name'] for arg in option.arguments].index(zero_dim_dispatch)
+                scalar_sig = signature(option.arguments, arg_idx, 'Scalar')
+                scalar_option = opt_dict[(option.name, scalar_sig)]
+                scalar_arg_names = [arg['name'] for arg in scalar_option.arguments]
+                assert scalar_option.zero_dim_dispatch_from is None
+                opt_dict[(option.name, scalar_sig)] = \
+                    scalar_option._replace(zero_dim_dispatch_from=scalar_arg_names[arg_idx])
+        return list(opt_dict.values())
+
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
+        processed_options = []
         for option in declaration['options']:
             try:
                 if option['mode'] != 'native':
                     process_option(option, output_options)
                 else:
                     process_native(option, output_options)
+                processed_options.append(option)
             except NYIError:
                 option['skip'] = True
+        output_options = link_zero_dispatch(output_options, processed_options)
         output_declarations.extend(output_options)
     return output_declarations
 
@@ -1154,7 +1183,7 @@ def create_derived(backend_type_env, declarations):
         body = []  # type: List[str]
         body += handle_sparse(env, option)
         # NB: Same size zero dim dispatch is handled in the broadcasting method
-        body += get_zero_dim_dispatch(env, option, want_same_size=False)
+        body += get_zero_dim_dispatch(env, option)
         only_zero_dim_check = handle_only_zero_dim(env, option)
         if only_zero_dim_check is not None:
             #  code below only_zero_dim_check is unreachable so we do not need to generate the rest.

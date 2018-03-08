@@ -695,16 +695,14 @@ class TestTorch(TestCase):
         y = torch.tensor(2., dtype=torch.double)
 
         operators = [
-            operator.add, operator.sub, operator.mul, operator.floordiv, operator.truediv,
+            operator.add, operator.sub, operator.mul, operator.truediv,
             operator.pow, operator.mod, operator.lt, operator.le, operator.gt,
             operator.ge, operator.eq, operator.ne
         ]
 
-        x + y
-        y + x
-        # for arg1, arg2, arg_same_type in [(x, y, y.float()), (y, x, x.double())]:
-            # for op in operators:
-                # self.assertEqual(op(arg1, arg2), op(arg1, arg_same_type))
+        for arg1, arg2, arg_same_type in [(x, y, y.float()), (y, x, x.double())]:
+            for op in operators:
+                self.assertEqual(op(arg1, arg2), op(arg1, arg_same_type))
 
     def test_mm(self):
         # helper function
