@@ -84,8 +84,10 @@ class Module(object):
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
 
-        Example:
+        Example::
+
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
+
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
@@ -484,9 +486,11 @@ class Module(object):
             dict:
                 a dictionary containing a whole state of the module
 
-        Example:
+        Example::
+
             >>> module.state_dict().keys()
             ['bias', 'weight']
+
         """
         if destination is None:
             destination = OrderedDict()
@@ -543,11 +547,13 @@ class Module(object):
         Yields:
             Parameter: module parameter
 
-        Example:
+        Example::
+
             >>> for param in model.parameters():
             >>>     print(type(param.data), param.size())
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+
         """
         for name, param in self.named_parameters():
             yield param
@@ -559,10 +565,12 @@ class Module(object):
         Yields:
             (string, Parameter): Tuple containing the name and parameter
 
-        Example:
+        Example::
+
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
+
         """
         if memo is None:
             memo = set()
@@ -602,10 +610,12 @@ class Module(object):
         Yields:
             (string, Module): Tuple containing a name and child module
 
-        Example:
+        Example::
+
             >>> for name, module in model.named_children():
             >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
+
         """
         memo = set()
         for name, module in self._modules.items():
@@ -623,16 +633,19 @@ class Module(object):
             Duplicate modules are returned only once. In the following
             example, ``l`` will be returned only once.
 
-        Example:
+        Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-            >>>     print(idx, '->', m)
+                    print(idx, '->', m)
+
             0 -> Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)
             )
             1 -> Linear (2 -> 2)
+
         """
         for name, module in self.named_modules():
             yield module
@@ -648,16 +661,18 @@ class Module(object):
             Duplicate modules are returned only once. In the following
             example, ``l`` will be returned only once.
 
-        Example:
+        Example::
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-            >>>     print(idx, '->', m)
+                    print(idx, '->', m)
+
             0 -> ('', Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)
             ))
             1 -> ('0', Linear (2 -> 2))
+
         """
 
         if memo is None:
