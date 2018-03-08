@@ -436,16 +436,13 @@ library_dirs = []
 extra_link_args = []
 
 if IS_WINDOWS:
-    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX'
+    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX', '/bigobj'
                           # /Z7 turns on symbolic debugging information in .obj files
                           # /EHa is about native C++ catch support for asynchronous
                           # structured exception handling (SEH)
                           # /DNOMINMAX removes builtin min/max functions
+                          # /bigobj increases number of sections in .obj file
                           ]
-    if sys.version_info[0] == 2:
-        # /bigobj increases number of sections in .obj file, which is needed to link
-        # against libaries in Python 2.7 under Windows
-        extra_compile_args.append('/bigobj')
 else:
     extra_compile_args = ['-std=c++11', '-Wno-write-strings',
                           # Python 2.6 requires -fno-strict-aliasing, see
