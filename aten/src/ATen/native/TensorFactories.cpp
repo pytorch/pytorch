@@ -45,7 +45,10 @@ Tensor& empty_out(Tensor& result, IntList size) {
 
 #define DEFINE_CAST_OP(_1, n, _2)                                            \
   Tensor cast_##_1(const Tensor& self, bool non_blocking) {                  \
-    return self.type().toScalarType(ScalarType::n).copy(self, non_blocking); \
+    auto& target_type = self.type().toScalarType(ScalarType::n);             \
+    if (self.type() == target_type)                                          \
+      return self;                                                           \
+    return target_type.copy(self, non_blocking);                             \
   }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
