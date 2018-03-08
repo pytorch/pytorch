@@ -204,12 +204,13 @@ Node* emitBuiltinCall(
         else
           n->i_(Symbol(name), v);
       } break;
-      case TK_LIST: {
+      case TK_LIST_LITERAL: {
         std::vector<double> vs{};
-        for (const auto& tree : value.get()->trees()) {
-          vs.push_back(tree->tree(0)->doubleValue());
+        std::string type = "f"; // TODO: handle possibly mixed constants better
+        for (const auto& tree : ListLiteral(value).inputs()) {
+          vs.push_back(tree.get()->tree(0)->doubleValue());
+          type = tree.get()->tree(1)->stringValue();
         }
-        const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
         if(type == "f") {
           n->fs_(Symbol(name), std::move(vs));
         } else {

@@ -78,7 +78,9 @@ namespace script {
   _(TK_SLICE, "slice", "")                       \
   _(TK_VAR, "variable", "")                      \
   _(TK_GATHER, "gather", "")                     \
-  _(TK_NOTHING, "nothing", "")
+  _(TK_NOTHING, "nothing", "")                   \
+  _(TK_LIST_LITERAL, "list-literal", "")
+
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
 enum TokenKind {

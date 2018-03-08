@@ -182,9 +182,10 @@ struct Parser {
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
     switch (kind) {
-      case '[':
-        return parseList('[', ',', ']', &Parser::parseConst);
-      default:
+      case '[': {
+        auto list = parseList('[', ',', ']', &Parser::parseConst);
+        return ListLiteral::create(list.range(), List<Expr>(list));
+      } default:
         return parseConst();
     }
   }

@@ -244,7 +244,7 @@ struct Expr : public TreeView {
       case TK_SLICE:
       case TK_GATHER:
       case TK_VAR:
-      case TK_LIST: /* temporarily */
+      case TK_LIST_LITERAL:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -649,6 +649,19 @@ struct TernaryIf : public Expr {
                           const Expr& false_expr) {
     return TernaryIf(Compound::create(TK_IF_EXPR, range, {cond, true_expr, false_expr}));
   };
+};
+
+
+struct ListLiteral : public TreeView {
+  explicit ListLiteral(const TreeRef& tree) : TreeView(tree) {
+    tree_->match(TK_LIST_LITERAL);
+  }
+  List<Expr> inputs() const {
+    return subtree(0);
+  }
+  static ListLiteral create(const SourceRange& range, const List<Expr>& inputs) {
+    return ListLiteral(Compound::create(TK_LIST_LITERAL, range, {inputs}));
+  }
 };
 
 } // namespace script
