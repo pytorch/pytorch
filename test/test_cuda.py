@@ -1094,6 +1094,9 @@ class TestCuda(TestCase):
         z = torch.randn(2, 2, 1).cuda()
         self.assertRaises(RuntimeError, lambda: torch.cat([x, y, z], dim=1))
 
+    def test_index_copy(self):
+        TestTorch._test_index_copy(self, lambda x: x.cuda())
+
     def test_serialization(self):
         x = torch.randn(4, 4).cuda()
         with tempfile.NamedTemporaryFile() as f:
