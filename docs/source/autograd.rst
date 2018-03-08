@@ -11,6 +11,15 @@ Automatic differentiation package - torch.autograd
 
 .. autofunction:: grad
 
+Controlling whether a graph is built for gradients
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: no_grad
+
+.. autoclass:: enable_grad
+
+.. autoclass:: set_grad_enabled
+
 Variable
 --------
 
