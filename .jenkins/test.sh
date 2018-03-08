@@ -105,6 +105,7 @@ fi
 echo "Running Python tests.."
 "$PYTHON" \
   -m pytest \
+  -x \
   -v \
   --junit-xml="$TEST_DIR/python/result.xml" \
   --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
