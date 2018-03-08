@@ -139,7 +139,7 @@ class cmake_build(Caffe2Command):
                 '-DBUILD_BINARY=OFF',
             ]
             if NINJA:
-                cmake_args.extend(['-G', 'ninja'])
+                cmake_args.extend(['-G', 'Ninja'])
             if 'CMAKE_ARGS' in os.environ:
                 extra_cmake_args = shlex.split(os.environ['CMAKE_ARGS'])
                 # prevent crossfire with downstream scripts
