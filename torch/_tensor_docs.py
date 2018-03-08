@@ -1176,7 +1176,7 @@ add_docstr_all('put_',
 put_(indices, tensor, accumulate=False) -> Tensor
 
 Copies the elements from :attr:`tensor` into the positions specified by
-indices. For the puropose of indexing, the :attr:`self` tensor is treated as if
+indices. For the purpose of indexing, the :attr:`self` tensor is treated as if
 it were a 1-D tensor.
 
 If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
