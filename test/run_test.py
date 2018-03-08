@@ -48,9 +48,9 @@ def get_shell_output(command):
     return subprocess.check_output(command, shell=True).decode().strip()
 
 
-def run_test(python, test_module, cwd, verbose):
+def run_test(python, test_module, test_directory, verbose):
     verbose = '--verbose' if verbose else ''
-    shell('{} {} {}'.format(python, test_module, verbose), cwd)
+    shell('{} {} {}'.format(python, test_module, verbose), test_directory)
 
 
 def test_cpp_extensions(python, test_module, test_directory, verbose):
@@ -66,9 +66,9 @@ def test_cpp_extensions(python, test_module, test_directory, verbose):
     os.environ['PYTHONPATH'] = python_path
 
 
-def test_distributed(python, test_module, cwd, verbose):
+def test_distributed(python, test_module, test_directory, verbose):
     os.environ['PYCMD'] = python
-    shell('./run_distributed_tests.sh', cwd)
+    shell('./run_distributed_tests.sh', test_directory)
 
 
 CUSTOM_HANDLERS = {
@@ -160,9 +160,10 @@ def get_selected_tests(options):
 def main():
     options = parse_args()
     python = get_python_command(options)
-    selected_tests = get_selected_tests(options)
-    print('Selected tests: {}'.format(', '.join(selected_tests)))
     test_directory = os.path.dirname(os.path.abspath(__file__))
+    selected_tests = get_selected_tests(options)
+    if options.verbose:
+        print('Selected tests: {}'.format(', '.join(selected_tests)))
 
     if options.coverage:
         shell('coverage erase')
