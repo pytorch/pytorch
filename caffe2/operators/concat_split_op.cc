@@ -60,7 +60,7 @@ OpSchema::Cost CostInferenceForConcat(
   }
 
   struct OpSchema::Cost cost;
-  cost.flops = size;
+  cost.flops = 0;
   cost.bytes_moved = size * sizeof(float);
   cost.params_bytes = 0;
   return cost;
@@ -89,8 +89,52 @@ OPERATOR_SCHEMA(Concat)
       vector<int> split_shape(1, in.size());
       vector<int> out_shape(in[0].dims().begin(), in[0].dims().end());
       if (add_axis) {
+        for (int i = 1; i < in.size(); ++i) {
+          CAFFE_ENFORCE_EQ(
+              in[0].dims().size(),
+              in[i].dims().size(),
+              "All inputs of Concat should have same dims when add_axis = 1. "
+              "Got different sizes for inputs 0 and ",
+              i);
+          for (int j = 0; j < in[0].dims().size(); ++j) {
+            CAFFE_ENFORCE_EQ(
+                in[0].dims(j),
+                in[i].dims(j),
+                "All inputs of Concat should have same dims when add_axis = 1. "
+                "Got different dims for inputs 0 and ",
+                i,
+                ". At dim: ",
+                j);
+          }
+        }
         out_shape.insert(out_shape.begin() + canonical_axis, in.size());
       } else {
+        for (int i = 1; i < in.size(); ++i) {
+          CAFFE_ENFORCE_EQ(
+              in[0].dims().size(),
+              in[i].dims().size(),
+              "All inputs of Concat should have same dims except "
+              "canonical_axis dim that is equal to ",
+              canonical_axis,
+              "Got different sizes for inputs 0 and ",
+              i);
+          for (int j = 0; j < in[0].dims().size(); ++j) {
+            if (j == canonical_axis) {
+              continue;
+            }
+            CAFFE_ENFORCE_EQ(
+                in[0].dims(j),
+                in[i].dims(j),
+                "All inputs of Concat should have same dims except "
+                "canonical_axis dim that is equal to ",
+                canonical_axis,
+                "Got different dims for inputs 0 and ",
+                i,
+                ". At dim: ",
+                j);
+          }
+        }
+
         for (int i = 1; i < in.size(); ++i) {
           out_shape[canonical_axis] += in[i].dims(canonical_axis);
         }

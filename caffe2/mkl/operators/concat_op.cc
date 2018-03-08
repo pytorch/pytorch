@@ -64,7 +64,7 @@ class MKLConcatOp final : public MKLOperator<T> {
       dims_changed = (input_size_cache_[i] != Input(i).dims());
     }
 
-    if (dims_changed) {
+    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
       input_size_cache_.resize(nInputs);
       int output_channels = 0;
       int canonical_axis = canonical_axis_index_(axis_, nDims);
@@ -96,7 +96,7 @@ class MKLConcatOp final : public MKLOperator<T> {
       Y->Reset(cached_output_dims_, primitive_, dnnResourceDst);
       buffer_.Reset(cached_output_dims_, primitive_, dnnResourceDst, true);
     }
-    buffer_.ShareFrom(*Y);
+    bool shared = buffer_.ShareFrom(*Y);
 
     for (int i = 0; i < nInputs; ++i) {
       resources_[dnnResourceMultipleSrc + i] = Input(i).buffer();
@@ -104,6 +104,9 @@ class MKLConcatOp final : public MKLOperator<T> {
     resources_[dnnResourceDst] = buffer_.buffer();
     ExecutePrimitive();
     buffer_.CopyTo(Y, primitive_, dnnResourceDst);
+    if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+      buffer_.Reset();
+    }
     return true;
   }
 

@@ -364,9 +364,11 @@ Region of Interest (RoI) align operation as used in Mask R-CNN.
     .Input(
         1,
         "RoIs",
-        "2D input of shape (R, 5) specifying R RoIs with five columns "
+        "2D input of shape (R, 4 or 5) specifying R RoIs "
         "representing: batch index in [0, N - 1], x1, y1, x2, y2. The RoI "
-        "coordinates are in the coordinate system of the input image.")
+        "coordinates are in the coordinate system of the input image. For "
+        "inputs corresponding to a single image, batch index can be excluded "
+        "to have just 4 columns.")
     .Output(
         0,
         "Y",

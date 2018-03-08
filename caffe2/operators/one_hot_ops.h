@@ -84,6 +84,10 @@ class BatchOneHotOp final : public Operator<Context> {
  protected:
   INPUT_TAGS(X, LENS, VALS);
   OUTPUT_TAGS(ONE_HOT);
+
+ private:
+  // allows for fast random access to a given dict and is re-used across runs
+  std::vector<TIndex> valsOffsets_;
 };
 
 template <class Context>

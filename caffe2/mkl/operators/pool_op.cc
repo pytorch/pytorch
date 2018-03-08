@@ -74,7 +74,7 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
 
   bool dims_changed;
   CHECK_INPUT_DIMS(X, dims_changed);
-  if (dims_changed) {
+  if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
     // We will utilize the SetOutputSize() function in the base class
     // with dummy TensorCPU input and output to calculate the sizes.
     TensorCPU dummy_input(X.dims());
@@ -111,12 +111,15 @@ bool MKLPoolOp<float>::RunOnDeviceWithOrderNCHW() {
   // Try to share from the output: this allows us to avoid unnecessary copy
   // operations, if the output is already allocated and is having the same
   // layout as the buffer has.
-  buffer_.ShareFrom(*Y);
+  bool shared = buffer_.ShareFrom(*Y);
   resources_[dnnResourceSrc] = X.buffer();
   resources_[dnnResourceDst] = buffer_.buffer();
   resources_[dnnResourceWorkspace] = workspace_buffer_->buffer();
   MKLDNN_SAFE_CALL(mkl::dnnExecute<float>(primitive_, resources_));
   buffer_.CopyTo(Y, primitive_, dnnResourceDst);
+  if (FLAGS_caffe2_mkl_memonger_in_use && !shared) {
+    buffer_.Reset();
+  }
   return true;
 }
 

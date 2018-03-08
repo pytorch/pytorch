@@ -111,6 +111,10 @@ class BatchGatherGradientOp final : public Operator<Context> {
 
     output->ResizeLike(data);
     TData* out_data = output->template mutable_data<TData>();
+    if (data.size() <= 0) {
+      return true;
+    }
+
     memset(out_data, 0, output->nbytes());
 
     const TData* grad_data = grad.template data<TData>();

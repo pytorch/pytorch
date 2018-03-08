@@ -55,7 +55,7 @@ class MKLSqueezeOp final : public MKLOperator<T> {
 
     bool dims_changed;
     CHECK_INPUT_DIMS(X, dims_changed);
-    if (dims_changed) {
+    if (dims_changed || FLAGS_caffe2_mkl_memonger_in_use) {
       // Temp buffer mainly to convert the input to plain layout before
       // Reshape() if the input has a custom layout.
       buffer_.Reset(X.dims());
