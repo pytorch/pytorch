@@ -598,12 +598,16 @@ def relu(input, inplace=False):
     Applies the rectified linear unit function element-wise. See
     :class:`~torch.nn.ReLU` for more details.
     """
-    return threshold(input, 0, 0, inplace)
+    if inplace:
+        return torch.relu_(input)
+    return torch.relu(input)
 
 
-def relu_(input):
-    r"""In-place version of :func:`~relu`."""
-    return threshold_(input, 0, 0)
+relu_ = _add_docstr(torch.relu_, r"""
+relu_(input) -> Tensor
+
+In-place verison of :func:`~relu`.
+""")
 
 
 def glu(input, dim=-1):
