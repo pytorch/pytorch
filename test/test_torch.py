@@ -3841,25 +3841,29 @@ class TestTorch(TestCase):
         with self.assertRaises(IndexError):
             reference[0.0, :, 0.0] = 1
 
-    def test_index_copy(self):
+    @staticmethod
+    def _test_index_copy(self, cast):
         num_copy, num_dest = 3, 20
-        dest = torch.randn(num_dest, 4, 5)
-        src = torch.randn(num_copy, 4, 5)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
+        dest = cast(torch.randn(num_dest, 4, 5))
+        src = cast(torch.randn(num_copy, 4, 5))
+        idx = cast(torch.randperm(num_dest).narrow(0, 0, num_copy))
         dest2 = dest.clone()
         dest.index_copy_(0, idx, src)
         for i in range(idx.size(0)):
             dest2[idx[i]] = src[i]
         self.assertEqual(dest, dest2, 0)
 
-        dest = torch.randn(num_dest)
-        src = torch.randn(num_copy)
-        idx = torch.randperm(num_dest).narrow(0, 0, num_copy)
+        dest = cast(torch.randn(num_dest))
+        src = cast(torch.randn(num_copy))
+        idx = cast(torch.randperm(num_dest).narrow(0, 0, num_copy))
         dest2 = dest.clone()
         dest.index_copy_(0, idx, src)
         for i in range(idx.size(0)):
             dest2[idx[i]] = src[i]
         self.assertEqual(dest, dest2, 0)
+
+    def test_index_copy(self):
+        return self._test_index_copy(self, lambda x: x)
 
     def test_index_add(self):
         num_copy, num_dest = 3, 3

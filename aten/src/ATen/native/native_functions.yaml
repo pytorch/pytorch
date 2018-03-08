@@ -215,6 +215,9 @@
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
+- func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
+  variants: method
+
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
