@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ParameterList, Parameter
 from torch.jit.frontend import get_jit_ast
-from torch._six import raise_from
+from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -650,15 +650,38 @@ def script_method(fn):
     return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
 
 
-# TODO: make this a subclass of nn.Module, implement most nn.Module
-# methods and disble the ones that cannot work
-class ScriptModule(torch._C.ScriptModule):
+class ScriptMeta(type(torch._C.ScriptModule)):
+    # this has to inherit from pybind11's metaclass otherwise we get
+    # issues because ScriptModule inherits from torch._C.ScriptModule,
+    # a pybind11 type
+    def __init__(cls, name, bases, attrs):
+        # find all the script methods
+        methods = []
+        for k, v in sorted(attrs.items()):
+            if isinstance(v, ScriptMethodStub):
+                delattr(cls, k)
+                methods.append(v)
+        if len(methods) > 0 and '__init__' in attrs:
+            # after the user's __init__ register all the script methods
+            # with the module
+            original_init = cls.__init__
+
+            def init_then_register(self, *args, **kwargs):
+                original_init(self, *args, **kwargs)
+                for m in methods:
+                    self._create_method(m.ast, m.resolution_callback)
+
+            cls.__init__ = init_then_register
+        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+
+
+class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule)):
 
     def __init__(self, optimize=True):
         super(ScriptModule, self).__init__(optimize)
 
     def __setattr__(self, name, value):
-        if isinstance(value, Variable):
+        if isinstance(value, Parameter):
             self._register_or_set_parameter(name, value)
         elif isinstance(value, ScriptModule):
             self._register_module(name, value)
@@ -671,13 +694,6 @@ class ScriptModule(torch._C.ScriptModule):
         else:
             object.__setattr__(self, name, value)
 
-    # override the stubs
-    def __getattribute__(self, name):
-        cls_dict = type(self).__dict__
-        if name in cls_dict and isinstance(cls_dict[name], ScriptMethodStub):
-            return self._get_method(name)
-        return object.__getattribute__(self, name)
-
     def __getattr__(self, attr):
         r = self._get_attribute(attr)
         if r is None:
@@ -687,15 +703,6 @@ class ScriptModule(torch._C.ScriptModule):
     def define(self, lang):
         rcb = createResolutionCallback()
         self._define(lang, rcb, True)
-
-    # TODO: wrap in metaclass to force ScriptMethodStub to run _after_
-    # subclass __init__ is finished, rather than rely on user
-    # call super in the right place
-    def finalize(self):
-        # register a method for each of the script stubs in the class
-        for _, v in sorted(type(self).__dict__.items()):
-            if isinstance(v, ScriptMethodStub):
-                self._create_method(v.ast, v.resolution_callback)
 
 
 if not torch._C._jit_init():

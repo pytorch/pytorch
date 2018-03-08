@@ -189,7 +189,7 @@ void initJitScriptBindings(PyObject* module) {
           case NamedMember::Module:
             return py::cast(self.get_module(name));
           case NamedMember::Method:
-            return py::cast(self.get_method(name), py::return_value_policy::reference_internal);
+            return py::cast(self.get_method(name), py::return_value_policy::reference_internal, py::cast(self));
           case NamedMember::None:
           default: {
             return py::none();

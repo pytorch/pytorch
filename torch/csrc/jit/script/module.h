@@ -130,11 +130,11 @@ struct NamedMember {
 
   static const char * kind_string(Kind kind) {
     switch(kind) {
-      case Module: return "Module";
-      case Parameter: return "Parameter";
-      case Method: return "Method";
-      case None: return "None";
-      default: return "Unknown";
+      case Module: return "module";
+      case Parameter: return "parameter";
+      case Method: return "method";
+      case None: return "none";
+      default: return "unknown";
     }
   }
 };
@@ -206,6 +206,18 @@ struct Module : public std::enable_shared_from_this<Module> {
 private:
   size_t find_member(const std::string& name, NamedMember::Kind kind) const  {
     auto it = members.find(name);
+    if(it == members.end()) {
+      std::stringstream ss;
+      ss << "unknown " << NamedMember::kind_string(kind) << " '" << name << "'";
+      throw std::runtime_error(ss.str());
+    }
+    if(it->second.kind != kind) {
+      std::stringstream ss;
+      ss << "Expected attribute '" << name << "' to be a "
+        << NamedMember::kind_string(kind) << " but found "
+        << NamedMember::kind_string(it->second.kind);
+      throw std::runtime_error(ss.str());
+    }
     JIT_ASSERT(it != members.end() && it->second.kind == kind);
     return it->second.offset;
   }
