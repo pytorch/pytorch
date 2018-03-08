@@ -15,14 +15,14 @@ class MaxPool1d(Module):
 
     .. math::
 
-        \begin{array}{ll}
-        out(N_i, C_j, k)  = \max_{{m}=0}^{{kernel\_size}-1} input(N_i, C_j, stride * k + m)
-        \end{array}
+        \begin{equation*}
+        \text{out}(N_i, C_j, k)  = \max_{m=0, \ldots, \text{kernel_size}-1}
+                \text{input}(N_i, C_j, \text{stride} * k + m)
+        \end{equation*}
 
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
+    It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     Args:
         kernel_size: the size of the window to take a max over
@@ -36,7 +36,10 @@ class MaxPool1d(Module):
     Shape:
         - Input: :math:`(N, C, L_{in})`
         - Output: :math:`(N, C, L_{out})` where
-          :math:`L_{out} = floor((L_{in}  + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
+
+          .. math::
+              L_{out} = \lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
+                    * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\rfloor
 
     Examples::
 
@@ -83,15 +86,14 @@ class MaxPool2d(Module):
 
     .. math::
 
-        \begin{array}{ll}
-        out(N_i, C_j, h, w)  = \max_{{m}=0}^{kH-1} \max_{{n}=0}^{kW-1}
-                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
-        \end{array}
+        \begin{equation*}
+        \text{out}(N_i, C_j, h, w)  = \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
+                               \text{input}(N_i, C_j, \text{stride}[0] * h + m, \text{stride}[1] * w + n)
+        \end{equation*}
 
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
+    It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -111,8 +113,13 @@ class MaxPool2d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
-          :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
+
+          .. math::
+              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
+                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+
+              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
+                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
 
     Examples::
 
@@ -187,7 +194,10 @@ class MaxUnpool1d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in})`
         - Output: :math:`(N, C, H_{out})` where
-          :math:`H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`
+
+          .. math::
+              H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+
           or as given by :attr:`output_size` in the call operator
 
     Example::
@@ -265,8 +275,12 @@ class MaxUnpool2d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = (H_{in} - 1) * stride[0] -2 * padding[0] + kernel\_size[0]`
-          :math:`W_{out} = (W_{in} - 1) * stride[1] -2 * padding[1] + kernel\_size[1]`
+
+          .. math::
+            H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+
+            W_{out} = (W_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1] + \text{kernel_size}[1]
+
           or as given by :attr:`output_size` in the call operator
 
     Example::
@@ -345,9 +359,14 @@ class MaxUnpool3d(Module):
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = (D_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]`
-          :math:`H_{out} = (H_{in} - 1) * stride[1] - 2 * padding[1] + kernel\_size[1]`
-          :math:`W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel\_size[2]`
+
+          .. math::
+              D_{out} = (D_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0] + \text{kernel_size}[0]
+
+              H_{out} = (H_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1] + \text{kernel_size}[1]
+
+              W_{out} = (W_{in} - 1) * \text{stride}[2] - 2 * \text{padding}[2] + \text{kernel_size}[2]
+
           or as given by :attr:`output_size` in the call operator
 
     Example::
@@ -388,13 +407,13 @@ class AvgPool1d(Module):
 
     .. math::
 
-        \begin{array}{ll}
-        out(N_i, C_j, l)  = 1 / k * \sum_{{m}=0}^{k}
-                               input(N_i, C_j, stride * l + m)
-        \end{array}
+        \begin{equation*}
+        \text{out}(N_i, C_j, l)  = \frac{1}{k} \sum_{m=0}^{k}
+                               \text{input}(N_i, C_j, \text{stride} * l + m)
+        \end{equation*}
 
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can each be
     an ``int`` or a one-element tuple.
@@ -409,7 +428,9 @@ class AvgPool1d(Module):
     Shape:
         - Input: :math:`(N, C, L_{in})`
         - Output: :math:`(N, C, L_{out})` where
-          :math:`L_{out} = floor((L_{in}  + 2 * padding - kernel\_size) / stride + 1)`
+
+          .. math::
+              L_{out} = \lfloor \frac{L_{in}  + 2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\rfloor
 
     Examples::
 
@@ -455,13 +476,13 @@ class AvgPool2d(Module):
 
     .. math::
 
-        \begin{array}{ll}
-        out(N_i, C_j, h, w)  = 1 / (kH * kW) * \sum_{{m}=0}^{kH-1} \sum_{{n}=0}^{kW-1}
-                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
-        \end{array}
+        \begin{equation*}
+        \text{out}(N_i, C_j, h, w)  = \frac{1}{kH * kW} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
+                               \text{input}(N_i, C_j, \text{stride}[0] * h + m, \text{stride}[1] * w + n)
+        \end{equation*}
 
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
@@ -479,8 +500,13 @@ class AvgPool2d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - kernel\_size[0]) / stride[0] + 1)`
-          :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - kernel\_size[1]) / stride[1] + 1)`
+
+          .. math::
+              H_{out} = \lfloor\frac{H_{in}  + 2 * \text{padding}[0] -
+                \text{kernel_size}[0]}{\text{stride}[0]} + 1\rfloor
+
+              W_{out} = \lfloor\frac{W_{in}  + 2 * \text{padding}[1] -
+                \text{kernel_size}[1]}{\text{stride}[1]} + 1\rfloor
 
     Examples::
 
@@ -524,15 +550,14 @@ class MaxPool3d(Module):
 
     .. math::
 
-        \begin{array}{ll}
-        out(N_i, C_j, d, h, w)  = \max_{{k}=0}^{kD-1} \max_{{m}=0}^{kH-1} \max_{{n}=0}^{kW-1}
-                         input(N_i, C_j, stride[0] * k + d, stride[1] * h + m, stride[2] * w + n)
-        \end{array}
+        \begin{align*}
+        \text{out}(N_i, C_j, d, h, w) &= \max_{k=0, \ldots, kD-1} \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
+                \text{input}(N_i, C_j, \text{stride}[0] * k + d,\\ &\text{stride}[1] * h + m, \text{stride}[2] * w + n)
+        \end{align*}
 
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-      for :attr:`padding` number of points
-    | :attr:`dilation` controls the spacing between the kernel points. It is harder to describe,
-      but this `link`_ has a nice visualization of what :attr:`dilation` does.
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
+    It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -552,9 +577,16 @@ class MaxPool3d(Module):
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = floor((D_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
-          :math:`H_{out} = floor((H_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
-          :math:`W_{out} = floor((W_{in}  + 2 * padding[2] - dilation[2] * (kernel\_size[2] - 1) - 1) / stride[2] + 1)`
+
+          .. math::
+              D_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0] *
+                (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+
+              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1] *
+                (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
+
+              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2] *
+                (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\rfloor
 
     Examples::
 
@@ -603,13 +635,15 @@ class AvgPool3d(Module):
 
     .. math::
 
-        \begin{array}{ll}
-        out(N_i, C_j, d, h, w)  = 1 / (kD * kH * kW) * \sum_{{k}=0}^{kD-1} \sum_{{m}=0}^{kH-1} \sum_{{n}=0}^{kW-1}
-                               input(N_i, C_j, stride[0] * d + k, stride[1] * h + m, stride[2] * w + n)
-        \end{array}
+        \begin{equation*}
+        \text{out}(N_i, C_j, d, h, w)  = \sum_{k=0}^{kD-1} \sum_{m=0}^{kH-1} \sum_{n=0}^{kW-1}
+                \frac{\text{input}(N_i, C_j, \text{stride}[0] * d + k, \text{stride}[1] * h + m,
+                        \text{stride}[2] * w + n)}
+                     {kD * kH * kW}
+        \end{equation*}
 
-    | If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
-      for :attr:`padding` number of points
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on all three sides
+    for :attr:`padding` number of points.
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -627,9 +661,16 @@ class AvgPool3d(Module):
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = floor((D_{in} + 2 * padding[0] - kernel\_size[0]) / stride[0] + 1)`
-          :math:`H_{out} = floor((H_{in} + 2 * padding[1] - kernel\_size[1]) / stride[1] + 1)`
-          :math:`W_{out} = floor((W_{in} + 2 * padding[2] - kernel\_size[2]) / stride[2] + 1)`
+
+          .. math::
+              D_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[0] -
+                    \text{kernel_size}[0]}{\text{stride}[0]} + 1\rfloor
+
+              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[1] -
+                    \text{kernel_size}[1]}{\text{stride}[1]} + 1\rfloor
+
+              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[2] -
+                    \text{kernel_size}[2]}{\text{stride}[2]} + 1\rfloor
 
     Examples::
 
@@ -674,19 +715,19 @@ class FractionalMaxPool2d(Module):
 
     Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
-    The max-pooling operation is applied in kHxkW regions by a stochastic
+    The max-pooling operation is applied in :math:`kHxkW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
-        output_size: the target output size of the image of the form oH x oW.
-                     Can be a tuple (oH, oW) or a single number oH for a square image oH x oH
+                     Can be a single number k (for a square kernel of k x k) or a tuple `(kh x kw)`
+        output_size: the target output size of the image of the form `oH x oW`.
+                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
-                        Useful to pass to nn.MaxUnpool2d. Default: ``False``
+                        Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
     Examples:
         >>> # pool of square window of size=3, and target output size 13x12
@@ -730,7 +771,10 @@ class LPPool2d(Module):
     r"""Applies a 2D power-average pooling over an input signal composed of several input
     planes.
 
-    On each window, the function computed is: :math:`f(X) = pow(sum(pow(X, p)), 1/p)`
+    On each window, the function computed is:
+
+    .. math::
+        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
         - At p = infinity, one gets Max Pooling
         - At p = 1, one gets Average Pooling
@@ -749,8 +793,13 @@ class LPPool2d(Module):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor((H_{in}  + 2 * padding[0] - dilation[0] * (kernel\_size[0] - 1) - 1) / stride[0] + 1)`
-          :math:`W_{out} = floor((W_{in}  + 2 * padding[1] - dilation[1] * (kernel\_size[1] - 1) - 1) / stride[1] + 1)`
+
+          .. math::
+              H_{out} = \lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0] *
+                    (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+
+              W_{out} = \lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1] *
+                    (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
 
     Examples::
 
@@ -786,7 +835,10 @@ class LPPool1d(Module):
     r"""Applies a 1D power-average pooling over an input signal composed of several input
     planes.
 
-    On each window, the function computed is: :math:`f(X) = pow(sum(pow(X, p)), 1/p)`
+    On each window, the function computed is:
+
+    .. math::
+        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
         - At p = infinity, one gets Max Pooling
         - At p = 1, one gets Average Pooling
@@ -799,7 +851,9 @@ class LPPool1d(Module):
     Shape:
         - Input: :math:`(N, C, L_{in})`
         - Output: :math:`(N, C, L_{out})` where
-          :math:`L_{out} = floor((L_{in} + 2 * padding - kernel\_size) / stride + 1)`
+
+          .. math::
+              L_{out} = \lfloor\frac{L_{in} + 2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.

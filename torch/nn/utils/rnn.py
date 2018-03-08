@@ -105,9 +105,9 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
 def pack_padded_sequence(input, lengths, batch_first=False):
     r"""Packs a Variable containing padded sequences of variable length.
 
-    Input can be of size ``TxBx*`` where T is the length of the longest sequence
-    (equal to ``lengths[0]``), B is the batch size, and * is any number of
-    dimensions (including 0). If ``batch_first`` is True ``BxTx*`` inputs are
+    Input can be of size ``T x B x *`` where `T` is the length of the longest sequence
+    (equal to ``lengths[0]``), `B` is the batch size, and `*` is any number of
+    dimensions (including 0). If ``batch_first`` is True ``B x T x *`` inputs are
     expected.
 
     The sequences should be sorted by length in a decreasing order, i.e.
@@ -152,15 +152,15 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
 
     It is an inverse operation to :func:`pack_padded_sequence`.
 
-    The returned Variable's data will be of size TxBx*, where T is the length
-    of the longest sequence and B is the batch size. If ``batch_first`` is True,
-    the data will be transposed into BxTx* format.
+    The returned Variable's data will be of size ``T x B x *``, where `T` is the length
+    of the longest sequence and `B` is the batch size. If ``batch_first`` is True,
+    the data will be transposed into ``B x T x *`` format.
 
     Batch elements will be ordered decreasingly by their length.
 
     Arguments:
         sequence (PackedSequence): batch to pad
-        batch_first (bool, optional): if ``True``, the output will be in BxTx*
+        batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format.
         padding_value (float, optional): values for padded elements.
 
@@ -206,14 +206,14 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 
     ``pad_sequence`` stacks a list of Variables along a new dimension,
     and padds them to equal length. For example, if the input is list of
-    sequences with size ``Lx*`` and if batch_first is False, and ``TxBx*``
+    sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
     otherwise. The list of sequences should be sorted in the order of
     decreasing length.
 
-    B is batch size. It's equal to the number of elements in ``sequences``.
-    T is length longest sequence.
-    L is length of the sequence.
-    * is any number of trailing dimensions, including none.
+    `B` is batch size. It's equal to the number of elements in ``sequences``.
+    `T` is length longest sequence.
+    `L` is length of the sequence.
+    `*` is any number of trailing dimensions, including none.
 
     Example:
         >>> from torch.nn.utils.rnn import pad_sequence
@@ -224,20 +224,20 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
         torch.Size([25, 3, 300])
 
     Note:
-        This function returns a Variable of size TxBx* or BxTx* where T is the
+        This function returns a Variable of size ``T x B x *`` or ``B x T x *`` where `T` is the
             length of longest sequence.
         Function assumes trailing dimensions and type of all the Variables
             in sequences are same.
 
     Arguments:
         sequences (list[Variable]): list of variable length sequences.
-        batch_first (bool, optional): output will be in BxTx* if True, or in
-            TxBx* otherwise
+        batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
+            ``T x B x *`` otherwise
         padding_value (float, optional): value for padded elements.
 
     Returns:
-        Variable of size ``T x B x * `` if batch_first is False
-        Variable of size ``B x T x * `` otherwise
+        Variable of size ``T x B x *`` if batch_first is False
+        Variable of size ``B x T x *`` otherwise
     """
 
     # assuming trailing dimensions and type of all the Variables
@@ -269,8 +269,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 def pack_sequence(sequences):
     r"""Packs a list of variable length Variables
 
-    ``sequences`` should be a list of Variables of size ``Lx*``, where L is
-    the length of a sequence and * is any number of trailing dimensions,
+    ``sequences`` should be a list of Variables of size ``Lx*``, where `L` is
+    the length of a sequence and `*` is any number of trailing dimensions,
     including zero. They should be sorted in the order of decreasing length.
 
     Example:

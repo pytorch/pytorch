@@ -42,7 +42,7 @@ class Module(object):
                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call .cuda(), etc.
+    parameters converted too when you call `.cuda()`, etc.
     """
 
     dump_patches = False
@@ -230,7 +230,7 @@ class Module(object):
         return self._apply(lambda t: t.cpu())
 
     def type(self, dst_type):
-        """Casts all parameters and buffers to dst_type.
+        """Casts all parameters and buffers to :attr:`dst_type`.
 
         Arguments:
             dst_type (type or string): the desired type
@@ -249,7 +249,7 @@ class Module(object):
         return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
     def double(self):
-        """Casts all floating point parameters and buffers to double datatype.
+        """Casts all floating point parameters and buffers to `double` datatype.
 
         Returns:
             Module: self
@@ -257,7 +257,7 @@ class Module(object):
         return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
     def half(self):
-        """Casts all floating point parameters and buffers to half datatype.
+        """Casts all floating point parameters and buffers to `half` datatype.
 
         Returns:
             Module: self
@@ -671,7 +671,8 @@ class Module(object):
     def train(self, mode=True):
         """Sets the module in training mode.
 
-        This has any effect only on modules such as Dropout or BatchNorm.
+        This has any effect only on modules such as :class:`Dropout`
+        or :class:`BatchNorm`.
 
         Returns:
             Module: self
@@ -684,7 +685,8 @@ class Module(object):
     def eval(self):
         """Sets the module in evaluation mode.
 
-        This has any effect only on modules such as Dropout or BatchNorm.
+        This has any effect only on modules such as :class:`Dropout`
+        or :class:`BatchNorm`.
         """
         return self.train(False)
 

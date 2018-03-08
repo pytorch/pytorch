@@ -67,7 +67,6 @@ for function_name in functions:
     plot_path = os.path.join(ACTIVATION_IMAGE_PATH, function_name + ".png")
     if not os.path.exists(plot_path):
         function = torch.nn.modules.activation.__dict__[function_name]()
-        print(function)
 
         # Start a new plot
         pylab.clf()
@@ -91,5 +90,5 @@ for function_name in functions:
         pylab.ylim([-7, 7])
 
         # And save it
-        print(plot_path)
         pylab.savefig(plot_path)
+        print('Saved activation image for {} at {}'.format(function, plot_path))
