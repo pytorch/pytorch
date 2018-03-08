@@ -1842,7 +1842,7 @@ viewed.
 Args:
     args (torch.Size or int...): the desired size
 
-Example:
+Example::
 
     >>> x = torch.randn(4, 4)
     >>> x.size()
