@@ -8,6 +8,10 @@ add_docstr(torch.abs,
 
 Computes the element-wise absolute value of the given :attr:`input` tensor.
 
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
 Example::
 
     >>> torch.abs(torch.FloatTensor([-1, -2, 3]))
@@ -1327,6 +1331,10 @@ erf(tensor, out=None) -> Tensor
 
 Computes the error function of each element.
 
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
 Example::
 
     >>> torch.erf(torch.Tensor([0, -1., 10.]))
@@ -1338,6 +1346,10 @@ add_docstr(torch.erfinv,
 erfinv(tensor, out=None) -> Tensor
 
 Computes the inverse error function of each element.
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -1351,6 +1363,10 @@ exp(tensor, out=None) -> Tensor
 
 Computes the exponential of each element.
 
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
 Example::
 
     >>> torch.exp(torch.Tensor([0, math.log(2)]))
@@ -1362,6 +1378,10 @@ add_docstr(torch.expm1,
 expm1(tensor, out=None) -> Tensor
 
 Computes the exponential of each element minus 1.
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -3705,6 +3725,7 @@ Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
     n (int): the upper bound (exclusive)
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4704,6 +4725,7 @@ Args:
     input (Tensor): the input tensor
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
+    out (Tensor, optional): the output tensor
 
 Example::
 
