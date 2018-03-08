@@ -1,24 +1,29 @@
-#include "Python.h"
+#ifndef NO_PYTHON
+#include <Python.h>
+#endif
 #include "interpreter.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
-#include "torch/csrc/autograd/python_engine.h"
-#include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/generated/aten_dispatch.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/tensor_conversions.h"
-#include "torch/csrc/utils/auto_gil.h"
 
 #include <typeinfo>
 
+#ifndef NO_PYTHON
+#include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/jit/pybind.h"
+#include "torch/csrc/utils/auto_gil.h"
+
 namespace py = pybind11;
+#endif
 
 namespace torch { namespace jit {
 
@@ -369,6 +374,7 @@ bool hasHandleOutput(Node * n) {
   return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
 }
 
+#ifndef NO_PYTHON
 Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
   py::function func;
   if (op->tracing_autograd_python_function) {
@@ -494,6 +500,14 @@ Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
     }
   };
 }
+#else
+Operation createPythonOperation(PythonOp* op, bool values_are_variables) {
+  throw std::runtime_error("Trying to create Python operation from a C++ build");
+  return [=](Stack & stack) {
+    return 0;
+  };
+}
+#endif
 
 Operation createCppOperation(CppOp* op) {
   std::shared_ptr<autograd::Function> func = op->fn;
@@ -523,7 +537,7 @@ Operation createEvalOperation(CppOp * op) {
     AutogradHandle * handle_in = dynamic_cast<AutogradHandle*>(handle_t.get());
     JIT_ASSERT(handle_in);
     HandleBuilder builder(has_handle_output);
-    auto& engine = autograd::python::PythonEngine::getDefaultEngine();
+    auto& engine = torch::autograd::Engine::getDefaultEngine();
     autograd::variable_list v_inputs;
     for(size_t i = 0; i < num_inputs - 1; i++) {
       v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
@@ -554,7 +568,7 @@ Operation createEvalOperation(CppOp * op) {
 // or nullptr if it's a no-op for autograd.
 Operation getOperation(jit::Node* node, bool values_are_variables) {
   IR_IFM(node, PythonOp)
-  return createPythonOperation(value, values_are_variables);
+    return createPythonOperation(value, values_are_variables);
   IR_ELSEIFM(CppOp)
     if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
       return createEvalOperation(value);
