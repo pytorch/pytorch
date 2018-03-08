@@ -845,13 +845,17 @@ class TestSparse(TestCase):
 
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
-        cpum = torch.sparse
-        cpu_dtypes = [cpum.uint8, cpum.int8, cpum.int16, cpum.int32, cpum.int64,
-                      cpum.float32, cpum.float64]
-        cudam = torch.cuda.sparse
-        cuda_dtypes = [cudam.uint8, cudam.int8, cudam.int16, cudam.int32, cudam.int64,
-                       cudam.float32, cudam.float64]
+        all_dtypes = torch.testing.get_all_dtypes()
+        cpu_dtypes = [d for d in all_dtypes if d.is_sparse and not d.is_cuda]
+        cuda_dtypes = [d for d in all_dtypes if d.is_sparse and d.is_cuda]
         TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, True)
+
+    @cpu_only  # not really, but we only really want to run this once
+    def test_empty_full(self):
+        all_dtypes = torch.testing.get_all_dtypes()
+        cpu_dtypes = [d for d in all_dtypes if d.is_sparse and not d.is_cuda]
+        cuda_dtypes = [d for d in all_dtypes if d.is_sparse and d.is_cuda]
+        TestTorch._test_empty_full(self, cpu_dtypes, cuda_dtypes)
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)

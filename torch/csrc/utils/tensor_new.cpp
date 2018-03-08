@@ -29,6 +29,27 @@ static void maybe_initialize_cuda(const at::Type &type) {
   }
 }
 
+static Tensor dispatch_zeros(const Type& type, int device, IntList sizes) {
+  maybe_initialize_cuda(type);
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(device);
+  return type.zeros(sizes);
+}
+
+static Tensor dispatch_ones(const Type& type, int device, IntList sizes) {
+  maybe_initialize_cuda(type);
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(device);
+  return type.ones(sizes);
+}
+
+static Tensor dispatch_full(const Type& type, Scalar fill_value, int device, IntList sizes) {
+  maybe_initialize_cuda(type);
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(device);
+  return type.full(sizes, fill_value);
+}
+
 static Tensor new_with_sizes(const Type& type, int device, IntList sizes) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
@@ -333,6 +354,62 @@ Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
     return set_requires_grad(new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0)), r.toBool(3));
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
+}
+
+Tensor new_empty(const at::Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new_empty(IntList size, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+  });
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto& actual_type = r.typeWithDefault(1, type);
+    return set_requires_grad(new_with_sizes(actual_type, r.toInt64(2), r.intlist(0)), r.toBool(3));
+  }
+  throw std::runtime_error("new_empty(): invalid arguments");
+}
+
+Tensor new_full(const at::Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new_full(IntList size, Scalar fill_value, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+  });
+
+  ParsedArgs<5> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto& actual_type = r.typeWithDefault(2, type);
+    return set_requires_grad(dispatch_full(actual_type, r.scalar(1), r.toInt64(3), r.intlist(0)), r.toBool(4));
+  }
+  throw std::runtime_error("new_full(): invalid arguments");
+}
+
+Tensor new_ones(const at::Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new_ones(IntList size, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+  });
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto& actual_type = r.typeWithDefault(1, type);
+    return set_requires_grad(dispatch_ones(actual_type, r.toInt64(2), r.intlist(0)), r.toBool(3));
+  }
+  throw std::runtime_error("new_ones(): invalid arguments");
+}
+
+Tensor new_zeros(const at::Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "new_zeros(IntList size, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+  });
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const auto& actual_type = r.typeWithDefault(1, type);
+    return set_requires_grad(dispatch_zeros(actual_type, r.toInt64(2), r.intlist(0)), r.toBool(3));
+  }
+  throw std::runtime_error("new_zeros(): invalid arguments");
 }
 
 }} // namespace torch::utils
