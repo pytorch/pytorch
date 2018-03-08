@@ -106,23 +106,6 @@ from tools.setup_helpers.ninja_builder import NinjaBuilder, ninja_build_ext
 from tools.setup_helpers.dist_check import WITH_DISTRIBUTED, \
     WITH_DISTRIBUTED_MW, WITH_GLOO_IBVERBS
 
-################################################################################
-# Check Python build dependencies
-################################################################################
-missing_pydep = '''
-Missing build dependency: Unable to `import {importname}`.
-Please install it via `conda install {module}` or `pip install {module}`
-'''.strip()
-
-
-def check_pydep(importname, module):
-    try:
-        importlib.import_module(importname)
-    except ImportError:
-        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
-
-check_pydep('yaml', 'pyyaml')
-
 DEBUG = check_env_flag('DEBUG')
 
 IS_WINDOWS = (platform.system() == 'Windows')
@@ -238,6 +221,18 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
+missing_pydep = '''
+Missing build dependency: Unable to `import {importname}`.
+Please install it via `conda install {module}` or `pip install {module}`
+'''.strip()
+
+
+def check_pydep(importname, module):
+    try:
+        importlib.import_module(importname)
+    except ImportError:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
 
 class build_deps(Command):
     user_options = []
@@ -258,6 +253,9 @@ class build_deps(Command):
         check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+
+        check_pydep('yaml', 'pyyaml')
+        check_pydep('typing', 'typing')
 
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
