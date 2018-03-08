@@ -573,7 +573,7 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64
   return ret;
 }
 
-Tensor adaptive_max_pool_double_backward(const Tensor & grad, const Tensor & self, const Tensor & indices, int dim) {
+Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
   TORCH_ASSERT(indices.dim() >= dim);
   auto size = std::vector<int64_t>(indices.sizes().slice(0, indices.dim() - dim));
   size.push_back(-1);
@@ -702,15 +702,6 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
   auto diag = grad_input.as_strided({diagonal_size}, {input_sizes[1] + 1}, storage_offset);
   diag.copy_(grad);
   return grad_input;
-}
-
-Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {
-  // fold the first two dims together and the last two together
-  auto fold = [](const Tensor & t) -> Tensor {
-    auto sizes = t.sizes();
-    return t.contiguous().view({sizes[0] * sizes[1], sizes[2] * sizes[3]});
-  };
-  return fold(grad).gather(1, fold(indices)).view(indices.sizes());
 }
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, bool size_average, bool reduce) {

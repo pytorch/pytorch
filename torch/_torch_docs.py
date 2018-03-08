@@ -11,6 +11,10 @@ Computes the element-wise absolute value of the given :attr:`input` tensor.
 .. math::
     \text{out}_{i} = |\text{input}_{i}|
 
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
 Example::
 
     >>> torch.abs(torch.FloatTensor([-1, -2, 3]))
@@ -1361,6 +1365,10 @@ Computes the error function of each element. The error function is defined as fo
 .. math::
     \mathrm{erf}(x) = \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
 Example::
 
     >>> torch.erf(torch.Tensor([0, -1., 10.]))
@@ -1376,6 +1384,10 @@ in the range :math:`(-1, 1)` as:
 
 .. math::
     \mathrm{erfinv}(\mathrm{erf}(x)) = x
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -1397,6 +1409,10 @@ Args:
     input (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
 Example::
 
     >>> torch.exp(torch.Tensor([0, math.log(2)]))
@@ -1415,6 +1431,10 @@ of :attr:`input`.
 
 Args:
     input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Args:
+    tensor (Tensor): the input tensor
     out (Tensor, optional): the output tensor
 
 Example::
@@ -3795,6 +3815,7 @@ Returns a random permutation of integers from ``0`` to ``n - 1``.
 
 Args:
     n (int): the upper bound (exclusive)
+    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4819,6 +4840,7 @@ Args:
     input (Tensor): the input tensor
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
+    out (Tensor, optional): the output tensor
 
 Example::
 

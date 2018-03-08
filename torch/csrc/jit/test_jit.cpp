@@ -807,21 +807,23 @@ void testBlocks(std::ostream & out) {
 
 
 const static auto cf_examples = R"JIT(
-  def if_test(a, b) -> (c):
+  def if_test(a, b):
       c = 0
       if a < b:
         c = b
       else:
         c = a
-  def if_one(a, b) -> (c):
+      return c
+  def if_one(a, b):
     c = b
     if a < b:
       c = a
-  def while_test(a, i) -> (c):
+    return c
+  def while_test(a, i):
     while i < 3:
       a *= a
       i += 1
-    c = a
+    return a
 )JIT";
 void testControlFlow() {
   script::CompilationUnit cu;

@@ -180,13 +180,27 @@ struct to_ir {
       auto& name = input.ident().name();
       environment_stack->setVar(name, def.graph->addInput(name));
     }
-    emitStatements(tree.statements());
-    for (auto output : tree.returns()) {
-      def.graph->registerOutput(environment_stack->getVar(output.ident()));
+
+    auto stmts = tree.statements();
+    auto stmts_begin = stmts.begin();
+    auto stmts_end = stmts.end();
+    if (stmts_begin == stmts_end)
+      throw ErrorReport(tree) << "functions need to have a non-empty body";
+    --stmts_end;
+    if ((*stmts_end).kind() != TK_RETURN)
+      throw ErrorReport(*stmts_end) << "functions need to end with a return statement";
+
+    emitStatements(stmts_begin, stmts_end);
+    for (auto output : Return(*stmts_end).values()) {
+      def.graph->registerOutput(emitExpr(output, 1)[0]);
     }
   }
   void emitStatements(const List<Stmt>& statements) {
-    for (auto stmt : statements) {
+    return emitStatements(statements.begin(), statements.end());
+  }
+  void emitStatements(List<Stmt>::const_iterator begin, List<Stmt>::const_iterator end) {
+    for (; begin != end; ++begin) {
+      auto stmt = *begin;
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -205,6 +219,10 @@ struct to_ir {
           break;
         case TK_EXPR_STMT:
           emitExpr(ExprStmt(stmt).expr(), 0);
+          break;
+        case TK_RETURN:
+          throw ErrorReport(stmt) << "return statements can appear only at the end "
+                                  << "of the function body";
           break;
       }
     }

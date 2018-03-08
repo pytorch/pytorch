@@ -1344,6 +1344,36 @@ class TestCuda(TestCase):
     def test_advancedindex(self):
         TestTorch._test_advancedindex(self, lambda t: t.cuda())
 
+    def test_advancedindex_mixed_cpu_cuda(self):
+        def test(x, ia, ib):
+            self.assertEqual(x[:, ia, None, ib, 0].cpu(),
+                             x.cpu()[:, ia.cpu(), None, ib.cpu(), 0])
+            self.assertEqual(x[ia], x.cpu()[ia.cpu()])
+
+        # Index cpu tensor with cuda tensor
+        x = torch.randn(3, 4, 4, 4, 3)
+        ia = torch.cuda.LongTensor([0, 2, 1])
+        ib = torch.cuda.LongTensor([0, 2, 1])
+        test(x, ia, ib)
+
+        # Index cuda tensor with cpu tensor
+        x = x.cuda()
+        ia = ia.cpu()
+        ib = ib.cpu()
+        test(x, ia, ib)
+
+        # Index cpu tensor with mixed cpu, cuda tensors
+        x = x.cpu()
+        ia = ia.cpu()
+        ib = ib.cuda()
+        test(x, ia, ib)
+
+        # Index cuda tensor with mixed cpu, cuda tensors
+        x = x.cuda()
+        ia = ia.cpu()
+        ib = ib.cuda()
+        test(x, ia, ib)
+
     def test_advancedindex_big(self):
         TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
 

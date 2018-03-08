@@ -36,7 +36,6 @@
 
 #ifdef _THP_CORE
 #include "serialization.h"
-#include "allocators.h"
 
 #include "autograd/autograd.h"
 #endif

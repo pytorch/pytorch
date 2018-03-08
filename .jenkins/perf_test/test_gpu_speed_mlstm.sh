@@ -11,7 +11,7 @@ test_gpu_speed_mlstm () {
   cd benchmark/scripts/
 
   SAMPLE_ARRAY=()
-  NUM_RUNS=20
+  NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command "python mlstm.py --skip-cpu-governor-check")
@@ -25,8 +25,10 @@ test_gpu_speed_mlstm () {
   echo "Runtime stats in seconds:"
   echo $stats
 
-  if [ "$1" == "compare_with_baseline" ]; then
-    python ../compare_with_baseline.py ${FUNCNAME[0]} "${stats}"
+  if [ "$2" == "compare_with_baseline" ]; then
+    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}"
+  elif [ "$2" == "compare_and_update" ]; then
+    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}" --update
   fi
 }
 

@@ -1,4 +1,5 @@
-#include <Python.h>
+#include "Generator.h"
+
 #include <structmember.h>
 #include <ATen/ATen.h>
 

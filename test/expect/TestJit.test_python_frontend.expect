@@ -5,10 +5,6 @@
     (param (ident y) (tensor_type))
     (param (ident z) (tensor_type)))
   (list
-    (param
-      (ident __jit_0)
-      (tensor_type)))
-  (list
     (assign
       (list (ident q))
       (=)
@@ -57,7 +53,5 @@
           (list (ident q))
           (=)
           (variable (ident x)))))
-    (assign
-      (list (ident __jit_0))
-      (=)
-      (variable (ident x)))))
+    (return
+      (list (variable (ident x))))))
