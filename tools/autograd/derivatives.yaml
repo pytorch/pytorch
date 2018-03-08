@@ -892,11 +892,11 @@
   self: zeros_like(self)
 
 - name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  grad_output: max_pool_double_backward(grad, indices, 2)
   self: zeros_like(self)
 
 - name: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 3)
+  grad_output: max_pool_double_backward(grad, indices, 3)
   self: zeros_like(self)
 
 - name: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
@@ -912,7 +912,7 @@
   output: grad * grad_output * (output < 0).toType(grad.type())
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  grad_output: max_pool_double_backward(grad, indices, 2)
   self: zeros_like(self)
 
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
@@ -948,7 +948,11 @@
   self: zeros_like(grad)
 
 - name: max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode, Tensor indices)
-  grad_output: max_pool2d_double_backward(grad, indices);
+  grad_output: max_pool_double_backward(grad, indices, 2);
+  self: zeros_like(self)
+
+- name: max_pool3d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode, Tensor indices)
+  grad_output: max_pool_double_backward(grad, indices, 3);
   self: zeros_like(self)
 
 - name: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, IntList output_size)
