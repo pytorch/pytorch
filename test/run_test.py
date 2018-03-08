@@ -78,47 +78,50 @@ CUSTOM_HANDLERS = {
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Run PyTorch unit test suite')
+    parser = argparse.ArgumentParser(
+        description='Run the PyTorch unit test suite',
+        epilog='where TESTS is any of: {}'.format(', '.join(TESTS)))
     parser.add_argument(
         '-v',
         '--verbose',
         action='store_true',
-        help='Print verbose information and test-by-test results')
+        help='print verbose information and test-by-test results')
     parser.add_argument(
-        '-p', '--python', help='The Python interpreter to execute tests with')
+        '-p', '--python', help='the python interpreter to execute tests with')
     parser.add_argument(
-        '-c',
-        '--coverage',
-        action='store_true',
-        help='Enable coverage support')
+        '-c', '--coverage', action='store_true', help='enable coverage')
     parser.add_argument(
         '-i',
         '--include',
         nargs='+',
         choices=TESTS,
         default=TESTS,
-        help='Select a set of tests to include')
+        metavar='TESTS',
+        help='select a set of tests to include (defaults to ALL tests)')
     parser.add_argument(
         '-x',
         '--exclude',
         nargs='+',
         choices=TESTS,
+        metavar='TESTS',
         default=[],
-        help='Select a set of tests to exclude')
+        help='select a set of tests to exclude')
     parser.add_argument(
         '-f',
         '--first',
         choices=TESTS,
-        help='Select the test to start from (excludes previous tests)')
+        metavar='TESTS',
+        help='select the test to start from (excludes previous tests)')
     parser.add_argument(
         '-l',
         '--last',
         choices=TESTS,
-        help='Select the last test to run (excludes following tests)')
+        metavar='TESTS',
+        help='select the last test to run (excludes following tests)')
     parser.add_argument(
         '--ignore-win-blacklist',
         action='store_true',
-        help='Always run blacklisted Windows tests')
+        help='always run blacklisted windows tests')
     return parser.parse_args()
 
 
@@ -132,7 +135,10 @@ def get_python_command(options):
 
 
 def get_selected_tests(options):
-    selected_tests = list(sorted(set(options.include) - set(options.exclude)))
+    selected_tests = options.include
+    for test in options.exclude:
+        if test in selected_tests:
+            selected_tests.remove(test)
 
     if options.first:
         first_index = selected_tests.index(options.first)
@@ -142,7 +148,7 @@ def get_selected_tests(options):
         last_index = selected_tests.index(options.last)
         selected_tests = selected_tests[:last_index + 1]
 
-    if sys.platform == 'win32' and not options.with_windows:
+    if sys.platform == 'win32' and not options.ignore_win_blacklist:
         for test in WINDOWS_BLACKLIST:
             if test in selected_tests:
                 print('Excluding {} on Windows'.format(test))
