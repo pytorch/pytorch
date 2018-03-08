@@ -2814,7 +2814,7 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
   ptrdiff_t size;
   real i = 0;
 
-  THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
+  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
 
@@ -2831,7 +2831,7 @@ void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
   ptrdiff_t size;
   real i = 0;
 
-  THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
+  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound inconsistent with step sign");
 
