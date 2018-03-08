@@ -55,7 +55,6 @@ struct THMapAllocatorContext_ {
   HANDLE handle;
   HANDLE event;
   char *eventname;
-  void *data;
 #else
   int fd;
 #endif
@@ -98,7 +97,6 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
   ctx->size = 0;
 #ifdef _WIN32
   ctx->handle = INVALID_HANDLE_VALUE;
-  ctx->data = INVALID_HANDLE_VALUE;
 #else
   ctx->fd = -1;
 #endif
@@ -572,7 +570,6 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
   if (THAtomicDecrementRef(&info->refcount)) {
-    ReleaseContext *cxt = (ReleaseContext *)ctx->data;
     SetEvent(ctx->event); 
   }
 #else /* _WIN32 */
