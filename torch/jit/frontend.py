@@ -284,7 +284,11 @@ class ExprBuilder(Builder):
     def build_Call(ctx, expr):
         ref = build_expr(ctx, expr.func, allow_methods=True)
         args = [build_expr(ctx, py_arg) for py_arg in expr.args]
-        kwargs = [Attribute(Ident(name), build_expr(ctx, value)) for name, value in expr.keywords]
+        kwargs = []
+        for kw in expr.keywords:
+            expr = build_expr(ctx, kw.value)
+            # XXX: we could do a better job at figuring out the range for the name here
+            kwargs.append(Attribute(Ident(expr.range(), kw.arg), expr))
         if type(ref) is ExprBuilder._MethodRef:  # Method call
             return Apply(ref.name, [ref.self] + args, kwargs)
         elif isinstance(ref, Var):  # Top-level function call

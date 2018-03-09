@@ -1654,9 +1654,10 @@ class TestJit(TestCase):
     def test_script_error(self):
         @torch.jit.script
         def foo(a):
-            return a.mm(a)
+            return a.t()
         s = Variable(torch.rand(10))
-        with self.assertRaisesRegex(RuntimeError, "failed shape propagation"):
+        # XXX: this should stay quiet in stay propagation and only fail in the interpreter
+        with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             foo(s)
 
         @torch.jit.script
