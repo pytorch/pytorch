@@ -141,7 +141,7 @@ class ONNXWhileOp final : public Operator<Context> {
         cur_ws = scope_->workspace();
         cur_output_condition = scope_->output_condition();
         if (save_scopes_) {
-          auto loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_);
+          loop_ws = ws_stack_.pushForwardWorkspace(parent_ws_);
           scope_ = std::make_shared<LocalScope>(loop_ws, body_net_def_);
         }
 
