@@ -1,4 +1,6 @@
+#ifndef NO_PYTHON
 #include <Python.h>
+#endif
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
@@ -15,10 +17,9 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 #include "torch/csrc/assertions.h"
-#include "torch/csrc/utils/auto_gil.h"
 
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/jit/graph_executor.h"
@@ -26,6 +27,12 @@
 
 #include <vector>
 #include <iostream>
+
+#ifndef NO_PYTHON
+#include "torch/csrc/utils/auto_gil.h"
+#else
+struct AutoNoGIL {};
+#endif
 
 namespace torch { namespace jit {
 
@@ -495,7 +502,7 @@ std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_i
 
 variable_list grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs) {
   static const auto get_edge = [](const Variable& v) { return v.gradient_edge(); };
-  auto & engine = torch::autograd::python::PythonEngine::getDefaultEngine();
+  auto & engine = torch::autograd::Engine::getDefaultEngine();
   return engine.execute(fmap(outputs, get_edge), grad_outputs, true, false, fmap(inputs, get_edge));
 }
 
@@ -807,21 +814,23 @@ void testBlocks(std::ostream & out) {
 
 
 const static auto cf_examples = R"JIT(
-  def if_test(a, b) -> (c):
+  def if_test(a, b):
       c = 0
       if a < b:
         c = b
       else:
         c = a
-  def if_one(a, b) -> (c):
+      return c
+  def if_one(a, b):
     c = b
     if a < b:
       c = a
-  def while_test(a, i) -> (c):
+    return c
+  def while_test(a, i):
     while i < 3:
       a *= a
       i += 1
-    c = a
+    return a
 )JIT";
 void testControlFlow() {
   script::CompilationUnit cu;

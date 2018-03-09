@@ -107,7 +107,8 @@ struct Parser {
   // precedence strictly greater than 'precedence'
   // precedence == 0 will parse _all_ expressions
   // this is the core loop of 'top-down precedence parsing'
-  TreeRef parseExp(int precedence = 0) {
+  Expr parseExp() { return parseExp(0); }
+  Expr parseExp(int precedence) {
     TreeRef prefix = nullptr;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
@@ -138,32 +139,22 @@ struct Parser {
 
       prefix = c(kind, pos, {prefix, parseExp(binary_prec)});
     }
-    return prefix;
+    return Expr(prefix);
   }
-  TreeRef
-  parseList(int begin, int sep, int end, std::function<TreeRef(int)> parse) {
+  template<typename T>
+  List<T> parseList(int begin, int sep, int end, T (Parser::*parse)()) {
     auto r = L.cur().range;
-    L.expect(begin);
-    TreeList elements;
+    if (begin != TK_NOTHING)
+      L.expect(begin);
+    std::vector<T> elements;
     if (L.cur().kind != end) {
-      int i = 0;
       do {
-        elements.push_back(parse(i++));
+        elements.push_back((this->*parse)());
       } while (L.nextIf(sep));
     }
-    L.expect(end);
-    return c(TK_LIST, r, std::move(elements));
-  }
-  TreeRef parseNonEmptyList(int sep, std::function<TreeRef(int)> parse) {
-    TreeList elements;
-    int i = 0;
-    do {
-      elements.push_back(parse(i++));
-    } while (L.nextIf(sep));
-    return c(TK_LIST, elements[0]->range(), std::move(elements));
-  }
-  TreeRef parseExpList() {
-    return parseList('(', ',', ')', [&](int i) { return parseExp(); });
+    if (end != TK_NOTHING)
+      L.expect(end);
+    return List<T>::create(r, elements);
   }
   TreeRef parseConst() {
     // 'b' - boolean
@@ -199,7 +190,7 @@ struct Parser {
     int kind = L.cur().kind;
     switch (kind) {
       case '[':
-        return parseList('[', ',', ']', [&](int i) { return parseConst(); });
+        return parseList('[', ',', ']', &Parser::parseConst);
       default:
         return parseConst();
     }
@@ -253,9 +244,6 @@ struct Parser {
 
     return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
   }
-  TreeRef parseIdentList() {
-    return parseList('(', ',', ')', [&](int i) { return parseIdent(); });
-  }
   TreeRef parseParam() {
     auto typ = parseType();
     if (L.cur().kind != TK_IDENT && typ->trees()[0]->kind() == TK_IDENT) {
@@ -297,12 +285,13 @@ struct Parser {
         return parseWhile();
       case TK_GLOBAL: {
         auto range = L.next().range;
-        std::vector<TreeRef> idents;
-        do {
-          idents.push_back(parseIdent());
-        } while (L.nextIf(','));
-        expectEndOfLine();
-        return c(TK_GLOBAL, range, std::move(idents));
+        auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+        return Global::create(range, idents);
+      }
+      case TK_RETURN: {
+        auto range = L.next().range;
+        auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        return Return::create(range, values);
       }
       default: {
         Expr r = Expr(parseExp());
@@ -331,7 +320,7 @@ struct Parser {
   TreeRef parseOptionalIdentList() {
     TreeRef list = nullptr;
     if (L.cur().kind == '(') {
-      list = parseIdentList();
+      list = parseList('(', ',', ')', &Parser::parseIdent);
     } else {
       list = c(TK_LIST, L.cur().range, {});
     }
@@ -385,15 +374,11 @@ struct Parser {
   TreeRef parseFunction() {
     L.expect(TK_DEF);
     auto name = parseIdent();
-    auto paramlist =
-        parseList('(', ',', ')', [&](int i) { return parseParam(); });
-    L.expect(TK_ARROW);
-    auto retlist =
-        parseList('(', ',', ')', [&](int i) { return parseParam(); });
+    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
     L.expect(':');
     auto stmts_list = parseStatements();
     return Def::create(name.range(), Ident(name), List<Param>(paramlist),
-                                      List<Param>(retlist), List<Stmt>(stmts_list));
+                       List<Stmt>(stmts_list));
   }
   Lexer& lexer() {
     return L;

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/utils/python_stub.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"

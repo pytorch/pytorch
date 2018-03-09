@@ -63,13 +63,7 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
           int iH,
           int oT,
           int oW,
-          int oH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int oH)
 {
   int k;
   int has_error = 0;
@@ -77,35 +71,29 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
-    int ti, i, j, maxz, maxy, maxx;
-    for (ti = 0; ti < iT; ti++)
+    real *output_p_k = output_p + k * oT * oH * oW;
+    real *input_p_k = input_p + k * iT * iH * iW;
+    THIndex_t *ind_p_k = ind_p + k * iT * iH * iW;
+
+    int t, i, j, index;
+    THIndex_t maxp;
+    for (t = 0; t < iT; t++)
     {
       for (i = 0; i < iH; i++)
       {
         for (j = 0; j < iW; j++)
         {
-          int start_t = ti * dT - pT;
-          int start_h = i * dH - pH;
-          int start_w = j * dW - pW;
-
-          real *input_p_k = input_p + k*iT*iW*iH + ti*iW*iH + i*iW + j;
-          THIndex_t *ind_p_k = ind_p + k*iT*iW*iH + ti*iW*iH + i*iW + j;
-
-          maxz = ((unsigned char*)(ind_p_k))[0]; /* retrieve position of max */
-          maxy = ((unsigned char*)(ind_p_k))[1];
-          maxx = ((unsigned char*)(ind_p_k))[2];
-
-          THIndex_t idx = k*oT*oW*oH + oH*oW*(start_t+maxz) + oW*(start_h+maxy) + (start_w+maxx);
-          if (start_t+maxz<0 || start_h+maxy<0 || start_w+maxx<0 || start_t+maxz>=oT
-	      || start_h+maxy>=oH || start_w+maxx>=oW)
+          index = t * iH * iW + i * iW + j;
+          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
+          if (maxp < 0 || maxp >= oT * oW * oH)
           {
 #pragma omp critical
             {
               has_error = 1;
-              error_index = idx;
+              error_index = maxp;
             }
           } else {
-            output_p[idx] = *input_p_k; /* update output */
+            output_p_k[maxp] = input_p_k[index]; /* update output */
           }
         }
       }
@@ -183,8 +171,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
       indices_data,
       nslices,
       iT, iW, iH,
-      oT, oW, oH,
-      dT, dW, dH, pT, pW, pH
+      oT, oW, oH
     );
   }
   else
@@ -206,9 +193,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         indices_data+p*nslices*iT*iW*iH,
         nslices,
         iT, iW, iH,
-        oT, oW, oH,
-        dT, dW, dH,
-        pT, pW, pH
+        oT, oW, oH
       );
     }
   }
@@ -228,46 +213,31 @@ static void THNN_(VolumetricMaxUnpooling_updateGradInput_frame)(
           int iH,
           int oT,
           int oW,
-          int oH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int oH)
 {
   int k;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {
-    int ti, i, j, maxz, maxy, maxx;
-    for (ti = 0; ti < iT; ti++)
+    real *gradInput_p_k = gradInput_p + k * iT * iH * iW;
+    real *gradOutput_p_k = gradOutput_p + k * oT * oH * oW;
+    THIndex_t *ind_p_k = ind_p + k * iT * iH * iW;
+
+    int t, i, j, index;
+    THIndex_t maxp;
+    for (t = 0; t < iT; t++)
     {
       for (i = 0; i < iH; i++)
       {
         for (j = 0; j < iW; j++)
         {
-          int start_t = ti * dT - pT;
-          int start_h = i * dH - pH;
-          int start_w = j * dW - pW;
-
-          real *gradInput_p_k = gradInput_p + k*iT*iW*iH + ti*iW*iH + i*iW + j;
-          THIndex_t *ind_p_k = ind_p + k*iT*iW*iH + ti*iW*iH + i*iW + j;
-
-          maxz = ((unsigned char*)(ind_p_k))[0]; /* retrieve position of max */
-          maxy = ((unsigned char*)(ind_p_k))[1];
-          maxx = ((unsigned char*)(ind_p_k))[2];
-
-          if (start_t+maxz<0 || start_h+maxy<0 || start_w+maxx<0
-	      || start_t+maxz>=oT || start_h+maxy>=oH || start_w+maxx>=oW)
+          index = t * iH * iW + i * iW  + j;
+          maxp = ind_p_k[index] - TH_INDEX_BASE;  /* retrieve position of max */
+          if (maxp < 0 || maxp >= oT * oH * oW)
           {
-            THError(
-              "invalid max index z= %d, y= %d, x= %d, oT= %d, oW= %d, oH= %d",
-              start_t+maxz, start_h+maxy, start_w+maxx, oT, oW, oH
-            );
+            THError("invalid max index %ld, oT= %d, oW= %d, oH= %d", maxp, oT, oW, oH);
           }
-          *gradInput_p_k = gradOutput_p[k*oT*oW*oH + oH*oW*(start_t+maxz)
-					+ oW*(start_h+maxy) + (start_w+maxx)]; /* update gradient */
+          gradInput_p_k[index] = gradOutput_p_k[maxp];  /* update gradient */
         }
       }
     }
@@ -342,9 +312,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
       indices_data,
       nslices,
       iT, iW, iH,
-      oT, oW, oH,
-      dT, dW, dH,
-      pT, pW, pH
+      oT, oW, oH
     );
   }
   else
@@ -358,9 +326,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         indices_data+p*nslices*iT*iW*iH,
         nslices,
         iT, iW, iH,
-        oT, oW, oH,
-        dT, dW, dH,
-        pT, pW, pH
+        oT, oW, oH
       );
     }
   }

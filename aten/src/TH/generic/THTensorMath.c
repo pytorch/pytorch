@@ -115,6 +115,26 @@
   } \
 }
 
+static inline real THTensor_(powOne)(real x, real y) {
+#if defined(TH_REAL_IS_FLOAT)
+  return powf(x, y); 
+#elif defined(TH_REAL_IS_DOUBLE)
+  return pow(x, y);
+#else
+  THArgCheck(y >= 0, 1,
+      "Integers to negative integer powers are not allowed");
+  real result = 1;  
+  while (y) {       
+    if (y & 1) {    
+       result *= x; 
+    }               
+    y /= 2;         
+    x *= x;         
+  }                 
+  return result;    
+#endif
+}
+
 void THTensor_(fill)(THTensor *r_, real value)
 {
   if (THTensor_(isContiguous)(r_) || THTensor_(isTransposed)(r_)) {
@@ -1297,6 +1317,47 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
   }
 }
 
+void THTensor_(pow)(THTensor *r_, THTensor *t, real value)
+{
+  THTensor_(resizeAs)(r_, t);
+  if(value == 1){
+    THTensor_(copy)(r_, t);
+  }
+  else if(value == 2){
+    THTensor_(cmul)(r_, t, t);
+  }
+  else if(value == 3){
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * *t_data * *t_data;);
+  }
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#if defined (TH_REAL_IS_FLOAT)
+#define TH_MATH_NAME(fn) fn##f
+#else
+#define TH_MATH_NAME(fn) fn
+#endif
+  else if(value == 0.5){
+    THTensor_(sqrt)(r_, t);
+  }
+  else if(value == -0.5){
+    THTensor_(rsqrt)(r_, t);
+  }
+  else if(value == -1){
+    THTensor_(cinv)(r_, t);
+  }
+  else if(value == -2){
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = TH_MATH_NAME(1.0) / (*t_data * *t_data););
+  }
+  else{
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = TH_MATH_NAME(pow)(*t_data, value););
+  }
+#undef TH_MATH_NAME
+#else
+  else {
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = THTensor_(powOne)(*t_data, value););
+  }
+#endif
+}
+
 void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
@@ -1314,14 +1375,14 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
       int64_t i;
       #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<r_Size; i++)
-        rp[i] = pow(tp[i], sp[i]);
+        rp[i] = THTensor_(powOne)(tp[i], sp[i]);
     } else {
 #if _OPENMP
       int inOMP = omp_in_parallel();
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = pow(*t_data, *src_data);, TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = THTensor_(powOne)(*t_data, *src_data);, TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1331,7 +1392,7 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
     serial_path = 1;
   }
   if (serial_path) {
-    TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = pow(*t_data, *src_data););
+    TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = THTensor_(powOne)(*t_data, *src_data););
   }
 }
 
@@ -1750,21 +1811,21 @@ void THTensor_(tpow)(THTensor *r_, real value, THTensor *t)
     int64_t i;
     #pragma omp parallel for if(r_Size > TH_OMP_OVERHEAD_THRESHOLD) private(i)
     for (i=0; i<r_Size; i++)
-      rp[i] = pow(value, tp[i]);
+      rp[i] = THTensor_(powOne)(value, tp[i]);
   } else {
 #if _OPENMP
     int inOMP = omp_in_parallel();
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = pow(value, *t_data);, TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = THTensor_(powOne)(value, *t_data);, TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
 #endif
   }
   if (serial_path) {
-    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = pow(value, *t_data););
+    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = THTensor_(powOne)(value, *t_data););
   }
 }
 
@@ -3652,6 +3713,7 @@ TENSOR_IMPLEMENT_LOGICAL(ge,>=)
 TENSOR_IMPLEMENT_LOGICAL(eq,==)
 TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
+
 #ifdef _OPENMP
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC, OMP_THRESHOLD)             \
@@ -3786,35 +3848,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 #endif
 
-
-void THTensor_(pow)(THTensor *r_, THTensor *t, real value)
-{
-  THTensor_(resizeAs)(r_, t);
-  if(value == 1){
-    THTensor_(copy)(r_, t);
-  }
-  else if(value == 2){
-    THTensor_(cmul)(r_, t, t);
-  }
-  else if(value == 3){
-    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data * *t_data * *t_data;);
-  }
-  else if(value == 0.5){
-    THTensor_(sqrt)(r_, t);
-  }
-  else if(value == -0.5){
-    THTensor_(rsqrt)(r_, t);
-  }
-  else if(value == -1){
-    THTensor_(cinv)(r_, t);
-  }
-  else if(value == -2){
-    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = TH_MATH_NAME(1.0) / (*t_data * *t_data););
-  }
-  else{
-    TH_TENSOR_APPLY2(real, r_, real, t, *r__data = TH_MATH_NAME(pow)(*t_data, value););
-  }
-}
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {

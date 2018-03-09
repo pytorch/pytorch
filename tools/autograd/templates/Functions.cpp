@@ -550,22 +550,21 @@ Tensor potrf_backward(Tensor grad, bool upper, Tensor L) {
   return S;
 }
 
-Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64_t split_size, int64_t dim, IntList sizes, const Type &type) {
+Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &grads,
+                                 IntList split_sizes, int64_t dim, IntList sizes, const Type &type) {
   dim = at::maybe_wrap_dim(dim, sizes.size());
-  int64_t dim_size = sizes[dim];
-  int64_t num_splits = (dim_size + split_size - 1) / split_size;
 
   // it's possible some of the grads are not defined (represents tensors of all 0s).
   // Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined(grads.size());
   for (size_t j = 0; j < grads.size(); ++j) {
     if (grads[j].defined()) {
-      grads_all_defined[ j ] = grads[ j ];
+      grads_all_defined[j] = grads[j];
     } else {
-      auto length = (int64_t)j < (num_splits - 1) ? split_size : split_size - (split_size * num_splits - dim_size);
+      auto length = split_sizes[j];
       std::vector<int64_t> grad_size(sizes);
-      grad_size[ dim ] = length;
-      grads_all_defined[ j ] = type.zeros(grad_size);
+      grad_size[dim] = length;
+      grads_all_defined[j] = type.zeros(grad_size);
     }
   }
 
@@ -573,7 +572,17 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads, int64
   return ret;
 }
 
-Tensor adaptive_max_pool_double_backward(const Tensor & grad, const Tensor & self, const Tensor & indices, int dim) {
+Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
+                      int64_t split_size, int64_t dim, IntList sizes, const Type &type) {
+  dim = at::maybe_wrap_dim(dim, sizes.size());
+  int64_t dim_size = sizes[dim];
+  int64_t num_splits = grads.size();
+  std::vector<int64_t> split_sizes(num_splits, split_size);
+  split_sizes[num_splits - 1] = split_size - (split_size * num_splits - dim_size);
+  return split_with_sizes_backward(grads, split_sizes, dim, sizes, type);
+}
+
+Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
   TORCH_ASSERT(indices.dim() >= dim);
   auto size = std::vector<int64_t>(indices.sizes().slice(0, indices.dim() - dim));
   size.push_back(-1);
@@ -702,15 +711,6 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
   auto diag = grad_input.as_strided({diagonal_size}, {input_sizes[1] + 1}, storage_offset);
   diag.copy_(grad);
   return grad_input;
-}
-
-Tensor max_pool2d_double_backward(const Tensor & grad, const Tensor & indices) {
-  // fold the first two dims together and the last two together
-  auto fold = [](const Tensor & t) -> Tensor {
-    auto sizes = t.sizes();
-    return t.contiguous().view({sizes[0] * sizes[1], sizes[2] * sizes[3]});
-  };
-  return fold(grad).gather(1, fold(indices)).view(indices.sizes());
 }
 
 Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, bool size_average, bool reduce) {

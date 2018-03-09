@@ -182,7 +182,7 @@ def _set_SIGCHLD_handler():
     _SIGCHLD_handler_set = True
 
 
-class DataLoaderIter(object):
+class _DataLoaderIter(object):
     r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
     def __init__(self, loader):
@@ -309,7 +309,7 @@ class DataLoaderIter(object):
         # Probably the best way to do this is by moving the sample pushing
         # to a separate thread and then just sharing the data queue
         # but signalling the end is tricky without a non-blocking API
-        raise NotImplementedError("DataLoaderIterator cannot be pickled")
+        raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
         try:
@@ -410,6 +410,9 @@ class DataLoader(object):
             raise ValueError('num_workers cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
+        if sys.platform == "win32" and self.num_workers > 0:
+            raise ValueError('num_workers > 0 is not supported on Windows')
+
         if batch_sampler is None:
             if sampler is None:
                 if shuffle:
@@ -422,7 +425,7 @@ class DataLoader(object):
         self.batch_sampler = batch_sampler
 
     def __iter__(self):
-        return DataLoaderIter(self)
+        return _DataLoaderIter(self)
 
     def __len__(self):
         return len(self.batch_sampler)
