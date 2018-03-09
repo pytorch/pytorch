@@ -93,6 +93,21 @@ if [[ "$OSTYPE" != "msys" ]]; then
 
     distributed_tear_down() {
       rm -rf "$TEMP_DIR"
+      unset WORLD_SIZE
+    }
+
+    gloo_multigpu_set_up() {
+      # When we have 2 GPUs, there're not enough GPUs for multigpu tests to run
+      # for 3 processes. Thus we spawn 2 processes and skip all dist.new_group
+      # tests. When we have 0 or 1 GPU, multigpu tests are skipped anyways.
+      num_gpu=$($PYCMD -c \
+	      $'import torch;print(torch.cuda.device_count() if torch.cuda.is_available() else 0)')
+      min_gpu_for_multigpu=2
+      if [ "$num_gpu" -eq "$min_gpu_for_multigpu" ]; then
+	export WORLD_SIZE=2
+      else
+	export WORLD_SIZE=3
+      fi
     }
 
     trap distributed_tear_down EXIT SIGHUP SIGINT SIGTERM
@@ -109,12 +124,14 @@ if [[ "$OSTYPE" != "msys" ]]; then
 
     echo "Running distributed tests for the Gloo backend"
     distributed_set_up
-    BACKEND=gloo WORLD_SIZE=3 $PYCMD ./test_distributed.py
+    gloo_multigpu_set_up
+    BACKEND=gloo $PYCMD ./test_distributed.py
     distributed_tear_down
 
     echo "Running distributed tests for the Gloo backend with file init_method"
     distributed_set_up
-    BACKEND=gloo WORLD_SIZE=3 INIT_METHOD='file://'$TEMP_DIR'/shared_init_file' $PYCMD ./test_distributed.py
+    gloo_multigpu_set_up
+    BACKEND=gloo INIT_METHOD='file://'$TEMP_DIR'/shared_init_file' $PYCMD ./test_distributed.py
     distributed_tear_down
 
     if [ -x "$(command -v mpiexec)" ]; then
