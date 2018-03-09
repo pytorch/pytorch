@@ -1615,7 +1615,7 @@ class AbstractLengthsGradientOp : public Operator<Context> {
   }
 
   // Input layout:
-  //   orig_arg1, orig_arg2, ..., orig_argN, SEGMENT_GRADS, SEGMENT_IDS
+  //   orig_arg1, orig_arg2, ..., orig_argN, SEGMENT_GRADS, LENGTHS, INDICES
   // orig_argXs represent original op's inputs and will be passed to the reducer
   // directly
   static constexpr int kNumInputs = ReducerGradient::originalInputs().size() +
@@ -1731,8 +1731,8 @@ class AbstractLengthsWithMainInputGradientOp : public Operator<Context> {
   }
 
   // Input layout:
-  //   orig_arg1, orig_arg2, ..., orig_argN, DATA_INPUT, SEGMENT_GRADS,
-  //      SEGMENT_LEGNTHS, [INDICES]
+  //   orig_arg1, orig_arg2, ..., orig_argN, SEGMENT_GRADS, LENGTHS,
+  //      DATA_INPUT, [INDICES]
   // orig_argXs represent original op's inputs and will be passed to the reducer
   // directly
   static constexpr int kNumInputs = ReducerGradient::originalInputs().size() +
@@ -1824,8 +1824,8 @@ class AbstractLengthsWithMainInputAndForwardOutputGradientOp
   }
 
   // Input layout:
-  //   orig_arg1, orig_arg2, ..., orig_argN, FORWARD_OUTPUT, DATA_INPUT,
-  //      SEGMENT_GRADS, SEGMENT_LEGNTHS
+  //   orig_arg1, orig_arg2, ..., orig_argN, FORWARD_OUTPUT, SEGMENT_GRADS,
+  //      LENGTHS, DATA_INPUT
   // orig_argXs represent original op's inputs and will be passed to the reducer
   // directly
   static constexpr int kNumInputs =
