@@ -1187,7 +1187,7 @@ class TestTorch(TestCase):
             self.assertEqual(shape, tensor.shape)
             self.assertIs(dtype, tensor.dtype)
             self.assertEqual(tensor.requires_grad, requires_grad)
-            if tensor.is_cuda:
+            if tensor.is_cuda and device != -1:
                 self.assertEqual(device, tensor.get_device())
             if value is not None:
                 fill = tensor.new(shape).fill_(value)
