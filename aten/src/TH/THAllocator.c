@@ -196,6 +196,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
     if (ctx->filename[0] == '/') {
       filename = ctx->filename + 1;
       eventname = ctx->eventname + 1;
+    }
     else {
       filename = ctx->filename;
       eventname = ctx->eventname;
