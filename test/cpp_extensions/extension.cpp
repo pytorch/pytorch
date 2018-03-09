@@ -6,7 +6,7 @@ at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
 
 struct MatrixMultiplier {
   MatrixMultiplier(int A, int B) {
-    tensor_ = at::ones(at::CPU(at::kDouble), {A, B});
+    tensor_ = at::ones(torch::CPU(at::kDouble), {A, B});
     torch::set_requires_grad(tensor_, true);
   }
   at::Tensor forward(at::Tensor weights) {
