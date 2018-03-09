@@ -1282,7 +1282,7 @@ Example::
      1  2  3  1  2  3
      1  2  3  1  2  3
      1  2  3  1  2  3
-    [torch.FloatTensor of size 4x6]
+    [torch.FloatTensor of size (4,6)]
 
     >>> x.repeat(4, 2, 1).size()
 
