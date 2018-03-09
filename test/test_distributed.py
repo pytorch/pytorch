@@ -12,6 +12,8 @@ import torch
 import torch.cuda
 import torch.nn as nn
 import torch.distributed as dist
+import torch.optim as optim
+import torch.nn.functional as F
 from torch.autograd import Variable
 from common import TestCase
 
@@ -20,6 +22,17 @@ TEMP_DIR = os.environ['TEMP_DIR']
 INIT_METHOD = os.getenv('INIT_METHOD', 'env://')
 MASTER_PORT = '29500'
 MASTER_ADDR = '127.0.0.1'
+
+DEFAULT_TIMEOUT = 15
+CUSTOMIZED_TIMEOUT = {'test_DistributedDataParallel': 25}
+
+
+def get_timeout(test_id):
+    test_name = test_id.split('.')[-1]
+    if test_name in CUSTOMIZED_TIMEOUT:
+        return CUSTOMIZED_TIMEOUT[test_name]
+    else:
+        return DEFAULT_TIMEOUT
 
 
 if not dist.is_available():
@@ -754,15 +767,19 @@ class _DistTestBase(object):
         class Net(nn.Module):
             def __init__(self):
                 super(Net, self).__init__()
-                self.features = nn.Linear(2, 4, bias=False)
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 50, bias=False)
+                self.fc3 = nn.Linear(50, 4, bias=False)
+                self.relu = nn.ReLU()
 
             def forward(self, x):
-                x = self.features(x)
-                return x
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                x = self.fc3(x)
+                return F.softmax(x, dim=1)
 
         # cpu training setup
         model = Net()
-        model_cpu = copy.deepcopy(model)
 
         # single gpu training setup
         model_gpu = copy.deepcopy(model)
@@ -773,33 +790,38 @@ class _DistTestBase(object):
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpu_subset)
+        optimizer = optim.SGD(model_DDP.parameters(), lr=1e-2)
+        optimizer.zero_grad()
 
         # batch_size for DDP should be divisible by #GPU per node.
         batch_size = len(gpu_subset) * int(WORLD_SIZE)
-        input_cpu = torch.randn(batch_size, 1, 2)
-        target = torch.randn(batch_size, 1, 4)
+        input_cpu = torch.randn(batch_size, 2)
+        target = torch.randn(batch_size, 4)
         loss = nn.MSELoss()
-
-        # cpu training
-        self._test_DDP_helper(model_cpu,
-                              Variable(input_cpu, requires_grad=True),
-                              Variable(target),
-                              loss)
 
         # single gpu training
         self._test_DDP_helper(model_gpu,
-                              Variable(input_cpu.cuda(gpu_subset[0]), requires_grad=True),
-                              Variable(target.cuda(gpu_subset[0], non_blocking=True)),
+                              input_cpu.cuda(gpu_subset[0]),
+                              target.cuda(gpu_subset[0]),
                               loss)
 
         # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
         self._test_DDP_helper(model_DDP,
-                              Variable(input_cpu, requires_grad=True),
-                              Variable(target.cuda(gpu_subset[0], non_blocking=True)),
+                              input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
+                              target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
                               loss)
 
-        self.assertEqual(model_cpu.features.weight.grad, model_gpu.features.weight.grad)
-        self.assertEqual(model_cpu.features.weight.grad, model_DDP.module.features.weight.grad)
+        for layer_gpu, layer_DDP in zip(model_gpu.modules(), model_DDP.module.modules()):
+            if isinstance(layer_gpu, nn.Linear):
+                self.assertEqual(layer_gpu.weight.grad, layer_DDP.weight.grad)
+
+        # Run SGD and second iteration to shake out errors
+        optimizer.step()
+        self._test_DDP_helper(model_DDP,
+                              input_cpu,
+                              target.cuda(gpu_subset[0]),
+                              loss)
+
         self._barrier()
 
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
@@ -808,8 +830,6 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     class TestDistBackend(TestCase, _DistTestBase):
 
         MANAGER_PROCESS_RANK = -1
-        # DDP test on 8GPU machine takes about 21s
-        JOIN_TIMEOUT = 25
 
         @staticmethod
         def manager_join(fn):
@@ -869,6 +889,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
             skip_ok = getattr(fn, "skip_if_no_cuda_distributed", False) \
                 or getattr(fn, "skip_if_no_multigpu", False) \
                 or getattr(fn, "skip_if_small_worldsize", False)
+            self.JOIN_TIMEOUT = get_timeout(self.id())
             for p in self.processes:
                 p.join(self.JOIN_TIMEOUT)
                 if not skip_ok:
