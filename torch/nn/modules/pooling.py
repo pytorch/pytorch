@@ -430,7 +430,8 @@ class AvgPool1d(Module):
         - Output: :math:`(N, C, L_{out})` where
 
           .. math::
-              L_{out} = \left\lfloor \frac{L_{in}  + 2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
+              L_{out} = \left\lfloor \frac{L_{in} +
+              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -853,7 +854,8 @@ class LPPool1d(Module):
         - Output: :math:`(N, C, L_{out})` where
 
           .. math::
-              L_{out} = \left\lfloor\frac{L_{in} + 2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
+              L_{out} = \left\lfloor\frac{L_{in} +
+              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.

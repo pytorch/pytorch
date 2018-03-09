@@ -102,7 +102,8 @@ class Conv1d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\left\lfloor \frac{\text{out_channels}}{\text{in_channels}} \right\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor \frac{\text{out_channels}}{\text{in_channels}} \right\rfloor`).
 
     .. note::
 
@@ -216,7 +217,8 @@ class Conv2d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -334,7 +336,8 @@ class Conv3d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -490,7 +493,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     .. note::
 
@@ -571,7 +575,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
@@ -690,7 +695,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
