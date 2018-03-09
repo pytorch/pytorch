@@ -205,8 +205,8 @@ class Caffe2Backend(Backend):
     # so this interface MAY make BC-breaking changes.  Specify an
     # opset_version if you don't want this to version.
     @classmethod
-    def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version):
-        super(Caffe2Backend, cls).run_node(node, inputs, device)
+    def run_node(cls, node, inputs, device='CPU', opset_version=_known_opset_version, outputs_info=None):
+        super(Caffe2Backend, cls).run_node(node, inputs, device=device, outputs_info=outputs_info)
 
         device_option = get_device_option(Device(device))
         with Workspace(), core.DeviceScope(device_option):  # temporary!
