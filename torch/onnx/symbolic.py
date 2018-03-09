@@ -543,6 +543,23 @@ def slice(g, self, dim, start, end, step):
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
 
 
+def alias(g, self):
+    return self
+
+
+def unsqueeze(g, self, dim):
+    return g.op("Unsqueeze", self, axes_i=[dim])
+
+
+def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
+    if out is not None:
+        raise NotImplementedError('Out parameter is not supported for topk')
+    if not largest:
+        raise NotImplementedError('Ascending TopK is not supported')
+
+    return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
+
+
 def instance_norm(g, input, **kwargs):
     input_type = input.type().scalarType()
     weight = kwargs.get("weight", None)

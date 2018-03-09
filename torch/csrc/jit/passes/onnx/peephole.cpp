@@ -59,9 +59,9 @@ bool isBroadcasting(Node *node) {
 // Note that this is NOT equivalent to numpy broadcasting semantics, and do
 // not represent that generalized broadcasting that Pytorch implements in
 // general. Rather, this is Caffe2-style broadcasting.
-bool fusibleExpandTo(at::IntList from, at::IntList to) {
+std::tuple<bool, ssize_t> fusibleExpandTo(at::IntList from, at::IntList to) {
   if (from.size() > to.size()) {
-    return false;
+    return std::make_tuple<bool, ssize_t>(false, -1);
   }
   ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
   while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
@@ -73,14 +73,36 @@ bool fusibleExpandTo(at::IntList from, at::IntList to) {
 
   ssize_t f = from_dim_end;
   ssize_t t = to.size() - 1;
+  bool trailing_expand = true;
   for (; f >= from_dim_start && t >= 0; --f, --t) {
-    if (from[f] != to[t]) return false;
+    if (from[f] != to[t]) {
+      trailing_expand = false;
+      break;
+    }
   }
 
   // In the case that the 'to' tensor has leading ones in the same place that
   // the 'from' tensor does, f will be less than from_dim_start rather than
   // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
-  return f <= from_dim_start;
+  if (trailing_expand && f <= from_dim_start) {
+    return std::make_tuple<bool, ssize_t>(true, -1);
+  }
+
+  f = from_dim_start;
+  t = 0;
+  bool leading_expand = true;
+  for (; f <= from_dim_end && t < to.size(); ++f, ++t) {
+    if (from[f] != to[t]) {
+      leading_expand = false;
+      break;
+    }
+  }
+
+  if (leading_expand && f >= from_dim_end) {
+    return std::make_tuple<bool, ssize_t>(true, 0);
+  }
+
+  return std::make_tuple<bool, ssize_t>(false, -1);
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
@@ -111,12 +133,19 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     if (!unexpanded_rhs->isTensor()) continue;
 
     // Not all broadcasts are supported by ONNX broadcast.
-    if (!fusibleExpandTo(unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-                         expanded_rhs->output()->type()->expect<TensorType>()->sizes())   // to
-       ) continue;
+    bool fusible_expand;
+    ssize_t axis;
+    std::tie(fusible_expand, axis) = fusibleExpandTo(
+        unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
+        expanded_rhs->output()->type()->expect<TensorType>()->sizes()); // to
+    if (!fusible_expand)
+      continue;
 
     n->replaceInput(input_index, unexpanded_rhs);
     n->i_(kbroadcast, 1);
+    if (axis != -1) {
+      n->i_(kaxis, axis);
+    }
     if (!expanded_rhs->hasUses()) {
       expanded_rhs->destroy();
     }
