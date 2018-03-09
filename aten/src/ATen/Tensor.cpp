@@ -11,9 +11,4 @@ void Tensor::print() const {
     std::cerr << "[UndefinedTensor]" << std::endl;
   }
 }
-
-bool Tensor::isVariable() const noexcept {
-  return type().is_variable();
-}
-
 } // namespace at

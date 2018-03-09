@@ -119,14 +119,14 @@ struct Variable : public at::Tensor {
   // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
     TORCH_ASSERTM(
-        isVariable(),
+        is_variable_or_undefined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
   /*implicit*/ Variable(at::Tensor&& rhs) noexcept
       : at::Tensor(std::move(rhs)) {
     TORCH_ASSERTM(
-        isVariable(),
+        is_variable_or_undefined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
