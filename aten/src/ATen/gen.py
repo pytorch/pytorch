@@ -359,10 +359,12 @@ def declare_outputs():
 
 
 def filter_by_extension(files, *extensions):
+    filtered_files = []
     for file in files:
         for extension in extensions:
             if file.endswith(extension):
-                yield file
+                filtered_files.append(file)
+    return filtered_files
 
 
 def generate_outputs():
