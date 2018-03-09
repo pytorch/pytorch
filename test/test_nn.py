@@ -3789,18 +3789,18 @@ class TestNN(NNTestCase):
         input2 = Variable(torch.randn(15, 10), requires_grad=True)
         target = Variable(torch.randn(15).sign())
         self.assertTrue(gradcheck(lambda x, y, z: F.cosine_embedding_loss(
-            x, y, z, reduce=True), (input1, input2, target)))
-        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, reduce=True),
-                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, reduce=True))
+            x, y, z, reduce=False), (input1, input2, target)))
+        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, reduce=False),
+                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, reduce=False))
 
     def test_cosine_embedding_loss_margin_no_reduce(self):
         input1 = Variable(torch.randn(15, 10), requires_grad=True)
         input2 = Variable(torch.randn(15, 10), requires_grad=True)
         target = Variable(torch.randn(15).sign())
         self.assertTrue(gradcheck(lambda x, y, z: F.cosine_embedding_loss(
-            x, y, z, margin=0.5, reduce=True), (input1, input2, target)))
-        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, margin=0.5, reduce=True),
-                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, margin=0.5, reduce=True))
+            x, y, z, margin=0.5, reduce=False), (input1, input2, target)))
+        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, margin=0.5, reduce=False),
+                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, margin=0.5, reduce=False))
 
     def test_triplet_margin_loss(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
