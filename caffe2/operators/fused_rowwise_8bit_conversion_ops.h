@@ -109,7 +109,7 @@ class Fused8BitRowwiseQuantizedToFloatOp : public Operator<Context> {
     const auto input_columns = input.dim(1);
     CAFFE_ENFORCE_EQ(input.ndim(), 2, "Expect input to be a matrix");
 
-    // The first 4 bytes are the scale, the next 4 bytes the bias. The rest of
+    // The last 8 bytes per row are the scale and the bias. The rest of
     // input_columns is the number of values in the original row.
     const std::vector<TIndex> output_dimensions = {input_rows,
                                                    input_columns - 8};
