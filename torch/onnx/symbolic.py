@@ -5,6 +5,8 @@ import warnings
 
 import torch.onnx
 
+from functools import partial
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
@@ -537,37 +539,28 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
-# Cast operators
-def cast_uint8_t(g, input, non_blocking):
-    return g.op("Cast", input, to_s="UINT8")
+# Metaprogram symbolics for each ATen native specialized cast operator.
+# For e.g. we specify a function named `_cast_uint8_t` that instantiates an
+# ONNX cast node with `to` attribute 'UINT8'
+cast_pytorch_to_onnx = {
+    'uint8_t':  'UINT8',
+    'int8_t':   'INT8',
+    'double':   'DOUBLE',
+    'float':    'FLOAT',
+    'Half':     'FLOAT16',
+    'int':      'INT32',
+    'int64_t':  'INT64',
+    'int16_t':  'INT16',
+}
 
 
-def cast_int8_t(g, input, non_blocking):
-    return g.op("Cast", input, to_s="INT8")
+def _cast_func_template(to_s, g, input, non_blocking):
+    return g.op("Cast", input, to_s=to_s)
 
 
-def cast_double(g, input, non_blocking):
-    return g.op("Cast", input, to_s="DOUBLE")
-
-
-def cast_float(g, input, non_blocking):
-    return g.op("Cast", input, to_s="FLOAT")
-
-
-def cast_Half(g, input, non_blocking):
-    return g.op("Cast", input, to_s="FLOAT16")
-
-
-def cast_int(g, input, non_blocking):
-    return g.op("Cast", input, to_s="INT32")
-
-
-def cast_int64_t(g, input, non_blocking):
-    return g.op("Cast", input, to_s="INT64")
-
-
-def cast_int16_t(g, input, non_blocking):
-    return g.op("Cast", input, to_s="INT16")
+for k, v in cast_pytorch_to_onnx.items():
+    name = '_cast_{}'.format(k)
+    globals()[name] = partial(_cast_func_template, v)
 
 
 def slice(g, self, dim, start, end, step):
