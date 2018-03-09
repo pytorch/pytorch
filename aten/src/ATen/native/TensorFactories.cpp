@@ -260,7 +260,6 @@ Tensor zeros_like(const Tensor& self, const Type& dtype) {
     auto res = dtype.tensor();
     // resize_as_ requires the same exact type.
     res.sparse_raw_resize_(self.sizes(), self._dimI(), self._dimV());
-    res.zero_();
     return res;
   }
   return at::native::zeros(dtype, self.sizes());
