@@ -851,11 +851,21 @@ class MarginRankingLoss(_Loss):
     .. math::
         \text{loss}(x, y) = \max(0, -y * (x1 - x2) + \text{margin})
 
-    if the internal variable `size_average = True`,
-    the loss function averages the loss over the batch samples;
-    if `size_average = False`, then the loss function sums over the batch
-    samples.
-    By default, `size_average` equals to ``True``.
+    Args:
+        margin (float, optional): Has a default value of `0`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
+        - Target: :math:`(N)`
+        - Output: scalar. If `reduce` is False, then `(N)`.
     """
 
     def __init__(self, margin=0, size_average=True, reduce=True):

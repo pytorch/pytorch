@@ -3828,17 +3828,19 @@ class TestNN(NNTestCase):
         input1 = Variable(torch.randn(15).mul(10), requires_grad=True)
         input2 = Variable(torch.randn(15).mul(10), requires_grad=True)
         target = Variable(torch.randn(15).sign())
-        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(x, y, z), (input1, input2, target)))
-        self.assertEqual(F.margin_ranking_loss(input1, input2, target),
-                         loss_reference_fns['MarginRankingLoss'](input1, input2, target))
+        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(
+            x, y, z, reduce=False), (input1, input2, target)))
+        self.assertEqual(F.margin_ranking_loss(input1, input2, target, reduce=False),
+                         loss_reference_fns['MarginRankingLoss'](input1, input2, target, reduce=False))
 
     def test_margin_ranking_loss_margin_no_reduce(self):
         input1 = Variable(torch.randn(15).mul(10), requires_grad=True)
         input2 = Variable(torch.randn(15).mul(10), requires_grad=True)
         target = Variable(torch.randn(15).sign())
-        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(x, y, z, margin=0.5), (input1, input2, target)))
-        self.assertEqual(F.margin_ranking_loss(input1, input2, target, margin=0.5),
-                         loss_reference_fns['MarginRankingLoss'](input1, input2, target, margin=0.5))
+        self.assertTrue(gradcheck(lambda x, y, z: F.margin_ranking_loss(
+            x, y, z, margin=0.5, reduce=False), (input1, input2, target)))
+        self.assertEqual(F.margin_ranking_loss(input1, input2, target, margin=0.5, reduce=False),
+                         loss_reference_fns['MarginRankingLoss'](input1, input2, target, margin=0.5, reduce=False))
 
     def test_triplet_margin_loss(self):
         input1 = Variable(torch.randn(5, 10), requires_grad=True)
