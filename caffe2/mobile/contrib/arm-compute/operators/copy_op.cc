@@ -20,6 +20,7 @@ bool CopyFromGLOp<T>::RunOnDevice() {
 
   auto *X0blob = OperatorBase::Inputs()[0];
   auto X0 = GLContext::getGLTensor<T>(X0blob);
+
   if (first_run_) {
     inputs_.push_back(std::move(X0));
   }
@@ -45,7 +46,7 @@ bool CopyFromGLOp<T>::RunOnDevice() {
     for (int i = 0; i < inputs_.size(); ++i) {
       auto* X = inputs_[i].get();
       auto* Xblob = inputsBlob[i];
-      X->lazy_allocate(Xblob, second_run_, true);
+      X->lazy_allocate(Xblob, second_run_, second_run_);
     }
     if (second_run_) {
       // Don't need to allocate output
@@ -66,6 +67,6 @@ bool CopyFromGLOp<T>::RunOnDevice() {
   return true;
 }
 
-REGISTER_GL_OPERATOR(CopyFromGL, CopyFromGLOp<half>);
+REGISTER_GL_OPERATOR(CopyFromGL, CopyFromGLOp<DataType>);
 
 } // namespace caffe2
