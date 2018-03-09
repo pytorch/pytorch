@@ -7,6 +7,8 @@ import subprocess
 import sys
 import tempfile
 
+import torch
+
 TESTS = [
     'autograd',
     'cpp_extensions',
@@ -36,7 +38,7 @@ DISTRIBUTED_TESTS_CONFIG = {
         'WORLD_SIZE': '3'
     },
     'gloo': {
-        'WORLD_SIZE': '3'
+        'WORLD_SIZE': '2' if torch.cuda.device_count() == 2 else '3'
     },
     'nccl': {
         'WORLD_SIZE': '2'
