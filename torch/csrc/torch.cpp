@@ -16,11 +16,10 @@ at::Type& CUDA(at::ScalarType type) {
 }
 
 void set_requires_grad(at::Tensor& tensor, bool requires_grad) noexcept {
-  autograd::as_variable_ref(tensor, /*check=*/true)
-      .set_requires_grad(requires_grad);
+  autograd::as_variable_ref(tensor).set_requires_grad(requires_grad);
 }
 
 bool requires_grad(const at::Tensor& tensor) noexcept {
-  return autograd::as_variable_ref(tensor, /*check=*/true).requires_grad();
+  return autograd::as_variable_ref(tensor).requires_grad();
 }
 } // namespace torch

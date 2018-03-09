@@ -435,11 +435,8 @@ inline bool is_variable(const at::Tensor& tensor) noexcept {
 /// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
 /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
 /// throws a `std::invalid_argument` exception.
-inline Variable& as_variable_ref(at::Tensor& tensor, bool check = false) {
-#ifdef DEBUG
-  check = true;
-#endif
-  if (check && !is_variable(tensor)) {
+inline Variable& as_variable_ref(at::Tensor& tensor) {
+  if (!is_variable(tensor)) {
     throw std::invalid_argument(
         "Attempted to cast a Tensor to a Variable, but "
         "the dynamic type of the value is not Variable.");
@@ -447,13 +444,8 @@ inline Variable& as_variable_ref(at::Tensor& tensor, bool check = false) {
   return static_cast<Variable&>(tensor);
 }
 
-inline const Variable& as_variable_ref(
-    const at::Tensor& tensor,
-    bool check = false) {
-#ifdef DEBUG
-  check = true;
-#endif
-  if (check && !is_variable(tensor)) {
+inline const Variable& as_variable_ref(const at::Tensor& tensor) {
+  if (!is_variable(tensor)) {
     throw std::invalid_argument(
         "Attempted to cast a Tensor to a Variable, but "
         "the dynamic type of the value is not Variable.");
