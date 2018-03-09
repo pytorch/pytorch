@@ -308,7 +308,16 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
   }
-  // return self.toType(type, non_blocking);
+
+  // Don't specialize cross-backend copies
+  if (self.type().backend() != type.backend()) {
+    return self.toType(type, non_blocking);
+  }
+
+  // Dispatch to specialized, traceable cast operators for the JIT. These
+  // specialized ops are ATen native and thus have the tracing mechanisms auto-
+  // generated, whereas the default case is not traceable since it requires a
+  // Type as a parameter/attribute. TODO: support Types in the JIT
   switch (type.scalarType()) {
 #define DEFINE_CAST_DISPATCH(_1, n, _2)  \
   case ScalarType::n: {                  \
