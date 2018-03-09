@@ -394,6 +394,7 @@ class Hardshrink(Module):
         x, & \text{ if } x > \lambda \\
         x, & \text{ if } x < -\lambda \\
         0, & \text{ otherwise }
+        \end{cases}
 
     Args:
         lambd: the :math:`\lambda` value for the Hardshrink formulation. Default: 0.5
