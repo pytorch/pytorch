@@ -18,7 +18,8 @@
 
 namespace caffe2 {
 
-// registering 4 input gradient with main output
+// registering 5 input gradient with main output
+// gradient of SparseLengthsWeightedSum
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientWeightedSumWithMainInputGradient)
     .NumInputs(5)
     .NumOutputs(2);
@@ -46,6 +47,7 @@ REGISTER_CPU_OPERATOR(
         true /*GradientNeedIndices*/>);
 
 // registering 3 input version
+// gradient of SparseLengthsSum
 OPERATOR_SCHEMA(SparseLengthsIndicesInGradientSumGradient)
     .NumInputs(3)
     .NumOutputs(1);
@@ -57,6 +59,7 @@ REGISTER_CPU_OPERATOR(
         CPUContext,
         SumReducerDef::template ReducerGradient<float, CPUContext>,
         true /*GradientNeedIndices*/>);
+// gradient of LengthsSum
 OPERATOR_SCHEMA(LengthsIndicesInGradientSumGradient).NumInputs(3).NumOutputs(1);
 REGISTER_CPU_OPERATOR(
     LengthsIndicesInGradientSumGradient,
