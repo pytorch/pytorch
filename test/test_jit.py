@@ -1243,7 +1243,7 @@ class TestJit(TestCase):
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
 
-        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], [], optimize)
+        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], optimize)
 
         # test no gradients case
 
@@ -1820,12 +1820,11 @@ class TestJit(TestCase):
             del linear_submodule.weight
 
         # Submodules can't be called
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(AttributeError):
             linear_submodule(x)
 
         # Type casts
-        with self.assertRaises(RuntimeError):
-            linear_submodule.cuda()
+        linear_submodule.cuda()
         traced_model.float().cuda()
         cuda_out = traced_model(x.float().cuda())
         traced_model.cpu()

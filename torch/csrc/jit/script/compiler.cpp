@@ -579,7 +579,7 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, output_size);
   }
 
-  // any expression that can produce a SugaredValue are handled here
+  // any expression that can produce a SugaredValue is handled here
   // with emitExpr falling back to this function to handle them
   // the kinds handled here should be kept in sync with [SUGARED VALUES]
   // in emitExpr
