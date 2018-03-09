@@ -36,38 +36,35 @@ def _symbolic_override_wrapper_maker(symbolic_fn, might_trace, fn):
 
     def wrapper(*args, **kwargs):
         import torch
+        import torch.jit
         from torch.autograd import Function, function
 
-        output = fn(*args, **kwargs)
         # fast pass
         if not might_trace(args):
-            return output
+            return fn(*args, **kwargs)
 
         flat_args = tuple(function._iter_variables(args))
         if not any(map(torch._C._jit_is_tracing, flat_args)):
-            return output
-        flat_output_tensors = tuple(
-            v.data for v in function._iter_variables(output))
-        # TODO: kwargs aren't traced
+            return fn(*args, **kwargs)
 
-        class ExportProxy(Function):
-            @staticmethod
-            def symbolic(g, *flat_args):
-                symbolic_args = function._unflatten(flat_args, args)
-                symbolic_output = symbolic_fn(g, *symbolic_args, **kwargs)
-                return tuple(function._iter_jit_values(symbolic_output))
+        tstate = torch._C._get_tracing_state(flat_args)
 
-            @staticmethod
-            def forward(ctx, *unused_args):
-                return flat_output_tensors
+        arg_values = [torch._C._get_value_trace(tstate, x) for x in flat_args]
 
-            @staticmethod
-            def backward(ctx, *unused_args, **unused_kwargs):
-                raise RuntimeError(
-                    "symbolic_override is meant for inference export only")
+        # This must come after the calls to get_value_trace, lest we
+        # lose information due to in-place operations.
+        output_vars = fn(*args, **kwargs)
 
-        flat_proxy_output = ExportProxy.apply(*flat_args)
-        return function._unflatten(flat_proxy_output, output)
+        symbolic_args = function._unflatten(arg_values, args)
+        output_vals = symbolic_fn(tstate.graph(), *symbolic_args, **kwargs)
+
+        for var, val in zip(
+                function._iter_variables(output_vars),
+                function._iter_jit_values(output_vals)):
+            val.inferTypeFrom(var.data)
+            torch._C._set_value_trace(tstate, var, val)
+
+        return output_vars
 
     # fn might be autograd.Function too, in this case wrapping doesn't work
     if isinstance(fn, types.FunctionType):
