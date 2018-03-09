@@ -198,7 +198,7 @@ static Value* createZerosLike(Value *v) {
   AutoGPU gpu_guard(type->device());
 
   auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
-  auto zeros = at_type.zeros({1}).expand(type->sizes());
+  auto zeros = at::zeros(at_type, {1}).expand(type->sizes());
   Node *constant = graph->createConstant(zeros)
                         ->i_(kis_zero, 1);
   graph->insertNode(constant);
