@@ -543,14 +543,14 @@ def conv_tbc(g, input, weight, bias, pad):
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'
 cast_pytorch_to_onnx = {
-    'uint8_t':  'UINT8',
-    'int8_t':   'INT8',
-    'double':   'DOUBLE',
-    'float':    'FLOAT',
-    'Half':     'FLOAT16',
-    'int':      'INT32',
-    'int64_t':  'INT64',
-    'int16_t':  'INT16',
+    'uint8_t': 'UINT8',
+    'int8_t': 'INT8',
+    'double': 'DOUBLE',
+    'float': 'FLOAT',
+    'Half': 'FLOAT16',
+    'int': 'INT32',
+    'int64_t': 'INT64',
+    'int16_t': 'INT16',
 }
 
 
