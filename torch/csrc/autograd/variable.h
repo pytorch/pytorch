@@ -122,14 +122,12 @@ struct Variable : public at::Tensor {
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
-  /// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
-  /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
-  /// throws a `std::runtime_error` exception.
+  /// Returns true if the `tensor`'s dynamic type is `Variable`, else false.
   /// NOTE: Has to be a friend function because runtime type information is
   /// available only for `TensorImpl`/`Impl` and not the `Tensor`/`Variable`
   /// classes, as the latter are not polymorphic classes (`Tensor` has no
   /// virtual methods).
-  friend Variable& as_variable_ref(at::Tensor& tensor);
+  friend bool is_variable(const at::Tensor& tensor) noexcept;
 
   const at::Tensor& data() const noexcept;
   at::Tensor& data() noexcept;
@@ -428,17 +426,31 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline Variable& as_variable_ref(at::Tensor& tensor) {
-#ifdef DEBUG
+inline bool is_variable(const at::Tensor& tensor) noexcept {
   // dynamic_cast will return a nullptr if the `TensorImpl`'s dynamic type is
   // not `Variable::Impl`.
-  if (dynamic_cast<Variable::Impl*>(tensor.get()) == nullptr) {
-    throw std::runtime_error(
+  return dynamic_cast<const Variable::Impl*>(tensor.get()) != nullptr;
+}
+
+/// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
+/// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
+/// throws a `std::invalid_argument` exception.
+inline Variable& as_variable_ref(at::Tensor& tensor) {
+  if (!is_variable(tensor)) {
+    throw std::invalid_argument(
         "Attempted to cast a Tensor to a Variable, but "
         "the dynamic type of the value is not Variable.");
   }
-#endif
   return static_cast<Variable&>(tensor);
+}
+
+inline const Variable& as_variable_ref(const at::Tensor& tensor) {
+  if (!is_variable(tensor)) {
+    throw std::invalid_argument(
+        "Attempted to cast a Tensor to a Variable, but "
+        "the dynamic type of the value is not Variable.");
+  }
+  return static_cast<const Variable&>(tensor);
 }
 
 inline const at::Tensor& Variable::data() const noexcept {
