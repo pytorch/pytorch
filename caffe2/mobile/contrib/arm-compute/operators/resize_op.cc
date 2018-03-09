@@ -34,7 +34,7 @@ private:
 template <typename T>
 bool GLResizeNearestOp<T>::RunOnDevice() {
 
-  auto Xblob = OperatorBase::Inputs()[0];
+  auto* Xblob = OperatorBase::Inputs()[0];
 
   if (first_run_) {
     X_ = GLContext::getGLTensor<T>(Xblob);

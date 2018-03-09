@@ -71,7 +71,9 @@ bool GLNet::Run() {
   if (first_run_) {
     first_run_ = false;
     for (auto& op: operators_) {
-      op->Run();
+      if (op->device_option().device_type() == OPENGL) {
+        op->Run();
+      }
     }
   }
   VLOG(1) << "Running net " << name_;
