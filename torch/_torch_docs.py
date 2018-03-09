@@ -715,7 +715,7 @@ Returns a new tensor with the ceil of the elements of :attr:`input`,
 the smallest integer greater than or equal to each element.
 
 .. math::
-    \text{out}_{i} = \lceil \text{input}_{i} \rceil = \lfloor \text{input}_{i} \rfloor + 1
+    \text{out}_{i} = \lceil \text{input}_{i} \rceil = \left\lfloor \text{input}_{i} \right\rfloor + 1
 
 Args:
     input (Tensor): the input tensor
@@ -1546,7 +1546,7 @@ Returns a new tensor with the floor of the elements of :attr:`input`,
 the largest integer less than or equal to each element.
 
 .. math::
-    \text{out}_{i} = \lfloor \text{input}_{i} \rfloor
+    \text{out}_{i} = \left\lfloor \text{input}_{i} \right\rfloor
 
 Args:
     input (Tensor): the input tensor
@@ -1625,7 +1625,7 @@ frac(tensor, out=None) -> Tensor
 Computes the fractional portion of each element in :attr:`tensor`.
 
 .. math::
-    \text{out}_{i} = \text{input}_{i} - \lfloor \text{input}_{i} \rfloor
+    \text{out}_{i} = \text{input}_{i} - \left\lfloor \text{input}_{i} \right\rfloor
 
 Example::
 
@@ -4017,7 +4017,7 @@ add_docstr(torch.range,
            r"""
 range(start, end, step=1, out=None) -> Tensor
 
-Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor + 1`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right\rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
 the gap between two values in the tensor. :math:`x_{i+1} = x_i + step`.
 
@@ -4057,7 +4057,7 @@ add_docstr(torch.arange,
            r"""
 arange(start=0, end, step=1, out=None) -> Tensor
 
-Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor`
+Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right\rfloor`
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
@@ -5563,7 +5563,7 @@ Ignoring the batch dimension, this method computes the following expression:
 , where :math:`m` is the index of the sliding window, and :math:`\omega` is
 the frequency that :math:`0 \leq \omega < fft\_size`. When
 :attr:`return_onsesided` is the default value True, only values for
-:math:`\omega` in range :math:`[0, 1, 2, \dots, \lfloor \frac{fft\_size}{2} \rfloor + 1]`
+:math:`\omega` in range :math:`[0, 1, 2, \dots, \left\lfloor \frac{fft\_size}{2} \right\rfloor + 1]`
 are returned because the real-to-complex transform satisfies the Hermitian
 symmetry, i.e., :math:`X[m, \omega] = X[m, fft\_length - \omega]^*`.
 
