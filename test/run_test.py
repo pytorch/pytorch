@@ -88,6 +88,8 @@ def test_distributed(python, test_module, test_directory, verbose):
     if verbose and not mpi_available:
         print('MPI not available -- MPI backend tests will be skipped')
     for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
+        if backend == 'mpi' and not mpi_available:
+            continue
         for with_init in {True, False}:
             tmp_dir = tempfile.mkdtemp()
             with_init_message = ' with file init_method' if with_init else ''
@@ -104,7 +106,7 @@ def test_distributed(python, test_module, test_directory, verbose):
             try:
                 os.mkdir(os.path.join(tmp_dir, 'barrier'))
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
-                if backend == 'mpi' and mpi_available:
+                if backend == 'mpi':
                     mpiexec = 'mpiexec -n 3 --noprefix {}'.format(python)
                     run_test(mpiexec, test_module, test_directory, verbose)
                 else:
