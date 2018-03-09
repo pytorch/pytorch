@@ -1319,6 +1319,9 @@ class TestTorch(TestCase):
             res2 = expected.new_tensor(expected, dtype=torch.cuda.int)
             self.assertIs(torch.cuda.int, res1.dtype)
             self.assertEqual(res2.get_device(), expected.get_device())
+            res2 = expected.new_tensor(expected, dtype=torch.cuda.int, device=0)
+            self.assertIs(torch.cuda.int, res1.dtype)
+            self.assertEqual(res2.get_device(), 0)
 
             res1 = expected.new_tensor(1)
             self.assertEqual(res1.get_device(), expected.get_device())

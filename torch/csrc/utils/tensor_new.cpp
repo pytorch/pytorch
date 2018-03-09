@@ -70,7 +70,8 @@ static Tensor new_with_tensor(const Type& type, Tensor other) {
   return other.slice();
 }
 
-static Tensor new_with_tensor_copy(const Type& type, Tensor other) {
+static Tensor new_with_tensor_copy(const Type& type, Tensor other, int64_t device) {
+  AutoGPU auto_gpu(device);
   maybe_initialize_cuda(type);
   return type.copy(other);
 }
@@ -342,14 +343,14 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
 
 Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
-    "new_tensor(Tensor other, *, Type dtype=None, bool requires_grad=False)",
+    "new_tensor(Tensor other, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
     "new_tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0)), r.toBool(2));
+    return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0), r.toInt64(2)), r.toBool(3));
   } else if (r.idx == 1) {
     return set_requires_grad(new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0)), r.toBool(3));
   }
