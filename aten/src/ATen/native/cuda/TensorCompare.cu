@@ -64,7 +64,7 @@ struct CmpOpCUDA<std::less_equal, scalar> {
 
     if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
       auto other_double = other.to<double>();
-      auto other_long = other.to<long>();
+      auto other_long = other.to<int64_t>();
       if (other_double != other_long) {
         other_val = at::convert<scalar>(floor(other_double));
       }
@@ -85,7 +85,7 @@ struct CmpOpCUDA<std::greater_equal, scalar> {
 
     if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
       auto other_double = other.to<double>();
-      auto other_long = other.to<long>();
+      auto other_long = other.to<int64_t>();
       if (other_double != other_long) {
         other_val = at::convert<scalar>(ceil(other_double));
       }
@@ -106,7 +106,7 @@ struct CmpOpCUDA<std::equal_to, scalar> {
 
     if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
       auto other_double = other.to<double>();
-      auto other_long = other.to<long>();
+      auto other_long = other.to<int64_t>();
       if (other_double != other_long) {
         ret.fill_(0);
       }
@@ -127,7 +127,7 @@ struct CmpOpCUDA<std::not_equal_to, scalar> {
 
     if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
       auto other_double = other.to<double>();
-      auto other_long = other.to<long>();
+      auto other_long = other.to<int64_t>();
       if (other_double != other_long) {
         ret.fill_(1);
       }
