@@ -1,17 +1,14 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
-<<<<<<< 582d0450922c6178920d2401751adce02cd34fbb
 #include "TH/THRandom.h"
 #include "ATen/CheckGenerator.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/Dispatch.h"
+#include "ATen/ScalarType.h"
 #include <algorithm>
 #include <sstream>
-=======
-#include "ATen/ScalarType.h"
->>>>>>> Traceable dispatch for Variable cast methods
 
-namespace at {
+    namespace at {
 namespace native {
 
 Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
@@ -43,12 +40,12 @@ Tensor& empty_out(Tensor& result, IntList size) {
   return result;
 }
 
-#define DEFINE_CAST_OP(_1, n, _2)                                            \
-  Tensor _cast_##_1(const Tensor& self, bool non_blocking) {                  \
-    auto& target_type = self.type().toScalarType(ScalarType::n);             \
-    if (self.type() == target_type)                                          \
-      return self;                                                           \
-    return target_type.copy(self, non_blocking);                             \
+#define DEFINE_CAST_OP(_1, n, _2)                                \
+  Tensor _cast_##_1(const Tensor& self, bool non_blocking) {     \
+    auto& target_type = self.type().toScalarType(ScalarType::n); \
+    if (self.type() == target_type)                              \
+      return self;                                               \
+    return target_type.copy(self, non_blocking);                 \
   }
 
 AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
