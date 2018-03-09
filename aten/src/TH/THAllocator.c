@@ -162,17 +162,14 @@ static DWORD WINAPI WaitForReleaseHandle(LPVOID lpParam) {
   while (TRUE) {
     WaitForSingleObject(event, INFINITE);
 
-    THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
-    if (THAtomicGet(&info->refcount) == 0) {
-      SetEvent(event);
-      CloseHandle(event);
-      CloseHandle(handle);
+    SetEvent(event);
+    CloseHandle(event);
+    CloseHandle(handle);
 
-      if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
-        THError("could not unmap the shared memory file");
+    if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
+      THError("could not unmap the shared memory file");
 
-      break;
-    }
+    break;
   }
 
   THFree(cxt);
@@ -196,15 +193,13 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
     char *eventname;
     LARGE_INTEGER hfilesz;
 
-    if (ctx->filename[0] == '/')
+    if (ctx->filename[0] == '/') {
       filename = ctx->filename + 1;
-    else
-      filename = ctx->filename;
-
-    if (ctx->eventname[0] == '/')
       eventname = ctx->eventname + 1;
-    else
+    else {
+      filename = ctx->filename;
       eventname = ctx->eventname;
+    }
 
     hfilesz.QuadPart = size;
 
