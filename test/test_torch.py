@@ -1498,6 +1498,10 @@ class TestTorch(TestCase):
         self.assertEqual(r1, r2, 0)
         self.assertEqual(r2, r3[:-1], 0)
 
+        # check floating point error
+        r = torch.arange(0.1, 0.50, 0.05)
+        self.assertEqual(r.size(0), 8)
+
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         # select full dimensionality

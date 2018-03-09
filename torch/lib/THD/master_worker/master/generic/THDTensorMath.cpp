@@ -359,7 +359,7 @@ void THDTensor_(range)(THDTensor *r_, accreal xmin,
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin)),
               2, "upper bound and larger bound incoherent with step sign");
 
-  ptrdiff_t size = static_cast<ptrdiff_t>((((xmax - xmin) / step) + 1));
+  ptrdiff_t size = static_cast<ptrdiff_t>(((xmax / step - xmin / step) + 1));
 
   if (THDTensor_(nElement)(r_) != size)
     THDTensor_(resize1d)(r_, size);
