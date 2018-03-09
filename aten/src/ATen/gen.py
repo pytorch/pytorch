@@ -53,7 +53,7 @@ class FileManager(object):
         self.undeclared_files = []
 
     def will_write(self, filename):
-        filename = os.path.join(options.output_dir, filename)
+        filename = '{}/{}'.format(options.output_dir, filename)
         if self.outputs_written:
             raise Exception("'will_write' can only be called before " +
                             "the call to write_outputs, refactor so outputs are registered " +
@@ -79,7 +79,7 @@ class FileManager(object):
         self.outputs_written = True
 
     def write(self, filename, s):
-        filename = os.path.join(options.output_dir, filename)
+        filename = '{}/{}'.format(options.output_dir, filename)
         self._write_if_changed(filename, s)
         if filename not in self.filenames:
             self.undeclared_files.append(filename)
