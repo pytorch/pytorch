@@ -91,7 +91,7 @@ class Module(object):
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
-        elif tensor is not None and not torch.is_tensor(tensor):
+        elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
                             .format(torch.typename(tensor), name))
