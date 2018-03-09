@@ -234,6 +234,14 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
   encodeGraph(p_g, g, initializers);
 }
 
+namespace {
+std::string getNodeStackTraceString(Node* n) {
+  std::stringstream ss;
+  n->getSourceLocation()->highlight(ss);
+  return ss.str();
+}
+} // namespace
+
 void validateGraph(const std::shared_ptr<Graph>& graph) {
   for (auto node : graph->nodes()) {
       // Macro'ed so we get a marginally better line number on failed export
@@ -241,14 +249,20 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
     IR_IF(node, CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
-      FAIL_EXPORT("Couldn't export C++ operator " + cpp_node->name())
-    IR_ELSEIF(PythonOp)
+      FAIL_EXPORT(
+          "Couldn't export C++ operator " + cpp_node->name() +
+          " Defined at:\n" + getNodeStackTraceString(node))
+      IR_ELSEIF(PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
-      FAIL_EXPORT("Couldn't export Python operator " + py_node->name())
-    IR_ELSE()
+      FAIL_EXPORT(
+          "Couldn't export Python operator " + py_node->name() +
+          " Defined at:\n" + getNodeStackTraceString(node))
+      IR_ELSE()
       // Expand is not a real ONNX operator yet, reject it
       if (node->kind() == kExpand) {
-        FAIL_EXPORT("Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support");
+        FAIL_EXPORT(
+            "Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support. Node defined at:\n" +
+            getNodeStackTraceString(node));
       }
       std::string n = node->kind().toString();
       if (n.size() == 0) {
@@ -257,7 +271,9 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       // NB: Upper-case is ONNX, lower-case is ATen.  If we want to be more
       // robust, need to explicitly flag operators as ONNX or ATen
       if (!isupper(n[0])) {
-        FAIL_EXPORT("Couldn't export operator " + n);
+        FAIL_EXPORT(
+            "Couldn't export operator " + n + " Defined at:\n" +
+            getNodeStackTraceString(node));
       }
     IR_END()
 #undef FAIL_EXPORT
