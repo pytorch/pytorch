@@ -1261,6 +1261,35 @@ renorm_(p, dim, maxnorm) -> Tensor
 In-place version of :meth:`~Tensor.renorm`
 """)
 
+add_docstr_all('repeat',
+               r"""
+repeat(*sizes) -> Tensor
+
+Repeats this tensor along the specified dimensions.
+
+Unlike :meth:`~Tensor.expand`, this function copies the tensor’s data.
+
+Args:
+    sizes (torch.Size or int...): The number of times to repeat this tensor along each
+        dimension
+
+Example::
+
+    >>> x = torch.Tensor([1, 2, 3])
+    >>> x.repeat(4, 2)
+
+     1  2  3  1  2  3
+     1  2  3  1  2  3
+     1  2  3  1  2  3
+     1  2  3  1  2  3
+    [torch.FloatTensor of size 4x6]
+
+    >>> x.repeat(4, 2, 1).size()
+
+    torch.Size([4, 2, 3])
+
+""")
+
 add_docstr_all('resize_',
                r"""
 resize_(*sizes) -> Tensor
