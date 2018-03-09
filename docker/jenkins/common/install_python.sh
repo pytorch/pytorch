@@ -122,8 +122,15 @@ pushd pip-9.0.1
 popd
 rm -rf pip-9.0.1*
 
-# Install pip packages
-pip install -U setuptools
+# Upgrade setuptools
+# setuptools 38.5.2 seems to be buggy, see error in
+# https://ci.pytorch.org/jenkins/job/caffe2-docker/job/py3.6-gcc5-ubuntu16.04/35/consoleFull
+pip install -U pip setuptools!=38.5.2
+
+# tornado 5.0 requires Python 2.7.9+ or 3.4+
+if [[ $($PYTHON -c 'import sys; print(int(sys.version_info <= (2, 7, 9) or sys.version_info <= (3, 4)))' == 1) ]]; then
+    pip install 'tornado<5'
+fi
 
 # Need networkx 2.0 because bellmand_ford was moved in 2.1 . Scikit-image by
 # defaults installs the most recent networkx version, so we install this lower
@@ -142,4 +149,3 @@ pip install --no-cache-dir \
     scikit-image \
     tabulate \
     virtualenv
-

@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
+# tornado 5.0 requires Python 2.7.9+ or 3.4+
 RUN pip install --no-cache-dir \
     flask \
     graphviz \
@@ -34,7 +35,7 @@ RUN pip install --no-cache-dir \
     scikit-image \
     scipy \
     setuptools \
-    tornado
+    'tornado<5'
 
 ########## INSTALLATION STEPS ###################
 RUN cd caffe2 && mkdir build && cd build \
