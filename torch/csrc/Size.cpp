@@ -54,6 +54,19 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
         return PyErr_Format(PyExc_TypeError, "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
             i, Py_TYPE(item)->tp_name);
       }
+      if (THPUtils_checkLong(item)) {
+        continue;
+      }
+      // item.__index__() works with 0-dim tensors and tensors with one element
+      THPObjectPtr number(PyNumber_Index(item));
+      if (number && THPUtils_checkLong(number.get())) {
+        Py_INCREF(number.get());
+        PyTuple_SetItem(self, i, number.get());
+        continue;
+      }
+      return PyErr_Format(PyExc_TypeError,
+                          "torch.Size() takes an iterable of 'int' (item %zd is '%s')",
+                          i, Py_TYPE(item)->tp_name);
     }
   }
   return self.release();
