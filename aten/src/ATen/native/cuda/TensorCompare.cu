@@ -87,7 +87,7 @@ struct CmpOpCUDA<std::greater_equal, scalar> {
       auto other_double = other.to<double>();
       auto other_long = other.to<long>();
       if (other_double != other_long) {
-        other_val =  at::convert<scalar>(ceil(other_double));
+        other_val = at::convert<scalar>(ceil(other_double));
       }
     }
 
