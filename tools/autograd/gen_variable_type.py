@@ -113,6 +113,12 @@ if (${cond}) {
 }
 """)
 
+DISPATCH_SCALAR_AS_TENSOR = CodeTemplate("""\
+if (${zero_dim_dispatch_from}.isBackedByTensor()) {
+  return static_cast<const Type*>(this)->${api_name}(${as_tensor_actuals});
+}
+""")
+
 RECORD_FUNCTION = CodeTemplate("""\
 profiler::RecordFunction profiler("${name}");""")
 
@@ -462,6 +468,21 @@ def emit_body(declaration):
     combined = nested_dict(env, declaration)
 
     body = []
+    if declaration['zero_dim_dispatch_from']:
+        # We can't use the scalar code path for scalars that are backed by tensors, because
+        # it would break autodiff wrt those scalars. That's why we reshape them to be 1d
+        # and dispatch again.
+        # XXX: using self as a template for the valid type for the arg is a bit aribitrary,
+        # but seems to work well. We don't have any concrete type labels in declarations, so
+        # we can't do anything better for now.
+        # XXX: scalars and 1-element tensors are equivalent in terms of broadcasting, but
+        # scalars additionally allow being implicitly casted to a different type, but we
+        # fix this here.
+        as_tensor_actuals = [arg['name'] if arg['name'] != declaration['zero_dim_dispatch_from']
+                             else arg['name'] + ".toTensor().type_as(self).view({1})"
+                             for arg in declaration['arguments']]
+        body.append(DISPATCH_SCALAR_AS_TENSOR.substitute(combined,
+            as_tensor_actuals=as_tensor_actuals))
     if base_name not in DONT_PROFILE:
         body.append(RECORD_FUNCTION.substitute(combined))
     if strategy != 'use_type':

@@ -2,6 +2,7 @@
 # "what has to be done to add a Operation ..." first!
 
 import re
+from collections import OrderedDict
 from code_template import CodeTemplate
 
 try:
@@ -44,6 +45,7 @@ ${return_type} ${api_name}(${formals_with_defaults}) const;
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} Type::${api_name}(${formals}) const {
+    ${zero_dim_dispatch}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
@@ -442,6 +444,7 @@ FunctionOption = TypedDict('FunctionOption', {
 OutputDeclaration = NamedTuple('OutputDeclaration', [
     ('name', str),
     ('method_prefix_derived', str),
+    ('zero_dim_dispatch_from', Optional[str]),
     ('arguments', List[AtFormal]),
     ('method_of', List[str]),
     ('mode', str),
@@ -477,6 +480,25 @@ def to_return_type(arg, option):
         'type': rt,
         'dynamic_type': DYNAMIC_TYPE.get(arg['type'], arg['type']),
     }
+
+
+def signature(args, i=None, value=None, exclude=lambda arg: False):
+    elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
+                if i is None or j != i else value
+                for j, arg in enumerate(args)
+                if not exclude(arg)]
+    return '#'.join(elements)
+
+
+def get_zero_dim_dispatch(env, option):
+    # type: (Environment, FunctionOption) -> List[str]
+    zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar')
+    if not zero_dim_dispatch:
+        return []
+    zero_dim_actuals = [arg['name']
+                        if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
+                        for arg in option['formals_list']]
+    return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
 
 
 def create_generic(top_env, declarations):
@@ -750,7 +772,8 @@ def create_generic(top_env, declarations):
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
+                TYPE_METHOD_DEFINITION_BROADCAST.substitute(
+                    env, zero_dim_dispatch=get_zero_dim_dispatch(env, option)))
 
         method_of = ['Type']
         if is_method:
@@ -773,6 +796,7 @@ def create_generic(top_env, declarations):
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             method_prefix_derived=option['method_prefix_derived'],
+            zero_dim_dispatch_from=None,
             arguments=formals,
             method_of=method_of,
             mode=mode,
@@ -957,6 +981,7 @@ def create_generic(top_env, declarations):
         output_options.append(OutputDeclaration(
             name=option['api_name'],
             method_prefix_derived=option['method_prefix_derived'],
+            zero_dim_dispatch_from=None,
             arguments=formals,
             method_of=method_of,
             mode=option['mode'],
@@ -967,17 +992,37 @@ def create_generic(top_env, declarations):
             abstract=abstract,
         ))
 
+    # Register reverse of the zero_dim_dispatch relation in zero_dim_dispatch_from
+    def link_zero_dispatch(output_options, processed_options):
+        assert len(output_options) == len(processed_options)
+        opt_dict = OrderedDict([((option.name, signature(option.arguments)), option)
+                                 for option in output_options])
+        for option, raw_option in zip(output_options, processed_options):
+            zero_dim_dispatch = raw_option.get('zero_dim_dispatch_when_scalar', '')
+            if zero_dim_dispatch:
+                arg_idx = [arg['name'] for arg in option.arguments].index(zero_dim_dispatch)
+                scalar_sig = signature(option.arguments, arg_idx, 'Scalar')
+                scalar_option = opt_dict[(option.name, scalar_sig)]
+                scalar_arg_names = [arg['name'] for arg in scalar_option.arguments]
+                assert scalar_option.zero_dim_dispatch_from is None
+                opt_dict[(option.name, scalar_sig)] = \
+                    scalar_option._replace(zero_dim_dispatch_from=scalar_arg_names[arg_idx])
+        return list(opt_dict.values())
+
     output_declarations = []  # type: List[OutputDeclaration]
     for declaration in declarations:
         output_options = []  # type: List[OutputDeclaration]
+        processed_options = []
         for option in declaration['options']:
             try:
                 if option['mode'] != 'native':
                     process_option(option, output_options)
                 else:
                     process_native(option, output_options)
+                processed_options.append(option)
             except NYIError:
                 option['skip'] = True
+        output_options = link_zero_dispatch(output_options, processed_options)
         output_declarations.extend(output_options)
     return output_declarations
 
@@ -1065,24 +1110,10 @@ def create_derived(backend_type_env, declarations):
             return backend_type_env['AccScalarName'] == 'Long'
         return False
 
-    def get_zero_dim_dispatch_when_scalar(option):
-        # type: (FunctionOption) -> str
-        return option.get('zero_dim_dispatch_when_scalar', False)  # type: ignore
-
-    def handle_zero_dim(env, option):
-        # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = get_zero_dim_dispatch_when_scalar(option)
-        if not zero_dim_dispatch:
-            return []
-        zero_dim_actuals = [arg['name']
-                            if arg['name'] != zero_dim_dispatch else "Scalar({})".format(arg['name'])
-                            for arg in option['formals_list']]
-        return [ZERO_DIM_CHECK.substitute(env, check_name=zero_dim_dispatch, zero_dim_actuals=zero_dim_actuals)]
-
     def handle_only_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         if option.get('zero_dim_tensor_only', False):
-            check_name = get_zero_dim_dispatch_when_scalar(option)
+            check_name = option['zero_dim_dispatch_when_scalar']
             return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
         else:
             return None
@@ -1151,7 +1182,8 @@ def create_derived(backend_type_env, declarations):
         # type: (Environment, FunctionOption) -> List[str]
         body = []  # type: List[str]
         body += handle_sparse(env, option)
-        body += handle_zero_dim(env, option)
+        # NB: Same size zero dim dispatch is handled in the broadcasting method
+        body += get_zero_dim_dispatch(env, option)
         only_zero_dim_check = handle_only_zero_dim(env, option)
         if only_zero_dim_check is not None:
             #  code below only_zero_dim_check is unreachable so we do not need to generate the rest.

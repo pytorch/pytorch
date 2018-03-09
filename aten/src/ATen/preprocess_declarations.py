@@ -1,6 +1,7 @@
 import re
 from copy import deepcopy
 from function_wrapper import TYPE_FORMAL_GENERIC
+from function_wrapper import signature as signature_base
 import common_with_cwrap
 
 type_map = {
@@ -141,6 +142,7 @@ def sanitize_return(option):
 def set_mode(option):
     option['mode'] = option.get('mode', 'TH')
 
+
 # To enable 0-dim support in TH operations
 # we find all places where a single Scalar replaced with a Tensor
 # as an argument is still a valid function
@@ -148,18 +150,13 @@ def set_mode(option):
 # where 'name' is the name of the argument that should be a scalar
 # during dispatch, if that argument is marked internally as holding a scalar
 # then the method will dispatch to that function.
-
-
 def discover_zero_dim_tensor_operations(declaration):
     def exclude(arg):
         return arg.get('ignore_check')
 
     def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
-        return '#'.join(elements)
+        return signature_base(option['arguments'], i, value, exclude)
+
     signature_to_option = {signature(option): option
                            for option in declaration['options']}
 
@@ -173,12 +170,6 @@ def discover_zero_dim_tensor_operations(declaration):
                     names = [arg['name'] for arg in tensor_version['arguments']
                              if not exclude(arg)]
                     tensor_version['zero_dim_dispatch_when_scalar'] = names[i]
-                    # print("FOUND "+str(i)   )
-                    # print("Scalar Version ===== ")
-                    # print(yaml.dump(option))
-                    # print("Tensor Version ===== ")
-                    # print(yaml.dump(tensor_version))
-                    # print("SHARED "+names[i])
 
 
 def discover_sparse_tensor_operations(declaration):
@@ -186,11 +177,7 @@ def discover_sparse_tensor_operations(declaration):
         return arg.get('ignore_check')
 
     def signature(option, i=None, value=None):
-        elements = [TYPE_FORMAL_GENERIC.get(arg['type'], arg['type'])
-                    if i is None or j != i else value
-                    for j, arg in enumerate(option['arguments'])
-                    if not exclude(arg)]
-        return '#'.join(elements)
+        return signature_base(option['arguments'], i, value, exclude)
 
     # Determine if any options have the 'aten_dense_sparse' flag
     dense_sparse_options = [option

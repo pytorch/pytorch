@@ -55,14 +55,20 @@ _(==,x.eq(y), y.eq(x)) \
 _(!=,x.ne(y), y.ne(x))
 
 #define DEFINE_OPERATOR(op,body,reverse_scalar_body) \
-static inline Tensor operator op(const Tensor & x, const Tensor & y) { \
-  return body; \
-} \
 static inline Tensor operator op(const Tensor & x, Scalar y) { \
   return body; \
 } \
 static inline Tensor operator op(Scalar x, const Tensor & y) { \
   return reverse_scalar_body; \
+} \
+static inline Tensor operator op(const Tensor & x, const Tensor & y) { \
+  /* XXX: it is important that we avoid casting tensors to scalars here, \
+   * because this code is also used for autograd, and that would \
+   * break differentiation */ \
+  if (x.dim() == 0) { \
+    return reverse_scalar_body; \
+  } \
+  return body; \
 }
 
 

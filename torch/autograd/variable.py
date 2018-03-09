@@ -329,8 +329,6 @@ class Variable(_C._VariableBase):
     __rtruediv__ = __rdiv__
     __itruediv__ = _C._VariableBase.__idiv__
 
-    __pow__ = _C._VariableBase.pow
-
     def __format__(self, format_spec):
         if self.dim() == 0:
             return self.item().__format__(format_spec)
@@ -344,12 +342,6 @@ class Variable(_C._VariableBase):
 
     __neg__ = _C._VariableBase.neg
 
-    __eq__ = _C._VariableBase.eq
-    __ne__ = _C._VariableBase.ne
-    __lt__ = _C._VariableBase.lt
-    __le__ = _C._VariableBase.le
-    __gt__ = _C._VariableBase.gt
-    __ge__ = _C._VariableBase.ge
     __abs__ = _C._VariableBase.abs
 
     def __len__(self):
