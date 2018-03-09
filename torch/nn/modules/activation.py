@@ -96,7 +96,7 @@ class RReLU(Module):
             ax & \text{ otherwise }
         \end{cases},
 
-     where :math:`a` is randomly sampled from uniform distribution
+    where :math:`a` is randomly sampled from uniform distribution
     :math:`\mathcal{U}(\text{lower}, \text{upper})`.
 
      See: https://arxiv.org/pdf/1505.00853.pdf
