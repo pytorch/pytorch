@@ -174,7 +174,7 @@ unique_ptr<OperatorBase> _CreateOperator(
               << " is not available for operator " << op_type << ".";
     }
   }
-  if (operator_def.engine().size()) {
+  if (operator_def.engine().size() && !VLOG_IS_ON(1)) {
     LOG(INFO) << "Engine " << operator_def.engine()
               << " is not available for operator " << op_type << ".";
   }
