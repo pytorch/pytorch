@@ -1157,11 +1157,17 @@ class Caffe2Backend(Backend):
 
         dummy_name(cls._all_names_in_graph(init_model.graph) | cls._all_names_in_graph(pred_model.graph))
 
+        success = True
         for net, model in ( (init_net, init_model), (pred_net, pred_model) ):
             net.device_option.CopyFrom(device_option)
             for node in model.graph.node:
-                c2ops = cls._onnx_node_to_caffe2_op(
-                    init_model, pred_model, node, opset_version)
+                try:
+                    c2ops = cls._onnx_node_to_caffe2_op(
+                        init_model, pred_model, node, opset_version)
+                except Exception as e:
+                    success = False
+                    print('ONNX FATAL:', e)
+                    continue
                 (init_net if include_initializers else net).op.extend(c2ops.init_ops)
                 net.op.extend(c2ops.ops)
                 net.external_input.extend(c2ops.interface_blobs)
@@ -1169,6 +1175,9 @@ class Caffe2Backend(Backend):
                 value_info.name for value_info in model.graph.output)
             net.external_input.extend(
                 value_info.name for value_info in model.graph.input)
+
+        if not success:
+            raise RuntimeError('ONNX conversion failed')
 
         return init_net, pred_net
 
