@@ -18,17 +18,22 @@ class Upsample(Module):
     calculate the output size. (You cannot give both, as it is ambiguous)
 
     Args:
-        size (tuple, optional): a tuple of ints ([D_out], [H_out], W_out) output sizes
+        size (tuple, optional): a tuple of ints `([D_out], [H_out], W_out)` output sizes
         scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
-        mode (string, optional): the upsampling algorithm: nearest | linear | bilinear | trilinear. Default: nearest
+        mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear` and `trilinear`.
+                                    Default: nearest
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})`
           or :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = floor(D_{in} * scale\_factor)` or `size[-3]`
-          :math:`H_{out} = floor(H_{in} * scale\_factor)` or `size[-2]`
-          :math:`W_{out} = floor(W_{in}  * scale\_factor)` or `size[-1]`
+
+          .. math::
+              D_{out} = \lfloor D_{in} * scale\_factor \rfloor or \text{size}[-3]
+
+              H_{out} = \lfloor H_{in} * scale\_factor \rfloor or \text{size}[-2]
+
+              W_{out} = \lfloor W_{in} * scale\_factor \rfloor or \text{size}[-1]
 
     Examples::
 
@@ -94,17 +99,20 @@ class UpsamplingNearest2d(Upsample):
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
 
-    When `size` is given, it is the output size of the image (h, w).
+    When `size` is given, it is the output size of the image `(h, w)`.
 
     Args:
-        size (tuple, optional): a tuple of ints (H_out, W_out) output sizes
-        scale_factor (int, optional): the multiplier for the image height / width
+        size (tuple, optional): a tuple of ints `(H_out, W_out)` output sizes
+        scale_factor (int, optional): the multiplier for the image height or width
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor(H_{in} * scale\_factor)`
-          :math:`W_{out} = floor(W_{in}  * scale\_factor)`
+
+          .. math::
+              H_{out} = \lfloor H_{in} * scale\_factor \rfloor
+
+              W_{out} = \lfloor W_{in} * scale\_factor \rfloor
 
     Examples::
 
@@ -142,17 +150,20 @@ class UpsamplingBilinear2d(Upsample):
     To specify the scale, it takes either the :attr:`size` or the :attr:`scale_factor`
     as it's constructor argument.
 
-    When `size` is given, it is the output size of the image (h, w).
+    When `size` is given, it is the output size of the image `(h, w)`.
 
     Args:
-        size (tuple, optional): a tuple of ints (H_out, W_out) output sizes
-        scale_factor (int, optional): the multiplier for the image height / width
+        size (tuple, optional): a tuple of ints `(H_out, W_out)` output sizes
+        scale_factor (int, optional): the multiplier for the image height or width
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = floor(H_{in} * scale\_factor)`
-          :math:`W_{out} = floor(W_{in}  * scale\_factor)`
+
+          .. math::
+              H_{out} = \lfloor H_{in} * scale\_factor \rfloor
+
+              W_{out} = \lfloor W_{in} * scale\_factor \rfloor
 
     Examples::
 

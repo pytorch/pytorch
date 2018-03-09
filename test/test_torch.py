@@ -1,4 +1,5 @@
 import sys
+import io
 import os
 import math
 import random
@@ -13,7 +14,7 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from itertools import product, combinations
 from functools import reduce
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, run_tests, \
-    download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS
+    download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
 
 if TEST_NUMPY:
     import numpy as np
@@ -31,6 +32,47 @@ with warnings.catch_warnings(record=True) as warns:
             if "Couldn't retrieve source code" in warn.message.args[0]:
                 can_retrieve_source = False
                 break
+
+
+class FilelikeMock(object):
+    def __init__(self, data, has_fileno=True, has_readinto=False):
+        if has_readinto:
+            setattr(self, 'readinto', self.readinto_opt)
+        if has_fileno:
+            # Python 2's StringIO.StringIO has no fileno attribute.
+            # This is used to test that.
+            setattr(self, 'fileno', self.fileno_opt)
+
+        self.calls = set([])
+        self.bytesio = io.BytesIO(data)
+
+        def trace(fn, name):
+            def result(*args, **kwargs):
+                self.calls.add(name)
+                return fn(*args, **kwargs)
+            return result
+
+        for attr in ['read', 'readline', 'seek', 'tell', 'write', 'flush']:
+            traced_fn = trace(getattr(self.bytesio, attr), attr)
+            setattr(self, attr, traced_fn)
+
+    def fileno_opt(self):
+        raise io.UnsupportedOperation('Not a real file')
+
+    def readinto_opt(self, view):
+        self.calls.add('readinto')
+        return self.bytesio.readinto(view)
+
+    def was_called(self, name):
+        return name in self.calls
+
+
+class BytesIOContext(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 
 class TestTorch(TestCase):
@@ -935,6 +977,41 @@ class TestTorch(TestCase):
     def test_rpow(self):
         m = torch.randn(10, 10)
         self.assertEqual(torch.pow(2, m), 2**m)
+
+    @staticmethod
+    def _test_int_pow(self, cast):
+        if not TEST_NUMPY:
+            return
+        import numpy as np
+
+        def check_against_np(tensor, exp):
+            tensor_np = tensor.cpu().numpy()
+            exp_np = exp if isinstance(exp, int) else exp.cpu().numpy()
+            expected = torch.LongTensor(tensor_np ** exp_np).type_as(tensor)
+            self.assertEqual(torch.pow(tensor, exp), expected)
+            self.assertEqual(tensor.pow(exp), torch.pow(tensor, exp))
+
+        typecasts = [
+            lambda x: x.long(),
+            lambda x: x.short(),
+            lambda x: x.byte(),
+        ]
+
+        if not IS_WINDOWS:
+            typecasts.append(lambda x: x.int())
+
+        shape = (11, 5)
+        tensor = cast(torch.LongTensor(shape).random_(-10, 10))
+        exps = [0, 1, 2, 5, cast(torch.LongTensor(shape).random_(0, 20))]
+
+        for typecast in typecasts:
+            for exp in exps:
+                t = typecast(tensor)
+                e = exp if isinstance(exp, int) else typecast(exp)
+                check_against_np(t, e)
+
+    def test_int_pow(self):
+        self._test_int_pow(self, lambda x: x)
 
     def _test_cop(self, torchfn, mathfn):
         def reference_implementation(res2):
@@ -4614,7 +4691,7 @@ class TestTorch(TestCase):
         self.assertEqual(r[:, :50].std(), 4, 0.3)
         self.assertEqual(r[:, 50:].std(), 1, 0.2)
 
-    def test_serialization(self):
+    def _test_serialization(self, filecontext_lambda, test_use_filename=True):
         a = [torch.randn(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
@@ -4624,12 +4701,16 @@ class TestTorch(TestCase):
         t2 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
         b += [(t1.storage(), t1.storage(), t2.storage())]
         b += [a[0].storage()[0:2]]
-        for use_name in (False, True):
+        if test_use_filename:
+            use_name_options = (False, True)
+        else:
+            use_name_options = (False,)
+        for use_name in use_name_options:
             # Passing filename to torch.save(...) will cause the file to be opened twice,
             # which is not supported on Windows
             if sys.platform == "win32" and use_name:
                 continue
-            with tempfile.NamedTemporaryFile() as f:
+            with filecontext_lambda() as f:
                 handle = f if not use_name else f.name
                 torch.save(b, handle)
                 f.seek(0)
@@ -4657,7 +4738,15 @@ class TestTorch(TestCase):
             rootview = c[8]
             self.assertEqual(rootview.data_ptr(), c[0].data_ptr())
 
-    def test_serialization_offset(self):
+    def test_serialization(self):
+        # Test serialization with a real file
+        self._test_serialization(tempfile.NamedTemporaryFile)
+
+    def test_serialization_filelike(self):
+        # Test serialization (load and save) with a filelike object
+        self._test_serialization(BytesIOContext, test_use_filename=False)
+
+    def _test_serialization_offset(self, filecontext_lambda):
         a = torch.randn(5, 5)
         i = 41
         with tempfile.TemporaryFile() as f:
@@ -4668,6 +4757,12 @@ class TestTorch(TestCase):
             b = torch.load(f)
             self.assertTrue(torch.equal(a, b))
             self.assertEqual(i, j)
+
+    def test_serialization_offset(self):
+        self._test_serialization_offset(tempfile.TemporaryFile)
+
+    def test_serialization_offset_filelike(self):
+        self._test_serialization_offset(BytesIOContext)
 
     def test_half_tensor(self):
         x = torch.randn(5, 5).float()
@@ -4698,15 +4793,14 @@ class TestTorch(TestCase):
             self.assertIsInstance(xc2, type(xc))
             self.assertEqual(xc.float(), xc2.float())
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_serialization_cuda(self):
+    def _test_serialization_cuda(self, filecontext_lambda):
         device_count = torch.cuda.device_count()
         t0 = torch.cuda.FloatTensor(5).fill_(1)
         torch.cuda.set_device(device_count - 1)
         tn = torch.cuda.FloatTensor(3).fill_(2)
         torch.cuda.set_device(0)
         b = (t0, tn)
-        with tempfile.NamedTemporaryFile() as f:
+        with filecontext_lambda() as f:
             torch.save(b, f)
             f.seek(0)
             c = torch.load(f)
@@ -4714,6 +4808,14 @@ class TestTorch(TestCase):
             u0, un = c
             self.assertEqual(u0.get_device(), 0)
             self.assertEqual(un.get_device(), device_count - 1)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_serialization_cuda(self):
+        self._test_serialization_cuda(tempfile.NamedTemporaryFile)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_serialization_cuda_filelike(self):
+        self._test_serialization_cuda(BytesIOContext)
 
     def test_serialization_backwards_compat(self):
         a = [torch.arange(1 + i, 26 + i).view(5, 5).float() for i in range(2)]
@@ -4735,7 +4837,11 @@ class TestTorch(TestCase):
         self.assertEqual(c[1], c[3], 0)
         self.assertEqual(c[4][1:4], c[5], 0)
 
-    def test_serialization_container(self):
+    # unique_key is necessary because on Python 2.7, if a warning passed to
+    # the warning module is the same, it is not raised again.
+    def _test_serialization_container(self, unique_key, filecontext_lambda):
+        tmpmodule_name = 'tmpmodule{}'.format(unique_key)
+
         def import_module(name, filename):
             if sys.version_info >= (3, 5):
                 import importlib.util
@@ -4748,9 +4854,9 @@ class TestTorch(TestCase):
             sys.modules[module.__name__] = module
             return module
 
-        with tempfile.NamedTemporaryFile() as checkpoint:
+        with filecontext_lambda() as checkpoint:
             fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
-            module = import_module('tmpmodule', fname)
+            module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
             # First check that the checkpoint can be loaded without warnings
@@ -4763,7 +4869,7 @@ class TestTorch(TestCase):
 
             # Replace the module with different source
             fname = os.path.join(os.path.dirname(__file__), 'data/network2.py')
-            module = import_module('tmpmodule', fname)
+            module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:
                 loaded = torch.load(checkpoint)
@@ -4772,23 +4878,93 @@ class TestTorch(TestCase):
                     self.assertEquals(len(w), 1)
                     self.assertTrue(w[0].category, 'SourceChangeWarning')
 
+    def test_serialization_container(self):
+        self._test_serialization_container('file', tempfile.NamedTemporaryFile)
+
+    def test_serialization_container_filelike(self):
+        self._test_serialization_container('filelike', BytesIOContext)
+
     def test_serialization_map_location(self):
         test_file_path = download_file('https://download.pytorch.org/test_data/gpu_tensors.pt')
 
         def map_location(storage, loc):
             return storage
 
-        tensor = torch.load(test_file_path, map_location=map_location)
-        self.assertIsInstance(tensor, torch.FloatTensor)
-        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+        def load_bytes():
+            with open(test_file_path, 'rb') as f:
+                data = io.BytesIO(f.read())
+            return data
 
-        tensor = torch.load(test_file_path, map_location={'cuda:0': 'cpu'})
-        self.assertIsInstance(tensor, torch.FloatTensor)
-        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+        fileobject_lambdas = [lambda: test_file_path, load_bytes]
+        map_locations = [map_location, {'cuda:0': 'cpu'}, 'cpu']
 
-        tensor = torch.load(test_file_path, map_location='cpu')
-        self.assertIsInstance(tensor, torch.FloatTensor)
-        self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+        for fileobject_lambda in fileobject_lambdas:
+            for map_location in map_locations:
+                tensor = torch.load(fileobject_lambda(), map_location=map_location)
+                self.assertIsInstance(tensor, torch.FloatTensor)
+                self.assertEqual(tensor, torch.FloatTensor([[1.0, 2.0], [3.0, 4.0]]))
+
+    def test_serialization_filelike_api_requirements(self):
+        filemock = FilelikeMock(b'', has_readinto=False)
+        tensor = torch.randn(3, 5)
+        torch.save(tensor, filemock)
+        expected_superset = set(['write', 'flush'])
+        self.assertTrue(expected_superset.issuperset(filemock.calls))
+
+        # Reset between save and load
+        filemock.seek(0)
+        filemock.calls.clear()
+
+        _ = torch.load(filemock)
+        expected_superset = set(['read', 'readline', 'seek', 'tell'])
+        self.assertTrue(expected_superset.issuperset(filemock.calls))
+
+    def _test_serialization_filelike(self, tensor, mock, desc):
+        f = mock(b'')
+        torch.save(tensor, f)
+        f.seek(0)
+        data = mock(f.read())
+
+        msg = 'filelike serialization with {}'
+
+        b = torch.load(data)
+        self.assertTrue(torch.equal(tensor, b), msg.format(desc))
+
+    def test_serialization_filelike_missing_attrs(self):
+        # Test edge cases where filelike objects are missing attributes.
+        # The Python io docs suggests that these attributes should really exist
+        # and throw io.UnsupportedOperation, but that isn't always the case.
+        mocks = [
+            ('no readinto', lambda x: FilelikeMock(x)),
+            ('has readinto', lambda x: FilelikeMock(x, has_readinto=True)),
+            ('no fileno', lambda x: FilelikeMock(x, has_fileno=False)),
+        ]
+
+        to_serialize = torch.randn(3, 10)
+        for desc, mock in mocks:
+            self._test_serialization_filelike(to_serialize, mock, desc)
+
+    def test_serialization_filelike_stress(self):
+        a = torch.randn(11 * (2 ** 9) + 1, 5 * (2 ** 9))
+
+        # This one should call python read multiple times
+        self._test_serialization_filelike(a, lambda x: FilelikeMock(x, has_readinto=False),
+                                          'read() stress test')
+        self._test_serialization_filelike(a, lambda x: FilelikeMock(x, has_readinto=True),
+                                          'readinto() stress test')
+
+    def test_serialization_filelike_uses_readinto(self):
+        # For maximum effiency, when reading a file-like object,
+        # ensure the C API calls readinto instead of read.
+        a = torch.randn(5, 4)
+
+        f = io.BytesIO()
+        torch.save(a, f)
+        f.seek(0)
+        data = FilelikeMock(f.read(), has_readinto=True)
+
+        b = torch.load(data)
+        self.assertTrue(data.was_called('readinto'))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])
@@ -5423,6 +5599,67 @@ class TestTorch(TestCase):
         self.assertEqual(double_tensor[1], tiny_float, prec=0.0)
         self.assertEqual(double_tensor[2], 0.0, prec=0.0)  # tiny_double to zero
         torch.set_flush_denormal(False)
+
+    def test_unique_cpu(self):
+        x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
+        expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
+        expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
+
+        x_unique = torch.unique(x)
+        self.assertEqual(
+            expected_unique.tolist(), sorted(x_unique.tolist()))
+
+        x_unique, x_inverse = x.unique(return_inverse=True)
+        self.assertEqual(
+            expected_unique.tolist(), sorted(x_unique.tolist()))
+        self.assertEqual(expected_inverse.numel(), x_inverse.numel())
+
+        x_unique = x.unique(sorted=True)
+        self.assertEqual(expected_unique, x_unique)
+
+        x_unique, x_inverse = torch.unique(
+            x, sorted=True, return_inverse=True)
+        self.assertEqual(expected_unique, x_unique)
+        self.assertEqual(expected_inverse, x_inverse)
+
+        # Tests per-element unique on a higher rank tensor.
+        y = x.view(2, 2, 2)
+        y_unique, y_inverse = y.unique(sorted=True, return_inverse=True)
+        self.assertEqual(expected_unique, y_unique)
+        self.assertEqual(expected_inverse.view(y.size()), y_inverse)
+
+        # Tests unique on other types.
+        int_unique, int_inverse = torch.unique(
+            torch.IntTensor([2, 1, 2]), sorted=True, return_inverse=True)
+        self.assertEqual(torch.IntTensor([1, 2]), int_unique)
+        self.assertEqual(torch.LongTensor([1, 0, 1]), int_inverse)
+
+        double_unique, double_inverse = torch.unique(
+            torch.DoubleTensor([2., 1.5, 2.1, 2.]),
+            sorted=True,
+            return_inverse=True,
+        )
+        self.assertEqual(torch.DoubleTensor([1.5, 2., 2.1]), double_unique)
+        self.assertEqual(torch.LongTensor([1, 0, 2, 1]), double_inverse)
+
+        byte_unique, byte_inverse = torch.unique(
+            torch.ByteTensor([133, 7, 7, 7, 42, 128]),
+            sorted=True,
+            return_inverse=True,
+        )
+        self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
+        self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_unique_cuda(self):
+        # unique currently does not support CUDA.
+        self.assertRaises(
+            RuntimeError, lambda: torch.cuda.LongTensor([0, 1]).unique())
+        self.assertRaises(
+            RuntimeError,
+            lambda: torch.unique(torch.cuda.FloatTensor([0., 1.])),
+        )
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1

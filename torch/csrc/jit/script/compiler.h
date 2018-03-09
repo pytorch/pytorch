@@ -4,7 +4,6 @@
 #include <string>
 
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/script/error_report.h"
 #include "torch/csrc/jit/script/tree_views.h"
 

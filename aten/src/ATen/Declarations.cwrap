@@ -2157,8 +2157,6 @@
 ]]
 [[
   name: pow
-  types:
-    - floating_point
   variants:
     - method
     - function
@@ -2181,8 +2179,6 @@
 ]]
 [[
   name: pow
-  types:
-    - floating_point
   variants:
     - function
   return: argument 0
@@ -2196,11 +2192,6 @@
 ]]
 [[
   name: pow_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
   return: argument 0
   cname: pow
   options:

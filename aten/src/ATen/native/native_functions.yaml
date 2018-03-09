@@ -90,6 +90,9 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
   variants: function
 
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
+  variants: function
+
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
   return:
     - type: Tensor
@@ -385,6 +388,8 @@
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
+- func: split_with_sizes(Tensor self, IntList split_sizes, int64_t dim=0) -> TensorList
+
 - func: squeeze(Tensor self) -> Tensor
 
 - func: squeeze(Tensor self, int64_t dim) -> Tensor
@@ -425,6 +430,11 @@
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
+
+- func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_cpu
+    CUDA: _unique_cuda
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function

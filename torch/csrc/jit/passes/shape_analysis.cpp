@@ -1,4 +1,3 @@
-#include <Python.h>
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"

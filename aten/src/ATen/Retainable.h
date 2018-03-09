@@ -11,7 +11,7 @@ struct Retainable {
   void retain() {
     ++refcount;
   }
-  virtual void release() {
+  void release() {
     if(--refcount == 0) {
       delete this;
     }

@@ -16,15 +16,15 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+        - Input: :math:`(N, *, in\_features)` where :math:`*` means any number of
           additional dimensions
         - Output: :math:`(N, *, out\_features)` where all but the last dimension
           are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
-            (out_features x in_features)
-        bias:   the learnable bias of the module of shape (out_features)
+            `(out_features x in_features)`
+        bias:   the learnable bias of the module of shape `(out_features)`
 
     Examples::
 
@@ -63,7 +63,7 @@ class Linear(Module):
 
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 * A * x_2 + b`
+    :math:`y = x_1 A x_2 + b`
 
     Args:
         in1_features: size of each first input sample
@@ -78,8 +78,8 @@ class Bilinear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            (out_features x in1_features x in2_features)
-        bias:   the learnable bias of the module of shape (out_features)
+            `(out_features x in1_features x in2_features)`
+        bias:   the learnable bias of the module of shape `(out_features)`
 
     Examples::
 

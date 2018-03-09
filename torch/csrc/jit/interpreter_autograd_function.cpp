@@ -1,5 +1,3 @@
-#include <Python.h>
-
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
