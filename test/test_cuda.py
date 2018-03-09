@@ -238,9 +238,9 @@ tests = [
     ('div', small_3d, lambda t: [number(3.14, 3, t)],),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types),
-    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', float_types),
-    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', float_types),
-    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', float_types),
+    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', types),
+    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', types),
+    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', types),
     ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
     # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
     ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half),
@@ -1410,6 +1410,9 @@ class TestCuda(TestCase):
 
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
+
+    def test_int_pow(self):
+        TestTorch._test_int_pow(self, lambda x: x.cuda())
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
