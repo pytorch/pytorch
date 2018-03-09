@@ -174,13 +174,13 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   // Compute the linear indices for the parts of the tensor not being indexed
   Tensor beforeIndex;
   if (emptyBefore > 0) {
-    auto index = longType.arange(0, nElemBefore) * strides[emptyBefore - 1];
+    auto index = at::arange(longType, 0, nElemBefore) * strides[emptyBefore - 1];
     index = index.view(src.sizes().slice(0, emptyBefore));
     beforeIndex = unsqueezeN(index, 0, linearIndex.dim() + emptyAfter);
   }
   Tensor afterIndex;
   if (emptyAfter > 0) {
-    auto index = longType.arange(0, nElemAfter);
+    auto index = at::arange(longType, 0, nElemAfter);
     index = index.view(src.sizes().slice(src.dim() - emptyAfter, emptyAfter));
     afterIndex = unsqueezeN(index, linearIndex.dim() + emptyBefore, 0);
   }

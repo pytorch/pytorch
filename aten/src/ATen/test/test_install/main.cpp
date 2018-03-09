@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
 
 int main() {
-  std::cout << at::CPU(at::kFloat).ones({3,4}) << "\n";
+  std::cout << at::ones(at::CPU(at::kFloat), {3,4}) << "\n";
 }

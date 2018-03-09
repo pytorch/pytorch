@@ -23,6 +23,18 @@
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
 
+- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: arange_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: arange(Type dtype, Scalar end) -> Tensor
+  variants: function
+
+- func: arange_out(Tensor reuslt, Scalar end) -> Tensor
+  variants: function
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
@@ -207,6 +219,15 @@
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
+  variants: function
+
+- func: eye_out(Tensor result, int64_t n, int64_t m=-1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: eye_out_cpu
+    CUDA: eye_out_cuda
+
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
@@ -233,6 +254,18 @@
 - func: is_signed(Tensor self) -> bool
 
 - func: is_sparse(Tensor self) -> bool
+
+- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
@@ -265,6 +298,12 @@
 - func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
   variants: function
 
+- func: ones(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: ones_out(Tensor result, IntList size) -> Tensor
+  variants: function
+
 - func: ones_like(Tensor self) -> Tensor
   variants: function
 
@@ -276,16 +315,40 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: rand_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: rand_like(Tensor self) -> Tensor
   variants: function
 
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randn_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: randn_like(Tensor self) -> Tensor
   variants: function
 
 - func: randn_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
+- func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
   variants: function
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
@@ -392,6 +455,12 @@
   dispatch:
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
+
+- func: zeros(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: zeros_out(Tensor result, IntList size) -> Tensor
+  variants: function
 
 - func: zeros_like(Tensor self) -> Tensor
   variants: function
