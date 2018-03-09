@@ -77,32 +77,17 @@ inline bool THPUtils_checkDouble(PyObject* obj) {
 }
 
 inline double THPUtils_unpackDouble(PyObject* obj) {
-  if (PyFloat_Check(obj)) {
-    return PyFloat_AS_DOUBLE(obj);
+  // PyFloat_AsDouble will calls obj.__float__ if obj is not a float object
+  auto value = PyFloat_AsDouble(obj);
+  if (PyErr_Occurred()){
+    throw python_error();
   }
+  // raise warning when converting a long to float with precision loss
   if (PyLong_Check(obj)) {
-    double value = PyLong_AsDouble(obj);
-    // raise error on overflow
-    if (PyErr_Occurred() &&
-     PyErr_GivenExceptionMatches(PyErr_Occurred(), PyExc_OverflowError)) {
-      PyErr_Clear();
-      throw std::runtime_error("Overflow when unpacking double");
-    }
-    // raise warning on precision loss
     if (value > DOUBLE_INT_MAX || value < -DOUBLE_INT_MAX) {
       auto warning_message = "Precision loss when converting int to double";
       PyErr_WarnEx(PyExc_RuntimeWarning, warning_message, 1);
     }
-    return value;
-  }
-#if PY_MAJOR_VERSION == 2
-  if (PyInt_Check(obj)) {
-    return (double)PyInt_AS_LONG(obj);
-  }
-#endif
-  double value = PyFloat_AsDouble(obj);
-  if (value == -1 && PyErr_Occurred()) {
-    throw python_error();
   }
   return value;
 }
