@@ -189,12 +189,6 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
-- func: empty_like(Tensor self) -> Tensor
-  variants: function
-
-- func: empty_like(Tensor self, *, Type dtype) -> Tensor
-  variants: function
-
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
@@ -213,6 +207,18 @@
     CPU: embedding_bag_backward_cpu
     CUDA: embedding_bag_backward_cuda
 
+- func: empty(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: empty_out(Tensor result, IntList size) -> Tensor
+  variants: function
+
+- func: empty_like(Tensor self) -> Tensor
+  variants: function
+
+- func: empty_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
@@ -227,6 +233,18 @@
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
+
+- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
+  variants: function
+
+- func: full_out(Tensor result, IntList size, Scalar fill_value) -> Tensor
+  variants: function
+
+- func: full_like(Tensor self, Scalar fill_value) -> Tensor
+  variants: function
+
+- func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
+  variants: function
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function

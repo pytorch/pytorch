@@ -26,12 +26,31 @@ Tensor& arange_out(Tensor& result, Scalar end) {
   return at::_arange_out(result, end);
 }
 
+Tensor empty(const Type& dtype, IntList size) {
+  return dtype.tensor(size);
+}
+
+Tensor& empty_out(Tensor& result, IntList size) {
+  if (result.is_sparse()) {
+    result.sparse_raw_resize_(size, size.size(), 0);
+  } else {
+    result.resize_(size);
+  }
+  return result;
+}
+
 Tensor empty_like(const Tensor& self) {
-  return self.type().tensor(self.sizes());
+  return at::native::empty_like(self, self.type());
 }
 
 Tensor empty_like(const Tensor& self, const Type& dtype) {
-  return dtype.tensor(self.sizes());
+  if (dtype.is_sparse() && self.type().is_sparse()) {
+    auto res = dtype.tensor();
+    // resize_as_ requires the same exact type.
+    res.sparse_raw_resize_(self.sizes(), self._dimI(), self._dimV());
+    return res;
+  }
+  return at::native::empty(dtype, self.sizes());
 }
 
 Tensor eye(const Type& dtype, int64_t n, int64_t m) {
@@ -61,6 +80,30 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   });
 
   return result;
+}
+
+Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
+  if (dtype.is_sparse()) {
+    at::runtime_error("full(...) is not implemented for sparse types, got: %s", dtype.toString());
+  }
+  auto result = dtype.tensor(size);
+  return result.fill_(fill_value);
+}
+
+Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
+  if (result.is_sparse()) {
+    at::runtime_error("full(...) is not implemented for sparse types, got: %s", result.type().toString());
+  }
+  result.resize_(size);
+  return result.fill_(fill_value);
+}
+
+Tensor full_like(const Tensor& self, Scalar fill_value) {
+  return at::native::full_like(self, fill_value, self.type());
+}
+
+Tensor full_like(const Tensor& self, Scalar fill_value, const Type& dtype) {
+  return at::native::full(dtype, self.sizes(), fill_value);
 }
 
 Tensor linspace(const Type& dtype, Scalar start, Scalar end, int64_t steps) {
@@ -215,8 +258,8 @@ Tensor zeros_like(const Tensor& self) {
 Tensor zeros_like(const Tensor& self, const Type& dtype) {
   if (dtype.is_sparse() && self.type().is_sparse()) {
     auto res = dtype.tensor();
-    res.resize_as_(self);
-    res.zero_();
+    // resize_as_ requires the same exact type.
+    res.sparse_raw_resize_(self.sizes(), self._dimI(), self._dimV());
     return res;
   }
   return at::native::zeros(dtype, self.sizes());
