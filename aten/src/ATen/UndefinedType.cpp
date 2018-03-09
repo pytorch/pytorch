@@ -3,7 +3,7 @@
 namespace at {
 
 UndefinedType::UndefinedType(Context* context)
-: Type(context, true) {}
+: Type(context, /*is_variable=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }

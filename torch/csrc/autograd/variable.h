@@ -2,6 +2,7 @@
 
 #include "torch/csrc/utils/python_stub.h"
 
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"

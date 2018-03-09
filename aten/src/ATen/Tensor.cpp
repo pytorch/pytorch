@@ -12,4 +12,8 @@ void Tensor::print() const {
   }
 }
 
+bool Tensor::isVariable() const noexcept {
+  return type().is_variable();
 }
+
+} // namespace at

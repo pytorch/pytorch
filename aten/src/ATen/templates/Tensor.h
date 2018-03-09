@@ -75,7 +75,8 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
-  inline bool isVariable() const;
+  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
+  bool isVariable() const noexcept;
 
   template<typename T>
   T * data() const;
