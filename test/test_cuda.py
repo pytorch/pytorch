@@ -1517,6 +1517,12 @@ class TestCuda(TestCase):
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
 
+    def test_diagonal(self):
+        TestTorch._test_diagonal(self, dtype=torch.cuda.float32)
+
+    def test_diagflat(self):
+        TestTorch._test_diagflat(self, dtype=torch.cuda.float32)
+
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):
         states = torch.cuda.get_rng_state_all()

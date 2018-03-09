@@ -38,7 +38,7 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
 }
 
 Tensor diagflat(const Tensor& self, int64_t offset) {
-  return self.view(-1).diag(offset);
+  return self.contiguous().view(-1).diag(offset);
 }
 
 Tensor diagonal(const Tensor& self, int64_t offset) {

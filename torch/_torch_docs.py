@@ -1217,7 +1217,7 @@ Examples:
     -1.0817
     [torch.FloatTensor of size 3]
 
-    >>> torch.diag(a, 1)
+    >>> torch.diagonal(a, 1)
 
     -1.3210
     -0.2239
