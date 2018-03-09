@@ -319,9 +319,9 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
   // generated, whereas the default case is not traceable since it requires a
   // Type as a parameter/attribute. TODO: support Types in the JIT
   switch (type.scalarType()) {
-#define DEFINE_CAST_DISPATCH(_1, n, _2)  \
-  case ScalarType::n: {                  \
-    return self.cast_##_1(non_blocking); \
+#define DEFINE_CAST_DISPATCH(_1, n, _2)   \
+  case ScalarType::n: {                   \
+    return self._cast_##_1(non_blocking); \
   } break;
     AT_FORALL_SCALAR_TYPES(DEFINE_CAST_DISPATCH)
 #undef DEFINE_CAST_DISPATCH
