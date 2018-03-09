@@ -57,7 +57,7 @@ if [[ "$JOB_NAME" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
 fi
 
-time test/run_test.sh -- -v
+time python test/run_test.py --verbose
 
 rm -rf ninja
 
