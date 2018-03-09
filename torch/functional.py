@@ -163,7 +163,7 @@ def hann_window(window_length, periodic=True):
     This method computes the Hann window function:
 
     .. math::
-        w[n] = \frac{1}{2}\ [1 - \cos \left( \frac{2 \pi n}{N - 1} \right)] = \sin^2 \left( \frac{\pi n}{N - 1} \right)
+        w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] = \sin^2 \left( \frac{\pi n}{N - 1} \right)
 
     , where :math:`N` is the full window size.
 
@@ -243,7 +243,7 @@ def bartlett_window(window_length, periodic=True):
     This method computes the Bartlett window function:
 
     .. math::
-        w[n] = 1 - \lvert \frac{2n}{N-1} - 1 \rvert = \begin{cases}
+        w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
             \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
             2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
         \end{cases}

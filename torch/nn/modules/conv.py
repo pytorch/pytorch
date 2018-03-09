@@ -377,10 +377,10 @@ class Conv3d(_ConvNd):
               D_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
                     * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
 
-              H_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
+              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
                     * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
 
-              W_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
+              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
                     * (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\rfloor
 
     Attributes:

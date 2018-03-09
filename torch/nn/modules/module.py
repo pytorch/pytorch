@@ -660,6 +660,7 @@ class Module(object):
             example, ``l`` will be returned only once.
 
         Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):

@@ -33,7 +33,7 @@ acos(input, out=None) -> Tensor
 Returns a new tensor with the arccosine  of the elements of :attr:`input`.
 
 .. math::
-    \text{out}_{i} = cos^{-1}(\text{input}_{i})
+    \text{out}_{i} = \cos^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -167,18 +167,18 @@ same number of matrices.
 If :attr:`batch1` is a :math:`(b \times n \times m)` tensor, :attr:`batch2` is a
 :math:`(b \times m \times p)` tensor, :attr:`mat` must be
 :ref:`broadcastable <broadcasting-semantics>` with a :math:`(n \times p)` tensor
-and attr:`out` will be a :math:`(n \times p)` tensor.
+and :attr:`out` will be a :math:`(n \times p)` tensor.
 
 .. math::
     out = \beta\ mat + \alpha\ (\sum_{i=0}^{b} batch1_i \mathbin{@} batch2_i)
 
-For inputs of type `FloatTensor` or `DoubleTensor`, arguments `beta` and `alpha`
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`\beta` and :attr:`\alpha`
 must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     mat (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for `batch1 @ batch2`
+    alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
     out (Tensor, optional): the output tensor
@@ -289,9 +289,9 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     mat (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`mat1 @ mat2`
+    alpha (Number, optional): multiplier for :math:`mat1 @ mat2` (:math:`\alpha`)
     mat1 (Tensor): the first matrix to be multiplied
     mat2 (Tensor): the second matrix to be multiplied
     out (Tensor, optional): the output tensor
@@ -331,9 +331,9 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
-    beta (Number, optional): multiplier for :attr:`tensor`
+    beta (Number, optional): multiplier for :attr:`tensor` (:math:`\beta`)
     tensor (Tensor): vector to be added
-    alpha (Number, optional): multiplier for :math:`mat @ vec`
+    alpha (Number, optional): multiplier for :math:`mat @ vec` (:math:`\alpha`)
     mat (Tensor): matrix to be multiplied
     vec (Tensor): vector to be multiplied
     out (Tensor, optional): the output tensor
@@ -374,9 +374,9 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers
 
 Args:
-    beta (Number, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     mat (Tensor): matrix to be added
-    alpha (Number, optional): multiplier for :math:`vec1 \otimes vec2`
+    alpha (Number, optional): multiplier for :math:`vec1 \otimes vec2` (:math:`\alpha`)
     vec1 (Tensor): the first vector of the outer product
     vec2 (Tensor): the second vector of the outer product
     out (Tensor, optional): the output tensor
@@ -401,7 +401,7 @@ asin(input, out=None) -> Tensor
 Returns a new tensor with the arcsine  of the elements of :attr:`input`.
 
 .. math::
-    \text{out}_{i} = sin^{-1}(\text{input}_{i})
+    \text{out}_{i} = \sin^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -434,7 +434,7 @@ atan(input, out=None) -> Tensor
 Returns a new tensor with the arctangent  of the elements of :attr:`input`.
 
 .. math::
-    \text{out}_{i} = tan^{-1}(\text{input}_{i})
+    \text{out}_{i} = \tan^{-1}(\text{input}_{i})
 
 Args:
     input (Tensor): the input tensor
@@ -520,9 +520,9 @@ For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and
 :attr:`alpha` must be real numbers, otherwise they should be integers.
 
 Args:
-    beta (Number, optional): multiplier for :attr:`mat`
+    beta (Number, optional): multiplier for :attr:`mat` (:math:`\beta`)
     mat (Tensor): the tensor to be added
-    alpha (Number, optional): multiplier for `batch1 @ batch2`
+    alpha (Number, optional): multiplier for `batch1 @ batch2` (:math:`\alpha`)
     batch1 (Tensor): the first batch of matrices to be multiplied
     batch2 (Tensor): the second batch of matrices to be multiplied
     out (Tensor, optional): the output tensor
@@ -545,7 +545,7 @@ Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 The :attr:`input` tensor should be a tensor containing probabilities
 to be used for drawing the binary random number.
 Hence, all values in :attr:`input` have to be in the range:
-:math:`0 \leq input_i \leq 1`.
+:math:`0 \leq \text{input}_i \leq 1`.
 
 The :math:`\text{i}^{th}` element of the output tensor will draw a
 value `1` according to the :math:`\text{i}^{th}` probability value given
@@ -780,14 +780,14 @@ add_docstr(torch.clamp,
            r"""
 clamp(input, min, max, out=None) -> Tensor
 
-Clamp all elements in :attr:`input` into the range `[min, max]` and return
+Clamp all elements in :attr:`input` into the range `[` :attr:`min`, :attr:`max` `]` and return
 a resulting tensor:
 
 .. math::
     y_i = \begin{cases}
-        min & \text{if } x_i < min \\
-        x_i & \text{if } min \leq x_i \leq max \\
-        max & \text{if } x_i > max
+        \text{min} & \text{if } x_i < \text{min} \\
+        x_i & \text{if } \text{min} \leq x_i \leq \text{max} \\
+        \text{max} & \text{if } x_i > \text{max}
     \end{cases}
 
 If :attr:`input` is of type `FloatTensor` or `DoubleTensor`, args :attr:`min`
@@ -1677,7 +1677,7 @@ For a 3-D tensor the output is specified by::
 
 If :attr:`input` is an n-dimensional tensor with size
 :math:`(x_0, x_1..., x_{i-1}, x_i, x_{i+1}, ..., x_{n-1})`
-and :attr:`dim` = `i`, then :attr:`index` must be an n-dimensional tensor with
+and :attr:`dim` :math:`= i`, then :attr:`index` must be an :math:`n`-dimensional tensor with
 size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
 and :attr:`out` will have the same size as :attr:`index`.
 
@@ -1903,7 +1903,7 @@ add_docstr(torch.gt,
            r"""
 gt(input, other, out=None) -> Tensor
 
-Computes `input > other` element-wise.
+Computes :math:`input > other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2192,9 +2192,9 @@ add_docstr(torch.linspace,
 linspace(start, end, steps=100, out=None) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps`
-equally spaced points between :attr:`start` and :attr:`end`
+equally spaced points between :attr:`start` and :attr:`end`.
 
-The output tensor is 1-D of size :attr:`steps`
+The output tensor is 1-D of size :attr:`steps`.
 
 Args:
     start (float): the starting value for the set of points
@@ -2315,9 +2315,9 @@ add_docstr(torch.logspace,
 logspace(start, end, steps=100, out=None) -> Tensor
 
 Returns a one-dimensional tensor of :attr:`steps` points
-logarithmically spaced between :math:`10^{start}` and :math:`10^{end}`.
+logarithmically spaced between :math:`10^{\text{start}}` and :math:`10^{\text{end}}`.
 
-The output is a 1-D tensor of size :attr:`steps`
+The output is a 1-D tensor of size :attr:`steps`.
 
 Args:
     start (float): the starting value for the set of points
@@ -2352,7 +2352,7 @@ add_docstr(torch.lt,
            r"""
 lt(input, other, out=None) -> Tensor
 
-Computes `input < other` element-wise.
+Computes :math:`input < other` element-wise.
 
 The second argument can be a number or a tensor whose shape is
 :ref:`broadcastable <broadcasting-semantics>` with the first argument.
@@ -2492,7 +2492,7 @@ Example::
 .. function:: max(input, other, out=None) -> Tensor
 
 Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise `max` is taken.
+element of the tensor :attr:`other` and an element-wise maximum is taken.
 
 The shapes of :attr:`input` and :attr:`other` don't need to match,
 but they must be :ref:`broadcastable <broadcasting-semantics>`.
@@ -2751,7 +2751,7 @@ Example::
 .. function:: min(input, other, out=None) -> Tensor
 
 Each element of the tensor :attr:`input` is compared with the corresponding
-element of the tensor :attr:`other` and an element-wise `min` is taken.
+element of the tensor :attr:`other` and an element-wise minimum is taken.
 The resulting tensor is returned.
 
 The shapes of :attr:`input` and :attr:`other` don't need to match,
@@ -3048,7 +3048,7 @@ of tensor :attr:`input`.
 Indices are ordered from left to right according to when each was sampled
 (first samples are placed in first column).
 
-If :attr:`input` is a vector, :attr:`out` is a vector of size `num_samples`.
+If :attr:`input` is a vector, :attr:`out` is a vector of size :math:`num_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
 :math:`(m \times num\_samples)`.
@@ -3876,19 +3876,19 @@ add_docstr(torch.qr,
 qr(input, out=None) -> (Tensor, Tensor)
 
 Computes the QR decomposition of a matrix :attr:`input`: returns matrices
-`q` and `r` such that :math:`x = q r`, with `q` being an orthogonal matrix
-and `r` being an upper triangular matrix.
+`Q` and `R` such that :math:`\text{input} = Q R`, with `Q` being an orthogonal matrix
+and `R` being an upper triangular matrix.
 
 This returns the thin (reduced) QR factorization.
 
-.. note:: precision may be lost if the magnitudes of the elements of `input`
+.. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large
 
 .. note:: while it should always give you a valid decomposition, it may not
           give you the same one across platforms - it will depend on your
           LAPACK implementation.
 
-.. note:: Irrespective of the original strides, the returned matrix `q` will be
+.. note:: Irrespective of the original strides, the returned matrix :math:`Q` will be
           transposed, i.e. with strides `(1, m)` instead of `(m, 1)`.
 
 Args:
@@ -3968,6 +3968,9 @@ Returns a tensor filled with random numbers from a normal distribution
 with zero mean and variance of one (also called the standard normal
 distirbution).
 
+.. math::
+    \text{out}_{i} \sim \mathcal{N}(0, 1)
+
 The shape of the tensor is defined by the variable argument :attr:`sizes`.
 
 Args:
@@ -4019,7 +4022,10 @@ range(start, end, step=1, out=None) -> Tensor
 
 Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
-the gap between two values in the tensor. :math:`x_{i+1} = x_i + step`.
+the gap between two values in the tensor. 
+
+.. math::
+    \text{out}_{i+1} = \text{out}_i + step.
 
 .. warning::
     This function is deprecated in favor of :func:`torch.arange`.
@@ -4062,7 +4068,7 @@ with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
 .. math::
-    out_{i+1} = out_{i} + \mathrm{step}
+    \text{out}_{i+1} = \text{out}_{i} + \text{step}
 
 Args:
     start (float): the starting value for the set of points
@@ -4522,7 +4528,7 @@ will be of shape: :math:`(A \times B \times C \times D)`.
 
 When :attr:`dim` is given, a squeeze operation is done only in the given
 dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
-`squeeze(input, 0)` leaves the tensor unchanged, but `squeeze(input, 1)` will
+`squeeze(input, 0)` leaves the tensor unchanged, but :func:`squeeze(input, 1)` will
 squeeze the tensor to the shape :math:`(A \times B)`.
 
 .. note:: As an exception to the above, a 1-dimensional tensor of size 1 will
@@ -4832,7 +4838,7 @@ t(input, out=None) -> Tensor
 Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
 and 1.
 
-Can be seen as a short-hand function for `transpose(input, 0, 1)`
+Can be seen as a short-hand function for :meth:`transpose(input, 0, 1)`
 
 Args:
     input (Tensor): the input tensor
@@ -5155,7 +5161,7 @@ The argument :attr:`diagonal` controls which diagonal to consider. If
 retained. A positive value excludes just as many diagonals above the main
 diagonal, and similarly a negative value includes just as many diagonals below
 the main diagonal. The main diagonal are the set of indices
-:math:`\lbrace (i, i) \rbrace` for `i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
 :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
 Args:
@@ -5327,8 +5333,8 @@ specified position.
 The returned tensor shares the same underlying data with this tensor.
 
 A negative `dim` value within the range
-[-`input.dim()`, `input.dim()`) can be used and
-will correspond to :meth:`unsqueeze` applied at `dim` = `dim + input.dim() + 1`
+[-:attr:`input.dim()`, :attr:`input.dim()`) can be used and
+will correspond to :meth:`unsqueeze` applied at :attr:`dim` = :attr:`dim + input.dim() + 1`
 
 Args:
     input (Tensor): the input tensor

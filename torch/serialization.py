@@ -150,7 +150,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
         Please use something like io.BytesIO instead.
 
-    Example:
+    Example::
         # Save to file
         >>> x = torch.Tensor([0, 1, 2, 3, 4])
         >>> torch.save(x, 'tensor.pt')
@@ -279,7 +279,7 @@ def load(f, map_location=None, pickle_module=pickle):
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
 
-    Example:
+    Example::
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
         >>> torch.load('tensors.pt', map_location='cpu')
