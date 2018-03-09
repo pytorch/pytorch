@@ -271,6 +271,9 @@
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: pairwise_distance(Tensor x1, Tensor x2, double p, double eps) -> Tensor
+  variants: function
+
 - func: permute(Tensor self, IntList dims) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
@@ -359,6 +362,9 @@
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin, double p, double eps, bool swap, bool size_average, bool reduce) -> Tensor
+  variants: function
 
 - func: t_(Tensor self) -> Tensor
   variants: method
