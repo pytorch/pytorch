@@ -1,3 +1,5 @@
+#!/bin/bash
+
 . ./common.sh
 
 test_cpu_speed_mini_sequence_labeler () {
@@ -38,4 +40,3 @@ test_cpu_speed_mini_sequence_labeler () {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   run_test test_cpu_speed_mini_sequence_labeler "$@"
 fi
-
