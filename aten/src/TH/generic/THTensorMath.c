@@ -2875,9 +2875,9 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
   ptrdiff_t size;
   real i = 0;
 
-  THArgCheck(step > 0 || step < 0, 3, "step must be a non-null number");
+  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
-              , 2, "upper bound and larger bound incoherent with step sign");
+              , 2, "upper bound and larger bound inconsistent with step sign");
 
   size = (ptrdiff_t) (((xmax - xmin) / step) + 1);
 
@@ -2889,14 +2889,20 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
 }
 
 void THTensor_(arange)(THTensor *r_, accreal xmin, accreal xmax, accreal step) {
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-  int m = fmod(xmax - xmin, step) == 0;
-#else
-  int m = (xmax - xmin) % step == 0;
-#endif
-  if (m)
-    xmax -= step;
-  THTensor_(range)(r_, xmin, xmax, step);
+  ptrdiff_t size;
+  real i = 0;
+
+  THArgCheck(step > 0 || step < 0, 3, "step must be nonzero");
+  THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
+              , 2, "upper bound and larger bound inconsistent with step sign");
+
+  size = (ptrdiff_t) ceil((double)(xmax - xmin) / step);
+
+  if (THTensor_(nElement)(r_) != size) {
+    THTensor_(resize1d)(r_, size);
+  }
+
+  TH_TENSOR_APPLY(real, r_, *r__data = xmin + (i++)*step;);
 }
 
 void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
