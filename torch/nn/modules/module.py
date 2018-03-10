@@ -664,6 +664,7 @@ class Module(object):
             example, ``l`` will be returned only once.
 
         Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
@@ -692,8 +693,10 @@ class Module(object):
     def train(self, mode=True):
         r"""Sets the module in training mode.
 
-        This has any effect only on modules such as :class:`Dropout`
-        or :class:`BatchNorm`.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
 
         Returns:
             Module: self
@@ -706,8 +709,10 @@ class Module(object):
     def eval(self):
         r"""Sets the module in evaluation mode.
 
-        This has any effect only on modules such as :class:`Dropout`
-        or :class:`BatchNorm`.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
         """
         return self.train(False)
 
