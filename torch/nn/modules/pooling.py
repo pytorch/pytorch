@@ -38,8 +38,8 @@ class MaxPool1d(Module):
         - Output: :math:`(N, C, L_{out})` where
 
           .. math::
-              L_{out} = \lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
-                    * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\rfloor
+              L_{out} = \left\lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
+                    * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -115,11 +115,11 @@ class MaxPool2d(Module):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
-                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
+                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
-                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
+                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 
@@ -430,7 +430,8 @@ class AvgPool1d(Module):
         - Output: :math:`(N, C, L_{out})` where
 
           .. math::
-              L_{out} = \lfloor \frac{L_{in}  + 2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\rfloor
+              L_{out} = \left\lfloor \frac{L_{in} +
+              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -502,11 +503,11 @@ class AvgPool2d(Module):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \lfloor\frac{H_{in}  + 2 * \text{padding}[0] -
-                \text{kernel_size}[0]}{\text{stride}[0]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] -
+                \text{kernel_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{W_{in}  + 2 * \text{padding}[1] -
-                \text{kernel_size}[1]}{\text{stride}[1]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] -
+                \text{kernel_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 
@@ -579,14 +580,14 @@ class MaxPool3d(Module):
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0] *
-                (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0] *
+                (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1] *
-                (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1] *
+                (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2] *
-                (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2] *
+                (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
 
@@ -663,14 +664,14 @@ class AvgPool3d(Module):
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[0] -
-                    \text{kernel_size}[0]}{\text{stride}[0]} + 1\rfloor
+              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] -
+                    \text{kernel_size}[0]}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \lfloor\frac{H_{in} + 2 * \text{padding}[1] -
-                    \text{kernel_size}[1]}{\text{stride}[1]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] -
+                    \text{kernel_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{W_{in} + 2 * \text{padding}[2] -
-                    \text{kernel_size}[2]}{\text{stride}[2]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] -
+                    \text{kernel_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
     Examples::
 
@@ -795,11 +796,11 @@ class LPPool2d(Module):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0] *
-                    (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0] *
+                    (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1] *
-                    (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1] *
+                    (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Examples::
 
@@ -853,7 +854,8 @@ class LPPool1d(Module):
         - Output: :math:`(N, C, L_{out})` where
 
           .. math::
-              L_{out} = \lfloor\frac{L_{in} + 2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\rfloor
+              L_{out} = \left\lfloor\frac{L_{in} +
+              2 * \text{padding} - \text{kernel_size}}{\text{stride}} + 1\right\rfloor
 
     Examples::
         >>> # power-2 pool of window of length 3, with stride 2.

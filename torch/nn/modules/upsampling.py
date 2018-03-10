@@ -29,11 +29,11 @@ class Upsample(Module):
           or :math:`(N, C, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = \lfloor D_{in} * scale\_factor \rfloor or \text{size}[-3]
+              D_{out} = \left\lfloor D_{in} * scale\_factor \right\rfloor or \text{size}[-3]
 
-              H_{out} = \lfloor H_{in} * scale\_factor \rfloor or \text{size}[-2]
+              H_{out} = \left\lfloor H_{in} * scale\_factor \right\rfloor or \text{size}[-2]
 
-              W_{out} = \lfloor W_{in} * scale\_factor \rfloor or \text{size}[-1]
+              W_{out} = \left\lfloor W_{in} * scale\_factor \right\rfloor or \text{size}[-1]
 
     Examples::
 
@@ -110,9 +110,9 @@ class UpsamplingNearest2d(Upsample):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \lfloor H_{in} * scale\_factor \rfloor
+              H_{out} = \left\lfloor H_{in} * scale\_factor \right\rfloor
 
-              W_{out} = \lfloor W_{in} * scale\_factor \rfloor
+              W_{out} = \left\lfloor W_{in} * scale\_factor \right\rfloor
 
     Examples::
 
@@ -161,9 +161,9 @@ class UpsamplingBilinear2d(Upsample):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \lfloor H_{in} * scale\_factor \rfloor
+              H_{out} = \left\lfloor H_{in} * scale\_factor \right\rfloor
 
-              W_{out} = \lfloor W_{in} * scale\_factor \rfloor
+              W_{out} = \left\lfloor W_{in} * scale\_factor \right\rfloor
 
     Examples::
 
