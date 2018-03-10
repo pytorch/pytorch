@@ -31,7 +31,7 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}(Context* context)
-: Type(context) {}
+: Type(context, /*is_variable_or_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }

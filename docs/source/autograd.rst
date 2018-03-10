@@ -11,6 +11,15 @@ Automatic differentiation package - torch.autograd
 
 .. autofunction:: grad
 
+Locally disabling gradient computation
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: no_grad
+
+.. autoclass:: enable_grad
+
+.. autoclass:: set_grad_enabled
+
 Variable
 --------
 

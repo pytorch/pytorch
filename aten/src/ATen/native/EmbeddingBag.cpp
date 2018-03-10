@@ -81,11 +81,11 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
   Tensor indices = indices__.contiguous();
   Tensor offsets = offsets__.contiguous();
 
-  auto bag_size = indices.type().zeros(offsets.sizes());
+  auto bag_size = at::zeros(indices.type(), offsets.sizes());
   auto offset2bag =
-      indices__.type().zeros({indices.sizes()[0]}); // offset2bag = [0 0 0 0 0]
+      at::zeros(indices__.type(), {indices.sizes()[0]}); // offset2bag = [0 0 0 0 0]
   make_offset2bag(offsets, indices, offset2bag);
-  auto output = weight.type().zeros({offsets.sizes()[0], weight.sizes()[1]});
+  auto output = at::zeros(weight.type(), {offsets.sizes()[0], weight.sizes()[1]});
   auto index_output = weight.index_select(0, indices);
   output.index_add_(0, offset2bag, index_output);
   make_bag_size(offsets, indices, mode, bag_size);
@@ -168,7 +168,7 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
   }
 
   auto index_grad_weight =
-      grad.type().zeros({num_weights, grad.sizes()[1]}).contiguous();
+      at::zeros(grad.type(), {num_weights, grad.sizes()[1]}).contiguous();
 
 #pragma omp parallel for if (numel > 1000)
   for (int64_t i = 0; i < (int64_t)counts_uniq.size(); i++) {

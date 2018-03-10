@@ -37,6 +37,17 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   return self.split(split_size, dim);
 }
 
+Tensor diagflat(const Tensor& self, int64_t offset) {
+  return self.contiguous().view(-1).diag(offset);
+}
+
+Tensor diagonal(const Tensor& self, int64_t offset) {
+  if (self.dim() != 2) {
+    throw std::runtime_error("diagonal expects a 2-dimensional tensor");
+  }
+  return self.diag(offset);
+}
+
 Tensor expand(const Tensor& self, IntList size) {
   if (size.size() < (size_t)self.dim()) {
     std::ostringstream ss;

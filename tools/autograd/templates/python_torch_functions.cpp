@@ -30,9 +30,9 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-static void check_out_dtype_matches(Tensor result, const at::Type &type) {
+static void check_out_type_matches(Tensor result, const at::Type &type) {
   if (result.type() != type) {
-    at::runtime_error("dtype corresponding to %s does not match type of out parameter (%s)",
+    at::runtime_error("type corresponding to %s does not match type of out parameter (%s)",
                       type.toString(), result.type().toString());
   }
 }
