@@ -91,6 +91,7 @@ import sys
 import os
 import json
 import glob
+import importlib
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
@@ -220,6 +221,18 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
+missing_pydep = '''
+Missing build dependency: Unable to `import {importname}`.
+Please install it via `conda install {module}` or `pip install {module}`
+'''.strip()
+
+
+def check_pydep(importname, module):
+    try:
+        importlib.import_module(importname)
+    except ImportError:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
 
 class build_deps(Command):
     user_options = []
@@ -240,6 +253,9 @@ class build_deps(Command):
         check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+
+        check_pydep('yaml', 'pyyaml')
+        check_pydep('typing', 'typing')
 
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
@@ -810,5 +826,4 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/torch.h',
             ]
-        },
-        install_requires=['pyyaml', 'numpy'], )
+        })
