@@ -94,7 +94,7 @@ class PackedSequence(PackedSequence_):
 def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
     if batch_first:
         from torch.onnx import symbolic
-        input = symbolic.t(input)
+        input = symbolic.t(g, input)
     # There currently is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
@@ -142,7 +142,7 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
     data, lengths = g.op("PadPacked", input.data, input.batch_sizes, outputs=2)
     if batch_first:
         from torch.onnx import symbolic
-        data = symbolic.t(data)
+        data = symbolic.t(g, data)
     return data, lengths
 
 
