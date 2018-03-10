@@ -172,7 +172,7 @@ and :attr:`out` will be a :math:`(n \times p)` tensor.
 .. math::
     out = \beta\ mat + \alpha\ (\sum_{i=0}^{b} batch1_i \mathbin{@} batch2_i)
 
-For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`\beta` and :attr:`\alpha`
+For inputs of type `FloatTensor` or `DoubleTensor`, arguments :attr:`beta` and :attr:`alpha`
 must be real numbers, otherwise they should be integers.
 
 Args:
