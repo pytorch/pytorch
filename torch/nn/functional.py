@@ -26,16 +26,16 @@ planes.
 See :class:`~torch.nn.Conv1d` for details and output shape.
 
 Args:
-    input: input tensor of shape (minibatch x in_channels x iW)
-    weight: filters of shape (out_channels x in_channels/groups x kW)
-    bias: optional bias of shape (out_channels). Default: None
+    input: input tensor of shape :math:`minibatch \times in\_channels \times iW`
+    weight: filters of shape :math:`out\_channels \times \frac{in\_channels}{groups} \times kW`
+    bias: optional bias of shape (:math:`out\_channels`). Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or
-      a one-element tuple (sW,). Default: 1
+      a one-element tuple `(sW,)`. Default: 1
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a one-element tuple (padW,). Default: 0
+      single number or a one-element tuple `(padW,)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
-      a one-element tuple (dW,). Default: 1
-    groups: split input into groups, in_channels should be divisible by
+      a one-element tuple `(dW,)`. Default: 1
+    groups: split input into groups, :math:`in\_channels` should be divisible by
       the number of groups. Default: 1
 
 Examples::
@@ -54,16 +54,16 @@ planes.
 See :class:`~torch.nn.Conv2d` for details and output shape.
 
 Args:
-    input: input tensor (minibatch x in_channels x iH x iW)
-    weight: filters tensor (out_channels x in_channels/groups x kH x kW)
-    bias: optional bias tensor (out_channels). Default: None
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iH \times iW`)
+    weight: filters of shape (:math:`out\_channels \times \frac{in\_channels}{groups} \times kH \times kW`)
+    bias: optional bias tensor of shape (:math:`out\_channels`). Default: ``None``
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple (sH, sW). Default: 1
+      tuple `(sH, sW)`. Default: 1
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padH, padW). Default: 0
+      single number or a tuple `(padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple (dH, dW). Default: 1
-    groups: split input into groups, in_channels should be divisible by the
+      a tuple `(dH, dW)`. Default: 1
+    groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
 
 Examples::
@@ -83,16 +83,16 @@ planes.
 See :class:`~torch.nn.Conv3d` for details and output shape.
 
 Args:
-    input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
-    weight: filters tensor of shape (out_channels x in_channels/groups x kT x kH x kW)
-    bias: optional bias tensor of shape (out_channels). Default: None
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iT \times iH \times iW`)
+    weight: filters of shape (:math:`out\_channels \times \frac{in\_channels}{groups} \times kT \times kH \times kW`)
+    bias: optional bias tensor of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple (sT, sH, sW). Default: 1
+      tuple `(sT, sH, sW)`. Default: 1
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padT, padH, padW). Default: 0
+      single number or a tuple `(padT, padH, padW)`. Default: 0
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple (dT, dH, dW). Default: 1
-    groups: split input into groups, in_channels should be divisible by
+      a tuple `(dT, dH, dW)`. Default: 1
+    groups: split input into groups, :math:`in\_channels` should be divisible by
       the number of groups. Default: 1
 
 Examples::
@@ -111,20 +111,20 @@ composed of several input planes, sometimes also called "deconvolution".
 See :class:`~torch.nn.ConvTranspose1d` for details and output shape.
 
 Args:
-    input: input tensor of shape (minibatch x in_channels x iW)
-    weight: filters of shape (in_channels x out_channels/groups x kW)
-    bias: optional bias of shape (out_channels). Default: None
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
+    weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kW`)
+    bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple (sW,). Default: 1
+      tuple `(sW,)`. Default: 1
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padW,). Default: 0
-    output_padding: implicit zero-paddings of 0 <= padding < stride on both
-      sides of the output. Can be a single number or a tuple (out_padW,).
+      single number or a tuple `(padW,)`. Default: 0
+    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
+      sides of the output. Can be a single number or a tuple `(out_padW,)`.
       Default: 0
-    groups: split input into groups, in_channels should be divisible by the
+    groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple (dW,). Default: 1
+      a tuple `(dW,)`. Default: 1
 """)
 
 conv_transpose2d = _add_docstr(torch.conv_transpose2d, r"""
@@ -136,20 +136,20 @@ composed of several input planes, sometimes also called "deconvolution".
 See :class:`~torch.nn.ConvTranspose2d` for details and output shape.
 
 Args:
-    input: input tensor of shape (minibatch x in_channels x iH x iW)
-    weight: filters of shape (in_channels x out_channels/groups x kH x kW)
-    bias: optional bias of shape (out_channels). Default: None
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iH \times iW`)
+    weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kH \times kW`)
+    bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple (sH, sW). Default: 1
+      tuple `(sH, sW)`. Default: 1
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padH, padW). Default: 0
-    output_padding: implicit zero-paddings of 0 <= padding < stride on both
+      single number or a tuple `(padH, padW)`. Default: 0
+    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
       sides of the output. Can be a single number or a tuple
-      (out_padH, out_padW). Default: 0
-    groups: split input into groups, in_channels should be divisible by the
+      `(out_padH, out_padW)`. Default: 0
+    groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple (dH, dW). Default: 1
+      a tuple `(dH, dW)`. Default: 1
 """)
 
 conv_transpose3d = _add_docstr(torch.conv_transpose3d, r"""
@@ -161,31 +161,31 @@ composed of several input planes, sometimes also called "deconvolution"
 See :class:`~torch.nn.ConvTranspose3d` for details and output shape.
 
 Args:
-    input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
-    weight: filters of shape (in_channels x out_channels/groups x kH x kW)
-    bias: optional bias of shape (out_channels). Default: None
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iT \times iH \times iW`)
+    weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kT \times kH \times kW`)
+    bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple (sT, sH, sW). Default: 1
+      tuple `(sT, sH, sW)`. Default: 1
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padT, padH, padW). Default: 0
-    output_padding: implicit zero-paddings of 0 <= padding < stride on both
+      single number or a tuple `(padT, padH, padW)`. Default: 0
+    output_padding: implicit zero-paddings of `0 \leq padding < stride` on both
       sides of the output. Can be a single number or a tuple
-      (out_padT, out_padH, out_padW). Default: 0
-    groups: split input into groups, in_channels should be divisible by the
+      `(out_padT, out_padH, out_padW)`. Default: 0
+    groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple (dT, dH, dW). Default: 1
+      a tuple `(dT, dH, dW)`. Default: 1
 """)
 
 
 def conv_tbc(input, weight, bias, pad=0):
     r"""Applies a 1-dimensional sequence convolution over an input sequence.
-    Input and output dimensions are (Time, Batch, Channels) hence TBC.
+    Input and output dimensions are (Time, Batch, Channels) - hence TBC.
 
     Args:
-        input: input tensor of shape (sequence length x batch x channels)
-        weight: filter of shape (kernel width x input channels x output channels)
-        bias: bias of shape (output channels)
+        input: input tensor of shape (:math:`\text{sequence length} \times batch \times in\_channels`)
+        weight: filter of shape (:math:`\text{kernel width} \times in\_channels \times out\_channels`)
+        bias: bias of shape (:math:`out\_channels`)
         pad: number of timesteps to pad
     """
     return input.conv_tbc(weight, bias, pad)
@@ -200,13 +200,13 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
     Args:
-        input: input tensor (minibatch x in_channels x iW)
+        input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
         kernel_size: the size of the window. Can be a single number or a
-          tuple (kW,)
+          tuple `(kW,)`
         stride: the stride of the window. Can be a single number or a tuple
-          (sW,). Default: :attr:`kernel_size`
+          `(sW,)`. Default: :attr:`kernel_size`
         padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple (padW,). Default: 0
+          single number or a tuple `(padW,)`. Default: 0
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the
             output shape. Default: ``False``
         count_include_pad: when True, will include the zero-padding in the
@@ -234,46 +234,46 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
 avg_pool2d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
-Applies 2D average-pooling operation in kh x kw regions by step size
-dh x dw steps. The number of output features is equal to the number of
+Applies 2D average-pooling operation in :math:`kH \times kW` regions by step size
+:math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
-    input: input tensor (minibatch x in_channels x iH x iW)
+    input: input tensor (:math:`minibatch \times in\_channels \times iH \times iW`)
     kernel_size: size of the pooling region. Can be a single number or a
-      tuple (kH x kW)
+      tuple (:math:`kH \times kW`)
     stride: stride of the pooling operation. Can be a single number or a
-      tuple (sH, sW). Default is equal to kernel size
+      tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padH, padW). Default: 0
+      single number or a tuple `(padH, padW)`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
-    count_include_pad: when True, will include the zero-padding in th
+    count_include_pad: when True, will include the zero-padding in the
         averaging calculation. Default: ``True``
 """)
 
 avg_pool3d = _add_docstr(torch._C._nn.avg_pool3d, r"""
 avg_pool3d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
-Applies 3D average-pooling operation in kt x kh x kw regions by step
-size dt x dh x dw steps. The number of output features is equal to the
-number of input planes / dt.
+Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions by step
+size :math:`sT \times sH \times sW` steps. The number of output features is equal to
+:math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
 
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
-    input: input tensor (minibatch x in_channels x iT x iH x iW)
+    input: input tensor (:math:`minibatch \times in\_channels \times iT \times iH \times iW`)
     kernel_size: size of the pooling region. Can be a single number or a
-      tuple (kT x kH x kW)
+      tuple (:math:`kT \times kH \times kW`)
     stride: stride of the pooling operation. Can be a single number or a
-      tuple (sT, sH, sW). Default is equal to kernel size
+      tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple (padT, padH, padW), Default: 0
+      single number or a tuple `(padT, padH, padW)`, Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
-    count_include_pad: when True, will include the zero-padding in th
+    count_include_pad: when True, will include the zero-padding in the
         averaging calculation
 """)
 
@@ -285,19 +285,20 @@ def fractional_max_pool2d(input, kernel_size, output_size=None,
 
     Fractiona MaxPooling is described in detail in the paper `Fractional MaxPooling`_ by Ben Graham
 
-    The max-pooling operation is applied in kHxkW regions by a stochastic
+    The max-pooling operation is applied in :math:`kH \times kW` regions by a stochastic
     step size determined by the target output size.
     The number of output features is equal to the number of input planes.
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k) or a tuple (kh x kw)
-        output_size: the target output size of the image of the form oH x oW.
-                     Can be a tuple (oH, oW) or a single number oH for a square image oH x oH
+                     Can be a single number :math:`k` (for a square kernel of :math:`k \times k`)
+                     or a tuple (:math:`kH \times kW`)
+        output_size: the target output size of the image of the form :math:`oH \times oW`.
+                     Can be a tuple `(oH, oW)` or a single number :math:`oH` for a square image :math:`oH \times oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
                       This has to be a number or tuple in the range (0, 1)
         return_indices: if ``True``, will return the indices along with the outputs.
-                        Useful to pass to max_unpool2d.
+                        Useful to pass to `max_unpool2d`.
 
     Examples:
         >>> input = torch.randn(20, 16, 50, 32)

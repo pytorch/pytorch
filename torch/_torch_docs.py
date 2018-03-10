@@ -4022,7 +4022,7 @@ range(start, end, step=1, out=None) -> Tensor
 
 Returns a 1-D tensor of size :math:`\lfloor \frac{end - start}{step} \rfloor + 1`
 with values from :attr:`start` to :attr:`end` with step :attr:`step`. Step is
-the gap between two values in the tensor. 
+the gap between two values in the tensor.
 
 .. math::
     \text{out}_{i+1} = \text{out}_i + step.

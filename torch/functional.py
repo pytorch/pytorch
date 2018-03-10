@@ -163,9 +163,10 @@ def hann_window(window_length, periodic=True):
     This method computes the Hann window function:
 
     .. math::
-        w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] = \sin^2 \left( \frac{\pi n}{N - 1} \right)
+        w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
+                \sin^2 \left( \frac{\pi n}{N - 1} \right)
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
