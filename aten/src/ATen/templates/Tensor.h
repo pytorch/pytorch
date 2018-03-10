@@ -3,11 +3,11 @@
 #include "ATen/Generator.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
-#include "ATen/TensorAccessor.h"
-#include "ATen/TensorImpl.h"
-#include "ATen/TensorBase.h"
-#include "ATen/Storage.h"
 #include "ATen/SparseTensorRef.h"
+#include "ATen/Storage.h"
+#include "ATen/TensorAccessor.h"
+#include "ATen/TensorBase.h"
+#include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
 
 namespace at {
@@ -74,6 +74,10 @@ struct Tensor : public detail::TensorBase {
   inline Tensor & copy_(const Tensor & src, bool non_blocking=false);
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
+
+  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`,
+  /// or has undefined type. Defined in Type.h because of include order issues.
+  bool is_variable_or_undefined() const noexcept;
 
   template<typename T>
   T * data() const;
