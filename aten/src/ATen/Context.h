@@ -115,4 +115,4 @@ static inline int64_t current_device() {
   return globalContext().current_device();
 }
 
-}
+} // namespace at

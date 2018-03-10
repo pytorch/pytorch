@@ -12,7 +12,7 @@ using namespace at;
 static void test() {
   {
     std::cout << "dlconvertor: convert ATen to DLTensor" << std::endl;
-    Tensor a = CPU(at::kFloat).rand({3,4});
+    Tensor a = rand(CPU(at::kFloat), {3,4});
     std::cout << a.numel() << std::endl;
     DLManagedTensor* dlMTensor = toDLPack(a);
     std::cout << "dlconvertor: convert DLTensor to ATen" << std::endl;

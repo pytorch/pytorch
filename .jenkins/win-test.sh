@@ -72,7 +72,7 @@ cd test/
 python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
 
 7z x %IMAGE_COMMIT_TAG%.7z
-sh run_test.sh -- -v && python ..\\ci_scripts\\delete_image.py
+python run_test.py --verbose && python ..\\ci_scripts\\delete_image.py
 
 EOL
 

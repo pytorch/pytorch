@@ -162,13 +162,13 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   int64_t numBags = offsets.sizes()[0];
   int64_t stride = weight.sizes()[1];
 
-  auto bag_size = indices.type().zeros(offsets.sizes());
+  auto bag_size = at::zeros(indices.type(), offsets.sizes());
   auto offset2bag =
-      indices.type().zeros({indices.sizes()[0]}); // offset2bag = [0 0 0 0 0]
+      at::zeros(indices.type(), {indices.sizes()[0]}); // offset2bag = [0 0 0 0 0]
 
   cudaStream_t stream = globalContext().getCurrentCUDAStream();
 
-  auto output = weight.type().zeros({offsets.sizes()[0], weight.sizes()[1]});
+  auto output = at::zeros(weight.type(), {offsets.sizes()[0], weight.sizes()[1]});
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
@@ -204,7 +204,7 @@ Tensor embedding_bag_backward_cuda(const Tensor &grad_, const Tensor &indices,
 
   Tensor &bag_size = const_cast<Tensor &>(bag_size_);
 
-  auto grad_weight = grad_.type().zeros({num_weights, grad.sizes()[1]});
+  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad.sizes()[1]});
 
   int nDim = indices.ndimension();
 

@@ -652,6 +652,7 @@ criterion_tests = [
         target_fn=lambda: torch.randn(15).sign(),
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
+        check_no_size_average=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -661,6 +662,7 @@ criterion_tests = [
         reference_fn=lambda i, t, m:
             cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, size_average=get_size_average(m)),
         desc='margin',
+        check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',

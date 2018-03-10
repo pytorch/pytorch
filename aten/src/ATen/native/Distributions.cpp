@@ -200,7 +200,7 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
 }
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
-  Tensor ret = lambda.type().zeros(lambda.sizes());
+  Tensor ret = at::zeros(lambda.type(), lambda.sizes());
   auto lambda_ = lambda.toType(ScalarType::Double);
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);

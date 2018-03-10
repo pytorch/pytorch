@@ -32,7 +32,7 @@ static void test(Type & type) {
 
   {
     std::cout << "ones and dot:" << std::endl;
-    Tensor b = type.ones({3, 4});
+    Tensor b = ones(type, {3, 4});
     std::cout << b << std::endl;
     ASSERT(24 == (b+b).sum().toCDouble());
     std::cout << b.numel() << std::endl;
@@ -44,14 +44,14 @@ static void test(Type & type) {
   {
     std::cout << "rand:" << std::endl;
     for(auto i = 0; i < 10; i++) {
-      Tensor a = type.toScalarType(i % 2 == 0 ? kFloat : kDouble).rand({3,4});
+      Tensor a = rand(type.toScalarType(i % 2 == 0 ? kFloat : kDouble), {3,4});
       std::cout << a << std::endl;
     }
   }
 
   {
     std::cout << "sort:" << std::endl;
-    Tensor b = type.rand({3, 4});
+    Tensor b = rand(type, {3, 4});
 
     std::cout << b << std::endl;
     auto z = b.sort(1);
@@ -61,7 +61,7 @@ static void test(Type & type) {
   if(type.backend() != kCUDA)
   {
     std::cout << "randperm:" << std::endl;
-    Tensor b = type.randperm(15);
+    Tensor b = randperm(type, 15);
     std::cout << b << std::endl;
     Tensor rv, ri;
     std::tie(rv, ri) = sort(b, 0);
@@ -75,8 +75,8 @@ static void test(Type & type) {
 
   {
     std::cout << "add:" << std::endl;
-    Tensor a = type.rand({3, 4});
-    Tensor b = type.rand({3, 4});
+    Tensor a = rand(type, {3, 4});
+    Tensor b = rand(type, {3, 4});
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     Tensor c = add(a, add(a, b));
@@ -91,8 +91,8 @@ static void test(Type & type) {
   {
     std::cout << "loads of adds:" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
-    Tensor d = type.ones({3, 4});
-    Tensor r = type.zeros({3,4});
+    Tensor d = ones(type, {3, 4});
+    Tensor r = zeros(type, {3, 4});
     for(auto i = 0; i < 100000; i++) {
       add_out(r, r, d);
     }
@@ -105,8 +105,8 @@ static void test(Type & type) {
   {
     std::cout << "loads of adds (with copy):" << std::endl;
     auto begin = std::chrono::high_resolution_clock::now();
-    Tensor d = type.ones({3, 4});
-    Tensor r = type.zeros({3, 4});
+    Tensor d = ones(type, {3, 4});
+    Tensor r = zeros(type, {3, 4});
     for(auto i = 0; i < 100000; i++) {
       r = add(r, d);
     }
@@ -118,7 +118,7 @@ static void test(Type & type) {
 
   {
     std::cout << "isContiguous:" << std::endl;
-    Tensor a = type.rand({3, 4});
+    Tensor a = rand(type, {3, 4});
     std::cout << a.is_contiguous() << std::endl;
     ASSERT(a.is_contiguous());
     a = a.transpose(0, 1);
@@ -126,7 +126,7 @@ static void test(Type & type) {
   }
 
   {
-    Tensor a = type.rand({3, 4, 5});
+    Tensor a = rand(type, {3, 4, 5});
     Tensor b = a.permute({1, 2, 0});
     ASSERT(b.sizes().equals({4, 5, 3}));
     ASSERT(b.strides().equals({5, 1, 20}));
@@ -134,23 +134,23 @@ static void test(Type & type) {
 
   {
     std::cout << "mm:" << std::endl;
-    Tensor a = type.rand({3, 4});
-    Tensor b = type.rand({4});
+    Tensor a = rand(type, {3, 4});
+    Tensor b = rand(type, {4});
     Tensor c = mv(a, b);
     std::cout << a << std::endl;
     std::cout << b << std::endl;
     std::cout << c << std::endl;
-    ASSERT(c.equal(addmv(type.zeros({3}), a, b, 0, 1)));
+    ASSERT(c.equal(addmv(zeros(type, {3}), a, b, 0, 1)));
   }
 
   {
     std::cout << "squeeze:" << std::endl;
-    Tensor a = type.rand({2, 1});
+    Tensor a = rand(type, {2, 1});
     std::cout << a << std::endl;
     Tensor b = squeeze(a);
     ASSERT(b.dim() == 1);
     std::cout << b << std::endl;
-    a = type.rand({1});
+    a = rand(type, {1});
     std::cout << a << std::endl;
     b = squeeze(a);
     //TODO 0-dim squeeze
@@ -159,9 +159,9 @@ static void test(Type & type) {
 
   {
     std::cout << "copy:" << std::endl;
-    Tensor a = type.zeros({4, 3});
+    Tensor a = zeros(type, {4, 3});
     std::cout << a << std::endl;
-    Tensor e = type.rand({4, 3});
+    Tensor e = rand(type, {4, 3});
     std::cout << e << std::endl;
     a.copy_(e);
     std::cout << a << std::endl;
@@ -170,8 +170,8 @@ static void test(Type & type) {
 
   {
     std::cout << "copy [broadcasting]:" << std::endl;
-    Tensor a = type.zeros({4, 3});
-    Tensor e = type.rand({3});
+    Tensor a = zeros(type, {4, 3});
+    Tensor e = rand(type, {3});
     a.copy_(e);
     for (int i = 0; i < 4; ++i) {
       ASSERT(a[i].equal(e));
@@ -198,15 +198,15 @@ static void test(Type & type) {
 
   {
     std::cout << "adding a value with a salar:" << std::endl;
-    Tensor a = type.rand({4, 3});
+    Tensor a = rand(type, {4, 3});
     std::cout << a << std::endl;
     std::cout << add(a, 1) << std::endl;
-    ASSERT((type.ones({4,3}) + a).equal(add(a,1)));
+    ASSERT((ones(type, {4,3}) + a).equal(add(a,1)));
   }
 
   {
     std::cout << "select:" << std::endl;
-    Tensor a = type.rand({3, 7});
+    Tensor a = rand(type, {3, 7});
     std::cout << a << std::endl;
     std::cout << select(a, 1, 3) << std::endl;
     std::cout << select(select(a, 1, 3), 0, 2) << std::endl;
@@ -214,20 +214,20 @@ static void test(Type & type) {
 
   {
       std::cout << "zero-dim: " << std::endl;
-      Tensor a =  type.scalarTensor(4); //type.rand({1});
+      Tensor a =  type.scalarTensor(4); //rand(type, {1});
 
       std::cout << a << "dims: " << a.dim() << std::endl;
       std::cout << Scalar(a) << std::endl;
-      Tensor b = type.rand({3,4});
+      Tensor b = rand(type, {3,4});
       std::cout << b + a << std::endl;
       std::cout << a + b << std::endl;
       ASSERT((a+a).dim() == 0);
       ASSERT((1+a).dim() == 0);
-      auto c = type.rand({3,4});
+      auto c = rand(type, {3,4});
       std::cout << c[1][2] << std::endl;
 
-      auto f = type.rand({3,4});
-      f[2] = type.zeros({4});
+      auto f = rand(type, {3,4});
+      f[2] = zeros(type, {4});
       f[1][0] = -1;
       std:: cout << f << std::endl;
       ASSERT(Scalar(f[2][0]).toDouble() == 0);
@@ -240,18 +240,18 @@ static void test(Type & type) {
     std::cout << tt << std::endl;
   }
   {
-      Tensor a = CPU(kFloat).zeros({3,4});
-      Tensor b = CPU(kFloat).ones({3,7});
+      Tensor a = zeros(CPU(kFloat), {3,4});
+      Tensor b = ones(CPU(kFloat), {3,7});
       Tensor c = cat({a,b},1);
       std::cout << c.sizes() << std::endl;
       ASSERT(c.size(1) == 11);
       std::cout << c << std::endl;
 
-      Tensor e = CPU(kFloat).rand({});
+      Tensor e = rand(CPU(kFloat), {});
       ASSERT(*e.data<float>()== e.sum().toCFloat());
   }
   {
-    Tensor b = CPU(kFloat).ones({3,7})*.0000001f;
+    Tensor b = ones(CPU(kFloat), {3,7})*.0000001f;
     std::stringstream s;
     s << b << "\n";
     std::string expect = "1e-07 *";

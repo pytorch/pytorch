@@ -335,6 +335,14 @@ void py_set_default_tensor_type(PyObject* obj) {
     throw unavailable_type(*type);
   }
 
+  if (!at::isFloatingType(type->aten_type->scalarType())) {
+    throw TypeError("only floating-point types are supported as the default type");
+  }
+
+  if (type->aten_type->is_sparse()) {
+    throw TypeError("only dense types are supported as the default type");
+  }
+
   // get the storage first, so if it doesn't exist we don't change the default tensor type
   THPObjectPtr storage = get_storage_obj(*type);
   set_default_tensor_type(*type->aten_type);
