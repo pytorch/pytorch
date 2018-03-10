@@ -43,7 +43,7 @@ options = parser.parse_args()
 
 
 if options.output_dir is not None and not os.path.exists(options.output_dir):
-    os.mkdir(options.output_dir)
+    os.makedirs(options.output_dir)
 
 
 class FileManager(object):
@@ -347,7 +347,8 @@ def declare_outputs():
     for f in files:
         file_manager.will_write(f)
     for fname in sorted(generators.keys()):
-        file_manager.will_write(fname)
+        if generators[fname]['name'] in backends:
+            file_manager.will_write(fname)
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
@@ -380,7 +381,8 @@ def generate_outputs():
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
-        file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
+        if env['name'] in backends:
+            file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends
