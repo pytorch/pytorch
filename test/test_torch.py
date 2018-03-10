@@ -1245,26 +1245,32 @@ class TestTorch(TestCase):
         default_type = torch.Tensor().type()
         self.assertIs(torch.Tensor().dtype, torch.Tensor.dtype)
 
-        torch.set_default_tensor_type('torch.IntTensor')
-        self.assertIs(torch.int32, torch.Tensor.dtype)
-        self.assertIs(torch.int32, torch.IntTensor.dtype)
-        self.assertEqual(torch.IntStorage, torch.Storage)
+        torch.set_default_tensor_type('torch.FloatTensor')
+        self.assertIs(torch.float32, torch.Tensor.dtype)
+        self.assertIs(torch.float32, torch.FloatTensor.dtype)
+        self.assertEqual(torch.FloatStorage, torch.Storage)
 
-        torch.set_default_tensor_type(torch.int64)
-        self.assertIs(torch.int64, torch.Tensor.dtype)
-        self.assertIs(torch.int64, torch.LongTensor.dtype)
-        self.assertEqual(torch.LongStorage, torch.Storage)
+        torch.set_default_tensor_type(torch.float64)
+        self.assertIs(torch.float64, torch.Tensor.dtype)
+        self.assertIs(torch.float64, torch.DoubleTensor.dtype)
+        self.assertEqual(torch.DoubleStorage, torch.Storage)
 
         torch.set_default_tensor_type('torch.Tensor')
-        self.assertIs(torch.int64, torch.Tensor.dtype)
-        self.assertIs(torch.int64, torch.LongTensor.dtype)
-        self.assertEqual(torch.LongStorage, torch.Storage)
+        self.assertIs(torch.float64, torch.Tensor.dtype)
+        self.assertIs(torch.float64, torch.DoubleTensor.dtype)
+        self.assertEqual(torch.DoubleStorage, torch.Storage)
 
         if torch.cuda.is_available():
-            torch.set_default_tensor_type(torch.cuda.float64)
-            self.assertIs(torch.cuda.float64, torch.Tensor.dtype)
-            self.assertIs(torch.cuda.float64, torch.cuda.DoubleTensor.dtype)
-            self.assertEqual(torch.cuda.DoubleStorage, torch.Storage)
+            torch.set_default_tensor_type(torch.cuda.float32)
+            self.assertIs(torch.cuda.float32, torch.Tensor.dtype)
+            self.assertIs(torch.cuda.float32, torch.cuda.FloatTensor.dtype)
+            self.assertEqual(torch.cuda.FloatStorage, torch.Storage)
+
+        # don't support integral or sparse default types.
+        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
+        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.int64))
+        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.sparse.int64))
+        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.sparse.float64))
 
         torch.set_default_tensor_type(default_type)
 
