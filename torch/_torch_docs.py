@@ -1140,7 +1140,14 @@ Args:
     diagonal (int, optional): the diagonal to consider
     out (Tensor, optional): the output tensor
 
-Example:
+.. seealso::
+
+        :func:`torch.diagonal` always returns the diagonal of its input.
+
+        :func:`torch.diagflat` always constructs a tensor with diagonal elements
+        specified by the input.
+
+Examples:
 
 Get the square matrix where the input vector is the diagonal::
 
@@ -1190,6 +1197,109 @@ Get the k-th diagonal of a given matrix::
     -1.3210
     -0.2239
     [torch.FloatTensor of size (2,)]
+
+""")
+
+add_docstr(torch.diagflat,
+           r"""
+diagflat(input, diagonal=0) -> Tensor
+
+- If :attr:`input` is a vector (1-D tensor), then returns a 2-D square tensor
+  with the elements of :attr:`input` as the diagonal.
+- If :attr:`input` is a tensor with more than one dimension, then returns a
+  2-D tensor with diagonal elements equal to a flattened :attr:`input`.
+
+The argument :attr:`offset` controls which diagonal to consider:
+
+- If :attr:`offset` = 0, it is the main diagonal.
+- If :attr:`offset` > 0, it is above the main diagonal.
+- If :attr:`offset` < 0, it is below the main diagonal.
+
+Args:
+    input (Tensor): the input tensor
+    offset (int, optional): the diagonal to consider. Default: 0 (main
+        diagonal).
+
+Examples:
+
+    >>> a = torch.randn(3)
+    >>> a
+
+     1.0480
+    -2.3405
+    -1.1138
+    [torch.FloatTensor of size 3]
+
+    >>> torch.diagflat(a)
+
+     1.0480  0.0000  0.0000
+     0.0000 -2.3405  0.0000
+     0.0000  0.0000 -1.1138
+    [torch.FloatTensor of size 3x3]
+
+    >>> torch.diagflat(a, 1)
+
+     0.0000  1.0480  0.0000  0.0000
+     0.0000  0.0000 -2.3405  0.0000
+     0.0000  0.0000  0.0000 -1.1138
+     0.0000  0.0000  0.0000  0.0000
+    [torch.FloatTensor of size 4x4]
+
+    >>> a = torch.randn(2, 2)
+    >>> a
+
+     0.1761 -0.9121
+    -0.5722  1.5219
+    [torch.FloatTensor of size (2,2)]
+
+    >>> torch.diagflat(a)
+
+     0.1761  0.0000  0.0000  0.0000
+     0.0000 -0.9121  0.0000  0.0000
+     0.0000  0.0000 -0.5722  0.0000
+     0.0000  0.0000  0.0000  1.5219
+    [torch.FloatTensor of size (4,4)]
+
+""")
+
+add_docstr(torch.diagonal,
+           r"""
+diagonal(input, offset=0) -> Tensor
+
+Returns a 1-D tensor with the diagonal elements of :attr:`input`.
+
+The argument :attr:`offset` controls which diagonal to consider:
+
+- If :attr:`offset` = 0, it is the main diagonal.
+- If :attr:`offset` > 0, it is above the main diagonal.
+- If :attr:`offset` < 0, it is below the main diagonal.
+
+Args:
+    input (Tensor): the input tensor. Must be 2-dimensional.
+    offset (int, optional): which diagonal to consider. Default: 0
+        (main diagonal).
+
+Examples:
+    >>> a = torch.randn(3, 3)
+    >>> a
+
+    -1.5328 -1.3210 -1.5204
+     0.8596  0.0471 -0.2239
+    -0.6617  0.0146 -1.0817
+    [torch.FloatTensor of size 3x3]
+
+    >>> torch.diagonal(a, 0)
+
+    -1.5328
+     0.0471
+    -1.0817
+    [torch.FloatTensor of size 3]
+
+    >>> torch.diagonal(a, 1)
+
+    -1.3210
+    -0.2239
+    [torch.FloatTensor of size 2]
 
 """)
 
