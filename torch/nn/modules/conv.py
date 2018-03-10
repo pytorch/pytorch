@@ -102,7 +102,8 @@ class Conv1d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\lfloor \frac{\text{out_channels}}{\text{in_channels}} \rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor \frac{\text{out_channels}}{\text{in_channels}} \right\rfloor`).
 
     .. note::
 
@@ -139,8 +140,8 @@ class Conv1d(_ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = \lfloor(\frac{L_{in} + 2 * \text{padding} - \text{dilation}
-                        * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\rfloor
+              L_{out} = \left\lfloor(\frac{L_{in} + 2 * \text{padding} - \text{dilation}
+                        * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -216,7 +217,8 @@ class Conv2d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\lfloor\frac{\text{out_channels}}{\text{in_channels}}\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -256,11 +258,11 @@ class Conv2d(_ConvNd):
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0]
-                        * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0]
+                        * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1]
-                        * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1]
+                        * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -334,7 +336,8 @@ class Conv3d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\lfloor\frac{\text{out_channels}}{\text{in_channels}}\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -374,14 +377,14 @@ class Conv3d(_ConvNd):
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
-                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\rfloor
+              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
+                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
-                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\rfloor
+              H_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
+                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \lfloor\frac{D_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
-                    * (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\rfloor
+              W_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
+                    * (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -490,7 +493,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\lfloor\frac{\text{out_channels}}{\text{in_channels}}\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     .. note::
 
@@ -571,7 +575,8 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\lfloor\frac{\text{out_channels}}{\text{in_channels}}\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
@@ -690,7 +695,8 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size :math:`\lfloor\frac{\text{out_channels}}{\text{in_channels}}\rfloor`).
+          its own set of filters (of size
+          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
