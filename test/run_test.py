@@ -67,21 +67,23 @@ def get_shell_output(command):
 
 def run_test(python, test_module, test_directory, verbose):
     verbose = '--verbose' if verbose else ''
-    shell('{} {} {}'.format(python, test_module, verbose), test_directory)
+    return shell('{} {} {}'.format(python, test_module, verbose), test_directory)
 
 
 def test_cpp_extensions(python, test_module, test_directory, verbose):
-    shell('{} setup.py install --root ./install'.format(python),
-          os.path.join(test_directory, 'cpp_extensions'))
+    if not shell('{} setup.py install --root ./install'.format(python),
+          os.path.join(test_directory, 'cpp_extensions')):
+        return False
 
     python_path = os.environ.get('PYTHONPATH', '')
-    install_directory = get_shell_output(
-        "find cpp_extensions/install -name '*-packages'")
-    install_directory = os.path.join(test_directory, install_directory)
-    os.environ['PYTHONPATH'] = '{}:{}'.format(install_directory, python_path)
-    run_test(python, test_module, test_directory, verbose)
-    os.environ['PYTHONPATH'] = python_path
-
+    try:
+        install_directory = get_shell_output(
+            "find cpp_extensions/install -name '*-packages'")
+        install_directory = os.path.join(test_directory, install_directory)
+        os.environ['PYTHONPATH'] = '{}:{}'.format(install_directory, python_path)
+        return run_test(python, test_module, test_directory, verbose)
+    finally:
+        os.environ['PYTHONPATH'] = python_path
 
 def test_distributed(python, test_module, test_directory, verbose):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
@@ -108,12 +110,14 @@ def test_distributed(python, test_module, test_directory, verbose):
                 os.mkdir(os.path.join(tmp_dir, 'test_dir'))
                 if backend == 'mpi':
                     mpiexec = 'mpiexec -n 3 --noprefix {}'.format(python)
-                    run_test(mpiexec, test_module, test_directory, verbose)
+                    if not run_test(mpiexec, test_module, test_directory, verbose):
+                        return False
                 else:
-                    run_test(python, test_module, test_directory, verbose)
+                    if not run_test(python, test_module, test_directory, verbose):
+                        return False
             finally:
                 shutil.rmtree(tmp_dir)
-
+    return True
 
 CUSTOM_HANDLERS = {
     'cpp_extensions': test_cpp_extensions,
