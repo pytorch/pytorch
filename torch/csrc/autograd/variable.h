@@ -2,6 +2,7 @@
 
 #include "torch/csrc/utils/python_stub.h"
 
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"
@@ -116,9 +117,18 @@ struct Variable : public at::Tensor {
 
   // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
   // know are Variables.
-  /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {}
+  /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
+    TORCH_ASSERTM(
+        is_variable_or_undefined(),
+        "Tensor that was converted to Variable was not actually a Variable");
+  }
+
   /*implicit*/ Variable(at::Tensor&& rhs) noexcept
-      : at::Tensor(std::move(rhs)) {}
+      : at::Tensor(std::move(rhs)) {
+    TORCH_ASSERTM(
+        is_variable_or_undefined(),
+        "Tensor that was converted to Variable was not actually a Variable");
+  }
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
 
@@ -612,6 +622,7 @@ inline Variable::Variable(Variable::Impl* self, bool retain)
     : at::Tensor(self, retain) {}
 
 inline Variable::Impl* Variable::get() const noexcept {
+  TORCH_ASSERTM(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(pImpl);
 }
 }} // namespace torch::autograd
