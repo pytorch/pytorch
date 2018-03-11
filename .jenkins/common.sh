@@ -18,7 +18,7 @@ function cleanup {
 set -ex
 
 # Required environment variables:
-#   $JOB_NAME
+#   $BUILD_ENVIRONMENT (should be set by your Docker image)
 
 # This token is used by a parser on Jenkins logs for determining
 # if a failure is a legitimate problem, or a problem with the build
@@ -61,27 +61,25 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
-# Converts:
-# pytorch-builds/pytorch-macos-10.13-py3-build-test ==> pytorch-macos-10.13-py3-build-test
-#
-# We don't match the full path so that you can make a job in a subfolder
-# that will trigger this checking.
-#
-# NB: This greedily matches until the last /, so if you ever decide to
-# restructure the PyTorch jobs to have some more directory hierarchy,
-# you will have to adjust this.
-COMPACT_JOB_NAME="$(echo "$JOB_NAME" | perl -pe 's{^(?:.+/)?(.+)$}{$1}o')"
+# It's called a COMPACT_JOB_NAME because it's distinct from the
+# Jenkin's provided JOB_NAME, which also includes a prefix folder
+# e.g. pytorch-builds/
+
+if [ -z "$COMPACT_JOB_NAME" ]; then
+  echo "Jenkins build scripts must set COMPACT_JOB_NAME"
+  exit 1
+fi
 
 if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/disabled-configs.txt"; then
-  echo "Test is explicitly disabled, SKIPPING"
+  echo "Job is explicitly disabled, SKIPPING"
   exit 0
 else
-  echo "Test is not disabled, proceeding"
+  echo "Job is not disabled, proceeding"
 fi
 
 if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/enabled-configs.txt"; then
-  echo "Test is enabled, proceeding"
+  echo "Job is enabled, proceeding"
 else
-  echo "Test not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
+  echo "Job is not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
   exit 1
 fi
