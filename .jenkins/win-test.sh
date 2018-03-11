@@ -1,5 +1,6 @@
 #!/bin/bash
 
+COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-test
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export IMAGE_COMMIT_TAG=${BUILD_ENVIRONMENT}-${IMAGE_COMMIT_ID}
