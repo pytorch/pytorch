@@ -7,3 +7,6 @@
 [submodule "torch/lib/nanopb"]
 	path = torch/lib/nanopb
 	url = https://github.com/nanopb/nanopb.git
+[submodule "aten/src/ATen/utils/catch"]
+	path = aten/src/ATen/utils/catch
+	url = https://github.com/catchorg/Catch2.git

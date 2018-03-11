@@ -1,5 +1,7 @@
+#define CATCH_CONFIG_MAIN
+#include "catch.hpp"
+
 #include "ATen/ATen.h"
-#include "test_assert.h"
 #include "test_seed.h"
 #include <algorithm>
 #include <iostream>
@@ -7,9 +9,23 @@
 
 using namespace at;
 
-void assert_equal_size_dim(const Tensor &lhs, const Tensor &rhs) {
-  ASSERT(lhs.dim() == rhs.dim());
-  ASSERT(lhs.sizes().equals(rhs.sizes()));
+#define TRY_CATCH_ELSE(fn, catc, els)                           \
+  {                                                             \
+    /* avoid mistakenly passing if els code throws exception*/  \
+    bool _passed = false;                                       \
+    try {                                                       \
+      fn;                                                       \
+      _passed = true;                                           \
+      els;                                                      \
+    } catch (std::runtime_error &e) {                           \
+      REQUIRE(!_passed);                                        \
+      catc;                                                     \
+    }                                                           \
+  }
+
+void require_equal_size_dim(const Tensor &lhs, const Tensor &rhs) {
+  REQUIRE(lhs.dim() == rhs.dim());
+  REQUIRE(lhs.sizes().equals(rhs.sizes()));
 }
 
 bool should_expand(const IntList &from_size, const IntList &to_size) {
@@ -33,25 +49,26 @@ void test(Type &T) {
   for (auto s = sizes.begin(); s != sizes.end(); ++s) {
     // verify that the dim, sizes, strides, etc match what was requested.
     auto t = ones(T, *s);
-    ASSERT((std::size_t)t.dim() == s->size());
-    ASSERT((std::size_t)t.ndimension() == s->size());
-    ASSERT(t.sizes().equals(*s));
-    ASSERT(t.strides().size() == s->size());
+    REQUIRE((std::size_t)t.dim() == s->size());
+    REQUIRE((std::size_t)t.ndimension() == s->size());
+    REQUIRE(t.sizes().equals(*s));
+    REQUIRE(t.strides().size() == s->size());
     auto numel = std::accumulate(s->begin(), s->end(), 1, std::multiplies<int64_t>());
-    ASSERT(t.numel() == numel);
+    REQUIRE(t.numel() == numel);
     // verify we can output
-    std::cout << t << std::endl;
+    std::stringstream ss;
+    REQUIRE_NOTHROW(ss << t << std::endl);
 
     // set_
     auto t2 = ones(T, *s);
     t2.set_();
-    assert_equal_size_dim(t2, ones(T, {0}));
+    require_equal_size_dim(t2, ones(T, {0}));
 
     // unsqueeze
     if (t.numel() != 0) {
-      ASSERT(t.unsqueeze(0).dim() == t.dim() + 1);
+      REQUIRE(t.unsqueeze(0).dim() == t.dim() + 1);
     } else {
-      ASSERT_THROWS(t.unsqueeze(0));
+      REQUIRE_THROWS(t.unsqueeze(0));
     }
 
     // unsqueeze_
@@ -59,19 +76,19 @@ void test(Type &T) {
       auto t2 = ones(T, *s);
       if (t2.numel() != 0) {
         auto r = t2.unsqueeze_(0);
-        ASSERT(r.dim() == t.dim() + 1);
+        REQUIRE(r.dim() == t.dim() + 1);
       } else {
-        ASSERT_THROWS(t2.unsqueeze_(0));
+        REQUIRE_THROWS(t2.unsqueeze_(0));
       }
     }
 
     // squeeze (with dimension argument)
     if (t.dim() == 0 || t.sizes()[0] == 1) {
-      ASSERT(t.squeeze(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
+      REQUIRE(t.squeeze(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
       // in NumPy this is an error.
-      ASSERT(t.squeeze(0).dim() == t.dim());
+      REQUIRE(t.squeeze(0).dim() == t.dim());
     }
 
     // squeeze (with no dimension argument)
@@ -83,18 +100,18 @@ void test(Type &T) {
         }
       }
       auto result = t.squeeze();
-      assert_equal_size_dim(result, ones(T, size_without_ones));
+      require_equal_size_dim(result, ones(T, size_without_ones));
     }
 
     {
       // squeeze_ (with dimension argument)
       auto t2 = ones(T, *s);
       if (t2.dim() == 0 ||  t2.sizes()[0] == 1) {
-        ASSERT(t2.squeeze_(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
+        REQUIRE(t2.squeeze_(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
       } else {
         // In PyTorch, it is a no-op to try to squeeze a dimension that has size != 1;
         // in NumPy this is an error.
-        ASSERT(t2.squeeze_(0).dim() == t.dim());
+        REQUIRE(t2.squeeze_(0).dim() == t.dim());
       }
     }
 
@@ -108,38 +125,38 @@ void test(Type &T) {
         }
       }
       auto r = t2.squeeze_();
-      assert_equal_size_dim(t2, ones(T, size_without_ones));
+      require_equal_size_dim(t2, ones(T, size_without_ones));
     }
 
     // reduce (with dimension argument and with 1 return argument)
     if (t.numel() != 0) {
-      ASSERT(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
+      REQUIRE(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // FIXME: you should be able to reduce over size {0}
-      ASSERT_THROWS(t.sum(0));
+      REQUIRE_THROWS(t.sum(0));
     }
 
     // reduce (with dimension argument and with 2 return arguments)
     if (t.numel() != 0) {
       auto ret = t.min(0);
-      ASSERT(std::get<0>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
-      ASSERT(std::get<1>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
+      REQUIRE(std::get<0>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
+      REQUIRE(std::get<1>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
       // FIXME: you should be able to reduce over size {0}
-      ASSERT_THROWS(t.min(0));
+      REQUIRE_THROWS(t.min(0));
     }
 
     // simple indexing
     if (t.dim() > 0 && t.numel() != 0) {
-      ASSERT(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
+      REQUIRE(t[0].dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      ASSERT_THROWS(t[0]);
+      REQUIRE_THROWS(t[0]);
     }
 
     // fill_ (argument to fill_ can only be a 0-dim tensor)
     TRY_CATCH_ELSE(t.fill_(t.sum(0)),
-                   ASSERT(t.numel() == 0 || t.dim() > 1),
-                   ASSERT(t.numel() > 0 && t.dim() <= 1));
+                   REQUIRE((t.numel() == 0 || t.dim() > 1)),
+                   { REQUIRE(t.numel() > 0); REQUIRE(t.dim() <= 1); });
   }
 
   for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {
@@ -149,8 +166,8 @@ void test(Type &T) {
           auto lhs = ones(T, *lhs_it);
           auto rhs = ones(T, *rhs_it);
           if(*lhs_it != *rhs_it) {
-            ASSERT(!lhs.is_same_size(rhs));
-            ASSERT(!rhs.is_same_size(lhs));
+            REQUIRE(!lhs.is_same_size(rhs));
+            REQUIRE(!rhs.is_same_size(lhs));
           }
       }
       // forced size functions (resize_, resize_as, set_)
@@ -160,14 +177,14 @@ void test(Type &T) {
           auto lhs = ones(T, *lhs_it);
           auto rhs = ones(T, *rhs_it);
           lhs.resize_(*rhs_it);
-          assert_equal_size_dim(lhs, rhs);
+          require_equal_size_dim(lhs, rhs);
         }
         // resize_as_
         {
           auto lhs = ones(T, *lhs_it);
           auto rhs = ones(T, *rhs_it);
           lhs.resize_as_(rhs);
-          assert_equal_size_dim(lhs, rhs);
+          require_equal_size_dim(lhs, rhs);
         }
         // set_
         {
@@ -176,7 +193,7 @@ void test(Type &T) {
             auto lhs = ones(T, *lhs_it);
             auto rhs = ones(T, *rhs_it);
             lhs.set_(rhs);
-            assert_equal_size_dim(lhs, rhs);
+            require_equal_size_dim(lhs, rhs);
           }
           {
             // with storage
@@ -185,7 +202,7 @@ void test(Type &T) {
             auto storage = T.storage(rhs.numel());
             lhs.set_(*storage);
             // should not be dim 0 because an empty storage is dim 1; all other storages aren't scalars
-            ASSERT(lhs.dim() != 0);
+            REQUIRE(lhs.dim() != 0);
           }
           {
             // with storage, offset, sizes, strides
@@ -193,7 +210,7 @@ void test(Type &T) {
             auto rhs = ones(T, *rhs_it);
             auto storage = T.storage(rhs.numel());
             lhs.set_(*storage, rhs.storage_offset(), rhs.sizes(), rhs.strides());
-            assert_equal_size_dim(lhs, rhs);
+            require_equal_size_dim(lhs, rhs);
           }
         }
       }
@@ -204,8 +221,8 @@ void test(Type &T) {
         auto rhs = ones(T, *rhs_it);
         auto rhs_size = *rhs_it;
         TRY_CATCH_ELSE(auto result = lhs.view(rhs_size),
-                       ASSERT(lhs.numel() != rhs.numel()),
-                       ASSERT(lhs.numel() == rhs.numel()); assert_equal_size_dim(result, rhs););
+                       REQUIRE(lhs.numel() != rhs.numel()),
+                       REQUIRE(lhs.numel() == rhs.numel()); require_equal_size_dim(result, rhs););
       }
 
       // take
@@ -213,8 +230,8 @@ void test(Type &T) {
         auto lhs = ones(T, *lhs_it);
         auto rhs = zeros(T, *rhs_it).toType(ScalarType::Long);
         TRY_CATCH_ELSE(auto result = lhs.take(rhs),
-                       ASSERT(lhs.numel() == 0 && rhs.numel() != 0),
-                       assert_equal_size_dim(result, rhs));
+                       REQUIRE(lhs.numel() == 0); REQUIRE(rhs.numel() != 0),
+                       require_equal_size_dim(result, rhs));
       }
 
 
@@ -223,11 +240,11 @@ void test(Type &T) {
         auto lhs = ones(T, *lhs_it);
         auto rhs = ones(T, *rhs_it);
         TRY_CATCH_ELSE(auto result = lhs.ger(rhs),
-                       ASSERT(lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() != 1 || rhs.dim() != 1),
+                       REQUIRE((lhs.numel() == 0 || rhs.numel() == 0 || lhs.dim() != 1 || rhs.dim() != 1)),
                        [&]() {
                          int64_t dim0 = lhs.dim() == 0 ? 1 : lhs.size(0);
                          int64_t dim1 = rhs.dim() == 0 ? 1 : rhs.size(0);
-                         assert_equal_size_dim(result, result.type().tensor({dim0, dim1}));
+                         require_equal_size_dim(result, result.type().tensor({dim0, dim1}));
                        }(););
       }
 
@@ -239,8 +256,8 @@ void test(Type &T) {
         auto rhs_size = *rhs_it;
         bool should_pass = should_expand(lhs_size, rhs_size);
         TRY_CATCH_ELSE(auto result = lhs.expand(rhs_size),
-                       ASSERT(!should_pass),
-                       ASSERT(should_pass); assert_equal_size_dim(result, rhs););
+                       REQUIRE(!should_pass),
+                       REQUIRE(should_pass); require_equal_size_dim(result, rhs););
 
         // in-place functions (would be good if we can also do a non-broadcasting one, b/c
         // broadcasting functions will always end up operating on tensors of same size;
@@ -248,22 +265,24 @@ void test(Type &T) {
         {
           bool should_pass_inplace = should_expand(rhs_size, lhs_size);
           TRY_CATCH_ELSE(lhs.add_(rhs),
-                         ASSERT(!should_pass_inplace),
-                         ASSERT(should_pass_inplace); assert_equal_size_dim(lhs, ones(T, *lhs_it)););
+                         REQUIRE(!should_pass_inplace),
+                         REQUIRE(should_pass_inplace); require_equal_size_dim(lhs, ones(T, *lhs_it)););
         }
       }
     }
   }
 }
 
-int main() {
+TEST_CASE( "scalar tensor test CPU", "[cpu]" ) {
   manual_seed(123);
 
   test(CPU(kFloat));
+}
+
+TEST_CASE( "scalar tensor test CUDA", "[cuda]" ) {
+  manual_seed(123);
 
   if (at::hasCUDA()) {
     test(CUDA(kFloat));
   }
-
-  return 0;
 }
