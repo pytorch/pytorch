@@ -468,6 +468,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
 add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
+${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/utils/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})
