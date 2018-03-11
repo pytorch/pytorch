@@ -183,6 +183,19 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       int dilation_height = 0;
       int dilation_width = 0;
 
+#if CUDNN_VERSION_MIN(6, 0, 0)
+      CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
+          input,
+          &pad_height,
+          &pad_width,
+          &stride_height,
+          &stride_width,
+          &dilation_height,
+          &dilation_width,
+          &mode,
+          &dataType
+          ));
+#else
       CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
           input,
           &pad_height,
@@ -192,12 +205,22 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_height,
           &dilation_width,
           &mode
-#if CUDNN_VERSION_MIN(6, 0, 0)
-          ,
-          &dataType
-#endif
           ));
+#endif
 
+#if CUDNN_VERSION_MIN(6, 0, 0)
+      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
+          copy,
+          pad_height,
+          pad_width,
+          stride_height,
+          stride_width,
+          dilation_height,
+          dilation_width,
+          mode,
+          dataType
+          ));
+#else
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           copy,
           pad_height,
@@ -207,11 +230,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           dilation_height,
           dilation_width,
           mode
-#if CUDNN_VERSION_MIN(6, 0, 0)
-          ,
-          dataType
-#endif
           ));
+#endif
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;
@@ -323,6 +343,19 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
       int dilation_height = 0;
       int dilation_width = 0;
 
+#if CUDNN_VERSION_MIN(6, 0, 0)
+      CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
+          conv_desc,
+          &pad_height,
+          &pad_width,
+          &stride_height,
+          &stride_width,
+          &dilation_height,
+          &dilation_width,
+          &mode,
+          &dataType
+          ));
+#else
       CUDNN_ENFORCE(cudnnGetConvolution2dDescriptor(
           conv_desc,
           &pad_height,
@@ -332,12 +365,22 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           &dilation_height,
           &dilation_width,
           &mode
-#if CUDNN_VERSION_MIN(6, 0, 0)
-          ,
-          &dataType
-#endif
           ));
+#endif
 
+#if CUDNN_VERSION_MIN(6, 0, 0)
+      CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
+          conv_desc,
+          pad_height,
+          pad_width,
+          stride_height,
+          stride_width,
+          dilation_height,
+          dilation_width,
+          mode,
+          math
+          ));
+#else
       CUDNN_ENFORCE(cudnnSetConvolution2dDescriptor(
           conv_desc,
           pad_height,
@@ -347,11 +390,8 @@ class CudnnConvOpBase : public ConvPoolOpBase<CUDAContext> {
           dilation_height,
           dilation_width,
           mode
-#if CUDNN_VERSION_MIN(6, 0, 0)
-          ,
-          math
-#endif
           ));
+#endif
     } else {
       cudnnConvolutionMode_t mode;
       cudnnDataType_t dataType;

@@ -63,7 +63,7 @@ inline void LogCuDNNPerfStats(
 // Easier indexing into force_algo_ vector,
 // shared by CudnnConvTransposeOpBase and CudnnConvOpBase to force
 // usage of a particular algortihm instead of searching
-enum { ALGO_FWD = 0, ALGO_WGRAD = 1, ALGO_DGRAD = 2 } algoIndex_t;
+enum { ALGO_FWD = 0, ALGO_WGRAD = 1, ALGO_DGRAD = 2 };
 
 } // namespace caffe2
 

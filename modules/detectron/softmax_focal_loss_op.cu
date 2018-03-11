@@ -78,7 +78,7 @@ __global__ void SoftmaxFocalLossKernel(
       int offset = a * num_classes;
       int idx = n * (H * W * D) + (offset + label) * (H * W) + y * W + x;
       losses[i] =
-          -(pow(1.0 - Pdata[idx], gamma) *
+          -(pow(1.0f - Pdata[idx], gamma) *
           log(max(Pdata[idx], FLT_MIN))) * z;
     }
   }
