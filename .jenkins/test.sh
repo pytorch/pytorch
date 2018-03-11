@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_BUILD_ENVIRONMENT="${BUILD_ENVIRONMENT}-test"
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Required environment variable: $BUILD_ENVIRONMENT
