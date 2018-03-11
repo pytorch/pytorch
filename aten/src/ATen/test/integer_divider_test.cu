@@ -1,3 +1,6 @@
+#define CATCH_CONFIG_MAIN
+#include "catch.hpp"
+
 // Test IntegerDivider: this tests *all* 32-bit pairs (a, b) where a % b is 0 or
 // (b-1), so it takes a few minutes to run.
 
@@ -7,8 +10,6 @@
 #include <vector>
 
 #include "THC/THCIntegerDivider.cuh"
-
-#include "test_assert.h"
 
 using std::vector;
 
@@ -61,18 +62,18 @@ class IntDividerTester {
     cudaError_t err;
 
     err = cudaMalloc(&dividersBuf_, NUM_CASES * sizeof(IntDivider<Value>));
-    ASSERT(err == cudaSuccess);
+    REQUIRE(err == cudaSuccess);
     err = cudaMalloc(&testCasesBuf_, NUM_CASES * sizeof(TestCase<Value>));
-    ASSERT(err == cudaSuccess);
+    REQUIRE(err == cudaSuccess);
   }
 
   ~IntDividerTester() {
     cudaError_t err;
 
     err = cudaFree(dividersBuf_);
-    ASSERT(err == cudaSuccess);
+    REQUIRE(err == cudaSuccess);
     err = cudaFree(testCasesBuf_);
-    ASSERT(err == cudaSuccess);
+    REQUIRE(err == cudaSuccess);
   }
 
   void addTestCase(Value dividend, Value divisor, int steps) {
@@ -91,17 +92,18 @@ class IntDividerTester {
     cudaError_t err;
 
     if (testCases_.empty()) return;
-    ASSERT(!dividers_.empty());
+    REQUIRE(!dividers_.empty());
 
-    ASSERT(dividers_.size() <= NUM_CASES && testCases_.size() <= NUM_CASES);
+    REQUIRE(dividers_.size() <= NUM_CASES);
+    REQUIRE(testCases_.size() <= NUM_CASES);
     err = cudaMemcpy(dividersBuf_, dividers_.data(),
                      dividers_.size() * sizeof(IntDivider<Value>),
                      cudaMemcpyHostToDevice);
-    ASSERT(err == cudaSuccess);
+    REQUIRE(err == cudaSuccess);
     err = cudaMemcpy(testCasesBuf_, testCases_.data(),
                      testCases_.size() * sizeof(TestCase<Value>),
                      cudaMemcpyHostToDevice);
-    ASSERT(err == cudaSuccess);
+    REQUIRE(err == cudaSuccess);
 
     int numCases = testCases_.size();
     testIntDivider<Value><<<512, 512>>>(
@@ -156,7 +158,7 @@ static void testUint32Divider()
 static void testUint64Divider()
 {
   IntDividerTester<uint64_t> tester;
-  
+
   uint64_t dividend = 0x123456789ULL;
   uint64_t divisor = 0x54321ULL;
 
@@ -178,13 +180,11 @@ static void testUint64Divider()
   tester.flush();
 }
 
-int main()
-{
+TEST_CASE( "CUDA integer divider", "[cuda]" ) {
+
   testUint64Divider();
   testUint32Divider();
 
   cudaError_t err = cudaDeviceSynchronize();
-  ASSERT(err == cudaSuccess);
-
-  return 0;
+  REQUIRE(err == cudaSuccess);
 }
