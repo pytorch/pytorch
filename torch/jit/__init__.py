@@ -607,6 +607,25 @@ for name, method in _get_methods(torch.nn.Module):
 
 
 def createResolutionCallback(frame_id=2):
+    """
+    Creates a function which, given a string variable name,
+    returns the value of the variable in the scope of the caller of
+    the function which called createResolutionCallback (by default).
+    For example, the following program prints 2::
+    
+        def bar():
+            cb = createResolutionCallback()
+            print(x("foo"))
+
+        def baz():
+            foo = 2
+            bar()
+
+        baz()
+    
+    This is used to enable access in-scope Python variables inside
+    TorchScript fragments.
+    """
     frame = inspect.stack()[frame_id][0]
 
     def env(key):
