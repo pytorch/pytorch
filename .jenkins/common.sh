@@ -65,7 +65,7 @@ trap_add cleanup EXIT
 # Jenkin's provided JOB_NAME, which also includes a prefix folder
 # e.g. pytorch-builds/
 
-if [ -z "$COMPACT_JOB_NAME" ];
+if [ -z "$COMPACT_JOB_NAME" ]; then
   echo "Jenkins build scripts must set COMPACT_JOB_NAME"
   exit 1
 fi
