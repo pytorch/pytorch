@@ -3,8 +3,18 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
 
+// This file contains classes which assist in desugaring Python style
+// modules and their methods into flattened graphs which don't have any
+// function calls.
+
 namespace torch { namespace jit { namespace script {
 
+// A method in a module, e.g. f in:
+//
+// class M(ScriptModule):
+//   @script_method
+//   def f(self, x):
+//     ...
 struct Method {
   Method(std::string name, bool optimize)
   : name_(std::move(name))
@@ -80,7 +90,7 @@ private:
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
   GraphExecutor executor; // for execution
-  // member_inputs are a list of additional arguments append to graph that are
+  // member_inputs are a list of additional arguments appended to graph that are
   // inputs that come from the members of the Module or its submodules.
   // each is a pointer to a slot in the module that owns this Method or a submethod
   // of the module.
@@ -118,12 +128,12 @@ struct NamedParameter {
 private:
   // the extra level of indirection allows Methods to safely store pointers
   // to the slots where parameters are kept while also allow parameters
-  // to be reassign
+  // to be reassigned
   std::unique_ptr<at::Tensor> parameter;
 };
 
 struct NamedMember {
-  enum Kind { Module, Parameter, Method, None};
+  enum Kind { Module, Parameter, Method, None };
   // note: None is used to report undefined attributes;
   Kind kind;
   size_t offset;
