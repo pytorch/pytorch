@@ -172,11 +172,13 @@ struct Symbol {
   // IT IN A TIGHT LOOP.
   std::string toQualString() const;
 
-  // Give an unambiguous, machine readable description of the name.
+  // Give an unambiguous, machine readable description of the name.  This
+  // is strictly an implementation, but it will look something like "tmm"
   const char * toRawString() const;
 
   // This describes a symbol in human readable form.  DO NOT use
   // this for uses-cases that are intended to be machine-readable.
+  // This will look something like "ATen operator 'mm'"
   const char * toDisplayString() const;
 
 private:
