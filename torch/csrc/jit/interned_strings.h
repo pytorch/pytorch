@@ -8,6 +8,15 @@
 
 namespace torch { namespace jit {
 
+enum class SymbolNamespace : char {
+  ONNXOperator = 'o',
+  JITOperator = 'j',
+  ATenOperator = 't',
+  // NB: ONNX and ATen attributes all live in a global namespace, as
+  // their interpretation depends on the operator name (which is namespaced)
+  Attribute = 'a',
+};
+
 // JIT symbols are synthetic operators that occur only in the JIT IR
 // and don't have corresponding implementations in ATen.
 //
@@ -33,6 +42,7 @@ _(Placeholder) \
 _(Print) \
 _(PythonOp) \
 _(ReplaceIfUndef) \
+_(Reverse) \
 _(Return) \
 _(Store) \
 _(Undefined) \
@@ -136,10 +146,6 @@ static inline bool operator==(BuiltinSymbol lhs, Symbol rhs) {
 }
 static inline bool operator==(Symbol lhs, BuiltinSymbol rhs) {
   return static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs);
-}
-
-inline Symbol operator "" _sym(const char * s, size_t) {
-  return Symbol(s);
 }
 
 }}
