@@ -32,8 +32,17 @@ import numpy as np
 
 class BatchLRLoss(ModelLayer):
 
-    def __init__(self, model, input_record, name='batch_lr_loss',
-                 average_loss=True, jsd_weight=0.0, **kwargs):
+    def __init__(
+        self,
+        model,
+        input_record,
+        name='batch_lr_loss',
+        average_loss=True,
+        jsd_weight=0.0,
+        pos_label_target=1.0,
+        neg_label_target=0.0,
+        **kwargs
+    ):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
 
         self.average_loss = average_loss
@@ -57,6 +66,12 @@ class BatchLRLoss(ModelLayer):
                 'xent_weight', 1 - self.jsd_weight
             )
 
+        assert pos_label_target <= 1 and pos_label_target >= 0
+        assert neg_label_target <= 1 and neg_label_target >= 0
+        assert pos_label_target >= neg_label_target
+        self.pos_label_target = pos_label_target
+        self.neg_label_target = neg_label_target
+
         self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
         self.output_schema = schema.Scalar(
@@ -76,6 +91,14 @@ class BatchLRLoss(ModelLayer):
             to=core.DataType.FLOAT)
         label = net.ExpandDims(label, net.NextScopedBlob('expanded_label'),
                                 dims=[1])
+        if self.pos_label_target != 1.0 or self.neg_label_target != 0.0:
+            label = net.StumpFunc(
+                label,
+                net.NextScopedBlob('smoothed_label'),
+                threshold=0.5,
+                low_value=self.neg_label_target,
+                high_value=self.pos_label_target,
+            )
         xent = net.SigmoidCrossEntropyWithLogits(
             [self.input_record.logit(), label],
             net.NextScopedBlob('cross_entropy'),

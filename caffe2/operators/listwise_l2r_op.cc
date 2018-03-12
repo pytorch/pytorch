@@ -104,6 +104,11 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   EigenVectorArrayMap<float> ideal_discount_vec(
       ideal_discount_data, discount_.size());
   double idcg = (gain_vec * ideal_discount_vec).sum();
+  // in case that all docs in a session have zero ratings, idcg will be zero.
+  // For that case we will not normalize dcg.
+  if (idcg < 1e-5) {
+    idcg = 1.0;
+  }
 
   ComputeDiscounts(rank_idx_data, N);
   auto* discount_data = discount_.template mutable_data<float>();
@@ -122,20 +127,21 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   auto* dy_data = dy->template mutable_data<float>();
   EigenVectorArrayMap<float> dy_vec(dy_data, dy->size());
   // dy_i =
-  //    \sum_j lambda_{i, j} sign(i > j) * sigm( -sign(i > j)*(yi - yj) )
+  //    \sum_j lambda_{i, j} -sign(i > j) * sigm( -sign(i > j)*(yi - yj) )
   //                         |++ gradient of rank loss between i & j  ++|
-  dy_vec = (lambda_mat * CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) *
-            CWISE_SIGM(
-                -CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N)))
-               .rowwise()
-               .sum() /
+  dy_vec =
+      -(lambda_mat * CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) *
+        CWISE_SIGM(
+            -CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N)))
+           .rowwise()
+           .sum() /
       idcg;
   // loss = \sum_{i, j} lambda_{i, j} rank_loss(i, j)
   *loss_data =
-      (lambda_mat *
-       CWISE_LOG_SIGM(
-           CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N), 100))
-          .sum() /
+      -(lambda_mat *
+        CWISE_LOG_SIGM(
+            CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N), 100))
+           .sum() /
       idcg;
   return true;
 }

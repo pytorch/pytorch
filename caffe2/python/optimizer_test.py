@@ -119,7 +119,7 @@ class TestFtrl(OptimizerTestBase, TestCase):
 class TestAdagrad(OptimizerTestBase, LRModificationTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = False
-        return build_adagrad(model, base_learning_rate=1.0, **kwargs)
+        return build_adagrad(model, base_learning_rate=1.0, lars=0.5, **kwargs)
 
     def check_optimizer(self, optimizer):
         self.assertFalse(optimizer.get_auxiliary_parameters().shared)

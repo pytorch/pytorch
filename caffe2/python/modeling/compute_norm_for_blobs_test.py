@@ -56,10 +56,12 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 6)
 
-        assert 'fc1_w_l2_norm' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
-        assert 'fc2_w_l2_norm' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
+        assert 'fc1_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs(),\
+            model.net.output_record().field_blobs()
+        assert 'fc2_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs(),\
+            model.net.output_record().field_blobs()
 
     def test_compute_norm_for_blobs_no_print(self):
         model = model_helper.ModelHelper(name="test")
@@ -91,10 +93,12 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 4)
 
-        assert 'fc1_w_l2_norm' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
-        assert 'fc2_w_l2_norm' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
+        assert 'fc1_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs(),\
+            model.net.output_record().field_blobs()
+        assert 'fc2_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs(),\
+            model.net.output_record().field_blobs()
 
     def test_compute_l1_norm_for_blobs(self):
         model = model_helper.ModelHelper(name="test")
@@ -127,7 +131,9 @@ class ComputeNormForBlobsTest(unittest.TestCase):
 
         self.assertEqual(len(model.net.Proto().op), 6)
 
-        assert 'fc1_w_l1_norm' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
-        assert 'fc2_w_l1_norm' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
+        assert 'fc1_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs(),\
+            model.net.output_record().field_blobs()
+        assert 'fc2_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs(),\
+            model.net.output_record().field_blobs()

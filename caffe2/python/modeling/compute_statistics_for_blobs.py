@@ -38,6 +38,7 @@ class ComputeStatisticsForBlobs(NetModifier):
     def __init__(self, blobs, logging_frequency):
         self._blobs = blobs
         self._logging_frequency = logging_frequency
+        self._field_name_suffix = '_summary'
 
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
 
@@ -48,11 +49,11 @@ class ComputeStatisticsForBlobs(NetModifier):
                     blob, net.Name()))
 
             cast_blob = net.Cast(blob, to=core.DataType.FLOAT)
-            stats_name = net.NextScopedBlob(prefix=blob + '_summary')
+            stats_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)
             stats = net.Summarize(cast_blob, stats_name, to_file=0)
             net.Print(stats, [], every_n=self._logging_frequency)
 
-            output_field_name = str(blob) + '_summary'
+            output_field_name = str(blob) + self._field_name_suffix
             output_scalar = schema.Scalar((np.float, (1,)), stats)
 
             if net.output_record() is None:
@@ -63,3 +64,6 @@ class ComputeStatisticsForBlobs(NetModifier):
                 net.AppendOutputRecordField(
                     output_field_name,
                     output_scalar)
+
+    def field_name_suffix(self):
+        return self._field_name_suffix

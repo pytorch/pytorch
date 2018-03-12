@@ -82,3 +82,10 @@ class StoreOpsTests(object):
         # Raise first error we find, if any
         if not queue.empty():
             raise queue.get()
+
+    @classmethod
+    def test_get_timeout(cls, create_store_handler_fn):
+        store_handler = create_store_handler_fn()
+        net = core.Net('get_missing_blob')
+        net.StoreGet([store_handler], 1, blob_name='blob')
+        workspace.RunNetOnce(net)

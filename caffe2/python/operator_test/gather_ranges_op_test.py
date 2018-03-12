@@ -18,7 +18,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core
+from caffe2.python import core, workspace
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -188,6 +188,23 @@ class TestGatherRanges(hu.HypothesisTestCase):
             inputs=[data, ranges, key, lengths],
             reference=gather_ranges_to_dense_with_key
         )
+
+    def test_shape_and_type_inference(self):
+        with hu.temp_workspace("shape_type_inf_int32"):
+            net = core.Net('test_net')
+            net.ConstantFill(
+                [], "ranges", shape=[3, 5, 2], dtype=core.DataType.INT32,
+            )
+            net.ConstantFill(
+                [], "values", shape=[64], dtype=core.DataType.INT64,
+            )
+            net.GatherRanges(['values', 'ranges'], ['values_output', 'lengths_output'])
+            (shapes, types) = workspace.InferShapesAndTypes([net], {})
+
+            self.assertEqual(shapes["values_output"], [64])
+            self.assertEqual(types["values_output"], core.DataType.INT64)
+            self.assertEqual(shapes["lengths_output"], [3])
+            self.assertEqual(types["lengths_output"], core.DataType.INT32)
 
 
 if __name__ == "__main__":

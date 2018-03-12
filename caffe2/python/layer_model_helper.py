@@ -349,6 +349,10 @@ class LayerModelHelper(model_helper.ModelHelper):
     def seed(self):
         return self._seed
 
+    @property
+    def sequence_seed(self):
+        return self._sequence_seed
+
     def store_seed(self, seed, sequence_seed=True):
         # Store seed config that will be applied to each op in the net.
         self._seed = seed
@@ -425,6 +429,21 @@ class LayerModelHelper(model_helper.ModelHelper):
                 index += 1
             loss_struct = schema.Struct((prefix, loss))
             self._loss = self._loss + loss_struct
+
+    def add_output_schema(self, name, value):
+        assert value is not None, \
+            'Added output schema {} should not be None'.format(name)
+        assert isinstance(value, schema.Scalar) or \
+            isinstance(value, schema.Struct), \
+            'Added output schema {} should be a scalar or a struct.\n\
+            Now it is {}.'.format(name, type(value))
+        if self._output_schema is None:  # be the first field
+            self._output_schema = schema.Struct((name, value))
+        else:  # merge with other fields
+            assert name not in self._output_schema.fields, \
+                'Output Schema Field {} already exists'.format(name)
+            self._output_schema = \
+                self._output_schema + schema.Struct((name, value))
 
     def add_trainer_extra_schema(self, trainer_extra_schema):
         trainer_extra_record = schema.NewRecord(self.net, trainer_extra_schema)

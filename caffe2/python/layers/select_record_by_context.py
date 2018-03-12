@@ -37,8 +37,16 @@ class SelectRecordByContext(ModelLayer):
     sometimes clone fields internally so we need static blob name for output
     """
 
-    def __init__(self, model, input_record, name='select_record_by_context',
-                 check_field_metas=True, use_copy=False, **kwargs):
+    def __init__(
+        self,
+        model,
+        input_record,
+        name='select_record_by_context',
+        check_field_metas=True,
+        use_copy=False,
+        default_output_record_field=None,
+        **kwargs
+    ):
         super(SelectRecordByContext, self).__init__(model, name, input_record,
                                                     **kwargs)
 
@@ -46,7 +54,10 @@ class SelectRecordByContext(ModelLayer):
         assert len(input_record) > 1
 
         self.use_copy = use_copy
-
+        self.default_output_record = (
+            input_record[default_output_record_field]
+            if (default_output_record_field is not None) else None
+        )
         ref_record = input_record[0]
         for record in input_record:
             assert schema.equal_schemas(record, ref_record,
@@ -55,11 +66,11 @@ class SelectRecordByContext(ModelLayer):
         self.output_schema = schema.NewRecord(model.net, ref_record)
 
     def _set_output_blobs(self, net, context):
-        assert context in self.input_record, (
-            "{} context is not in input record".format(context)
+        record = self.input_record.get(context, self.default_output_record)
+        assert record is not None, (
+            "{} context is not in input record without providing default"
+            " output".format(context)
         )
-        record = self.input_record[context]
-
         for in_blob, out_blob in zip(
                 record.field_blobs(), self.output_schema.field_blobs()
         ):
