@@ -141,7 +141,6 @@ class LayerNorm(Module):
         >>> m = nn.LayerNorm(10)
         >>> # Activating the module
         >>> output = m(input)
-
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
     def __init__(self, normalized_shape, eps=1e-5, momentum=0.1,

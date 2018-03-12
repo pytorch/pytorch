@@ -235,7 +235,6 @@ def avg_pool1d(input, kernel_size, stride=None, padding=0,
         >>> # pool of square window of size=3, stride=2
         >>> input = torch.Tensor([[[1,2,3,4,5,6,7]]])
         >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-
         (0 ,.,.) =
           2  4  6
         [torch.FloatTensor of size (1,1,3)]
@@ -1894,19 +1893,21 @@ def affine_grid(theta, size):
 def pad(input, pad, mode='constant', value=0):
     r"""Pads tensor.
 
-    Nd constant padding:  The number of dimensions to pad is
-        :math:`\lfloor\frac{len(padding)}{2}\rfloor` and the dimensions that gets padded begins with the
-        last dimension and moves forward.  See below for examples.
+    `Nd` constant padding:  The number of dimensions to pad is
+        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that gets padded begins with the
+        last dimension and moves forward. See below for examples.
 
-    1D, 2D and 3D "reflect"/"replicate" padding:
-        1D: 3D input with padding in form (pad_l, pad_r)
-        2D: 4D input tensor pad should be in form
-        (pad_l, pad_r, pad_t, pad_b ).
-        3D: 5D pad (pleft, pright, ptop, pbottom, pfront, pback). No "reflect"
-        implementation
+    `1D`, `2D` and `3D` "reflect" / "replicate" padding:
+        for 1D:
+                3D input tensor with padding of the form `(padLeft, padRight)`
+        for 2D:
+                4D input tensor with padding of the form `(padLeft, padRight, padTop, padBottom)`.
+        for 3D:
+                5D input tensor with padding of the form
+                `(padLeft, padRight, padTop, padBottom, padFront, padBack)`. No "reflect" implementation.
 
     Args:
-        input (Variable): Nd tensor
+        input (Variable): `Nd` tensor
         pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
         mode: 'constant', 'reflect' or 'replicate'. Default: 'constant'
         value: fill value for 'constant' padding. Default: 0
