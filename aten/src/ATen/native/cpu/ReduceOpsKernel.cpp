@@ -1,6 +1,6 @@
 #include "ATen/native/cpu/ReduceOpsKernel.h"
 #include "ATen/Dispatch.h"
-#include <iostream>
+#include "ATen/Parallel.h"
 
 namespace at {
 namespace native {
@@ -91,14 +91,14 @@ template <template <class> class OP, CPUCapability C>
 inline void allImpl(Tensor & result, const Tensor & self, size_t dim, bool all, const char* name, int64_t init) {
   AT_DISPATCH_ALL_TYPES(self.type(), name, [&] {
     if (all) {
-      result.fill_(parallel_reduce<scalar_t, OP>(
+      result.fill_(at::parallel_reduce<scalar_t, OP>(
           &allreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>, self.data<scalar_t>(),
           (size_t)0, (size_t)self.numel(), (scalar_t)init));
     } else {
-      parallel_for_2d<scalar_t>(&dimreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>,
-                                self.sizes()[dim], self.strides()[dim],
-                                self.numel(), self.data<scalar_t>(),
-                                result.data<scalar_t>());
+      at::parallel_for_2d<scalar_t>(
+          &dimreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>,
+          self.sizes()[dim], self.strides()[dim], self.numel(),
+          self.data<scalar_t>(), result.data<scalar_t>());
     }
     });
 }
