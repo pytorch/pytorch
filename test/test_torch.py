@@ -1343,6 +1343,14 @@ class TestTorch(TestCase):
         self.assertEqual(res1, expected)
         self.assertIs(torch.int, res1.dtype)
 
+        # test copy with numpy
+        if TEST_NUMPY:
+            a = np.array([5.])
+            res1 = torch.tensor(a)
+            self.assertEqual(5., res1[0].item())
+            a[0] = 7.
+            self.assertEqual(5., res1[0].item())
+
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
@@ -1360,6 +1368,15 @@ class TestTorch(TestCase):
         res2 = expected.new_tensor(expected, dtype=torch.int)
         self.assertEqual(res2, expected)
         self.assertIs(torch.int, res2.dtype)
+
+        # test copy with numpy
+        if TEST_NUMPY:
+            a = np.array([5.])
+            res1 = torch.tensor(a)
+            res1 = res1.new_tensor(a)
+            self.assertEqual(5., res1[0].item())
+            a[0] = 7.
+            self.assertEqual(5., res1[0].item())
 
         if torch.cuda.device_count() >= 2:
             expected = expected.cuda(1)
