@@ -2,8 +2,9 @@ import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ParameterList, Parameter
-from torch._six import raise_from
-from collections import defaultdict, OrderedDict
+from torch.jit.frontend import get_jit_ast
+from torch._six import raise_from, with_metaclass
+from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
 import itertools
@@ -500,8 +501,9 @@ class TracedModuleBase(torch.nn.Module):
         if not self.__frozen:
             return super(TracedModuleBase, self).__setattr__(name, value)
         if name in self._parameters or name in self._buffers:
+            result = super(TracedModuleBase, self).__setattr__(name, value)
             self._recompute_captures()
-            return super(TracedModuleBase, self).__setattr__(name, value)
+            return result
         raise RuntimeError("Only parameters and buffers of compiled modules can be re-assigned.")
 
     def __delattr__(self, name):
@@ -560,7 +562,6 @@ class TracedModule(TracedModuleBase):
 
         self._executor = executor
         self._recompute_captures()
-
         self._freeze()
 
     def __call__(self, *args):
@@ -606,6 +607,25 @@ for name, method in _get_methods(torch.nn.Module):
 
 
 def createResolutionCallback(frame_id=2):
+    """
+    Creates a function which, given a string variable name,
+    returns the value of the variable in the scope of the caller of
+    the function which called createResolutionCallback (by default).
+    For example, the following program prints 2::
+
+        def bar():
+            cb = createResolutionCallback()
+            print(x("foo"))
+
+        def baz():
+            foo = 2
+            bar()
+
+        baz()
+
+    This is used to enable access in-scope Python variables inside
+    TorchScript fragments.
+    """
     frame = inspect.stack()[frame_id][0]
 
     def env(key):
@@ -621,29 +641,93 @@ def createResolutionCallback(frame_id=2):
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
-        self.cu = torch._C.CompilationUnit()
+        self.module = torch._C.ScriptModule(optimize)
         if lang is not None:
             self.define(lang, frame_id=3)
-        self.execution_engines = {}
         self.optimize = optimize
 
     def define(self, lang, rcb=None, frame_id=2):
         if not rcb:
             rcb = createResolutionCallback(frame_id)
-        self.cu.define(lang, rcb)
+        self.module._define(lang, rcb, False)
 
     def __getattr__(self, attr):
-        if attr not in self.execution_engines:
-            graph = self.cu.get_graph(attr)
-            self.execution_engines[attr] = torch._C.GraphExecutor(graph, self.optimize)
-        return self.execution_engines[attr]
+        return self.module._get_method(attr)
 
 
 def script(fn):
     rcb = createResolutionCallback()
-    ast = torch.jit.frontend.get_jit_ast(fn)
+    ast = get_jit_ast(fn)
     graph = _jit_script_compile(ast, rcb)
     return torch._C.GraphExecutor(graph, True)
+
+
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast'))
+
+
+def script_method(fn):
+    return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
+
+
+# For each user-defined class that subclasses ScriptModule this meta-class,
+# (1) finds all the methods annotated with @script_method
+# in a ScriptModule and removes them from the class attributes, and
+# (2) puts a wrapper around the class's __init__ method to register
+# all of the script_methods with the module after the original __init__
+# has run. This has to occur after the user-defined __init__ so that
+# submodules and parameters are initialized _before_ the script compiler
+# resolve references to `self.param` or `self.module`.
+class ScriptMeta(type(torch._C.ScriptModule)):
+    # this has to inherit from pybind11's metaclass otherwise we get
+    # issues because ScriptModule inherits from torch._C.ScriptModule,
+    # a pybind11 type
+    def __init__(cls, name, bases, attrs):
+        # find all the script methods
+        methods = []
+        for k, v in sorted(attrs.items()):
+            if isinstance(v, ScriptMethodStub):
+                delattr(cls, k)
+                methods.append(v)
+        if len(methods) > 0:
+            # after the user's __init__ register all the script methods
+            # with the module
+            original_init = getattr(cls, '__init__', lambda self: None)
+
+            def init_then_register(self, *args, **kwargs):
+                original_init(self, *args, **kwargs)
+                for m in methods:
+                    self._create_method(m.ast, m.resolution_callback)
+
+            cls.__init__ = init_then_register
+        return super(ScriptMeta, cls).__init__(name, bases, attrs)
+
+
+class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule)):
+
+    def __setattr__(self, name, value):
+        if isinstance(value, Parameter):
+            self._register_or_set_parameter(name, value)
+        elif isinstance(value, ScriptModule):
+            self._register_module(name, value)
+            # note: script modules are subclassed in python and the
+            # C++ script::Module class will not hold references to them
+            # to ensure that you always get the same python value here
+            # we store it as a native attribute _in addition to_
+            # registering it with the C++ script::Module
+            object.__setattr__(self, name, value)
+        else:
+            object.__setattr__(self, name, value)
+
+    def __getattr__(self, attr):
+        r = self._get_attribute(attr)
+        if r is None:
+            raise AttributeError("'{}' object has no attribute '{}'".format(self.__class__.__name__, attr))
+        return r
+
+    def define(self, lang):
+        rcb = createResolutionCallback()
+        self._define(lang, rcb, True)
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

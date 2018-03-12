@@ -803,8 +803,8 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
   }
 
   if (free_rinfo_) {
-    real min = THCudaIntTensor_minall(state, rinfo_);
-    real max = THCudaIntTensor_maxall(state, rinfo_);
+    int min = THCudaIntTensor_minall(state, rinfo_);
+    int max = THCudaIntTensor_maxall(state, rinfo_);
     THCudaIntTensor_free(state, rinfo_);
     if (min != 0 || max != 0) {
       THError("failed to factorize some batch elements (min info == %d, max info == %d)",

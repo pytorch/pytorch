@@ -1,24 +1,26 @@
-#include "Python.h"
+#ifndef NO_PYTHON
+#include <Python.h>
+#endif
 #include "torch/csrc/jit/tracer.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/functions/special.h"
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
 
 #include <string>
 #include <sstream>
 #include <memory>
+
+#ifndef NO_PYTHON
+#include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/python_strings.h"
 #include <frameobject.h>
 #include <patchlevel.h>
 
-namespace torch { namespace jit { namespace tracer {
-
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::string getPythonInterpreterStackTrace() {
+std::string torch::jit::tracer::getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
   PyThreadState *tstate = PyThreadState_GET();
@@ -35,6 +37,10 @@ std::string getPythonInterpreterStackTrace() {
   }
   return stack_trace.str();
 }
+#endif
+
+namespace torch { namespace jit { namespace tracer {
+
 
 namespace {
 
@@ -142,8 +148,10 @@ PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
   auto state_lock = info.state->lock();
 
   Node *n = ctor(*graph);
+#ifndef NO_PYTHON
   auto sl = std::make_shared<StringSourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
+#endif
 
   for (Variable input : inputs) {
     n->addInput(getValueTrace(info.state, input));
@@ -164,6 +172,7 @@ PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
   });
 }
 
+#ifndef NO_PYTHON
 PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
@@ -183,6 +192,7 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
         std::move(scalar_args));
   });
 }
+#endif
 
 void postRecordTrace(const PreTraceInfo& info,
                      at::ArrayRef<Variable> outputs) {

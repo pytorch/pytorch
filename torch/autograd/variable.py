@@ -11,7 +11,7 @@ from torch._C import _add_docstr
 
 
 class Variable(_C._VariableBase):
-    """Wraps a tensor and records the operations applied to it.
+    r"""Wraps a tensor and records the operations applied to it.
 
     Variable is a thin wrapper around a Tensor object, that also holds
     the gradient w.r.t. to it, and a reference to a function that created it.
@@ -90,7 +90,7 @@ class Variable(_C._VariableBase):
                 return torch._tensor_str._str(self).encode('UTF-8', 'replace')
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False):
-        """Computes the gradient of current variable w.r.t. graph leaves.
+        r"""Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is
         non-scalar (i.e. its data has more than one element) and requires
@@ -120,7 +120,7 @@ class Variable(_C._VariableBase):
         torch.autograd.backward(self, gradient, retain_graph, create_graph)
 
     def register_hook(self, hook):
-        """Registers a backward hook.
+        r"""Registers a backward hook.
 
         The hook will be called every time a gradient with respect to the
         variable is computed. The hook should have the following signature::
@@ -246,6 +246,8 @@ class Variable(_C._VariableBase):
         return self.view(tensor.size())
 
     def btrifact(self, info=None, pivot=True):
+        r"""See :func:`torch.btrifact`
+        """
         if info is not None:
             warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "
                           "consider using btrifact_with_info instead", stacklevel=2)
@@ -268,10 +270,12 @@ class Variable(_C._VariableBase):
         return Resize.apply(self, variable.size())
 
     def split(self, split_size, dim=0):
+        r"""See :func:`torch.split`
+        """
         if isinstance(split_size, int):
             return super(Variable, self).split(split_size, dim)
         else:
-            return torch.functional.split(self, split_size, dim)
+            return super(Variable, self).split_with_sizes(split_size, dim)
 
     def index_add(self, dim, index, tensor):
         return self.clone().index_add_(dim, index, tensor)
@@ -304,6 +308,18 @@ class Variable(_C._VariableBase):
 
     def expand_as(self, tensor):
         return self.expand(tensor.size())
+
+    def unique(self, sorted=False, return_inverse=False):
+        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+
+        See :func:`torch.unique`
+        """
+        output, inverse_indices = self._unique(
+            sorted=sorted, return_inverse=return_inverse)
+        if return_inverse:
+            return output, inverse_indices
+        else:
+            return output
 
     def __rsub__(self, other):
         return -self + other

@@ -24,6 +24,7 @@ Creation Ops
 .. autofunction:: range
 .. autofunction:: zeros
 .. autofunction:: zeros_like
+.. autofunction:: empty_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -144,6 +145,7 @@ Reduction Ops
 .. autofunction:: prod
 .. autofunction:: std
 .. autofunction:: sum
+.. autofunction:: unique
 .. autofunction:: var
 
 

@@ -11,28 +11,9 @@ namespace torch {
 namespace jit {
 namespace script {
 
-namespace {
-
-// record of defined function
-// Graph + metadata
-struct FunctionDefinition {
-  explicit FunctionDefinition(Def tree_)
-      : tree(new Def(tree_)), graph(new Graph()) {}
-
-  explicit FunctionDefinition(std::unique_ptr<Graph> graph_)
-      : tree(nullptr), graph(std::move(graph_)) {}
-
-  bool isExtern() const {
-    return tree == nullptr;
-  }
-  std::unique_ptr<Def> tree;
-  std::shared_ptr<Graph> graph;
-};
-
-} // namespace
-
-using FunctionTable = std::unordered_map<std::string, FunctionDefinition>;
-using ValueTable = std::unordered_map<std::string, Value*>;
+using SugaredValuePtr = std::shared_ptr<SugaredValue>;
+using FunctionTable = std::unordered_map<std::string, Method&>;
+using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap =
     std::unordered_map<std::string, std::pair<double, std::string>>;
 using ListAttributeMap = std::unordered_map<
@@ -67,23 +48,24 @@ using ListAttributeMap = std::unordered_map<
 //      the IR API, but for now we choose to pessimisitically create inputs and
 //      delete unnecessary ones later with replaceAllusesWith().
 struct Environment {
-  Environment(Block* b, std::shared_ptr<Environment> next = nullptr)
-      : b(b), next(next) {}
+  Environment(Method & method, const Resolver& resolver, Block* b, std::shared_ptr<Environment> next = nullptr)
+      : method(method), resolver(resolver), b(b), next(next) {}
 
+  Method & method;
+  const Resolver& resolver;
   std::vector<std::string> captured_inputs;
-  ValueTable value_table;
   Block* b;
 
   std::shared_ptr<Environment> next;
 
-  Value* findInThisFrame(const std::string& name) {
+  SugaredValuePtr findInThisFrame(const std::string& name) {
     if (value_table.count(name)) {
       return value_table.at(name);
     }
     return nullptr;
   }
 
-  Value* findInParentFrame(const std::string& name) {
+  SugaredValuePtr findInParentFrame(const std::string& name) {
     for (auto runner = next; runner; runner = runner->next) {
       if (runner->value_table.count(name)) {
         return runner->value_table.at(name);
@@ -92,17 +74,22 @@ struct Environment {
     return nullptr;
   }
 
-  Value* createCapturedInput(const std::string& name) {
+  Value* getValueInThisFrame(const SourceRange& loc, const std::string& name) {
+    return value_table.at(name)->asValue(loc, method);
+  }
+
+  SugaredValuePtr createCapturedInput(const std::string& name) {
     // Create the input
     Value* new_input = b->addInput();
 
     // Associate this name with this value
-    value_table[name] = new_input;
+    auto sv = std::make_shared<SimpleValue>(new_input);
+    value_table[name] = sv;
 
     // List as a positional input
     captured_inputs.push_back(name);
 
-    return new_input;
+    return sv;
   }
 
   Symbol getBlockOwningKind() {
@@ -114,38 +101,52 @@ struct Environment {
   }
 
   void setVar(const std::string& name, Value* value) {
+    setSugaredVar(name, std::make_shared<SimpleValue>(value));
+  }
+  void setSugaredVar(const std::string& name, SugaredValuePtr value) {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
         getBlockOwningKind() == kLoop)
       createCapturedInput(name);
-    value_table[name] = value;
+    value_table[name] = std::move(value);
   }
 
+  SugaredValuePtr getSugaredVar(const Ident& ident, bool required=true) {
+    return getSugaredVar(ident.name(), ident);
+  }
   Value* getVar(const Ident& ident) {
-    return getVar(ident.name(), ident);
+    return getSugaredVar(ident)->asValue(ident.range(), method);
+  }
+
+  SugaredValuePtr getSugaredVar(const std::string& ident, const TreeView& tv, bool required=true) {
+    auto retval = findInThisFrame(ident);
+
+    if (!retval && (retval = findInParentFrame(ident)) &&
+        getBlockOwningKind() == kLoop) {
+      retval = createCapturedInput(ident);
+    }
+
+    if(!retval) {
+      retval = resolver(ident);
+    }
+
+    if (!retval && required) {
+      throw ErrorReport(tv) << "undefined value " << ident;
+    }
+    return retval;
   }
 
   Value* getVar(const std::string& ident, const TreeView& tv) {
-    Value* retval = findInThisFrame(ident);
-
-    if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == kLoop)
-      retval = createCapturedInput(ident);
-
-    if (!retval) {
-      throw ErrorReport(tv) << "undefined value " << ident;
-    }
-
-    return retval;
+    return getSugaredVar(ident, tv)->asValue(tv.range(), method);
   }
 
   // Given that after emitting statements in a block, we've added block inputs
   // for all value references and assignments, delete inputs for which there was
   // no assignment, only references.
-  void deleteExtraInputs(size_t skip_num = 0) {
+  void deleteExtraInputs(const SourceRange& loc, size_t skip_num = 0) {
     std::vector<size_t> inputs_to_delete;
     int i = skip_num;
     for (const auto& x : captured_inputs) {
-      if (b->inputs()[i] == value_table[x]) {
+      if (b->inputs()[i] == getValueInThisFrame(loc, x)) {
         inputs_to_delete.push_back(i);
       }
       i++;
@@ -154,8 +155,8 @@ struct Environment {
     for (auto ritr = inputs_to_delete.rbegin(); ritr != inputs_to_delete.rend();
          ++ritr) {
       auto name = captured_inputs[*ritr - skip_num];
-      Value* v = value_table[name];
-      Value* orig = findInParentFrame(name);
+      Value* v = getValueInThisFrame(loc, name);
+      Value* orig = findInParentFrame(name)->asValue(loc, method);
       // Replace all matching node inputs with original value
       // from an enclosing scope
       v->replaceAllUsesWith(orig);
@@ -165,28 +166,135 @@ struct Environment {
       captured_inputs.erase(captured_inputs.begin() + *ritr - skip_num);
     }
   }
+  std::vector<std::string> definedVariables() {
+    std::vector<std::string> result;
+    for(auto & kv : value_table) {
+      result.push_back(kv.first);
+    }
+    return result;
+  }
+private:
+  ValueTable value_table;
 };
+
+Node* emitBuiltinCall(
+  const SourceRange& loc,
+  Method& method,
+  const std::string & name,
+  at::ArrayRef<Value*> inputs,
+  List<Attribute> attributes,
+  size_t n_outputs) {
+
+  NodeKind kind(name);
+  auto graph = method.graph();
+  auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
+                ->setSourceLocation(std::make_shared<SourceRange>(loc));
+
+  for (const auto& attr : attributes) {
+    const auto& name = attr.name().name();
+    const Expr& value = attr.value();
+    // TODO: handle non-float attributes
+    switch (value.kind()) {
+      case TK_CONST: {
+        auto v = value.get()->tree(0)->doubleValue();
+        const auto& type = value.get()->tree(1)->stringValue();
+        if(type == "f")
+          n->f_(Symbol(name), v);
+        else
+          n->i_(Symbol(name), v);
+      } break;
+      case TK_LIST_LITERAL: {
+        std::vector<double> vs{};
+        std::string type = "f"; // TODO: handle possibly mixed constants better
+        for (const auto& tree : ListLiteral(value).inputs()) {
+          vs.push_back(tree.get()->tree(0)->doubleValue());
+          type = tree.get()->tree(1)->stringValue();
+        }
+        if(type == "f") {
+          n->fs_(Symbol(name), std::move(vs));
+        } else {
+          n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
+        }
+      } break;
+    default:
+        throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+        break;
+    }
+  }
+
+  return n;
+}
 
 struct to_ir {
   to_ir(
-      FunctionDefinition& def,
+      Def def,
       FunctionTable& function_table,
-      const Resolver& resolver)
-      : def(def), function_table(function_table), resolver(resolver) {
-    environment_stack = std::make_shared<Environment>(def.graph->block());
-    // populate def->graph
-    auto& tree = *def.tree;
-    for (auto input : tree.params()) {
-      auto& name = input.ident().name();
-      environment_stack->setVar(name, def.graph->addInput(name));
+      const Resolver& resolver,
+      SugaredValuePtr self,
+      Method& method) // method being constructed
+      : method(method)
+      , graph(method.graph())
+      , def(def)
+      , function_table(function_table)
+      , resolver(resolver)
+      , environment_stack(nullptr) {
+    pushFrame(graph->block());
+    // inputs
+    auto it = def.params().begin();
+    auto end = def.params().end();
+    if(self) {
+      if(it == end)
+        throw ErrorReport(def.params().range()) << "methods must have a self argument";
+      environment_stack->setSugaredVar((*it).ident().name(), self);
+      ++it;
     }
-    emitStatements(tree.statements());
-    for (auto output : tree.returns()) {
-      def.graph->registerOutput(environment_stack->getVar(output.ident()));
+    for(;it != end; ++it) {
+      auto& name = (*it).ident().name();
+      environment_stack->setVar(name, graph->addInput(name));
+    }
+    // body
+    auto stmts = def.statements();
+    auto stmts_begin = stmts.begin();
+    auto stmts_end = stmts.end();
+    if (stmts_begin == stmts_end)
+      throw ErrorReport(def) << "functions need to have a non-empty body";
+    --stmts_end;
+    if ((*stmts_end).kind() != TK_RETURN)
+      throw ErrorReport(*stmts_end) << "functions need to end with a return statement";
+
+    emitStatements(stmts_begin, stmts_end);
+
+    // outputs
+    for (auto output : Return(*stmts_end).values()) {
+      graph->registerOutput(emitExpr(output, 1)[0]);
     }
   }
+
+private:
+  Method& method;
+  std::shared_ptr<Graph> graph;
+  Def def;
+  FunctionTable& function_table;
+  const Resolver& resolver;
+
+  // Singly-linked list of environments. This top element contains a member
+  // `next` that points to the most immediate enclosing scope's value.
+  std::shared_ptr<Environment> environment_stack;
+
+  void pushFrame(Block * b) {
+    environment_stack = std::make_shared<Environment>(method, resolver, b, environment_stack);
+  }
+  std::shared_ptr<Environment> popFrame() {
+    auto old_frame = environment_stack;
+    environment_stack = environment_stack->next;
+    return old_frame;
+  }
   void emitStatements(const List<Stmt>& statements) {
-    for (auto stmt : statements) {
+    return emitStatements(statements.begin(), statements.end());
+  }
+  void emitStatements(List<Stmt>::const_iterator begin, List<Stmt>::const_iterator end) {
+    for (; begin != end; ++begin) {
+      auto stmt = *begin;
       switch (stmt.kind()) {
         case TK_IF:
           emitIf(If(stmt));
@@ -200,11 +308,15 @@ struct to_ir {
         case TK_GLOBAL:
           for (auto ident : Global(stmt).names()) {
             const auto& name = Ident(ident).name();
-            environment_stack->setVar(name, def.graph->addInput(name));
+            environment_stack->setVar(name, graph->addInput(name));
           }
           break;
         case TK_EXPR_STMT:
           emitExpr(ExprStmt(stmt).expr(), 0);
+          break;
+        case TK_RETURN:
+          throw ErrorReport(stmt) << "return statements can appear only at the end "
+                                  << "of the function body";
           break;
       }
     }
@@ -214,22 +326,20 @@ struct to_ir {
       Block* b,
       const List<Stmt> branch,
       std::unordered_set<std::string>* mutated_parent_values) {
-    environment_stack = std::make_shared<Environment>(b, environment_stack);
-    WithInsertPoint guard(*def.graph, b);
+    pushFrame(b);
+    WithInsertPoint guard(b);
     emitStatements(branch);
 
-    for (const auto& kv : environment_stack->value_table) {
-      if (environment_stack->findInParentFrame(kv.first)) {
-        mutated_parent_values->insert(kv.first);
+    for (const auto & n : environment_stack->definedVariables()) {
+      if (environment_stack->findInParentFrame(n)) {
+        mutated_parent_values->insert(n);
       }
     }
-    auto save_env = environment_stack;
-    environment_stack = environment_stack->next;
-    return save_env;
+    return popFrame();
   }
 
   Node* create(Symbol kind, const SourceRange& loc,  size_t num_outputs) {
-    return def.graph
+    return graph
              ->create(kind, num_outputs)
              ->setSourceLocation(std::make_shared<SourceRange>(loc));
   }
@@ -237,18 +347,17 @@ struct to_ir {
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kIf, expr.range(), 0));
+    Node* n = graph->insertNode(create(kIf, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
 
     auto emit_if_expr = [this](Block* b, const Expr& expr) {
-      environment_stack = std::make_shared<Environment>(b, environment_stack);
-      WithInsertPoint guard(*def.graph, b);
+      pushFrame(b);
+      WithInsertPoint guard(b);
       Value* out_val = emitExpr(expr, 1)[0];
       b->registerOutput(out_val);
-
-      environment_stack = environment_stack->next;
+      popFrame();
     };
 
     emit_if_expr(true_block, expr.true_expr());
@@ -263,7 +372,7 @@ struct to_ir {
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kIf, stmt.range(), 0));
+    Node* n = graph->insertNode(create(kIf, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -312,7 +421,7 @@ struct to_ir {
     Value* max_trip_count_dummy = emitConst(stmt.range(), INT_MAX, "i")[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = def.graph->insertNode(create(kLoop, stmt.range(), 0));
+    Node* n = graph->insertNode(create(kLoop, stmt.range(), 0));
     n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
@@ -325,32 +434,27 @@ struct to_ir {
     size_t skip_inputs_num = 1;
 
     {
-      environment_stack =
-          std::make_shared<Environment>(body_block, environment_stack);
-      WithInsertPoint guard(*def.graph, body_block);
+      pushFrame(body_block);
+      WithInsertPoint guard(body_block);
       emitStatements(stmt.body());
 
       // Also emit the conditional
       Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
       body_block->registerOutput(body_cond_value);
 
+      auto body_frame = popFrame();
+      auto outer_frame = environment_stack;
       // Remove inputs for values that did not mutate within the
       // block
-      environment_stack->deleteExtraInputs(skip_inputs_num);
+      body_frame->deleteExtraInputs(stmt.range(), skip_inputs_num);
 
       // Add block outputs
-      auto curr_frame = environment_stack;
-      for (const auto& x : curr_frame->captured_inputs) {
-        body_block->registerOutput(curr_frame->value_table[x]);
+      for (const auto& x : body_frame->captured_inputs) {
+        body_block->registerOutput(body_frame->getValueInThisFrame(stmt.range(), x));
+        n->addInput(outer_frame->getVar(x, stmt));
+        outer_frame->setVar(x, n->addOutput());
       }
 
-      auto next_frame = curr_frame->next;
-      for (const auto& x : curr_frame->captured_inputs) {
-        n->addInput(next_frame->getVar(x, stmt));
-        next_frame->setVar(x, n->addOutput());
-      }
-
-      environment_stack = next_frame;
     }
   }
 
@@ -422,33 +526,6 @@ struct to_ir {
     return values;
   }
 
-  // emit a function call by inlining the function's Graph into our
-  // Graph
-  std::vector<Value*> emitFunctionCall(Apply& apply, const size_t output_size) {
-    auto& fn = function_table.at(apply.name().name());
-    std::vector<Value*> inputs = getValues(apply.inputs());
-
-    std::unordered_map<Value*, Value*> value_map;
-    auto value_map_func = [&](Value* v) { return value_map.at(v); };
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      value_map[fn.graph->inputs()[i]] = inputs[i];
-    }
-    for (auto* node : fn.graph->nodes()) {
-      auto* new_node =
-          def.graph->insertNode(def.graph->createClone(node, value_map_func));
-      for (size_t i = 0; i < node->outputs().size(); ++i) {
-        value_map[node->outputs()[i]] = new_node->outputs()[i];
-        new_node->outputs()[i]->copyMetadata(node->outputs()[i]);
-      }
-    }
-
-    std::vector<Value*> outputs{};
-    for (auto* output : fn.graph->outputs()) {
-      outputs.push_back(value_map_func(output));
-    }
-    return outputs;
-  }
-
   void expectOutputs(
       const TreeRef& tree,
       const size_t expected_size,
@@ -460,15 +537,63 @@ struct to_ir {
     }
   }
 
-  // This will _always_ compute something, unlike 'getValue' which simply
-  // returns an already computed reference if possible.
+  // special rules apply when we directly call foo(a,b) when foo is an ident
+  std::vector<Value*> emitApplyIdent(Ident ident, std::vector<Value*> inputs, List<Attribute> attributes, size_t output_size) {
+    auto it = function_table.find(ident.name());
+    if (it != function_table.end()) {
+      if(inputs.size() != it->second.num_inputs())
+        throw ErrorReport(ident) << "expected " << it->second.num_inputs() << " but found " << inputs.size();
+      auto outputs = method.emit_call_to(it->second, inputs);
+      expectOutputs(ident, output_size, outputs.size());
+      return outputs;
+    } else if (ident.name() == "print") {
+      expectOutputs(ident, output_size, 0);
+      if (!attributes.empty())
+        throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
+      return emitNode(kPrint, ident.range(), inputs, 0 )->outputs();
+    }
+    Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, output_size);
+    if (hasTensorOp(builtin)) {
+      return builtin->outputs();
+    }
+    builtin->destroy();
+    // it wasn't known built in, so treat it like standard apply
+    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, output_size);
+  }
+
+  std::vector<Value*> emitApplyExpr(Expr callee, const std::vector<Value*>& inputs, List<Attribute> attributes, size_t output_size) {
+    // otherwise we evaluate the callee and then desugar it
+    auto sv = emitSugaredExpr(callee);
+    return sv->call(callee.range(), method, inputs, attributes, output_size);
+  }
+
+  // any expression that can produce a SugaredValue are handled here
+  // with emitExpr falling back to this function to handle them
+  // the kinds handled here should be kept in sync with [SUGARED VALUES]
+  // in emitExpr
+  std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree) {
+    switch(tree.kind()) {
+      case TK_VAR:
+        return environment_stack->getSugaredVar(Var(tree).name());
+      case '.': {
+        auto select = Select(tree);
+        auto sv = emitSugaredExpr(select.value());
+        return sv->attr(select.range(), method, select.selector().name());
+      }
+      default:
+        return std::make_shared<SimpleValue>(emitExpr(tree, 1)[0]);
+    }
+  }
+
   std::vector<Value*> emitExpr(
       const TreeRef& tree,
       const size_t output_size = 0) {
     switch (tree->kind()) {
-      case TK_VAR: {
-        expectOutputs(tree, output_size, 1);
-        return {environment_stack->getVar(Var(tree).name())};
+      // the expressions have special handling because they may operate
+      // on sugared values
+      // [SUGARED VALUES]
+      case TK_VAR: case '.': {
+        return { emitSugaredExpr(Expr(tree))->asValue(tree->range(), method) };
       } break;
       case TK_NE:
       case TK_EQ:
@@ -498,63 +623,12 @@ struct to_ir {
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        if (function_table.count(apply.name().name()) > 0) {
-          return emitFunctionCall(apply, output_size);
-        } else if (apply.name().name() == "print") {
-          expectOutputs(tree, output_size, 0);
-          if (!apply.attributes().empty())
-            throw ErrorReport(tree) << "print doesn't accept any keyword arguments";
-          return emitNode(kPrint, tree->range(), getValues(apply.inputs()), 0,
-                          AttributeMap{}, ListAttributeMap{})->outputs();
-        } else {
-          const auto& inputs = getValues(apply.inputs());
-          NodeKind kind{apply.name().name()};
-
-          AttributeMap attributes{};
-          ListAttributeMap list_attributes{};
-          for (const auto& attr : apply.attributes()) {
-            const auto& name = attr.name().name();
-            const TreeRef& value = attr.value();
-            // TODO: handle non-float attributes
-            switch (value->kind()) {
-              case TK_CONST: {
-                auto v = value.get()->tree(0)->doubleValue();
-                const auto& type = value.get()->tree(1)->stringValue();
-                attributes.insert({name, {v, type}});
-              } break;
-              case TK_LIST: {
-                std::vector<double> vs{};
-                for (const auto& tree : value.get()->trees()) {
-                  vs.push_back(tree->tree(0)->doubleValue());
-                }
-                const auto& type = value.get()->trees()[0]->tree(1)->stringValue();
-                list_attributes.insert({name, {std::move(vs), type}});
-              } break;
-            default:
-                throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value->kind();
-                break;
-            }
-          }
-          auto n =
-              emitNode(kind, apply.range(), inputs, output_size, attributes, list_attributes);
-          std::vector<Value*> outputs = n->outputs();
-          if (!hasTensorOp(n)) {
-            // This will either throw or return a new node. We take
-            // responsibility for inserting the node with inputs and outputs and
-            // destroying the old node
-            auto new_node = resolver.resolveCall(tree->range(), n);
-            new_node->insertBefore(n);
-            for (const auto& i : n->inputs()) {
-              new_node->addInput(i);
-            }
-            for (size_t i = 0; i < n->outputs().size(); ++i) {
-              new_node->addOutput();
-            }
-            n->destroy();
-            n = new_node;
-          }
-          return n->outputs();
+        auto inputs = getValues(apply.inputs());
+        // the apply is directly an identifier 'foo'
+        if(apply.callee().kind() == TK_VAR) {
+          return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), output_size);
         }
+        return emitApplyExpr(apply.callee(), inputs, apply.attributes(), output_size);
       } break;
       case TK_CAST: {
         expectOutputs(tree, output_size, 1);
@@ -580,8 +654,6 @@ struct to_ir {
         return emitGather(
             gather.range(), {gather.value(), gather.indices()}, output_size);
       } break;
-      case '.':
-        // TODO: add support for "."
       case TK_IF_EXPR: {
         expectOutputs(tree, output_size, 1);
         return emitTernaryIf(TernaryIf(tree));
@@ -613,7 +685,7 @@ struct to_ir {
     return emitNode(
                Symbol("type_as"),
                input->range(),
-               {emitExpr(input, 1)[0], createConstant(input->range(), at::CPU(t).ones({1}))},
+               {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
         ->outputs();
   }
@@ -636,32 +708,10 @@ struct to_ir {
       NodeKind kind,
       const SourceRange& loc,
       const std::vector<Value*> inputs,
-      const size_t output_size,
-      const AttributeMap& attributes = AttributeMap{},
-      const ListAttributeMap& list_attributes = ListAttributeMap{}) {
-    Node* n = def.graph->insertNode(create(kind, loc, output_size));
+      const size_t output_size) {
+    Node* n = graph->insertNode(create(kind, loc, output_size));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
-    }
-    for (const auto& attr : attributes) {
-      const auto name = Symbol(attr.first);
-      auto value = attr.second.first;
-      const auto& type = attr.second.second;
-      if (type == "f") {
-        n->f_(name, value);
-      } else {
-        n->i_(name, value);
-      }
-    }
-    for (const auto& attr : list_attributes) {
-      const auto name = Symbol(attr.first);
-      const auto& values = attr.second.first;
-      const auto& type = attr.second.second;
-      if (type == "f") {
-        n->fs_(name, std::vector<double>{values.begin(), values.end()});
-      } else {
-        n->is_(name, std::vector<int64_t>{values.begin(), values.end()});
-      }
     }
     return n;
   }
@@ -682,12 +732,11 @@ struct to_ir {
                Symbol("slice"),
                loc,
                {tensor},
-               output_size,
-               {{"dim", {0, "LL"}},
-                {"step", {1, "LL"}},
-                {"start", {begin, "LL"}},
-                {"end", {end, "LL"}}})
-        ->outputs();
+               output_size)
+               ->i_(kdim, 0)
+               ->i_(kstep, 1)
+               ->i_(kstart, begin)
+               ->i_(kend, end)->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -704,82 +753,76 @@ struct to_ir {
                Symbol("select"),
                loc,
                {tensor},
-               output_size,
-               {{"dim", {0, "LL"}}, {"index", {idx, "LL"}}})
-        ->outputs();
+               output_size)
+               ->i_(kdim, 0)
+               ->i_(kindex, idx)
+               ->outputs();
   }
 
-  FunctionDefinition& def; // the def being constructed
-  FunctionTable& function_table;
-  const Resolver& resolver;
-
-  // Singly-linked list of environments. This top element contains a member
-  // `next` that points to the most immediate enclosing scope's value.
-  std::shared_ptr<Environment> environment_stack;
-
- private:
   Value* createConstant(const SourceRange& loc, const at::Tensor& val) {
-    auto n = def.graph->createConstant(val);
+    auto n = graph->createConstant(val);
     n->setSourceLocation(std::make_shared<SourceRange>(loc));
-    return def.graph->insertNode(n)->output();
+    return graph->insertNode(n)->output();
   }
 };
 
-struct CompilationUnitImpl {
-  CompilationUnitImpl() {}
-  void defineFunction(const Def& def, const Resolver& resolver) {
-    const auto& name = def.name().name();
+// support syntax sugar for x.foo(y, z) by allowing x.foo to return a
+// callable value that will resolve to foo(x, y, z) when called.
+std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
+  struct InfixCall : public SugaredValue {
+    InfixCall(const std::string& field, Value* value)
+    : field(field), value(value) {}
+    std::string field;
+    Value* value;
 
-    if (functions.count(name) > 0) {
-      throw ErrorReport(def) << name << " already defined.";
+    virtual std::string kind() const override {
+      return "builtin";
     }
+    virtual std::vector<Value*> call(
+      SourceRange loc,
+      Method & m,
+      at::ArrayRef<Value*> inputs_,
+      List<Attribute> attributes,
+      size_t n_outputs) override {
+        std::vector<Value*> inputs { value };
+        inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
+        Node * n = emitBuiltinCall(loc, m, field, inputs, attributes, n_outputs);
+        if(!hasTensorOp(n)) {
+          throw ErrorReport(loc) << "unknown builtin op";
+        }
+        return n->outputs();
+    }
+  };
+  return std::make_shared<InfixCall>(field, value);
+}
 
-    auto it = functions.emplace(name, FunctionDefinition{def}).first;
-    to_ir(it->second, functions, resolver);
-  }
 
-  void define(const std::string& script, const Resolver& resolver) {
-    Parser p(script);
-    while (p.lexer().cur().kind != TK_EOF) {
-      defineFunction(Def(p.parseFunction()), resolver);
+void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const Resolver& resolver, SugaredValuePtr self) {
+  FunctionTable table;
+  for(auto def : definitions) {
+    const std::string& name = def.name().name();
+    Method& method = m.create_method(name);
+    to_ir(def, table, resolver, self,  method);
+    auto result = table.emplace(name, method);
+    if(!result.second) {
+      throw ErrorReport(def) << "duplicate definition of function '" << name << "'";
     }
   }
+}
 
-  std::shared_ptr<Graph> getGraph(const std::string& func_name) {
-    if (functions.count(func_name) == 0)
-      throw ErrorReport() << "undefined function: " << func_name << "\n";
-    auto& def = functions.at(func_name);
-    return def.graph;
+void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
+  Parser p(source);
+  std::vector<Def> definitions;
+  while (p.lexer().cur().kind != TK_EOF) {
+    definitions.push_back(Def(p.parseFunction()));
   }
-
- private:
-  friend struct to_ir;
-  FunctionTable functions;
-};
-
-CompilationUnit::CompilationUnit() : pImpl(new CompilationUnitImpl()) {}
-
-void CompilationUnit::define(
-    const std::string& script,
-    const Resolver& resolver) {
-  return pImpl->define(script, resolver);
+  defineMethodsInModule(m, definitions, resolver, self);
 }
 
-void CompilationUnit::defineFunction(const Def& def, const Resolver& resolver) {
-  return pImpl->defineFunction(def, resolver);
-}
-
-std::shared_ptr<Graph> CompilationUnit::getGraph(const std::string& func_name) {
-  return pImpl->getGraph(func_name);
-}
-
-CompilationUnit::~CompilationUnit() {}
-
-std::shared_ptr<Graph> jitScriptCompile(Def def, const Resolver& resolver) {
-  FunctionTable empty;
-  FunctionDefinition fd(def);
-  to_ir(fd, empty, resolver);
-  return fd.graph;
+std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
+  Module m(/*optimize=*/false); //note: we don't use 'm' to execute so this setting is unused
+  defineMethodsInModule(m, {def}, resolver, nullptr);
+  return m.get_method(def.name().name()).graph();
 }
 
 } // namespace script

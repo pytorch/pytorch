@@ -1691,6 +1691,19 @@ class TestAutograd(TestCase):
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
+    def test_set_grad_enabled(self):
+        x = torch.tensor([1], requires_grad=True)
+        with torch.set_grad_enabled(False):
+            y = x * 2
+        self.assertFalse(y.requires_grad)
+        with torch.set_grad_enabled(True):
+            y = x * 2
+        self.assertTrue(y.requires_grad)
+        with torch.set_grad_enabled(False):
+            torch.set_grad_enabled(True)
+            y = x * 2
+        self.assertTrue(y.requires_grad)
+
     def test_reentrant(self):
         y_data = torch.randn(2, 2)
 
@@ -2604,6 +2617,8 @@ method_tests = [
     ('chunk', (S, S, S), (S, 1), 'dim', [1]),
     ('split', (S, S, S), (2,)),
     ('split', (S, S, S), (S, 1), 'dim', [1]),
+    ('split', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'size_list'),
+    ('split', (S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2), 'size_list_dim', [1]),
     ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', [0]),
     ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', [0]),
     ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', [0]),
