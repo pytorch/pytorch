@@ -1,5 +1,10 @@
 # See README.md in this directory for more guidance
 
+
+# Temporary type cast operators. These are needed to trace type-casts now since
+# Type's are not supported in the IR. Instead, we call down to these
+# specialized operators for each datatype.
+# TODO: remove when we have Type support in the IR
 - func: _cast_uint8_t(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 

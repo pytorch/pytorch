@@ -40,6 +40,11 @@ Tensor& empty_out(Tensor& result, IntList size) {
   return result;
 }
 
+// Temporary type cast operators. These are needed to trace type-casts now since
+// Type's are not supported in the IR. Instead, we call down to these
+// specialized operators for each datatype.
+// TODO: remove when we have Type support in the IR
+
 #define DEFINE_CAST_OP(_1, n, _2)                                \
   Tensor _cast_##_1(const Tensor& self, bool non_blocking) {     \
     auto& target_type = self.type().toScalarType(ScalarType::n); \

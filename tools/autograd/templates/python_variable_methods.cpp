@@ -317,7 +317,8 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
   // Dispatch to specialized, traceable cast operators for the JIT. These
   // specialized ops are ATen native and thus have the tracing mechanisms auto-
   // generated, whereas the default case is not traceable since it requires a
-  // Type as a parameter/attribute. TODO: support Types in the JIT
+  // Type as a parameter/attribute. TODO: support Types in the JIT and remove
+  // this once we have that
   switch (type.scalarType()) {
 #define DEFINE_CAST_DISPATCH(_1, n, _2)   \
   case ScalarType::n: {                   \

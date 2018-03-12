@@ -542,6 +542,9 @@ def conv_tbc(g, input, weight, bias, pad):
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'
+#
+# TODO: remove these once we support Type's in the JIT IR and we can once again
+# use the unified toType operator
 cast_pytorch_to_onnx = {
     'uint8_t': 'UINT8',
     'int8_t': 'INT8',
