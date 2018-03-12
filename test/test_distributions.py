@@ -31,7 +31,7 @@ from random import shuffle
 
 import torch
 from common import TestCase, run_tests, set_rng_seed
-from torch.autograd import Variable, grad, gradcheck
+from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, ExponentialFamily,
@@ -86,13 +86,13 @@ def is_all_nan(tensor):
 Example = namedtuple('Example', ['Dist', 'params'])
 EXAMPLES = [
     Example(Bernoulli, [
-        {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
+        {'probs': variable([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': variable([0.3], requires_grad=True)},
         {'probs': 0.3},
     ]),
     Example(Geometric, [
-        {'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([0.3]), requires_grad=True)},
+        {'probs': variable([0.7, 0.2, 0.4], requires_grad=True)},
+        {'probs': variable([0.3], requires_grad=True)},
         {'probs': 0.3},
     ]),
     Example(Beta, [
@@ -106,22 +106,22 @@ EXAMPLES = [
         },
     ]),
     Example(Categorical, [
-        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
+        {'probs': variable([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': variable([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
     ]),
     Example(Binomial, [
-        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
-        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True), 'total_count': 10},
+        {'probs': variable([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
+        {'probs': variable([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
     ]),
     Example(Multinomial, [
-        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True), 'total_count': 10},
-        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True), 'total_count': 10},
+        {'probs': variable([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
+        {'probs': variable([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
     ]),
     Example(Cauchy, [
         {'loc': 0.0, 'scale': 1.0},
-        {'loc': Variable(torch.Tensor([0.0])), 'scale': 1.0},
-        {'loc': Variable(torch.Tensor([[0.0], [0.0]])),
-         'scale': Variable(torch.Tensor([[1.0], [1.0]]))}
+        {'loc': variable([0.0]), 'scale': 1.0},
+        {'loc': variable([[0.0], [0.0]]),
+         'scale': variable([[1.0], [1.0]])}
     ]),
     Example(Chi2, [
         {'df': Variable(torch.exp(torch.randn(2, 3)), requires_grad=True)},
@@ -149,7 +149,7 @@ EXAMPLES = [
             'df2': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'df1': Variable(torch.Tensor([1.0])),
+            'df1': variable([1.0]),
             'df2': 1.0,
         }
     ]),
@@ -183,8 +183,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
+            'loc': variable([1.0, 0.0], requires_grad=True),
+            'scale': variable([1e-5, 1e-5], requires_grad=True),
         },
     ]),
     Example(LogNormal, [
@@ -197,8 +197,8 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
+            'loc': variable([1.0, 0.0], requires_grad=True),
+            'scale': variable([1e-5, 1e-5], requires_grad=True),
         },
     ]),
     Example(Normal, [
@@ -211,13 +211,13 @@ EXAMPLES = [
             'scale': Variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
+            'loc': variable([1.0, 0.0], requires_grad=True),
+            'scale': variable([1e-5, 1e-5], requires_grad=True),
         },
     ]),
     Example(OneHotCategorical, [
-        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]), requires_grad=True)},
+        {'probs': variable([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': variable([[1.0, 0.0], [0.0, 1.0]], requires_grad=True)},
     ]),
     Example(Pareto, [
         {
@@ -246,30 +246,30 @@ EXAMPLES = [
     ]),
     Example(RelaxedBernoulli, [
         {
-            'temperature': Variable(torch.Tensor([0.5]), requires_grad=True),
-            'probs': Variable(torch.Tensor([0.7, 0.2, 0.4]), requires_grad=True),
+            'temperature': variable([0.5], requires_grad=True),
+            'probs': variable([0.7, 0.2, 0.4], requires_grad=True),
         },
         {
-            'temperature': Variable(torch.Tensor([2.0])),
-            'probs': Variable(torch.Tensor([0.3])),
+            'temperature': variable([2.0]),
+            'probs': variable([0.3]),
         },
         {
-            'temperature': Variable(torch.Tensor([7.2])),
-            'logits': Variable(torch.Tensor([-2.0, 2.0, 1.0, 5.0]))
+            'temperature': variable([7.2]),
+            'logits': variable([-2.0, 2.0, 1.0, 5.0])
         }
     ]),
     Example(RelaxedOneHotCategorical, [
         {
-            'temperature': Variable(torch.Tensor([0.5]), requires_grad=True),
-            'probs': Variable(torch.Tensor([[0.1, 0.2, 0.7], [0.5, 0.3, 0.2]]), requires_grad=True)
+            'temperature': variable([0.5], requires_grad=True),
+            'probs': variable([[0.1, 0.2, 0.7], [0.5, 0.3, 0.2]], requires_grad=True)
         },
         {
-            'temperature': Variable(torch.Tensor([2.0])),
-            'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 1.0]]))
+            'temperature': variable([2.0]),
+            'probs': variable([[1.0, 0.0], [0.0, 1.0]])
         },
         {
-            'temperature': Variable(torch.Tensor([7.2])),
-            'logits': Variable(torch.Tensor([[-2.0, 2.0], [1.0, 5.0]]))
+            'temperature': variable([7.2]),
+            'logits': variable([[-2.0, 2.0], [1.0, 5.0]])
         }
     ]),
     Example(TransformedDistribution, [
@@ -300,132 +300,132 @@ EXAMPLES = [
             'high': Variable(torch.ones(1), requires_grad=True),
         },
         {
-            'low': Variable(torch.Tensor([1.0, 1.0]), requires_grad=True),
-            'high': Variable(torch.Tensor([2.0, 3.0]), requires_grad=True),
+            'low': variable([1.0, 1.0], requires_grad=True),
+            'high': variable([2.0, 3.0], requires_grad=True),
         },
     ]),
 ]
 
 BAD_EXAMPLES = [
     Example(Bernoulli, [
-        {'probs': Variable(torch.Tensor([1.1, 0.2, 0.4]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([-0.5]), requires_grad=True)},
+        {'probs': variable([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': variable([-0.5], requires_grad=True)},
         {'probs': 1.00001},
     ]),
     Example(Beta, [
         {
-            'concentration1': Variable(torch.Tensor([0.0]), requires_grad=True),
-            'concentration0': Variable(torch.Tensor([0.0]), requires_grad=True),
+            'concentration1': variable([0.0], requires_grad=True),
+            'concentration0': variable([0.0], requires_grad=True),
         },
         {
-            'concentration1': Variable(torch.Tensor([-1.0]), requires_grad=True),
-            'concentration0': Variable(torch.Tensor([-2.0]), requires_grad=True),
+            'concentration1': variable([-1.0], requires_grad=True),
+            'concentration0': variable([-2.0], requires_grad=True),
         },
     ]),
     Example(Geometric, [
-        {'probs': Variable(torch.Tensor([1.1, 0.2, 0.4]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([-0.3]), requires_grad=True)},
+        {'probs': variable([1.1, 0.2, 0.4], requires_grad=True)},
+        {'probs': variable([-0.3], requires_grad=True)},
         {'probs': 1.00000001},
     ]),
     Example(Categorical, [
-        {'probs': Variable(torch.Tensor([[-0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([[-1.0, 10.0], [0.0, -1.0]]), requires_grad=True)},
+        {'probs': variable([[-0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True)},
+        {'probs': variable([[-1.0, 10.0], [0.0, -1.0]], requires_grad=True)},
     ]),
     Example(Binomial, [
-        {'probs': Variable(torch.Tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]]), requires_grad=True),
+        {'probs': variable([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
          'total_count': 10},
-        {'probs': Variable(torch.Tensor([[1.0, 0.0], [0.0, 2.0]]), requires_grad=True),
+        {'probs': variable([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
          'total_count': 10},
     ]),
     Example(Cauchy, [
         {'loc': 0.0, 'scale': -1.0},
-        {'loc': Variable(torch.Tensor([0.0])), 'scale': 0.0},
-        {'loc': Variable(torch.Tensor([[0.0], [-2.0]])),
-         'scale': Variable(torch.Tensor([[-0.000001], [1.0]]))}
+        {'loc': variable([0.0]), 'scale': 0.0},
+        {'loc': variable([[0.0], [-2.0]]),
+         'scale': variable([[-0.000001], [1.0]])}
     ]),
     Example(Chi2, [
-        {'df': Variable(torch.Tensor([0]), requires_grad=True)},
-        {'df': Variable(torch.Tensor([-2]), requires_grad=True)},
+        {'df': variable([0], requires_grad=True)},
+        {'df': variable([-2], requires_grad=True)},
     ]),
     Example(StudentT, [
-        {'df': Variable(torch.Tensor([0]), requires_grad=True)},
-        {'df': Variable(torch.Tensor([-2]), requires_grad=True)},
+        {'df': variable([0], requires_grad=True)},
+        {'df': variable([-2], requires_grad=True)},
     ]),
     Example(Dirichlet, [
-        {'concentration': Variable(torch.Tensor([0]), requires_grad=True)},
-        {'concentration': Variable(torch.Tensor([-2]), requires_grad=True)}
+        {'concentration': variable([0], requires_grad=True)},
+        {'concentration': variable([-2], requires_grad=True)}
     ]),
     Example(Exponential, [
-        {'rate': Variable(torch.Tensor([0, 0]), requires_grad=True)},
-        {'rate': Variable(torch.Tensor([-2]), requires_grad=True)}
+        {'rate': variable([0, 0], requires_grad=True)},
+        {'rate': variable([-2], requires_grad=True)}
     ]),
     Example(FisherSnedecor, [
         {
-            'df1': Variable(torch.Tensor([0, 0]), requires_grad=True),
-            'df2': Variable(torch.Tensor([-1, -100]), requires_grad=True),
+            'df1': variable([0, 0], requires_grad=True),
+            'df2': variable([-1, -100], requires_grad=True),
         },
         {
-            'df1': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'df2': Variable(torch.Tensor([0, 0]), requires_grad=True),
+            'df1': variable([1, 1], requires_grad=True),
+            'df2': variable([0, 0], requires_grad=True),
         }
     ]),
     Example(Gamma, [
         {
-            'concentration': Variable(torch.Tensor([0, 0]), requires_grad=True),
-            'rate': Variable(torch.Tensor([-1, -100]), requires_grad=True),
+            'concentration': variable([0, 0], requires_grad=True),
+            'rate': variable([-1, -100], requires_grad=True),
         },
         {
-            'concentration': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'rate': Variable(torch.Tensor([0, 0]), requires_grad=True),
+            'concentration': variable([1, 1], requires_grad=True),
+            'rate': variable([0, 0], requires_grad=True),
         }
     ]),
     Example(Gumbel, [
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([0, 1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([0, 1], requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1, -1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([1, -1], requires_grad=True),
         },
     ]),
     Example(Laplace, [
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([0, 1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([0, 1], requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1, -1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([1, -1], requires_grad=True),
         },
     ]),
     Example(LogNormal, [
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([0, 1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([0, 1], requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1, -1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([1, -1], requires_grad=True),
         },
     ]),
     Example(Normal, [
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([0, 1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([0, 1], requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1, 1]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1, -1]), requires_grad=True),
+            'loc': variable([1, 1], requires_grad=True),
+            'scale': variable([1, -1], requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
-            'scale': Variable(torch.Tensor([1e-5, -1e-5]), requires_grad=True),
+            'loc': variable([1.0, 0.0], requires_grad=True),
+            'scale': variable([1e-5, -1e-5], requires_grad=True),
         },
     ]),
     Example(OneHotCategorical, [
-        {'probs': Variable(torch.Tensor([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]]), requires_grad=True)},
-        {'probs': Variable(torch.Tensor([[0.0, 0.0], [0.0, 0.0]]), requires_grad=True)},
+        {'probs': variable([[0.1, 0.2, 0.3], [0.1, -10.0, 0.2]], requires_grad=True)},
+        {'probs': variable([[0.0, 0.0], [0.0, 0.0]], requires_grad=True)},
     ]),
     Example(Pareto, [
         {
@@ -433,8 +433,8 @@ BAD_EXAMPLES = [
             'alpha': 0.0
         },
         {
-            'scale': Variable(torch.Tensor([0.0, 0.0]), requires_grad=True),
-            'alpha': Variable(torch.Tensor([-1e-5, 0.0]), requires_grad=True)
+            'scale': variable([0.0, 0.0], requires_grad=True),
+            'alpha': variable([-1e-5, 0.0], requires_grad=True)
         },
         {
             'scale': variable([1.0]),
@@ -443,7 +443,7 @@ BAD_EXAMPLES = [
     ]),
     Example(Poisson, [
         {
-            'rate': Variable(torch.Tensor([0.0]), requires_grad=True),
+            'rate': variable([0.0], requires_grad=True),
         },
         {
             'rate': -1.0,
@@ -451,36 +451,36 @@ BAD_EXAMPLES = [
     ]),
     Example(RelaxedBernoulli, [
         {
-            'temperature': Variable(torch.Tensor([1.5]), requires_grad=True),
-            'probs': Variable(torch.Tensor([1.7, 0.2, 0.4]), requires_grad=True),
+            'temperature': variable([1.5], requires_grad=True),
+            'probs': variable([1.7, 0.2, 0.4], requires_grad=True),
         },
         {
-            'temperature': Variable(torch.Tensor([2.0])),
-            'probs': Variable(torch.Tensor([-1.0])),
+            'temperature': variable([2.0]),
+            'probs': variable([-1.0]),
         }
     ]),
     Example(RelaxedOneHotCategorical, [
         {
-            'temperature': Variable(torch.Tensor([0.5]), requires_grad=True),
-            'probs': Variable(torch.Tensor([[-0.1, 0.2, 0.7], [0.5, 0.3, 0.2]]), requires_grad=True)
+            'temperature': variable([0.5], requires_grad=True),
+            'probs': variable([[-0.1, 0.2, 0.7], [0.5, 0.3, 0.2]], requires_grad=True)
         },
         {
-            'temperature': Variable(torch.Tensor([2.0])),
-            'probs': Variable(torch.Tensor([[-1.0, 0.0], [-1.0, 1.1]]))
+            'temperature': variable([2.0]),
+            'probs': variable([[-1.0, 0.0], [-1.0, 1.1]])
         }
     ]),
     Example(Uniform, [
         {
-            'low': Variable(torch.Tensor([2.0]), requires_grad=True),
-            'high': Variable(torch.Tensor([2.0]), requires_grad=True),
+            'low': variable([2.0], requires_grad=True),
+            'high': variable([2.0], requires_grad=True),
         },
         {
-            'low': Variable(torch.Tensor([0.0]), requires_grad=True),
-            'high': Variable(torch.Tensor([0.0]), requires_grad=True),
+            'low': variable([0.0], requires_grad=True),
+            'high': variable([0.0], requires_grad=True),
         },
         {
-            'low': Variable(torch.Tensor([1.0]), requires_grad=True),
-            'high': Variable(torch.Tensor([0.0]), requires_grad=True),
+            'low': variable([1.0], requires_grad=True),
+            'high': variable([0.0], requires_grad=True),
         }
     ])
 ]
@@ -729,7 +729,7 @@ class TestDistributions(TestCase):
 
     def test_multinomial_1d(self):
         total_count = 10
-        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        p = variable([0.1, 0.2, 0.3], requires_grad=True)
         self.assertEqual(Multinomial(total_count, p).sample().size(), (3,))
         self.assertEqual(Multinomial(total_count, p).sample((2, 2)).size(), (2, 2, 3))
         self.assertEqual(Multinomial(total_count, p).sample((1,)).size(), (1, 3))
@@ -740,7 +740,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multinomial_1d_log_prob(self):
         total_count = 10
-        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        p = variable([0.1, 0.2, 0.3], requires_grad=True)
         dist = Multinomial(total_count, probs=p)
         x = dist.sample()
         log_prob = dist.log_prob(x)
@@ -757,8 +757,8 @@ class TestDistributions(TestCase):
         total_count = 10
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
-        p = Variable(torch.Tensor(probabilities), requires_grad=True)
-        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        p = variable(probabilities, requires_grad=True)
+        s = variable(probabilities_1, requires_grad=True)
         self.assertEqual(Multinomial(total_count, p).sample().size(), (2, 3))
         self.assertEqual(Multinomial(total_count, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
         self.assertEqual(Multinomial(total_count, p).sample((6,)).size(), (6, 2, 3))
@@ -775,7 +775,7 @@ class TestDistributions(TestCase):
         self.assertRaises(NotImplementedError, Multinomial(10, p).entropy)
 
     def test_categorical_1d(self):
-        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        p = variable([0.1, 0.2, 0.3], requires_grad=True)
         self.assertTrue(is_all_nan(Categorical(p).mean))
         self.assertTrue(is_all_nan(Categorical(p).variance))
         self.assertEqual(Categorical(p).sample().size(), ())
@@ -788,8 +788,8 @@ class TestDistributions(TestCase):
     def test_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
-        p = Variable(torch.Tensor(probabilities), requires_grad=True)
-        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        p = variable(probabilities, requires_grad=True)
+        s = variable(probabilities_1, requires_grad=True)
         self.assertEqual(Categorical(p).mean.size(), (2,))
         self.assertEqual(Categorical(p).variance.size(), (2,))
         self.assertTrue(is_all_nan(Categorical(p).mean))
@@ -823,7 +823,7 @@ class TestDistributions(TestCase):
         self._check_enumerate_support(Categorical, examples)
 
     def test_one_hot_categorical_1d(self):
-        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        p = variable([0.1, 0.2, 0.3], requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (3,))
         self.assertTrue(isinstance(OneHotCategorical(p).sample().data, torch.Tensor))
         self.assertEqual(OneHotCategorical(p).sample((2, 2)).size(), (2, 2, 3))
@@ -834,8 +834,8 @@ class TestDistributions(TestCase):
     def test_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
-        p = Variable(torch.Tensor(probabilities), requires_grad=True)
-        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        p = variable(probabilities, requires_grad=True)
+        s = variable(probabilities_1, requires_grad=True)
         self.assertEqual(OneHotCategorical(p).sample().size(), (2, 3))
         self.assertEqual(OneHotCategorical(p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
         self.assertEqual(OneHotCategorical(p).sample((6,)).size(), (6, 2, 3))
@@ -937,7 +937,7 @@ class TestDistributions(TestCase):
             self.assertEqual(equal_probs, s)
 
     def test_relaxed_one_hot_categorical_1d(self):
-        p = Variable(torch.Tensor([0.1, 0.2, 0.3]), requires_grad=True)
+        p = variable([0.1, 0.2, 0.3], requires_grad=True)
         temp = torch.tensor(0.67, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().size(), (3,))
         self.assertTrue(isinstance(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().data, torch.Tensor))
@@ -948,10 +948,10 @@ class TestDistributions(TestCase):
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
-        temp = Variable(torch.Tensor([3.00]), requires_grad=True)
-        temp_2 = Variable(torch.Tensor([0.2]), requires_grad=True)
-        p = Variable(torch.Tensor(probabilities), requires_grad=True)
-        s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
+        temp = variable([3.00], requires_grad=True)
+        temp_2 = variable([0.2], requires_grad=True)
+        p = variable(probabilities, requires_grad=True)
+        s = variable(probabilities_1, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample_n(6).size(), (6, 2, 3))
@@ -993,7 +993,7 @@ class TestDistributions(TestCase):
             self.assertEqual(equal_probs, s)
 
     def test_uniform(self):
-        low = Variable(torch.zeros(5, 5), requires_grad=True)
+        low = variable(torch.zeros(5, 5), requires_grad=True)
         high = Variable(torch.ones(5, 5) * 3, requires_grad=True)
         low_1d = Variable(torch.zeros(1), requires_grad=True)
         high_1d = Variable(torch.ones(1) * 3, requires_grad=True)
@@ -1005,8 +1005,8 @@ class TestDistributions(TestCase):
 
         # Check log_prob computation when value outside range
         uniform = Uniform(low_1d, high_1d)
-        above_high = Variable(torch.Tensor([4.0]))
-        below_low = Variable(torch.Tensor([-1.0]))
+        above_high = variable([4.0])
+        below_low = variable([-1.0])
         self.assertEqual(uniform.log_prob(above_high).item(), -float('inf'), allow_inf=True)
         self.assertEqual(uniform.log_prob(below_low).item(), -float('inf'), allow_inf=True)
 
@@ -1858,7 +1858,7 @@ class TestRsample(TestCase):
             ], dim=-1)
 
         for a1, a2, a3 in product(alpha_grid, alpha_grid, alpha_grid):
-            alpha = Variable(torch.Tensor([a1, a2, a3]).expand(num_samples, 3), requires_grad=True)
+            alpha = variable([a1, a2, a3], requires_grad=True).expand(num_samples, 3)
             x = Dirichlet(alpha).rsample()
             dlogp_da = grad([Dirichlet(alpha).log_prob(x.detach()).sum()],
                             [alpha], retain_graph=True)[0].data[:, 0]
