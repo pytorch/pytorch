@@ -70,7 +70,7 @@ bool isBroadcasting(Node *node) {
 // emitted as `0` (leading dimensions.)
 std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::IntList to) {
   if (from.size() > to.size()) {
-    return std::make_tuple<bool, ssize_t>(false, {});
+    return std::make_tuple(false, at::nullopt);
   }
   ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
   while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
@@ -94,7 +94,7 @@ std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::Int
   // the 'from' tensor does, f will be less than from_dim_start rather than
   // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
   if (trailing_expand && f <= from_dim_start) {
-    return std::make_tuple<bool, ssize_t>(true, {});
+    return std::make_tuple(true, at::nullopt);
   }
 
   f = from_dim_start;
@@ -108,10 +108,10 @@ std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::Int
   }
 
   if (leading_expand && f >= from_dim_end) {
-    return std::make_tuple<bool, ssize_t>(true, 0);
+    return std::make_tuple(true, 0);
   }
 
-  return std::make_tuple<bool, ssize_t>(false, {});
+  return std::make_tuple(false, at::nullopt);
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
