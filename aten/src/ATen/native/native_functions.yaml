@@ -1,5 +1,34 @@
 # See README.md in this directory for more guidance
 
+
+# Temporary type cast operators. These are needed to trace type-casts now since
+# Type's are not supported in the IR. Instead, we call down to these
+# specialized operators for each datatype.
+# TODO: remove when we have Type support in the IR
+- func: _cast_uint8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_double(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_float(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int64_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int16_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
