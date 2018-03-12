@@ -669,6 +669,14 @@ def script_method(fn):
     return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
 
 
+# For each user-defined class that subclasses ScriptModule this meta-class,
+# (1) finds all the methods annotated with @script_method
+# in a ScriptModule and removes them from the class attributes, and
+# (2) puts a wrapper around the class's __init__ method to register
+# all of the script_methods with the module after the original __init__
+# has run. This has to occur after the user-defined __init__ so that
+# submodules and parameters are initialized _before_ the script compiler
+# resolve references to `self.param` or `self.module`.
 class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
@@ -680,10 +688,10 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
-        if len(methods) > 0 and '__init__' in attrs:
+        if len(methods) > 0:
             # after the user's __init__ register all the script methods
             # with the module
-            original_init = cls.__init__
+            original_init = getattr(cls, '__init__', lambda self: None)
 
             def init_then_register(self, *args, **kwargs):
                 original_init(self, *args, **kwargs)
