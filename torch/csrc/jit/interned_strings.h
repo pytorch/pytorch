@@ -90,6 +90,7 @@ _(axis) \
 _(broadcast) \
 _(device) \
 /* _(dim) conflicts with ATen */ \
+_(end) \
 _(exponent) \
 _(inplace) \
 _(is_zero) \
@@ -99,6 +100,8 @@ _(other) \
 _(perm) \
 /* _(size) conflicts with ATen */ \
 /* _(sizes) conflicts with ATen */ \
+_(start) \
+_(step) \
 _(transA) \
 _(transB) \
 _(value) \
