@@ -30,7 +30,7 @@ def _find_cuda_home():
             # Guess #3
             try:
                 which = 'where' if sys.platform == 'win32' else 'which'
-                nvcc = subprocess.check_output([which, 'nvcc']).decode()
+                nvcc = subprocess.check_output([which, 'nvcc']).decode().rstrip('\r\n')
                 cuda_home = os.path.dirname(os.path.dirname(nvcc))
             except Exception:
                 cuda_home = None
@@ -211,7 +211,8 @@ def CUDAExtension(name, sources, *args, **kwargs):
                 })
     '''
     library_dirs = kwargs.get('library_dirs', [])
-    library_dirs.append(_join_cuda_home('lib64'))
+    lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
+    library_dirs.append(_join_cuda_home(lib_dir))
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
@@ -333,9 +334,14 @@ def load(name,
     if with_cuda:
         if verbose:
             print('Detected CUDA files, patching ldflags')
-        extra_ldflags = extra_ldflags or []
-        extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
-        extra_ldflags.append('-lcudart')
+        if sys.platform == 'win32':
+            extra_ldflags = extra_ldflags or []
+            extra_ldflags.append('/LIBPATH:{}'.format(_join_cuda_home('lib/x64')))
+            extra_ldflags.append('cudart.lib')
+        else:
+            extra_ldflags = extra_ldflags or []
+            extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
+            extra_ldflags.append('-lcudart')
 
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
@@ -460,10 +466,15 @@ def _write_ninja_file(path,
 
     # See https://ninja-build.org/build.ninja.html for reference.
     compile_rule = ['rule compile']
-    compile_rule.append(
-        '  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out')
-    compile_rule.append('  depfile = $out.d')
-    compile_rule.append('  deps = gcc')
+    if sys.platform == 'win32':
+        compile_rule.append(
+            '  command = cl /showIncludes -c $in /Fo$out')
+        compile_rule.append('  deps = msvc')        
+    else:
+        compile_rule.append(
+            '  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out')
+        compile_rule.append('  depfile = $out.d')
+        compile_rule.append('  deps = gcc')
 
     if with_cuda:
         cuda_compile_rule = ['rule cuda_compile']
@@ -471,7 +482,10 @@ def _write_ninja_file(path,
             '  command = $nvcc $cuda_flags -c $in -o $out')
 
     link_rule = ['rule link']
-    link_rule.append('  command = $cxx $ldflags $in -o $out')
+    if sys.platform == 'win32':
+        link_rule.append('  command = $cxx $in $libs /nologo /link $ldflags /out:$out')
+    else:
+        link_rule.append('  command = $cxx $ldflags $in -o $out')
 
     # Emit one build rule per source to enable incremental build.
     object_files = []

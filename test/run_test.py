@@ -32,7 +32,6 @@ TESTS = [
 ]
 
 WINDOWS_BLACKLIST = [
-    'cpp_extensions',
     'distributed',
 ]
 
