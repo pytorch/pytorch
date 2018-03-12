@@ -394,6 +394,12 @@ class build_ext(build_ext_parent):
         else:
             print('-- Building without distributed package')
 
+        # Copy headers necessary to compile C++ extensions.
+        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
+        self.copy_tree('torch/lib/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
+        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
+
         generate_code(ninja_global)
 
         if WITH_NINJA:
@@ -416,12 +422,6 @@ class install(setuptools.command.install.install):
     def run(self):
         if not self.skip_build:
             self.run_command('build_deps')
-
-        # Copy headers necessary to compile C++ extensions.
-        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
-        self.copy_tree('torch/lib/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
-        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
 
         setuptools.command.install.install.run(self)
 
