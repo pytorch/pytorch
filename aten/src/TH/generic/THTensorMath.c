@@ -3941,27 +3941,36 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int k
   THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
+  #define DIM_REDUCE(reduce, transform) \
+    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,      \
+                         accreal sum = 0;                   \
+                         int64_t i;                         \
+                         for(i = 0; i < t_size; i++) {      \
+                           (reduce);                        \
+                         }                                  \
+                         (transform);)                      \
+
   if(value == 0) {
-    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                         accreal sum = 0;
-                         int64_t i;
-                         for(i = 0; i < t_size; i++)
-                           sum += t_data[i*t_stride] != 0.0;
-                         *r__data = sum;)
+    DIM_REDUCE(sum += t_data[i*t_stride] != 0.0,
+               *r__data = sum);
+  } else if (value == 1) {
+    DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride]),
+               *r__data = sum);
+  } else if (value == 2) {
+    DIM_REDUCE(sum += t_data[i*t_stride] * t_data[i*t_stride],
+               *r__data = TH_MATH_NAME(sqrt)(sum));
+  } else if (value == 3) {
+    DIM_REDUCE(sum += TH_MATH_NAME(fabs)(t_data[i*t_stride] * t_data[i*t_stride] * t_data[i*t_stride]),
+               *r__data = TH_MATH_NAME(pow)(sum, 1.0/3));
   } else {
-    TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
-                         accreal sum = 0;
-                         int64_t i;
-                         for(i = 0; i < t_size; i++) {
-                           sum += TH_MATH_NAME(pow)(
-                             TH_MATH_NAME(fabs)(t_data[i*t_stride]), value);
-                         }
-                         *r__data = TH_MATH_NAME(pow)(sum, 1.0/value);)
+    DIM_REDUCE(sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(t_data[i*t_stride]), value),
+               *r__data = TH_MATH_NAME(pow)(sum, 1.0/value));
   }
 
   if (!keepdim) {
     THTensor_(squeeze1d)(r_, r_, dimension);
   }
+  #undef DIM_REDUCE
 }
 
 accreal THTensor_(normall)(THTensor *tensor, real value)
@@ -3976,6 +3985,9 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
   } else if(value == 2) {
     TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += z*z;);
     return sqrt(sum);
+  } else if(value == 3) {
+    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += TH_MATH_NAME(fabs)(z*z*z););
+    return TH_MATH_NAME(pow)(sum, 1.0/3);
   } else {
     TH_TENSOR_APPLY(real, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
     return TH_MATH_NAME(pow)(sum, 1.0/value);
