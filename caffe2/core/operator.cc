@@ -617,4 +617,19 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
   return mismatches;
 }
 
+std::set<std::string> GetRegisteredOperators() {
+  std::set<std::string> all_keys;
+
+  // CPU operators
+  for (const auto& name : CPUOperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+  // CUDA operators
+  for (const auto& name : CUDAOperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+
+  return all_keys;
+}
+
 }  // namespace caffe2

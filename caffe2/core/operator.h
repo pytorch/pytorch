@@ -21,6 +21,7 @@
 #include <climits>
 #include <cstddef>
 #include <exception>
+#include <set>
 #include <typeinfo>
 #include <vector>
 
@@ -826,6 +827,9 @@ TensorShapes InferBlobShapesAndTypesFromMap(
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,
     const OperatorDef& op_def);
+
+// Get a set of registered operator names
+std::set<std::string> GetRegisteredOperators();
 
 }  // namespace caffe2
 
