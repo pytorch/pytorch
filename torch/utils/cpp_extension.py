@@ -469,7 +469,7 @@ def _write_ninja_file(path,
     if sys.platform == 'win32':
         compile_rule.append(
             '  command = cl /showIncludes -c $in /Fo$out')
-        compile_rule.append('  deps = msvc')        
+        compile_rule.append('  deps = msvc')
     else:
         compile_rule.append(
             '  command = $cxx -MMD -MF $out.d $cflags -c $in -o $out')
