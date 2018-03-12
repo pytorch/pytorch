@@ -612,7 +612,7 @@ def createResolutionCallback(frame_id=2):
     returns the value of the variable in the scope of the caller of
     the function which called createResolutionCallback (by default).
     For example, the following program prints 2::
-    
+
         def bar():
             cb = createResolutionCallback()
             print(x("foo"))
@@ -622,7 +622,7 @@ def createResolutionCallback(frame_id=2):
             bar()
 
         baz()
-    
+
     This is used to enable access in-scope Python variables inside
     TorchScript fragments.
     """
@@ -695,9 +695,6 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 
 
 class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule)):
-
-    def __init__(self, optimize=True):
-        super(ScriptModule, self).__init__(optimize)
 
     def __setattr__(self, name, value):
         if isinstance(value, Parameter):

@@ -40,49 +40,19 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(Method & callee, ArrayRef<Value*> inputs) {
-    JIT_ASSERT(!executor);
-    auto fn = callee.graph();
-    JIT_ASSERT(inputs.size() == callee.num_inputs());
-    std::unordered_map<Value*, Value*> value_map;
-    auto value_map_func = [&](Value* v) { return value_map.at(v); };
-    // actual inputs
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      value_map[fn->inputs()[i]] = inputs[i];
-    }
-    // parameters to callee method (which become parameters to _this_ method
-    // if they were not already)
-    auto members_it = callee.member_inputs.begin();
-    for(size_t i = inputs.size(); i < fn->inputs().size(); i++) {
-      value_map[fn->inputs()[i]] = get_or_add_parameter(*members_it++);
-    }
-    for (auto* node : fn->nodes()) {
-      auto* new_node =
-          graph_->insertNode(graph_->createClone(node, value_map_func));
-      for (size_t i = 0; i < node->outputs().size(); ++i) {
-        value_map[node->outputs()[i]] = new_node->outputs()[i];
-      }
-    }
-
-    std::vector<Value*> outputs;
-    for (auto* output : fn->outputs()) {
-      outputs.push_back(value_map_func(output));
-    }
-    return outputs;
-  }
+  std::vector<Value*> emit_call_to(Method & callee, ArrayRef<Value*> inputs);
+  
   size_t num_inputs() const {
     return graph_->inputs().size() - member_inputs.size();
   }
   Value * get_or_add_parameter(at::Tensor* slot) {
-    size_t first_parameter = graph()->inputs().size() - member_inputs.size();
-    for(size_t i = 0; i < member_inputs.size(); i++) {
-      // it is already a parameter
-      if(member_inputs[i] == slot) {
-        return graph()->inputs()[first_parameter + i];
-      }
+    auto it = member_input_index.find(slot);
+    if(it != member_input_index.end()) {
+      return graph()->inputs().at(it->second);
     }
     // add it as a new parameter
     member_inputs.push_back(slot);
+    member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput();
   }
 private:
@@ -98,6 +68,9 @@ private:
   // these pointers always stay valid
   std::vector<at::Tensor*> member_inputs;
 
+  // map from a at::Tensor* in member_inputs to the offset it appears at
+  // in graph. used to accelerate get_or_add_parameter
+  std::unordered_map<at::Tensor*, size_t> member_input_index;
 
   // TODO: support that case where we allow _writes_ to parameters from
   // compiled functions.

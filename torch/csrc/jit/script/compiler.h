@@ -75,7 +75,7 @@ void defineMethodsInModule(
 // same as above but parse the definitions from source
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
 
-std::shared_ptr<Graph> defineFunction(Def def, const Resolver& resolver);
+std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
 
 
 } // namespace script

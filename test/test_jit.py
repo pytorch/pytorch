@@ -1924,9 +1924,9 @@ class TestJit(TestCase):
         c = m2.weight.mm(input)
         ref = a + b + m2.bias + m2.sub.weight + a + c
         self.assertEqual(ref, m2.forward(input))
-        m2.weight.data.zero_()
-        m2.bias.data.zero_()
-        m2.sub.weight.data.zero_()
+        m2.weight = nn.Parameter(torch.zeros_like(m2.weight))
+        m2.bias = nn.Parameter(torch.zeros_like(m2.bias))
+        m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
 if __name__ == '__main__':

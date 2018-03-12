@@ -45,7 +45,9 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   }
 
   virtual std::string kind() const override {
-    return py::repr(self);
+    std::stringstream ss;
+    ss << "python value'" << py::repr(self) << "'";
+    return ss.str();
   }
 private:
   py::object self;
@@ -62,7 +64,7 @@ Resolver pythonResolver(ResolutionCallback rcb) {
   };
 }
 
-// defines how a modules/methods behave inside the script subset.
+// defines how modules/methods behave inside the script subset.
 // for now this does not have any interaction with python.
 // in the future, we will add the ability to resolve `self.foo` to python
 // {functions, modules, contants} so this SugaredValue is defined here
@@ -78,7 +80,9 @@ struct MethodValue : public SugaredValue {
     return "method";
   }
   virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
-    ensureSizeMatches(loc, 0, attributes.size(), "keyword arguments");
+    if(attributes.size() != 0) {
+      throw ErrorReport(loc) << "not yet implemented - calls to python functions using keyword arguments";
+    }
     ensureSizeMatches(loc, caller.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
     ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
@@ -208,7 +212,7 @@ void initJitScriptBindings(PyObject* module) {
     });
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
-    return defineFunction(def, pythonResolver(rcb));
+    return compileFunction(def, pythonResolver(rcb));
   });
 }
 

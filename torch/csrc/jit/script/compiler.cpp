@@ -178,14 +178,13 @@ private:
 };
 
 Node* emitBuiltinCall(
-  SourceRange loc,
+  const SourceRange& loc,
   Method& method,
   const std::string & name,
   at::ArrayRef<Value*> inputs,
   List<Attribute> attributes,
   size_t n_outputs) {
 
-  // we presume this is a call to a built-in function, and construct it
   NodeKind kind(name);
   auto graph = method.graph();
   auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
@@ -237,8 +236,9 @@ struct to_ir {
       , graph(method.graph())
       , def(def)
       , function_table(function_table)
-      , resolver(resolver) {
-    environment_stack = newFrame(graph->block());
+      , resolver(resolver)
+      , environment_stack(nullptr) {
+    pushFrame(graph->block());
     // inputs
     auto it = def.params().begin();
     auto end = def.params().end();
@@ -281,8 +281,13 @@ private:
   // `next` that points to the most immediate enclosing scope's value.
   std::shared_ptr<Environment> environment_stack;
 
-  std::shared_ptr<Environment> newFrame(Block * b, std::shared_ptr<Environment> next = nullptr) {
-    return std::make_shared<Environment>(method, resolver, b, std::move(next));
+  void pushFrame(Block * b) {
+    environment_stack = std::make_shared<Environment>(method, resolver, b, environment_stack);
+  }
+  std::shared_ptr<Environment> popFrame() {
+    auto old_frame = environment_stack;
+    environment_stack = environment_stack->next;
+    return old_frame;
   }
   void emitStatements(const List<Stmt>& statements) {
     return emitStatements(statements.begin(), statements.end());
@@ -321,7 +326,7 @@ private:
       Block* b,
       const List<Stmt> branch,
       std::unordered_set<std::string>* mutated_parent_values) {
-    environment_stack = newFrame(b, environment_stack);
+    pushFrame(b);
     WithInsertPoint guard(b);
     emitStatements(branch);
 
@@ -330,9 +335,7 @@ private:
         mutated_parent_values->insert(n);
       }
     }
-    auto save_env = environment_stack;
-    environment_stack = environment_stack->next;
-    return save_env;
+    return popFrame();
   }
 
   Node* create(Symbol kind, const SourceRange& loc,  size_t num_outputs) {
@@ -350,12 +353,11 @@ private:
     auto* false_block = n->addBlock();
 
     auto emit_if_expr = [this](Block* b, const Expr& expr) {
-      environment_stack = newFrame(b, environment_stack);
+      pushFrame(b);
       WithInsertPoint guard(b);
       Value* out_val = emitExpr(expr, 1)[0];
       b->registerOutput(out_val);
-
-      environment_stack = environment_stack->next;
+      popFrame();
     };
 
     emit_if_expr(true_block, expr.true_expr());
@@ -432,7 +434,7 @@ private:
     size_t skip_inputs_num = 1;
 
     {
-      environment_stack = newFrame(body_block, environment_stack);
+      pushFrame(body_block);
       WithInsertPoint guard(body_block);
       emitStatements(stmt.body());
 
@@ -440,23 +442,19 @@ private:
       Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
       body_block->registerOutput(body_cond_value);
 
+      auto body_frame = popFrame();
+      auto outer_frame = environment_stack;
       // Remove inputs for values that did not mutate within the
       // block
-      environment_stack->deleteExtraInputs(stmt.range(), skip_inputs_num);
+      body_frame->deleteExtraInputs(stmt.range(), skip_inputs_num);
 
       // Add block outputs
-      auto curr_frame = environment_stack;
-      for (const auto& x : curr_frame->captured_inputs) {
-        body_block->registerOutput(curr_frame->getValueInThisFrame(stmt.range(), x));
+      for (const auto& x : body_frame->captured_inputs) {
+        body_block->registerOutput(body_frame->getValueInThisFrame(stmt.range(), x));
+        n->addInput(outer_frame->getVar(x, stmt));
+        outer_frame->setVar(x, n->addOutput());
       }
 
-      auto next_frame = curr_frame->next;
-      for (const auto& x : curr_frame->captured_inputs) {
-        n->addInput(next_frame->getVar(x, stmt));
-        next_frame->setVar(x, n->addOutput());
-      }
-
-      environment_stack = next_frame;
     }
   }
 
@@ -821,7 +819,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   defineMethodsInModule(m, definitions, resolver, self);
 }
 
-std::shared_ptr<Graph> defineFunction(Def def, const Resolver& resolver) {
+std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
   Module m(/*optimize=*/false); //note: we don't use 'm' to execute so this setting is unused
   defineMethodsInModule(m, {def}, resolver, nullptr);
   return m.get_method(def.name().name()).graph();
