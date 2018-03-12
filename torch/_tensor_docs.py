@@ -1267,7 +1267,7 @@ repeat(*sizes) -> Tensor
 
 Repeats this tensor along the specified dimensions.
 
-Unlike :meth:`~Tensor.expand`, this function copies the tensor’s data.
+Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
