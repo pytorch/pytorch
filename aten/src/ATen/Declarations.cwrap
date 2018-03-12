@@ -4067,17 +4067,6 @@
 ]]
 
 [[
-  name: reshape_
-  cname: resize
-  cpu_half: True
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THSize* size
-    - arg: THStride* stride
-]]
-
-[[
   name: _sparse_mask
   return: argument 0
   cname: sparseMask
