@@ -4,10 +4,11 @@
 #include "ATen/CheckGenerator.h"
 #include "ATen/CPUGenerator.h"
 #include "ATen/Dispatch.h"
+#include "ATen/ScalarType.h"
 #include <algorithm>
 #include <sstream>
 
-namespace at {
+    namespace at {
 namespace native {
 
 Tensor arange(const Type& dtype, Scalar start, Scalar end, Scalar step) {
@@ -38,6 +39,23 @@ Tensor& empty_out(Tensor& result, IntList size) {
   }
   return result;
 }
+
+// Temporary type cast operators. These are needed to trace type-casts now since
+// Type's are not supported in the IR. Instead, we call down to these
+// specialized operators for each datatype.
+// TODO: remove when we have Type support in the IR
+
+#define DEFINE_CAST_OP(_1, n, _2)                                \
+  Tensor _cast_##_1(const Tensor& self, bool non_blocking) {     \
+    auto& target_type = self.type().toScalarType(ScalarType::n); \
+    if (self.type() == target_type)                              \
+      return self;                                               \
+    return target_type.copy(self, non_blocking);                 \
+  }
+
+AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
+
+#undef DEFINE_CAST_OP
 
 Tensor empty_like(const Tensor& self) {
   return at::native::empty_like(self, self.type());
