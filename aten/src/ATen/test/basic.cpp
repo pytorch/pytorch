@@ -32,6 +32,14 @@ static void test(Type & type) {
 
   {
     std::cout << "ones and dot:" << std::endl;
+    Tensor b0 = ones(type, {1, 1});
+    std::cout << b0 << std::endl;
+    ASSERT(2 == (b0+b0).sum().toCDouble());
+
+    Tensor b1 = ones(type, {1, 2});
+    std::cout << b1 << std::endl;
+    ASSERT(4 == (b1+b1).sum().toCDouble());
+
     Tensor b = ones(type, {3, 4});
     std::cout << b << std::endl;
     ASSERT(24 == (b+b).sum().toCDouble());
