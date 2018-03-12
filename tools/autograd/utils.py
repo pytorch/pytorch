@@ -33,6 +33,16 @@ def split_name_params(prototype):
     name, params = re.match('(\w+)\((.*)\)', prototype).groups()
     return name, params.split(', ')
 
+# When tracing, we record inplace operations as out-of-place operations,
+# because we don't have a story for side effects in the IR yet.
+#
+# Doing this un-inplacing is a little delicate however; __and__ is NOT inplace!
+# TODO: Do something more robust
+def uninplace_api_name(api_name):
+    if api_name.endswith('_') and not api_name.endswith('__'):
+        api_name = api_name[:-1]
+    return api_name
+
 
 def write(dirname, name, template, env):
     env['generated_comment'] = GENERATED_COMMENT.substitute(filename=name)

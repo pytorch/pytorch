@@ -7,6 +7,10 @@
 // in Declarations.yaml; attributes are in one-to-one correspondence with
 // their ATen name.
 
-#define FORALL_ATEN_SYMBOLS(_) \
+#define FORALL_ATEN_BASE_SYMBOLS(_) \
 ${aten_symbols}
-_(__ATEN_END)
+/* nothing */
+
+#define FORALL_ATTR_BASE_SYMBOLS(_) \
+${attr_symbols}
+/* nothing */

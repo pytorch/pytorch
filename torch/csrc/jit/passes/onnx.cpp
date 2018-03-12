@@ -146,7 +146,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     WithCurrentScope scope_guard(*ctx.graph, n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
 
-    processSymbolicOutput(n->kind().toString(), n, raw_output);
+    // TODO: Assert it's an ATen identifier???
+    // (Sometimes it's not...)
+    processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
   };
 
   auto callPySymbolicMethod = [&](PythonOp* op) {
@@ -205,13 +207,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     IR_ELSEIFM(PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
-      if (node->kind() == kUndefined) {
-        // Undefined nodes get passed into Convolution, but then they are
-        // removed.  We'll test for leftover Undefined in export.cpp
-        cloneNode(node);
-      } else {
-        callPySymbolicFunction(node);
-      }
+      callPySymbolicFunction(node);
     IR_END()
   }
   for (auto output : state->graph->outputs()) {

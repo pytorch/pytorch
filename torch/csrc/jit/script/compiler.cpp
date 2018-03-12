@@ -102,7 +102,7 @@ struct Environment {
   }
   void setSugaredVar(const std::string& name, SugaredValuePtr value) {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
-        getBlockOwningKind() == kLoop)
+        getBlockOwningKind() == prim::Loop)
       createCapturedInput(name);
     value_table[name] = std::move(value);
   }
@@ -118,7 +118,7 @@ struct Environment {
     auto retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == kLoop) {
+        getBlockOwningKind() == prim::Loop) {
       retval = createCapturedInput(ident);
     }
 
@@ -182,13 +182,13 @@ Node* emitBuiltinCall(
   List<Attribute> attributes,
   size_t n_outputs) {
 
-  NodeKind kind(name);
+  NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
   auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (const auto& attr : attributes) {
-    const auto& name = Symbol(attr.name().name());
+    const auto& name = Symbol::attr(attr.name().name());
     const Expr& value_expr = attr.value();
     switch (value_expr.kind()) {
       case TK_CONST: {
@@ -359,7 +359,7 @@ private:
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kIf, expr.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -384,7 +384,7 @@ private:
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kIf, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -433,7 +433,7 @@ private:
     Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kLoop, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
     n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
@@ -496,34 +496,34 @@ private:
   NodeKind getNodeKind(int kind, int ninputs) {
     switch (kind) {
       case '+':
-        return kadd;
+        return aten::add;
       case '-':
         if (ninputs == 1)
-          return kneg;
+          return aten::neg;
         else
-          return ksub;
+          return aten::sub;
       case '*':
-        return kmul;
+        return aten::mul;
       case '/':
-        return kdiv;
+        return aten::div;
       case TK_NE:
-        return kne;
+        return aten::ne;
       case TK_EQ:
-        return keq;
+        return aten::eq;
       case '<':
-        return klt;
+        return aten::lt;
       case '>':
-        return kgt;
+        return aten::gt;
       case TK_LE:
-        return kle;
+        return aten::le;
       case TK_GE:
-        return kge;
+        return aten::ge;
       case TK_AND:
-        return k__and__;
+        return aten::__and__;
       case TK_OR:
-        return k__or__;
+        return aten::__or__;
       case TK_NOT:
-        return k__not__;
+        return aten::__not__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -562,7 +562,7 @@ private:
       expectOutputs(ident, output_size, 0);
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
-      return emitNode(kPrint, ident.range(), inputs, 0 )->outputs();
+      return emitNode(prim::Print, ident.range(), inputs, 0 )->outputs();
     }
     Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, output_size);
     if (hasTensorOp(builtin)) {
@@ -629,8 +629,8 @@ private:
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
-        if (kind != kneg)
-          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        if (kind != aten::neg)
+          node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {
@@ -694,7 +694,7 @@ private:
         throw ErrorReport(input) << "Unrecognized type: " << type;
     }
     return emitNode(
-               Symbol("type_as"),
+               Symbol::aten("type_as"),
                input->range(),
                {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
@@ -731,17 +731,17 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
-    const auto& end = at::Scalar(input_values[2]->node()->t(kvalue)).toInt();
+    const auto& begin = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
+    const auto& end = at::Scalar(input_values[2]->node()->t(attr::value)).toInt();
     return emitNode(
-               Symbol("slice"),
+               Symbol::aten("slice"),
                loc,
                {tensor},
                output_size)
-               ->i_(kdim, 0)
-               ->i_(kstep, 1)
-               ->i_(kstart, begin)
-               ->i_(kend, end)->outputs();
+               ->i_(attr::dim, 0)
+               ->i_(attr::step, 1)
+               ->i_(attr::start, begin)
+               ->i_(attr::end, end)->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -753,14 +753,14 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
+    const auto& idx = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
     return emitNode(
-               Symbol("select"),
+               Symbol::aten("select"),
                loc,
                {tensor},
                output_size)
-               ->i_(kdim, 0)
-               ->i_(kindex, idx)
+               ->i_(attr::dim, 0)
+               ->i_(attr::index, idx)
                ->outputs();
   }
 
