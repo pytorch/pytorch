@@ -121,6 +121,8 @@ Tensor repeat(const Tensor& self, IntList repeats) {
   return result;
 }
 
+// Infers the size of a dim with size -1, if it exists. Also checks that new
+// shape is compatible with the number of elements.
 static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
   auto res = shape.vec();
   int64_t newsize = 1;
