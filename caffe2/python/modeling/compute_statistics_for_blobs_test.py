@@ -60,7 +60,7 @@ class ComputeStatisticsForBlobsTest(unittest.TestCase):
         self.assertEqual(fc1_w_summary.size, 4)
 
         self.assertEqual(len(model.net.Proto().op), 8)
-        assert 'fc1_w_summary' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
-        assert 'fc2_w_summary' in model.net.output_record().field_blobs(),\
-                model.net.output_record().field_blobs()
+        assert 'fc1_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs()
+        assert 'fc2_w' + net_modifier.field_name_suffix() in\
+            model.net.output_record().field_blobs()

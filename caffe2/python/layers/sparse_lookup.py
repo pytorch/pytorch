@@ -194,13 +194,12 @@ class SparseLookup(ModelLayer):
         layer_name = 'SparseLengths' + reducer
 
         if version in ['fp32', 'fp16']:
-            # SparseLengths* Ops with engine='fp16' will accept either
-            # fp16 or fp32 embedding matrix and output fp32 pooled embedding
+            # SparseLengths* Ops will accept either fp16 or fp32 embedding
+            # matrix and output fp32 pooled embedding
             net.__getattr__(layer_name)(
                 op_input,
                 self.output_schema.field_blobs(),
                 grad_on_weights=grad_on_weights,
-                engine='fp16',
             )
         elif version == 'uint8rowwise':
             op_input.insert(len(op_input), self.scale_bias)
@@ -233,12 +232,11 @@ class SparseLookup(ModelLayer):
 
             layer_name = 'SparseLengths' + self.reducer
             if version in ['fp32', 'fp16']:
-                # SparseLengths* Ops with engine='fp16' will accept either
-                # fp16 or fp32 embedding matrix and output fp32 pooled embedding
+                # SparseLengths* Ops will accept either fp16 or fp32 embedding
+                # matrix and output fp32 pooled embedding
                 net.__getattr__(layer_name)(
                     op_input,
                     self.output_schema.field_blobs(),
-                    engine='fp16',
                 )
             elif version == 'uint8rowwise':
                 op_input.insert(len(op_input), self.scale_bias)
@@ -278,7 +276,6 @@ class SparseLookup(ModelLayer):
             net.__getattr__('SortedSegmentRange' + self.reducer)(
                 [table_rows, segment_ids],
                 self.output_schema.field_blobs(),
-                engine='fp16',
             )
 
     # deal with sparse features of id_score_list type
@@ -303,7 +300,6 @@ class SparseLookup(ModelLayer):
                 net.__getattr__(layer_name)(
                     op_input,
                     self.output_schema.field_blobs(),
-                    engine='fp16',
                 )
             elif version == 'uint8rowwise':
                 net.__getattr__(layer_name + '8BitsRowwise')(

@@ -38,10 +38,10 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
                 if i == j:
                     continue
                 lambda_weight = np.abs((2**r[i] - 2**r[j]) * (d[i] - d[j]))
-                rank_loss = log_sigm(
+                rank_loss = -log_sigm(
                     y[i] - y[j] if r[i] > r[j] else y[j] - y[i]
                 )
-                rank_dy = (1. if r[i] > r[j] else 0.) - sigm(y[i] - y[j])
+                rank_dy = (0. if r[i] > r[j] else 1.) - sigm(-y[i] + y[j])
                 loss += lambda_weight * rank_loss / idcg
                 dy[i] += lambda_weight * rank_dy / idcg
         return loss, dy

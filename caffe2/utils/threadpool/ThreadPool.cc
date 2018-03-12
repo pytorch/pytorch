@@ -27,7 +27,7 @@ CAFFE2_DEFINE_bool(caffe2_threadpool_force_inline, false,
 CAFFE2_DEFINE_int(caffe2_threadpool_android_cap, true, "");
 
 // Whether or not threadpool caps apply to iOS
-CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, false, "");
+CAFFE2_DEFINE_int(caffe2_threadpool_ios_cap, true, "");
 
 
 namespace caffe2 {

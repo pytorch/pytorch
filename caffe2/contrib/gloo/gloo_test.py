@@ -32,6 +32,7 @@ import shutil
 
 from caffe2.python import core, workspace, dyndep
 import caffe2.python.hypothesis_test_util as hu
+from gloo.python import IoError
 
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:file_store_handler_ops")
 dyndep.InitOpsLibrary("@/caffe2/caffe2/distributed:redis_store_handler_ops")
@@ -637,6 +638,59 @@ class TestCase(hu.HypothesisTestCase):
                     tmpdir=tmpdir)
         # Check that test finishes quickly because connections get closed
         self.assertLess(time.time() - start_time, 2.0)
+
+    def _test_io_error(
+        self,
+        comm_rank=None,
+        comm_size=None,
+        tmpdir=None,
+    ):
+        '''
+        Only one node will participate in allreduce, resulting in an IoError
+        '''
+        store_handler, common_world = self.create_common_world(
+            comm_rank=comm_rank,
+            comm_size=comm_size,
+            tmpdir=tmpdir)
+
+        if comm_rank == 0:
+            blob_size = 1000
+            num_blobs = 1
+
+            blobs = []
+            for i in range(num_blobs):
+                blob = "blob_{}".format(i)
+                value = np.full(
+                    blob_size, (comm_rank * num_blobs) + i, np.float32
+                )
+                workspace.FeedBlob(blob, value)
+                blobs.append(blob)
+
+            net = core.Net("allreduce")
+            net.Allreduce(
+                [common_world] + blobs,
+                blobs,
+                engine=op_engine)
+
+            workspace.CreateNet(net)
+            workspace.RunNet(net.Name())
+
+    @given(comm_size=st.integers(min_value=2, max_value=8),
+           device_option=st.sampled_from([hu.cpu_do]))
+    def test_io_error(self, comm_size, device_option):
+        TestCase.test_counter += 1
+        with self.assertRaises(IoError):
+            if os.getenv('COMM_RANK') is not None:
+                self.run_test_distributed(
+                    self._test_io_error,
+                    device_option=device_option)
+            else:
+                with TemporaryDirectory() as tmpdir:
+                    self.run_test_locally(
+                        self._test_io_error,
+                        comm_size=comm_size,
+                        device_option=device_option,
+                        tmpdir=tmpdir)
 
 if __name__ == "__main__":
     import unittest

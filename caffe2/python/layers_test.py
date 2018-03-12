@@ -128,6 +128,30 @@ class TestLayers(LayersTestCase):
         assert core.BlobReference('loss_blob_in_tuple_1')\
          in self.model.loss.field_blobs()
 
+    def testAddOutputSchema(self):
+        # add the first field
+        self.model.add_output_schema('struct', schema.Struct())
+        expected_output_schema = schema.Struct(('struct', schema.Struct()))
+        self.assertEqual(
+            self.model.output_schema,
+            expected_output_schema,
+        )
+
+        # add the second field
+        self.model.add_output_schema('scalar', schema.Scalar(np.float64))
+        expected_output_schema = schema.Struct(
+            ('struct', schema.Struct()),
+            ('scalar', schema.Scalar(np.float64)),
+        )
+        self.assertEqual(
+            self.model.output_schema,
+            expected_output_schema,
+        )
+
+        # overwrite a field should raise
+        with self.assertRaises(AssertionError):
+            self.model.add_output_schema('scalar', schema.Struct())
+
     def _test_net(self, net, ops_list):
         """
         Helper function to assert the net contains some set of operations and

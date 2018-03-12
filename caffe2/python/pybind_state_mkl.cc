@@ -50,9 +50,8 @@ class MKLMemoryFetcher : public BlobFetcherBase {
     for (const auto dim : src.dims()) {
       npy_dims.push_back(dim);
     }
-    auto result = pybind11::object(
-        PyArray_SimpleNew(src.dims().size(), npy_dims.data(), numpy_type),
-        /* borrowed */ false);
+    auto result = pybind11::reinterpret_steal<pybind11::object>(
+        PyArray_SimpleNew(src.dims().size(), npy_dims.data(), numpy_type));
     void* ptr = static_cast<void*>(
         PyArray_DATA(reinterpret_cast<PyArrayObject*>(result.ptr())));
     src.CopyTo(ptr);
