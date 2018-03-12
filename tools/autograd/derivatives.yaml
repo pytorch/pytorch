@@ -717,7 +717,7 @@
   self: soft_margin_loss_backward(grad, self, target, size_average, reduce)
 
 - name: relu(Tensor self)
-  self: grad * (self > 0).type_as(self)
+  self: threshold_backward(grad, self, 0, 0)
 
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale)
   self: elu_backward(grad, alpha, scale, output)
