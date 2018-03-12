@@ -24,6 +24,7 @@
 
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
+#include "torch/csrc/jit/script/module.h"
 
 #include <vector>
 #include <iostream>
@@ -791,12 +792,12 @@ void testBlocks(std::ostream & out) {
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
-    WithInsertPoint guard(g, then_block);
+    WithInsertPoint guard(then_block);
     auto t = c + c;
     then_block->registerOutput(t.value());
   }
   {
-    WithInsertPoint guard(g, else_block);
+    WithInsertPoint guard(else_block);
     auto  d = b + c;
     auto e = d + c;
     else_block->registerOutput(e.value());
@@ -833,10 +834,10 @@ const static auto cf_examples = R"JIT(
     return a
 )JIT";
 void testControlFlow() {
-  script::CompilationUnit cu;
-  cu.define(cf_examples, torch::jit::script::Resolver());
+  script::Module cu(/*optimize=*/true);
+  script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
-    auto graph = cu.getGraph(name);
+    auto graph = cu.get_method(name).graph();
     Code code(graph, /*values_are_variables=*/false);
     InterpreterState interp(code);
     interp.runOneStage(stack);

@@ -1610,8 +1610,8 @@ class TestJit(TestCase):
             return c
         ''')
         self.assertEqual(
-            str(cu.cu.get_graph('test_ternary_control')),
-            str(cu2.cu.get_graph('test_ternary')),
+            str(cu.test_ternary_control.graph()),
+            str(cu2.test_ternary.graph()),
         )
 
     def test_python_frontend_run(self):
@@ -1693,7 +1693,7 @@ class TestJit(TestCase):
         self.assertEqual(cu.test_call_python(*inputs), outputs[0])
 
     def test_script_python_call_failure(self):
-        with self.assertRaisesRegex(RuntimeError, "Unknown function pyfunc2"):
+        with self.assertRaisesRegex(RuntimeError, "undefined value pyfunc2"):
             def pyfunc(a):
                 return a * 3.0
 
@@ -1733,7 +1733,7 @@ class TestJit(TestCase):
         self.assertEqual(foo(*inputs), outputs[0])
 
     def test_script_python_call_annotation_failure(self):
-        with self.assertRaisesRegex(RuntimeError, "Unknown function pyfunc2"):
+        with self.assertRaisesRegex(RuntimeError, "undefined value pyfunc2"):
             def pyfunc(a):
                 return a * 3.0
 
@@ -1877,6 +1877,57 @@ class TestJit(TestCase):
         if not WINDOWS:
             self.assertExpected(captured[0])
 
+    def test_script_module(self):
+        class M1(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M1, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                # test submodule
+                self.sub = M1()
+                # test parameters
+                self.weight = nn.Parameter(torch.randn(2, 3))
+                self.bias = nn.Parameter(torch.randn(2))
+                # test defining a method from a string
+                self.define("""
+                    def hi(self, a):
+                        return self.weight.mm(a)
+                """)
+            # test script methods
+
+            @torch.jit.script_method
+            def doit(self, input):
+                # test use of parameter
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def doit2(self, input):
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                a = self.doit(input)
+                b = self.doit2(input)
+                c = self.hi(input)
+                return a + b + self.bias + self.sub(a) + c
+        m2 = M2()
+        input = torch.randn(3, 2)
+        a = m2.weight.mm(input)
+        b = m2.weight.mm(input)
+        c = m2.weight.mm(input)
+        ref = a + b + m2.bias + m2.sub.weight + a + c
+        self.assertEqual(ref, m2.forward(input))
+        m2.weight = nn.Parameter(torch.zeros_like(m2.weight))
+        m2.bias = nn.Parameter(torch.zeros_like(m2.bias))
+        m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
+        self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
 if __name__ == '__main__':
     run_tests()

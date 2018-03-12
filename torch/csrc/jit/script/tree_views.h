@@ -244,6 +244,7 @@ struct Expr : public TreeView {
       case TK_SLICE:
       case TK_GATHER:
       case TK_VAR:
+      case TK_LIST_LITERAL:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -262,8 +263,8 @@ struct Attribute : public TreeView {
   Ident name() const {
     return Ident(subtree(0));
   }
-  TreeRef value() const {
-    return subtree(1);
+  Expr value() const {
+    return Expr(subtree(1));
   }
   static Attribute create(const SourceRange& range, const Ident& name, const TreeRef& value) {
     return Attribute(Compound::create(TK_ATTRIBUTE, range, {name, value}));
@@ -534,8 +535,8 @@ struct Apply : public Expr {
   explicit Apply(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_APPLY);
   }
-  Ident name() const {
-    return Ident(subtree(0));
+  Expr callee() const {
+    return Expr(subtree(0));
   }
   List<Expr> inputs() const {
     return List<Expr>(subtree(1));
@@ -545,10 +546,10 @@ struct Apply : public Expr {
   }
   static Apply create(
       const SourceRange& range,
-      const Ident& name,
+      const Expr& callee,
       const List<Expr>& inputs,
       const List<Attribute>& attributes) {
-    return Apply(Compound::create(TK_APPLY, range, {name, inputs, attributes}));
+    return Apply(Compound::create(TK_APPLY, range, {callee, inputs, attributes}));
   }
 };
 
@@ -648,6 +649,19 @@ struct TernaryIf : public Expr {
                           const Expr& false_expr) {
     return TernaryIf(Compound::create(TK_IF_EXPR, range, {cond, true_expr, false_expr}));
   };
+};
+
+
+struct ListLiteral : public TreeView {
+  explicit ListLiteral(const TreeRef& tree) : TreeView(tree) {
+    tree_->match(TK_LIST_LITERAL);
+  }
+  List<Expr> inputs() const {
+    return subtree(0);
+  }
+  static ListLiteral create(const SourceRange& range, const List<Expr>& inputs) {
+    return ListLiteral(Compound::create(TK_LIST_LITERAL, range, {inputs}));
+  }
 };
 
 } // namespace script

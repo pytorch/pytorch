@@ -76,7 +76,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
   // because JIT classic needs this to fix up gradients, remove when possible
   std::vector<std::vector<TypePtr>> stage_input_types;
 
-  WithInsertPoint guard(graph, *graph.nodes().begin());
+  WithInsertPoint guard(*graph.nodes().begin());
   size_t input_pos = 0;
   size_t output_pos = 0;
   auto it = graph.nodes().begin();

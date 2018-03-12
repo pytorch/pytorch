@@ -78,7 +78,9 @@ namespace script {
   _(TK_SLICE, "slice", "")                       \
   _(TK_VAR, "variable", "")                      \
   _(TK_GATHER, "gather", "")                     \
-  _(TK_NOTHING, "nothing", "")
+  _(TK_NOTHING, "nothing", "")                   \
+  _(TK_LIST_LITERAL, "list-literal", "")
+
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
 enum TokenKind {
@@ -134,8 +136,8 @@ struct SharedParserData {
 
     std::stringstream ss;
     for (const char* c = valid_single_char_tokens; *c; c++) {
-      const char str[] = {*c, '\0'};
-      head->insert(str, *c);
+      std::string str(1, *c);
+      head->insert(str.c_str(), *c);
     }
 
 #define ADD_CASE(tok, _, tokstring) \
