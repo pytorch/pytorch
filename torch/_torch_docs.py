@@ -4171,7 +4171,8 @@ Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
-Results may be inconsistent when using a non-integer step. This is due to floating point rounding errors, but can be avoided by adding a small value to `end`.
+Results may be inconsistent when using a non-integer step.
+This is due to floating point rounding errors, but can be avoided by adding a small value to `end`.
 
 .. math::
     out_{i+1} = out_{i} + \mathrm{step}
