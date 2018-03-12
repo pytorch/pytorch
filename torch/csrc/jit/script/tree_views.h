@@ -3,6 +3,7 @@
 #include "tree.h"
 
 #include <functional>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -14,8 +15,7 @@ namespace script {
 // A few notes on types and their aliases:
 // - List<T> is really a Tree with kind TK_LIST and elements as subtrees
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
-// - Builtin types are: Ident (TK_IDENT), String (TK_STRING),
-//                      Number (TK_NUMBER) and Bool (TK_BOOL)
+// - Builtin types are: Ident (TK_IDENT), String (TK_STRING) and Number (TK_NUMBER)
 //
 // Type  = TensorType()                                                 TK_TENSOR_TYPE
 // Param = Param(Type type, Ident name)                                 TK_PARAM
@@ -47,11 +47,7 @@ namespace script {
 //       | UnaryOp(Expr expr)
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
-//       -- * is one of  |   Number  | Bool |
-//       --              +-----------+------+
-//       -- type is then | "i" | "f" |  "b" |
-//       -- TODO: change this to a generic "Scalar" node that keep arbitrary precision values
-//       | Const(* value, String type)                                  TK_CONST
+//       | Const()                                                      TK_NUMBER
 //       | Cast(ScalarType type, Expr expr)                             TK_CAST
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
@@ -237,7 +233,7 @@ struct Expr : public TreeView {
       case '/':
       case TK_NOT:
       /* case '-': - unary minus */
-      case TK_CONST:
+      case TK_NUMBER:
       case TK_CAST:
       case TK_APPLY:
       case '.':
@@ -516,6 +512,27 @@ struct UnaryOp : public Expr {
   }
 };
 
+struct Const : public Expr {
+  explicit Const(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_NUMBER);
+  }
+  bool isFloatingPoint() const {
+    return tree_->stringValue().find_first_of(".eE") != std::string::npos;
+  }
+  bool isIntegral() const {
+    return !isFloatingPoint();
+  }
+  int64_t asIntegral() const {
+    return std::stoll(tree_->stringValue());
+  }
+  double asFloatingPoint() const {
+    return std::stod(tree_->stringValue());
+  }
+  static Const create(const SourceRange& range, std::string value) {
+    return Const(Number::create(range, std::move(value)));
+  }
+};
+
 struct Cast : public Expr {
   explicit Cast(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_CAST);
@@ -598,8 +615,7 @@ struct Slice : public Expr {
   }
 private:
   Expr createInt(int value) const {
-    return Expr(Compound::create(
-        TK_CONST, range(), {Number::create(value), String::create("i")}));
+    return Expr(Number::create(range(), std::to_string(value)));
   }
 };
 

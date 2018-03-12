@@ -150,34 +150,15 @@ struct Parser {
     return List<T>::create(r, elements);
   }
   TreeRef parseConst() {
-    // 'b' - boolean
-    // 'LL' 64-bit integer
-    // 'f' single-precision float
-    // 'i' 32-bit integer
-    // 'f' is default if '.' appears in the number
     auto range = L.cur().range;
     if (L.nextIf(TK_TRUE)) {
-      return c(TK_CONST, range, {d(1), s("b")});
+      return Number::create(range, "1");
     } else if (L.nextIf(TK_FALSE)) {
-      return c(TK_CONST, range, {d(0), s("b")});
+      return Number::create(range, "0");
     }
-    float mult = 1.0f;
-    while (L.nextIf('-')) {
-      mult *= -1.0f;
-    }
+    std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
-    std::string type_ident =
-        (t.text().find('.') == std::string::npos) ? "i" : "f";
-    if (L.cur().kind == TK_IDENT) {
-      Token type_ident_tok = L.expect(TK_IDENT);
-      type_ident = type_ident_tok.text();
-      if (type_ident != "LL" && type_ident != "f") {
-        throw ErrorReport(type_ident_tok)
-            << "expected 'f' or 'LL' "
-            << "as numeric type identifier but found '" << type_ident << "'";
-      }
-    }
-    return c(TK_CONST, t.range, {d(mult * t.doubleValue()), s(type_ident)});
+    return Number::create(t.range, unary_prefix + t.text());
   }
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
@@ -280,11 +261,13 @@ struct Parser {
       case TK_GLOBAL: {
         auto range = L.next().range;
         auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+        expectEndOfLine();
         return Global::create(range, idents);
       }
       case TK_RETURN: {
         auto range = L.next().range;
         auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        expectEndOfLine();
         return Return::create(range, values);
       }
       default: {
@@ -380,12 +363,6 @@ struct Parser {
 
  private:
   // short helpers to create nodes
-  TreeRef d(double v) {
-    return Number::create(v);
-  }
-  TreeRef s(const std::string& s) {
-    return String::create(s);
-  }
   TreeRef c(int kind, const SourceRange& range, TreeList&& trees) {
     return Compound::create(kind, range, std::move(trees));
   }

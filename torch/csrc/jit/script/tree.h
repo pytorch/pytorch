@@ -16,7 +16,7 @@ namespace script {
 // for instance the expression a*b+1 is represented as:
 // (+ (* (ident a) (ident b)) (const 1))
 // Atoms like 'a', 'b', and '1' are represented by subclasses of Tree which
-// define stringValue() and doubleValue().
+// define stringValue().
 // Everything else is a Compound object, which has a 'kind' that is a token from
 // Lexer.h's TokenKind enum, and contains a list of subtrees.
 // Like TokenKind single-character operators like '+' are representing using the
@@ -42,9 +42,6 @@ struct Tree : std::enable_shared_from_this<Tree> {
   }
   virtual const SourceRange& range() const {
     throw std::runtime_error("is an Atom");
-  }
-  virtual double doubleValue() const {
-    throw std::runtime_error("not a TK_NUMBER");
   }
   virtual const std::string& stringValue() const {
     throw std::runtime_error("not a TK_STRING");
@@ -115,9 +112,15 @@ struct String : public Tree {
   std::string value_;
 };
 struct Number : public Tree {
-  Number(double value_) : Tree(TK_NUMBER), value_(value_) {}
-  virtual double doubleValue() const override {
+  Number(SourceRange range, std::string value)
+    : Tree(TK_NUMBER)
+    , range_(std::move(range))
+    , value_(std::move(value)) {}
+  virtual const std::string& stringValue() const override {
     return value_;
+  }
+  virtual const SourceRange& range() const override {
+    return range_;
   }
   template <typename... Args>
   static TreeRef create(Args&&... args) {
@@ -125,20 +128,8 @@ struct Number : public Tree {
   }
 
  private:
-  double value_;
-};
-struct Bool : public Tree {
-  Bool(bool value_) : Tree(TK_BOOL), value_(value_) {}
-  virtual double doubleValue() const override {
-    return value_;
-  }
-  template <typename... Args>
-  static TreeRef create(Args&&... args) {
-    return std::make_shared<Bool>(std::forward<Args>(args)...);
-  }
-
- private:
-  bool value_;
+  SourceRange range_;
+  std::string value_;
 };
 
 static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
@@ -198,7 +189,7 @@ struct pretty_tree {
     std::stringstream out;
     switch (t->kind()) {
       case TK_NUMBER:
-        out << t->doubleValue();
+        out << t->stringValue();
         break;
       case TK_STRING:
         out << t->stringValue();

@@ -39,7 +39,6 @@ namespace script {
   _(TK_EQUIVALENT, "equivalent", "<=>")          \
   _(TK_IDENT, "ident", "")                       \
   _(TK_STRING, "string", "")                     \
-  _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \
@@ -362,13 +361,6 @@ struct Token {
   int kind;
   SourceRange range;
   Token(int kind, const SourceRange& range) : kind(kind), range(range) {}
-  double doubleValue() {
-    assert(TK_NUMBER == kind);
-    size_t idx;
-    double r = stod(text(), &idx);
-    assert(idx == range.size());
-    return r;
-  }
   std::string text() {
     return range.text();
   }
