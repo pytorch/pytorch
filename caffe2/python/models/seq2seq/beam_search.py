@@ -158,17 +158,6 @@ class BeamSearchForwardOnly(object):
                 'possible_finished_penalty',
             )
 
-            # [beam_size]
-            hypo_t_flat = self.step_model.net.FlattenToVec(
-                self.hypo_t_prev,
-                'hypo_t_flat',
-            )
-            hypo_t_flat_int = self.step_model.net.Cast(
-                hypo_t_flat,
-                'hypo_t_flat_int',
-                to=core.DataType.INT32,
-            )
-
             tokens_t_flat = self.step_model.net.FlattenToVec(
                 self.tokens_t_prev,
                 'tokens_t_flat',
@@ -179,12 +168,8 @@ class BeamSearchForwardOnly(object):
                 to=core.DataType.INT32,
             )
 
-            predecessor_tokens = self.step_model.net.Gather(
-                [tokens_t_flat_int, hypo_t_flat_int],
-                'predecessor_tokens',
-            )
             predecessor_is_eos = self.step_model.net.EQ(
-                [predecessor_tokens, eos_token],
+                [tokens_t_flat_int, eos_token],
                 'predecessor_is_eos',
             )
             predecessor_is_eos_float = self.step_model.net.Cast(
