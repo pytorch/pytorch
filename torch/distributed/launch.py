@@ -52,16 +52,25 @@ multi-node) GPU training currently only achieves the best performance using
 the NCCL distributed backend. Thus NCCL backend is the recommended backend to
 use for GPU training.
 
-2. In your training program, you are supposed to parse the command-line
-argument: ``--device=DEVICE_TO_RUN``, (which will be provided with this module)
-and ensure that your code only runs on this device in your training program by:
+2. In your training program, you must parse the command-line argument:
+``--local_rank=LOCAL_PROCESS_RANK, which will be provided by this module.
+If your training program uses GPUs, you should ensure that your code only
+runs on the GPU device of LOCAL_PROCESS_RANK. This can be done by:
 
+    Parsing the local_rank argument
 
-    >>> torch.cuda.set_device(arg.device)  # before your code runs
+    >>> import argparse
+    >>> parser = argparse.ArgumentParser()
+    >>> parser.add_argument("--local_rank", type=int)
+    >>> args = parser.parse_args()
+
+    Set your device to local rank using either
+
+    >>> torch.cuda.set_device(arg.local_rank)  # before your code runs
 
     or
 
-    >>> with torch.cuda.device(arg.device):
+    >>> with torch.cuda.device(arg.local_rank):
     >>>    # your code to run
 
 3. In your training program, you are supposed to call the following function
@@ -73,16 +82,18 @@ by this module:
     init_method='env://')``
 
 4. In your training program, you can either use regular distributed functions
-or use DistributedDataParallel module. If you would like to use
-DistributedDataParallel module, here is how to configure it.
+or use DistributedDataParallel module. If your training program uses GPUs for
+training and you would like to use DistributedDataParallel module, here is how
+to configure it.
 
     ``model = torch.nn.parallel.DistributedDataParallel(model,
-    device_ids=[arg.device], output_device=arg.device)``
+    device_ids=[arg.local_rank], output_device=arg.local_rank)``
 
 Please ensure that ``device_ids`` argument is set to be the only GPU device id
-that your code will be operating on. In other words, the ``device_ids`` needs
-to be ``[args.device]``, and ``output_device`` needs to be ``args.devices`` in
-order to use this utility
+that your code will be operating on. This is generally the local rank of the
+process. In other words, the ``device_ids`` needs to be ``[args.local_rank]``,
+and ``output_device`` needs to be ``args.local_rank`` in order to use this
+utility
 
 """
 
@@ -113,7 +124,7 @@ def parse_args():
                              "training")
     parser.add_argument("--nproc_per_node", type=int, default=1,
                         help="The number of processes to launch on each node, "
-                             "for GPU training, this is recommended to be set"
+                             "for GPU training, this is recommended to be set "
                              "to the number of GPUs in your system so that "
                              "each process can be bound to a single GPU.")
     parser.add_argument("--master_addr", default="127.0.0.1", type=str,
@@ -159,7 +170,7 @@ for local_rank in range(0, args.nproc_per_node):
     # spawn the processes
     cmd = ["python",
            args.training_script,
-           "--device={}".format(local_rank)] + args.training_script_args
+           "--local_rank={}".format(local_rank)] + args.training_script_args
 
     process = subprocess.Popen(cmd, env=current_env)
     processes.append(process)
