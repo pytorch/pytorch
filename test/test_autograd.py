@@ -2213,6 +2213,11 @@ method_tests = [
     ('view', (S,), (S,), '1d'),
     ('view', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('view', (), (1,), 'scalar_to_1d'),
+    ('reshape', (S, S, S), (S * S, S),),
+    ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size'),
+    ('reshape', (S,), (S,), '1d'),
+    ('reshape', (), (dont_convert(()),), 'scalar_to_scalar'),
+    ('reshape', (), (1,), 'scalar_to_1d'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
@@ -2748,6 +2753,7 @@ EXCLUDE_FUNCTIONAL = {
     'addmv_',
     'addr',
     'addr_',
+    'reshape',
     'where'  # argument order
 }
 EXCLUDE_GRADCHECK = {
