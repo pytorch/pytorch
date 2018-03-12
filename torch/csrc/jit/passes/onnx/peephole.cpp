@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 
+#include <ATen/optional.h>
+
 #if defined(_MSC_VER)
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
@@ -54,14 +56,21 @@ bool isBroadcasting(Node *node) {
 // dimensions that are simply one, since they can be trivially broadcasted.
 // When iterating over the dimension sizes (with reduced 'from' tensor),
 // starting at the trailing dimension, the dimension sizes must either be equal,
-// or one of them does not exist.
+// or one of them does not exist. If a broadcast candidate is not found at the
+// trailing dimension, search at the leading dimension. If one is found here,
+// return the `axis` argument to be emitted to ONNX on the broadcasting operator
 //
 // Note that this is NOT equivalent to numpy broadcasting semantics, and do
-// not represent that generalized broadcasting that Pytorch implements in
-// general. Rather, this is Caffe2-style broadcasting.
-std::tuple<bool, ssize_t> fusibleExpandTo(at::IntList from, at::IntList to) {
+// not represent the generalized broadcasting that Pytorch implements.
+// Rather, this is Caffe2-style broadcasting.
+//
+// Return value is 1) Whether this expand is fusable, 2) the `axis` argument we
+// should emit to ONNX. Coming from a Pytorch frontend, this should either not
+// be emitted (if we're broadcasting trailing dimensions) or it should be
+// emitted as `0` (leading dimensions.)
+std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::IntList to) {
   if (from.size() > to.size()) {
-    return std::make_tuple<bool, ssize_t>(false, -1);
+    return std::make_tuple<bool, ssize_t>(false, {});
   }
   ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
   while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
@@ -85,7 +94,7 @@ std::tuple<bool, ssize_t> fusibleExpandTo(at::IntList from, at::IntList to) {
   // the 'from' tensor does, f will be less than from_dim_start rather than
   // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
   if (trailing_expand && f <= from_dim_start) {
-    return std::make_tuple<bool, ssize_t>(true, -1);
+    return std::make_tuple<bool, ssize_t>(true, {});
   }
 
   f = from_dim_start;
@@ -102,7 +111,7 @@ std::tuple<bool, ssize_t> fusibleExpandTo(at::IntList from, at::IntList to) {
     return std::make_tuple<bool, ssize_t>(true, 0);
   }
 
-  return std::make_tuple<bool, ssize_t>(false, -1);
+  return std::make_tuple<bool, ssize_t>(false, {});
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
@@ -134,7 +143,7 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 
     // Not all broadcasts are supported by ONNX broadcast.
     bool fusible_expand;
-    ssize_t axis;
+    at::optional<size_t> axis;
     std::tie(fusible_expand, axis) = fusibleExpandTo(
         unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
         expanded_rhs->output()->type()->expect<TensorType>()->sizes()); // to
@@ -143,8 +152,8 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 
     n->replaceInput(input_index, unexpanded_rhs);
     n->i_(kbroadcast, 1);
-    if (axis != -1) {
-      n->i_(kaxis, axis);
+    if (axis) {
+      n->i_(kaxis, axis.value());
     }
     if (!expanded_rhs->hasUses()) {
       expanded_rhs->destroy();
