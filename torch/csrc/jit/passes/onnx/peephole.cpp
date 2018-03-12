@@ -100,7 +100,7 @@ std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::Int
   f = from_dim_start;
   t = 0;
   bool leading_expand = true;
-  for (; f <= from_dim_end && t < to.size(); ++f, ++t) {
+  for (; f <= from_dim_end && t < static_cast<ssize_t>(to.size()); ++f, ++t) {
     if (from[f] != to[t]) {
       leading_expand = false;
       break;
