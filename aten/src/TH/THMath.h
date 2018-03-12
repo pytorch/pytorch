@@ -42,7 +42,6 @@ static inline float TH_lerpf(float a, float b, float weight) {
   return a + weight * (b-a);
 }
 
-
 /* The next function is taken from  https://github.com/antelopeusersgroup/antelope_contrib/blob/master/lib/location/libgenloc/erfinv.c.
 Below is the copyright.
 Output was modified to be inf or -inf when input is 1 or -1. */

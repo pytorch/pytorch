@@ -1,4 +1,3 @@
-#include "Python.h"
 #include "VariableType.h"
 
 // ${generated_comment}
@@ -43,7 +42,7 @@ template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context)
+  : Type(context, /*is_variable_or_undefined=*/true)
   , baseType(baseType) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
@@ -247,14 +246,6 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   }
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
-
-#ifndef WITH_SCALARS
-static void ensure_no_aten_scalars(Tensor & data) {
-  if (data.defined() && data.dim() == 0) {
-    data.as_strided_({1}, {1});
-  }
-}
-#endif
 
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   bool out = false;

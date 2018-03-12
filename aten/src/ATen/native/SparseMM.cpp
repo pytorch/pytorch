@@ -49,19 +49,17 @@ void sspaddmm_TH_dispatch<double>(Tensor& result, Scalar beta, const Tensor& sel
   result_->maybeScalar(self_->isScalar() && mat1_->isScalar() && mat2_->isScalar());
 }
 
-template <typename scalar_t>
-struct SspaddmmOp {
-  static void apply(Tensor& result, Scalar beta, const Tensor& self,
-      Scalar alpha, const Tensor& mat1, const Tensor& mat2) {
-    sspaddmm_TH_dispatch<scalar_t>(result, beta, self, alpha, mat1, mat2);
-  }
-};
-
 // sparse, sparse, sparse, dense, real, real -> sparse
-Tensor& _sspaddmm_out_cpu(Tensor& result, const Tensor& self,
-    const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  dispatch_floating_types<void, SspaddmmOp>(self.type(), "sspaddmm",
-      result, beta, self, alpha, mat1, mat2);
+Tensor& _sspaddmm_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Scalar beta,
+    Scalar alpha) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "sspaddmm", [&]{
+    sspaddmm_TH_dispatch<scalar_t>(result, beta, self, alpha, mat1, mat2);
+  });
   return result;
 }
 
@@ -87,4 +85,4 @@ Tensor sspaddmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2,
   return result;
 }
 
-}}
+}} // namespace at::native

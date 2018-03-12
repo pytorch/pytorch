@@ -6,7 +6,7 @@ from itertools import product
 
 import torch
 import torch.cuda
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
@@ -293,9 +293,6 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
         result = -input[target] * norm
         return (result, norm)
 
-    if torch.is_tensor(weight):
-        # TODO: remove this once Variables and tensors merge
-        weight = Variable(weight)
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
@@ -357,11 +354,6 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
 
 
 def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
-    # needed for legacy tests
-    if not isinstance(input, Variable):
-        input = Variable(input)
-        target = Variable(target)
-
     margin_clamp = (margin - input).clamp(min=0).type_as(input)
     output = torch.where(target == 1, input, margin_clamp)
 
@@ -382,6 +374,55 @@ def softmarginloss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
+def _multimarginloss_reference(input, target_idx, p, margin, weight):
+    if weight is None:
+        weight = input.new(len(input)).fill_(1)
+
+    output = 0
+    for i in range(0, len(input)):
+        if i != target_idx:
+            output += max(0, weight[target_idx] * (margin - input[target_idx] + input[i]) ** p)
+    return output
+
+
+def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_average=True,
+                              reduce=True):
+    if input.dim() == 1:
+        n = 1
+        dim = input.size(0)
+        output = input.new(1)
+        output[0] = _multimarginloss_reference(input, target[0], p, margin, weight) / dim
+        return output
+    else:
+        n = input.size(0)
+        dim = input.size(1)
+        output = input.new(n)
+        for x in range(0, n):
+            output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
+
+        if reduce and size_average:
+            return output.mean() / dim
+        elif reduce:
+            return output.sum() / dim
+        return output / dim
+
+
+def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+    def _cos(a, b):
+        cos = a.new(a.size(0))
+        for i in range(0, a.size(0)):
+            cos[i] = (a[i] * b[i]).sum() / ((((a[i] * a[i]).sum() + 1e-12) * ((b[i] * b[i]).sum() + 1e-12)) ** 0.5)
+        return cos
+
+    output = torch.where(target == 1, 1 - _cos(input1, input2), (_cos(input1, input2) - margin).clamp(min=0))
+
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -390,28 +431,10 @@ loss_reference_fns = {
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
     'HingeEmbeddingLoss': hingeembeddingloss_reference,
     'SoftMarginLoss': softmarginloss_reference,
+    'MultiMarginLoss': multimarginloss_reference,
+    'CosineEmbeddingLoss': cosineembeddingloss_reference,
 }
 
-
-sample_scalar = variable(0)
-
-
-# TODO: replace this with torch.rand() when Variables and tensors are merged;
-# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_rand(sizes, requires_grad=False):
-    if len(sizes) == 0:
-        return torch.testing.rand_like(sample_scalar, requires_grad=requires_grad)
-    else:
-        return Variable(torch.rand(*sizes), requires_grad=requires_grad)
-
-
-# TODO: replace this with torch.randn() when Variables and tensors are merged;
-# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_randn(sizes, requires_grad=False):
-    if len(sizes) == 0:
-        return torch.testing.randn_like(sample_scalar, requires_grad=requires_grad)
-    else:
-        return Variable(torch.randn(*sizes), requires_grad=requires_grad)
 
 criterion_tests = [
     dict(
@@ -557,6 +580,54 @@ criterion_tests = [
         module_name='MultiMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        input_size=(10,),
+        target_fn=lambda: torch.rand(1).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+        desc='1d',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(2,),
+        input_fn=lambda: torch.rand(5, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, p=2, size_average=get_size_average(m)),
+        desc='p',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(1, 0.5),
+        legacy_constructor_args=(1, None, 0.5),
+        input_size=(5, 10),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
+        desc='margin',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(1, 1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10)),
+        input_size=(5, 10),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, weight=get_weight(m), size_average=get_size_average(m)),
+        desc='weights',
+        check_no_size_average=True,
         check_gradgrad=False,
     ),
     dict(
@@ -579,15 +650,19 @@ criterion_tests = [
         module_name='CosineEmbeddingLoss',
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
-        check_gradgrad=False,
+        reference_fn=lambda i, t, m:
+            cosineembeddingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
+        check_no_size_average=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
         constructor_args=(0.7,),
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
+        reference_fn=lambda i, t, m:
+            cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, size_average=get_size_average(m)),
         desc='margin',
-        check_gradgrad=False,
+        check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -808,7 +883,7 @@ class TestBase(object):
                     elif torch.is_tensor(sizes):
                         return Variable(sizes.double())
                     else:
-                        return torch_randn(sizes)
+                        return torch.randn(sizes)
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
 

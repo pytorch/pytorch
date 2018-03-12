@@ -1,5 +1,6 @@
 #!/bin/bash
 
+COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Set up conda environment
@@ -18,9 +19,8 @@ export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
 # If we run too many parallel jobs, we will OOM
-export MAX_JOBS=3
+export MAX_JOBS=2
 python setup.py install
-cd test/
 echo "Ninja version: $(ninja --version)"
-sh run_test.sh -- -v
+python test/run_test.py --verbose
 echo "BUILD PASSED"

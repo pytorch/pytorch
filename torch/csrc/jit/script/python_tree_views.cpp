@@ -1,5 +1,6 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/tree_views.h"
 
 #include <pybind11/pybind11.h>
@@ -73,7 +74,9 @@ void initTreeViewBindings(PyObject *module) {
     });
 
   py::class_<Ident, TreeView>(m, "Ident")
-    .def(py::init(&Ident::create));
+      .def(py::init(&Ident::create))
+      .def_property_readonly(
+          "name", [](const Ident& self) { return self.name(); });
 
   py::class_<Param, TreeView>(m, "Param")
     .def(py::init([](const Type& type, const Ident& name) {
@@ -94,13 +97,11 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<Def, TreeView>(m, "Def")
     .def(py::init([](const Ident& name,
                      std::vector<Param> params,
-                     std::vector<Param> returns,
                      std::vector<Stmt> body) {
       auto r = name.range();
       return Def::create(r,
                          name,
                          wrap_list(r, std::move(params)),
-                         wrap_list(r, std::move(returns)),
                          wrap_list(r, std::move(body)));
     }));
 
@@ -110,6 +111,10 @@ void initTreeViewBindings(PyObject *module) {
       auto r = lhs.at(0).range();
       auto kind = AssignKind(Compound::create(stringToKind(kind_str), r, {}));
       return Assign::create(r, List<Ident>::create(r, std::move(lhs)), kind, rhs);
+    }));
+  py::class_<Return, Stmt>(m, "Return")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
+      return Return::create(range, wrap_list(range, std::move(values)));
     }));
   py::class_<If, Stmt>(m, "If")
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> true_branch, std::vector<Stmt> false_branch) {

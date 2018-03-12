@@ -28,21 +28,25 @@ class MultiMarginCriterion(Criterion):
             self.sizeAverage,
             self.p,
             self.weights,
-            self.margin
+            self.margin,
+            True,  # reduce
         )
         self.output = self.output_tensor[0].item()
         return self.output
 
     def updateGradInput(self, input, target):
         target = target.long()
+        implicit_gradOutput = torch.ones(1).type_as(input)
         self._backend.MultiMarginCriterion_updateGradInput(
             self._backend.library_state,
             input,
             target,
+            implicit_gradOutput,
             self.gradInput,
             self.sizeAverage,
             self.p,
             self.weights,
-            self.margin
+            self.margin,
+            True,  # reduce
         )
         return self.gradInput

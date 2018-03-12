@@ -20,7 +20,7 @@ else:
 
 
 class ExceptionWrapper(object):
-    r"Wraps an exception plus traceback to communicate across threads"
+    r"""Wraps an exception plus traceback to communicate across threads"""
 
     def __init__(self, exc_info):
         self.exc_type = exc_info[0]
@@ -28,7 +28,7 @@ class ExceptionWrapper(object):
 
 
 _use_shared_memory = False
-"""Whether to use shared memory in default_collate"""
+r"""Whether to use shared memory in default_collate"""
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -99,7 +99,7 @@ numpy_type_map = {
 
 
 def default_collate(batch):
-    "Puts each data field into a tensor with outer dimension batch size"
+    r"""Puts each data field into a tensor with outer dimension batch size"""
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
@@ -153,7 +153,7 @@ def pin_memory_batch(batch):
 
 
 _SIGCHLD_handler_set = False
-"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
+r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
 handler needs to be set for all DataLoaders in a process."""
 
 
@@ -182,8 +182,8 @@ def _set_SIGCHLD_handler():
     _SIGCHLD_handler_set = True
 
 
-class DataLoaderIter(object):
-    "Iterates once over the DataLoader's dataset, as specified by the sampler"
+class _DataLoaderIter(object):
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
     def __init__(self, loader):
         self.dataset = loader.dataset
@@ -309,7 +309,7 @@ class DataLoaderIter(object):
         # Probably the best way to do this is by moving the sample pushing
         # to a separate thread and then just sharing the data queue
         # but signalling the end is tricky without a non-blocking API
-        raise NotImplementedError("DataLoaderIterator cannot be pickled")
+        raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
         try:
@@ -342,7 +342,7 @@ class DataLoaderIter(object):
 
 
 class DataLoader(object):
-    """
+    r"""
     Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
 
@@ -379,7 +379,7 @@ class DataLoader(object):
               this value in :attr:`worker_init_fn`, which can be used to set other seeds
               (e.g. NumPy) before data loading.
 
-    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be an
+    .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
     """
 
@@ -410,6 +410,9 @@ class DataLoader(object):
             raise ValueError('num_workers cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
+        if sys.platform == "win32" and self.num_workers > 0:
+            raise ValueError('num_workers > 0 is not supported on Windows')
+
         if batch_sampler is None:
             if sampler is None:
                 if shuffle:
@@ -422,7 +425,7 @@ class DataLoader(object):
         self.batch_sampler = batch_sampler
 
     def __iter__(self):
-        return DataLoaderIter(self)
+        return _DataLoaderIter(self)
 
     def __len__(self):
         return len(self.batch_sampler)

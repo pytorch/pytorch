@@ -1,5 +1,4 @@
 import torch
-from torch.autograd._functions.utils import check_onnx_broadcast  # TODO: move me
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
 import warnings
@@ -118,6 +117,10 @@ _onnx_opset_version = 2
 # used to represent "missing" optional inputs
 def unused(g):
     return g.op("Undefined")
+
+
+def Constant(g, value):
+    return g.op("Constant", value_t=value)
 
 
 def add(g, self, other, alpha):

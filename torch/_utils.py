@@ -4,15 +4,15 @@ import warnings
 from collections import defaultdict
 
 
-def _type(self, new_type=None, non_blocking=False, **kwargs):
-    """Returns the type if `new_type` is not provided, else casts this object to
+def _type(self, dtype=None, non_blocking=False, **kwargs):
+    """Returns the type if `dtype` is not provided, else casts this object to
     the specified type.
 
     If this is already of the correct type, no copy is performed and the
     original object is returned.
 
     Args:
-        new_type (type or string): The desired type
+        dtype (type or string): The desired type
         non_blocking (bool): If ``True``, and the source is in pinned memory
             and destination is on the GPU or vice versa, the copy is performed
             asynchronously with respect to the host. Otherwise, the argument
@@ -21,25 +21,25 @@ def _type(self, new_type=None, non_blocking=False, **kwargs):
             the ``non_blocking`` argument.
     """
     non_blocking = _get_async_or_non_blocking('type', non_blocking, kwargs)
-    if new_type is None:
+    if dtype is None:
         return self.__module__ + '.' + self.__class__.__name__
 
-    if isinstance(new_type, str):
-        new_type = _import_dotted_name(new_type)
-    if new_type == type(self):
+    if isinstance(dtype, str):
+        dtype = _import_dotted_name(dtype)
+    if dtype == type(self):
         return self
     if self.is_sparse:
-        if not new_type.is_sparse:
+        if not dtype.is_sparse:
             raise RuntimeError("Cannot cast sparse tensor to dense tensor")
-        new_module_name = new_type.__module__.replace('.sparse', '')
-        new_values_type_name = new_module_name + '.' + new_type.__name__
+        new_module_name = dtype.__module__.replace('.sparse', '')
+        new_values_type_name = new_module_name + '.' + dtype.__name__
         new_values = self._values().type(new_values_type_name, non_blocking)
         new_indices_type_name = new_module_name + '.LongTensor'
         new_indices = self._indices().type(new_indices_type_name, non_blocking)
-        return new_type(new_indices, new_values, self.size())
-    if new_type.is_sparse:
+        return dtype(new_indices, new_values, self.size())
+    if dtype.is_sparse:
         raise RuntimeError("Cannot cast dense tensor to sparse tensor")
-    return new_type(self.size()).copy_(self, non_blocking)
+    return dtype(self.size()).copy_(self, non_blocking)
 
 
 def _cuda(self, device=None, non_blocking=False, **kwargs):
@@ -259,54 +259,3 @@ def _take_tensors(tensors, size_limit):
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
-
-
-def _repeat(self, *sizes):
-    r"""Repeats this tensor along the specified dimensions.
-
-    Unlike :meth:`expand`, this function copies the tensor's data.
-
-    Args:
-        *sizes (torch.Size or int...): The number of times to repeat this
-            tensor along each dimension
-
-    Example:
-        >>> x = torch.Tensor([1, 2, 3])
-        >>> x.repeat(4, 2)
-         1  2  3  1  2  3
-         1  2  3  1  2  3
-         1  2  3  1  2  3
-         1  2  3  1  2  3
-        [torch.FloatTensor of size 4x6]
-        >>> x.repeat(4, 2, 1).size()
-        torch.Size([4, 2, 3])
-    """
-    # If args == (torch.Size,), then we need to unpack the tuple
-    if len(sizes) == 1 and isinstance(sizes[0], torch.Size):
-        sizes = sizes[0]
-
-    repeats = list(sizes)
-
-    if len(repeats) < self.dim():
-        raise ValueError('Number of dimensions of repeat dims can not be '
-                         'smaller than number of dimensions of tensor')
-
-    # Add new leading dimensions to the tensor if the
-    # number of target dimensions is larger than the
-    # number of source dimensions.
-    num_new_dimensions = len(repeats) - self.dim()
-    padded_size = [1] * num_new_dimensions + list(self.size())
-    target_size = torch.Size([a * b for a, b in zip(padded_size, repeats)])
-
-    xtensor = self.new().set_(self)
-    xtensor = xtensor.expand(padded_size)
-
-    result = self.new()
-    result.resize_(target_size)
-    urtensor = result.new(result)
-    for i in range(xtensor.dim()):
-        urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i))
-
-    urtensor.copy_(xtensor.expand_as(urtensor))
-
-    return result

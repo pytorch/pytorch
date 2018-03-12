@@ -9,8 +9,6 @@ from torch.distributions.utils import _finfo, broadcast_all, lazy_property
 
 
 def _standard_gamma(concentration):
-    if not isinstance(concentration, Variable):
-        return torch._C._standard_gamma(concentration)
     return concentration._standard_gamma()
 
 
@@ -26,9 +24,9 @@ class Gamma(ExponentialFamily):
         [torch.FloatTensor of size 1]
 
     Args:
-        concentration (float or Tensor or Variable): shape parameter of the distribution
+        concentration (float or Tensor): shape parameter of the distribution
             (often referred to as alpha)
-        rate (float or Tensor or Variable): rate = 1 / scale of the distribution
+        rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
     params = {'concentration': constraints.positive, 'rate': constraints.positive}

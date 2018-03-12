@@ -2,13 +2,16 @@
 #include "ATen/UndefinedTensor.h"
 #include <string>
 #include "test_assert.h"
+#include "test_seed.h"
 
 using namespace at;
 
 int main() {
+  manual_seed(123);
+
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;
-  Tensor ft = CPU(kFloat).ones({1});
+  Tensor ft = ones(CPU(kFloat), {1});
 
   std::cout << und << std::endl;
   ASSERT(!und.defined());
@@ -40,7 +43,7 @@ int main() {
   ASSERT_THROWSM(und.toBackend(Backend::CPU), "toBackend");
   ASSERT_THROWSM(ft.toBackend(Backend::Undefined), "UndefinedType");
 
-  Tensor to_move = CPU(kFloat).ones({1});
+  Tensor to_move = ones(CPU(kFloat), {1});
   Tensor m(std::move(to_move));
   ASSERT(!to_move.defined());
   ASSERT(to_move.get() == UndefinedTensor::singleton());

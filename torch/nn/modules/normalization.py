@@ -24,10 +24,11 @@ class LocalResponseNorm(Module):
     Shape:
         - Input: :math:`(N, C, ...)`
         - Output: :math:`(N, C, ...)` (same shape as input)
+
     Examples:
         >>> lrn = nn.LocalResponseNorm(2)
-        >>> signal_2d = autograd.Variable(torch.randn(32, 5, 24, 24))
-        >>> signal_4d = autograd.Variable(torch.randn(16, 5, 7, 7, 7, 7))
+        >>> signal_2d = torch.randn(32, 5, 24, 24)
+        >>> signal_4d = torch.randn(16, 5, 7, 7, 7, 7)
         >>> output_2d = lrn(signal_2d)
         >>> output_4d = lrn(signal_4d)
     """
@@ -77,11 +78,11 @@ class LayerNorm(Module):
     the paper `Layer Normalization`_ .
 
     .. math::
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
 
     The mean and standard-deviation are calculated separately over the last
     certain number dimensions with shape specified by :attr:`normalized_shape`.
-    Gamma and beta are learnable parameters of :attr:`normalized_shape` if
+    :math:`\gamma` and :math:`\beta` are learnable parameters of :attr:`normalized_shape` if
     :attr:`elementwise_affine` is ``True``.
 
     .. note::
@@ -102,13 +103,17 @@ class LayerNorm(Module):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
     Args:
         normalized_shape (int or list or torch.Size): input shape from an expected input
-            of size `[* x normalized_shape[0] x normalized_shape[1] x ... x normalized_shape[-1]]`.
+            of size
+
+            .. math::
+                [* \times \text{normalized_shape}[0] \times \text{normalized_shape}[1]
+                    \times \ldots \times \text{normalized_shape}[-1]]
             If a single integer is used, it is treated as a singleton list, and this module will
             normalize over the last dimension with that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
@@ -125,11 +130,16 @@ class LayerNorm(Module):
         - Output: :math:`(N, *)` (same shape as input)
 
     Examples:
-        >>> input = autograd.Variable(torch.randn(20, 5, 10, 10))
+        >>> input = torch.randn(20, 5, 10, 10)
         >>> # With Learnable Parameters
         >>> m = nn.LayerNorm(input.size()[1:])
         >>> # Without Learnable Parameters
         >>> m = nn.LayerNorm(input.size()[1:], elementwise_affine=False)
+        >>> # Normalize over last two dimensions
+        >>> m = nn.LayerNorm([10, 10])
+        >>> # Normalize over last dimension of size 10
+        >>> m = nn.LayerNorm(10)
+        >>> # Activating the module
         >>> output = m(input)
 
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450

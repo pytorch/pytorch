@@ -77,9 +77,27 @@ BPTT, including in the `word language model <https://github.com/pytorch/examples
 `this forum post <https://discuss.pytorch.org/t/help-clarifying-repackage-hidden-in-word-language-model/226>`_.
 
 **Don't use linear layers that are too large.**
-A linear layer ``nn.Linear(m, n)`` uses O(nm) memory: that is to say, the
-memory requirements of the weights
+A linear layer ``nn.Linear(m, n)`` uses :math:`O(nm)` memory: that is to say,
+the memory requirements of the weights
 scales quadratically with the number of features.  It is very easy
 to `blow through your memory <https://github.com/pytorch/pytorch/issues/958>`_
 this way (and remember that you will need at least twice the size of the
 weights, since you also need to store the gradients.)
+
+My GPU memory isn't freed properly
+-------------------------------------------------------
+PyTorch use a caching memory allocator to speed up memory allocations. As a
+result, the values shown in ``nvidia-smi`` usually don't reflect the true
+memory usage. See :ref:`cuda-memory-management` for more details about GPU
+memory management.
+
+If your GPU memory isn't freed even after Python quits, it is very likely that
+some Python subprocesses are still alive. You may find them via
+``ps -elfx | grep python`` and manually kill them with ``kill -9 [pid]``.
+
+My data loader workers return identical random numbers
+-------------------------------------------------------
+You are likely using other libraries to generate random numbers in the dataset.
+For example, NumPy's RNG is duplicated when worker subprocesses are started via
+``fork``. See :class:`torch.utils.data.DataLoader`'s document for how to
+properly set up random seeds in workers.

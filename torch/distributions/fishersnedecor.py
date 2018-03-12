@@ -19,8 +19,8 @@ class FisherSnedecor(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        df1 (float or Tensor or Variable): degrees of freedom parameter 1
-        df2 (float or Tensor or Variable): degrees of freedom parameter 2
+        df1 (float or Tensor): degrees of freedom parameter 1
+        df2 (float or Tensor): degrees of freedom parameter 2
     """
     params = {'df1': constraints.positive, 'df2': constraints.positive}
     support = constraints.positive

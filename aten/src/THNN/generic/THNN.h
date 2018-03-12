@@ -381,16 +381,19 @@ TH_API void THNN_(MultiMarginCriterion_updateOutput)(
           bool sizeAverage,
           int p,
           THTensor* weights,      // [OPTIONAL]
-          accreal margin);
+          accreal margin,
+          bool reduce);
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
+          THTensor *gradOutput,
           THTensor *gradInput,
           bool sizeAverage,
           int p,
           THTensor *weights,      // [OPTIONAL]
-          accreal margin);
+          accreal margin,
+          bool reduce);
 
 TH_API void THNN_(PReLU_updateOutput)(
           THNNState *state,
@@ -1277,6 +1280,20 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
           int padding_mode);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
+          THNNState *state,
+          THTensor *input, THTensor *gradInput,
+          THTensor *grid, THTensor *gradGrid,
+          THTensor *gradOutput,
+          int padding_mode);
+
+TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *grid,
+          THTensor *output,
+          int padding_mode);
+
+TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           THNNState *state,
           THTensor *input, THTensor *gradInput,
           THTensor *grid, THTensor *gradGrid,

@@ -310,3 +310,6 @@
 
 #include "generic/VolumetricUpSamplingTrilinear.c"
 #include "THGenerateFloatTypes.h"
+
+#include "generic/VolumetricGridSamplerBilinear.c"
+#include "THGenerateFloatTypes.h"

@@ -19,8 +19,8 @@ struct TensorType;
 struct Code {
   Code()
   : pImpl(nullptr) {}
-  Code(std::shared_ptr<Graph> & graph, bool constants_are_variables);
-  // constants_are_variables = true means that all constants in the
+  Code(std::shared_ptr<Graph>& graph, bool values_are_variables);
+  // values_are_variables = true means that all constants in the
   // code will have VariableType rather than a base tensor type
   ~Code();
   operator bool() const {

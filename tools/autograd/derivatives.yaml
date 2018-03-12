@@ -264,7 +264,7 @@
   self: grad
 
 - name: gather(Tensor self, int64_t dim, Tensor index)
-  self: grad.type().zeros(self.sizes()).scatter_add_(dim, index, grad)
+  self: at::zeros(grad.type(), self.sizes()).scatter_add_(dim, index, grad)
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -317,7 +317,7 @@
   value: grad.index_select(dim, index).sum()
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
-  self: grad.type().zeros(self.sizes()).index_add_(dim, index, grad)
+  self: at::zeros(grad.type(), self.sizes()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
   self: -at::mm(output.t(), at::mm(grad, output.t()))
@@ -445,14 +445,14 @@
   self: zeros_like(grad)
 
 - name: normal(Tensor mean, double std, Generator generator)
-  mean: grad.type().zeros(mean.sizes())
+  mean: at::zeros(grad.type(), mean.sizes())
 
 - name: normal(double mean, Tensor std, Generator generator)
-  std: grad.type().zeros(std.sizes())
+  std: at::zeros(grad.type(), std.sizes())
 
 - name: normal(Tensor mean, Tensor std, Generator generator)
-  mean: grad.type().zeros(mean.sizes())
-  std: grad.type().zeros(std.sizes())
+  mean: at::zeros(grad.type(), mean.sizes())
+  std: at::zeros(grad.type(), std.sizes())
 
 - name: orgqr(Tensor self, Tensor input2)
   self: not_implemented("orgqr")
@@ -564,6 +564,9 @@
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
 
+- name: split_with_sizes(Tensor self, IntList split_sizes, int64_t dim)
+  self: split_with_sizes_backward(grads, split_sizes, dim, self.sizes(), self.type())
+
 - name: sqrt(Tensor self)
   self: grad / (2 * result)
 
@@ -637,6 +640,9 @@
 - name: uniform_(Tensor self, double from, double to, Generator generator)
   self: zeros_like(grad)
 
+- name: _unique(Tensor self, bool sorted, bool return_inverse)
+  self: not_implemented("_unique")
+
 - name: _unsafe_view(Tensor self, IntList size)
   self: grad.contiguous().view(self.sizes())
 
@@ -692,8 +698,8 @@
 - name: mse_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: mse_loss_backward(grad, self, target, size_average, reduce)
 
-- name: multi_margin_loss_forward(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, bool size_average)
-  self: multi_margin_loss_backward(self, target, p, margin, weight, size_average).mul_(grad)
+- name: multi_margin_loss_forward(Tensor self, Tensor target, Scalar p, Scalar margin, Tensor weight, bool size_average, bool reduce)
+  self: multi_margin_loss_backward(grad, self, target, p, margin, weight, size_average, reduce)
 
 - name: multilabel_margin_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: multilabel_margin_loss_backward(grad, self, target, size_average, reduce, is_target)
@@ -889,11 +895,11 @@
   self: zeros_like(self)
 
 - name: adaptive_max_pool2d_backward(Tensor grad_output, Tensor self, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  grad_output: max_pool_double_backward(grad, indices, 2)
   self: zeros_like(self)
 
 - name: adaptive_max_pool3d_backward(Tensor grad_output, Tensor self, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 3)
+  grad_output: max_pool_double_backward(grad, indices, 3)
   self: zeros_like(self)
 
 - name: avg_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, bool ceil_mode, bool count_include_pad)
@@ -909,7 +915,7 @@
   output: grad * grad_output * (output < 0).toType(grad.type())
 
 - name: fractional_max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList output_size, Tensor indices)
-  grad_output: adaptive_max_pool_double_backward(grad, self, indices, 2)
+  grad_output: max_pool_double_backward(grad, indices, 2)
   self: zeros_like(self)
 
 - name: glu_backward(Tensor grad_output, Tensor self, int64_t dim)
@@ -945,7 +951,11 @@
   self: zeros_like(grad)
 
 - name: max_pool2d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode, Tensor indices)
-  grad_output: max_pool2d_double_backward(grad, indices);
+  grad_output: max_pool_double_backward(grad, indices, 2);
+  self: zeros_like(self)
+
+- name: max_pool3d_backward(Tensor grad_output, Tensor self, IntList kernel_size, IntList stride, IntList padding, IntList dilation, bool ceil_mode, Tensor indices)
+  grad_output: max_pool_double_backward(grad, indices, 3);
   self: zeros_like(self)
 
 - name: max_unpool2d_backward(Tensor grad_output, Tensor self, Tensor indices, IntList output_size)

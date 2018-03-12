@@ -3,6 +3,7 @@
 #else
 
 #include "THCThrustAllocator.cuh"
+#include "THCNumerics.cuh"
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
 
@@ -478,9 +479,8 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   THCSTensor_(free)(state, src);
 }
 
-#if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE)
 void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real value) {
-  if (value == 0) {
+  if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(0))) {
     THError("cannot raise to zeroth power on sparse tensor");
   }
   THCSTensor *t = THCSTensor_(newCoalesce)(state, t_);
@@ -503,7 +503,6 @@ void THCSTensor_(pow)(THCState *state, THCSTensor *r_, THCSTensor *t_, real valu
   THCTensor_(free)(state, t_values_);
   THCSTensor_(free)(state, t);
 }
-#endif
 
 #if defined(THCS_REAL_IS_FLOAT) || defined(THCS_REAL_IS_DOUBLE) || defined(THCS_REAL_IS_HALF)
 accreal THCSTensor_(normall)(THCState *state, THCSTensor *self, real value) {

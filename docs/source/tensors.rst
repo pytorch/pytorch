@@ -311,6 +311,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: type_as
    .. automethod:: unfold
    .. automethod:: uniform_
+   .. automethod:: unique
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: var

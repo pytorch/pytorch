@@ -20,17 +20,17 @@ class _InstanceNorm(_BatchNorm):
 
 
 class InstanceNorm1d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 2d or 3d input (a mini-batch of 1d
+    r"""Applies Instance Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size) if :attr:`affine` is ``True``.
+    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -44,7 +44,7 @@ class InstanceNorm1d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -69,7 +69,7 @@ class InstanceNorm1d(_InstanceNorm):
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm1d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100, 40))
+        >>> input = torch.randn(20, 100, 40)
         >>> output = m(input)
 
     .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
@@ -83,17 +83,17 @@ class InstanceNorm1d(_InstanceNorm):
 
 
 class InstanceNorm2d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 4d input (a mini-batch of 2d inputs
+    r"""Applies Instance Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
-    of size C (where C is the input size) if :attr:`affine` is ``True``.
+    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size) if :attr:`affine` is ``True``.
 
     By default, this layer uses instance statistics computed from input data in
     both training and evaluation modes.
@@ -107,7 +107,7 @@ class InstanceNorm2d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -132,7 +132,7 @@ class InstanceNorm2d(_InstanceNorm):
         >>> m = nn.InstanceNorm2d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm2d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
+        >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
 
     .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:
@@ -146,16 +146,16 @@ class InstanceNorm2d(_InstanceNorm):
 
 
 class InstanceNorm3d(_InstanceNorm):
-    r"""Applies Instance Normalization over a 5d input (a mini-batch of 3d inputs
+    r"""Applies Instance Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
     `Instance Normalization: The Missing Ingredient for Fast Stylization`_ .
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x]} + \epsilon} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
 
     The mean and standard-deviation are calculated per-dimension separately
-    for each object in a mini-batch. Gamma and beta are learnable parameter vectors
+    for each object in a mini-batch. :math:`\gamma` and :math:`\beta` are learnable parameter vectors
     of size C (where C is the input size) if :attr:`affine` is ``True``.
 
     By default, this layer uses instance statistics computed from input data in
@@ -170,7 +170,7 @@ class InstanceNorm3d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -195,7 +195,7 @@ class InstanceNorm3d(_InstanceNorm):
         >>> m = nn.InstanceNorm3d(100)
         >>> # With Learnable Parameters
         >>> m = nn.InstanceNorm3d(100, affine=True)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
+        >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
 
     .. _`Instance Normalization: The Missing Ingredient for Fast Stylization`:

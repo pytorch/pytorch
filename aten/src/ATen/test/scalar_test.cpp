@@ -7,6 +7,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Dispatch.h"
 #include "test_assert.h"
+#include "test_seed.h"
 
 using std::cout;
 using namespace at;
@@ -81,6 +82,8 @@ void test_overflow() {
 }
 
 int main() {
+  manual_seed(123);
+
   Scalar what = 257;
   Scalar bar = 3.0;
   Half h = bar.toHalf();
@@ -91,7 +94,7 @@ int main() {
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
     auto & CUDAFloat = C.getType(Backend::CPU,ScalarType::Float);
-    auto t2 = CUDAFloat.zeros({4,4});
+    auto t2 = zeros(CUDAFloat, {4,4});
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
     cout << "STORAGE: " << CUDAFloat.storage(4).get() << "\n";
@@ -99,18 +102,18 @@ int main() {
     s->fill(7);
     cout << "GET " << s->get(3).toFloat() << "\n";
   }
-  auto t = CPU(Float).ones({4,4});
+  auto t = ones(CPU(Float), {4,4});
 
-  auto wha2 = CPU(Float).zeros({4,4}).add(t).sum();
+  auto wha2 = zeros(CPU(Float), {4,4}).add(t).sum();
   cout << wha2.toCDouble() << " <-ndim\n";
 
   cout << t.sizes() << " " << t.strides() << "\n";
 
   Type & T = CPU(Float);
-  Tensor x = T.randn({1,10});
-  Tensor prev_h = T.randn({1,20});
-  Tensor W_h = T.randn({20,20});
-  Tensor W_x = T.randn({20,10});
+  Tensor x = randn(T, {1,10});
+  Tensor prev_h = randn(T, {1,20});
+  Tensor W_h = randn(T, {20,20});
+  Tensor W_x = randn(T, {20,10});
   Tensor i2h = at::mm(W_x, x.t());
   Tensor h2h = at::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
@@ -126,21 +129,28 @@ int main() {
 
     cout << r << "\n";
   }
-  cout << T.randn({10,10,2}) << "\n";
+  cout << randn(T, {10,10,2}) << "\n";
 
   // check Scalar.toTensor on Scalars backed by different data types
   ASSERT(bar.toTensor().type().scalarType() == kDouble);
   ASSERT(what.toTensor().type().scalarType() == kLong);
-  ASSERT(Scalar(CPU(kFloat).ones({})).toTensor().type().scalarType() == kFloat);
+  ASSERT(Scalar(ones(CPU(kFloat), {})).toTensor().type().scalarType() == kFloat);
 
-  dispatch_all<void, Foo>(x.type(),"foo",x,prev_h);
+  if (x.type().scalarType() != ScalarType::Half) {
+    AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
+      scalar_t s = 1;
+      cout << "hello, dispatch: " << x.type().toString() << s << "\n";
+      auto data = (scalar_t*)x.data_ptr();
+      (void)data;
+    });
+  }
 
   // test direct C-scalar type conversions
   {
-    auto x = T.ones({1,2});
+    auto x = ones(T, {1,2});
     ASSERT_THROWS(x.toCFloat());
   }
-  auto float_one = T.ones({});
+  auto float_one = ones(T, {});
   ASSERT(float_one.toCFloat() == 1);
   ASSERT(float_one.toCInt() == 1);
   ASSERT(float_one.toCHalf() == 1);

@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <thread>
 #include <chrono>
+#include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
@@ -13,43 +14,14 @@
 
 #include "THCP.h"
 
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/cuda/python_comm.h"
-#include "ModuleSparse.cpp"
 
 using namespace torch;
 
 THCState *state;
-
-////////////////////////////////////////////////////////////////////////////////
-// Class pointer cache
-////////////////////////////////////////////////////////////////////////////////
-
-static bool THCPModule_loadClasses(PyObject *torch_module)
-{
-#define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
-  if (!THCPDoubleTensor_postInit(torch_module)) return false;
-  if (!THCPFloatTensor_postInit(torch_module)) return false;
-  if (!THCPHalfTensor_postInit(torch_module)) return false;
-  if (!THCPLongTensor_postInit(torch_module)) return false;
-  if (!THCPIntTensor_postInit(torch_module)) return false;
-  if (!THCPShortTensor_postInit(torch_module)) return false;
-  if (!THCPCharTensor_postInit(torch_module)) return false;
-  if (!THCPByteTensor_postInit(torch_module)) return false;
-
-  THCPDoubleStorage_postInit(torch_module);
-  THCPFloatStorage_postInit(torch_module);
-  THCPHalfStorage_postInit(torch_module);
-  THCPLongStorage_postInit(torch_module);
-  THCPIntStorage_postInit(torch_module);
-  THCPShortStorage_postInit(torch_module);
-  THCPCharStorage_postInit(torch_module);
-  THCPByteStorage_postInit(torch_module);
-
-  return true;
-#undef ASSERT_NOT_NULL
-}
 
 ////////////////////////////////////////////////////////////////////////////////
 // CUDA management methods
@@ -343,46 +315,78 @@ PyObject * THCPModule_maxMemoryCached(PyObject *_unused, PyObject *arg)
 // Cuda module initialization
 ////////////////////////////////////////////////////////////////////////////////
 
-bool THCPModule_initCuda(PyObject *torch_module) {
-  HANDLE_TH_ERRORS
-#define ASSERT_TRUE(cond) if (!(cond)) { return false; }
-  state = at::globalContext().lazyInitCUDA();
-
-#ifdef USE_MAGMA
-  THCMagma_init(state);
-  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_magma", PyBool_FromLong(true)) != -1);
-#else
-  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_magma", PyBool_FromLong(false)) != -1);
-#endif
-
-#ifdef CUDA_HALF_TENSOR
-  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_half", PyBool_FromLong(true)) != -1);
-#else
-  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "has_half", PyBool_FromLong(false)) != -1);
-#endif
-
-  ASSERT_TRUE(THCPModule_loadClasses(torch_module));
-
-  ASSERT_TRUE(PyObject_SetAttrString(torch_module, "_state_cdata", PyLong_FromVoidPtr(state)) != -1);
-
-  // TODO: register THCudaShutdown handler at exit
-  return true;
-#undef ASSERT_TRUE
-  END_HANDLE_TH_ERRORS_RET(false)
+static void bindCudaDeviceProperties(PyObject* module) {
+  // Add class and method to torch.cuda
+  auto m = py::handle(module).cast<py::module>();
+  py::class_<cudaDeviceProp>(m, "_CudaDeviceProperties")
+    .def_readonly("name", &cudaDeviceProp::name)
+    .def_readonly("major", &cudaDeviceProp::major)
+    .def_readonly("minor", &cudaDeviceProp::minor)
+    .def_readonly("is_multi_gpu_board", &cudaDeviceProp::isMultiGpuBoard)
+    .def_readonly("is_integrated", &cudaDeviceProp::integrated)
+    .def_readonly("multi_processor_count", &cudaDeviceProp::multiProcessorCount)
+    .def_readonly("total_memory", &cudaDeviceProp::totalGlobalMem)
+    .def("__repr__", [](const cudaDeviceProp &prop) {
+      std::ostringstream stream;
+      stream << "_CudaDeviceProperties(name='" << prop.name << "', major=" << prop.major
+             << ", minor=" << prop.minor << ", total_memory=" << prop.totalGlobalMem / (1024 * 1024)
+             << "MB, multi_processor_count=" << prop.multiProcessorCount << ")";
+      return stream.str();
+    });
+  m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
+    return at::globalContext().getDeviceProperties(device);
+  }, py::return_value_policy::reference);
 }
 
 // Callback for python part. Used for additional initialization of python classes
-PyObject * THCPModule_initExtension(PyObject *self)
+static PyObject * THCPModule_initExtension(PyObject *self)
 {
-  PyObject *torch_module = PyImport_ImportModule("torch.cuda");
-  if (!torch_module) {
-    THPUtils_setError("class loader couldn't access torch module");
-    return NULL;
-  }
-  if (!THCPModule_initCuda(torch_module)) {
-    return NULL;
-  }
+  HANDLE_TH_ERRORS
+  state = at::globalContext().lazyInitCUDA();
+
+  auto m = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
+  if (!m) throw python_error();
+
+  // Register Storage Python objects with DynamicTypes.cpp
+  THCPDoubleStorage_postInit(m);
+  THCPFloatStorage_postInit(m);
+  THCPHalfStorage_postInit(m);
+  THCPLongStorage_postInit(m);
+  THCPIntStorage_postInit(m);
+  THCPShortStorage_postInit(m);
+  THCPCharStorage_postInit(m);
+  THCPByteStorage_postInit(m);
+
+#ifdef USE_MAGMA
+  THCMagma_init(state);
+  bool has_magma = true;
+#else
+  bool has_magma = false;
+#endif
+
+#ifdef CUDA_HALF_TENSOR
+  bool has_half = true;
+#else
+  bool has_half = false;
+#endif
+
+  auto set_module_attr = [&](const char* name, PyObject* v) {
+    if (PyObject_SetAttrString(m, name, v) < 0) {
+      throw python_error();
+    }
+  };
+
+  set_module_attr("has_magma", has_magma ? Py_True : Py_False);
+  set_module_attr("has_half", has_half ? Py_True : Py_False);
+
+  auto _state_cdata = THPObjectPtr(PyLong_FromVoidPtr(state));
+  if (!_state_cdata) throw python_error();
+  set_module_attr("_state_cdata", _state_cdata.get());
+
+  bindCudaDeviceProperties(m);
+
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
 }
 
 #ifdef WITH_NCCL

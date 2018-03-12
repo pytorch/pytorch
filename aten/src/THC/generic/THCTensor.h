@@ -68,10 +68,6 @@ THC_API THCTensor *THCTensor_(newTranspose)(THCState *state, THCTensor *tensor, 
 THC_API THCTensor *THCTensor_(newUnfold)(THCState *state, THCTensor *tensor, int dimension_, int64_t size_, int64_t step_);
 THC_API THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage *size);
 THC_API THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input);
-THC_API THCTensor *THCTensor_(newExpand)(THCState *state, THCTensor *tensor, THLongStorage *size);
-
-THC_API void THCTensor_(expand)(THCState *state, THCTensor *r, THCTensor *tensor, THLongStorage *sizes);
-THC_API void THCTensor_(expandNd)(THCState *state, THCTensor **rets, THCTensor **ops, int count);
 
 // resize* methods simply resize the storage. So they may not retain the current data at current indices.
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
