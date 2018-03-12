@@ -734,9 +734,9 @@ private:
                {tensor},
                output_size)
                ->i_(kdim, 0)
-               ->i_("step"_sym, 1)
-               ->i_("start"_sym, begin)
-               ->i_("end"_sym, end)->outputs();
+               ->i_(kstep, 1)
+               ->i_(kstart, begin)
+               ->i_(kend, end)->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).

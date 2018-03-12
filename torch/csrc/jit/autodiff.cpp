@@ -242,7 +242,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   // note: reverse_node is intentionally not inserted to avoid
   // accidentally acting on it (e.g. in elminate dead code),
   // std::cout << *reverse_node << to view its state.
-  auto reverse_node = graph.create("Reverse"_sym, 0);
+  auto reverse_node = graph.create(kReverse, 0);
   auto reverse_block = reverse_node->addBlock();
   WithInsertPoint guard(reverse_block);
 

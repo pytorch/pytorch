@@ -33,6 +33,7 @@ _(Placeholder) \
 _(Print) \
 _(PythonOp) \
 _(ReplaceIfUndef) \
+_(Reverse) \
 _(Return) \
 _(Store) \
 _(Undefined) \
@@ -80,6 +81,7 @@ _(axis) \
 _(broadcast) \
 _(device) \
 /* _(dim) conflicts with ATen */ \
+_(end) \
 _(exponent) \
 _(inplace) \
 _(is_zero) \
@@ -89,6 +91,8 @@ _(other) \
 _(perm) \
 /* _(size) conflicts with ATen */ \
 /* _(sizes) conflicts with ATen */ \
+_(start) \
+_(step) \
 _(transA) \
 _(transB) \
 _(value) \
@@ -136,10 +140,6 @@ static inline bool operator==(BuiltinSymbol lhs, Symbol rhs) {
 }
 static inline bool operator==(Symbol lhs, BuiltinSymbol rhs) {
   return static_cast<uint32_t>(lhs) == static_cast<uint32_t>(rhs);
-}
-
-inline Symbol operator "" _sym(const char * s, size_t) {
-  return Symbol(s);
 }
 
 }}
