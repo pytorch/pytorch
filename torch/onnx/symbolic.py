@@ -553,9 +553,9 @@ def unsqueeze(g, self, dim):
 
 def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
     if out is not None:
-        raise NotImplementedError('Out parameter is not supported for topk')
+        _unimplemented("TopK", "Out parameter is not supported for topk")
     if not largest:
-        raise NotImplementedError('Ascending TopK is not supported')
+        _unimplemented("TopK", "Ascending TopK is not supported")
 
     return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
