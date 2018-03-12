@@ -62,53 +62,6 @@ static InternedStrings & globalStrings() {
 
 Symbol Symbol::parseQualString(const std::string & s) {
   return Symbol(s);
-
-  /*
-  size_t colon_pos = s.find(':');
-  if (colon_pos == std::string::npos) {
-    std::ostringstream ss;
-    ss << "Symbol: illegal unqualified string '" << s << "'; "
-       << "all symbols must be qualified, e.g., 'ns::" << s << "'. "
-       << "Valid namespaces are: " << detail::valid_namespaces_str();
-    throw std::runtime_error(ss.str());
-  }
-  if (colon_pos == 0) {
-    std::ostringstream ss;
-    ss << "Symbol: illegal leading colon in '" << s << "'; "
-       << "all symbols must have a non-empty namespace. "
-       << "Valid namespaces are: " << detail::valid_namespaces_str();
-    throw std::runtime_error(ss.str());
-  }
-  // attr::x
-  //     ^___ colon_pos
-  //        ^___ s.size()
-  if (colon_pos + 2 >= s.size()) {
-    std::ostringstream ss;
-    ss << "Symbol: underlong string '" << s << "'; "
-       << "namespace must be followed by double colon and a "
-       << "non-empty string.";
-    throw std::runtime_error(ss.str());
-  }
-  if (s[colon_pos + 1] != ':') {
-    std::ostringstream ss;
-    ss << "Symbol: invalid use of colons in '" << s << "'; "
-       << "namespace must be followed by double colon, not a"
-       << "single colon.";
-    throw std::runtime_error(ss.str());
-  }
-  auto ns = s.substr(0, colon_pos - 1);
-  auto unqual_name = s.substr(colon_pos + 2);
-  if (ns == "unknown") {
-    // OK
-  } else {
-    std::ostringstream ss;
-    ss << "Symbol: invalid namespace in '" << s << "'. "
-       << "Valid namespaces are: " << detail::valid_namespaces_str();
-    throw std::runtime_error(ss.str());
-  }
-
-  return Symbol(unqual_name);
-  */
 }
 
 const char * Symbol::toUnqualString() const {
@@ -117,7 +70,6 @@ const char * Symbol::toUnqualString() const {
 
 std::string Symbol::toQualString() const {
   std::ostringstream oss;
-  // oss << "unknown::" << globalStrings().string(*this);
   return globalStrings().string(*this);
 }
 

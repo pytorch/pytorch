@@ -8,28 +8,6 @@
 
 namespace torch { namespace jit {
 
-/*
-Intended symbol namespace structure:
-
-enum class SymbolNamespace : char {
-  ONNXOperator = 'o',
-  JITOperator = 'j',
-  ATenOperator = 't',
-  // NB: ONNX and ATen attributes all live in a global namespace, as
-  // their interpretation depends on the operator name (which is namespaced)
-  Attribute = 'a',
-};
-
-namespace detail {
-
-  // TODO: programatically generate this
-  inline std::string valid_namespaces_str() {
-    return "'onnx', 'jit', 'aten', 'attr'";
-  }
-
-}
-*/
-
 // JIT symbols are synthetic operators that occur only in the JIT IR
 // and don't have corresponding implementations in ATen.
 //
