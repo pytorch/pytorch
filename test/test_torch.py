@@ -229,23 +229,27 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _testMath(self, torchfn, mathfn):
-        size = (10, 5)
-        # contiguous
-        m1 = torch.randn(*size)
-        res1 = torchfn(m1[4])
-        res2 = res1.clone().zero_()
-        for i, v in enumerate(m1[4]):
-            res2[i] = mathfn(v.item())
-        self.assertEqual(res1, res2)
+    def _testMath(self, torchfn, mathfn, large=True):
+        def _testMathSize(size, self, torchfn, mathfn):
+            # contiguous
+            m1 = torch.randn(*size)
+            res1 = torchfn(m1[4])
+            res2 = res1.clone().zero_()
+            for i, v in enumerate(m1[4]):
+                res2[i] = mathfn(v.item())
+            self.assertEqual(res1, res2)
 
-        # non-contiguous
-        m1 = torch.randn(*size)
-        res1 = torchfn(m1[:, 4])
-        res2 = res1.clone().zero_()
-        for i, v in enumerate(m1[:, 4]):
-            res2[i] = mathfn(v.item())
-        self.assertEqual(res1, res2)
+            # non-contiguous
+            m1 = torch.randn(*size)
+            res1 = torchfn(m1[:, 4])
+            res2 = res1.clone().zero_()
+            for i, v in enumerate(m1[:, 4]):
+                res2[i] = mathfn(v.item())
+            self.assertEqual(res1, res2)
+        _testMathSize((10, 5), self, torchfn, mathfn)
+        if large:
+            # Trigger parallelism
+            _testMathSize((10, 50000), self, torchfn, mathfn)
 
     def _testMathByName(self, function_name):
         torchfn = getattr(torch, function_name)
@@ -269,8 +273,9 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_polygamma(self):
         from scipy.special import polygamma
+        # This test won't work when using many samples
         for n in [0, 1]:
-            self._testMath(lambda x: torch.polygamma(n, x), lambda x: polygamma(n, x)[()])
+            self._testMath(lambda x: torch.polygamma(n, x), lambda x: polygamma(n, x)[()], large=False)
 
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))

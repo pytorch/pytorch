@@ -596,3 +596,57 @@
 
 - func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
   variants: function
+
+# Unary Ops #
+
+- func: ceil(Tensor self) -> Tensor
+
+- func: ceil_(Tensor self) -> Tensor
+
+- func: ceil_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _ceil_out_cpu
+    CUDA: _ceil_out_cuda
+
+- func: floor(Tensor self) -> Tensor
+
+- func: floor_(Tensor self) -> Tensor
+
+- func: floor_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _floor_out_cpu
+    CUDA: _floor_out_cuda
+
+- func: round(Tensor self) -> Tensor
+
+- func: round_(Tensor self) -> Tensor
+
+- func: round_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _round_out_cpu
+    CUDA: _round_out_cuda
+
+- func: trunc(Tensor self) -> Tensor
+
+- func: trunc_(Tensor self) -> Tensor
+
+- func: trunc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _trunc_out_cpu
+    CUDA: _trunc_out_cuda
+
+- func: sqrt(Tensor self) -> Tensor
+
+- func: sqrt_(Tensor self) -> Tensor
+
+- func: sqrt_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sqrt_out_cpu
+    CUDA: _sqrt_out_cuda
+
+# \Unary Ops #
