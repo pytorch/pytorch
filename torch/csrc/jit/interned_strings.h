@@ -8,6 +8,28 @@
 
 namespace torch { namespace jit {
 
+/*
+Intended symbol namespace structure:
+
+enum class SymbolNamespace : char {
+  ONNXOperator = 'o',
+  JITOperator = 'j',
+  ATenOperator = 't',
+  // NB: ONNX and ATen attributes all live in a global namespace, as
+  // their interpretation depends on the operator name (which is namespaced)
+  Attribute = 'a',
+};
+
+namespace detail {
+
+  // TODO: programatically generate this
+  inline std::string valid_namespaces_str() {
+    return "'onnx', 'jit', 'aten', 'attr'";
+  }
+
+}
+*/
+
 // JIT symbols are synthetic operators that occur only in the JIT IR
 // and don't have corresponding implementations in ATen.
 //
@@ -119,15 +141,46 @@ struct Symbol {
   Symbol() {}
   /*implicit*/ Symbol(BuiltinSymbol value)
   : value(value) {}
-  explicit Symbol(const std::string & s);
   explicit Symbol(uint32_t value)
   : value(value) {}
+
+  // Parse a string in the toQualString format to Symbol.  This is a proper
+  // parser, so avoid using it in a hotpath.
+  static Symbol parseQualString(const std::string & s);
+
+  // Constructors for our various namespaced strings.  ATM these don't do
+  // anything but they will soon.
+  static Symbol attr(const std::string & s) { return Symbol(s); };
+  static Symbol aten(const std::string & s) { return Symbol(s); };
+  static Symbol onnx(const std::string & s) { return Symbol(s); };
+  static Symbol jit(const std::string & s) { return Symbol(s); };
+  // TODO: eliminate me
+  static Symbol scope(const std::string & s) { return Symbol(s); };
 
   operator uint32_t() const {
     return value;
   }
-  const char * toString() const;
+
+  // Give a string corresponding to the unqualified version of this name, e.g.,
+  // "mm". Use this in a context where the intended namespace of the string is
+  // obvious; this is a *lossy* conversion.
+  const char * toUnqualString() const;
+
+  // Give a string corresponding to the qualified version of this name,
+  // e.g., "aten::mm".  This string format is made available to Python bindings
+  // (so we know how to parse it.)  THIS FUNCTION DOES AN ALLOCATION, DON'T USE
+  // IT IN A TIGHT LOOP.
+  std::string toQualString() const;
+
+  // Give an unambiguous, machine readable description of the name.
+  const char * toRawString() const;
+
+  // This describes a symbol in human readable form.  DO NOT use
+  // this for uses-cases that are intended to be machine-readable.
+  const char * toDisplayString() const;
+
 private:
+  explicit Symbol(const std::string & s);
   uint32_t value;
 };
 

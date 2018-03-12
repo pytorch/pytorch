@@ -185,7 +185,7 @@ Node* emitBuiltinCall(
   List<Attribute> attributes,
   size_t n_outputs) {
 
-  NodeKind kind(name);
+  NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
   auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
@@ -199,9 +199,9 @@ Node* emitBuiltinCall(
         auto v = value.get()->tree(0)->doubleValue();
         const auto& type = value.get()->tree(1)->stringValue();
         if(type == "f")
-          n->f_(Symbol(name), v);
+          n->f_(Symbol::attr(name), v);
         else
-          n->i_(Symbol(name), v);
+          n->i_(Symbol::attr(name), v);
       } break;
       case TK_LIST_LITERAL: {
         std::vector<double> vs{};
@@ -211,9 +211,9 @@ Node* emitBuiltinCall(
           type = tree.get()->tree(1)->stringValue();
         }
         if(type == "f") {
-          n->fs_(Symbol(name), std::move(vs));
+          n->fs_(Symbol::attr(name), std::move(vs));
         } else {
-          n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
+          n->is_(Symbol::attr(name), std::vector<int64_t>(vs.begin(), vs.end()));
         }
       } break;
     default:
@@ -618,7 +618,7 @@ private:
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
         if (kind != kneg)
-          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+          node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {
@@ -683,7 +683,7 @@ private:
         throw ErrorReport(input) << "Unrecognized type: " << type;
     }
     return emitNode(
-               Symbol("type_as"),
+               Symbol::aten("type_as"),
                input->range(),
                {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
@@ -729,7 +729,7 @@ private:
     const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
     const auto& end = at::Scalar(input_values[2]->node()->t(kvalue)).toInt();
     return emitNode(
-               Symbol("slice"),
+               Symbol::aten("slice"),
                loc,
                {tensor},
                output_size)
@@ -750,7 +750,7 @@ private:
     Value* tensor = input_values[0];
     const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
     return emitNode(
-               Symbol("select"),
+               Symbol::aten("select"),
                loc,
                {tensor},
                output_size)

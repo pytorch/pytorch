@@ -190,7 +190,8 @@ void printAttributes(std::ostream & out, const Node * n) {
   for(auto name : names) {
     if(i++ > 0)
       out << ", ";
-    out << name.toString() <<"=";
+    // TODO: debugging mode to see the qualifier
+    out << name.toUnqualString() <<"=";
     switch(n->kindOf(name)) {
       case AttributeKind::f:
         out << n->f(name);
@@ -275,13 +276,16 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_ELSE()
     if(n->hasAttribute(kSubgraph)) {
       if(groups) {
-        out << n->kind().toString() << "_" << groups->size();
+        // TODO: This should be a toQualString
+        out << n->kind().toUnqualString() << "_" << groups->size();
         groups->push_back(n);
       } else {
-        out << n->kind().toString() << "[" << *n->g(kSubgraph) << "]";
+        // TODO: This should be a toQualString
+        out << n->kind().toUnqualString() << "[" << *n->g(kSubgraph) << "]";
       }
     } else {
-      out << n->kind().toString();
+      // TODO: This should be a toQualString
+      out << n->kind().toUnqualString();
       if(n->hasAttributes()) {
         printAttributes(out,n);
       }
@@ -326,7 +330,8 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
   for(auto fg : groups) {
-    out << "with " << fg->kind().toString() << "_" <<i++ << " = " << *fg->g(kSubgraph);
+    // TODO: This should be a toQualString
+    out << "with " << fg->kind().toUnqualString() << "_" <<i++ << " = " << *fg->g(kSubgraph);
   }
   /*
   // Uncomment this to debug all_nodes issues

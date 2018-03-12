@@ -235,7 +235,8 @@ std::string encodeRHS(Node * n) {
     if(n->kindOf(a) == AttributeKind::t) {
       auto v = n->t(a);
       if(v.dim() == 0) {
-        env.s(a.toString(), scalarValue(v));
+        // TODO: test a is attribute namespace
+        env.s(a.toUnqualString(), scalarValue(v));
       }
     }
   }

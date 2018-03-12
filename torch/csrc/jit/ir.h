@@ -85,7 +85,7 @@ private:
   std::vector<std::unique_ptr<Scope> > children_;
 public:
   Scope() {
-    name_ = Symbol("");
+    name_ = Symbol::scope("");
     parent_ = NULL;
   }
   Scope(Scope* parent, Symbol name) {
@@ -116,13 +116,14 @@ public:
     return name_;
   }
   std::string namesFromRoot(const std::string& separator="/") {
-    std::string out = this->name_.toString();
+    // TODO: I think the answer is we shouldn't have used Symbol here
+    std::string out = this->name_.toUnqualString();
     if (this->isRoot()) {
       return out;
     }
     Scope* parent = this->parent_;
     while (!parent->isRoot()) {
-      out = std::string(parent->name_.toString()) + separator + out;
+      out = std::string(parent->name_.toUnqualString()) + separator + out;
       parent = parent->parent_;
     }
     return out;
@@ -582,7 +583,7 @@ public:
   }
   template<typename T>
   T* expect() {
-    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", Symbol(T::Kind).toString(), kind().toString());
+    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", Symbol(T::Kind).toDisplayString(), kind().toDisplayString());
     return static_cast<T*>(this);
   }
 
@@ -806,7 +807,7 @@ public:
     return block_->return_node();
   }
   void push_scope(const std::string& scope_name) {
-    current_scope_ = current_scope_->push(Symbol(scope_name));
+    current_scope_ = current_scope_->push(Symbol::scope(scope_name));
   }
   void pop_scope() {
     current_scope_ = current_scope_->parent();

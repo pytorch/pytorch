@@ -258,16 +258,18 @@ void attributesTest() {
 
 void internedStringsTests () {
 
-  JIT_ASSERT(kParam == Symbol("Param"));
-  JIT_ASSERT(kReturn == Symbol("Return"));
-  JIT_ASSERT(Symbol(kReturn).toString() == std::string("Return"));
-  size_t symstart = Symbol("__NEW_SYMBOL");
-  JIT_ASSERT(Symbol("What") == symstart+1);
-  JIT_ASSERT(Symbol("What2") == symstart+2);
-  JIT_ASSERT(Symbol("What") == symstart+1);
-  JIT_ASSERT(Symbol("What2") == symstart+2);
-  JIT_ASSERT(Symbol(symstart+2).toString() == std::string("What2"));
+  JIT_ASSERT(kParam == Symbol::jit("Param"));
+  JIT_ASSERT(kReturn == Symbol::jit("Return"));
+  JIT_ASSERT(Symbol(kReturn).toUnqualString() == std::string("Return"));
+  size_t symstart = Symbol::aten("__NEW_SYMBOL");
+  JIT_ASSERT(Symbol::aten("What") == symstart+1);
+  JIT_ASSERT(Symbol::aten("What2") == symstart+2);
+  JIT_ASSERT(Symbol::aten("What") == symstart+1);
+  JIT_ASSERT(Symbol::aten("What2") == symstart+2);
+  JIT_ASSERT(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
+
+// TODO: parseQualString tests
 
 
 

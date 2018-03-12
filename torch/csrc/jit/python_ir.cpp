@@ -37,16 +37,16 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(eraseInput)
     .GS(registerOutput)
     .def("create",[](Graph & g, const char * str) {
-      return g.create(Symbol(str));
+      return g.create(Symbol::parseQualString(str));
     })
     .def("create",[](Graph & g, const char * str, size_t noutputs) {
-      return g.create(Symbol(str), noutputs);
+      return g.create(Symbol::parseQualString(str), noutputs);
     })
     .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs) {
-      return g.create(Symbol(str),inputs);
+      return g.create(Symbol::parseQualString(str),inputs);
     })
     .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs, size_t noutputs) {
-      return g.create(Symbol(str),inputs, noutputs);
+      return g.create(Symbol::parseQualString(str),inputs, noutputs);
     })
     .GS(createConstant)
     .GS(createFusionGroup)
@@ -141,13 +141,14 @@ void initPythonIRBindings(PyObject * module_) {
     .AS(removeAttribute)
     .AS(hasAttributes)
     .AS(attributeNames)
+    // TODO: These can be reasonably implemented by assuming
 #undef AS
 #define CREATE_ACCESSOR(Kind,method) \
     def(#method "_",[](Node & n, const char * name, Kind##Attr::ValueType v) { \
-      return n . method ## _(Symbol(name), std::move(v)); \
+      return n . method ## _(Symbol::attr(name), std::move(v)); \
     }) \
     .def(#method, [](Node & n, const char * name) { \
-      return n.method(Symbol(name)); \
+      return n.method(Symbol::attr(name)); \
     })
     .CREATE_ACCESSOR(Float,f)
     .CREATE_ACCESSOR(Floats,fs)
@@ -160,10 +161,10 @@ void initPythonIRBindings(PyObject * module_) {
 #undef CREATE_ACCESSOR
     // Tensor (t_) -- manually written to unwrap the variable into a tensor.
     .def("t_",[](Node & n, const char * name, torch::autograd::Variable v) {
-      return n.t_(Symbol(name), std::move(v.data()));
+      return n.t_(Symbol::attr(name), std::move(v.data()));
     })
     .def("t", [](Node & n, const char * name) {
-      return torch::autograd::make_variable(n.t(Symbol(name)), /*requires_grad=*/false);
+      return torch::autograd::make_variable(n.t(Symbol::attr(name)), /*requires_grad=*/false);
     })
     // Tensors (ts_) -- manually written to unwrap variables into tensors.
     .def("ts_",[](Node & n, const char * name, std::vector<torch::autograd::Variable> vs) {
@@ -172,10 +173,10 @@ void initPythonIRBindings(PyObject * module_) {
       for (auto& variable : vs) {
         tensors.push_back(std::move(variable.data()));
       }
-      return n.ts_(Symbol(name), std::move(tensors));
+      return n.ts_(Symbol::attr(name), std::move(tensors));
     })
     .def("ts", [](Node & n, const char * name) {
-      auto tensors = n.ts(Symbol(name));
+      auto tensors = n.ts(Symbol::attr(name));
       std::vector<torch::autograd::Variable> variables;
       variables.reserve(tensors.size());
       for (auto& tensor : tensors) {
@@ -185,19 +186,19 @@ void initPythonIRBindings(PyObject * module_) {
       return variables;
     })
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
-        return n.t_(Symbol(name), std::move(v.view({})));
+        return n.t_(Symbol::attr(name), std::move(v.view({})));
     })
     .def("z",[](Node & n, const char * name) {
-        return n.t(Symbol(name));
+        return n.t(Symbol::attr(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
         for (size_t i = 0; i < v.size(); ++ i) {
             v[i] = v[i].view({});
         }
-        return n.ts_(Symbol(name), std::move(v));
+        return n.ts_(Symbol::attr(name), std::move(v));
     })
     .def("zs",[](Node & n, const char * name) {
-        return n.ts(Symbol(name));
+        return n.ts(Symbol::attr(name));
     })
     .def("pyobj",[](Node & n) {
       return py::handle(n.expect<PythonOp>()->pyobj.get()).cast<py::object>();

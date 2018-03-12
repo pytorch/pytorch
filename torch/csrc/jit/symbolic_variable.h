@@ -80,11 +80,11 @@ struct SymbolicVariable {
     return create(kneg, {*this})[0].typeLike(*this);
   }
   SymbolicVariable mm(const SymbolicVariable rhs) const {
-    auto r = create(s("mm"), {*this, rhs})[0];
+    auto r = create(t("mm"), {*this, rhs})[0];
     return r;
   }
   SymbolicVariable t() const {
-    auto r = create(s("t"), {*this})[0];
+    auto r = create(t("t"), {*this})[0];
     return r;
   }
   SymbolicVariable sigmoid() const {
@@ -95,17 +95,17 @@ struct SymbolicVariable {
   }
   std::vector<SymbolicVariable> chunk(int32_t chunks, uint32_t dim) const {
     Node * n;
-    auto r = create(s("chunk"), { *this }, chunks, &n);
-    n->i_(s("chunks"), chunks)
-     ->i_(s("dim"), dim);
+    auto r = create(t("chunk"), { *this }, chunks, &n);
+    n->i_(a("chunks"), chunks)
+     ->i_(a("dim"), dim);
     return r;
   }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     Node * n;
-    auto r = create(s("narrow"), { *this }, 1, &n)[0];
-    n->i_(s("dim"), dim)
-     ->i_(s("start"), start)
-     ->i_(s("length"), length);
+    auto r = create(t("narrow"), { *this }, 1, &n)[0];
+    n->i_(a("dim"), dim)
+     ->i_(a("start"), start)
+     ->i_(a("length"), length);
     return r;
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
@@ -115,32 +115,32 @@ struct SymbolicVariable {
     return r;
   }
   SymbolicVariable sum() const {
-    auto r = create(s("sum"), {*this})[0];
+    auto r = create(t("sum"), {*this})[0];
     return r;
   }
   SymbolicVariable sum(int dim, bool keepdim) const {
     Node * n;
-    auto r = create(s("sum"), {*this}, 1, &n)[0];
-    n->i_(s("dim"), dim)
-     ->i_(s("keepdim"), keepdim);
+    auto r = create(t("sum"), {*this}, 1, &n)[0];
+    n->i_(a("dim"), dim)
+     ->i_(a("keepdim"), keepdim);
     return r;
   }
   SymbolicVariable squeeze(int dim) const {
     Node * n;
-    auto r = create(s("squeeze"), {*this}, 1, &n)[0];
-    n->i_(s("dim"), dim);
+    auto r = create(t("squeeze"), {*this}, 1, &n)[0];
+    n->i_(a("dim"), dim);
     return r;
   }
   SymbolicVariable unsqueeze(int dim) const {
     Node * n;
-    auto r = create(s("unsqueeze"), {*this}, 1, &n)[0];
-    n->i_(s("dim"), dim);
+    auto r = create(t("unsqueeze"), {*this}, 1, &n)[0];
+    n->i_(a("dim"), dim);
     return r;
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
     Node *n;
     auto r =  create(kview, {*this}, 1, &n)[0];
-    n->is_(s("size"), std::move(sizes));
+    n->is_(a("size"), std::move(sizes));
     return r;
   }
   Value * value() const {
@@ -152,8 +152,11 @@ private:
       v->setType(other_type->contiguous());
     return *this;
   }
-  static Symbol s(const char * s_) {
-    return Symbol(s_);
+  static Symbol a(const char * s_) {
+    return Symbol::attr(s_);
+  }
+  static Symbol t(const char * s_) {
+    return Symbol::aten(s_);
   }
   Value * v;
 };

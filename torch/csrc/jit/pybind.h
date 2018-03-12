@@ -60,7 +60,9 @@ public:
 
   bool load(handle src, bool) {
     try {
-      value = torch::jit::Symbol(py::cast<std::string>(src));
+      // URK, isn't this suppressing errors from parseQualString?  What is going
+      // on here?
+      value = torch::jit::Symbol::parseQualString(py::cast<std::string>(src));
     } catch (std::exception& e) {
       return false;
     }
@@ -68,7 +70,7 @@ public:
   }
 
   static handle cast(torch::jit::Symbol src, return_value_policy /* policy */, handle /* parent */) {
-    return py::cast(std::string(src.toString()), return_value_policy::copy).release();
+    return py::cast(std::string(src.toQualString()), return_value_policy::copy).release();
   }
 };
 
