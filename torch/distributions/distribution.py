@@ -205,9 +205,8 @@ class Distribution(object):
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
 
-        if self._validate_args:
-            if not self.support.check(value).all():
-                raise ValueError('The value argument must be within the support')
+        if not self.support.check(value).all():
+            raise ValueError('The value argument must be within the support')
 
     def __repr__(self):
         return self.__class__.__name__ + '()'

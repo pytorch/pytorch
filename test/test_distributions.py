@@ -1894,6 +1894,10 @@ class TestDistributionShapes(TestCase):
         self.tensor_sample_2 = Variable(torch.ones(3, 2, 3))
         Distribution.set_default_validate_args(True)
 
+    def tearDown(self):
+        super(TestCase, self).tearDown()
+        Distribution.set_default_validate_args(False)
+
     def test_entropy_shape(self):
         for Dist, params in EXAMPLES:
             for i, param in enumerate(params):
@@ -2015,7 +2019,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist.sample().size(), torch.Size((3,)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_1)
-        simplex_sample = self.tensor_sample_2 / self.tensor_sample_2.sum(-1).unsqueeze(-1)
+        simplex_sample = self.tensor_sample_2 / self.tensor_sample_2.sum(-1, keepdim=True)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 2,)))
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((3,)))
         simplex_sample = Variable(torch.ones(3, 3)) / 3
@@ -2026,7 +2030,7 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
         self.assertEqual(dist.sample((3, 2)).size(), torch.Size((3, 2, 3, 2)))
-        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1).unsqueeze(-1)
+        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1, keepdim=True)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
         self.assertEqual(dist.log_prob(dist.enumerate_support()).size(), torch.Size((2, 3)))
@@ -2059,10 +2063,10 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(dist._event_shape, torch.Size((2,)))
         self.assertEqual(dist.sample().size(), torch.Size((3, 2)))
         self.assertEqual(dist.sample((5, 4)).size(), torch.Size((5, 4, 3, 2)))
-        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1).unsqueeze(-1)
+        simplex_sample = self.tensor_sample_1 / self.tensor_sample_1.sum(-1, keepdim=True)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3,)))
         self.assertRaises(ValueError, dist.log_prob, self.tensor_sample_2)
-        simplex_sample = Variable(torch.ones((3, 1, 2)))
+        simplex_sample = torch.ones((3, 1, 2))
         simplex_sample = simplex_sample / simplex_sample.sum(-1).unsqueeze(-1)
         self.assertEqual(dist.log_prob(simplex_sample).size(), torch.Size((3, 3)))
 
@@ -2223,10 +2227,6 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(laplace.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertRaises(ValueError, laplace.log_prob, self.tensor_sample_2)
         self.assertEqual(laplace.log_prob(Variable(torch.ones(2, 1))).size(), torch.Size((2, 2)))
-
-    def tearDown(self):
-        super(TestCase, self).tearDown()
-        Distribution.set_default_validate_args(False)
 
 
 class TestKL(TestCase):
