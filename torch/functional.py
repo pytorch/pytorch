@@ -173,7 +173,7 @@ def hann_window(window_length, periodic=True):
     window trims off the last duplicate value from the symmetric window and is
     ready to be used as a periodic window with functions like
     :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`window\_length + 1`. Also, we always have
+    above formula is in fact :math:`\textt{window_length} + 1`. Also, we always have
     ``torch.hann_window(L, periodic=True)`` equal to
     ``torch.hann_window(L + 1, periodic=False)[:-1])``.
 
@@ -186,7 +186,7 @@ def hann_window(window_length, periodic=True):
             function. If False, return a symmetric window.
 
     Returns:
-        Tensor: A 1-D tensor of size :math:`(window\_length)` containing the window
+        Tensor: A 1-D tensor of size :math:`(\text{window_length})` containing the window
     """
     if window_length <= 0:
         raise ValueError('window_length must be positive')
@@ -201,14 +201,14 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46):
     .. math::
         w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right)
 
-    , where :math:`N` is the full window size.
+    where :math:`N` is the full window size.
 
     The input :attr:`window_length` is a positive integer controlling the
     returned window size. :attr:`periodic` flag determines whether the returned
     window trims off the last duplicate value from the symmetric window and is
     ready to be used as a periodic window with functions like
     :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`window\_length + 1`. Also, we always have
+    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
     ``torch.hamming_window(L, periodic=True)`` equal to
     ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
 
@@ -256,7 +256,7 @@ def bartlett_window(window_length, periodic=True):
     window trims off the last duplicate value from the symmetric window and is
     ready to be used as a periodic window with functions like
     :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`window\_length + 1`. Also, we always have
+    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
     ``torch.bartlett_window(L, periodic=True)`` equal to
     ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
 

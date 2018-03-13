@@ -5204,7 +5204,7 @@ The argument :attr:`diagonal` controls which diagonal to consider. If
 retained. A positive value includes just as many diagonals above the main
 diagonal, and similarly a negative value excludes just as many diagonals below
 the main diagonal. The main diagonal are the set of indices
-:math:`\lbrace (i, i) \rbrace` for `i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
+:math:`\lbrace (i, i) \rbrace` for :math:`i \in [0, \min\{d_{1}, d_{2}\} - 1]` where
 :math:`d_{1}, d_{2}` are the dimensions of the matrix.
 
 Args:
@@ -5674,19 +5674,19 @@ Ignoring the batch dimension, this method computes the following expression:
 
 .. math::
     X[m, \omega] = \sum_{k = 0}^{frame\_length}%
-                        window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{frame\_length}}
+                        window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{\text{frame_length}}}
 
-, where :math:`m` is the index of the sliding window, and :math:`\omega` is
-the frequency that :math:`0 \leq \omega < fft\_size`. When
-:attr:`return_onsesided` is the default value True, only values for
-:math:`\omega` in range :math:`[0, 1, 2, \dots, \left\lfloor \frac{fft\_size}{2} \right\rfloor + 1]`
+where :math:`m` is the index of the sliding window, and :math:`\omega` is
+the frequency that :math:`0 \leq \omega <` :attr:`fft_size`. When
+:attr:`return_onsesided` is the default value ``True``, only values for
+:math:`\omega` in range :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{fft_size}}{2} \right\rfloor + 1\right]`
 are returned because the real-to-complex transform satisfies the Hermitian
-symmetry, i.e., :math:`X[m, \omega] = X[m, fft\_length - \omega]^*`.
+symmetry, i.e., :math:`X[m, \omega] = X[m, \text{fft_size} - \omega]^*`.
 
 The input :attr:`signal` must be 1-D sequence :math:`(T)` or 2-D a batch of
 sequences :math:`(N \times T)`. If :attr:`fft_size` is ``None``, it is
-default to same value as  :attr:``frame_length``. :attr:`window` can be a
-1-D tensor of size :math:`(frame\_length)`, e.g., see
+default to same value as  :attr:`frame_length`. :attr:`window` can be a
+1-D tensor of size :attr:`frame_length`, e.g., see
 :meth:`torch.hann_window`. If :attr:`window` is the default value ``None``,
 it is treated as if having :math:`1` everywhere in the frame.
 :attr:`pad_end` indicates the amount of zero padding at the end of
@@ -5694,7 +5694,7 @@ it is treated as if having :math:`1` everywhere in the frame.
 
 Returns the real and the imaginary parts together as one tensor of size
 :math:`(* \times N \times 2)`, where :math:`*` is the shape of input :attr:`signal`,
-:math:`N` is the number of :math:`\omega`s considered depending on
+:math:`N` is the number of :math:`\omega` s considered depending on
 :attr:`fft_size` and :attr:`return_onesided`, and each pair in the last
 dimension represents a complex number as real part and imaginary part.
 
@@ -5702,10 +5702,10 @@ Arguments:
     signal (Tensor): the input tensor
     frame_length (int): the size of window frame and STFT filter
     hop (int): the distance between neighboring sliding window frames
-    fft_size (int, optional): size of Fourier transform
-    return_onesided (bool, optional): controls whether to avoid redundancy in the return value
-    window (Tensor, optional): the optional window function
-    pad_end (int, optional): implicit zero padding at the end of :attr:`signal`
+    fft_size (int, optional): size of Fourier transform. Default: ``None``
+    return_onesided (bool, optional): controls whether to avoid redundancy in the return value. Default: ``True``
+    window (Tensor, optional): the optional window function. Default: ``None``
+    pad_end (int, optional): implicit zero padding at the end of :attr:`signal`. Default: 0
 
 Returns:
     Tensor: A tensor containing the STFT result

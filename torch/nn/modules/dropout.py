@@ -56,7 +56,7 @@ class Dropout2d(Module):
     r"""Randomly zeroes whole channels of the input tensor.
     The channels to zero-out are randomized on every forward call.
 
-    *Usually the input comes from :func:`nn.Conv2d` modules.*
+    Usually the input comes from :class:`nn.Conv2d` modules.
 
     As described in the paper
     `Efficient Object Localization Using Convolutional Networks`_ ,
@@ -109,7 +109,7 @@ class Dropout3d(Module):
     r"""Randomly zeroes whole channels of the input tensor.
     The channels to zero are randomized on every forward call.
 
-    *Usually the input comes from :func:`nn.Conv3d` modules.*
+    Usually the input comes from :class:`nn.Conv3d` modules.
 
     As described in the paper
     `Efficient Object Localization Using Convolutional Networks`_ ,

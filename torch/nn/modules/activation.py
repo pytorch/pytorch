@@ -279,7 +279,7 @@ class Tanh(Module):
 
 class ELU(Module):
     r"""Applies element-wise,
-    :math:`\text{ELU}(x) = max(0,x) + min(0, \alpha * (\exp(x) - 1))`
+    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -578,7 +578,7 @@ class Softshrink(Module):
 
 class PReLU(Module):
     r"""Applies element-wise the function
-    :math:`\text{PReLU}(x) = max(0,x) + a * min(0,x)` or
+    :math:`\text{PReLU}(x) = \max(0,x) + a * \min(0,x)` or
 
     .. math::
         \text{PReLU}(x) =

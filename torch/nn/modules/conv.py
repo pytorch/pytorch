@@ -140,7 +140,7 @@ class Conv1d(_ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = \left\lfloor(\frac{L_{in} + 2 * \text{padding} - \text{dilation}
+              L_{out} = \left\lfloor\frac{L_{in} + 2 * \text{padding} - \text{dilation}
                         * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Attributes:

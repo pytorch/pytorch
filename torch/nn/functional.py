@@ -1033,7 +1033,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
         It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Variable,
         since some autograd functions may not propagate sparse gradients correctly.
         Additionally, keep in mind that only a limited number of optimizers support
-        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`), and `optim.Adagrad` (`cpu`)
+        sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`), and :class:`optim.Adagrad` (`CPU`)
 
     Examples::
 
