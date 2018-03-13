@@ -1016,28 +1016,13 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor & ggG,
     const Tensor & ggB,
     const Tensor & gO,
-    const Tensor & running_mean_v,
-    const Tensor & running_var_v,
+    const Tensor & running_mean,
+    const Tensor & running_var,
     bool training,
     double eps,
-    const Tensor & save_mean_v,
-    const Tensor & save_std_v,
+    const Tensor & save_mean,
+    const Tensor & save_std,
     std::array<bool,3> output_mask) {
-
-  // NB: In the original design of BatchNorm, save_mean, save_std, running_mean
-  // and running_var are unconditionally tensor "buffers", and never get wrapped
-  // in variables.  However, when ATen happened, we never designed the API
-  // to allow mixed passing of tensors and variables (and this would be very
-  // confusing, because we always write "Tensor" in the signatures no matter if
-  // it's a Variable or a Tensor).  So, when a user calls
-  // batchnorm_double_backward from Python (which still thinks that these are
-  // plain tensors), it goes ahead and wraps them in variables to appease
-  // the interface that only understand variables.  Consequently, we have to
-  // unwrap them again.
-  const Tensor& save_mean = static_cast<const Variable&>(save_mean_v).data();
-  const Tensor& save_std = static_cast<const Variable&>(save_std_v).data();
-  const Tensor& running_mean = static_cast<const Variable&>(running_mean_v).data();
-  const Tensor& running_var = static_cast<const Variable&>(running_var_v).data();
 
   bool affine = gamma.defined();
   // TODO: Do we have a ScalarOrTensor type?  Would such a thing exist?
@@ -1060,9 +1045,9 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
   for (auto s : input.sizes().slice(2)) {
     M *= s;
   }
-  auto mu = unsqueeze_dim1(make_variable(training ? save_mean : running_mean, /*requires_grad=*/false), input);
+  auto mu = unsqueeze_dim1(training ? save_mean : running_mean, input);
   auto input_sub_mu = input - mu;
-  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(make_variable(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5), /*requires_grad=*/false), input);
+  auto sigma2_eps_neg_1_2 = unsqueeze_dim1(training ? save_std : running_var.add(Scalar(eps)).pow(-0.5), input);
   auto sigma2_eps_neg_1 = sigma2_eps_neg_1_2.pow(2);
   auto sigma2_eps_neg_3_2 = sigma2_eps_neg_1_2.pow(3);
 
