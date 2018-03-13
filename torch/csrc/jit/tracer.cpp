@@ -177,10 +177,7 @@ PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
                                   std::string arg_types,
                                   at::ArrayRef<Variable> inputs,
                                   pyobj_list scalar_args) {
-  std::vector<VariableFlags> var_flags(inputs.size());
-  for (size_t i = 0; i < inputs.size(); i++) {
-    var_flags[i] = VariableFlags::of(inputs[i]);
-  }
+  std::vector<VariableFlags> var_flags = fmap(inputs, &VariableFlags::of);
 
   return makePreTraceInfo(inputs, [&](Graph& graph) {
     const bool is_legacy = false;

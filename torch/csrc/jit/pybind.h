@@ -16,44 +16,6 @@ namespace py = pybind11;
 
 namespace pybind11 { namespace detail {
 
-template<> struct type_caster<torch::jit::tracer::TraceInput> {
-public:
-  PYBIND11_TYPE_CASTER(torch::jit::tracer::TraceInput, _("torch::jit::tracer::TraceInput"));
-  bool load(handle src, bool) {
-    PyObject *source = src.ptr();
-    if (THPVariable_Check(source)) {
-      value = torch::jit::tracer::TraceInput(((THPVariable*)source)->cdata);
-      return true;
-    } else {
-      return false;
-    }
-  }
-  static handle cast(torch::jit::tracer::TraceInput src, return_value_policy /* policy */, handle /* parent */) {
-    if (src.variable.defined()) {
-      return handle(THPVariable_Wrap(src.variable));
-    } else {
-      return handle(THPVariable_Wrap(torch::autograd::make_variable(src.buffer, false)));
-    }
-  }
-};
-
-template<> struct type_caster<torch::autograd::Variable> {
-public:
-  PYBIND11_TYPE_CASTER(torch::autograd::Variable, _("torch::autograd::Variable"));
-  bool load(handle src, bool) {
-    PyObject *source = src.ptr();
-    if (THPVariable_Check(source)) {
-      value = ((THPVariable*)source)->cdata;
-      return true;
-    } else {
-      return false;
-    }
-  }
-  static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPVariable_Wrap(src));
-  }
-};
-
 template <> struct type_caster<torch::jit::Symbol> {
 public:
   PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
