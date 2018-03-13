@@ -977,7 +977,7 @@ def sigmoid(input):
 
 def linear(input, weight, bias=None):
     """
-    Applies a linear transformation to the incoming data: :math:`y = Ax + b`.
+    Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
     Shape:
         - Input: :math:`(N, *, in\_features)` where `*` means any number of
@@ -1674,8 +1674,8 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
 
 
 def pixel_shuffle(input, upscale_factor):
-    r"""Rearranges elements in a tensor of shape :math:`[*, r^2C, H, W]` to a
-    tensor of shape :math:`[C, rH, rW]`.
+    r"""Rearranges elements in a tensor of shape :math:`[*, C*r^2, H, W]` to a
+    tensor of shape :math:`[C, H*r, W*r]`.
 
     See :class:`~torch.nn.PixelShuffle` for details.
 
