@@ -2501,8 +2501,6 @@ class TestConstraints(TestCase):
                         constraint = dist.params[name]
                     except KeyError:
                         continue  # ignore optional parameters
-                    except TypeError:
-                        continue
 
                     if is_dependent(constraint):
                         continue
@@ -2533,12 +2531,12 @@ class TestNumericalStability(TestCase):
                         expected_gradient=None,
                         prec=1e-5):
         if probs is not None:
-            p = variable(probs, requires_grad=True)
+            p = Variable(probs, requires_grad=True)
             dist = dist_class(p)
         else:
-            p = variable(logits, requires_grad=True)
+            p = Variable(logits, requires_grad=True)
             dist = dist_class(logits=p)
-        log_pdf = dist.log_prob(variable(x))
+        log_pdf = dist.log_prob(Variable(x))
         log_pdf.sum().backward()
         self.assertEqual(log_pdf.data,
                          expected_value,
