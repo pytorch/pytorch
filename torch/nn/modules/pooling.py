@@ -780,7 +780,7 @@ class LPPool2d(Module):
         - At p = infinity, one gets Max Pooling
         - At p = 1, one gets Average Pooling
 
-    The parameters :attr:`kernel_size`, :attr:`stride` can either be:
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
