@@ -140,7 +140,7 @@ class Conv1d(_ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = \left\lfloor(\frac{L_{in} + 2 * \text{padding} - \text{dilation}
+              L_{out} = \left\lfloor\frac{L_{in} + 2 * \text{padding} - \text{dilation}
                         * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Attributes:
@@ -380,10 +380,10 @@ class Conv3d(_ConvNd):
               D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
                     * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
                     * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
                     * (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Attributes:

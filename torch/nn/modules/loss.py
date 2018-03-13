@@ -806,7 +806,7 @@ class CosineEmbeddingLoss(_Loss):
     using the cosine distance, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
-    The loss function for each sample is::
+    The loss function for each sample is:
 
     .. math::
         \text{loss}(x, y) =

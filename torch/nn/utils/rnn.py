@@ -123,7 +123,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Arguments:
         input (Variable): padded batch of variable length sequences.
         lengths (Variable): list of sequences lengths of each batch element.
-        batch_first (bool, optional): if ``True``, the input is expected in BxTx*
+        batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
 
     Returns:
@@ -211,7 +211,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     decreasing length.
 
     `B` is batch size. It's equal to the number of elements in ``sequences``.
-    `T` is length longest sequence.
+    `T` is length of the longest sequence.
     `L` is length of the sequence.
     `*` is any number of trailing dimensions, including none.
 
@@ -269,7 +269,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 def pack_sequence(sequences):
     r"""Packs a list of variable length Variables
 
-    ``sequences`` should be a list of Variables of size ``Lx*``, where `L` is
+    ``sequences`` should be a list of Variables of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
     including zero. They should be sorted in the order of decreasing length.
 
