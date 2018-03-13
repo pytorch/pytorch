@@ -65,16 +65,35 @@ class SumReduceDimsOp final : public Operator<Context> {
       return true;
     }
 
+    const int32_t* lengths_data = nullptr;
+    if (InputSize() > 1) {
+      const auto& lengths = Input(1);
+      lengths_data = lengths.template data<int32_t>();
+      CAFFE_ENFORCE(
+          num_reduce_dims_ == 1,
+          "Given lengths input, the number of reduce dimensions should be one.");
+      const int batch_size = FIRSTDIMS ? cols : rows;
+      CAFFE_ENFORCE(
+          lengths.size() == batch_size,
+          "The size of lengths vector doesn't match the batch size.");
+    }
+
     const T* in_data = X.template data<T>();
     T* out_data = Y->template mutable_data<T>();
-    Compute(rows, cols, in_data, out_data);
+    Compute(rows, cols, in_data, lengths_data, out_data);
 
     return true;
   }
 
  private:
   template <typename T>
-  void Compute(int rows, int cols, const T* in_data, T* out_data);
+  void Compute(
+      int rows,
+      int cols,
+      const T* in_data,
+      const int32_t* lengths_data,
+      T* out_data);
+
   int num_reduce_dims_;
 };
 
@@ -122,15 +141,33 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
         ? dX->size_from_dim(num_reduce_dims_)
         : dX->size_from_dim(dX->ndim() - num_reduce_dims_);
 
+    const int32_t* lengths_data = nullptr;
+    if (InputSize() > 2) {
+      const auto& lengths = Input(2);
+      lengths_data = lengths.template data<int32_t>();
+      CAFFE_ENFORCE(
+          num_reduce_dims_ == 1,
+          "Given lengths input, the number of reduce dimensions should be one.");
+      const int batch_size = FIRSTDIMS ? cols : rows;
+      CAFFE_ENFORCE(
+          lengths.size() == batch_size,
+          "The size of lengths vector doesn't match the batch size.");
+    }
+
     const T* dYdata = dY.template data<T>();
     T* dXdata = dX->template mutable_data<T>();
-    Compute<T>(rows, cols, dYdata, dXdata);
+    Compute<T>(rows, cols, dYdata, lengths_data, dXdata);
     return true;
   }
 
  private:
   template <typename T>
-  void Compute(int rows, int cols, const T* dYdata, T* dXdata);
+  void Compute(
+      int rows,
+      int cols,
+      const T* dYdata,
+      const int32_t* lengths_data,
+      T* dXdata);
   int num_reduce_dims_;
   // scratch space used for former version of this reducer
   Tensor<CPUContext> shape_;
@@ -173,14 +210,32 @@ class MaxReduceDimsOp final : public Operator<Context> {
       return true;
     }
 
+    const int32_t* lengths_data = nullptr;
+    if (InputSize() > 1) {
+      const auto& lengths = Input(1);
+      lengths_data = lengths.template data<int32_t>();
+      CAFFE_ENFORCE(
+          num_reduce_dims_ == 1,
+          "Given lengths input, the number of reduce dimensions should be one.");
+      const int batch_size = FIRSTDIMS ? cols : rows;
+      CAFFE_ENFORCE(
+          lengths.size() == batch_size,
+          "The size of lengths vector doesn't match the batch size.");
+    }
+
     const float* data = X.template data<float>();
     float* out_data = Y->template mutable_data<float>();
-    Compute(rows, cols, data, out_data);
+    Compute(rows, cols, data, lengths_data, out_data);
     return true;
   }
 
  protected:
-  void Compute(int rows, int cols, const float* data, float* out_data);
+  void Compute(
+      int rows,
+      int cols,
+      const float* data,
+      const int32_t* lengths_data,
+      float* out_data);
 
   int num_reduce_dims_;
 };
@@ -211,8 +266,21 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
     const float* Xdata = X.template data<float>();
     const float* Ydata = Y.template data<float>();
 
+    const int32_t* lengths_data = nullptr;
+    if (InputSize() > 3) {
+      const auto& lengths = Input(3);
+      lengths_data = lengths.template data<int32_t>();
+      CAFFE_ENFORCE(
+          num_reduce_dims_ == 1,
+          "Given lengths input, the number of reduce dimensions should be one.");
+      const int batch_size = FIRSTDIMS ? cols : rows;
+      CAFFE_ENFORCE(
+          lengths.size() == batch_size,
+          "The size of lengths vector doesn't match the batch size.");
+    }
+
     float* dXdata = dX->template mutable_data<float>();
-    Compute(rows, cols, dYdata, Xdata, Ydata, dXdata);
+    Compute(rows, cols, dYdata, Xdata, Ydata, lengths_data, dXdata);
     return true;
   }
 
@@ -223,6 +291,7 @@ class MaxReduceDimsGradientOp final : public Operator<Context> {
       const float* dYdata,
       const float* Xdata,
       const float* Ydata,
+      const int32_t* lengths_data,
       float* dXdata);
 
   int num_reduce_dims_;
