@@ -1199,8 +1199,9 @@ class TestTorch(TestCase):
                 return torch.int64
             return operator.attrgetter(module)(torch).int64
 
-        check_value(torch.empty(shape), torch.Tensor.dtype, -1, None, False)
-        check_value(torch.full(shape, -5), torch.Tensor.dtype, -1, None, False)
+        default_dtype = torch.get_default_dtype()
+        check_value(torch.empty(shape), default_dtype, -1, None, False)
+        check_value(torch.full(shape, -5), default_dtype, -1, None, False)
         for dtype in dtypes:
             for rg in [True, False]:
                 int64_dtype = get_int64_dtype(dtype)
@@ -1243,26 +1244,26 @@ class TestTorch(TestCase):
 
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
-        self.assertIs(torch.Tensor().dtype, torch.Tensor.dtype)
+        self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())
 
         torch.set_default_tensor_type('torch.FloatTensor')
-        self.assertIs(torch.float32, torch.Tensor.dtype)
+        self.assertIs(torch.float32, torch.get_default_dtype())
         self.assertIs(torch.float32, torch.FloatTensor.dtype)
         self.assertEqual(torch.FloatStorage, torch.Storage)
 
         torch.set_default_tensor_type(torch.float64)
-        self.assertIs(torch.float64, torch.Tensor.dtype)
+        self.assertIs(torch.float64, torch.get_default_dtype())
         self.assertIs(torch.float64, torch.DoubleTensor.dtype)
         self.assertEqual(torch.DoubleStorage, torch.Storage)
 
-        torch.set_default_tensor_type('torch.Tensor')
-        self.assertIs(torch.float64, torch.Tensor.dtype)
-        self.assertIs(torch.float64, torch.DoubleTensor.dtype)
-        self.assertEqual(torch.DoubleStorage, torch.Storage)
+        torch.set_default_tensor_type(torch.FloatTensor)
+        self.assertIs(torch.float32, torch.get_default_dtype())
+        self.assertIs(torch.float32, torch.DoubleTensor.dtype)
+        self.assertEqual(torch.FloatStorage, torch.Storage)
 
         if torch.cuda.is_available():
             torch.set_default_tensor_type(torch.cuda.float32)
-            self.assertIs(torch.cuda.float32, torch.Tensor.dtype)
+            self.assertIs(torch.cuda.float32, torch.get_default_dtype())
             self.assertIs(torch.cuda.float32, torch.cuda.FloatTensor.dtype)
             self.assertEqual(torch.cuda.FloatStorage, torch.Storage)
 

@@ -22,7 +22,7 @@ __all__ = [
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -150,28 +150,10 @@ def set_default_tensor_type(t):
          3.0000
         [torch.DoubleTensor of size (2,)]
 
-        >>> torch.set_default_tensor_type(torch.cuda.uint8)
-        >>> torch.Tensor([2, 3])
-
-         2
-         3
-        [torch.cuda.ByteTensor of size (2,) (GPU 0)]
-
-        >>> torch.set_default_tensor_type(torch.cuda.LongTensor)
-        >>> torch.Tensor([3, 4])
-
-         3
-         4
-        [torch.cuda.LongTensor of size (2,) (GPU 0)]
-
     """
-    if isinstance(t, globals()['dtype']):
-        _C._set_default_tensor_type(t)
-    else:
-        if not isinstance(t, _string_classes):
-            raise ValueError("t must be a string or a dtype, but got: {}".format(repr(t)))
-        Tensor = _import_dotted_name(t)
-        _C._set_default_tensor_type(Tensor)
+    if isinstance(t, _string_classes):
+        t = _import_dotted_name(t)
+    _C._set_default_tensor_type(t)
 
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
@@ -182,6 +164,7 @@ from ._tensor_str import set_printoptions
 # Define Storage and Tensor classes
 ################################################################################
 
+from .tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -247,6 +230,7 @@ del manager_path
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
 
+set_default_tensor_type(torch.float32)
 
 ################################################################################
 # Import interface functions defined in Python

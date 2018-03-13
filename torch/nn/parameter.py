@@ -1,7 +1,7 @@
-from torch.autograd import Variable
+import torch
 
 
-class Parameter(Variable):
+class Parameter(torch.Tensor):
     r"""A kind of Variable that is to be considered a module parameter.
 
     Parameters are :class:`~torch.autograd.Variable` subclasses, that have a
@@ -19,7 +19,9 @@ class Parameter(Variable):
             :ref:`excluding-subgraphs` for more details.
     """
     def __new__(cls, data=None, requires_grad=True):
-        return super(Parameter, cls).__new__(cls, data, requires_grad=requires_grad)
+        if data is None:
+            data = torch.Tensor()
+        return torch.Tensor._make_subclass(cls, data, requires_grad)
 
     def __repr__(self):
         return super(Parameter, self).__repr__().replace('Variable', 'Parameter')
