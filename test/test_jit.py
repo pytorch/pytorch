@@ -1747,6 +1747,21 @@ class TestJit(TestCase):
 
             self.assertEqual(foo(*inputs), outputs)
 
+    def test_desugar_module(self):
+        import torch.nn.functional as F
+
+        def fn(x, slope):
+            a = torch.abs(x)
+            b = torch.nn.functional.prelu(x, slope)
+            c = F.prelu(x, slope)
+            return a, b, c
+
+        x = torch.arange(-3, 4)
+        slope = torch.tensor([0.5])
+        outputs = fn(x, slope)
+        print(outputs)
+        self.checkScript(fn, [x, slope], outputs, True)
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
     def test_traced_module(self):
