@@ -261,16 +261,16 @@ static void test(Type & type) {
     // Indexing by Scalar
     Tensor tensor = CPU(kInt).arange(0, 10);
     Tensor one = CPU(kInt).ones({1});
-    for (long i = 0; i < tensor.numel(); ++i) {
+    for (int64_t i = 0; i < tensor.numel(); ++i) {
       ASSERT(tensor[i].equal(one * i));
     }
     for (int i = 0; i < tensor.numel(); ++i) {
       ASSERT(tensor[i].equal(one * i));
     }
-    for (short i = 0; i < tensor.numel(); ++i) {
+    for (int16_t i = 0; i < tensor.numel(); ++i) {
       ASSERT(tensor[i].equal(one * i));
     }
-    for (char i = 0; i < tensor.numel(); ++i) {
+    for (int8_t i = 0; i < tensor.numel(); ++i) {
       ASSERT(tensor[i].equal(one * i));
     }
     try {
