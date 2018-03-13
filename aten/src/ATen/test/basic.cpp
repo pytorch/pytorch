@@ -296,11 +296,18 @@ static void test(Type & type) {
           "Can only index tensors with integral scalars (got CPUFloatType)");
     }
     try {
-      ASSERT(tensor[Scalar(CPU(kInt).ones({2, 3, 4}))].equal(one));
+      ASSERT(tensor[Tensor()].equal(one));
     } catch (const std::runtime_error& error) {
       ASSERT(
           std::string(error.what()) ==
-          "Attempting to create a Scalar from a 3 dim tensor");
+          "Can only index with tensors that are defined");
+    }
+    try {
+      ASSERT(tensor[CPU(kInt).ones({2, 3, 4})].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+        std::string(error.what()) ==
+        "Can only index with tensors that are scalars (zero-dim)");
     }
   }
 }
