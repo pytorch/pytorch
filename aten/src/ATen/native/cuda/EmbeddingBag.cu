@@ -49,7 +49,10 @@ __global__ void EmbeddingBag_updateOutputKernel(
       int64_t begin = offsets[bag];
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       assert(end >= begin);
+
       accscalar_t weightFeatSum = scalar_cast<accscalar_t>(0);
+      scalar_t weightFeatMax;
+
       int64_t bag_size_ = 0;
       int64_t maxWord = -1;
       for (int64_t emb = begin; emb < end; emb++) {
@@ -57,8 +60,8 @@ __global__ void EmbeddingBag_updateOutputKernel(
         scalar_t weightValue = weightFeat[weightRow];
 
         if (mode == MODE_MAX) {
-          if (emb == begin || weightValue > weightFeatSum) {
-            weightFeatSum = weightValue;
+          if (emb == begin || weightValue > weightFeatMax) {
+            weightFeatMax = weightValue;
             maxWord = input[emb]; 
           }
         } else {
@@ -74,10 +77,13 @@ __global__ void EmbeddingBag_updateOutputKernel(
         weightFeatSum = weightFeatSum / scalar_cast<accscalar_t>(bag_size_);
         bag_size[bag] = bag_size_;
       }
-      output[bag * stride + featureDim] = scalar_cast<scalar_t>(weightFeatSum);
 
-      if (mode == MODE_MAX) {
+      if (mode == MODE_MEAN || mode == MODE_SUM) {
+        output[bag * stride + featureDim] = scalar_cast<scalar_t>(weightFeatSum);
+      }
+      else if (mode == MODE_MAX) {
         max_indices[bag * stride + featureDim] = maxWord;
+        output[bag * stride + featureDim] = weightFeatMax;
       }
     }
   }
@@ -284,7 +290,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
   dim3 block = dim3(32, 8);
   int grid = 1024;
 
-  AT_DISPATCH_FLOATING_TYPES(
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       grad.type(), "embedding_bag_backward_cuda_max", [&] {
         using cuda_scalar_t = cuda::type<scalar_t>;
         EmbeddingBag_accGradParametersKernel_max<
