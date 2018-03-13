@@ -787,7 +787,7 @@ class LPPool2d(Module):
           and the second `int` for the width dimension
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-    for :attr:`padding` number of points.  This raises an error if :attr:`norm_type`:math:`\leq 0`, 
+    for :attr:`padding` number of points.  This raises an error if :attr:`norm_type`:math:`\leq 0`,
     as zero cannot be raised to non-positive powers.
 
     Args:
@@ -852,7 +852,7 @@ class LPPool1d(Module):
         - At p = 1, one gets Average Pooling
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
-    for :attr:`padding` number of points.  This raises an error if :attr:`norm_type`:math:`\leq 0`, 
+    for :attr:`padding` number of points.  This raises an error if :attr:`norm_type`:math:`\leq 0`,
     as zero cannot be raised to non-positive powers.
 
     Args:
