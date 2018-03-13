@@ -1181,10 +1181,10 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         mode = 2
 
         if scale_grad_by_freq:
-          raise ValueError("max mode does not support scaling the gradient by the frequency")
+            raise ValueError("max mode does not support scaling the gradient by the frequency")
 
         if sparse:
-          raise ValueError("max mode does not support sparse weights")
+            raise ValueError("max mode does not support sparse weights")
 
     else:
         raise ValueError("mode has to be one of sum or mean")

@@ -169,11 +169,11 @@ class EmbeddingBag(Module):
         max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
         norm_type (float, optional): The p of the p-norm to compute for the max_norm option
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
-                                                the words in the dictionary. Note: this option is not supported when 
+                                                the words in the dictionary. Note: this option is not supported when
                                                 using max mode.
         mode (string, optional): 'sum' | 'mean' | 'max'. Specifies the way to reduce the bag. Default: 'mean'
         sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients. Note: this option is not supported when 
+                                    more details regarding sparse gradients. Note: this option is not supported when
                                     using max mode.
 
     Attributes:
