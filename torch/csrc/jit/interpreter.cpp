@@ -949,9 +949,9 @@ struct CodeImpl {
     };
     auto & inst = instructions.at(pc);
     writeList(inst.outputs);
-    // TODO: Maybe this wants to be unqualified.  Not sure what is going on
-    // with debug_name
-    out << " = " << inst.debug_name.toQualString() << " ";
+    // NB: debug names are the kind of operator used to select
+    // dispatch
+    out << " = " << inst.debug_name.toUnqualString() << " ";
     writeUseList(inst.inputs);
   }
   void dump(std::ostream & out) const {

@@ -141,7 +141,6 @@ void initPythonIRBindings(PyObject * module_) {
     .AS(removeAttribute)
     .AS(hasAttributes)
     .AS(attributeNames)
-    // TODO: These can be reasonably implemented by assuming
 #undef AS
 #define CREATE_ACCESSOR(Kind,method) \
     def(#method "_",[](Node & n, const char * name, Kind##Attr::ValueType v) { \
