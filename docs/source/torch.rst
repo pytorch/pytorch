@@ -9,6 +9,7 @@ Tensors
 .. autofunction:: set_default_tensor_type
 .. autofunction:: numel
 .. autofunction:: set_printoptions
+.. autofunction:: set_flush_denormal
 
 
 Creation Ops
@@ -23,6 +24,7 @@ Creation Ops
 .. autofunction:: range
 .. autofunction:: zeros
 .. autofunction:: zeros_like
+.. autofunction:: empty_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,6 +34,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
+.. autofunction:: reshape
 .. autofunction:: split
 .. autofunction:: squeeze
 .. autofunction:: stack
@@ -142,6 +145,7 @@ Reduction Ops
 .. autofunction:: prod
 .. autofunction:: std
 .. autofunction:: sum
+.. autofunction:: unique
 .. autofunction:: var
 
 
@@ -151,6 +155,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
 .. autofunction:: lt

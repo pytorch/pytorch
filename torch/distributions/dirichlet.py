@@ -4,12 +4,12 @@ import torch
 from torch.autograd import Function, Variable
 from torch.autograd.function import once_differentiable
 from torch.distributions import constraints
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _finfo, broadcast_all
 
 
 def _dirichlet_sample_nograd(concentration):
-    probs = torch._C._standard_gamma(concentration)
+    probs = torch._standard_gamma(concentration)
     probs /= probs.sum(-1, True)
     eps = _finfo(probs).eps
     return probs.clamp_(min=eps, max=1 - eps)
@@ -18,7 +18,7 @@ def _dirichlet_sample_nograd(concentration):
 # This helper is exposed for testing.
 def _Dirichlet_backward(x, concentration, grad_output):
     total = concentration.sum(-1, True).expand_as(concentration)
-    grad = torch._C._dirichlet_grad(x, concentration, total)
+    grad = torch._dirichlet_grad(x, concentration, total)
     return grad * (grad_output - (x * grad_output).sum(-1, True))
 
 
@@ -36,7 +36,7 @@ class _Dirichlet(Function):
         return _Dirichlet_backward(x, concentration, grad_output)
 
 
-class Dirichlet(Distribution):
+class Dirichlet(ExponentialFamily):
     r"""
     Creates a Dirichlet distribution parameterized by concentration `concentration`.
 
@@ -49,7 +49,7 @@ class Dirichlet(Distribution):
         [torch.FloatTensor of size 2]
 
     Args:
-        concentration (Tensor or Variable): concentration parameter of the distribution
+        concentration (Tensor): concentration parameter of the distribution
             (often referred to as alpha)
     """
     params = {'concentration': constraints.positive}
@@ -74,9 +74,25 @@ class Dirichlet(Distribution):
                 torch.lgamma(self.concentration.sum(-1)) -
                 torch.lgamma(self.concentration).sum(-1))
 
+    @property
+    def mean(self):
+        return self.concentration / self.concentration.sum(-1)
+
+    @property
+    def variance(self):
+        con0 = self.concentration.sum(-1)
+        return self.concentration * (con0 - self.concentration) / (con0.pow(2) * (con0 + 1))
+
     def entropy(self):
         k = self.concentration.size(-1)
         a0 = self.concentration.sum(-1)
         return (torch.lgamma(self.concentration).sum(-1) - torch.lgamma(a0) -
                 (k - a0) * torch.digamma(a0) -
                 ((self.concentration - 1.0) * torch.digamma(self.concentration)).sum(-1))
+
+    @property
+    def _natural_params(self):
+        return (self.concentration, )
+
+    def _log_normalizer(self, x):
+        return x.lgamma().sum(-1) - torch.lgamma(x.sum(-1))

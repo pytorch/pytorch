@@ -19,14 +19,14 @@ _FINFO = {
 
 
 def _finfo(tensor):
-    """
+    r"""
     Return floating point info about a `Tensor` or `Variable`:
     - `.eps` is the smallest number that can be added to 1 without being lost.
     - `.tiny` is the smallest positive number greater than zero
       (much smaller than `.eps`).
 
     Args:
-        tensor (Tensor or Variable): tensor or variable of floating point data.
+        tensor (Tensor): tensor or variable of floating point data.
     Returns:
         _Finfo: a `namedtuple` with fields `.eps` and `.tiny`.
     """
@@ -35,7 +35,7 @@ def _finfo(tensor):
 
 def expand_n(v, n):
     r"""
-    Cleanly expand float or Tensor or Variable parameters.
+    Cleanly expand float or Tensor parameters.
     """
     if isinstance(v, Number):
         return torch.Tensor([v]).expand(n, 1)
@@ -44,34 +44,33 @@ def expand_n(v, n):
 
 
 def _broadcast_shape(shapes):
-    """
+    r"""
     Given a list of tensor sizes, returns the size of the resulting broadcasted
     tensor.
 
     Args:
         shapes (list of torch.Size): list of tensor sizes
     """
-    shape = torch.Size([1])
+    shape = torch.Size()
     for s in shapes:
         shape = torch._C._infer_size(s, shape)
     return shape
 
 
 def broadcast_all(*values):
-    """
+    r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
       - `torch.Tensor` and `torch.autograd.Variable` instances are broadcasted as
         per the `broadcasting rules
         <http://pytorch.org/docs/master/notes/broadcasting.html>`_
-      - numbers.Number instances (scalars) are upcast to Tensor/Variable having
-        the same size and type as the first tensor passed to `values`. If all the
-        values are scalars, then they are upcasted to `torch.Tensor` having size
+      - numbers.Number instances (scalars) are upcast to Variables having
+        the same size and type as the first tensor passed to `values`.  If all the
+        values are scalars, then they are upcasted to Variables having size
         `(1,)`.
 
     Args:
-        values (list of `numbers.Number`, `torch.autograd.Variable` or
-        `torch.Tensor`)
+        values (list of `numbers.Number` or `torch.Tensor`)
 
     Raises:
         ValueError: if any of the values is not a `numbers.Number`, `torch.Tensor`
@@ -79,26 +78,40 @@ def broadcast_all(*values):
     """
     values = list(values)
     scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
-    tensor_idxs = [i for i in range(len(values)) if
-                   torch.is_tensor(values[i]) or isinstance(values[i], Variable)]
+    tensor_idxs = [i for i in range(len(values)) if isinstance(values[i], torch.Tensor)]
     if len(scalar_idxs) + len(tensor_idxs) != len(values):
-        raise ValueError('Input arguments must all be instances of numbers.Number, torch.Tensor or ' +
-                         'torch.autograd.Variable.')
+        raise ValueError('Input arguments must all be instances of numbers.Number or torch.Tensor.')
     if tensor_idxs:
         broadcast_shape = _broadcast_shape([values[i].size() for i in tensor_idxs])
         for idx in tensor_idxs:
             values[idx] = values[idx].expand(broadcast_shape)
         template = values[tensor_idxs[0]]
+        if len(scalar_idxs) > 0 and not isinstance(template, torch.autograd.Variable):
+            raise ValueError(('Input arguments containing instances of numbers.Number and torch.Tensor '
+                              'are not currently supported.  Use torch.autograd.Variable instead of torch.Tensor'))
         for idx in scalar_idxs:
             values[idx] = template.new(template.size()).fill_(values[idx])
     else:
         for idx in scalar_idxs:
-            values[idx] = torch.Tensor([values[idx]])
+            values[idx] = torch.tensor(values[idx])
     return values
 
 
-def softmax(tensor):
+def _sum_rightmost(value, dim):
+    r"""
+    Sum out ``dim`` many rightmost dimensions of a given tensor.
+
+    Args:
+        value (Tensor): A tensor of ``.dim()`` at least ``dim``.
+        dim (int): The number of rightmost dims to sum out.
     """
+    if dim == 0:
+        return value
+    return value.contiguous().view(value.shape[:-dim] + (-1,)).sum(-1)
+
+
+def softmax(tensor):
+    r"""
     Wrapper around softmax to make it work with both Tensors and Variables.
     TODO: Remove once https://github.com/pytorch/pytorch/issues/2633 is resolved.
     """
@@ -108,7 +121,7 @@ def softmax(tensor):
 
 
 def log_sum_exp(tensor, keepdim=True):
-    """
+    r"""
     Numerically stable implementation for the `LogSumExp` operation. The
     summing is done along the last dimension.
 
@@ -121,7 +134,7 @@ def log_sum_exp(tensor, keepdim=True):
 
 
 def logits_to_probs(logits, is_binary=False):
-    """
+    r"""
     Converts a tensor of logits into probabilities. Note that for the
     binary case, each value denotes log odds, whereas for the
     multi-dimensional case, the values along the last dimension denote
@@ -138,7 +151,7 @@ def clamp_probs(probs):
 
 
 def probs_to_logits(probs, is_binary=False):
-    """
+    r"""
     Converts a tensor of probabilities into logits. For the binary case,
     this denotes the probability of occurrence of the event indexed by `1`.
     For the multi-dimensional case, the values along the last dimension
@@ -151,7 +164,7 @@ def probs_to_logits(probs, is_binary=False):
 
 
 class lazy_property(object):
-    """
+    r"""
     Used as a decorator for lazy loading of class attributes. This uses a
     non-data descriptor that calls the wrapped method to compute the property on
     first call; thereafter replacing the wrapped method into an instance

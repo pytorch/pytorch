@@ -1,4 +1,4 @@
-"""
+r"""
 The torch package contains data structures for multi-dimensional
 tensors and mathematical operations over these are defined.
 Additionally, it provides many utilities for efficient serializing of
@@ -12,6 +12,7 @@ import sys
 import platform
 from ._utils import _import_dotted_name
 from .version import __version__
+from ._six import string_classes as _string_classes
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage', 'set_default_tensor_type',
@@ -90,6 +91,9 @@ if platform.system() != 'Windows':
 
 
 def typename(o):
+    if isinstance(o, torch.Tensor):
+        return o.type()
+
     module = ''
     class_name = ''
     if hasattr(o, '__module__') and o.__module__ != 'builtins' \
@@ -107,16 +111,16 @@ def typename(o):
 
 
 def is_tensor(obj):
-    r"""Returns True if `obj` is a pytorch tensor.
+    r"""Returns True if `obj` is a PyTorch tensor.
 
     Args:
         obj (Object): Object to test
     """
-    return type(obj) in _tensor_classes
+    return isinstance(obj, torch.Tensor)
 
 
 def is_storage(obj):
-    r"""Returns True if `obj` is a pytorch storage object.
+    r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
         obj (Object): Object to test
@@ -125,11 +129,49 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
-    global Tensor
-    global Storage
-    Tensor = _import_dotted_name(t)
-    Storage = _import_dotted_name(t.replace('Tensor', 'Storage'))
-    _C._set_default_tensor_type(Tensor)
+    r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
+
+    Args:
+        t (type or string): the tensor type or its name
+
+    Example::
+
+        >>> torch.set_default_tensor_type("torch.FloatTensor")
+        >>> torch.Tensor([1.2, 3])
+
+         1.2000
+         3.0000
+        [torch.FloatTensor of size (2,)]
+
+        >>> torch.set_default_tensor_type(torch.double)
+        >>> torch.Tensor([1.2, 3])
+
+         1.2000
+         3.0000
+        [torch.DoubleTensor of size (2,)]
+
+        >>> torch.set_default_tensor_type(torch.cuda.uint8)
+        >>> torch.Tensor([2, 3])
+
+         2
+         3
+        [torch.cuda.ByteTensor of size (2,) (GPU 0)]
+
+        >>> torch.set_default_tensor_type(torch.cuda.LongTensor)
+        >>> torch.Tensor([3, 4])
+
+         3
+         4
+        [torch.cuda.LongTensor of size (2,) (GPU 0)]
+
+    """
+    if isinstance(t, globals()['dtype']):
+        _C._set_default_tensor_type(t)
+    else:
+        if not isinstance(t, _string_classes):
+            raise ValueError("t must be a string or a dtype, but got: {}".format(repr(t)))
+        Tensor = _import_dotted_name(t)
+        _C._set_default_tensor_type(Tensor)
 
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
@@ -141,7 +183,6 @@ from ._tensor_str import set_printoptions
 ################################################################################
 
 from .storage import _StorageBase
-from .tensor import _TensorBase
 
 
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
@@ -176,107 +217,13 @@ class ByteStorage(_C.ByteStorageBase, _StorageBase):
     pass
 
 
-class DoubleTensor(_C.DoubleTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return DoubleStorage
-
-
-class FloatTensor(_C.FloatTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return FloatStorage
-
-
-class HalfTensor(_C.HalfTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return HalfStorage
-
-
-class LongTensor(_C.LongTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return LongStorage
-
-
-class IntTensor(_C.IntTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return IntStorage
-
-
-class ShortTensor(_C.ShortTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return ShortStorage
-
-
-class CharTensor(_C.CharTensorBase, _TensorBase):
-
-    def is_signed(self):
-        # TODO
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return CharStorage
-
-
-class ByteTensor(_C.ByteTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return ByteStorage
-
-
 _storage_classes = {
     DoubleStorage, FloatStorage, LongStorage, IntStorage, ShortStorage,
     CharStorage, ByteStorage, HalfStorage
 }
 
-_tensor_classes = {
-    DoubleTensor, FloatTensor, LongTensor, IntTensor, ShortTensor,
-    CharTensor, ByteTensor, HalfTensor
-}
-
-_integer_tensor_classes = {
-    LongTensor, IntTensor, ShortTensor, CharTensor, ByteTensor
-}
-
-
-################################################################################
-# Import interface functions defined in Python
-################################################################################
-
-from .functional import *
+# The _tensor_classes set is initialized by the call to _C._initialize_tensor_type_bindings()
+_tensor_classes = set()
 
 
 ################################################################################
@@ -297,7 +244,17 @@ def manager_path():
 _C._initExtension(manager_path())
 del manager_path
 
-set_default_tensor_type('torch.FloatTensor')
+for name in dir(_C._VariableFunctions):
+    globals()[name] = getattr(_C._VariableFunctions, name)
+
+
+################################################################################
+# Import interface functions defined in Python
+################################################################################
+
+# needs to be after the above ATen bindings so we can overwrite from Python side
+from .functional import *
+
 
 ################################################################################
 # Remove unnecessary members
@@ -310,21 +267,6 @@ del IntStorageBase
 del ShortStorageBase
 del CharStorageBase
 del ByteStorageBase
-del DoubleTensorBase
-del FloatTensorBase
-del LongTensorBase
-del IntTensorBase
-del ShortTensorBase
-del CharTensorBase
-del ByteTensorBase
-
-del SparseDoubleTensorBase
-del SparseFloatTensorBase
-del SparseLongTensorBase
-del SparseIntTensorBase
-del SparseShortTensorBase
-del SparseCharTensorBase
-del SparseByteTensorBase
 
 ################################################################################
 # Import most common subpackages
@@ -338,12 +280,13 @@ import torch.multiprocessing
 import torch.sparse
 import torch.utils.backcompat
 import torch.onnx
+import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
-from torch.autograd import no_grad, enable_grad
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
-_C._init_names(list(torch._tensor_classes) + list(torch._storage_classes))
+_C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
 from . import _torch_docs, _tensor_docs, _storage_docs

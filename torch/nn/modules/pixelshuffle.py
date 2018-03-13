@@ -3,8 +3,8 @@ from .. import functional as F
 
 
 class PixelShuffle(Module):
-    r"""Rearranges elements in a Tensor of shape :math:`(*, C * r^2, H, W]` to a
-    tensor of shape :math:`(C, H * r, W * r)`.
+    r"""Rearranges elements in a Tensor of shape :math:`(*, r^2C, H, W)` to a
+    tensor of shape :math:`(C, rH, rW)`.
 
     This is useful for implementing efficient sub-pixel convolution
     with a stride of :math:`1/r`.
@@ -23,7 +23,7 @@ class PixelShuffle(Module):
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = autograd.Variable(torch.Tensor(1, 9, 4, 4))
+        >>> input = torch.Tensor(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])

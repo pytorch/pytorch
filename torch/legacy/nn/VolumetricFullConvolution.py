@@ -102,6 +102,7 @@ class VolumetricFullConvolution(Module):
             self.bias,
             self.finput,
             self.fgradInput,
+            self.kT, self.kW, self.kH,
             self.dT, self.dW, self.dH,
             self.padT, self.padW, self.padH,
             adjT, adjW, adjH
@@ -138,6 +139,7 @@ class VolumetricFullConvolution(Module):
             self.weight,
             self.finput,
             self.fgradInput,
+            self.kT, self.kW, self.kH,
             self.dT, self.dW, self.dH,
             self.padT, self.padW, self.padH,
             adjT, adjW, adjH
@@ -179,6 +181,7 @@ class VolumetricFullConvolution(Module):
             self.gradBias,
             self.finput,
             self.fgradInput,
+            self.kT, self.kW, self.kH,
             self.dT, self.dW, self.dH,
             self.padT, self.padW, self.padH,
             adjT, adjW, adjH,

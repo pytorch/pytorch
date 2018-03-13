@@ -84,8 +84,8 @@ std::unordered_map<NodeKind, std::string> simple_map_ops = {
   {kclamp, "min(max(${0},${min}),${max})"},
 
   // simple derivatives
-  {"_sigmoid_backward"_sym, "${0} * ${1} * (1.f - ${1})"},
-  {"_tanh_backward"_sym,    "${0} * (1.f - ${1} * ${1})"},
+  {k_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
+  {k_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
 };
 
 std::vector<bool> TensorDesc::findContiguous(

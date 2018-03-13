@@ -41,10 +41,9 @@ class Embedding(Module):
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
+        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
         >>> embedding(input)
 
-        Variable containing:
         (0 ,.,.) =
          -1.0822  1.2522  0.2434
           0.8393 -0.6062 -0.3348
@@ -56,26 +55,25 @@ class Embedding(Module):
          -0.1527  0.0877  0.4260
           0.8393 -0.6062 -0.3348
          -0.8738 -0.9054  0.4281
-        [torch.FloatTensor of size 2x4x3]
+        [torch.FloatTensor of size (2,4,3)]
 
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
-        >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
+        >>> input = torch.LongTensor([[0,2,0,5]])
         >>> embedding(input)
 
-        Variable containing:
         (0 ,.,.) =
           0.0000  0.0000  0.0000
           0.3452  0.4937 -0.9361
           0.0000  0.0000  0.0000
           0.0706 -2.1962 -0.6276
-        [torch.FloatTensor of size 1x4x3]
+        [torch.FloatTensor of size (1,4,3)]
 
     """
 
     def __init__(self, num_embeddings, embedding_dim, padding_idx=None,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 sparse=False):
+                 sparse=False, _weight=None):
         super(Embedding, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -89,10 +87,14 @@ class Embedding(Module):
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-        self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+        if _weight is None:
+            self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
+            self.reset_parameters()
+        else:
+            assert list(_weight.shape) == [num_embeddings, embedding_dim], \
+                'Shape of weight does not match num_embeddings and embedding_dim'
+            self.weight = Parameter(_weight)
         self.sparse = sparse
-
-        self.reset_parameters()
 
     def reset_parameters(self):
         self.weight.data.normal_(0, 1)
@@ -119,6 +121,35 @@ class Embedding(Module):
         s += ')'
         return s.format(name=self.__class__.__name__, **self.__dict__)
 
+    @classmethod
+    def from_pretrained(cls, embeddings, freeze=True):
+        r"""Creates Embedding instance from given 2-dimensional FloatTensor.
+
+        Args:
+            embeddings (Tensor): FloatTensor containing weights for the Embedding.
+                First dimension is being passed to Embedding as 'num_embeddings', second as 'embedding_dim'.
+            freeze (boolean, optional): If ``True``, the tensor does not get updated in the learning process.
+                Equivalent to ``embedding.weight.requires_grad = False``. Default: ``True``
+
+        Examples::
+
+            >> # FloatTensor containing pretrained weights
+            >> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
+            >> embedding = nn.Embedding.from_pretrained(weight)
+            >> # Get embeddings for index 1
+            >> input = torch.LongTensor([1])
+            >> embedding(input)
+
+             4.0000  5.1000  6.3000
+            [torch.FloatTensor of size (1,3)]
+        """
+        assert embeddings.dim() == 2, \
+            'Embeddings parameter is expected to be 2-dimensional'
+        rows, cols = embeddings.shape
+        embedding = cls(num_embeddings=rows, embedding_dim=cols, _weight=embeddings)
+        embedding.weight.requires_grad = not freeze
+        return embedding
+
 
 class EmbeddingBag(Module):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
@@ -139,6 +170,8 @@ class EmbeddingBag(Module):
         scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                 the words in the dictionary.
         mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
+                                    more details regarding sparse gradients.
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
@@ -172,20 +205,19 @@ class EmbeddingBag(Module):
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
-        >>> offsets = Variable(torch.LongTensor([0,4]))
+        >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
+        >>> offsets = torch.LongTensor([0,4])
         >>> embedding_sum(input, offsets)
 
-        Variable containing:
         -0.7296 -4.6926  0.3295
         -0.5186 -0.5631 -0.2792
-        [torch.FloatTensor of size 2x3]
+        [torch.FloatTensor of size (2,3)]
 
     """
 
     def __init__(self, num_embeddings, embedding_dim,
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
-                 mode='mean'):
+                 mode='mean', sparse=False):
         super(EmbeddingBag, self).__init__()
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
@@ -194,6 +226,7 @@ class EmbeddingBag(Module):
         self.scale_grad_by_freq = scale_grad_by_freq
         self.weight = Parameter(torch.Tensor(num_embeddings, embedding_dim))
         self.mode = mode
+        self.sparse = sparse
 
         self.reset_parameters()
 
@@ -203,7 +236,7 @@ class EmbeddingBag(Module):
     def forward(self, input, offsets=None):
         return F.embedding_bag(self.weight, input, offsets,
                                self.max_norm, self.norm_type,
-                               self.scale_grad_by_freq, self.mode)
+                               self.scale_grad_by_freq, self.mode, self.sparse)
 
     def __repr__(self):
         s = '{name}({num_embeddings}, {embedding_dim}'

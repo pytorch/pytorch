@@ -4,8 +4,10 @@
 #include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <memory>
 #include <mutex>
@@ -20,17 +22,20 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+#ifndef NO_PYTHON
 std::string getPythonInterpreterStackTrace();
+#endif
 
 namespace detail {
 
 inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>& state, const Variable& var, bool alloc = true) {
-  for (auto it = var.tracing_state()->begin(); it != var.tracing_state()->end();) {
+  auto& tracing_state = var.tracing_state();
+  for (auto it = tracing_state.begin(); it != tracing_state.end();) {
     auto ts = it->state.lock();
     // GC of invalidated tracing states
     if (!ts) {
       auto current_it = it++;
-      var.tracing_state()->erase(current_it);
+      tracing_state.erase(current_it);
       continue;
     } else if (ts == state) {
       return &(*it);
@@ -38,8 +43,8 @@ inline ValueTracingStateElem* getValueState(const std::shared_ptr<TracingState>&
     ++it;
   }
   if (alloc) {
-    var.tracing_state()->emplace_front();
-    auto & vts = var.tracing_state()->front();
+    tracing_state.emplace_front();
+    auto & vts = tracing_state.front();
     vts.state = state;
     return &vts;
   } else {
@@ -60,13 +65,17 @@ inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
 
 
 // Should a function which takes 'vars' as inputs be traced?
-// It sufficies for ONE variable to be tracing: any "untraced" variables
+// It suffices for ONE variable to be tracing: any "untraced" variables
 // are treated as constants.
 //
-// TODO: This code lives in the hotpath; make sure it is fast
+// NB: This code lives in the hotpath; make sure it is fast
+//
+// NB: Variable overload is not variadic because we don't actually
+// need it (in most cases if we have a variable_list it is already
+// flattened).
 inline bool isTracingVar(const Variable& var) {
-  if (!var.defined() || !var.tracing_state()) return false;
-  return std::any_of(var.tracing_state()->begin(), var.tracing_state()->end(), detail::isElemActive);
+  if (!var.defined() || !var.has_tracing_state()) return false;
+  return std::any_of(var.tracing_state().begin(), var.tracing_state().end(), detail::isElemActive);
 }
 
 inline bool isTracingVar(at::ArrayRef<Variable> vars) {
@@ -77,28 +86,19 @@ inline bool isTracingVar(at::ArrayRef<Variable> vars) {
   return false;
 }
 
-// NB: Don't forget to forward declare your template calls: they are going to
-// recursively call one another!
-template<typename... Args> inline bool isTracing();
-template<typename... Args> inline bool isTracing(const at::Tensor& x, Args... args);
-template<typename... Args> inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args);
-
-template<typename... Args>
-inline bool isTracing() {
-  return false;
-}
-
-template<typename... Args>
-inline bool isTracing(const at::Tensor& x, Args... args) {
-  return isTracingVar(x) || isTracing(args...);
-}
-
-template<typename... Args>
-inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args) {
-  for (const auto & x : xs) {
-    if (isTracingVar(x)) return true;
+struct IsTracing : IterArgs<IsTracing> {
+  bool out = false;
+  using IterArgs<IsTracing>::operator();
+  void operator()(const at::Tensor& var) {
+    out = out || isTracingVar(var);
   }
-  return isTracing(args...);
+  bool short_circuit() { return out; }
+};
+
+// To be called with Tensor arguments from generated code
+template<typename... Args>
+inline bool isTracing(Args&&... args) {
+  return IsTracing().apply(std::forward<Args>(args)...).out;
 }
 
 // Retrieve the tracing state which a function applied with 'vars' should
@@ -108,8 +108,8 @@ inline bool isTracing(at::ArrayRef<at::Tensor> xs, Args... args) {
 inline std::shared_ptr<TracingState> getTracingState(const variable_list& vars) {
   std::shared_ptr<TracingState> state;
   for (auto& var : vars) {
-    if (!var.defined() || !var.tracing_state()) continue;
-    for (auto & vts : *var.tracing_state()) {
+    if (!var.defined() || !var.has_tracing_state()) continue;
+    for (auto & vts : var.tracing_state()) {
       auto var_state = vts.state.lock();
       if (!var_state || !var_state->active) continue;
       if (!state) state = var_state;
@@ -275,6 +275,19 @@ inline void exit(const variable_list& outputs) {
 // with an Eval in the trace).
 void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
 
-Node* recordTrace(std::string op, at::ArrayRef<Variable> inputs, at::ArrayRef<Variable> outputs);
+// Pre-recorded information about the trace before we actually carry
+// out the trace
+struct PreTraceInfo {
+  std::shared_ptr<TracingState> state;
+  Node *n;
+};
+
+PreTraceInfo preRecordTrace(std::string op, at::ArrayRef<Variable> inputs);
+#ifndef NO_PYTHON
+PreTraceInfo preRecordPythonTrace(
+    THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<Variable> inputs,
+    pyobj_list scalar_args);
+#endif
+void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 }}} // namespace torch::jit::tracer

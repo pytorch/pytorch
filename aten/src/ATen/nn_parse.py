@@ -314,10 +314,14 @@ def backward_declaration(base, thnn_functions):
             arg['zero'] = True
 
     is_batch_norm_backward = '_backward' in thnn_functions[0].name
+    grad_params = []
     if len(thnn_functions) > 1 or is_batch_norm_backward:
         for arg in arguments:
             if arg.get('output', False):
                 initialize_output_arg(arg)
+            if 'Tensor' in arg['type'] and arg['name'].startswith('grad_') and \
+                    'input' not in arg['name'] and 'output' not in arg['name']:
+                grad_params.append(arg['name'])
 
     thnn_args = [get_thnn_args(f, arguments, False) for f in thnn_functions]
     arguments = remove_unused_args(arguments, unique_args(thnn_args))
@@ -328,7 +332,7 @@ def backward_declaration(base, thnn_functions):
         if '_updateGradInput' in func.name:
             return 'grad_input_'
         if '_accGradParameters' in func.name:
-            return 'grad_weight_'
+            return ' || '.join(p + '_' for p in grad_params)
         return None
 
     for func, args in zip(thnn_functions, thnn_args):
@@ -346,7 +350,7 @@ def backward_declaration(base, thnn_functions):
             pass
         else:
             base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
-            if base_name in [arg['name'] for arg in arguments]:
+            if base_name in [a['name'] for a in arguments]:
                 scalar_check[arg['name']] = base_name + '_->isScalar()'
             else:
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "

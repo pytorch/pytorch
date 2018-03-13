@@ -5,7 +5,9 @@ import copy
 
 import torch
 from torch.autograd import Variable
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
+from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
+    _take_tensors
+
 from torch.cuda.comm import broadcast_coalesced
 from torch.cuda import nccl
 import torch.distributed as dist
@@ -42,7 +44,7 @@ class DistributedDataParallel(Module):
     (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
-        This module works only with the ``gloo`` backend.
+        This module works only with the ``nccl`` and ``gloo`` backends.
 
     .. warning::
         Constructor, forward method, and differentiation of the output (or a
@@ -63,6 +65,14 @@ class DistributedDataParallel(Module):
         only work if gradients are to be accumulated in ``.grad`` attributes of
         parameters).
 
+    .. warning::
+        If you plan on using this module with a ``nccl`` backend or a ``gloo``
+        backend (that uses Infiniband), together with a DataLoader that uses
+        multiple workers, please change the multiprocessing start method to
+        ``forkserver`` (Python 3 only) or ``spawn``. Unfortunately
+        Gloo (that uses Infiniband) and NCCL2 are not fork safe, and you will
+        likely experience deadlocks if you don't change this setting.
+
     .. note::
         Parameters are never broadcast between processes. The module performs
         an all-reduce step on gradients and assumes that they will be modified
@@ -70,10 +80,18 @@ class DistributedDataParallel(Module):
         (e.g. BatchNorm stats) are broadcast form the module in process of rank
         0, to all other replicas in the system in every iteration.
 
+    .. warning::
+        Forward and backward hooks defined on :attr:`module` and its submodules
+        won't be invoked anymore, unless the hooks are initialized in the
+        :meth:`forward` method.
+
     Args:
         module: module to be parallelized
         device_ids: CUDA devices (default: all devices)
         output_device: device location of output (default: device_ids[0])
+        broadcast_buffers: flag that enables syncing (broadcasting) buffers of
+                           the module at beginning of the forward function.
+                           (default: True)
 
     Example::
 
@@ -81,7 +99,8 @@ class DistributedDataParallel(Module):
         >>> net = torch.nn.DistributedDataParallel(model)
     """
 
-    def __init__(self, module, device_ids=None, output_device=None, dim=0):
+    def __init__(self, module, device_ids=None, output_device=None, dim=0,
+                 broadcast_buffers=True):
         super(DistributedDataParallel, self).__init__()
         if device_ids is None:
             device_ids = list(range(torch.cuda.device_count()))
@@ -91,16 +110,22 @@ class DistributedDataParallel(Module):
         self.module = module
         self.device_ids = device_ids
         self.output_device = output_device
+        self.broadcast_buffers = broadcast_buffers
+
+        # Flag used by the NCCL backend to make sure we only reduce gradients
+        # one time in the execution engine
+        self.need_reduction = False
+
+        MB = 1024 * 1024
+        # used for intra-node param sync and inter-node sync as well
+        self.broadcast_bucket_size = 10 * MB
+        self.nccl_reduce_bucket_size = 256 * MB
 
         # Sync params and buffers
-        for p in self.module.state_dict().values():
-            dist.broadcast(p, 0)
-
-        # Clear NCCL communicator and CUDA event cache of the default group ID,
-        # These cache will be recreated at the later call. This is currently a
-        # work-around for a potential NCCL deadlock.
-        if dist._backend == dist.dist_backend.NCCL:
-            dist._clear_group_cache()
+        module_states = list(self.module.state_dict().values())
+        if len(module_states) > 0:
+            self._dist_broadcast_coalesced(module_states,
+                                           self.broadcast_bucket_size)
 
         if len(device_ids) > 1:
             # TODO: we don't need to replicate params in here. they're always going to
@@ -115,34 +140,46 @@ class DistributedDataParallel(Module):
         else:
             self._module_copies = [self.module]
 
-        # Split parameters into buckets that will coalesce reductions
-        # TODO: different types need different buckets
-        t = None
-        for p in self.module.parameters():
-            tp = type(p.data)
-            if t is not None and t is not tp:
-                raise ValueError("DistributedDataParallel requires all parameters' data to be of the same type")
-            t = tp
+        # For NCCL backend, since every single NCCL call is asynchoronous, we
+        # therefore directly enqueue all the NCCL reduction calls to the
+        # default CUDA stream without spawning up other reduction threads.
+        # This achieves the best performance.
+        if dist._backend == dist.dist_backend.NCCL:
+            self._register_nccl_grad_hook()
+            return
+
+        bucket_bytes_cap = 1 * MB
+
+        # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
+        param_buckets = []
+        # Split the parameters into buckets and by types as well
+        for dev_idx, module in enumerate(self._module_copies):
+            param_buckets.append(list(_take_tensors(module.parameters(), bucket_bytes_cap)))
 
         self.bucket_sizes = []
         self.bucket_map = {}
-        MB = 1024 * 1024
-        self.broadcast_bucket_size = 10 * MB  # used for param sync before forward
-        # Currently NCCL backend only supports single reduction thread/bucket
-        if dist._backend == dist.dist_backend.NCCL:
-            bucket_bytes_cap = float('inf')
-        else:
-            bucket_bytes_cap = 1 * MB
-        bucket_bytes = bucket_bytes_cap  # to init the first bucket immediately
-        for param_tuple in zip(*map(lambda m: m.parameters(), self._module_copies)):
-            if param_tuple[0].requires_grad:
-                if bucket_bytes >= bucket_bytes_cap:
-                    self.bucket_sizes.append(0)
-                    bucket_bytes = 0
+
+        # We transpose param_buckets, so the loop is over buckets.
+        # param_buckets_tuple is a doubly-nested list with "dims": devices, bucket_elems
+        for bucket_idx, param_buckets_tuple in enumerate(zip(*param_buckets)):
+            self.bucket_sizes.append(0)
+            # Now, we transpose again, so we iterate over bucket_elems, but getting tuples
+            # of params from each device.
+            for idx, param_tuple in enumerate(zip(*param_buckets_tuple)):
+                if idx == 0:
+                    # Bucket parameter type tracking
+                    bucket_param_type = param_tuple[0].type()
+                    # Only gloo and nccl support half-precision
+                    if bucket_param_type == torch.cuda.HalfTensor and \
+                            dist._backend != dist.dist_backend.GLOO:
+                        raise RuntimeError("DistributedDataParallel currently only "
+                                           "supports half precision parameters "
+                                           "with Nccl and Gloo backend")
+                if not param_tuple[0].requires_grad:
+                    continue
                 for p in param_tuple:
-                    self.bucket_map[p] = len(self.bucket_sizes) - 1
-                bucket_bytes += p.numel() * p.element_size()
-                self.bucket_sizes[-1] += 1
+                    self.bucket_map[p] = bucket_idx
+                self.bucket_sizes[bucket_idx] += 1
 
         self.buckets = [[[] for _ in range(len(self.device_ids))] for _ in range(len(self.bucket_sizes))]
         self.bucket_events = [[None] * len(self.device_ids) for _ in range(len(self.bucket_sizes))]
@@ -155,16 +192,22 @@ class DistributedDataParallel(Module):
 
     def __getstate__(self):
         attrs = copy.copy(self.__dict__)
-        del attrs['_grad_accs'], attrs['_reduction_queues'], attrs['_reduction_streams'], \
-            attrs['_reduction_threads'], attrs['_nccl_streams'], attrs['_default_streams']
+        if dist._backend != dist.dist_backend.NCCL:
+            del attrs['_grad_accs'], attrs['_reduction_queues'], \
+                attrs['_reduction_streams'], attrs['_reduction_threads'], \
+                attrs['_nccl_streams'], attrs['_default_streams']
         return attrs
 
     def __setstate__(self, state):
         super(DistributedDataParallel, self).__setstate__(state)
-        self._register_grad_hooks()
-        self._start_reduction_threads()
+        if dist._backend == dist.dist_backend.NCCL:
+            self._register_nccl_grad_hook()
+        else:
+            self._register_grad_hooks()
+            self._start_reduction_threads()
 
     def forward(self, *inputs, **kwargs):
+        self.need_reduction = True
         inputs, kwargs = self.scatter(inputs, kwargs, self.device_ids)
         self._sync_params()
         if len(self.device_ids) == 1:
@@ -182,35 +225,49 @@ class DistributedDataParallel(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        # Clear NCCL communicator and CUDA event cache of the default group ID,
-        # These cache will be recreated at the later call. This is currently a
-        # work-around for a potential NCCL deadlock.
-        if dist._backend == dist.dist_backend.NCCL:
-            dist._clear_group_cache()
         super(DistributedDataParallel, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
 
+    def _dist_broadcast_coalesced(self, tensors, buffer_size):
+        """
+        Broadcast a sequence of tensors to the default group from rank 0.
+        Small tensors are first coalesced into a buffer to reduce the number of
+        broadcasts.
+
+        tensors (sequence): tensors to broadcast. Each tensor needs to be on the
+                            same GPU.
+        buffer_size (int): maximum size of the buffer for coalescing
+        """
+        for tensors in _take_tensors(tensors, buffer_size):
+            flat_tensors = _flatten_dense_tensors(tensors)
+            dist.broadcast(flat_tensors, 0)
+            for tensor, synced in zip(tensors,
+                                      _unflatten_dense_tensors(flat_tensors, tensors)):
+                tensor.copy_(synced)
+
     def _sync_params(self):
-        params = [p.data for p in self.module.parameters()]
-        result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
-        for tensors, module in zip(result[1:], self._module_copies[1:]):
-            for tensor, param in zip(tensors, module.parameters()):
-                param.data.set_(tensor)
-
-        buffers = list(self.module._all_buffers())
-        if len(buffers) > 0:
-            # cross-node buffer sync
-            flat_buffers = _flatten_dense_tensors(buffers)
-            dist.broadcast(flat_buffers, 0)
-            for buf, synced in zip(buffers, _unflatten_dense_tensors(flat_buffers, buffers)):
-                buf.copy_(synced)
-
-            # intra-node buffer sync
-            result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+        if len(self.device_ids) > 1:
+            # intra-node parameter sync
+            params = [p.data for p in self.module.parameters()]
+            result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
             for tensors, module in zip(result[1:], self._module_copies[1:]):
-                for tensor, buf in zip(tensors, module._all_buffers()):
-                    buf.set_(tensor)
+                for tensor, param in zip(tensors, module.parameters()):
+                    param.data.set_(tensor)
+
+        # module buffer sync
+        if self.broadcast_buffers:
+            buffers = list(self.module._all_buffers())
+            if len(buffers) > 0:
+                # cross-node buffer sync
+                self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
+
+                if len(self.device_ids) > 1:
+                    # intra-node buffer sync
+                    result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
+                    for tensors, module in zip(result[1:], self._module_copies[1:]):
+                        for tensor, buf in zip(tensors, module._all_buffers()):
+                            buf.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
@@ -222,7 +279,86 @@ class DistributedDataParallel(Module):
                     grad_acc.register_hook(self._make_param_hook(p, device_idx))
                     self._grad_accs.append(grad_acc)
 
+    def _register_nccl_grad_hook(self):
+        """
+        This function registers the callback all-reduction function for the
+        NCCL backend. All gradients will be all reduced in one single step.
+        The NCCL reduction will directly be enqueued into the
+        default CUDA stream. Therefore, no synchronization is needed.
+        """
+        # Creating a new group
+        self.nccl_reduction_group_id = dist.new_group()
+
+        def reduction_fn_nccl():
+            # This function only needs to be called once
+            if not self.need_reduction:
+                return
+
+            self.need_reduction = False
+            all_grads = [[] for _ in range(len(self._module_copies))]
+            all_grads_buckets_iters = []
+
+            # Bucketing all the gradients
+            for dev_idx, module in enumerate(self._module_copies):
+                for param in module.parameters():
+                    if not param.requires_grad or param.grad is None:
+                        continue
+                    if param.grad.requires_grad:
+                        raise RuntimeError("DistributedDataParallel only works "
+                                           "with gradients that don't require "
+                                           "grad")
+                    # Adding the gradients for reduction
+                    all_grads[dev_idx].append(param.grad.data)
+
+                # Now bucketing the parameters
+                dev_grads_buckets = _take_tensors(all_grads[dev_idx],
+                                                  self.nccl_reduce_bucket_size)
+
+                all_grads_buckets_iters.append(dev_grads_buckets)
+
+            # Now reduce each bucket one after another
+            for grads_batch in zip(*all_grads_buckets_iters):
+                grads_batch_coalesced = []
+                # Coalesce each bucket
+                for dev_idx, dev_grads_batch in enumerate(grads_batch):
+                    dev_id = self.device_ids[dev_idx]
+                    with torch.cuda.device(dev_id):
+                        dev_grads_batch_coalesced = _flatten_dense_tensors(dev_grads_batch)
+                        grads_batch_coalesced.append(dev_grads_batch_coalesced)
+
+                # We will only use device 0's results, but this single op should be
+                # faster than doing the following two operation sequentially:
+                # (1) intra-node reduce to lead GPU, followed by
+                # (2) inter-node allreduce for all the first lead GPUs in all nodes
+                dist.all_reduce_multigpu(grads_batch_coalesced,
+                                         group=self.nccl_reduction_group_id)
+
+                # Now only work on the first device of self.device_ids, uncoalesce
+                # the gradients for each bucket
+                grads_batch_coalesced[0] /= dist.get_world_size()
+                grads_batch_reduced = _unflatten_dense_tensors(grads_batch_coalesced[0], grads_batch[0])
+                for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
+                    grad.copy_(reduced)
+
+            # clear the gradients and save memory for replicas
+            for module in self._module_copies[1:]:
+                for param in module.parameters():
+                    if param.requires_grad:
+                        param.grad = None
+                        param.data.set_()
+
+        # Now register the reduction hook on the parameters
+        for p in self.module.parameters():
+            if not p.requires_grad:
+                continue
+
+            def allreduce_hook(*unused):
+                Variable._execution_engine.queue_callback(reduction_fn_nccl)
+
+            p.register_hook(allreduce_hook)
+
     def _make_param_hook(self, param, device_idx):
+
         bucket_idx = self.bucket_map[param]
 
         def distributed_data_parallel_hook(*unused):
@@ -297,10 +433,7 @@ class DistributedDataParallel(Module):
             # We only use the first device for distributed reductions
             dist._register_stream(reduction_streams[0])
 
-            if dist._backend == dist.dist_backend.NCCL:
-                group_id = dist.group.WORLD
-            else:
-                group_id = dist.new_group()
+            group_id = dist.new_group()
 
             self._reduction_threads.append(threading.Thread(
                 target=self._reduction_thread_fn,

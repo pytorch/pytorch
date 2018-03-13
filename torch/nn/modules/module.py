@@ -1,4 +1,4 @@
-from collections import OrderedDict, Iterable
+from collections import OrderedDict
 import functools
 
 import torch
@@ -42,7 +42,7 @@ class Module(object):
                return F.relu(self.conv2(x))
 
     Submodules assigned in this way will be registered, and will have their
-    parameters converted too when you call .cuda(), etc.
+    parameters converted too when you call `.cuda()`, etc.
     """
 
     dump_patches = False
@@ -58,7 +58,7 @@ class Module(object):
         self.training = True
 
     def forward(self, *input):
-        """Defines the computation performed at every call.
+        r"""Defines the computation performed at every call.
 
         Should be overriden by all subclasses.
 
@@ -71,7 +71,7 @@ class Module(object):
         raise NotImplementedError
 
     def register_buffer(self, name, tensor):
-        """Adds a persistent buffer to the module.
+        r"""Adds a persistent buffer to the module.
 
         This is typically used to register a buffer that should not to be
         considered a model parameter. For example, BatchNorm's ``running_mean``
@@ -84,16 +84,22 @@ class Module(object):
                 from this module using the given name
             tensor (Tensor): buffer to be registered.
 
-        Example:
+        Example::
+
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
+
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
-
-        self._buffers[name] = tensor
+        elif tensor is not None and not isinstance(tensor, torch.Tensor):
+            raise TypeError("cannot assign '{}' object to buffer '{}' "
+                            "(torch Tensor or None required)"
+                            .format(torch.typename(tensor), name))
+        else:
+            self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
-        """Adds a parameter to the module.
+        r"""Adds a parameter to the module.
 
         The parameter can be accessed as an attribute using given name.
 
@@ -125,7 +131,7 @@ class Module(object):
             self._parameters[name] = param
 
     def add_module(self, name, module):
-        """Adds a child module to the current module.
+        r"""Adds a child module to the current module.
 
         The module can be accessed as an attribute using the given name.
 
@@ -160,7 +166,7 @@ class Module(object):
         return self
 
     def apply(self, fn):
-        """Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
+        r"""Applies ``fn`` recursively to every submodule (as returned by ``.children()``)
         as well as self. Typical use includes initializing the parameters of a model
         (see also :ref:`torch-nn-init`).
 
@@ -170,29 +176,37 @@ class Module(object):
         Returns:
             Module: self
 
-        Example:
+        Example::
+
             >>> def init_weights(m):
-            >>>     print(m)
-            >>>     if type(m) == nn.Linear:
-            >>>         m.weight.data.fill_(1.0)
-            >>>         print(m.weight)
-            >>>
+                    print(m)
+                    if type(m) == nn.Linear:
+                        m.weight.data.fill_(1.0)
+                        print(m.weight)
+
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
-            Linear (2 -> 2)
-            Parameter containing:
+            Linear(in_features=2, out_features=2, bias=True)
+
              1  1
              1  1
-            [torch.FloatTensor of size 2x2]
-            Linear (2 -> 2)
-            Parameter containing:
+            [torch.FloatTensor of size (2,2)]
+
+            Linear(in_features=2, out_features=2, bias=True)
+
              1  1
              1  1
-            [torch.FloatTensor of size 2x2]
-            Sequential (
-              (0): Linear (2 -> 2)
-              (1): Linear (2 -> 2)
+            [torch.FloatTensor of size (2,2)]
+
+            Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
             )
+            Sequential(
+              (0): Linear(in_features=2, out_features=2, bias=True)
+              (1): Linear(in_features=2, out_features=2, bias=True)
+            )
+
         """
         for module in self.children():
             module.apply(fn)
@@ -200,7 +214,7 @@ class Module(object):
         return self
 
     def cuda(self, device=None):
-        """Moves all model parameters and buffers to the GPU.
+        r"""Moves all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
         it should be called before constructing optimizer if the module will
@@ -216,7 +230,7 @@ class Module(object):
         return self._apply(lambda t: t.cuda(device))
 
     def cpu(self):
-        """Moves all model parameters and buffers to the CPU.
+        r"""Moves all model parameters and buffers to the CPU.
 
         Returns:
             Module: self
@@ -224,7 +238,7 @@ class Module(object):
         return self._apply(lambda t: t.cpu())
 
     def type(self, dst_type):
-        """Casts all parameters and buffers to dst_type.
+        r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         Arguments:
             dst_type (type or string): the desired type
@@ -235,31 +249,31 @@ class Module(object):
         return self._apply(lambda t: t.type(dst_type))
 
     def float(self):
-        """Casts all floating point parameters and buffers to float datatype.
+        r"""Casts all floating point parameters and buffers to float datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.float() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.float() if t.is_floating_point() else t)
 
     def double(self):
-        """Casts all floating point parameters and buffers to double datatype.
+        r"""Casts all floating point parameters and buffers to ``double`` datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.double() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.double() if t.is_floating_point() else t)
 
     def half(self):
-        """Casts all floating point parameters and buffers to half datatype.
+        r"""Casts all floating point parameters and buffers to ``half`` datatype.
 
         Returns:
             Module: self
         """
-        return self._apply(lambda t: t.half() if not type(t) in torch._integer_tensor_classes else t)
+        return self._apply(lambda t: t.half() if t.is_floating_point() else t)
 
     def register_backward_hook(self, hook):
-        """Registers a backward hook on the module.
+        r"""Registers a backward hook on the module.
 
         The hook will be called every time the gradients with respect to module
         inputs are computed. The hook should have the following signature::
@@ -282,7 +296,7 @@ class Module(object):
         return handle
 
     def register_forward_pre_hook(self, hook):
-        """Registers a forward pre-hook on the module.
+        r"""Registers a forward pre-hook on the module.
 
         The hook will be called every time before :func:`forward` is invoked.
         It should have the following signature::
@@ -452,7 +466,7 @@ class Module(object):
             object.__delattr__(self, name)
 
     def state_dict(self, destination=None, prefix='', keep_vars=False):
-        """Returns a dictionary containing a whole state of the module.
+        r"""Returns a dictionary containing a whole state of the module.
 
         Both parameters and persistent buffers (e.g. running averages) are
         included. Keys are corresponding parameter and buffer names.
@@ -474,9 +488,11 @@ class Module(object):
             dict:
                 a dictionary containing a whole state of the module
 
-        Example:
+        Example::
+
             >>> module.state_dict().keys()
             ['bias', 'weight']
+
         """
         if destination is None:
             destination = OrderedDict()
@@ -492,7 +508,7 @@ class Module(object):
         return destination
 
     def load_state_dict(self, state_dict, strict=True):
-        """Copies parameters and buffers from :attr:`state_dict` into
+        r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True`` then
         the keys of :attr:`state_dict` must exactly match the keys returned
         by this module's :func:`state_dict()` function.
@@ -526,33 +542,37 @@ class Module(object):
                 raise KeyError('missing keys in state_dict: "{}"'.format(missing))
 
     def parameters(self):
-        """Returns an iterator over module parameters.
+        r"""Returns an iterator over module parameters.
 
         This is typically passed to an optimizer.
 
         Yields:
             Parameter: module parameter
 
-        Example:
+        Example::
+
             >>> for param in model.parameters():
             >>>     print(type(param.data), param.size())
             <class 'torch.FloatTensor'> (20L,)
             <class 'torch.FloatTensor'> (20L, 1L, 5L, 5L)
+
         """
         for name, param in self.named_parameters():
             yield param
 
     def named_parameters(self, memo=None, prefix=''):
-        """Returns an iterator over module parameters, yielding both the
+        r"""Returns an iterator over module parameters, yielding both the
         name of the parameter as well as the parameter itself
 
         Yields:
             (string, Parameter): Tuple containing the name and parameter
 
-        Example:
+        Example::
+
             >>> for name, param in self.named_parameters():
             >>>    if name in ['bias']:
             >>>        print(param.size())
+
         """
         if memo is None:
             memo = set()
@@ -577,7 +597,7 @@ class Module(object):
                 yield b
 
     def children(self):
-        """Returns an iterator over immediate children modules.
+        r"""Returns an iterator over immediate children modules.
 
         Yields:
             Module: a child module
@@ -586,16 +606,18 @@ class Module(object):
             yield module
 
     def named_children(self):
-        """Returns an iterator over immediate children modules, yielding both
+        r"""Returns an iterator over immediate children modules, yielding both
         the name of the module as well as the module itself.
 
         Yields:
             (string, Module): Tuple containing a name and child module
 
-        Example:
+        Example::
+
             >>> for name, module in model.named_children():
             >>>     if name in ['conv4', 'conv5']:
             >>>         print(module)
+
         """
         memo = set()
         for name, module in self._modules.items():
@@ -604,7 +626,7 @@ class Module(object):
                 yield name, module
 
     def modules(self):
-        """Returns an iterator over all modules in the network.
+        r"""Returns an iterator over all modules in the network.
 
         Yields:
             Module: a module in the network
@@ -613,21 +635,25 @@ class Module(object):
             Duplicate modules are returned only once. In the following
             example, ``l`` will be returned only once.
 
+        Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.modules()):
-            >>>     print(idx, '->', m)
+                    print(idx, '->', m)
+
             0 -> Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)
             )
             1 -> Linear (2 -> 2)
+
         """
         for name, module in self.named_modules():
             yield module
 
     def named_modules(self, memo=None, prefix=''):
-        """Returns an iterator over all modules in the network, yielding
+        r"""Returns an iterator over all modules in the network, yielding
         both the name of the module as well as the module itself.
 
         Yields:
@@ -637,15 +663,19 @@ class Module(object):
             Duplicate modules are returned only once. In the following
             example, ``l`` will be returned only once.
 
+        Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
-            >>>     print(idx, '->', m)
+                    print(idx, '->', m)
+
             0 -> ('', Sequential (
               (0): Linear (2 -> 2)
               (1): Linear (2 -> 2)
             ))
             1 -> ('0', Linear (2 -> 2))
+
         """
 
         if memo is None:
@@ -661,9 +691,12 @@ class Module(object):
                     yield m
 
     def train(self, mode=True):
-        """Sets the module in training mode.
+        r"""Sets the module in training mode.
 
-        This has any effect only on modules such as Dropout or BatchNorm.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
 
         Returns:
             Module: self
@@ -674,14 +707,17 @@ class Module(object):
         return self
 
     def eval(self):
-        """Sets the module in evaluation mode.
+        r"""Sets the module in evaluation mode.
 
-        This has any effect only on modules such as Dropout or BatchNorm.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
         """
         return self.train(False)
 
     def zero_grad(self):
-        """Sets gradients of all model parameters to zero."""
+        r"""Sets gradients of all model parameters to zero."""
         for p in self.parameters():
             if p.grad is not None:
                 p.grad.detach_()
@@ -690,8 +726,11 @@ class Module(object):
     def share_memory(self):
         return self._apply(lambda t: t.share_memory_())
 
+    def _get_name(self):
+        return self.__class__.__name__
+
     def __repr__(self):
-        tmpstr = self.__class__.__name__ + '(\n'
+        tmpstr = self._get_name() + '(\n'
         for key, module in self._modules.items():
             modstr = module.__repr__()
             modstr = _addindent(modstr, 2)

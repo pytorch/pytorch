@@ -29,7 +29,7 @@ void initPythonIRBindings(PyObject * module_) {
     })
     // TODO: Iterator invalidation might make this hazardous
     .def("nodes",[](Graph &g) {
-      return py::make_iterator(g.begin(), g.end());
+      return py::make_iterator(g.nodes().begin(), g.nodes().end());
     })
     .def("addInput",[](Graph &g) { return g.addInput(); })
     .GS(advanceStage)
@@ -70,8 +70,6 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .VS(type)
-    .VS(typeOption)
-    .VS(hasType)
     .VS(setType)
     .VS(inferTypeFrom)
     // skip owningGraph because it returns a raw pointer to a otherwise
@@ -87,7 +85,7 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(replaceAllUsesWith)
     .def("node",[](Value &v) { return v.node(); })
     .def("setTypeAs", [](Value * node, Value * other) {
-      node->setType(other->typeOption());
+      node->setType(other->type());
       return node;
     })
     .VS(copyMetadata)
@@ -157,11 +155,35 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Strings,ss)
     .CREATE_ACCESSOR(Int,i)
     .CREATE_ACCESSOR(Ints,is)
-    .CREATE_ACCESSOR(Tensor,t)
-    .CREATE_ACCESSOR(Tensors,ts)
     .CREATE_ACCESSOR(Graph,g)
     .CREATE_ACCESSOR(Graphs,gs)
 #undef CREATE_ACCESSOR
+    // Tensor (t_) -- manually written to unwrap the variable into a tensor.
+    .def("t_",[](Node & n, const char * name, torch::autograd::Variable v) {
+      return n.t_(Symbol(name), std::move(v.data()));
+    })
+    .def("t", [](Node & n, const char * name) {
+      return torch::autograd::make_variable(n.t(Symbol(name)), /*requires_grad=*/false);
+    })
+    // Tensors (ts_) -- manually written to unwrap variables into tensors.
+    .def("ts_",[](Node & n, const char * name, std::vector<torch::autograd::Variable> vs) {
+      std::vector<at::Tensor> tensors;
+      tensors.reserve(vs.size());
+      for (auto& variable : vs) {
+        tensors.push_back(std::move(variable.data()));
+      }
+      return n.ts_(Symbol(name), std::move(tensors));
+    })
+    .def("ts", [](Node & n, const char * name) {
+      auto tensors = n.ts(Symbol(name));
+      std::vector<torch::autograd::Variable> variables;
+      variables.reserve(tensors.size());
+      for (auto& tensor : tensors) {
+        variables.push_back(torch::autograd::make_variable(
+            std::move(tensor), /*requires_grad=*/false));
+      }
+      return variables;
+    })
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
         return n.t_(Symbol(name), std::move(v.view({})));
     })
@@ -207,13 +229,17 @@ void initPythonIRBindings(PyObject * module_) {
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
-      TYPE_IF(t, HandleType)
-        return "HandleType";
-      TYPE_ELSEIF(TensorType)
-        return "TensorType";
-      TYPE_END()
-      torch::barf("unknown type kind");
-      return "";
+      switch(t->kind()) {
+        case TypeKind::HandleType:
+          return "HandleType";
+        case TypeKind::DynamicType:
+          return "DynamicType";
+        case TypeKind::TensorType:
+          return "TensorType";
+        default:
+          torch::barf("unknown type kind");
+          return "";
+        }
     })
     .def("sizes",[](Type& t) {
       return t.expect<TensorType>()->sizes();

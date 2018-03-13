@@ -1,0 +1,129 @@
+testBlocks
+graph(%a : Dynamic
+      %b : Dynamic
+      %c : Dynamic) {
+  %2 : Dynamic = add[alpha={1}](%a, %b)
+  %4 : Dynamic = If(%c)
+    block0() {
+      %5 : Dynamic = add[alpha={1}](%2, %2)
+      -> (%5)
+    }
+    block1() {
+      %6 : Dynamic = add[alpha={1}](%b, %2)
+      %7 : Dynamic = add[alpha={1}](%6, %2)
+      -> (%7)
+    }
+  %8 : Dynamic = add[alpha={1}](%4, %2)
+  return (%8);
+}
+
+graph(%a : Dynamic
+      %b : Dynamic
+      %c : Dynamic) {
+  %2 : Dynamic = add[alpha={1}](%a, %b)
+  %4 : Dynamic = If(%c)
+    block0() {
+      %6 : Dynamic = add[alpha={1}](%b, %2)
+      %7 : Dynamic = add[alpha={1}](%6, %2)
+      -> (%7)
+    }
+  %8 : Dynamic = add[alpha={1}](%4, %2)
+  return (%8);
+}
+
+graph(%a : Dynamic
+      %b : Dynamic
+      %c : Dynamic) {
+  %3 : Dynamic = add[alpha={1}](%a, %b)
+  %4 : Dynamic = If(%c)
+    block0() {
+      %5 : Dynamic = add[alpha={1}](%b, %3)
+      %6 : Dynamic = add[alpha={1}](%5, %3)
+      -> (%6)
+    }
+  %7 : Dynamic = add[alpha={1}](%4, %3)
+  return (%7);
+}
+
+testCreateAutodiffSubgraphs
+graph(%0 : Dynamic
+      %1 : Dynamic
+      %2 : Dynamic
+      %3 : Dynamic
+      %4 : Dynamic) {
+  %21 : Dynamic, %22 : Dynamic = GraphExecutor_0(%0, %3, %1, %4, %2)
+  return (%22, %21);
+}
+with GraphExecutor_0 = graph(%1 : Dynamic
+      %2 : Dynamic
+      %4 : Dynamic
+      %5 : Dynamic
+      %16 : Dynamic) {
+  %0 : Dynamic = mm(%1, %2)
+  %3 : Dynamic = mm(%4, %5)
+  %6 : Dynamic = add[alpha={1}](%0, %3)
+  %7 : Dynamic, %8 : Dynamic, %9 : Dynamic, %10 : Dynamic = chunk[chunks=4, dim=1](%6)
+  %11 : Dynamic = sigmoid(%7)
+  %12 : Dynamic = sigmoid(%10)
+  %13 : Dynamic = tanh(%9)
+  %14 : Dynamic = sigmoid(%8)
+  %15 : Dynamic = mul(%14, %16)
+  %17 : Dynamic = mul(%11, %13)
+  %18 : Dynamic = add[alpha={1}](%15, %17)
+  %19 : Dynamic = tanh(%18)
+  %20 : Dynamic = mul(%12, %19)
+  return (%18, %20);
+}
+
+testDifferentiate
+graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)) {
+  %2 : Float(2, 3, 4) = mul(%0, %1)
+  %3 : Float(2, 3, 4) = mul(%2, %0)
+  %4 : Float(2, 3, 4) = add[alpha={1}](%3, %1)
+  return (%4, %2);
+}
+graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)
+      %2 : Float(2, 3, 4)
+      %3 : Float(2, 3, 4)
+      %4 : Float(2, 3, 4)) {
+  %5 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %6 : Dynamic = ReplaceIfUndef(%0, %5)
+  %7 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %8 : Dynamic = ReplaceIfUndef(%1, %7)
+  %9 : Dynamic = mul(%6, %2)
+  %10 : Dynamic = add[alpha={1}](%8, %9)
+  %11 : Dynamic = mul(%6, %4)
+  %12 : Dynamic = mul(%10, %3)
+  %13 : Dynamic = mul(%10, %2)
+  %14 : Dynamic = add[alpha={1}](%11, %12)
+  %15 : Dynamic = add[alpha={1}](%6, %13)
+  return (%14, %15);
+}
+
+testDifferentiateWithRequiresGrad
+graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)) {
+  %2 : Float(2, 3, 4) = mul(%1, %1)
+  %3 : Float(2, 3, 4) = add[alpha={1}](%2, %1)
+  %4 : Float(2, 3, 4) = add[alpha={1}](%3, %0)
+  %5 : Float(2, 3, 4) = mul(%4, %0)
+  %6 : Float(2, 3, 4) = add[alpha={1}](%5, %1)
+  return (%3, %6, %4);
+}
+graph(%0 : Float(2, 3, 4)
+      %1 : Float(2, 3, 4)
+      %2 : Float(2, 3, 4)
+      %3 : Float(2, 3, 4)) {
+  %4 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %5 : Dynamic = ReplaceIfUndef(%0, %4)
+  %6 : Dynamic = Constant[value=<Tensor>, is_zero=1]()
+  %7 : Dynamic = ReplaceIfUndef(%1, %6)
+  %8 : Dynamic = mul(%5, %2)
+  %9 : Dynamic = add[alpha={1}](%7, %8)
+  %10 : Dynamic = mul(%5, %3)
+  %11 : Dynamic = add[alpha={1}](%10, %9)
+  return (%11);
+}
+

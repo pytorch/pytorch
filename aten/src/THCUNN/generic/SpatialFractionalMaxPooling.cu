@@ -32,10 +32,10 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   int64_t inputH = THCTensor_(size)(state, input, dimh);
   int64_t inputW = THCTensor_(size)(state, input, dimw);
 
-  THArgCheck(outputH + poolSizeH - 1 < inputH, 6,
+  THArgCheck(outputH + poolSizeH - 1 <= inputH, 6,
              "poolSizeH (%d) too large relative to input height (%d)",
              poolSizeH, inputH);
-  THArgCheck(outputW + poolSizeW - 1 < inputW, 5,
+  THArgCheck(outputW + poolSizeW - 1 <= inputW, 5,
              "poolSizeW (%d) too large relative to input width (%d)",
              poolSizeW, inputW);
 

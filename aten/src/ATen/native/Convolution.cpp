@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 
+#include "ATen/Config.h"
 #if AT_CUDNN_ENABLED()
 #include "THC/THC.h"
 #include "ATen/cudnn/cudnn-wrapper.h"
@@ -161,9 +162,9 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   if (weight_dim != k) {
     std::stringstream ss;
-    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
-       << "-dimensional weight " << weight.sizes() << ", but got input of size "
-       << input.sizes() << " instead";
+    ss << "Expected " << k << "-dimensional weight for " << k
+       << "-dimensional input " << input.sizes() << ", but got weight of size "
+       << weight.sizes() << " instead";
     throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
@@ -381,7 +382,7 @@ at::Tensor _convolution(
         outputs[g] = at::_convolution_nogroup(
             input_g, weight_g, bias_g, params.stride, params.padding, params.dilation, params.transposed, params.output_padding);
       }
-      output = cat(outputs, 1);
+      output = at::cat(outputs, 1);
     }
   }
 
@@ -421,7 +422,7 @@ at::Tensor _convolution_nogroup(
           stride, padding, output_padding, dilation);
     } else if (dim == 5) {
       return at::thnn_conv_transpose3d(
-        input, weight, bias,
+        input, weight, kernel_size, bias,
         stride, padding, output_padding, dilation);
       }
   } else {  /* Not transposed */

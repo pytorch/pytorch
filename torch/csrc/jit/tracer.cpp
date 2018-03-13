@@ -1,21 +1,26 @@
-#include "Python.h"
+#ifndef NO_PYTHON
+#include <Python.h>
+#endif
 #include "torch/csrc/jit/tracer.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/functions/special.h"
+
+#include <string>
+#include <sstream>
+#include <memory>
+
+#ifndef NO_PYTHON
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/python_strings.h"
-
 #include <frameobject.h>
 #include <patchlevel.h>
 
-namespace torch { namespace jit { namespace tracer {
-
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
-std::string getPythonInterpreterStackTrace() {
+std::string torch::jit::tracer::getPythonInterpreterStackTrace() {
   std::stringstream stack_trace;
   AutoGIL gil;
   PyThreadState *tstate = PyThreadState_GET();
@@ -32,6 +37,10 @@ std::string getPythonInterpreterStackTrace() {
   }
   return stack_trace.str();
 }
+#endif
+
+namespace torch { namespace jit { namespace tracer {
+
 
 namespace {
 
@@ -104,7 +113,7 @@ struct TraceEval : autograd::Eval {
 
     detail::_exit(tracing_state, outputs);
     auto stage = tracing_state->graph->stage();
-    tracing_state->output_edges[stage] = fmap(placeholders, [](const std::shared_ptr<autograd::EvalOutput> p) {
+    tracing_state->output_edges[stage] = fmap(placeholders, [](const std::shared_ptr<autograd::EvalOutput>& p) {
       return p->next_edge;
     });
   }
@@ -128,39 +137,79 @@ void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_li
   std::make_shared<autograd::Eval>()->replaceSubgraph(inputs, outputs);
 }
 
-Node* recordTrace(std::string op, // TODO: make this a Symbol
-                  at::ArrayRef<Variable> inputs,
-                  at::ArrayRef<Variable> outputs) {
-  auto state = getTracingState(inputs);
-  auto& graph = state->graph;
-  // TODO: Technically, we could reduce the scope of the lock, but since we
-  // haven't actually specified what the locking contract is, be conservative.
-  auto state_lock = state->lock();
+// We must record the nodes of inputs before we actually carry out
+// the operation, because an inplace operation may destroy the information
+// we're interested in.  See #4480.
+template<typename F>
+PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
+  PreTraceInfo info;
+  info.state = getTracingState(inputs);
+  auto& graph = info.state->graph;
+  auto state_lock = info.state->lock();
 
-  Node *n = graph->create(Symbol(op), 0 /* initial outputs */);
-  auto sl = std::make_shared<SourceLocation>(getPythonInterpreterStackTrace());
+  Node *n = ctor(*graph);
+#ifndef NO_PYTHON
+  auto sl = std::make_shared<StringSourceLocation>(getPythonInterpreterStackTrace());
   n->setSourceLocation(sl);
+#endif
 
   for (Variable input : inputs) {
-    n->addInput(getValueTrace(state, input));
+    n->addInput(getValueTrace(info.state, input));
   }
 
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  auto assignOutput = [&state](const Variable & output, Value * value) {
+  info.n = n;
+
+  return info;
+}
+
+PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
+                            at::ArrayRef<Variable> inputs) {
+  return makePreTraceInfo(inputs, [&op](Graph& graph) {
+    return graph.create(Symbol(op), 0 /* initial outputs */);
+  });
+}
+
+#ifndef NO_PYTHON
+PreTraceInfo preRecordPythonTrace(THPObjectPtr pyobj,
+                                  std::string arg_types,
+                                  at::ArrayRef<Variable> inputs,
+                                  pyobj_list scalar_args) {
+  std::vector<VariableFlags> var_flags(inputs.size());
+  for (size_t i = 0; i < inputs.size(); i++) {
+    var_flags[i] = VariableFlags::of(inputs[i]);
+  }
+
+  return makePreTraceInfo(inputs, [&](Graph& graph) {
+    const bool is_legacy = false;
+    return graph.createPythonOp(
+        std::move(pyobj),
+        arg_types,
+        is_legacy,
+        std::move(var_flags),
+        std::move(scalar_args));
+  });
+}
+#endif
+
+void postRecordTrace(const PreTraceInfo& info,
+                     at::ArrayRef<Variable> outputs) {
+  // TODO: Technically, we could reduce the scope of the lock, but since we
+  // haven't actually specified what the locking contract is, be conservative.
+  auto state_lock = info.state->lock();
+
+  auto assignOutput = [&info](const Variable & output, Value * value) {
     if (output.defined()) {
       value->inferTypeFrom(output.data());
-      setValueTrace(state, output, value);
+      setValueTrace(info.state, output, value);
     }
   };
 
-  for(size_t i = 0; i < outputs.size(); i++) {
-    assignOutput(outputs[i], n->addOutput());
+  for (size_t i = 0; i < outputs.size(); i++) {
+    assignOutput(outputs[i], info.n->addOutput());
   }
-
-  // Return the n so that attributes can be added.
-  return n;
 }
 
 }}}

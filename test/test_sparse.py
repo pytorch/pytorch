@@ -6,6 +6,7 @@ import random
 import unittest
 from common import TestCase, run_tests
 from common_nn import TEST_CUDA
+from test_torch import TestTorch
 from numbers import Number
 
 
@@ -125,6 +126,29 @@ class TestSparse(TestCase):
         x = self.SparseTensor()
         self.assertEqual(x._indices().numel(), 0)
         self.assertEqual(x._values().numel(), 0)
+
+    def test_ctor_size_checks(self):
+        indices = self.IndexTensor([
+            [0, 0, 0],
+            [0, 3, 0],
+            [0, 0, 0],
+            [0, 0, 0],
+        ])
+        values = self.ValueTensor([2, 1, 3, 4])
+
+        # indices inconsistent with size
+        self.assertRaises(
+            RuntimeError,
+            lambda: self.SparseTensor(indices, values, torch.Size([2, 1, 1])))
+
+        # values inconsistent with size
+        values = self.ValueTensor([
+            [2, 1, 2, 1],
+            [1, 0, 5, 2],
+        ])
+        self.assertRaises(
+            RuntimeError,
+            lambda: self.SparseTensor(indices, values, torch.Size([2, 4, 2, 1])))
 
     def test_to_dense(self):
         i = self.IndexTensor([
@@ -315,6 +339,16 @@ class TestSparse(TestCase):
         y = x.clone()
         self.assertTrue(y.is_coalesced())
 
+    @cuda_only
+    def test_cuda_empty(self):
+        x = torch.sparse.FloatTensor(2, 3, 4)
+        y = x.cuda(0)
+        self.assertEqual(x._dimI(), y._dimI())
+        self.assertEqual(x._dimV(), y._dimV())
+        x = y.cpu()
+        self.assertEqual(y._dimI(), x._dimI())
+        self.assertEqual(y._dimV(), x._dimV())
+
     def test_transpose(self):
         x = self._gen_sparse(4, 20, 5)[0]
         y = self.safeToDense(x)
@@ -327,6 +361,29 @@ class TestSparse(TestCase):
             x = x.transpose(i, j)
             y = y.transpose(i, j)
             self.assertEqual(self.safeToDense(x), y)
+
+    def test_transpose_coalesce_invariant(self):
+        # If a sparse tensor is coalesced, its transpose should be the same
+        # If a sparse tensor is uncoalesed, its transpose should be the same
+        x_coalesced = self._gen_sparse(2, 3, 4)[0].coalesce()
+        x_indices = x_coalesced._indices()
+        x_values = x_coalesced._values()
+
+        y_uncoalesced = self.SparseTensor(
+            torch.cat([x_indices, x_indices], dim=1),
+            torch.cat([x_values, x_values]),
+            x_coalesced.size())
+
+        self.assertTrue(x_coalesced.is_coalesced())
+        self.assertFalse(y_uncoalesced.is_coalesced())
+
+        self.assertTrue(x_coalesced.transpose(0, 1).is_coalesced())
+        self.assertFalse(y_uncoalesced.transpose(0, 1).is_coalesced())
+
+        x_coalesced.transpose_(0, 1)
+        y_uncoalesced.transpose_(0, 1)
+        self.assertTrue(x_coalesced.is_coalesced())
+        self.assertFalse(y_uncoalesced.is_coalesced())
 
     @cpu_only
     def test_mm(self):
@@ -442,6 +499,11 @@ class TestSparse(TestCase):
         self._test_spadd_shape([50, 30, 20], [2])
         self._test_spadd_shape([5, 5, 5, 5, 5, 5], [2])
 
+    def test_norm(self):
+        x, _, _ = self._gen_sparse(3, 10, 100)
+        y = x.coalesce()
+        self.assertEqual(x.norm(), y._values().norm())
+
     def _test_basic_ops_shape(self, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
@@ -548,26 +610,6 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4]))
         self.assertEqual(res, expected)
 
-    def test_sparse_mask_variable(self):
-        # TODO: remove once variable and tensor are merged
-        i = torch.autograd.Variable(self.IndexTensor([
-            [1, 3, 0, 4],
-            [2, 1, 2, 3],
-        ]))
-        v = torch.autograd.Variable(self.ValueTensor([1, 2, 3, 4]))
-        x = torch.autograd.Variable(self.SparseTensor(i.data, v.data, torch.Size([5, 4])).coalesce())
-        dense = torch.autograd.Variable(self.ValueTensor([
-            [1, 2, 3, 4],
-            [5, 6, 7, 8],
-            [9, 10, 11, 12],
-            [13, 14, 15, 16],
-            [17, 18, 19, 20],
-        ]))
-        exp_v = torch.autograd.Variable(self.ValueTensor([7, 14, 3, 20]))
-        res = dense._sparse_mask(x)
-        expected = torch.autograd.Variable(self.SparseTensor(i.data, exp_v.data, torch.Size([5, 4])))
-        self.assertEqual(res, expected)
-
     def test_sparse_mask(self):
         self._test_sparse_mask_fixed()
 
@@ -635,6 +677,99 @@ class TestSparse(TestCase):
         expected = self.SparseTensor(i, exp_v, torch.Size([5, 4, 2]))
         self.assertEqual(res, expected)
 
+    def test_sparse_variable_methods(self):
+        # TODO: delete when tensor/variable are merged
+        from torch.autograd import Variable
+        i = self.IndexTensor([[0, 1, 1], [2, 0, 2]])
+        v = self.ValueTensor([3, 4, 5])
+        sparse_mat = self.SparseTensor(i, v, torch.Size([2, 3]))
+        sparse_var = Variable(sparse_mat)
+
+        to_test_one_arg = {
+            'zeros_like': lambda x: torch.zeros_like(x),
+            'transpose': lambda x: x.transpose(0, 1),
+            'transpose_': lambda x: x.transpose(0, 1),
+            't': lambda x: x.t(),
+            't_': lambda x: x.t_(),
+            'div': lambda x: x.div(2),
+            'div_': lambda x: x.div_(2),
+            'pow': lambda x: x.pow(2),
+            '_nnz': lambda x: x._nnz(),
+            'is_coalesced': lambda x: x.is_coalesced(),
+            'coalesce': lambda x: x.coalesce(),
+            'to_dense': lambda x: x.to_dense(),
+            '_dimI': lambda x: x._dimI(),
+            '_dimV': lambda x: x._dimV(),
+            'norm': lambda x: x.norm(),
+        }
+
+        for test_name, test_fn in to_test_one_arg.items():
+            var1 = sparse_var.clone()
+            tensor1 = sparse_mat.clone()
+
+            out_var = test_fn(var1)
+            out_tensor = test_fn(tensor1)
+
+            if isinstance(out_tensor, int) or isinstance(out_tensor, bool):
+                if not isinstance(out_var, int) and not isinstance(out_var, bool):
+                    check_var = out_var.data[0]
+                else:
+                    check_var = out_var
+                self.assertEqual(out_var, out_tensor)
+                continue
+
+            # Assume output is variable / tensor
+            self.assertEqual(test_fn(var1).data, test_fn(tensor1),
+                             test_name)
+
+        i = self.IndexTensor([[0, 0, 1], [1, 2, 1]])
+        v = self.ValueTensor([3, 3, 4])
+        sparse_mat2 = self.SparseTensor(i, v, torch.Size([2, 3]))
+        sparse_var2 = Variable(sparse_mat2)
+
+        to_test_two_arg = {
+            'sub': lambda x, y: x.sub(y),
+            'sub_': lambda x, y: x.sub_(y),
+            'mul': lambda x, y: x.mul(y),
+            'mul_': lambda x, y: x.mul_(y),
+        }
+
+        for test_name, test_fn in to_test_two_arg.items():
+            var1 = sparse_var.clone()
+            var2 = sparse_var2.clone()
+            tensor1 = sparse_mat.clone()
+            tensor2 = sparse_mat2.clone()
+            self.assertEqual(test_fn(var1, var2).data,
+                             test_fn(tensor1, tensor2), test_name)
+
+        to_test_mixed = [
+            # test name, lambda expression, should_run_when_cuda
+            ('sspaddmm', lambda sp, de: sp.sspaddmm(sp, de), False),
+            ('sspaddmm_b', lambda sp, de: sp.sspaddmm(2, sp, de), False),
+            ('sspaddmm_b_a', lambda sp, de: sp.sspaddmm(3, 2, sp, de), False),
+            ('addmm', lambda sp, de: de.addmm(sp, de), True),
+            ('addmm_', lambda sp, de: de.addmm(sp, de), True),
+            ('mm', lambda sp, de: torch.mm(sp, de), True),
+            ('mm_out', lambda sp, de: torch.mm(sp, de, out=de), True),
+        ]
+
+        i = self.IndexTensor([[0, 0, 1, 2, 2], [1, 2, 1, 0, 1]])
+        v = self.ValueTensor([3, 3, 4, 1, 2])
+        sparse_mat = self.SparseTensor(i, v, torch.Size([3, 3]))
+        sparse_var = Variable(sparse_mat)
+        dense_mat = sparse_mat.to_dense().random_(0, 5)
+        dense_var = Variable(dense_mat)
+
+        for test_name, test_fn, test_cuda in to_test_mixed:
+            if sparse_var.is_cuda and not test_cuda:
+                continue
+            sp_var = sparse_var.clone()
+            de_var = dense_var.clone()
+            sp_mat = sparse_mat.clone()
+            de_mat = dense_mat.clone()
+            self.assertEqual(test_fn(sp_var, de_var).data,
+                             test_fn(sp_mat, de_mat), test_name)
+
     def test_sparse_mask_hybrid(self):
         self._test_sparse_mask_hybrid_fixed()
 
@@ -697,14 +832,47 @@ class TestSparse(TestCase):
         self._test_new_device((30, 20), 1)
         self._test_new_device((30, 20, 10), 1)
 
+    def test_new(self):
+        x, indices, values = self._gen_sparse(3, 10, 100)
+        if not x.is_cuda:
+            # CUDA sparse tensors currently requires the size to be
+            # specified if nDimV > 0
+            self.assertEqual(x.new(indices, values), x)
+        self.assertEqual(x.new(indices, values, x.size()), x)
+
+        self.assertIs(torch.sparse.uint8, x.new(dtype=torch.sparse.uint8).dtype)
+        self.assertIs(torch.sparse.uint8, x.new(1, 2, dtype=torch.sparse.uint8).dtype)
+
+    @cpu_only  # not really, but we only really want to run this once
+    def test_dtypes(self):
+        all_dtypes = torch.testing.get_all_dtypes()
+        cpu_dtypes = [d for d in all_dtypes if d.is_sparse and not d.is_cuda]
+        cuda_dtypes = [d for d in all_dtypes if d.is_sparse and d.is_cuda]
+        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, True)
+
+    @cpu_only  # not really, but we only really want to run this once
+    def test_empty_full(self):
+        all_dtypes = torch.testing.get_all_dtypes()
+        cpu_dtypes = [d for d in all_dtypes if d.is_sparse and not d.is_cuda]
+        cuda_dtypes = [d for d in all_dtypes if d.is_sparse and d.is_cuda]
+        TestTorch._test_empty_full(self, cpu_dtypes, cuda_dtypes)
+
     def test_is_sparse(self):
         x = torch.randn(3, 3)
         self.assertFalse(x.is_sparse)
-        self.assertFalse(torch.autograd.Variable(x).is_sparse)
 
         x = self.SparseTensor()
         self.assertTrue(x.is_sparse)
-        self.assertTrue(torch.autograd.Variable(x).is_sparse)
+
+    def test_resize_as(self):
+        def do_test(t):
+            y = t.new().resize_as_(t).zero_()
+            self.assertEqual(y.shape, t.shape)
+            # Check that y can be added to t. Currently, this requires that
+            # _dimI and _dimV match.
+            self.assertEqual(t, t + y)
+
+        do_test(self.SparseTensor())
 
 
 class TestUncoalescedSparse(TestSparse):

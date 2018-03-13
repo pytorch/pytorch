@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
-#include "ATen/Check.h"
+#include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
 #include <cstring>
@@ -99,7 +99,7 @@ Tensor embedding_backward_cpu(
   }
 
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
-  auto grad_weight = grad_.type().zeros({num_weights, grad_.size(-1)});
+  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad_.size(-1)});
 
 #ifdef _OPENMP
   if (numel > 1000) {
@@ -115,7 +115,7 @@ Tensor embedding_backward_cpu(
       int64_t end = start + (num_weights/nthreads + 1);
       for (int64_t i = 0; i < numel; i++) {
         if (indices_data[i] != padding_idx) {
-          int64_t k = indices_data[i] - TH_INDEX_BASE;
+          int64_t k = indices_data[i];
           if (k >= start && k < end) {
             double scale = 1.0;
             if (scale_grad_by_freq) {

@@ -144,6 +144,12 @@ Pooling Layers
 .. autoclass:: FractionalMaxPool2d
     :members:
 
+:hidden:`LPPool1d`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LPPool1d
+    :members:
+
 :hidden:`LPPool2d`
 ~~~~~~~~~~~~~~~~~~
 
@@ -221,8 +227,44 @@ Padding Layers
     :members:
 
 
-Non-linear Activations
-----------------------------------
+Non-linear Activations (weighed sum+nonlinearity)
+-------------------------------------------------
+
+:hidden:`ELU`
+~~~~~~~~~~~~~
+
+.. autoclass:: ELU
+    :members:
+
+:hidden:`Hardshrink`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Hardshrink
+    :members:
+
+:hidden:`Hardtanh`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Hardtanh
+    :members:
+
+:hidden:`LeakyReLU`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LeakyReLU
+    :members:
+
+:hidden:`LogSigmoid`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LogSigmoid
+    :members:
+
+:hidden:`PReLU`
+~~~~~~~~~~~~~~~
+
+.. autoclass:: PReLU
+    :members:
 
 :hidden:`ReLU`
 ~~~~~~~~~~~~~~
@@ -236,10 +278,10 @@ Non-linear Activations
 .. autoclass:: ReLU6
     :members:
 
-:hidden:`ELU`
-~~~~~~~~~~~~~
+:hidden:`RReLU`
+~~~~~~~~~~~~~~~
 
-.. autoclass:: ELU
+.. autoclass:: RReLU
     :members:
 
 :hidden:`SELU`
@@ -248,46 +290,10 @@ Non-linear Activations
 .. autoclass:: SELU
     :members:
 
-:hidden:`PReLU`
-~~~~~~~~~~~~~~~
-
-.. autoclass:: PReLU
-    :members:
-
-:hidden:`LeakyReLU`
-~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: LeakyReLU
-    :members:
-
-:hidden:`Threshold`
-~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: Threshold
-    :members:
-
-:hidden:`Hardtanh`
-~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: Hardtanh
-    :members:
-
 :hidden:`Sigmoid`
 ~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Sigmoid
-    :members:
-
-:hidden:`Tanh`
-~~~~~~~~~~~~~~
-
-.. autoclass:: Tanh
-    :members:
-
-:hidden:`LogSigmoid`
-~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: LogSigmoid
     :members:
 
 :hidden:`Softplus`
@@ -308,11 +314,26 @@ Non-linear Activations
 .. autoclass:: Softsign
     :members:
 
+:hidden:`Tanh`
+~~~~~~~~~~~~~~
+
+.. autoclass:: Tanh
+    :members:
+
 :hidden:`Tanhshrink`
 ~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: Tanhshrink
     :members:
+
+:hidden:`Threshold`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: Threshold
+    :members:
+
+Non-linear Activations (Other)
+------------------------------
 
 :hidden:`Softmin`
 ~~~~~~~~~~~~~~~~~
@@ -337,7 +358,6 @@ Non-linear Activations
 
 .. autoclass:: LogSoftmax
     :members:
-
 
 Normalization layers
 ----------------------------------
@@ -378,8 +398,14 @@ Normalization layers
 .. autoclass:: InstanceNorm3d
     :members:
 
-:hidden:`LocalResponseNorm`
+:hidden:`LayerNorm`
 ~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LayerNorm
+    :members:
+
+:hidden:`LocalResponseNorm`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: LocalResponseNorm
     :members:
@@ -789,6 +815,11 @@ Pooling functions
 
 .. autofunction:: max_unpool3d
 
+:hidden:`lp_pool1d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: lp_pool1d
+
 :hidden:`lp_pool2d`
 ~~~~~~~~~~~~~~~~~~~
 
@@ -948,8 +979,18 @@ Normalization functions
 
 .. autofunction:: batch_norm
 
-:hidden:`local_response_norm`
+:hidden:`instance_norm`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: instance_norm
+
+:hidden:`layer_norm`
 ~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: layer_norm
+
+:hidden:`local_response_norm`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: local_response_norm
 

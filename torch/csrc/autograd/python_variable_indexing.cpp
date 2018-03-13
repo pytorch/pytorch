@@ -3,22 +3,19 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/THP_export.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/python_compat.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/tensor_new.h"
 
+#include <ATen/ExpandUtils.h>
 #include <vector>
 
 using namespace at;
 using namespace torch::autograd::utils;
-
-THP_API PyObject* THPLongTensorClass;
-#ifdef WITH_CUDA
-THP_API PyObject* THCPLongTensorClass;
-#endif
-
-extern bool THPModule_isTensor(PyObject *obj);
 
 namespace torch { namespace autograd {
 
@@ -47,6 +44,8 @@ static int64_t count_specified_dimensions(PyObject* index) {
       auto& var = reinterpret_cast<THPVariable*>(obj)->cdata;
       if (var.type().scalarType() == kByte) {
         count += var.dim();
+      } else {
+        count++;
       }
     } else if (obj != Py_None && obj != Py_Ellipsis) {
       count++;
@@ -69,11 +68,11 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
     throw python_error();
   }
   if (step == 0) {
-    throw IndexError("step cannot be zero");
+    throw ValueError("step cannot be zero");
   }
   if (step < 0) {
     // TODO: implement negative step
-    throw IndexError("negative step not yet supported");
+    throw ValueError("negative step not yet supported");
   }
   if (!ensure_view && start == 0 && stop == length && step == 1) {
     return self;
@@ -82,6 +81,13 @@ static Variable applySlice(const Variable& self, int64_t dim, PyObject* slice, b
 }
 
 static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
+  if (index == 0 && dim == 0 && self.dim() == 0) {
+    // Deprecated support for indexing 0-dim tensors as if they were 1-dim.
+    PyErr_WarnEx(PyExc_UserWarning,
+        "invalid index of a 0-dim tensor. This will be an error in PyTorch 0.5. "
+        "Use tensor.item() to convert a 0-dim tensor to a Python number", 1);
+    return at::alias(self);
+  }
   int64_t size = self.size(dim);
   if (index < -size || index >= size) {
     throw IndexError("index %lld is out of bounds for dimension %lld with size %lld",
@@ -94,13 +100,8 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
 }
 
 static Variable sequenceToVariable(const Type& type, PyObject* seq) {
-  PyObject* ctor = THPLongTensorClass;
-#ifdef WITH_CUDA
-  if (type.is_cuda()) ctor = THCPLongTensorClass;
-#endif
-  auto obj = THPObjectPtr(PyObject_CallFunctionObjArgs(ctor, seq, NULL));
-  if (!obj) throw python_error();
-  return make_variable(createTensor(obj.get()));
+  auto& idx_type = type.toScalarType(kLong);
+  return torch::utils::legacy_new_from_data(idx_type, -1, seq);
 }
 
 static Variable valueToTensor(const Type & type, PyObject* value) {
@@ -119,6 +120,7 @@ static Variable valueToTensor(const Type & type, PyObject* value) {
 static Variable applySlicing(const Variable& self, PyObject* index, variable_list& outIndices) {
   int64_t size = PyTuple_GET_SIZE(index);
   int64_t dim = 0;
+  int64_t specified_dims = count_specified_dimensions(index);
 
   auto handle_var = [&](const Variable& var) {
     // TODO: check scalarType
@@ -126,6 +128,10 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
     outIndices[dim] = var;
     dim++;
   };
+
+  if (specified_dims > self.dim()) {
+    throw IndexError("too many indices for tensor of dimension %d", (int)self.dim());
+  }
 
   Variable result = self;
   for (int64_t i = 0; i < size; i++) {
@@ -136,18 +142,21 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = applySlice(result, dim, obj);
       dim++;
     } else if (obj == Py_Ellipsis) {
-      dim += self.dim() - count_specified_dimensions(index);
+      dim += self.dim() - specified_dims;
     } else if (obj == Py_None) {
       result = result.unsqueeze(dim);
       dim++;
     } else if (THPVariable_Check(obj)) {
       handle_var(reinterpret_cast<THPVariable*>(obj)->cdata);
-    } else if (THPModule_isTensor(obj)) {
-      handle_var(make_variable(createTensor(obj)));
     } else if (PySequence_Check(obj)) {
       handle_var(sequenceToVariable(self.type(), obj));
     } else {
-      invalid_index(obj);
+      auto index = THPObjectPtr(PyNumber_Index(obj));
+      if (!index) {
+        PyErr_Clear();
+        invalid_index(obj);
+      }
+      result = applySelect(result, dim, THPUtils_unpackLong(index));
     }
   }
   return result;
@@ -220,9 +229,22 @@ static THPObjectPtr wrapTuple(PyObject* index) {
   return res;
 }
 
+static bool isSingleBoolScalar(const variable_list& vars) {
+  return vars.size() == 1 && vars[0].type().scalarType() == ScalarType::Byte && vars[0].dim() == 0;
+}
+
+static PyObject* applyBoolGetitem(const Variable& self, bool index) {
+  if (index) {
+    return wrap(self.type().copy(self.unsqueeze(0)));
+  } else {
+    return wrap(self.type().tensor({0}));
+  }
+}
+
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
 
   // handle simple types: integers, slices, ellipsis
   if (index == Py_None) {
@@ -232,11 +254,7 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   } else if (THPUtils_checkLong(index)) {
     return wrap(applySelect(self_, 0, THPUtils_unpackLong(index)));
   } else if (PyBool_Check(index)) {
-    if (index == Py_True) {
-      return wrap(self_.unsqueeze(0));
-    } else {
-      return wrap(self_.type().tensor({0}));
-    }
+    return applyBoolGetitem(self_, index == Py_True);
   } else if (PySlice_Check(index)) {
     return wrap(applySlice(self_, 0, index, true));
   }
@@ -247,11 +265,14 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   variable_list variableIndices;
   Variable sliced = applySlicing(self_, holder.get(), variableIndices);
   if (variableIndices.empty()) {
-    if (sliced.get() == self_.get()) {
+    if (sliced.is_same(self_)) {
       // ensure we return a shallow copy for things like x[...]
       sliced = at::alias(sliced);
     }
     return wrap(sliced);
+  }
+  if (isSingleBoolScalar(variableIndices)) {
+    return applyBoolGetitem(self_, variableIndices[0].toCByte());
   }
 
   // indexing by tensors ("advanced" indexing)
@@ -260,22 +281,47 @@ PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   END_HANDLE_TH_ERRORS
 }
 
+static void copy_to(Variable dst, const Variable& src) {
+  Tensor b_src;
+  // To match numpy semantics:
+  // As a special case for backwards compatibility,
+  // strip away unit dimensions from the left of 'src'
+  auto src_sizes = src.sizes();
+  size_t first_nonzero_src = src_sizes.size();
+  for (size_t i = 0; i < src_sizes.size(); ++i) {
+    if (src_sizes[i] != 1) {
+      first_nonzero_src = i;
+      break;
+    }
+  }
+
+  src_sizes = src_sizes.slice(first_nonzero_src);
+  std::tie(b_src) = expand_inplace(dst, src.view(src_sizes), "setitem");
+  dst.copy_(b_src);
+}
+
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
   auto value = valueToTensor(self_.type(), py_value);
 
   // handle simple types: integers, slices, ellipsis, bool
   if (index == Py_False) {
+    // do nothing for false (technically we should check the size, but we don't have
+    // real 0-sized shapes.
     return 0;
-  } else if (index == Py_None || index == Py_Ellipsis || index == Py_True) {
-    self_.copy_(value);
+  } else if (index == Py_Ellipsis) {
+    copy_to(self_, value);
+    return 0;
+  } else if (index == Py_None || index == Py_True) {
+    copy_to(self_.unsqueeze(0), value);
     return 0;
   } else if (THPUtils_checkLong(index)) {
-    applySelect(self_, 0, THPUtils_unpackLong(index)).copy_(value);
+    copy_to(applySelect(self_, 0, THPUtils_unpackLong(index)), value);
     return 0;
   } else if (PySlice_Check(index)) {
-    applySlice(self_, 0, index).copy_(value);
+    copy_to(applySlice(self_, 0, index), value);
     return 0;
   }
 
@@ -285,7 +331,13 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   variable_list variableIndices;
   Variable sliced = applySlicing(self_, holder.get(), variableIndices);
   if (variableIndices.empty()) {
-    sliced.copy_(value);
+    copy_to(sliced, value);
+    return 0;
+  }
+  if (isSingleBoolScalar(variableIndices)) {
+    if (variableIndices[0].toCByte()) {
+      copy_to(self_.unsqueeze(0), value);
+    }
     return 0;
   }
 

@@ -10,13 +10,14 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
   THTensor *bias,
   THTensor *finput,         // internal columns buffer
   THTensor *fgradInput,     // internal ones buffer
+  int kT, int kW, int kH,   // kenerl size
   int dT, int dW, int dH,   // stride of the convolution
   int pT, int pW, int pH,   // padding
   int aT, int aW, int aH)   // extra output adjustment
 {
   THNN_(VolumetricFullDilatedConvolution_updateOutput)(
       state, input, output, weight, bias, finput, fgradInput,
-      dT, dW, dH, pT, pW, pH, 1, 1, 1, aT, aW, aH);
+      kT, kW, kH, dT, dW, dH, pT, pW, pH, 1, 1, 1, aT, aW, aH);
 }
 
 void THNN_(VolumetricFullConvolution_updateGradInput)(
@@ -27,13 +28,14 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
   THTensor *weight,
   THTensor *finput,
   THTensor *fgradInput,     // only used by cuda impl
+  int kT, int kW, int kH,   // kenerl size
   int dT, int dW, int dH,   // stride
   int pT, int pW, int pH,   // padding
   int aT, int aW, int aH)   // extra output adjustment
 {
   THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
       state, input, gradOutput, gradInput, weight, finput, fgradInput,
-      dT, dW, dH, pT, pW, pH, 1, 1, 1, aT, aW, aH);
+      kT, kW, kH, dT, dW, dH, pT, pW, pH, 1, 1, 1, aT, aW, aH);
 }
 
 void THNN_(VolumetricFullConvolution_accGradParameters)(
@@ -44,6 +46,7 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
   THTensor *gradBias,
   THTensor *finput,
   THTensor *fgradInput,
+  int kT, int kW, int kH,   // kenerl size
   int dT, int dW, int dH,   // stride
   int pT, int pW, int pH,   // padding
   int aT, int aW, int aH,   // extra output adjustment
@@ -51,7 +54,7 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
 {
   THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
       state, input, gradOutput, gradWeight, gradBias, finput, fgradInput,
-      dT, dW, dH, pT, pW, pH, 1, 1, 1, aT, aW, aH, scale_);
+      kT, kW, kH, dT, dW, dH, pT, pW, pH, 1, 1, 1, aT, aW, aH, scale_);
 }
 
 #endif

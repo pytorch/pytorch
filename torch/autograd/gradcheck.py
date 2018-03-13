@@ -26,9 +26,11 @@ def zero_gradients(x):
 
 
 def make_jacobian(input, num_out):
-    if isinstance(input, Variable) and not input.requires_grad:
-        return None
-    elif torch.is_tensor(input) or isinstance(input, Variable):
+    if isinstance(input, Variable):
+        if not input.is_floating_point():
+            return None
+        if not input.requires_grad:
+            return None
         return torch.zeros(input.nelement(), num_out)
     elif isinstance(input, Iterable):
         jacobians = list(filter(
@@ -41,9 +43,7 @@ def make_jacobian(input, num_out):
 
 
 def iter_tensors(x, only_requiring_grad=False):
-    if torch.is_tensor(x):
-        yield x
-    elif isinstance(x, Variable):
+    if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x.data
     elif isinstance(x, Iterable):
@@ -53,9 +53,7 @@ def iter_tensors(x, only_requiring_grad=False):
 
 
 def contiguous(input):
-    if torch.is_tensor(input):
-        return input.contiguous()
-    elif isinstance(input, Variable):
+    if isinstance(input, torch.Tensor):
         return input.contiguous()
     elif isinstance(input, Iterable):
         return type(input)(contiguous(e) for e in input)
@@ -75,22 +73,19 @@ def get_numerical_jacobian(fn, input, target, eps=1e-3):
     x_tensors = [t for t in iter_tensors(target, True)]
     j_tensors = [t for t in iter_tensors(jacobian)]
 
-    outa = torch.DoubleTensor(output_size)
-    outb = torch.DoubleTensor(output_size)
-
     # TODO: compare structure
     for x_tensor, d_tensor in zip(x_tensors, j_tensors):
-        flat_tensor = x_tensor.view(-1)
+        flat_tensor = x_tensor.view(-1).detach()
         for i in range(flat_tensor.nelement()):
-            orig = flat_tensor[i]
+            orig = flat_tensor[i].item()
             flat_tensor[i] = orig - eps
-            outa.copy_(fn(input), broadcast=False)
+            outa = fn(input).clone()
             flat_tensor[i] = orig + eps
-            outb.copy_(fn(input), broadcast=False)
+            outb = fn(input).clone()
             flat_tensor[i] = orig
 
-            outb.add_(-1, outa).div_(2 * eps)
-            d_tensor[i] = outb
+            r = (outb - outa) / (2 * eps)
+            d_tensor[i] = r.detach().contiguous().view(-1)
 
     return jacobian
 
@@ -115,7 +110,9 @@ def get_analytical_jacobian(input, output):
                     if d_x is None:
                         jacobian_x[:, i].zero_()
                     else:
-                        jacobian_x[:, i] = d_x.to_dense() if d_x.is_sparse else d_x
+                        d_x_dense = d_x.to_dense() if d_x.is_sparse else d_x
+                        assert jacobian_x[:, i].numel() == d_x_dense.numel()
+                        jacobian_x[:, i] = d_x_dense.contiguous().view(-1)
                 if d_x is not None and d_x.size() != x.size():
                     correct_grad_sizes = False
 
@@ -182,7 +179,8 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         for j, (a, n) in enumerate(zip(analytical, numerical)):
             if a.numel() != 0 or n.numel() != 0:
                 if not ((a - n).abs() <= (atol + rtol * n.abs())).all():
-                    return fail_test('for output no. %d,\n numerical:%s\nanalytical:%s\n' % (j, numerical, analytical))
+                    return fail_test('Jacobian mismatch for output %d with respect to input %d,\n'
+                                     'numerical:%s\nanalytical:%s\n' % (i, j, n, a))
 
         if not reentrant:
             return fail_test('not reentrant')
@@ -203,11 +201,16 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
                 continue
             if not i.grad.data.eq(0).all():
                 return fail_test('backward not multiplied by grad_output')
+            if i.grad.type() != i.type():
+                return fail_test("grad is incorrect type")
+            if i.grad.size() != i.size():
+                return fail_test('grad is incorrect size')
 
     return True
 
 
-def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3, gen_non_contig_grad_outputs=False):
+def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
+                  gen_non_contig_grad_outputs=False, raise_exception=True):
     """Check gradients of gradients computed via small finite differences
        against analytical gradients
     This function checks that backpropagating through the gradients computed
@@ -228,6 +231,12 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         eps (float, optional): perturbation for finite differences
         atol (float, optional): absolute tolerance
         rtol (float, optional): relative tolerance
+        gen_non_contig_grad_outputs (bool, optional): if :attr:`grad_outputs` is
+            ``None`` and :attr:`gen_non_contig_grad_outputs` is ``True``, the
+            randomly generated gradient outputs are made to be noncontiguous
+        raise_exception: bool indicating whether to raise an exception if
+            gradcheck fails. The exception gives more information about the
+            exact nature of the failure. This is helpful when debugging gradchecks.
 
     Returns:
         True if all differences satisfy allclose condition. Raises an exception
@@ -253,4 +262,4 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
         grad_inputs = torch.autograd.grad(outputs, input_args, grad_outputs, create_graph=True)
         return grad_inputs
 
-    return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol)
+    return gradcheck(new_func, inputs + grad_outputs, eps, atol, rtol, raise_exception)
