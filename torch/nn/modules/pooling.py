@@ -777,7 +777,7 @@ class LPPool2d(Module):
     .. math::
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
-    - At p = infinity, one gets Max Pooling
+    - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Average Pooling
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
