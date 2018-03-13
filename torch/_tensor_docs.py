@@ -5,7 +5,7 @@ from torch._C import _add_docstr as add_docstr
 
 
 def add_docstr_all(method, docstr):
-    add_docstr(getattr(torch._C._VariableBase, method), docstr)
+    add_docstr(getattr(torch._C._TensorBase, method), docstr)
 
 
 add_docstr_all('abs',

@@ -1370,26 +1370,26 @@ class TestTorch(TestCase):
 
     def test_constructor_dtypes(self):
         default_type = torch.Tensor().type()
-        self.assertIs(torch.Tensor().dtype, torch.Tensor.dtype)
+        self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())
 
         torch.set_default_tensor_type('torch.FloatTensor')
-        self.assertIs(torch.float32, torch.Tensor.dtype)
+        self.assertIs(torch.float32, torch.get_default_dtype())
         self.assertIs(torch.float32, torch.FloatTensor.dtype)
         self.assertEqual(torch.FloatStorage, torch.Storage)
 
         torch.set_default_tensor_type(torch.float64)
-        self.assertIs(torch.float64, torch.Tensor.dtype)
+        self.assertIs(torch.float64, torch.get_default_dtype())
         self.assertIs(torch.float64, torch.DoubleTensor.dtype)
         self.assertEqual(torch.DoubleStorage, torch.Storage)
 
-        torch.set_default_tensor_type('torch.Tensor')
-        self.assertIs(torch.float64, torch.Tensor.dtype)
-        self.assertIs(torch.float64, torch.DoubleTensor.dtype)
-        self.assertEqual(torch.DoubleStorage, torch.Storage)
+        torch.set_default_tensor_type(torch.FloatTensor)
+        self.assertIs(torch.float32, torch.get_default_dtype())
+        self.assertIs(torch.float32, torch.DoubleTensor.dtype)
+        self.assertEqual(torch.FloatStorage, torch.Storage)
 
         if torch.cuda.is_available():
             torch.set_default_tensor_type(torch.cuda.float32)
-            self.assertIs(torch.cuda.float32, torch.Tensor.dtype)
+            self.assertIs(torch.cuda.float32, torch.get_default_dtype())
             self.assertIs(torch.cuda.float32, torch.cuda.FloatTensor.dtype)
             self.assertEqual(torch.cuda.FloatStorage, torch.Storage)
 
