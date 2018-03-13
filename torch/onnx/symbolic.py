@@ -428,7 +428,7 @@ def upsample_bilinear2d(g, input, output_size):
                 height_scale_f=h_scale, mode_s="bilinear")
 
 
-def stack(g, *tensors, dim=0):
+def stack(g, *tensors, dim):
     return g.op("ATen", *tensors, operator_s="stack", dim_i=dim)
 
 
