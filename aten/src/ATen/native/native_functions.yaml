@@ -1,5 +1,34 @@
 # See README.md in this directory for more guidance
 
+
+# Temporary type cast operators. These are needed to trace type-casts now since
+# Type's are not supported in the IR. Instead, we call down to these
+# specialized operators for each datatype.
+# TODO: remove when we have Type support in the IR
+- func: _cast_uint8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_double(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_float(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int64_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int16_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
@@ -378,6 +407,8 @@
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
+- func: reshape(Tensor self, IntList shape) -> Tensor
+
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
   dispatch:
@@ -445,6 +476,32 @@
     fft_size: frame_length
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
+
+- func: sum(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sum_cpu
+    CUDA: _sum_cuda
+
+- func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sum_out_cpu
+    CUDA: _sum_out_cuda
+
+- func: prod(Tensor self) -> Tensor
+  dispatch:
+    CPU: _prod_cpu
+    CUDA: _prod_cuda
+
+- func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _prod_out_cpu
+    CUDA: _prod_out_cuda
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method

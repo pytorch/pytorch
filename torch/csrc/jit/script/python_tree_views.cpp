@@ -146,10 +146,15 @@ void initTreeViewBindings(PyObject *module) {
       return UnaryOp::create(range, stringToKind(kind), expr);
     }));
   py::class_<Apply, Expr>(m, "Apply")
-    .def(py::init([](const Ident& name, std::vector<Expr> args, std::vector<Attribute> kwargs) {
-      auto r = name.range();
-      return Apply::create(name.range(), name,
+    .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
+      auto r = expr.range();
+      return Apply::create(expr.range(), expr,
                            wrap_list(r, std::move(args)), wrap_list(r, std::move(kwargs)));
+    }));
+  py::class_<Select, Expr>(m, "Select")
+    .def(py::init([](const Expr& expr, const Ident& field) {
+      auto r = expr.range();
+      return Select::create(expr.range(), expr, field);
     }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")
     .def(py::init([](const Expr& cond, const Expr& true_expr, const Expr& false_expr) {

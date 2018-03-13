@@ -5,6 +5,8 @@ import warnings
 
 import torch.onnx
 
+from functools import partial
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
@@ -537,10 +539,54 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
+# Metaprogram symbolics for each ATen native specialized cast operator.
+# For e.g. we specify a function named `_cast_uint8_t` that instantiates an
+# ONNX cast node with `to` attribute 'UINT8'
+#
+# TODO: remove these once we support Type's in the JIT IR and we can once again
+# use the unified toType operator
+cast_pytorch_to_onnx = {
+    'uint8_t': 'UINT8',
+    'int8_t': 'INT8',
+    'double': 'DOUBLE',
+    'float': 'FLOAT',
+    'Half': 'FLOAT16',
+    'int': 'INT32',
+    'int64_t': 'INT64',
+    'int16_t': 'INT16',
+}
+
+
+def _cast_func_template(to_s, g, input, non_blocking):
+    return g.op("Cast", input, to_s=to_s)
+
+
+for k, v in cast_pytorch_to_onnx.items():
+    name = '_cast_{}'.format(k)
+    globals()[name] = partial(_cast_func_template, v)
+
+
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def alias(g, self):
+    return self
+
+
+def unsqueeze(g, self, dim):
+    return g.op("Unsqueeze", self, axes_i=[dim])
+
+
+def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported for topk")
+    if not largest:
+        _unimplemented("TopK", "Ascending TopK is not supported")
+
+    return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
 def instance_norm(g, input, **kwargs):

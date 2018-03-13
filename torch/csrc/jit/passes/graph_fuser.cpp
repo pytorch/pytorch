@@ -64,8 +64,8 @@ std::unordered_set<NodeKind> simple_mappable = {
   ktanh,
   ktrunc,
   kzeros,
-  "_sigmoid_backward"_sym,
-  "_tanh_backward"_sym,
+  k_sigmoid_backward,
+  k_tanh_backward,
 };
 
 bool isSimpleMap(Node *node) {

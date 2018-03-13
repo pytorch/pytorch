@@ -4177,6 +4177,10 @@ Returns a 1-D tensor of size :math:`\left\lfloor \frac{end - start}{step} \right
 with values from the interval ``[start, end)`` taken with common difference
 :attr:`step` beginning from `start`.
 
+Note that non-integer `step` is subject to floating point rounding errors when
+comparing against `end`; to avoid inconsistency, we advise adding a small epsilon to `end`
+in such cases.
+
 .. math::
     \text{out}_{i+1} = \text{out}_{i} + \text{step}
 
@@ -4296,6 +4300,41 @@ Example::
     [torch.FloatTensor of size (3,3)]
 
 """)
+
+add_docstr(torch.reshape,
+           r"""
+reshape(input, shape) -> Tensor
+
+Returns a tensor with the same data and number of elements as :attr:`input`,
+but with the specified shape. When possible, the returned tensor will be a view
+of :attr:`input`. Otherwise, it will be a copy. Contiguous inputs and inputs
+with compatible strides can be reshaped without copying, but you should not
+depend on the copying vs. viewing behavior.
+
+A single dimension may be -1, in which case it's inferred from the remaining
+dimensions and the number of elements in :attr:`input`.
+
+Args:
+    input (Tensor): the tensor to be reshaped
+    shape (tuple of ints): the new shape
+
+Example::
+
+    >>> a = torch.arange(4)
+    >>> torch.reshape(a, (2, 2))
+     0  1
+     2  3
+    [torch.FloatTensor of size (2,2)]
+
+    >>> b = torch.tensor([[0, 1], [2, 3]])
+    >>> torch.reshape(b, (-1,))
+     0
+     1
+     2
+     3
+    [torch.FloatTensor of size (4,)]
+""")
+
 
 add_docstr(torch.round,
            r"""

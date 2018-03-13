@@ -31,7 +31,7 @@ int main() {
   // test case with empty tensor
   {
     auto a = randn(T, 0);
-    ASSERT_THROWS(a.prod(0));
+    ASSERT(a.prod(0).equal(T.tensor({0})));
   }
 
   // test case with scalar vs 1-dim, 1-size

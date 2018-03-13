@@ -1267,7 +1267,7 @@ repeat(*sizes) -> Tensor
 
 Repeats this tensor along the specified dimensions.
 
-Unlike :meth:`~Tensor.expand`, this function copies the tensor’s data.
+Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1288,6 +1288,19 @@ Example::
 
     torch.Size([4, 2, 3])
 
+""")
+
+add_docstr_all('reshape',
+               r"""
+reshape(*shape) -> Tensor
+
+Returns a tensor with the same data and number of elements as :attr:`self`,
+but with the specified shape.
+
+Args:
+    shape (tuple of ints or int...): the desired shape
+
+See :func:`torch.reshape`
 """)
 
 add_docstr_all('resize_',
