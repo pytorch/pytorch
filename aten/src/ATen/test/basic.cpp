@@ -277,9 +277,8 @@ static void test(Type & type) {
       ASSERT(tensor[Scalar(3.14)].equal(one));
     } catch (const std::runtime_error& error) {
       ASSERT(
-          std::string(error.what())
-              .find("Can only index tensors with integral scalars") !=
-          std::string::npos);
+          std::string(error.what()) ==
+          "Can only index tensors with integral scalars (got CPUDoubleType)");
     }
   }
   {
@@ -293,9 +292,8 @@ static void test(Type & type) {
       ASSERT(tensor[CPU(kFloat).ones({}) * 3.14].equal(one));
     } catch (const std::runtime_error& error) {
       ASSERT(
-          std::string(error.what())
-              .find("Can only index tensors with integral scalars") !=
-          std::string::npos);
+          std::string(error.what()) ==
+          "Can only index tensors with integral scalars (got CPUFloatType)");
     }
     try {
       ASSERT(tensor[Scalar(CPU(kInt).ones({2, 3, 4}))].equal(one));
