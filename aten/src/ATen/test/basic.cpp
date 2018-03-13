@@ -257,7 +257,54 @@ static void test(Type & type) {
     std::string expect = "1e-07 *";
     ASSERT(s.str().substr(0,expect.size()) == expect);
   }
-
+  {
+    // Indexing by Scalar
+    Tensor tensor = CPU(kInt).arange(0, 10);
+    Tensor one = CPU(kInt).ones({1});
+    for (long i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    for (int i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    for (short i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    for (char i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    try {
+      ASSERT(tensor[Scalar(3.14)].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+          std::string(error.what())
+              .find("Can only index tensors with integral scalars") !=
+          std::string::npos);
+    }
+  }
+  {
+    // Indexing by zero-dim tensor
+    Tensor tensor = CPU(kInt).arange(0, 10);
+    Tensor one = CPU(kInt).ones({});
+    for (int i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[one * i].equal(one * i));
+    }
+    try {
+      ASSERT(tensor[CPU(kFloat).ones({}) * 3.14].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+          std::string(error.what())
+              .find("Can only index tensors with integral scalars") !=
+          std::string::npos);
+    }
+    try {
+      ASSERT(tensor[Scalar(CPU(kInt).ones({2, 3, 4}))].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+          std::string(error.what()) ==
+          "Attempting to create a Scalar from a 3 dim tensor");
+    }
+  }
 }
 
 int main(int argc, char ** argv)

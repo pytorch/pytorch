@@ -1,8 +1,11 @@
 #pragma once
 
-#include "ATen/Tensor.h"
 #include "ATen/Scalar.h"
+#include "ATen/Tensor.h"
+#include "ATen/Type.h"
 
+#include <string>
+#include <stdexcept>
 
 namespace at {
 
@@ -37,8 +40,15 @@ inline Tensor& Tensor::operator/=(const Tensor & other) {
 inline Tensor& Tensor::operator/=(Scalar other) {
   return div_(other);
 }
-inline Tensor Tensor::operator[](int64_t idx) const {
-  return select(0, idx);
+inline Tensor Tensor::operator[](Scalar index) const {
+  AT_ASSERT(
+      index.local().isIntegral(),
+      "Can only index tensors with integral scalars (got %s)",
+      index.toTensor().type().toString());
+  return select(0, index.toLong());
+}
+inline Tensor Tensor::operator[](Tensor index) const {
+  return this->operator[](Scalar(index));
 }
 
 #define AT_FORALL_BINARY_OPS(_) \
