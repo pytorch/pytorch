@@ -48,6 +48,9 @@ inline Tensor Tensor::operator[](Scalar index) const {
   return select(0, index.toLong());
 }
 inline Tensor Tensor::operator[](Tensor index) const {
+  // The Scalar(Tensor) constructor is explicit, so we need to actually call
+  // it. This constructor will also throw if the tensor is not zero-dim or
+  // undefined.
   return this->operator[](Scalar(index));
 }
 
