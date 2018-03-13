@@ -227,7 +227,7 @@ def main():
         print('Running {} ...'.format(test_module))
         handler = CUSTOM_HANDLERS.get(test, run_test)
         if not handler(python, test_module, test_directory, options.verbose):
-            break
+            raise RuntimeError('{} failed!'.format(test_module))
 
     if options.coverage:
         shell('coverage combine')
