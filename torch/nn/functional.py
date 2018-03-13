@@ -1098,6 +1098,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         For bags of constant length,
             * embedding_bag with `mode=sum` is equivalent to nn.functional.embedding followed by `torch.sum(dim=1)`
             * with `mode=mean` is equivalent to nn.functional.embedding followed by `torch.mean(dim=1)`
+            * with `mode=max` is equivalent to nn.functional.embedding followed by `torch.max(dim=1)`
 
         However, embedding_bag is much more time and memory efficient than using a chain of these
         operations.
@@ -1115,7 +1116,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             norm_type (float, optional): The p of the p-norm to compute for the max_norm option
             scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
                                                     the words in the dictionary.
-            mode (string, optional): 'sum' | 'mean'. Specifies the way to reduce the bag. Default: 'mean'
+            mode (string, optional): 'sum' | 'mean' | 'max'. Specifies the way to reduce the bag. Default: 'mean'
             sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes
                                         for more details regarding sparse gradients.
 
@@ -1176,6 +1177,15 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         mode = 0
     elif mode == 'mean':
         mode = 1
+    elif mode == 'max':
+        mode = 2
+
+        if scale_grad_by_freq:
+          raise ValueError("max mode does not support scaling the gradient by the frequency")
+
+        if sparse:
+          raise ValueError("max mode does not support sparse weights")
+
     else:
         raise ValueError("mode has to be one of sum or mean")
 
@@ -1183,7 +1193,7 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
         with torch.no_grad():
             torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
-    ret, _, _ = torch.embedding_bag(
+    ret, _, _, _ = torch.embedding_bag(
         embedding_matrix,
         indices,
         offsets,

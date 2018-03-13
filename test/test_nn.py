@@ -1289,7 +1289,7 @@ class TestNN(NNTestCase):
                  [0, 0],
                  [1, 2],
                  [3, 4]])
-        else:
+        elif mode == 'mean':
             expected_output = torch.Tensor(
                 [[13. / 3, 16. / 3],
                  [13. / 3, 16. / 3]])
@@ -1299,6 +1299,16 @@ class TestNN(NNTestCase):
                  [0., 0.],
                  [1. / 3, 2. / 3],
                  [3. / 3, 4. / 3]])
+        elif mode == 'max':
+            expected_output = torch.Tensor(
+                [[7, 8],
+                 [9, 10]])
+            expected_grad_weight = torch.Tensor(
+                [[0, 0],
+                 [0, 0],
+                 [0, 0],
+                 [1, 2],
+                 [3, 4]])
 
         if cuda:
             es = es.cuda()
@@ -1348,8 +1358,10 @@ class TestNN(NNTestCase):
             output = es(input.view(-1), offsets)
             if mode == 'sum':
                 ref_output = e(input).sum(1)
-            else:
+            elif mode == 'mean':
                 ref_output = e(input).mean(1)
+            elif mode == 'max':
+                ref_output = e(input).max(1)[0]
 
             self.assertEqual(output, ref_output)
 
@@ -1426,6 +1438,8 @@ class TestNN(NNTestCase):
     def test_embedding_bag(self):
         self._test_EmbeddingBag(False, 'sum', False)
         self._test_EmbeddingBag(False, 'mean', False)
+        self._test_EmbeddingBag(False, 'max', False)
+
         self._test_EmbeddingBag(False, 'sum', True)
         self._test_EmbeddingBag(False, 'mean', True)
 
@@ -1433,6 +1447,8 @@ class TestNN(NNTestCase):
     def test_embedding_bag_cuda(self):
         self._test_EmbeddingBag(True, 'sum', False)
         self._test_EmbeddingBag(True, 'mean', False)
+        self._test_EmbeddingBag(True, 'max', False)
+
         self._test_EmbeddingBag(True, 'sum', True)
         self._test_EmbeddingBag(True, 'mean', True)
 
