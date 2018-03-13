@@ -429,6 +429,10 @@
 
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
+- func: relu(Tensor self) -> Tensor
+
+- func: relu_(Tensor self) -> Tensor
+
 - func: selu(Tensor self) -> Tensor
   variants: function
 
