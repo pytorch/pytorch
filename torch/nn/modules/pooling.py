@@ -778,7 +778,7 @@ class LPPool2d(Module):
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
     - At p = infinity, one gets Max Pooling
-    - At p = 1, one gets Average Pooling
+    - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     The parameters :attr:`kernel_size`, :attr:`stride` can either be:
 
@@ -842,7 +842,7 @@ class LPPool1d(Module):
         f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
 
     - At p = infinity, one gets Max Pooling
-    - At p = 1, one gets Average Pooling
+    - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
     Args:
         kernel_size: a single int, the size of the window
