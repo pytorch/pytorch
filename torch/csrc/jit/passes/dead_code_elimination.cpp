@@ -3,10 +3,19 @@
 namespace torch { namespace jit {
 
 void EliminateDeadCode(std::shared_ptr<Graph>& graph) {
-  auto nodes = graph->nodes().reverse();
+  EliminateDeadCode(graph->block());
+}
+bool hasSideEffects(Node * node) {
+  return node->kind() == kPrint;
+}
+
+void EliminateDeadCode(Block *block) {
+  auto nodes = block->nodes().reverse();
   for (auto it = nodes.begin(); it != nodes.end(); it++) {
     auto node = *it;
-    if(!node->hasUses())
+    for (Block * block : node->blocks())
+      EliminateDeadCode(block);
+    if (!node->hasUses() && !hasSideEffects(node))
       it.destroyCurrent();
   }
 }

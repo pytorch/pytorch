@@ -1,4 +1,4 @@
-"""
+r"""
 This package adds support for CUDA tensor types, that implement the same
 function as CPU tensors, but they utilize GPUs for computation.
 
@@ -42,7 +42,7 @@ def find_cuda_windows_lib():
 
 
 def is_available():
-    """Returns a bool indicating if CUDA is currently available."""
+    r"""Returns a bool indicating if CUDA is currently available."""
     if (not hasattr(torch._C, '_cuda_isDriverSufficient') or
             not torch._C._cuda_isDriverSufficient()):
         return False
@@ -91,21 +91,29 @@ of the CUDA driver.""".format(str(torch._C._cuda_getDriverVersion())))
 
 
 def _check_capability():
-    error_str = """
+    incorrect_binary_warn = """
     Found GPU%d %s which requires CUDA_VERSION >= %d for
      optimal performance and fast startup time, but your PyTorch was compiled
      with CUDA_VERSION %d. Please install the correct PyTorch binary
      using instructions from http://pytorch.org
     """
 
+    old_gpu_warn = """
+    Found GPU%d %s which is of cuda capability %d.%d.
+    PyTorch no longer supports this GPU because it is too old.
+    """
+
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
     for d in range(device_count()):
-        major = get_device_capability(d)[0]
+        capability = get_device_capability(d)
+        major = capability[0]
         name = get_device_name(d)
         if CUDA_VERSION < 8000 and major >= 6:
-            warnings.warn(error_str % (d, name, 8000, CUDA_VERSION))
+            warnings.warn(incorrect_binary_warn % (d, name, 8000, CUDA_VERSION))
         elif CUDA_VERSION < 9000 and major >= 7:
-            warnings.warn(error_str % (d, name, 9000, CUDA_VERSION))
+            warnings.warn(incorrect_binary_warn % (d, name, 9000, CUDA_VERSION))
+        elif capability == (3, 0) or capability == (5, 0) or major < 3:
+            warnings.warn(old_gpu_warn % (d, name, major, capability[1]))
 
 
 def _lazy_call(callable):
@@ -123,7 +131,7 @@ class DeferredCudaCallError(Exception):
 
 
 def init():
-    """Initialize PyTorch's CUDA state.  You may need to call
+    r"""Initialize PyTorch's CUDA state.  You may need to call
     this explicitly if you are interacting with PyTorch via
     its C API, as Python bindings for CUDA functionality will not
     be until this initialization takes place.  Ordinary users
@@ -151,7 +159,6 @@ def _lazy_init():
             "Cannot re-initialize CUDA in forked subprocess. " + msg)
     _check_driver()
     torch._C._cuda_init()
-    torch._C._cuda_sparse_init()
     _cudart = _load_cudart()
     _cudart.cudaGetErrorName.restype = ctypes.c_char_p
     _cudart.cudaGetErrorString.restype = ctypes.c_char_p
@@ -201,7 +208,7 @@ def check_error(res):
 
 
 class device(object):
-    """Context-manager that changes the selected device.
+    r"""Context-manager that changes the selected device.
 
     Arguments:
         idx (int): device index to select. It's a no-op if this argument
@@ -215,10 +222,10 @@ class device(object):
     def __enter__(self):
         if self.idx is -1:
             return
-        _lazy_init()
         self.prev_idx = torch._C._cuda_getDevice()
         if self.prev_idx != self.idx:
             torch._C._cuda_setDevice(self.idx)
+        _lazy_init()
 
     def __exit__(self, *args):
         if self.prev_idx != self.idx:
@@ -227,7 +234,7 @@ class device(object):
 
 
 class device_of(device):
-    """Context-manager that changes the current device to that of given object.
+    r"""Context-manager that changes the current device to that of given object.
 
     You can use both tensors and storages as arguments. If a given object is
     not allocated on a GPU, this is a no-op.
@@ -242,7 +249,7 @@ class device_of(device):
 
 
 def set_device(device):
-    """Sets the current device.
+    r"""Sets the current device.
 
     Usage of this function is discouraged in favor of :any:`device`. In most
     cases it's better to use ``CUDA_VISIBLE_DEVICES`` environmental variable.
@@ -256,7 +263,7 @@ def set_device(device):
 
 
 def get_device_name(device):
-    """Gets the name of a device.
+    r"""Gets the name of a device.
 
     Arguments:
         device (int): device for which to return the name. This function is a
@@ -267,7 +274,7 @@ def get_device_name(device):
 
 
 def get_device_capability(device):
-    """Gets the cuda capability of a device.
+    r"""Gets the cuda capability of a device.
 
     Arguments:
         device (int): device for which to return the name. This function is a
@@ -279,9 +286,17 @@ def get_device_capability(device):
         return torch._C._cuda_getDeviceCapability(device)
 
 
+def get_device_properties(device):
+    if not _initialized:
+        init()  # will define _get_device_properties and _CudaDeviceProperties
+    if device < 0 or device >= device_count():
+        raise AssertionError("Invalid device id")
+    return _get_device_properties(device)
+
+
 @contextlib.contextmanager
 def stream(stream):
-    """Context-manager that selects a given stream.
+    r"""Context-manager that selects a given stream.
 
     All CUDA kernels queued within its context will be enqueued on a selected
     stream.
@@ -308,44 +323,51 @@ def stream(stream):
 def device_count():
     """Returns the number of GPUs available."""
     if is_available():
-        _lazy_init()
         return torch._C._cuda_getDeviceCount()
     else:
         return 0
 
 
 def current_device():
-    """Returns the index of a currently selected device."""
+    r"""Returns the index of a currently selected device."""
     _lazy_init()
     return torch._C._cuda_getDevice()
 
 
 def synchronize():
-    """Waits for all kernels in all streams on current device to complete."""
+    r"""Waits for all kernels in all streams on current device to complete."""
     _lazy_init()
     return torch._C._cuda_synchronize()
 
 
 def current_stream():
-    """Returns a currently selected :class:`Stream`."""
+    r"""Returns a currently selected :class:`Stream`."""
     _lazy_init()
     return torch.cuda.Stream(_cdata=torch._C._cuda_getCurrentStream())
 
 
 def current_blas_handle():
-    """Returns cublasHandle_t pointer to current cuBLAS handle"""
+    r"""Returns cublasHandle_t pointer to current cuBLAS handle"""
+    _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
 
 
 def empty_cache():
-    """Releases all unoccupied cached memory currently held by the caching
+    r"""Releases all unoccupied cached memory currently held by the caching
     allocator so that those can be used in other GPU application and visible in
-    `nvidia-smi`."""
-    return torch._C._cuda_emptyCache()
+    `nvidia-smi`.
+
+    .. note::
+        :meth:`~torch.cuda.empty_cache` doesn't increase the amount of GPU
+        memory available for PyTorch. See :ref:`cuda-memory-management` for
+        more details about GPU memory management.
+    """
+    if _initialized:
+        torch._C._cuda_emptyCache()
 
 
 def memory_allocated(device=None):
-    """Returns the current GPU memory usage by tensors in bytes for a given
+    r"""Returns the current GPU memory usage by tensors in bytes for a given
     device.
 
     Arguments:
@@ -354,16 +376,19 @@ def memory_allocated(device=None):
                                 :meth:`~torch.cuda.current_device`, if
                                 :attr:`device` is ``None`` (default).
 
-    .. note:: This is likely less than the amount shown in `nvidia-smi` since
-    some unused memory can be held by the caching allocator and some context
-    needs to be created on GPU. """
+    .. note::
+        This is likely less than the amount shown in `nvidia-smi` since some
+        unused memory can be held by the caching allocator and some context
+        needs to be created on GPU. See :ref:`cuda-memory-management` for more
+        details about GPU memory management.
+    """
     if device is None:
         device = current_device()
     return torch._C._cuda_memoryAllocated(device)
 
 
 def max_memory_allocated(device=None):
-    """Returns the maxium GPU memory usage by tensors in bytes for a given
+    r"""Returns the maximum GPU memory usage by tensors in bytes for a given
     device.
 
     Arguments:
@@ -371,6 +396,10 @@ def max_memory_allocated(device=None):
                                 current device, given by
                                 :meth:`~torch.cuda.current_device`, if
                                 :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
     """
     if device is None:
         device = current_device()
@@ -378,7 +407,7 @@ def max_memory_allocated(device=None):
 
 
 def memory_cached(device=None):
-    """Returns the current GPU memory managed by the caching allocator in bytes
+    r"""Returns the current GPU memory managed by the caching allocator in bytes
     for a given device.
 
     Arguments:
@@ -386,6 +415,10 @@ def memory_cached(device=None):
                                 current device, given by
                                 :meth:`~torch.cuda.current_device`, if
                                 :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
     """
     if device is None:
         device = current_device()
@@ -393,7 +426,7 @@ def memory_cached(device=None):
 
 
 def max_memory_cached(device=None):
-    """Returns the maximum GPU memory managed by the caching allocator in bytes
+    r"""Returns the maximum GPU memory managed by the caching allocator in bytes
     for a given device.
 
     Arguments:
@@ -401,6 +434,10 @@ def max_memory_cached(device=None):
                                 current device, given by
                                 :meth:`~torch.cuda.current_device`, if
                                 :attr:`device` is ``None`` (default).
+
+    .. note::
+        See :ref:`cuda-memory-management` for more details about GPU memory
+        management.
     """
     if device is None:
         device = current_device()
@@ -428,7 +465,6 @@ from .random import *
 ################################################################################
 
 
-from ..tensor import _TensorBase
 from ..storage import _StorageBase
 
 
@@ -503,87 +539,6 @@ class HalfStorage(_CudaBase, torch._C.CudaHalfStorageBase, _StorageBase):
     pass
 
 
-class DoubleTensor(_CudaBase, torch._C.CudaDoubleTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return DoubleStorage
-
-
-class FloatTensor(_CudaBase, torch._C.CudaFloatTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return FloatStorage
-
-
-class LongTensor(_CudaBase, torch._C.CudaLongTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return LongStorage
-
-
-class IntTensor(_CudaBase, torch._C.CudaIntTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return IntStorage
-
-
-class ShortTensor(_CudaBase, torch._C.CudaShortTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type(cls):
-        return ShortStorage
-
-
-class CharTensor(_CudaBase, torch._C.CudaCharTensorBase, _TensorBase):
-
-    def is_signed(self):
-        # TODO
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return CharStorage
-
-
-class ByteTensor(_CudaBase, torch._C.CudaByteTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return False
-
-    @classmethod
-    def storage_type(cls):
-        return ByteStorage
-
-
-class HalfTensor(_CudaBase, torch._C.CudaHalfTensorBase, _TensorBase):
-
-    def is_signed(self):
-        return True
-
-    @classmethod
-    def storage_type():
-        return HalfStorage
-
-
 torch._storage_classes.add(DoubleStorage)
 torch._storage_classes.add(FloatStorage)
 torch._storage_classes.add(LongStorage)
@@ -592,21 +547,6 @@ torch._storage_classes.add(ShortStorage)
 torch._storage_classes.add(CharStorage)
 torch._storage_classes.add(ByteStorage)
 torch._storage_classes.add(HalfStorage)
-
-torch._tensor_classes.add(DoubleTensor)
-torch._tensor_classes.add(FloatTensor)
-torch._tensor_classes.add(LongTensor)
-torch._tensor_classes.add(IntTensor)
-torch._tensor_classes.add(ShortTensor)
-torch._tensor_classes.add(CharTensor)
-torch._tensor_classes.add(ByteTensor)
-torch._tensor_classes.add(HalfTensor)
-
-torch._integer_tensor_classes.add(LongTensor)
-torch._integer_tensor_classes.add(IntTensor)
-torch._integer_tensor_classes.add(ShortTensor)
-torch._integer_tensor_classes.add(CharTensor)
-torch._integer_tensor_classes.add(ByteTensor)
 
 from . import sparse
 from . import profiler

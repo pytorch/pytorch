@@ -1,11 +1,11 @@
 from numbers import Number
 import torch
 import math
+from torch.autograd import variable, Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 from torch.distributions.utils import clamp_probs
-from torch.autograd import Variable
 
 
 class Binomial(Distribution):
@@ -28,8 +28,8 @@ class Binomial(Distribution):
 
     Args:
         total_count (int): number of Bernoulli trials
-        probs (Tensor or Variable): Event probabilities
-        logits (Tensor or Variable): Event log-odds
+        probs (Tensor): Event probabilities
+        logits (Tensor): Event log-odds
     """
     params = {'probs': constraints.unit_interval}
     has_enumerate_support = True
@@ -61,6 +61,14 @@ class Binomial(Distribution):
     def support(self):
         return constraints.integer_interval(0, self.total_count)
 
+    @property
+    def mean(self):
+        return self.total_count * self.probs
+
+    @property
+    def variance(self):
+        return self.total_count * self.probs * (1 - self.probs)
+
     @lazy_property
     def logits(self):
         return probs_to_logits(self.probs, is_binary=True)
@@ -75,7 +83,8 @@ class Binomial(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape) + (self.total_count,)
-        return torch.bernoulli(self.probs.unsqueeze(-1).expand(shape)).sum(dim=-1)
+        with torch.no_grad():
+            return torch.bernoulli(self.probs.unsqueeze(-1).expand(shape)).sum(dim=-1)
 
     def log_prob(self, value):
         self._validate_log_prob_arg(value)

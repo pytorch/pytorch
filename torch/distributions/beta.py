@@ -3,11 +3,11 @@ from numbers import Number
 import torch
 from torch.distributions import constraints
 from torch.distributions.dirichlet import Dirichlet
-from torch.distributions.distribution import Distribution
+from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
-class Beta(Distribution):
+class Beta(ExponentialFamily):
     r"""
     Beta distribution parameterized by `concentration1` and `concentration0`.
 
@@ -19,9 +19,9 @@ class Beta(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        concentration1 (float or Tensor or Variable): 1st concentration parameter of the distribution
+        concentration1 (float or Tensor): 1st concentration parameter of the distribution
             (often referred to as alpha)
-        concentration0 (float or Tensor or Variable): 2nd concentration parameter of the distribution
+        concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
     params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
@@ -30,12 +30,22 @@ class Beta(Distribution):
 
     def __init__(self, concentration1, concentration0):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
-            concentration1_concentration0 = torch.Tensor([concentration1, concentration0])
+            concentration1_concentration0 = torch.tensor([concentration1, concentration0])
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
         self._dirichlet = Dirichlet(concentration1_concentration0)
         super(Beta, self).__init__(self._dirichlet._batch_shape)
+
+    @property
+    def mean(self):
+        return self.concentration1 / (self.concentration1 + self.concentration0)
+
+    @property
+    def variance(self):
+        total = self.concentration1 + self.concentration0
+        return (self.concentration1 * self.concentration0 /
+                (total.pow(2) * (total + 1)))
 
     def rsample(self, sample_shape=()):
         value = self._dirichlet.rsample(sample_shape).select(-1, 0)
@@ -66,3 +76,10 @@ class Beta(Distribution):
             return torch.Tensor([result])
         else:
             return result
+
+    @property
+    def _natural_params(self):
+        return (self.concentration1, self.concentration0)
+
+    def _log_normalizer(self, x, y):
+        return torch.lgamma(x) + torch.lgamma(y) - torch.lgamma(x + y)

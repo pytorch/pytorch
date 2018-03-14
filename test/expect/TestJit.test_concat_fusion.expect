@@ -1,9 +1,9 @@
 graph(%0 : Float(3, 20)
       %1 : Float(3, 20)) {
-  %2 : Float(6, 20) = fusion_group_0(%0, %1)
+  %2 : Float(6, 20) = FusionGroup_0(%0, %1)
   return (%2);
 }
-with fusion_group_0 = graph(%3 : Float(3, 20)
+with FusionGroup_0 = graph(%3 : Float(3, 20)
       %4 : Float(3, 20)) {
   %6 : Float(3, 20) = add[alpha={1}](%3, %4)
   %5 : Float(3, 20) = mul(%3, %4)

@@ -6,6 +6,7 @@ from functools import wraps, reduce
 from string import Template
 import torch
 import torch.cuda
+from torch.autograd import Variable
 from torch._utils import _accumulate
 
 try:
@@ -105,9 +106,8 @@ def _build_extension(ffi, cffi_wrapper_name, target_dir, verbose):
         tmpdir = tempfile.mkdtemp()
         ext_suf = '.pyd' if os.sys.platform == 'win32' else '.so'
         libname = cffi_wrapper_name + ext_suf
-        ffi.compile(tmpdir=tmpdir, verbose=verbose, target=libname)
-        shutil.copy(os.path.join(tmpdir, libname),
-                    os.path.join(target_dir, libname))
+        outfile = ffi.compile(tmpdir=tmpdir, verbose=verbose, target=libname)
+        shutil.copy(outfile, os.path.join(target_dir, libname))
     finally:
         shutil.rmtree(tmpdir)
 
@@ -191,7 +191,7 @@ def _wrap_function(function, ffi):
     @wraps(function)
     def safe_call(*args, **kwargs):
         args = tuple(ffi.cast(_torch_to_cffi.get(type(arg), 'void') + '*', arg._cdata)
-                     if torch.is_tensor(arg) or torch.is_storage(arg)
+                     if torch.is_tensor(arg) or torch.is_storage(arg) or isinstance(arg, Variable)
                      else arg
                      for arg in args)
         args = (function,) + args

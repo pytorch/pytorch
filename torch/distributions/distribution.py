@@ -46,13 +46,34 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    @property
+    def mean(self):
+        """
+        Returns the mean of the distribution.
+        """
+        raise NotImplementedError
+
+    @property
+    def variance(self):
+        """
+        Returns the variance of the distribution.
+        """
+        raise NotImplementedError
+
+    @property
+    def stddev(self):
+        """
+        Returns the standard deviation of the distribution.
+        """
+        return self.variance.sqrt()
+
     def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
         """
-        z = self.rsample(sample_shape)
-        return z.detach() if hasattr(z, 'detach') else z
+        with torch.no_grad():
+            return self.rsample(sample_shape)
 
     def rsample(self, sample_shape=torch.Size()):
         """
@@ -76,7 +97,27 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
+        """
+        raise NotImplementedError
+
+    def cdf(self, value):
+        """
+        Returns the cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor):
+        """
+        raise NotImplementedError
+
+    def icdf(self, value):
+        """
+        Returns the inverse cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -92,7 +133,7 @@ class Distribution(object):
         use `itertools.product(m.enumerate_support())`.
 
         Returns:
-            Variable or Tensor iterating over dimension 0.
+            Tensor iterating over dimension 0.
         """
         raise NotImplementedError
 
@@ -101,7 +142,7 @@ class Distribution(object):
         Returns entropy of distribution, batched over batch_shape.
 
         Returns:
-            Tensor or Variable of shape batch_shape.
+            Tensor of shape batch_shape.
         """
         raise NotImplementedError
 
@@ -115,10 +156,7 @@ class Distribution(object):
         Args:
             sample_shape (torch.Size): the size of the sample to be drawn.
         """
-        shape = torch.Size(sample_shape + self._batch_shape + self._event_shape)
-        if not shape:
-            shape = torch.Size((1,))
-        return shape
+        return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
     def _validate_log_prob_arg(self, value):
         """
@@ -127,14 +165,14 @@ class Distribution(object):
         batch and event shapes.
 
         Args:
-            value (Tensor or Variable): the tensor whose log probability is to be
+            value (Tensor): the tensor whose log probability is to be
                 computed by the `log_prob` method.
         Raises
             ValueError: when the rightmost dimensions of `value` do not match the
                 distribution's batch and event shapes.
         """
-        if not (torch.is_tensor(value) or isinstance(value, Variable)):
-            raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
+        if not isinstance(value, torch.Tensor):
+            raise ValueError('The value argument to log_prob must be a Tensor')
 
         event_dim_start = len(value.size()) - len(self._event_shape)
         if value.size()[event_dim_start:] != self._event_shape:

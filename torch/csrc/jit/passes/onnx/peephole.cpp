@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 
+#include <ATen/optional.h>
+
 #if defined(_MSC_VER)
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
@@ -19,6 +21,11 @@ std::unordered_set<NodeKind> broadcasting = {
   kSub,
   kGemm,
 };
+
+bool isRNN(const Node *node) {
+  auto k = node->kind();
+  return k == kRNN || k == kLSTM || k == kGRU;
+}
 
 bool isNopTranspose(const std::vector<int64_t> & perm) {
   for (int64_t i = 0, perm_size = perm.size(); i < perm_size; i++)
@@ -49,14 +56,21 @@ bool isBroadcasting(Node *node) {
 // dimensions that are simply one, since they can be trivially broadcasted.
 // When iterating over the dimension sizes (with reduced 'from' tensor),
 // starting at the trailing dimension, the dimension sizes must either be equal,
-// or one of them does not exist.
+// or one of them does not exist. If a broadcast candidate is not found at the
+// trailing dimension, search at the leading dimension. If one is found here,
+// return the `axis` argument to be emitted to ONNX on the broadcasting operator
 //
 // Note that this is NOT equivalent to numpy broadcasting semantics, and do
-// not represent that generalized broadcasting that Pytorch implements in
-// general. Rather, this is Caffe2-style broadcasting.
-bool fusibleExpandTo(at::IntList from, at::IntList to) {
+// not represent the generalized broadcasting that Pytorch implements.
+// Rather, this is Caffe2-style broadcasting.
+//
+// Return value is 1) Whether this expand is fusable, 2) the `axis` argument we
+// should emit to ONNX. Coming from a Pytorch frontend, this should either not
+// be emitted (if we're broadcasting trailing dimensions) or it should be
+// emitted as `0` (leading dimensions.)
+std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::IntList to) {
   if (from.size() > to.size()) {
-    return false;
+    return std::make_tuple(false, at::nullopt);
   }
   ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
   while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
@@ -68,19 +82,40 @@ bool fusibleExpandTo(at::IntList from, at::IntList to) {
 
   ssize_t f = from_dim_end;
   ssize_t t = to.size() - 1;
+  bool trailing_expand = true;
   for (; f >= from_dim_start && t >= 0; --f, --t) {
-    if (from[f] != to[t]) return false;
+    if (from[f] != to[t]) {
+      trailing_expand = false;
+      break;
+    }
   }
 
   // In the case that the 'to' tensor has leading ones in the same place that
   // the 'from' tensor does, f will be less than from_dim_start rather than
   // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
-  return f <= from_dim_start;
+  if (trailing_expand && f <= from_dim_start) {
+    return std::make_tuple(true, at::nullopt);
+  }
+
+  f = from_dim_start;
+  t = 0;
+  bool leading_expand = true;
+  for (; f <= from_dim_end && t < to.size(); ++f, ++t) {
+    if (from[f] != to[t]) {
+      leading_expand = false;
+      break;
+    }
+  }
+
+  if (leading_expand && f >= from_dim_end) {
+    return std::make_tuple(true, 0);
+  }
+
+  return std::make_tuple(false, at::nullopt);
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
+  for(auto n : graph->nodes()) {
 
     // Can't fuse into nodes that don't support broadcasting
     if (!isBroadcasting(n)) continue;
@@ -104,15 +139,22 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     // always have this information (because expands are only ever traced,
     // not generated from symbolic), but if for some reason we don't
     // have it, we need to skip.
-    if (!unexpanded_rhs->hasType()) continue;
+    if (!unexpanded_rhs->isTensor()) continue;
 
     // Not all broadcasts are supported by ONNX broadcast.
-    if (!fusibleExpandTo(unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-                         expanded_rhs->output()->type()->expect<TensorType>()->sizes())   // to
-       ) continue;
+    bool fusible_expand;
+    at::optional<size_t> axis;
+    std::tie(fusible_expand, axis) = fusibleExpandTo(
+        unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
+        expanded_rhs->output()->type()->expect<TensorType>()->sizes()); // to
+    if (!fusible_expand)
+      continue;
 
     n->replaceInput(input_index, unexpanded_rhs);
     n->i_(kbroadcast, 1);
+    if (axis) {
+      n->i_(kaxis, axis.value());
+    }
     if (!expanded_rhs->hasUses()) {
       expanded_rhs->destroy();
     }
@@ -120,8 +162,7 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 }
 
 void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
+  for(auto n : graph->nodes()) {
 
     if (n->kind() == kTranspose && n->input()->node()->kind() == kTranspose) {
       auto origInput = n->input();
@@ -136,9 +177,8 @@ void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
 }
 
 void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
-
+  for(auto it = graph->nodes().begin(), end = graph->nodes().end(); it != end; ++it) {
+    auto n = *it;
     if (n->kind() == kTranspose) {
       if (isNopTranspose(n->is(kperm))) {
         n->replaceAllUsesWith(n->input()->node());
@@ -152,8 +192,7 @@ void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
 void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
   static const std::vector<int64_t> simpleTransPerm({1,0});
 
-  for (auto it = graph->begin(); it != graph->end(); ++it) {
-    auto* n = *it;
+  for(auto n : graph->nodes()) {
 
     if (n->kind() == kGemm) {
       for (size_t i : {0,1}) {
@@ -171,6 +210,87 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
   }
 }
 
+// Why this is here:
+//
+//   Pytorch has a "packed" representation of sequences, as well as a
+//   "padded" representation. ONNX has only one representation,
+//   corresponding to pytorch's "padded". Therefore, we need to remove
+//   any use of packed sequences before exporting.
+//
+// What this does:
+//
+//   This code uses the observation that
+//     RNN(PackPadded(x)) == PackPadded(RNN(x))
+//   and converts the first form to the second whenever possible,
+//   "pushing" the packing operation past the RNN operation. Then,
+//   the removeNopPacking pass removes the packing operations
+//   entirely by pairing them with their inverse PadPacked. If the
+//   input graph does not pair the operations, export will fail.
+void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != kPackPadded) {
+      continue;
+    }
+    if (n->outputs()[0]->uses().size() != 1) {
+      // For now, only handle the case where there is one consumer.
+      continue;
+    }
+    Node * rnn = n->outputs()[0]->uses()[0].user;
+    if (!isRNN(rnn)) {
+      continue;
+    }
+
+    // remove PackPadded from in front of the RNN
+    n->outputs()[0]->replaceAllUsesWith(n->inputs()[0]);
+
+    // note there can be multiple uses of the length blob. If we are
+    // translating a multi-level RNN it will be an input to each level.
+    n->outputs()[1]->replaceFirstUseWith(n->inputs()[1]);
+
+    // and insert new PackPadded after the RNN
+    Node * newPackPadded = graph->create(kPackPadded, 2);
+    newPackPadded->insertAfter(rnn);
+
+    // make things consume from the new PackPadded
+    rnn->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
+    n->outputs()[1]->replaceAllUsesWith(newPackPadded->outputs()[1]);
+
+    // setup the new PackPadded's inputs
+    newPackPadded->addInput(rnn->outputs()[0]);
+    newPackPadded->addInput(n->inputs()[1]);
+
+    it.destroyCurrent();
+  }
+}
+
+void removeNopPacking(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != kPadPacked) {
+      continue;
+    }
+    Node* input = n->inputs()[0]->node();
+    if (input->kind() != kPackPadded) {
+      continue;
+    }
+    if (input->outputs()[0] != n->inputs()[0]) {
+      continue;
+    }
+    if (input->outputs()[1] != n->inputs()[1]) {
+      continue;
+    }
+    n->outputs()[0]->replaceAllUsesWith(input->inputs()[0]);
+    n->outputs()[1]->replaceAllUsesWith(input->inputs()[1]);
+
+    n->removeAllInputs();
+    it.destroyCurrent();
+  }
+}
+
+
 // This optimization does ONNX-specific peephole optimizations.
 //
 // At the moment, here are the optimizations it does:
@@ -179,8 +299,9 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
 //    local information.  This optimization is not useful for PyTorch as 'expand'
 //    is free.
 //  - Fusing of consecutive transposes
-//  - Elimiation of NOP transposes
+//  - Elimination of NOP transposes
 //  - Fusing of transposes into Gemm
+//  - Elimination of PaddedSequences
 //
 // Before you write an optimization here, ask yourself, "Could I do this
 // optimization on ATen operators"?  If so, you should seriously consider
@@ -195,6 +316,8 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   fuseConsecutiveTransposes(graph);
   eliminateNopTranspose(graph);
   fuseTransposeIntoGemm(graph);
+  pushPackingPastRnn(graph);
+  removeNopPacking(graph);
 }
 
 }}

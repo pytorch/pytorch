@@ -1,7 +1,5 @@
 #pragma once
 
-#include "ATen/Config.h"
-
 #include <assert.h>
 #include <stdint.h>
 #include <stdexcept>
@@ -36,18 +34,6 @@ public:
   }
 
   AT_FORALL_SCALAR_TYPES(DEFINE_IMPLICIT_CTOR)
-
-#if AT_CUDA_ENABLED()
-  Scalar(half vv)
-  : tag(Tag::HAS_d) {
-#if CUDA_VERSION < 9000
-    v.d  = convert<double, Half>(Half{vv.x});
-#else
-    __half_raw vv_raw(vv);
-    v.d = convert<double,Half>(Half{vv_raw.x});
-#endif
-  }
-#endif
 
 #undef DEFINE_IMPLICIT_CTOR
 

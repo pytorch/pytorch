@@ -12,7 +12,7 @@ namespace {
 
 bool hasHandleOutput(Node *node) {
   auto last_output = node->outputs().back();
-  return last_output->typeOption() && last_output->typeOption()->kind() == TypeKind::HandleType;
+  return last_output->isHandle();
 }
 
 bool hasUsedHandle(Node *node) {
@@ -80,9 +80,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        if (!outputs[i]->hasType()) {
-          outputs[i]->setType(old->typeOption());
-        }
+        outputs[i]->setType(old->type());
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
@@ -150,8 +148,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
         py_inputs[input_nr++] = py::cast(envFn(input));
     }
 
-    auto scope_guard = ctx.graph->set_current_scope_temporary(n->scope());
-
+    WithCurrentScope scope_guard(*ctx.graph, n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
 
     processSymbolicOutput(n->kind().toString(), n, raw_output);
@@ -188,8 +185,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
       py_symbolic_args[input_nr++] = obj;
     }
 
-    auto scope_guard = ctx.graph->set_current_scope_temporary(op->scope());
-
+    WithCurrentScope scope_guard(*ctx.graph, op->scope());
     // Call the symbolic function
     // Use a little trampoline function so we can give good error messages
     // upon argument mismatch

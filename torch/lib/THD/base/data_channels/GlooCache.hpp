@@ -81,9 +81,10 @@ struct GlooCache {
     std::shared_ptr<std::mutex>      // mutex to protect same algorithm from running concurrently
   >;
 
-  GlooCache(rank_type rank, std::shared_ptr<::gloo::transport::Device> device)
+  GlooCache(rank_type rank,
+            std::vector<std::shared_ptr<::gloo::transport::Device>> deviceList)
    : _rank(rank)
-   , _device(device)
+   , _deviceList(deviceList)
   {}
 
   GlooCache(GlooCache const&)      = delete;
@@ -113,10 +114,25 @@ struct GlooCache {
     const DataChannelGloo::Group& group,
     const std::string& prefix
   ) {
+    /**
+     * We currently only supports a single Infiniband interface. In other words,
+     * if there are multiple Infiniband devices in the system, Gloo will detect
+     * all of them and use the first device.
+     *
+     * TODO: This can be extended later to utilize multiple Infiniband devices
+     *
+     * For ethernet, _deviceList[0] will always have the default ethernet
+     * device that is detected from the user's provided IP address and there
+     * won't be multiple one device in _deviceList
+     *
+     * For Infiniband, _deviceList[0], which is the first found IB interfance,
+     * will be used by all Gloo operations.
+     */
+    size_t curDevice = 0;
     auto context = std::make_shared<context_type>(
         group.mustGetGroupRank(_rank), group.size());
     prefix_store_type prefix_store(prefix, *group._store);
-    context->connectFullMesh(prefix_store, _device);
+    context->connectFullMesh(prefix_store, _deviceList[curDevice]);
     return context;
   }
 
@@ -210,7 +226,7 @@ private:
   }
 
   rank_type _rank;
-  std::shared_ptr<::gloo::transport::Device> _device;
+  std::vector<std::shared_ptr<::gloo::transport::Device>> _deviceList;
   std::shared_ptr<store_type> _store;
 
   std::mutex _mutex;
@@ -309,7 +325,7 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
       }
       auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-#if defined(GLOO_USE_IBVERBS) && GLOO_USE_IBVERBS
+#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
       // Only enable GPU direct if the device supports it
       if (context->getDevice()->hasGPUDirect()) {
         algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
@@ -375,31 +391,32 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
 #ifdef WITH_CUDA
     } else if (device == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
-      
-      #if defined(GLOO_USE_IBVERBS) && GLOO_USE_IBVERBS
-            // Only enable GPU direct if the device supports it
-            if (context->getDevice()->hasGPUDirect()) {
-              algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,
-                                      ::gloo::CudaDeviceWorkspace<T>>>(
-                context,
-                std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-                count,
-                src_rank,
-                0,
-                std::vector<cudaStream_t>{stream});
-            } else
-      #endif
-            {
-              algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,
-                                      ::gloo::CudaHostWorkspace<T>>>( 
-                context,
-                std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
-                count,
-                src_rank,
-                0,
-                std::vector<cudaStream_t>{stream});
-            }
+
+#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+      // Only enable GPU direct if the device supports it
+      if (context->getDevice()->hasGPUDirect()) {
+        algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,
+                                ::gloo::CudaDeviceWorkspace<T>>>(
+          context,
+          std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+          count,
+          src_rank,
+          0,
+          std::vector<cudaStream_t>{stream});
+      } else
 #endif
+      {
+        algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,
+                                ::gloo::CudaHostWorkspace<T>>>(
+          context,
+          std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
+          count,
+          src_rank,
+          0,
+          std::vector<cudaStream_t>{stream});
+      }
+#endif
+
     } else {
       throw std::runtime_error("unsupported tensor device in Gloo broadcast");
     }

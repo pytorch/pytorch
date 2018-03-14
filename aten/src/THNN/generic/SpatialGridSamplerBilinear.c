@@ -19,14 +19,12 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)
 
   int nbatch   = THTensor_(size)(input, 0);
   int channels = THTensor_(size)(input, 1);
-  int iheight   = THTensor_(size)(input, 2);
-  int iwidth    = THTensor_(size)(input, 3);
   int oheight   = THTensor_(size)(grid, 1);
   int owidth    = THTensor_(size)(grid, 2);
 
   THNN_CHECK_DIM_SIZE(grid, 4, 0, nbatch);
   THNN_CHECK_DIM_SIZE(grid, 4, 3, 2);
-  
+
   if (gradOutput != NULL) {
     THNN_CHECK_DIM_SIZE(gradOutput, 4, 0, nbatch);
     THNN_CHECK_DIM_SIZE(gradOutput, 4, 1, channels);

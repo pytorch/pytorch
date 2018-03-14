@@ -1,33 +1,35 @@
 #include "torch/csrc/autograd/functions/utils.h"
-#include "torch/csrc/utils/functional.h"
-#include "torch/csrc/jit/tracer.h"
 
+#include "torch/csrc/autograd/edge.h"
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 
 #include <sstream>
+#include <vector>
 
 namespace torch { namespace autograd {
 
 variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
                            function_constructor ctr) {
-  auto flags = Function::flags(inputs);
   variable_list result;
   result.reserve(outputs.size());
-  if (!flags.is_executable) {
+  if (!any_variable_requires_grad(inputs)) {
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(make_variable(output, false));
+        result.push_back(make_variable(output, /*requires_grad=*/false));
       } else {
         result.emplace_back();
       }
     }
   } else {
-    auto grad_fn = ctr(std::move(flags));
+    auto grad_fn = ctr(collect_next_edges(inputs));
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.emplace_back(make_variable(output, grad_fn));
+        auto variable = autograd::make_variable(output, /*requires_grad=*/false);
+        autograd::create_gradient_edge(variable, grad_fn);
+        result.push_back(std::move(variable));
       } else {
-        ++grad_fn->num_inputs;
+        grad_fn->bump_inputs();
         result.emplace_back();
       }
     }
@@ -53,5 +55,4 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
     }
   }
 }
-
-}}
+}} // namespace torch::autograd

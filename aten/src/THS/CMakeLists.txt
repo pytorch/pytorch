@@ -1,5 +1,5 @@
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THSTensor.c
+  ${CMAKE_CURRENT_SOURCE_DIR}/THSTensor.cpp
 PARENT_SCOPE)
 
 set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE}
@@ -15,7 +15,7 @@ INSTALL(FILES
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THS")
 
 INSTALL(FILES
-  generic/THSTensor.c
+  generic/THSTensor.cpp
   generic/THSTensor.h
   generic/THSTensorMath.c
   generic/THSTensorMath.h

@@ -9,7 +9,7 @@ int main()
 {
    std::cout << "hello\n";
 
-   Tensor tensor = CPU(kDouble).rand({256,32});
+   Tensor tensor = rand(CPU(kDouble), {256,32});
 
    TensorDataset dataset(tensor);
    DatasetIterator datasetiterator(dataset);

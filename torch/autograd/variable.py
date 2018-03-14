@@ -11,7 +11,7 @@ from torch._C import _add_docstr
 
 
 class Variable(_C._VariableBase):
-    """Wraps a tensor and records the operations applied to it.
+    r"""Wraps a tensor and records the operations applied to it.
 
     Variable is a thin wrapper around a Tensor object, that also holds
     the gradient w.r.t. to it, and a reference to a function that created it.
@@ -45,20 +45,27 @@ class Variable(_C._VariableBase):
         if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
-        result = type(self)(self.data.clone())
-        result.requires_grad = self.requires_grad
-        memo[id(self)] = result
-        return result
+        if id(self) in memo:
+            return memo[id(self)]
+        with torch.no_grad():
+            if self.is_sparse:
+                new_tensor = self.clone()
+            else:
+                new_storage = self.storage().__deepcopy__(memo)
+                new_tensor = self.new()
+                new_tensor.set_(new_storage, self.storage_offset(), self.size(), self.stride())
+            memo[id(self)] = new_tensor
+            new_tensor.requires_grad = self.requires_grad
+            return new_tensor
 
     def __reduce_ex__(self, proto):
-        state = (self.requires_grad, False, self._backward_hooks)
-        if proto > 1:
-            return type(self), (self.data,), state
-        if sys.version_info[0] == 2:
-            from copy_reg import __newobj__
-        else:
-            from copyreg import __newobj__
-        return __newobj__, (type(self), self.data), state
+        args = (self.storage(),
+                self.storage_offset(),
+                tuple(self.size()),
+                self.stride(),
+                self.requires_grad,
+                self._backward_hooks)
+        return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
         if len(state) == 5:
@@ -70,34 +77,20 @@ class Variable(_C._VariableBase):
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
-        if self.is_sparse:
-            data_str = ' \n{} with indices:\n{}and values:\n{}'.format(
-                torch.typename(self.data), self._indices().data,
-                self._values().data)
-        else:
-            data_str = torch._tensor_str._str(self.data, False)
-        strt = 'Variable containing:' + data_str
-        # let's make our own Variable-specific footer
-        size_str = '(' + ','.join(str(size) for size in self.size()) + (',)' if len(self.size()) == 1 else ')')
-        device_str = '' if not self.is_cuda else \
-            ' (GPU {})'.format(self.get_device())
-        strt += '[{} of size {}{}]\n'.format(torch.typename(self.data),
-                                             size_str, device_str)
-
         # All strings are unicode in Python 3, while we have to encode unicode
         # strings in Python2. If we can't, let python decide the best
         # characters to replace unicode characters with.
         if sys.version_info > (3,):
-            return strt
+            return torch._tensor_str._str(self)
         else:
             if hasattr(sys.stdout, 'encoding'):
-                return strt.encode(
+                return torch._tensor_str._str(self).encode(
                     sys.stdout.encoding or 'UTF-8', 'replace')
             else:
-                return strt.encode('UTF-8', 'replace')
+                return torch._tensor_str._str(self).encode('UTF-8', 'replace')
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False):
-        """Computes the gradient of current variable w.r.t. graph leaves.
+        r"""Computes the gradient of current variable w.r.t. graph leaves.
 
         The graph is differentiated using the chain rule. If the variable is
         non-scalar (i.e. its data has more than one element) and requires
@@ -127,7 +120,7 @@ class Variable(_C._VariableBase):
         torch.autograd.backward(self, gradient, retain_graph, create_graph)
 
     def register_hook(self, hook):
-        """Registers a backward hook.
+        r"""Registers a backward hook.
 
         The hook will be called every time a gradient with respect to the
         variable is computed. The hook should have the following signature::
@@ -196,8 +189,8 @@ class Variable(_C._VariableBase):
 
     .. note::
 
-      Returned Variable uses the same data tensor, as the original one, and
-      in-place modifications on either of them will be seen, and may trigger
+      Returned Variable uses the same data tensor as the original one.
+      In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
     """)
 
@@ -228,11 +221,6 @@ class Variable(_C._VariableBase):
         self.register_hook(retain_grad_hook)
         self.retains_grad = True
 
-    def type_as(self, other):
-        if torch.is_tensor(other):
-            other = Variable(other)
-        return super(Variable, self).type_as(other)
-
     def is_pinned(self):
         r"""Returns true if this tensor resides in pinned memory"""
         storage = self.storage()
@@ -252,37 +240,42 @@ class Variable(_C._VariableBase):
         and for CUDA tensors. Tensors in shared memory cannot be resized.
         """
         self.storage().share_memory_()
+        return self
 
     def view_as(self, tensor):
         return self.view(tensor.size())
 
-    def repeat(self, *repeats):
-        from ._functions import Repeat
-        if len(repeats) == 1 and isinstance(repeats[0], torch.Size):
-            repeats = repeats[0]
-        else:
-            repeats = torch.Size(repeats)
-        return Repeat.apply(self, repeats)
-
     def btrifact(self, info=None, pivot=True):
+        r"""See :func:`torch.btrifact`
+        """
         if info is not None:
             warnings.warn("info option in btrifact is deprecated and will be removed in v0.4, "
-                          "consider using btrifact_with_info instead")
+                          "consider using btrifact_with_info instead", stacklevel=2)
             factorization, pivots, _info = super(Variable, self).btrifact_with_info(pivot=pivot)
             if not isinstance(info, Variable) or info.type() != _info.type():
                 raise ValueError('btrifact expects info to be a Variable of IntTenor')
-            info.data.copy_(_info.data)
+            info.resize_as_(_info).copy_(_info)
             return factorization, pivots
         else:
             return super(Variable, self).btrifact(pivot=pivot)
 
     def resize(self, *sizes):
+        warnings.warn("non-inplace resize is deprecated")
         from ._functions import Resize
         return Resize.apply(self, sizes)
 
     def resize_as(self, variable):
+        warnings.warn("non-inplace resize_as is deprecated")
         from ._functions import Resize
         return Resize.apply(self, variable.size())
+
+    def split(self, split_size, dim=0):
+        r"""See :func:`torch.split`
+        """
+        if isinstance(split_size, int):
+            return super(Variable, self).split(split_size, dim)
+        else:
+            return super(Variable, self).split_with_sizes(split_size, dim)
 
     def index_add(self, dim, index, tensor):
         return self.clone().index_add_(dim, index, tensor)
@@ -316,15 +309,32 @@ class Variable(_C._VariableBase):
     def expand_as(self, tensor):
         return self.expand(tensor.size())
 
+    def unique(self, sorted=False, return_inverse=False):
+        r"""Returns the unique scalar elements of the tensor as a 1-D tensor.
+
+        See :func:`torch.unique`
+        """
+        output, inverse_indices = self._unique(
+            sorted=sorted, return_inverse=return_inverse)
+        if return_inverse:
+            return output, inverse_indices
+        else:
+            return output
+
     def __rsub__(self, other):
         return -self + other
 
     def __rdiv__(self, other):
         return self.reciprocal() * other
     __rtruediv__ = __rdiv__
-    __itruediv__ = _C._VariableBase.__div__
+    __itruediv__ = _C._VariableBase.__idiv__
 
     __pow__ = _C._VariableBase.pow
+
+    def __format__(self, format_spec):
+        if self.dim() == 0:
+            return self.item().__format__(format_spec)
+        return object.__format__(self, format_spec)
 
     def __ipow__(self, other):
         raise NotImplementedError("in-place pow not implemented")
@@ -340,9 +350,12 @@ class Variable(_C._VariableBase):
     __le__ = _C._VariableBase.le
     __gt__ = _C._VariableBase.gt
     __ge__ = _C._VariableBase.ge
+    __abs__ = _C._VariableBase.abs
 
     def __len__(self):
-        return len(self.data)
+        if self.dim() == 0:
+            raise TypeError("len() of a 0-d tensor")
+        return self.shape[0]
 
     def __iter__(self):
         # NB: we use 'imap' and not 'map' here, so that in Python 2 we get a
@@ -351,6 +364,8 @@ class Variable(_C._VariableBase):
         # (e.g., if you zip(*hiddens), the eager map will force all the
         # indexes of hiddens[0] before hiddens[1], while the generator
         # map will interleave them.)
+        if self.dim() == 0:
+            raise TypeError('iteration over a 0-d tensor')
         return iter(imap(lambda i: self[i], range(self.size(0))))
 
     def __hash__(self):
@@ -376,7 +391,7 @@ class Variable(_C._VariableBase):
         if array.dtype == bool:
             # Workaround, torch has no built-in bool tensor
             array = array.astype('uint8')
-        return Variable.from_numpy(array)
+        return torch.from_numpy(array)
 
     _torch = torch._C._VariableFunctions
 

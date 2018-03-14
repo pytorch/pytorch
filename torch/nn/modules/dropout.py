@@ -13,7 +13,7 @@ class Dropout(Module):
     `Improving neural networks by preventing co-adaptation of feature
     detectors`_ .
 
-    Furthermore, the outputs are scaled by a factor of *1/(1-p)* during
+    Furthermore, the outputs are scaled by a factor of :math:`\frac{1}{1-p}` during
     training. This means that during evaluation the module simply computes an
     identity function.
 
@@ -28,7 +28,7 @@ class Dropout(Module):
     Examples::
 
         >>> m = nn.Dropout(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16))
+        >>> input = torch.randn(20, 16)
         >>> output = m(input)
 
     .. _Improving neural networks by preventing co-adaptation of feature
@@ -57,12 +57,12 @@ class Dropout2d(Module):
     r"""Randomly zeroes whole channels of the input tensor.
     The channels to zero-out are randomized on every forward call.
 
-    *Usually the input comes from Conv2d modules.*
+    *Usually the input comes from `nn.Conv2d` modules.*
 
     As described in the paper
     `Efficient Object Localization Using Convolutional Networks`_ ,
     if adjacent pixels within feature maps are strongly correlated
-    (as is normally the case in early convolution layers) then iid dropout
+    (as is normally the case in early convolution layers) then i.i.d. dropout
     will not regularize the activations and will otherwise just result
     in an effective learning rate decrease.
 
@@ -70,7 +70,7 @@ class Dropout2d(Module):
     feature maps and should be used instead.
 
     Args:
-        p (float, optional): probability of an element to be zeroed.
+        p (float, optional): probability of an element to be zero-ed.
         inplace (bool, optional): If set to ``True``, will do this operation
             in-place
 
@@ -81,7 +81,7 @@ class Dropout2d(Module):
     Examples::
 
         >>> m = nn.Dropout2d(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 32, 32))
+        >>> input = torch.randn(20, 16, 32, 32)
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
@@ -110,12 +110,12 @@ class Dropout3d(Module):
     r"""Randomly zeroes whole channels of the input tensor.
     The channels to zero are randomized on every forward call.
 
-    *Usually the input comes from Conv3d modules.*
+    *Usually the input comes from `nn.Conv3d` modules.*
 
     As described in the paper
     `Efficient Object Localization Using Convolutional Networks`_ ,
     if adjacent pixels within feature maps are strongly correlated
-    (as is normally the case in early convolution layers) then iid dropout
+    (as is normally the case in early convolution layers) then i.i.d. dropout
     will not regularize the activations and will otherwise just result
     in an effective learning rate decrease.
 
@@ -134,7 +134,7 @@ class Dropout3d(Module):
     Examples::
 
         >>> m = nn.Dropout3d(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16, 4, 32, 32))
+        >>> input = torch.randn(20, 16, 4, 32, 32)
         >>> output = m(input)
 
     .. _Efficient Object Localization Using Convolutional Networks:
@@ -189,7 +189,7 @@ class AlphaDropout(Module):
     Examples::
 
         >>> m = nn.AlphaDropout(p=0.2)
-        >>> input = autograd.Variable(torch.randn(20, 16))
+        >>> input = torch.randn(20, 16)
         >>> output = m(input)
 
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515

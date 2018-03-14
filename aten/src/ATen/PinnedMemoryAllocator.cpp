@@ -2,6 +2,7 @@
 
 #include "Context.h"
 
+#include "ATen/Config.h"
 #if AT_CUDA_ENABLED()
 #include <THC/THC.h>
 #endif
