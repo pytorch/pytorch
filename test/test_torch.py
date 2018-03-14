@@ -431,55 +431,6 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_dim_reduction(self, cast):
-        example = [[-1, 2, 1], [5, 3, 6]]
-
-        types = ['torch.DoubleTensor',
-                 'torch.FloatTensor',
-                 'torch.LongTensor',
-                 'torch.IntTensor',
-                 'torch.ShortTensor',
-                 'torch.ByteTensor']
-
-        # This won't test for 256bit instructions, since we usually
-        # only work on 1 cacheline (1024bit) at a time and these
-        # examples aren't big enough to trigger that.
-        for tname in types:
-            x = cast(torch.FloatTensor(example).type(tname))
-            self.assertEqual(x.sum().item(), 16)
-            self.assertEqual(x.sum(0), torch.FloatTensor([4, 5, 7]))
-            self.assertEqual(x.sum(1), torch.FloatTensor([2, 14]))
-
-        # Mean not supported for Int types
-        for tname in types[:2]:
-            x = cast(torch.FloatTensor(example).type(tname))
-            self.assertEqual(x.mean().item(), 16.0 / 6)
-            self.assertEqual(x.mean(0), torch.FloatTensor([2.0, 2.5, 7.0 / 2]))
-            self.assertEqual(x.mean(1), torch.FloatTensor([2.0 / 3, 14.0 / 3]))
-
-        for tname in types:
-            if tname == 'torch.ByteTensor':  # Overflows
-                continue
-            x = cast(torch.FloatTensor(example).type(tname))
-            self.assertEqual(x.prod().item(), -180)
-            self.assertEqual(x.prod(0), torch.FloatTensor([-5, 6, 6]))
-            self.assertEqual(x.prod(1), torch.FloatTensor([-2, 90]))
-
-        for tname in types:
-            if tname == 'torch.ByteTensor':  # Doesn't support negative values
-                continue
-            x = cast(torch.FloatTensor(example).type(tname))
-            self.assertEqual(x.max().item(), 6)
-            self.assertEqual(x.max(0), (torch.FloatTensor([5, 3, 6]), torch.FloatTensor([1, 1, 1])))
-            self.assertEqual(x.max(1), (torch.FloatTensor([2, 6]), torch.FloatTensor([1, 2])))
-
-        for tname in types:
-            if tname == 'torch.ByteTensor':  # Doesn't support negative values
-                continue
-            x = cast(torch.FloatTensor(example).type(tname))
-            self.assertEqual(x.min().item(), -1)
-            self.assertEqual(x.min(0), (torch.FloatTensor([-1, 2, 1]), torch.FloatTensor([0, 0, 0])))
-            self.assertEqual(x.min(1), (torch.FloatTensor([-1, 3]), torch.FloatTensor([0, 1])))
-
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
