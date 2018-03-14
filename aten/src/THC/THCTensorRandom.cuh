@@ -144,12 +144,7 @@ __device__ int binarySearchForMultinomial(T* dist,
     // the code below will move it to the last non-zero probability
     // this actually can happen when the random number is 1
     // (github pytorch issue #4858).
-    if (size > 0) {
-      start = size - 1;
-    }
-    else {
-      start = 0;
-    }
+    start = size - 1;
   }
 
   T curVal = dist[start];
