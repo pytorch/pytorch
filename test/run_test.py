@@ -57,9 +57,8 @@ def print_to_stderr(message):
 
 
 def shell(command, cwd):
-    # bufsize = 1 means line-buffered output (rather than fully-buffered)
     return subprocess.call(
-        shlex.split(command), universal_newlines=True, bufsize=1, cwd=cwd) == 0
+        shlex.split(command), universal_newlines=True, cwd=cwd) == 0
 
 
 def get_shell_output(command):
