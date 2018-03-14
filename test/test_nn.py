@@ -4145,6 +4145,13 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
 
+    def test_bilinear_broadcasting(self):
+        m = nn.Bilinear(5, 6, 8)
+        input1 = torch.randn(2, 3, 5)
+        input2 = torch.randn(2, 3, 6)
+        expected = m(input1.view(6, 5), input2.view(6, 6)).view(2, 3, 8)
+        self.assertEqual(expected, m(input1, input2))
+
     def test_conv_tbc(self):
         inp = Variable(torch.randn(9, 4, 5), requires_grad=True)
         weight = Variable(torch.randn(3, 5, 6), requires_grad=True)

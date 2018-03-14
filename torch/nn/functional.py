@@ -1001,10 +1001,7 @@ def linear(input, weight, bias=None):
 
 
 def bilinear(input1, input2, weight, bias=None):
-    if bias is None:
-        return Bilinear.apply(input1, input2, weight)
-    else:
-        return Bilinear.apply(input1, input2, weight, bias)
+    return torch._C._VariableFunctions.bilinear(input1, input2, weight, bias)
 
 
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
