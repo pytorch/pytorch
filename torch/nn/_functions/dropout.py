@@ -76,6 +76,7 @@ class Zoneout(InplaceFunction):
     @classmethod
     def forward(cls, ctx, current_input, previous_input, p=None, mask=None,
                 train=False, inplace=False):
+        # Flag validation
         if p is None and mask is None:
             raise ValueError('Either p or mask must be provided')
         if p is not None and mask is not None:
@@ -87,6 +88,20 @@ class Zoneout(InplaceFunction):
                 not isinstance(mask, torch.ByteTensor) and \
                 not isinstance(mask, torch.cuda.ByteTensor):
             raise ValueError("mask must be a ByteTensor")
+        ctx.p = p
+        ctx.train = train
+        ctx.inplace = inplace
+
+        if ctx.inplace:
+            ctx.mark_dirty(current_input)
+            output = current_input
+        else:
+            output = current_input.clone()
+
+        if not ctx.train:
+            return output
+
+        # Input validation
         if current_input.size() != previous_input.size():
             raise ValueError(
                 'Current and previous inputs must be of the same '
@@ -101,19 +116,6 @@ class Zoneout(InplaceFunction):
                              '{previous}'.format(current=type(current_input),
                                                  previous=type(previous_input))
                              )
-
-        ctx.p = p
-        ctx.train = train
-        ctx.inplace = inplace
-
-        if ctx.inplace:
-            ctx.mark_dirty(current_input)
-            output = current_input
-        else:
-            output = current_input.clone()
-
-        if not ctx.train:
-            return output
 
         ctx.current_mask = cls._make_mask(current_input)
         ctx.previous_mask = cls._make_mask(current_input)
