@@ -941,8 +941,11 @@ class TripletMarginLoss(_Loss):
     where :math:`d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p`.
 
     Args:
-        p (int, optional): The norm degree for pairwise distance. Has a default value of `2`.
-        margin (float, optional): Has a default value of `1`.
+        margin (float, optional): Default: `1`.
+        p (int, optional): The norm degree for pairwise distance. Default: `2`.
+        swap (float, optional): The distance swap is described in detail in the paper
+            `Learning shallow convolutional feature descriptors with triplet losses` by
+            V. Balntas, E. Riba et al. Default: ``False``.
         size_average (bool, optional): By default, the losses are averaged over
             observations for each minibatch. However, if the field :attr:`size_average`
             is set to ``False``, the losses are instead summed for each minibatch.

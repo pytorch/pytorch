@@ -4866,17 +4866,6 @@ new_criterion_tests = [
         check_no_size_average=True,
         check_gradgrad=False,
     ),
-    dict(
-        module_name='TripletMarginLoss',
-        constructor_args=(torch.rand(10),),
-        input_fn=lambda: torch.randn(5, 10),
-        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        reference_fn=lambda i, t, m: -((t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()) * get_weight(m)).sum() /
-            (i.numel() if get_size_average(m) else 1),
-        desc='weights',
-        check_no_size_average=True,
-        check_gradgrad=False,
-    ),
 ]
 
 
