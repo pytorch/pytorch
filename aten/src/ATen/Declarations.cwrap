@@ -310,21 +310,6 @@
     - THTensor* source
 ]]
 [[
-  name: indexSelectAdd_
-  python_name: index_select_add_
-  cname: indexSelectAdd
-  backends:
-    - CPU
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - arg: long dim
-      wrap_dim: self
-    - THIndexTensor* selectIndex
-    - THIndexTensor* addIndex
-    - THTensor* source
-]]
-[[
   name: indexFill_
   python_name: index_fill_
   cname: indexFill
