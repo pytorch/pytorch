@@ -1779,6 +1779,13 @@ class TestNN(NNTestCase):
     def test_batchnorm_eval_cuda(self):
         self._test_batchnorm_eval(torch.cuda.FloatTensor)
 
+    def test_batchnorm_simple_average(self):
+        self._test_batchnorm_simple_average()
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_batchnorm_simple_average_cuda(self):
+        self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
+
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
 
@@ -1917,6 +1924,7 @@ class TestNN(NNTestCase):
         for i, replica in enumerate(replicas):
             self.assertEqual(replica.bn.running_mean.get_device(), i, 'buffer on wrong device')
             self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
+            self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_parallel_apply(self):
@@ -2233,7 +2241,7 @@ class TestNN(NNTestCase):
         net.add_module('empty', None)
 
         state_dict = net.state_dict()
-        self.assertEqual(len(state_dict), 9)
+        self.assertEqual(len(state_dict), 10)
         self.assertIn('linear1.weight', state_dict)
         self.assertIn('linear1.bias', state_dict)
         self.assertIn('linear2.weight', state_dict)
@@ -2245,6 +2253,7 @@ class TestNN(NNTestCase):
         self.assertIn('bn.bias', state_dict)
         self.assertIn('bn.running_var', state_dict)
         self.assertIn('bn.running_mean', state_dict)
+        self.assertIn('bn.num_batches_tracked', state_dict)
         self.assertFalse(any(map(lambda k: k.startswith('empty'), state_dict.keys())))
         for k, v in state_dict.items():
             param = net
@@ -3691,17 +3700,21 @@ class TestNN(NNTestCase):
         # training pass
         old_running_mean = module.running_mean.clone()
         old_running_var = module.running_var.clone()
+        old_num_batches_tracked = module.num_batches_tracked.clone()
         module(data)
         self.assertNotEqual(old_running_mean, module.running_mean)
         self.assertNotEqual(old_running_var, module.running_var)
+        self.assertEqual(old_num_batches_tracked + 1, module.num_batches_tracked)
 
         # eval pass
         module.eval()
         old_running_mean = module.running_mean.clone()
         old_running_var = module.running_var.clone()
+        old_num_batches_tracked = module.num_batches_tracked.clone()
         module(data)
         self.assertEqual(old_running_mean, module.running_mean)
         self.assertEqual(old_running_var, module.running_var)
+        self.assertEqual(old_num_batches_tracked, module.num_batches_tracked)
 
     def test_batchnorm_update_stats(self):
         self._test_batchnorm_update_stats()
@@ -3789,6 +3802,48 @@ class TestNN(NNTestCase):
         grad2 = data.grad.data.clone()
         self.assertEqual(res1, res2)
         self.assertEqual(grad1, grad2)
+
+    def _test_batchnorm_simple_average(self, test_type=torch.FloatTensor):
+        module = nn.BatchNorm1d(3, momentum=None).type(test_type)
+        zeros = torch.zeros(3).type(test_type)
+        ones = torch.ones(3).type(test_type)
+        self.assertEqual(module.running_mean, zeros)
+        self.assertEqual(module.running_var, ones)
+
+        data1 = torch.rand(4, 3).type(test_type)
+        data2 = torch.rand(4, 3).type(test_type)
+
+        # 1st pass
+        res1 = module(data1)
+        running_mean1 = module.running_mean.clone()
+        running_var1 = module.running_var.clone()
+        self.assertNotEqual(running_mean1, zeros)
+        self.assertNotEqual(running_var1, ones)
+
+        # reset stats
+        module.reset_running_stats()
+        self.assertEqual(module.running_mean, zeros)
+        self.assertEqual(module.running_var, ones)
+
+        # 2nd pass
+        res2 = module(data2)
+        running_mean2 = module.running_mean.clone()
+        running_var2 = module.running_var.clone()
+        self.assertNotEqual(running_mean2, zeros)
+        self.assertNotEqual(running_var2, ones)
+
+        # reset stats
+        module.reset_running_stats()
+        self.assertEqual(module.running_mean, zeros)
+        self.assertEqual(module.running_var, ones)
+
+        # 3rd (combined) pass
+        res3 = module(data1)
+        res4 = module(data2)
+        self.assertEqual(res3, res1)
+        self.assertEqual(res4, res2)
+        self.assertAlmostEqual(module.running_mean, (running_mean1 + running_mean2) / 2)
+        self.assertAlmostEqual(module.running_var, (running_var1 + running_var2) / 2)
 
     def test_pairwise_distance(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
@@ -5448,6 +5503,14 @@ new_module_tests = [
     ),
     dict(
         module_name='BatchNorm1d',
+        constructor_args=(10, 1e-3, None),
+        input_size=(4, 10),
+        cudnn=True,
+        check_eval=True,
+        desc='affine_simple_average',
+    ),
+    dict(
+        module_name='BatchNorm1d',
         constructor_args=(10, 1e-3, 0.3, False),
         input_size=(4, 10),
         cudnn=True,
@@ -5479,6 +5542,14 @@ new_module_tests = [
     ),
     dict(
         module_name='BatchNorm2d',
+        constructor_args=(3, 1e-3, None),
+        input_size=(2, 3, 6, 6),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_simple_average',
+    ),
+    dict(
+        module_name='BatchNorm2d',
         constructor_args=(3, 1e-3, 0.8),
         input_size=(2, 3, 6, 6),
         cudnn=True,
@@ -5507,6 +5578,14 @@ new_module_tests = [
         input_size=(2, 3, 4, 4, 4),
         cudnn=True,
         check_eval=True,
+    ),
+    dict(
+        module_name='BatchNorm3d',
+        constructor_args=(3, 1e-3, None),
+        input_size=(2, 3, 4, 4, 4),
+        cudnn=True,
+        check_eval=True,
+        desc='3d_simple_average',
     ),
     dict(
         module_name='BatchNorm3d',
