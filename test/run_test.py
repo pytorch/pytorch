@@ -99,18 +99,18 @@ def test_distributed(python, test_module, test_directory, options):
     for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
         if backend == 'mpi' and not mpi_available:
             continue
-        for with_init in {True, False}:
+        for with_init_file in {True, False}:
             tmp_dir = tempfile.mkdtemp()
-            with_init_message = ' with file init_method' if with_init else ''
             if options.verbose:
+                with_init = ' with file init_method' if with_init_file else ''
                 print_to_stderr(
                     'Running distributed tests for the {} backend{}'.format(
-                        backend, with_init_message))
+                        backend, with_init))
             os.environ['TEMP_DIR'] = tmp_dir
             os.environ['BACKEND'] = backend
             os.environ['INIT_METHOD'] = 'env://'
             os.environ.update(env_vars)
-            if with_init:
+            if with_init_file:
                 init_method = 'file://{}/shared_init_file'.format(tmp_dir)
                 os.environ['INIT_METHOD'] = init_method
             try:
