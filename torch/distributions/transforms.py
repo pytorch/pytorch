@@ -13,7 +13,6 @@ __all__ = [
     'BoltzmannTransform',
     'ComposeTransform',
     'ExpTransform',
-    'InvertibleBoltzmannTransform',
     'LowerCholeskyTransform',
     'SigmoidTransform',
     'StickBreakingTransform',
@@ -413,31 +412,6 @@ class BoltzmannTransform(Transform):
         return probs.log()
 
 
-class InvertibleBoltzmannTransform(Transform):
-    """
-    Transform from unconstrained space to the simplex via `y = [exp(x), 1]` and
-    then normalizing. Note that dimensionality of `y.dim() == x.dim() + 1`.
-    """
-    domain = constraints.real
-    codomain = constraints.simplex
-    bijective = True
-    event_dim = 1
-
-    def __eq__(self, other):
-        return isinstance(other, InvertibleBoltzmannTransform)
-
-    def _call(self, x):
-        probs = pad(x.exp(), (0, 1), value=1)
-        probs /= probs.sum(-1, True)
-        return probs
-
-    def _inverse(self, y):
-        return y[:, :-1].log() - y[:, -1:].log()
-
-    def log_abs_det_jacobian(self, x, y):
-        return y.log().sum(-1)
-
-
 class StickBreakingTransform(Transform):
     """
     Transform from unconstrained space to the simplex of one additional
@@ -460,21 +434,24 @@ class StickBreakingTransform(Transform):
         return isinstance(other, StickBreakingTransform)
 
     def _call(self, x):
-        shape = x.shape[:-1] + (1 + x.shape[-1],)
-        one = x.new([1]).expand(x.shape[:-1] + (1,))
-        numer = sigmoid(x)
-        denom = (1 - numer).cumprod(-1)
-        probs = torch.cat([numer, one], -1) * torch.cat([one, denom], -1)
-        return probs
+        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+        z = sigmoid(x - offset.log())
+        z_cumprod = (1 - z).cumprod(-1)
+        y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
+        return y
 
     def _inverse(self, y):
-        pmf = y
-        cmf = pmf.cumsum(-1)
-        sf = 1 - cmf
-        units = y[..., :-1] / sf[..., :-1]
-        return units.log()
+        shape = y.shape[:-1] + (y.shape[-1] - 1,)
+        offset = (shape[-1] + 1) - y.new([1]).expand(shape).cumsum(-1)
+        sf = (1 - y.cumsum(-1))[..., :-1]
+        x = y[..., :-1].log() - sf.log() + offset.log()
+        return x
 
-    # TODO implement .log_abs_det_jacobian()
+    def log_abs_det_jacobian(self, x, y):
+        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+        z = sigmoid(x - offset.log())
+        detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
+        return detJ
 
 
 class LowerCholeskyTransform(Transform):
