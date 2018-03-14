@@ -1,17 +1,14 @@
-#ifndef THP_SIZE_INC
-#define THP_SIZE_INC
+#pragma once
 
 #include <Python.h>
 #include "stdint.h"
 
-extern PyObject *THPSizeClass;
+extern PyTypeObject THPSizeType;
 
-#define THPSize_Check(obj) ((PyObject*)Py_TYPE(obj) == THPSizeClass)
+#define THPSize_Check(obj) (Py_TYPE(obj) == &THPSizeType)
 
 PyObject * THPSize_New(int dim, const int64_t *sizes);
 
 #ifdef _THP_CORE
-bool THPSize_init(PyObject *module);
-#endif
-
+void THPSize_init(PyObject *module);
 #endif

@@ -5,7 +5,7 @@ from .. import functional as F
 
 class PairwiseDistance(Module):
     r"""
-    Computes the batchwise pairwise distance between vectors v1,v2:
+    Computes the batchwise pairwise distance between vectors :math:`v_1`,:math:`v_2` using the p-norm:
 
     .. math ::
         \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
@@ -22,10 +22,10 @@ class PairwiseDistance(Module):
 
     Examples::
 
-    >>> pdist = nn.PairwiseDistance(p=2)
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> output = pdist(input1, input2)
+        >>> pdist = nn.PairwiseDistance(p=2)
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
+        >>> output = pdist(input1, input2)
     """
     def __init__(self, p=2, eps=1e-6):
         super(PairwiseDistance, self).__init__()
@@ -37,7 +37,7 @@ class PairwiseDistance(Module):
 
 
 class CosineSimilarity(Module):
-    r"""Returns cosine similarity between x1 and x2, computed along dim.
+    r"""Returns cosine similarity between :math:`x_1` and :math:`x_2`, computed along dim.
 
     .. math ::
         \text{similarity} = \dfrac{x_1 \cdot x_2}{\max(\Vert x_1 \Vert _2 \cdot \Vert x_2 \Vert _2, \epsilon)}
@@ -54,11 +54,10 @@ class CosineSimilarity(Module):
 
     Examples::
 
-    >>> input1 = autograd.Variable(torch.randn(100, 128))
-    >>> input2 = autograd.Variable(torch.randn(100, 128))
-    >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
-    >>> output = cos(input1, input2)
-    >>> print(output)
+        >>> input1 = torch.randn(100, 128)
+        >>> input2 = torch.randn(100, 128)
+        >>> cos = nn.CosineSimilarity(dim=1, eps=1e-6)
+        >>> output = cos(input1, input2)
     """
     def __init__(self, dim=1, eps=1e-8):
         super(CosineSimilarity, self).__init__()

@@ -21,8 +21,8 @@ class Cauchy(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mode or median of the distribution.
-        scale (float or Tensor or Variable): half width at half maximum.
+        loc (float or Tensor): mode or median of the distribution.
+        scale (float or Tensor): half width at half maximum.
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real

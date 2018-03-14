@@ -148,7 +148,7 @@ The following operators are supported:
 * threshold (non-zero threshold/non-zero value not supported)
 * leaky_relu
 * glu
-* softmax
+* softmax (only dim=-1 supported)
 * avg_pool2d (ceil_mode not supported)
 * log_softmax
 * unfold (experimental support with ATen-Caffe2 integration)

@@ -16,7 +16,10 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
+#include "THP.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/DataLoader.h"
+#include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
 #include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/autograd/python_variable.h"
@@ -32,9 +35,7 @@
 #endif
 
 #define WITH_NUMPY_IMPORT_ARRAY
-#include "THP.h"
-
-#include "DataLoader.cpp"
+#include "torch/csrc/utils/numpy_stub.h"
 
 namespace py = pybind11;
 
@@ -78,6 +79,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
     THPUtils_setError("initialization error - expected bytes/string object as shm_manager_path!");
     return NULL;
   }
+  torch::utils::initializeDtypes();
   torch::tensor::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
@@ -116,13 +118,6 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
   HANDLE_TH_ERRORS
   torch::tensor::py_set_default_tensor_type(type);
   Py_RETURN_NONE;
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THPModule_fromNumpy(PyObject *_unused, PyObject *array)
-{
-  HANDLE_TH_ERRORS
-  return torch::createPyObject(torch::utils::tensor_from_numpy(array));
   END_HANDLE_TH_ERRORS
 }
 
@@ -238,11 +233,6 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
-PyObject * THPModule_initializeDtypes(PyObject *_unused) {
-  torch::utils::initializeDtypes();
-  Py_RETURN_NONE;
-}
-
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
@@ -337,7 +327,6 @@ static PyMethodDef TorchMethods[] = {
   {"_add_docstr",     (PyCFunction)THPModule_addDocStr,       METH_VARARGS, NULL},
   {"_init_names",     (PyCFunction)THPModule_initNames,       METH_O,       NULL},
   {"_has_distributed",(PyCFunction)THPModule_hasDistributed,  METH_NOARGS,  NULL},
-  {"_initialize_dtypes",(PyCFunction)THPModule_initializeDtypes,  METH_NOARGS,  NULL},
   {"_safe_call",      (PyCFunction)THPModule_safeCall,          METH_VARARGS | METH_KEYWORDS, NULL},
   {"_set_default_tensor_type", (PyCFunction)THPModule_setDefaultTensorType, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
@@ -353,15 +342,9 @@ static PyMethodDef TorchMethods[] = {
   {"_set_cudnn_benchmark", (PyCFunction)THPModule_setBenchmarkCuDNN, METH_O,  NULL},
   {"_get_cudnn_deterministic", (PyCFunction)THPModule_deterministicCuDNN, METH_NOARGS,     NULL},
   {"_set_cudnn_deterministic", (PyCFunction)THPModule_setDeterministicCuDNN, METH_O,  NULL},
-  {"from_numpy",      (PyCFunction)THPModule_fromNumpy,         METH_O,       NULL},
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
-  // Sparse functions
-  // {"smm",             (PyCFunction)THSPModule_sspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
-  // {"saddmm",          (PyCFunction)THSPModule_sspaddmm,       METH_VARARGS | METH_KEYWORDS,  NULL},
-  // {"dsmm",            (PyCFunction)THSPModule_spmm,           METH_VARARGS | METH_KEYWORDS,  NULL},
-  // {"hsmm",            (PyCFunction)THSPModule_hspmm,          METH_VARARGS | METH_KEYWORDS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -460,7 +443,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPWrapper_init(module));
   ASSERT_TRUE(THPGenerator_init(module));
   ASSERT_TRUE(THPException_init(module));
-  ASSERT_TRUE(THPSize_init(module));
+  THPSize_init(module);
   ASSERT_TRUE(THPDtype_init(module));
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));

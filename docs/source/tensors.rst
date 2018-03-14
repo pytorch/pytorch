@@ -252,6 +252,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: reshape
    .. automethod:: resize_
    .. automethod:: resize_as_
    .. automethod:: round
@@ -311,6 +312,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: type_as
    .. automethod:: unfold
    .. automethod:: uniform_
+   .. automethod:: unique
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: var

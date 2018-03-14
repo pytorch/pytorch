@@ -7,10 +7,10 @@
 #include "torch/csrc/Size.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
-#include "torch/csrc/cuda/lazy_init.h"
 #ifdef WITH_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
+#include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_numbers.h"
@@ -298,11 +298,9 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
 }
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool non_blocking) {
-#ifdef WITH_CUDA
   if (type.is_cuda()) {
-    torch::cuda::lazy_init();
+    torch::utils::cuda_lazy_init();
   }
-#endif
   AutoNoGIL no_gil;
   AutoGPU auto_gpu(device);
   int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
@@ -310,7 +308,26 @@ static Tensor dispatch_type(const Tensor & self, const at::Type & type, int devi
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
   }
-  return self.toType(type, non_blocking);
+
+  // Don't specialize cross-backend copies
+  if (self.type().backend() != type.backend()) {
+    return self.toType(type, non_blocking);
+  }
+
+  // Dispatch to specialized, traceable cast operators for the JIT. These
+  // specialized ops are ATen native and thus have the tracing mechanisms auto-
+  // generated, whereas the default case is not traceable since it requires a
+  // Type as a parameter/attribute. TODO: support Types in the JIT and remove
+  // this once we have that
+  switch (type.scalarType()) {
+#define DEFINE_CAST_DISPATCH(_1, n, _2)   \
+  case ScalarType::n: {                   \
+    return self._cast_##_1(non_blocking); \
+  } break;
+    AT_FORALL_SCALAR_TYPES(DEFINE_CAST_DISPATCH)
+#undef DEFINE_CAST_DISPATCH
+    default: { return self.toType(type, non_blocking); } break;
+  }
 }
 
 static Tensor dispatch_type(const Tensor & self, const at::Type & type) {
@@ -480,12 +497,48 @@ static PyObject * THPVariable_new(PyObject* self, PyObject* args, PyObject* kwar
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_new_empty(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
+  return THPVariable_Wrap(torch::utils::new_empty(self_.type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_new_full(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
+  return THPVariable_Wrap(torch::utils::new_full(self_.type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_new_ones(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
+  return THPVariable_Wrap(torch::utils::new_ones(self_.type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_new_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   AutoGPU auto_gpu(self_);
   return THPVariable_Wrap(torch::utils::new_tensor(self_.type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_new_zeros(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
+  AutoGPU auto_gpu(self_);
+  return THPVariable_Wrap(torch::utils::new_zeros(self_.type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -595,7 +648,11 @@ PyMethodDef variable_methods[] = {
   {"ndimension", (PyCFunction)THPVariable_dim, METH_NOARGS, NULL},
   {"nelement", (PyCFunction)THPVariable_numel, METH_NOARGS, NULL},
   {"new", (PyCFunction)THPVariable_new, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"new_empty", (PyCFunction)THPVariable_new_empty, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"new_full", (PyCFunction)THPVariable_new_full, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"new_ones", (PyCFunction)THPVariable_new_ones, METH_VARARGS | METH_KEYWORDS, NULL},
   {"new_tensor", (PyCFunction)THPVariable_new_tensor, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"new_zeros", (PyCFunction)THPVariable_new_zeros, METH_VARARGS | METH_KEYWORDS, NULL},
   {"numpy", (PyCFunction)THPVariable_numpy, METH_NOARGS, NULL},
   {"record_stream", (PyCFunction)THPVariable_record_stream, METH_O, NULL},
   {"short", (PyCFunction)THPVariable_short, METH_NOARGS, NULL},

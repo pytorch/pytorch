@@ -1,5 +1,7 @@
 #include "tensor_numpy.h"
 
+#include "torch/csrc/utils/numpy_stub.h"
+
 #ifndef WITH_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
@@ -19,11 +21,6 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 #include <memory>
 #include <sstream>
 #include <stdexcept>
-
-#define NO_IMPORT_ARRAY
-#define PY_ARRAY_UNIQUE_SYMBOL __numpy_array_api
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <numpy/arrayobject.h>
 
 using namespace at;
 using namespace torch::autograd;

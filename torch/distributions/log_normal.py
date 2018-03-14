@@ -20,8 +20,8 @@ class LogNormal(TransformedDistribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of log of distribution
-        scale (float or Tensor or Variable): standard deviation of log ofthe distribution
+        loc (float or Tensor): mean of log of distribution
+        scale (float or Tensor): standard deviation of log ofthe distribution
     """
     params = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.positive

@@ -21,8 +21,8 @@ class Uniform(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        low (float or Tensor or Variable): lower range (inclusive).
-        high (float or Tensor or Variable): upper range (exclusive).
+        low (float or Tensor): lower range (inclusive).
+        high (float or Tensor): upper range (exclusive).
     """
     # TODO allow (loc,scale) parameterization to allow independent constraints.
     params = {'low': constraints.dependent, 'high': constraints.dependent}

@@ -10,9 +10,13 @@
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
 
-#include <fstream>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <fstream>
+#include <memory>
+#include <vector>
+#include <string>
 
 namespace py = pybind11;
 
@@ -31,37 +35,29 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
   for(auto d : tensor.sizes()) {
     p->add_dims(d);
   }
-  at::ScalarType at_type;
   onnx::DataType onnx_type;
   switch(tensor.type().scalarType()) {
     case at::kDouble:
       onnx_type = onnx::kDOUBLE;
-      at_type = at::kDouble;
       break;
     case at::kFloat:
       onnx_type = onnx::kFLOAT;
-      at_type = at::kFloat;
       break;
     case at::kHalf:
       onnx_type = onnx::kFLOAT16;
-      at_type = at::kHalf;
       break;
     case at::kByte:
     case at::kChar:
       onnx_type = onnx::kINT8;
-      at_type = at::kByte;
       break;
     case at::kShort:
       onnx_type = onnx::kINT16;
-      at_type = at::kShort;
       break;
     case at::kInt:
       onnx_type = onnx::kINT32;
-      at_type = at::kInt;
       break;
     case at::kLong:
       onnx_type = onnx::kINT64;
-      at_type = at::kLong;
       break;
     default:
       torch::barf("unexpected tensor scalar type");
@@ -69,8 +65,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
   }
   p->set_data_type(onnx_type);
   // CPU's HalfTensor doesn't have contiguous(), so first calling contiguous()
-  at::Tensor cont = tensor.contiguous().toType(at::CPU(at_type));
-  p->set_raw_data(cont);
+  p->set_raw_data(tensor.contiguous().toBackend(at::kCPU));
 }
 
 void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
@@ -197,7 +192,9 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     }
     auto p_n = p_g->add_node();
     if (node->getSourceLocation()) {
-      p_n->set_doc_string(node->getSourceLocation()->python_traceback);
+      std::stringstream ss;
+      node->getSourceLocation()->highlight(ss);
+      p_n->set_doc_string(ss.str());
     }
     for(auto input : node->inputs()) {
       if (input->node()->kind() == kUndefined) {
@@ -232,6 +229,14 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
   encodeGraph(p_g, g, initializers);
 }
 
+namespace {
+std::string getNodeStackTraceString(Node* n) {
+  std::stringstream ss;
+  n->getSourceLocation()->highlight(ss);
+  return ss.str();
+}
+} // namespace
+
 void validateGraph(const std::shared_ptr<Graph>& graph) {
   for (auto node : graph->nodes()) {
       // Macro'ed so we get a marginally better line number on failed export
@@ -239,14 +244,20 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
     IR_IF(node, CppOp)
       auto cpp_node = static_cast<torch::jit::CppOp*>(value);
-      FAIL_EXPORT("Couldn't export C++ operator " + cpp_node->name())
-    IR_ELSEIF(PythonOp)
+      FAIL_EXPORT(
+          "Couldn't export C++ operator " + cpp_node->name() +
+          " Defined at:\n" + getNodeStackTraceString(node))
+      IR_ELSEIF(PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
-      FAIL_EXPORT("Couldn't export Python operator " + py_node->name())
-    IR_ELSE()
+      FAIL_EXPORT(
+          "Couldn't export Python operator " + py_node->name() +
+          " Defined at:\n" + getNodeStackTraceString(node))
+      IR_ELSE()
       // Expand is not a real ONNX operator yet, reject it
       if (node->kind() == kExpand) {
-        FAIL_EXPORT("Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support");
+        FAIL_EXPORT(
+            "Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support. Node defined at:\n" +
+            getNodeStackTraceString(node));
       }
       std::string n = node->kind().toString();
       if (n.size() == 0) {
@@ -255,7 +266,9 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
       // NB: Upper-case is ONNX, lower-case is ATen.  If we want to be more
       // robust, need to explicitly flag operators as ONNX or ATen
       if (!isupper(n[0])) {
-        FAIL_EXPORT("Couldn't export operator " + n);
+        FAIL_EXPORT(
+            "Couldn't export operator " + n + " Defined at:\n" +
+            getNodeStackTraceString(node));
       }
     IR_END()
 #undef FAIL_EXPORT

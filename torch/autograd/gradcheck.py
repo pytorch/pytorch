@@ -43,13 +43,9 @@ def make_jacobian(input, num_out):
 
 
 def iter_tensors(x, only_requiring_grad=False):
-    if isinstance(x, Variable):
+    if isinstance(x, torch.Tensor):
         if x.requires_grad or not only_requiring_grad:
             yield x.data
-    elif torch.is_tensor(x):
-        if only_requiring_grad:
-            raise AssertionError("iter_tensors encountered Tensor with only_requiring_grad=True")
-        yield x
     elif isinstance(x, Iterable):
         for elem in x:
             for result in iter_tensors(elem, only_requiring_grad):
@@ -57,9 +53,7 @@ def iter_tensors(x, only_requiring_grad=False):
 
 
 def contiguous(input):
-    if torch.is_tensor(input):
-        return input.contiguous()
-    elif isinstance(input, Variable):
+    if isinstance(input, torch.Tensor):
         return input.contiguous()
     elif isinstance(input, Iterable):
         return type(input)(contiguous(e) for e in input)

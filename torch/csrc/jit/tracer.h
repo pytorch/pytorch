@@ -22,7 +22,9 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
+#ifndef NO_PYTHON
 std::string getPythonInterpreterStackTrace();
+#endif
 
 namespace detail {
 
@@ -281,9 +283,11 @@ struct PreTraceInfo {
 };
 
 PreTraceInfo preRecordTrace(std::string op, at::ArrayRef<Variable> inputs);
+#ifndef NO_PYTHON
 PreTraceInfo preRecordPythonTrace(
     THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<Variable> inputs,
     pyobj_list scalar_args);
+#endif
 void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 }}} // namespace torch::jit::tracer

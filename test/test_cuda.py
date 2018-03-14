@@ -9,7 +9,7 @@ import torch.cuda
 import torch.cuda.comm as comm
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, IS_WINDOWS
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests
 
 HAS_CUDA = True
 if not torch.cuda.is_available():
@@ -238,9 +238,9 @@ tests = [
     ('div', small_3d, lambda t: [number(3.14, 3, t)],),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types),
-    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', float_types),
-    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', float_types),
-    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', float_types),
+    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', types),
+    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', types),
+    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', types),
     ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
     # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
     ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half),
@@ -403,13 +403,11 @@ tests = [
     ('qr', small_2d_lapack, lambda t: [], 'square', float_types),
     ('qr', small_2d_lapack_skinny, lambda t: [], 'skinny', float_types),
     ('qr', small_2d_lapack_fat, lambda t: [], 'fat', float_types),
+    ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
     # TODO: add det to here once Variable and Tensor are the same thing
 ]
-
-if not IS_WINDOWS:
-    tests.append(('qr', large_2d_lapack, lambda t: [], 'big', float_types))
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
 #       resize, resizeAs, storage_offset, storage, stride, unfold
@@ -732,32 +730,26 @@ class TestCuda(TestCase):
                 t += 1
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
-    def _test_autogpu(self, TensorCtor):
-        x = TensorCtor().cuda()
-        y = TensorCtor().cuda()
+    def test_autogpu(self):
+        x = torch.randn(5, 5).cuda()
+        y = torch.randn(5, 5).cuda()
         self.assertEqual(x.get_device(), 0)
         self.assertEqual(x.get_device(), 0)
         with torch.cuda.device(1):
-            z = TensorCtor().cuda()
+            z = torch.randn(5, 5).cuda()
             self.assertEqual(z.get_device(), 1)
             q = x.add(y)
             self.assertEqual(q.get_device(), 0)
-            w = TensorCtor().cuda()
+            w = torch.randn(5, 5).cuda()
             self.assertEqual(w.get_device(), 1)
             self.assertEqual(y.cuda().get_device(), 1)
             self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
 
-    def test_autogpu(self):
-        # TODO: clean-up and merge with above code after Variable and Tensor
-        # are merged
-        self._test_autogpu(lambda: torch.randn(5, 5))
-        self._test_autogpu(lambda: torch.autograd.Variable(torch.randn(5, 5)))
-
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_new(self):
-        x = torch.autograd.Variable(torch.randn(3, 3).cuda())
+        x = torch.randn(3, 3).cuda()
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
         self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
 
@@ -1087,12 +1079,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    def test_bernoulli_variable(self):
-        # TODO: delete when tensor/variable are merged
-        from torch.autograd import Variable
-        x = torch.cuda.FloatTensor([0, 1]).cuda()
-        x_var = Variable(x)
-        self.assertEqual(x_var.bernoulli().data, x.bernoulli())
+    def test_bernoulli(self):
+        x = torch.tensor([0, 1], dtype=torch.cuda.float32)
+        self.assertEqual(x.bernoulli().tolist(), [0, 1])
 
     def test_cat_bad_input_sizes(self):
         x = torch.randn(2, 1).cuda()
@@ -1355,6 +1344,36 @@ class TestCuda(TestCase):
     def test_advancedindex(self):
         TestTorch._test_advancedindex(self, lambda t: t.cuda())
 
+    def test_advancedindex_mixed_cpu_cuda(self):
+        def test(x, ia, ib):
+            self.assertEqual(x[:, ia, None, ib, 0].cpu(),
+                             x.cpu()[:, ia.cpu(), None, ib.cpu(), 0])
+            self.assertEqual(x[ia], x.cpu()[ia.cpu()])
+
+        # Index cpu tensor with cuda tensor
+        x = torch.randn(3, 4, 4, 4, 3)
+        ia = torch.cuda.LongTensor([0, 2, 1])
+        ib = torch.cuda.LongTensor([0, 2, 1])
+        test(x, ia, ib)
+
+        # Index cuda tensor with cpu tensor
+        x = x.cuda()
+        ia = ia.cpu()
+        ib = ib.cpu()
+        test(x, ia, ib)
+
+        # Index cpu tensor with mixed cpu, cuda tensors
+        x = x.cpu()
+        ia = ia.cpu()
+        ib = ib.cuda()
+        test(x, ia, ib)
+
+        # Index cuda tensor with mixed cpu, cuda tensors
+        x = x.cuda()
+        ia = ia.cpu()
+        ib = ib.cuda()
+        test(x, ia, ib)
+
     def test_advancedindex_big(self):
         TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
 
@@ -1391,6 +1410,9 @@ class TestCuda(TestCase):
 
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
+
+    def test_int_pow(self):
+        TestTorch._test_int_pow(self, lambda x: x.cuda())
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -1497,6 +1519,12 @@ class TestCuda(TestCase):
             b = torch.__dict__[t]()
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
+
+    def test_diagonal(self):
+        TestTorch._test_diagonal(self, dtype=torch.cuda.float32)
+
+    def test_diagflat(self):
+        TestTorch._test_diagflat(self, dtype=torch.cuda.float32)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):

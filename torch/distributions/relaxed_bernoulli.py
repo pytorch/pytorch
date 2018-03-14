@@ -16,9 +16,9 @@ class LogitRelaxedBernoulli(Distribution):
     Samples are logits of values in (0, 1). See [1] for more details.
 
     Args:
-        temperature (Tensor or Variable):
-        probs (Number, Tensor or Variable): the probabilty of sampling `1`
-        logits (Number, Tensor or Variable): the log-odds of sampling `1`
+        temperature (Tensor):
+        probs (Number, Tensor): the probabilty of sampling `1`
+        logits (Number, Tensor): the log-odds of sampling `1`
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
     (Maddison et al, 2017)
@@ -92,9 +92,9 @@ class RelaxedBernoulli(TransformedDistribution):
         [torch.FloatTensor of size 4]
 
     Args:
-        temperature (Tensor or Variable):
-        probs (Number, Tensor or Variable): the probabilty of sampling `1`
-        logits (Number, Tensor or Variable): the log-odds of sampling `1`
+        temperature (Tensor):
+        probs (Number, Tensor): the probabilty of sampling `1`
+        logits (Number, Tensor): the log-odds of sampling `1`
     """
     params = {'probs': constraints.unit_interval}
     support = constraints.unit_interval

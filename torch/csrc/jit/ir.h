@@ -25,6 +25,7 @@
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/variable_flags.h"
+#include "torch/csrc/jit/source_location.h"
 
 namespace torch { namespace autograd {
 
@@ -68,14 +69,7 @@ static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
 }
 
-// SourceLocation represents source code-level debug information for a node.
-// It contains a Python stack trace that represents the provenance of a given
-// node in the trace.
-struct SourceLocation {
-  SourceLocation(std::string python_traceback)
-  : python_traceback(std::move(python_traceback)) {}
-  std::string python_traceback;
-};
+
 
 // Scope is a node of a trie that represents the tree of nested scopes.
 // Individual scopes are pushed and popped from Graph, which holds a
@@ -274,7 +268,7 @@ public:
     return kind_;
   }
   Node* setSourceLocation(std::shared_ptr<SourceLocation> sl) {
-    source_location_ = sl;
+    source_location_ = std::move(sl);
     return this;
   }
   std::shared_ptr<SourceLocation> getSourceLocation() const {
@@ -888,7 +882,13 @@ public:
     n->i_(kdevice, device);
     return n;
   }
-  Node * createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args);
+  Node* createPythonOp(
+      THPObjectPtr&& pyobj,
+      const std::string& cconv,
+      bool is_legacy,
+      std::vector<VariableFlags>&& var_flags,
+      pyobj_list&& scalar_args,
+      bool tracing_autograd_python_function = true);
   Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn, std::vector<VariableFlags> && var_flags);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
@@ -996,15 +996,15 @@ private:
 };
 
 struct WithInsertPoint : public ResourceGuard {
-  WithInsertPoint(Graph & g, Node * n)
+  WithInsertPoint(Node * n)
   : ResourceGuard([this] {
     prev->owningGraph()->setInsertPoint(prev);
   })
-  , prev(g.insertPoint()) {
-    g.setInsertPoint(n);
+  , prev(n->owningGraph()->insertPoint()) {
+    n->owningGraph()->setInsertPoint(n);
   }
-  WithInsertPoint(Graph & g, Block * b)
-  : WithInsertPoint(g, b->return_node()) {}
+  WithInsertPoint(Block * b)
+  : WithInsertPoint(b->return_node()) {}
 private:
   Node * prev;
 };
@@ -1190,12 +1190,19 @@ struct PythonOp : public Node {
   static const BuiltinSymbol Kind = kPythonOp;
   PythonOp(Graph * graph)
   : Node(graph,kPythonOp) {}
-  PythonOp* init(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
+  PythonOp* init(
+      THPObjectPtr&& pyobj,
+      const std::string& cconv,
+      bool is_legacy,
+      std::vector<VariableFlags>&& var_flags,
+      pyobj_list&& scalar_args,
+      bool tracing_autograd_python_function = true) {
     this->pyobj = std::move(pyobj);
     this->scalar_args = std::move(scalar_args);
     this->cconv = cconv;
     this->var_flags = std::move(var_flags);
     this->is_legacy = is_legacy;
+    this->tracing_autograd_python_function = tracing_autograd_python_function;
     return this;
   }
   virtual Node * allocNewInstance(Graph * g) override {
@@ -1213,6 +1220,7 @@ struct PythonOp : public Node {
   // 't' -- tensor argument
   std::string cconv;
   bool is_legacy;
+  bool tracing_autograd_python_function;
   // Scalar arguments to the Python function.  Not necessarily passed to
   // the function in this order; see cconv for the correct order.
   std::vector<THPObjectPtr> scalar_args;
@@ -1220,9 +1228,21 @@ struct PythonOp : public Node {
   std::string name() const;
   virtual void cloneFrom(Node * other_) override;
 };
-inline Node * Graph::createPythonOp(THPObjectPtr&& pyobj, const std::string & cconv, bool is_legacy, std::vector<VariableFlags> && var_flags, pyobj_list&& scalar_args) {
+inline Node* Graph::createPythonOp(
+    THPObjectPtr&& pyobj,
+    const std::string& cconv,
+    bool is_legacy,
+    std::vector<VariableFlags>&& var_flags,
+    pyobj_list&& scalar_args,
+    bool tracing_autograd_python_function) {
   auto op = new PythonOp(this);
-  return op->init(std::move(pyobj),cconv,is_legacy,std::move(var_flags), std::move(scalar_args));
+  return op->init(
+      std::move(pyobj),
+      cconv,
+      is_legacy,
+      std::move(var_flags),
+      std::move(scalar_args),
+      tracing_autograd_python_function);
 }
 
 // A Cpp operator is an operator which dispatches directly to an autograd function.

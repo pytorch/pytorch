@@ -24,9 +24,9 @@ class Gamma(ExponentialFamily):
         [torch.FloatTensor of size 1]
 
     Args:
-        concentration (float or Tensor or Variable): shape parameter of the distribution
+        concentration (float or Tensor): shape parameter of the distribution
             (often referred to as alpha)
-        rate (float or Tensor or Variable): rate = 1 / scale of the distribution
+        rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
     params = {'concentration': constraints.positive, 'rate': constraints.positive}

@@ -55,17 +55,17 @@ class _BatchNorm(Module):
 
 
 class BatchNorm1d(_BatchNorm):
-    r"""Applies Batch Normalization over a 2d or 3d input (a mini-batch of 1d
+    r"""Applies Batch Normalization over a 2D or 3D input (a mini-batch of 1D
     inputs with optional additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{\sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size).
 
     By default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -80,12 +80,12 @@ class BatchNorm1d(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, L)` slices, it's common terminology to call this Temporal BatchNorm.
+    Because the Batch Normalization is done over the `C` dimension, computing statistics
+    on `(N, L)` slices, it's common terminology to call this Temporal Batch Normalization.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -110,7 +110,7 @@ class BatchNorm1d(_BatchNorm):
         >>> m = nn.BatchNorm1d(100)
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm1d(100, affine=False)
-        >>> input = autograd.Variable(torch.randn(20, 100))
+        >>> input = torch.randn(20, 100)
         >>> output = m(input)
 
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
@@ -124,17 +124,17 @@ class BatchNorm1d(_BatchNorm):
 
 
 class BatchNorm2d(_BatchNorm):
-    r"""Applies Batch Normalization over a 4d input (a mini-batch of 2d inputs
+    r"""Applies Batch Normalization over a 4D input (a mini-batch of 2D inputs
     with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size).
 
     By default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -149,12 +149,12 @@ class BatchNorm2d(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, H, W)` slices, it's common terminology to call this Spatial BatchNorm.
+    Because the Batch Normalization is done over the `C` dimension, computing statistics
+    on `(N, H, W)` slices, it's common terminology to call this Spatial Batch Normalization.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -179,7 +179,7 @@ class BatchNorm2d(_BatchNorm):
         >>> m = nn.BatchNorm2d(100)
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm2d(100, affine=False)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45))
+        >>> input = torch.randn(20, 100, 35, 45)
         >>> output = m(input)
 
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:
@@ -193,17 +193,17 @@ class BatchNorm2d(_BatchNorm):
 
 
 class BatchNorm3d(_BatchNorm):
-    r"""Applies Batch Normalization over a 5d input (a mini-batch of 3d inputs
+    r"""Applies Batch Normalization over a 5D input (a mini-batch of 3D inputs
     with additional channel dimension) as described in the paper
     `Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`_ .
 
     .. math::
 
-        y = \frac{x - mean[x]}{ \sqrt{Var[x] + \epsilon}} * gamma + beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The mean and standard-deviation are calculated per-dimension over
-    the mini-batches and gamma and beta are learnable parameter vectors
-    of size C (where C is the input size).
+    the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
+    of size `C` (where `C` is the input size).
 
     By default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
@@ -218,13 +218,13 @@ class BatchNorm3d(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x}_\text{new} + \text{momemtum} \times x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, D, H, W)` slices, it's common terminology to call this Volumetric BatchNorm
-    or Spatio-temporal BatchNorm.
+    Because the Batch Normalization is done over the `C` dimension, computing statistics
+    on `(N, D, H, W)` slices, it's common terminology to call this Volumetric Batch Normalization
+    or Spatio-temporal Batch Normalization.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -249,7 +249,7 @@ class BatchNorm3d(_BatchNorm):
         >>> m = nn.BatchNorm3d(100)
         >>> # Without Learnable Parameters
         >>> m = nn.BatchNorm3d(100, affine=False)
-        >>> input = autograd.Variable(torch.randn(20, 100, 35, 45, 10))
+        >>> input = torch.randn(20, 100, 35, 45, 10)
         >>> output = m(input)
 
     .. _`Batch Normalization: Accelerating Deep Network Training by Reducing Internal Covariate Shift`:

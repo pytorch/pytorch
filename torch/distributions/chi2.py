@@ -15,7 +15,7 @@ class Chi2(Gamma):
         [torch.FloatTensor of size 1]
 
     Args:
-        df (float or Tensor or Variable): shape parameter of the distribution
+        df (float or Tensor): shape parameter of the distribution
     """
     params = {'df': constraints.positive}
 

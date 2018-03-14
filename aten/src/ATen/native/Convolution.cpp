@@ -162,9 +162,9 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   if (weight_dim != k) {
     std::stringstream ss;
-    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
-       << "-dimensional weight " << weight.sizes() << ", but got input of size "
-       << input.sizes() << " instead";
+    ss << "Expected " << k << "-dimensional weight for " << k
+       << "-dimensional input " << input.sizes() << ", but got weight of size "
+       << weight.sizes() << " instead";
     throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {

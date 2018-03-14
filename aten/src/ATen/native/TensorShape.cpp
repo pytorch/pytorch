@@ -2,6 +2,7 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/optional.h"
 
 #include <algorithm>
 
@@ -34,6 +35,17 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
   // ensure this is dispatched through Tensor/Type, rather than the native function directly.
   return self.split(split_size, dim);
+}
+
+Tensor diagflat(const Tensor& self, int64_t offset) {
+  return self.contiguous().view(-1).diag(offset);
+}
+
+Tensor diagonal(const Tensor& self, int64_t offset) {
+  if (self.dim() != 2) {
+    throw std::runtime_error("diagonal expects a 2-dimensional tensor");
+  }
+  return self.diag(offset);
 }
 
 Tensor expand(const Tensor& self, IntList size) {
@@ -120,6 +132,95 @@ Tensor repeat(const Tensor& self, IntList repeats) {
   return result;
 }
 
+// Infers the size of a dim with size -1, if it exists. Also checks that new
+// shape is compatible with the number of elements.
+static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
+  auto res = shape.vec();
+  int64_t newsize = 1;
+  auto infer_dim = at::optional<int64_t>();
+  for (int64_t dim = 0, ndim = shape.size(); dim != ndim; dim++) {
+    if (shape[dim] == -1) {
+      if (infer_dim) {
+        throw std::runtime_error("only one dimension can be inferred");
+      }
+      infer_dim = dim;
+    } else if (shape[dim] >= 0) {
+      newsize *= shape[dim];
+    } else {
+      runtime_error("invalid shape dimension %zd", shape[dim]);
+    }
+  }
+
+  if (numel == newsize || (infer_dim && newsize > 0 && numel % newsize == 0)) {
+    if (infer_dim) {
+      res[*infer_dim] = numel / newsize;
+    }
+    if (numel == 0) {
+      // Collapse zero-element shapes into one dimension because TH handles zeros
+      // in sizes strangely: x.resize_(1, 0) has shape (1,). TODO: remove this
+      // once we have multi-dimensional empty tensors.
+      return {0};
+    }
+    return res;
+  }
+
+  std::ostringstream ss;
+  ss << "shape '" << shape << "' is invalid for input of size " << numel;
+  throw std::runtime_error(ss.str());
+}
+
+static at::optional<std::vector<int64_t>>
+compute_stride(const Tensor& self, IntList newshape) {
+  auto oldstride = self.strides();
+  auto oldshape = self.sizes();
+  if (oldshape.empty()) {
+    return std::vector<int64_t>(newshape.size(), 1);
+  }
+
+  std::vector<int64_t> newstride(newshape.size());
+  int64_t view_d = newshape.size() - 1;
+  // stride for each subspace in the chunk
+  int64_t chunk_base_stride = oldstride.back();
+  // numel in current chunk
+  int64_t tensor_numel = 1;
+  int64_t view_numel = 1;
+  for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
+    tensor_numel *= oldshape[tensor_d];
+    // if end of tensor size chunk, check view
+    if ((tensor_d == 0) ||
+        (oldshape[tensor_d - 1] != 1 && oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+      while (view_d >= 0 && (view_numel < tensor_numel || newshape[view_d] == 1)) {
+        newstride[view_d] = view_numel * chunk_base_stride;
+        view_numel *= newshape[view_d];
+        view_d--;
+      }
+      if (view_numel != tensor_numel) {
+        return {};
+      }
+      if (tensor_d > 0) {
+        chunk_base_stride = oldstride[tensor_d - 1];
+        tensor_numel = 1;
+        view_numel = 1;
+      }
+    }
+  }
+  if (view_d != -1) {
+    return {};
+  }
+  return newstride;
+}
+
+Tensor reshape(const Tensor& self, IntList proposed_shape) {
+  if (self.type().is_sparse()) {
+    runtime_error("reshape is not implemented for sparse tensors");
+  }
+  auto shape = infer_size(proposed_shape, self.numel());
+  if (auto stride = compute_stride(self, shape)) {
+    return self.as_strided(shape, *stride);
+  }
+  return at::_unsafe_view(self.clone(), shape);
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   AT_ASSERT(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
@@ -179,6 +280,12 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   if (self.dim() == 0) {
     throw std::runtime_error("split expects at least a 1-dimensional tensor");
   }
+  if (split_size < 0) {
+    std::ostringstream ss;
+    ss << "split expects split_size be non-negative, but got split_size="
+       << split_size;
+    throw std::runtime_error(ss.str());
+  }
   int64_t dim_size = self.size(dim);
   int64_t num_splits = (dim_size + split_size - 1) / split_size;
   std::vector<Tensor> splits(num_splits);
@@ -187,6 +294,40 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   for (int64_t i = 0; i < num_splits; ++i) {
     auto length = i < num_splits - 1 ? split_size : last_split_size;
     splits[i] = self.narrow(dim, i * split_size, length);
+  }
+  return splits;
+}
+
+std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, int64_t dim) {
+  if (self.dim() == 0) {
+    throw std::runtime_error("split_with_sizes expects at least a 1-dimensional tensor");
+  }
+  int64_t dim_size = self.size(dim);
+  int64_t num_splits = split_sizes.size();
+  std::vector<Tensor> splits(num_splits);
+  int64_t start_idx = 0;
+  int64_t i;
+
+  for (i = 0; i < num_splits; ++i) {
+    auto length = split_sizes[i];
+    if (length < 0) {
+      std::ostringstream ss;
+      ss << "split_with_sizes expects split_sizes have only non-negative "
+         << "entries, but got split_sizes=" << split_sizes;
+      throw std::runtime_error(ss.str());
+    }
+    if (start_idx >= dim_size) {
+      break;
+    }
+    splits[i] = self.narrow(dim, start_idx, length);
+    start_idx += length;
+  }
+  if (i < num_splits || start_idx != dim_size) {
+    std::ostringstream ss;
+    ss << "split_with_sizes expects split_sizes to sum exactly to "
+       << dim_size << " (input tensor's size at dimension " << dim << "), "
+       << "but got split_sizes=" << split_sizes;
+    throw std::runtime_error(ss.str());
   }
   return splits;
 }

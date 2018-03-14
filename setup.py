@@ -91,6 +91,7 @@ import sys
 import os
 import json
 import glob
+import importlib
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
@@ -220,6 +221,18 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
+missing_pydep = '''
+Missing build dependency: Unable to `import {importname}`.
+Please install it via `conda install {module}` or `pip install {module}`
+'''.strip()
+
+
+def check_pydep(importname, module):
+    try:
+        importlib.import_module(importname)
+    except ImportError:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
 
 class build_deps(Command):
     user_options = []
@@ -240,6 +253,9 @@ class build_deps(Command):
         check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+
+        check_pydep('yaml', 'pyyaml')
+        check_pydep('typing', 'typing')
 
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
@@ -380,15 +396,6 @@ class build_ext(build_ext_parent):
 
         generate_code(ninja_global)
 
-        if IS_WINDOWS:
-            build_temp = self.build_temp
-            build_dir = 'torch/csrc'
-
-            ext_filename = self.get_ext_filename('_C')
-            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
-
-            _C_LIB = os.path.join(build_temp, build_dir, lib_filename).replace('\\', '/')
-
         if WITH_NINJA:
             # before we start the normal build make sure all generated code
             # gets built
@@ -509,10 +516,13 @@ main_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/DataLoader.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
+    "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
     "torch/csrc/utils/object_ptr.cpp",
     "torch/csrc/utils/python_arg_parser.cpp",
@@ -559,6 +569,7 @@ main_sources = [
     "torch/csrc/jit/generated/aten_dispatch.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/compiler.cpp",
+    "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/script/init.cpp",
     "torch/csrc/jit/script/python_tree_views.cpp",
     "torch/csrc/autograd/init.cpp",
@@ -654,7 +665,6 @@ if WITH_CUDA:
         "torch/csrc/cuda/utils.cpp",
         "torch/csrc/cuda/comm.cpp",
         "torch/csrc/cuda/python_comm.cpp",
-        "torch/csrc/cuda/lazy_init.cpp",
         "torch/csrc/cuda/serialization.cpp",
         "torch/csrc/nn/THCUNN.cpp",
     ]
@@ -799,6 +809,7 @@ if __name__ == '__main__':
                 'lib/torch_shm_manager',
                 'lib/*.h',
                 'lib/include/ATen/*.h',
+                'lib/include/ATen/cuda/*.h',
                 'lib/include/ATen/cuda/*.cuh',
                 'lib/include/ATen/cudnn/*.h',
                 'lib/include/ATen/cuda/detail/*.cuh',
@@ -809,11 +820,11 @@ if __name__ == '__main__':
                 'lib/include/THC/*.h',
                 'lib/include/THC/*.cuh',
                 'lib/include/THC/generic/*.h',
+                'lib/include/THCUNN/*.cuh',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/autograd/*.h',
                 'lib/include/torch/csrc/jit/*.h',
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/torch.h',
             ]
-        },
-        install_requires=['pyyaml', 'numpy'], )
+        })

@@ -1,4 +1,4 @@
-#include "lazy_init.h"
+#include "cuda_lazy_init.h"
 
 #include <Python.h>
 #include <mutex>
@@ -7,9 +7,9 @@
 #include "torch/csrc/utils/object_ptr.h"
 
 namespace torch {
-namespace cuda {
+namespace utils {
 
-void lazy_init() {
+void cuda_lazy_init() {
   static std::once_flag once;
   std::call_once(once, []() {
     auto module = THPObjectPtr(PyImport_ImportModule("torch.cuda"));
