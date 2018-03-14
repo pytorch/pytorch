@@ -10,35 +10,6 @@ from torch._C import _add_docstr
 
 
 class Tensor(torch._C._TensorBase):
-    r"""Wraps a tensor and records the operations applied to it.
-
-    Variable is a thin wrapper around a Tensor object, that also holds
-    the gradient w.r.t. to it, and a reference to a function that created it.
-    This reference allows retracing the whole chain of operations that
-    created the data. If the Variable has been created by the user, its grad_fn
-    will be ``None`` and we call such objects *leaf* Variables.
-
-    Since autograd only supports scalar valued function differentiation, grad
-    size always matches the data size. Also, grad is normally only allocated
-    for leaf variables, and will be always zero otherwise.
-
-    Attributes:
-        data: Wrapped tensor of any type.
-        grad: Variable holding the gradient of type and location matching
-            the ``.data``.  This attribute is lazily allocated and can't
-            be reassigned.
-        requires_grad: Boolean indicating whether the Variable has been
-            created by a subgraph containing any Variable, that requires it.
-            See :ref:`excluding-subgraphs` for more details.
-            Can be changed only on leaf Variables.
-        is_leaf: Boolean indicating if the Variable is a graph leaf (i.e
-            if it was created by the user).
-        grad_fn: Gradient function graph trace.
-
-    Parameters:
-        data (any tensor class): Tensor to wrap.
-        requires_grad (bool): Value of the requires_grad flag. **Keyword only.**
-    """
     def __deepcopy__(self, memo):
         if not self.is_leaf:
             raise RuntimeError("Only Variables created explicitly by the user "
