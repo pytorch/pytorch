@@ -148,21 +148,21 @@
 
 static inline real THTensor_(powOne)(real x, real y) {
 #if defined(TH_REAL_IS_FLOAT)
-  return powf(x, y); 
+  return powf(x, y);
 #elif defined(TH_REAL_IS_DOUBLE)
   return pow(x, y);
 #else
   THArgCheck(y >= 0, 1,
       "Integers to negative integer powers are not allowed");
-  real result = 1;  
-  while (y) {       
-    if (y & 1) {    
-       result *= x; 
-    }               
-    y /= 2;         
-    x *= x;         
-  }                 
-  return result;    
+  real result = 1;
+  while (y) {
+    if (y & 1) {
+       result *= x;
+    }
+    y /= 2;
+    x *= x;
+  }
+  return result;
 #endif
 }
 
@@ -695,7 +695,7 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 #undef th_isnan
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 #define th_isnan(val) \
-(isnan(val))
+(std::isnan(val))
 #else
 #define th_isnan(val) (0)
 #endif
@@ -703,7 +703,7 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 #undef th_isnan_break
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 #define th_isnan_break(val) \
-if (isnan(val)) break;
+if (std::isnan(val)) break;
 #else
 #define th_isnan_break(val)
 #endif
@@ -3987,7 +3987,7 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
     TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += z*z;);
     return sqrt(sum);
   } else if(value == 3) {
-    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += TH_MATH_NAME(fabs)(z*z*z););
+    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += std::abs(z*z*z););
     return TH_MATH_NAME(pow)(sum, 1.0/3);
   } else {
     TH_TENSOR_APPLY(real, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
@@ -4207,7 +4207,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
     series += numer / denom * (factor + 1 / denom);
   }
   const real result = x * TH_MATH_NAME(pow)(1 - x, -beta) * series;
-  return isnan(result) ? 0.0 : result;
+  return th_isnan(result) ? 0.0 : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
@@ -4225,7 +4225,7 @@ static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta
     series += numer / (alpha + i) * (dbetas + factor * betas);
   }
   const real result = -TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
-  return isnan(result) ? 0.0 : result;
+  return th_isnan(result) ? 0.0 : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.
