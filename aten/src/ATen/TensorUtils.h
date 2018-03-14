@@ -62,7 +62,7 @@ void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel);
 void checkSameNumel(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
 void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
 void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
-void checkScalarTypes(CheckedFrom c, const TensorArg& t, std::initializer_list<ScalarType> l);
+void checkScalarTypes(CheckedFrom c, const TensorArg& t, at::ArrayRef<ScalarType> l);
 void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
 void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
 void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
