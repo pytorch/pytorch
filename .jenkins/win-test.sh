@@ -73,6 +73,12 @@ cd test/
 python ..\\ci_scripts\\download_image.py %IMAGE_COMMIT_TAG%.7z
 
 7z x %IMAGE_COMMIT_TAG%.7z
+
+if "%GIT_BRANCH%" == "origin/master" (
+    set /p COMMIT_HASH=<torch\\COMMIT_HASH
+    git checkout %COMMIT_HASH%
+)
+
 python run_test.py --verbose && python ..\\ci_scripts\\delete_image.py
 
 EOL
