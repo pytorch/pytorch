@@ -164,6 +164,8 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
                                   const Tensor &bag_size_, int64_t num_weights,
                                   bool scale_grad_by_freq, int64_t mode) {
   auto grad = grad_.contiguous();
+  auto grad_arg = TensorArg(grad, "grad_", 1);
+  checkScalarTypes("embedding_bag", grad_arg, {kFloat, kDouble});
   auto indices_arg = TensorArg(indices__, "indices__", 1);
   checkScalarType("embedding_bag", indices_arg, kLong);
   auto offsets_arg = TensorArg(offsets__, "offsets__", 1);
@@ -241,8 +243,6 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
         auto gd = grad.data<double>();
         axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
                      igwd + ddim * index, 1);
-      } else {
-        index_grad_weight[index].add_(grad[source], scale);
       }
     }
   }
