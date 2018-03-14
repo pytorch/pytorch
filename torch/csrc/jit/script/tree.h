@@ -44,10 +44,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
     throw std::runtime_error("is an Atom");
   }
   virtual const std::string& stringValue() const {
-    throw std::runtime_error("not a TK_STRING");
-  }
-  virtual bool boolValue() const {
-    throw std::runtime_error("not a TK_BOOL");
+    throw std::runtime_error("stringValue can only be called on TK_STRING");
   }
   virtual const TreeList& trees() const {
     return empty_trees;
@@ -111,26 +108,6 @@ struct String : public Tree {
  private:
   std::string value_;
 };
-struct Number : public Tree {
-  Number(SourceRange range, std::string value)
-    : Tree(TK_NUMBER)
-    , range_(std::move(range))
-    , value_(std::move(value)) {}
-  virtual const std::string& stringValue() const override {
-    return value_;
-  }
-  virtual const SourceRange& range() const override {
-    return range_;
-  }
-  template <typename... Args>
-  static TreeRef create(Args&&... args) {
-    return std::make_shared<Number>(std::forward<Args>(args)...);
-  }
-
- private:
-  SourceRange range_;
-  std::string value_;
-};
 
 static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
   for (auto t : others) {
@@ -188,9 +165,6 @@ struct pretty_tree {
 
     std::stringstream out;
     switch (t->kind()) {
-      case TK_NUMBER:
-        out << t->stringValue();
-        break;
       case TK_STRING:
         out << t->stringValue();
         break;

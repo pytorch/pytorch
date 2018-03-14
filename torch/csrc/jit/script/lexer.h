@@ -39,6 +39,7 @@ namespace script {
   _(TK_EQUIVALENT, "equivalent", "<=>")          \
   _(TK_IDENT, "ident", "")                       \
   _(TK_STRING, "string", "")                     \
+  _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
   _(TK_OPTION, "option", "")                     \
   _(TK_APPLY, "apply", "")                       \

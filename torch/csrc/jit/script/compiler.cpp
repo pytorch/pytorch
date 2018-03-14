@@ -191,7 +191,7 @@ Node* emitBuiltinCall(
     const auto& name = Symbol(attr.name().name());
     const Expr& value_expr = attr.value();
     switch (value_expr.kind()) {
-      case TK_NUMBER: {
+      case TK_CONST: {
         Const value {value_expr};
         if (value.isFloatingPoint()) {
           n->f_(name, value.asFloatingPoint());
@@ -631,7 +631,7 @@ private:
         const auto cast = Cast(tree);
         return emitCast(cast.input(), cast.type());
       } break;
-      case TK_NUMBER: {
+      case TK_CONST: {
         expectOutputs(tree, output_size, 1);
         return emitConst(Const(tree));
       } break;

@@ -149,16 +149,16 @@ struct Parser {
       L.expect(end);
     return List<T>::create(r, elements);
   }
-  TreeRef parseConst() {
+  Const parseConst() {
     auto range = L.cur().range;
     if (L.nextIf(TK_TRUE)) {
-      return Number::create(range, "1");
+      return Const::create(range, "1");
     } else if (L.nextIf(TK_FALSE)) {
-      return Number::create(range, "0");
+      return Const::create(range, "0");
     }
     std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
-    return Number::create(t.range, unary_prefix + t.text());
+    return Const::create(t.range, unary_prefix + t.text());
   }
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
