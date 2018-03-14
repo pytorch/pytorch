@@ -65,13 +65,13 @@ def get_shell_output(command):
     return subprocess.check_output(command, shell=True).decode().strip()
 
 
-def run_test(python, test_module, test_directory, verbose):
-    verbose = '--verbose' if verbose else ''
+def run_test(python, test_module, test_directory, options):
+    verbose = '--verbose' if options.verbose else ''
     return shell('{} {} {}'.format(python, test_module, verbose),
                  test_directory)
 
 
-def test_cpp_extensions(python, test_module, test_directory, verbose):
+def test_cpp_extensions(python, test_module, test_directory, options):
     if not shell('{} setup.py install --root ./install'.format(python),
                  os.path.join(test_directory, 'cpp_extensions')):
         return False
@@ -84,14 +84,14 @@ def test_cpp_extensions(python, test_module, test_directory, verbose):
         install_directory = os.path.join(test_directory, install_directory)
         os.environ['PYTHONPATH'] = '{}:{}'.format(install_directory,
                                                   python_path)
-        return run_test(python, test_module, test_directory, verbose)
+        return run_test(python, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
 
 
-def test_distributed(python, test_module, test_directory, verbose):
+def test_distributed(python, test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
-    if verbose and not mpi_available:
+    if options.verbose and not mpi_available:
         print('MPI not available -- MPI backend tests will be skipped')
     for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
         if backend == 'mpi' and not mpi_available:
@@ -99,7 +99,7 @@ def test_distributed(python, test_module, test_directory, verbose):
         for with_init in {True, False}:
             tmp_dir = tempfile.mkdtemp()
             with_init_message = ' with file init_method' if with_init else ''
-            if verbose:
+            if options.verbose:
                 print('Running distributed tests for the {} backend{}'.format(
                     backend, with_init_message))
             os.environ['TEMP_DIR'] = tmp_dir
@@ -115,10 +115,10 @@ def test_distributed(python, test_module, test_directory, verbose):
                 if backend == 'mpi':
                     mpiexec = 'mpiexec -n 3 --noprefix {}'.format(python)
                     if not run_test(mpiexec, test_module, test_directory,
-                                    verbose):
+                                    options):
                         return False
                 elif not run_test(python, test_module, test_directory,
-                                  verbose):
+                                  options):
                     return False
             finally:
                 shutil.rmtree(tmp_dir)
@@ -226,7 +226,7 @@ def main():
         test_module = 'test_{}.py'.format(test)
         print('Running {} ...'.format(test_module))
         handler = CUSTOM_HANDLERS.get(test, run_test)
-        if not handler(python, test_module, test_directory, options.verbose):
+        if not handler(python, test_module, test_directory, options):
             raise RuntimeError('{} failed!'.format(test_module))
 
     if options.coverage:
