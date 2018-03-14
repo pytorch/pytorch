@@ -7,10 +7,3 @@
 [submodule "torch/lib/nanopb"]
 	path = torch/lib/nanopb
 	url = https://github.com/nanopb/nanopb.git
-[submodule "aten/src/ATen/cpu/cpuinfo"]
-	path = aten/src/ATen/cpu/cpuinfo
-	url = https://github.com/Maratyszcza/cpuinfo
-[submodule "aten/src/ATen/cpu/tbb/tbb_remote"]
-	path = aten/src/ATen/cpu/tbb/tbb_remote
-	url = https://github.com/01org/tbb
-	branch = tbb_2018
