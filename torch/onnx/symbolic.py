@@ -309,12 +309,6 @@ def squeeze(g, self, dim=None):
     return g.op("Squeeze", self, axes_i=dims)
 
 
-def unsqueeze(g, input, dim):
-    if dim < 0:
-        dim += len(input.type().sizes()) + 1
-    return g.op("Unsqueeze", self, axes_i=[dim])
-
-
 def prelu(g, self, weight):
     return g.op("PRelu", self, weight)
 
