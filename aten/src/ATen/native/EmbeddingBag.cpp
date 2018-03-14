@@ -37,6 +37,9 @@ void axpy<double>(int64_t n, double a, double *x, int64_t incx,
   THDoubleBlas_axpy(n, a, x, incx, y, incy);
 }
 
+// This function combines index_select (using select_indices as the index) and
+// index_add (using add_indices as the index), without creating an intermediary
+// tensor to hold the selected embeddings
 template<typename T>
 static void index_select_add(const Tensor &select_indices,
                              const Tensor &add_indices,
