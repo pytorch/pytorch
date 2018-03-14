@@ -129,25 +129,14 @@ static void recursive_store(char* data, IntList sizes, IntList strides, int64_t 
   }
 }
 
-static Tensor internal_new_from_data(const Type & type, int device, PyObject* data,
-                                     bool allow_variables, bool copy_variables, bool copy_numpy) {
+static Tensor internal_new_from_data(const Type & type, int device, PyObject* data, bool always_copy) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
-
-  if (allow_variables) {
-    if (THPVariable_Check(data)) {
-      auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-      return copy_variables ? new_with_tensor_copy(type, var, device) :
-                              new_with_type_conversion(type, var, device);
-    }
-  }
-
 #ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
-    return copy_numpy ? new_with_tensor_copy(type, tensor, device) :
-                        new_with_type_conversion(type, tensor, device);
+    return always_copy ? new_with_tensor_copy(type, tensor, device) : new_with_type_conversion(type, tensor, device);
   }
 #endif
 
@@ -160,11 +149,11 @@ static Tensor internal_new_from_data(const Type & type, int device, PyObject* da
 }
 
 Tensor legacy_new_from_data(const Type & type, int device, PyObject *data) {
-  return internal_new_from_data(type, device, data, false, false, false);
+  return internal_new_from_data(type, device, data, false);
 }
 
 static Tensor new_from_data_copy(const Type & type, int device, PyObject *data) {
-  return internal_new_from_data(type, device, data, true, true, true);
+  return internal_new_from_data(type, device, data, true);
 }
 
 static Tensor legacy_new_from_sequence(const Type & type, int device, PyObject* data) {
@@ -361,48 +350,17 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-Tensor new_sparse_coo_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
-  Backend sparse_backend = type.is_cuda() ? kSparseCUDA : kSparseCPU;
-  Backend dense_backend = type.is_cuda() ? kCUDA : kCPU;
-  const auto& default_sparse_type = type.toBackend(sparse_backend);
-
-  static PythonArgParser parser({
-    "new_sparse_coo_tensor(PyObject* indices, PyObject* values, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
-    "new_sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
-  });
-
-  ParsedArgs<6> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  if (r.idx == 0) {
-    const auto& sparse_type = r.typeWithDefault(2, default_sparse_type);
-    check_is_sparse(sparse_type);
-    const auto& dense_type = sparse_type.toBackend(dense_backend);
-    const auto& index_type = dense_type.toScalarType(kLong);
-    // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, r.toInt64(3), r.pyobject(0), true, false, true);
-    Tensor values = internal_new_from_data(dense_type, r.toInt64(3), r.pyobject(1), true, false, true);
-    return set_requires_grad(sparse_type.sparse_coo_tensor(indices, values), r.toBool(4));
-  } else if (r.idx == 1) {
-    const auto& sparse_type = r.typeWithDefault(3, default_sparse_type);
-    check_is_sparse(sparse_type);
-    const auto& dense_type = sparse_type.toBackend(dense_backend);
-    const auto& index_type = dense_type.toScalarType(kLong);
-    // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, r.toInt64(4), r.pyobject(0), true, false, true);
-    Tensor values = internal_new_from_data(dense_type, r.toInt64(4), r.pyobject(1), true, false, true);
-    return set_requires_grad(sparse_type.sparse_coo_tensor(indices, values, r.intlist(2)), r.toBool(5));
-  }
-  throw std::runtime_error("new_sparse_coo_tensor(): invalid arguments");
-}
-
 Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
+    "new_tensor(Tensor other, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
     "new_tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    return set_requires_grad(new_with_tensor_copy(r.typeWithDefault(1, type), r.tensor(0), r.toInt64(2)), r.toBool(3));
+  } else if (r.idx == 1) {
     return set_requires_grad(new_from_data_copy(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0)), r.toBool(3));
   }
   throw std::runtime_error("new_tensor(): invalid arguments");
