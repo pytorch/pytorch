@@ -1,5 +1,3 @@
-protobuf:
-  - 3.4.1
 pin_run_as_build:
   protobuf:
     min_pin: x.x

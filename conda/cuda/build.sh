@@ -24,7 +24,7 @@ PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
 CMAKE_ARGS=()
 
 # Build with minimal required libraries
-CMAKE_ARGS+=("-DUSE_LEVELDB=OFF")
+# Add CMAKE flags here
 CMAKE_ARGS+=("-DUSE_MPI=OFF")
 
 # Build with CUDA

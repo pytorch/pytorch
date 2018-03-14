@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+set -ex
 
 # Figure out which Python to use
 PYTHON="python"
@@ -17,12 +17,15 @@ INSTALL_PREFIX="/usr/local/caffe2"
 
 # Anaconda builds have a special install prefix and python
 if [[ "$BUILD_ENVIRONMENT" == conda* ]]; then
+  # This path comes from install_anaconda.sh which installs Anaconda into the
+  # docker image
   PYTHON="/opt/conda/bin/python"
-  INSTALL_PREFIX="/opt/conda"
+  INSTALL_PREFIX="/opt/conda/"
 fi
 
 # Add the site-packages in the caffe2 install prefix to the PYTHONPATH
 SITE_DIR=$($PYTHON -c "from distutils import sysconfig; print(sysconfig.get_python_lib(prefix=''))")
+INSTALL_SITE_DIR="${INSTALL_PREFIX}/${SITE_DIR}"
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/.. && pwd)
@@ -36,7 +39,7 @@ fi
 # Set PYTHONPATH and LD_LIBRARY_PATH so that python can find the installed
 # Caffe2. This shouldn't be done on Anaconda, as Anaconda should handle this.
 if [[ "$BUILD_ENVIRONMENT" != conda* ]]; then
-  export PYTHONPATH="${PYTHONPATH}:${INSTALL_PREFIX}/${SITE_DIR}"
+  export PYTHONPATH="${PYTHONPATH}:$INSTALL_SITE_DIR"
   export LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:${INSTALL_PREFIX}/lib"
 fi
 
@@ -91,7 +94,7 @@ for test in ./test/*; do
 done
 
 # Get the relative path to where the caffe2 python module was installed
-CAFFE2_PYPATH="$SITE_DIR/caffe2"
+CAFFE2_PYPATH="$INSTALL_SITE_DIR/caffe2"
 
 # Collect additional tests to run (outside caffe2/python)
 EXTRA_TESTS=()
