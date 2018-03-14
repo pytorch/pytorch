@@ -230,7 +230,7 @@ del manager_path
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
 
-set_default_tensor_type(torch.float32)
+set_default_tensor_type(globals()['float32'])
 
 ################################################################################
 # Import interface functions defined in Python
