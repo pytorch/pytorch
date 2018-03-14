@@ -2,6 +2,7 @@
 
 #include <Python.h>
 
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/autograd/variable.h"

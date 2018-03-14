@@ -182,7 +182,6 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // NB: Why does this take an rvalue reference?  We need to get a non-const
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
-// TODO: use variable_list or variable_tensor_list?
 inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
     variable_list inputs, std::size_t num_stages) {
   auto state = std::make_shared<TracingState>(num_stages);
