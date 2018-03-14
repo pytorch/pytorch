@@ -74,7 +74,7 @@ void SumReduceDimsGradientOp<CPUContext, true, false>::Compute(
   for (int i = 0; i < rows * cols; i++) {
     int row = i / cols;
     int col = i % cols;
-    if (lengths_data == nullptr or row < lengths_data[col]) {
+    if (lengths_data == nullptr || row < lengths_data[col]) {
       dXdata[i] = dYdata[col];
     } else {
       dXdata[i] = 0;
@@ -94,7 +94,7 @@ void SumReduceDimsGradientOp<CPUContext, false, false>::Compute(
   for (int i = 0; i < rows * cols; i++) {
     int row = i / cols;
     int col = i % cols;
-    if (lengths_data == nullptr or col < lengths_data[row]) {
+    if (lengths_data == nullptr || col < lengths_data[row]) {
       dXdata[i] = dYdata[row];
     } else {
       dXdata[i] = 0;
