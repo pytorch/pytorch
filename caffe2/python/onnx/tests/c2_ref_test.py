@@ -29,8 +29,8 @@ from caffe2.python import core
 from caffe2.proto import caffe2_pb2
 
 import onnx
-from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info
-from caffe2.python.onnx.helper import make_model, c2_native_run_net, c2_native_run_op
+from onnx.helper import make_node, make_graph, make_tensor, make_tensor_value_info, make_model
+from caffe2.python.onnx.helper import c2_native_run_net, c2_native_run_op
 
 from onnx import defs, mapping
 import caffe2.python.onnx.frontend as c2_onnx
@@ -66,7 +66,7 @@ class TestCaffe2Basic(TestCase):
             name="test",
             inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [3, 2])],
             outputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [3, 2])])
-        c2_rep = c2.prepare(make_model(graph_def))
+        c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run({"X": X})
         np.testing.assert_almost_equal(output.X, Y_ref)
 
@@ -85,7 +85,7 @@ class TestCaffe2Basic(TestCase):
             name="test",
             inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [3, 2])],
             outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT, [3, 2])])
-        c2_rep = c2.prepare(make_model(graph_def))
+        c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run(X)
         np.testing.assert_almost_equal(output.Y, Y_ref)
 
@@ -119,7 +119,7 @@ class TestCaffe2Basic(TestCase):
             return 1 / (1 + np.exp(-x))
 
         W_ref = -sigmoid(np.tanh((X + Y) * weight))
-        c2_rep = c2.prepare(make_model(graph_def))
+        c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
 
