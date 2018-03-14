@@ -4,6 +4,7 @@ from __future__ import print_function
 
 import argparse
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -58,11 +59,11 @@ def log(message):
 def shell(command, cwd):
     # bufsize = 1 means line-buffered output (rather than fully-buffered)
     return subprocess.call(
-        command.split(), universal_newlines=True, bufsize=1, cwd=cwd) == 0
+        shlex.split(command), universal_newlines=True, bufsize=1, cwd=cwd) == 0
 
 
 def get_shell_output(command):
-    return subprocess.check_output(command.split()).decode().strip()
+    return subprocess.check_output(shlex.split(command)).decode().strip()
 
 
 def run_test(python, test_module, test_directory, options):
