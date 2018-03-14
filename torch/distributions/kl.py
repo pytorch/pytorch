@@ -17,6 +17,8 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
+from .logit_normal import LogitNormal
+from .logistic_normal import LogisticNormal
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -311,6 +313,13 @@ def _kl_transformed_transformed(p, q):
     if p.transforms != q.transforms:
         raise NotImplementedError
     return kl_divergence(p.base_dist, q.base_dist)
+
+
+@register_kl(LogisticNormal, LogisticNormal)
+def _kl_logistic_normal(p, q):
+    if p.transforms != q.transforms:
+        raise NotImplementedError
+    return kl_divergence(p.base_dist, q.base_dist).sum(-1)
 
 
 @register_kl(Uniform, Uniform)
