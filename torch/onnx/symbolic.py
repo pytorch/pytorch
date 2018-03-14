@@ -292,6 +292,10 @@ def prelu(g, self, weight):
     return g.op("PRelu", self, weight)
 
 
+def relu(g, input):
+    return g.op("Relu", input)
+
+
 def threshold(g, self, threshold, value):
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
