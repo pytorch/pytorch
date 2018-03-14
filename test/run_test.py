@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import print_function
+
 import argparse
 import os
 import shutil
@@ -47,6 +49,12 @@ DISTRIBUTED_TESTS_CONFIG = {
 }
 
 
+def log(message):
+    # Print to stderr because test output also goes to stderr. This ensures
+    # synchronization between the two output sources.
+    print(message, file=sys.stdout)
+
+
 def shell(command, cwd):
     # bufsize = 1 means line-buffered output (rather than fully-buffered)
     return subprocess.call(
@@ -72,7 +80,8 @@ def test_cpp_extensions(python, test_module, test_directory, options):
     try:
         cpp_extensions = os.path.join(test_directory, 'cpp_extensions')
         install_directory = get_shell_output(
-            "find {}/install -name '*-packages'".format(cpp_extensions))
+            "find {}/install -name *-packages".format(cpp_extensions))
+        assert install_directory, 'install_directory must not be empty'
         install_directory = os.path.join(test_directory, install_directory)
         os.environ['PYTHONPATH'] = '{}:{}'.format(install_directory,
                                                   python_path)
@@ -84,7 +93,7 @@ def test_cpp_extensions(python, test_module, test_directory, options):
 def test_distributed(python, test_module, test_directory, options):
     mpi_available = subprocess.call('command -v mpiexec', shell=True) == 0
     if options.verbose and not mpi_available:
-        print('MPI not available -- MPI backend tests will be skipped')
+        log('MPI not available -- MPI backend tests will be skipped')
     for backend, env_vars in DISTRIBUTED_TESTS_CONFIG.items():
         if backend == 'mpi' and not mpi_available:
             continue
@@ -92,7 +101,7 @@ def test_distributed(python, test_module, test_directory, options):
             tmp_dir = tempfile.mkdtemp()
             with_init_message = ' with file init_method' if with_init else ''
             if options.verbose:
-                print('Running distributed tests for the {} backend{}'.format(
+                log('Running distributed tests for the {} backend{}'.format(
                     backend, with_init_message))
             os.environ['TEMP_DIR'] = tmp_dir
             os.environ['BACKEND'] = backend
@@ -197,7 +206,7 @@ def get_selected_tests(options):
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
         for test in WINDOWS_BLACKLIST:
             if test in selected_tests:
-                print('Excluding {} on Windows'.format(test))
+                log('Excluding {} on Windows'.format(test))
                 selected_tests.remove(test)
 
     return selected_tests
@@ -209,14 +218,14 @@ def main():
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
     if options.verbose:
-        print('Selected tests: {}'.format(', '.join(selected_tests)))
+        log('Selected tests: {}'.format(', '.join(selected_tests)))
 
     if options.coverage:
         shell('coverage erase')
 
     for test in selected_tests:
         test_module = 'test_{}.py'.format(test)
-        print('Running {} ...'.format(test_module))
+        log('Running {} ...'.format(test_module))
         handler = CUSTOM_HANDLERS.get(test, run_test)
         if not handler(python, test_module, test_directory, options):
             raise RuntimeError('{} failed!'.format(test_module))
