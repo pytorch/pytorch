@@ -11,7 +11,7 @@ class LogitNormal(TransformedDistribution):
 
         X ~ LogitNormal(loc, scale)
         Y = log(X / (1 - X)) ~ Normal(loc, scale)
-    
+
     where `log(X / (1 - X))` is computed element-wise.
 
     Example::

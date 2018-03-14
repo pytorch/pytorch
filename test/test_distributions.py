@@ -36,8 +36,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, Laplace, LogNormal, Multinomial,
-                                 Normal, OneHotCategorical, Pareto, Poisson,
+                                 Gumbel, Laplace, LogNormal, LogitNormal, LogisticNormal,
+                                 Multinomial, Normal, OneHotCategorical, Pareto, Poisson,
                                  RelaxedBernoulli, RelaxedOneHotCategorical, StudentT,
                                  TransformedDistribution, Uniform, constraints,
                                  kl_divergence)
@@ -201,6 +201,34 @@ EXAMPLES = [
             'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
         },
     ]),
+    Example(LogitNormal, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
+        },
+    ]),
+    Example(LogisticNormal, [
+        {
+            'loc': Variable(torch.randn(5, 5), requires_grad=True),
+            'scale': Variable(torch.randn(5, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.randn(1), requires_grad=True),
+            'scale': Variable(torch.randn(1).abs(), requires_grad=True),
+        },
+        {
+            'loc': Variable(torch.Tensor([1.0, 0.0]), requires_grad=True),
+            'scale': Variable(torch.Tensor([1e-5, 1e-5]), requires_grad=True),
+        },
+    ]),
     Example(Normal, [
         {
             'loc': Variable(torch.randn(5, 5), requires_grad=True),
@@ -331,8 +359,10 @@ class TestDistributions(TestCase):
         # checks that the log_prob matches a reference function
         s = dist.sample()
         log_probs = dist.log_prob(s)
-        for i, (val, log_prob) in enumerate(zip(s.data.view(-1), log_probs.data.view(-1))):
-            asset_fn(i, val, log_prob)
+        log_probs_data_flat = log_probs.data.view(-1)
+        s_data_flat = s.data.view(len(log_probs_data_flat), -1)
+        for i, (val, log_prob) in enumerate(zip(s_data_flat, log_probs_data_flat)):
+            asset_fn(i, val.squeeze(), log_prob)
 
     def _check_sampler_sampler(self, torch_dist, ref_dist, message, multivariate=False,
                                num_samples=10000, failure_rate=1e-3):
@@ -918,6 +948,80 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(LogNormal(mean, std),
                                         scipy.stats.lognorm(scale=math.exp(mean), s=std),
                                         'LogNormal(loc={}, scale={})'.format(mean, std))
+
+    def test_logitnormal(self):
+        mean = Variable(torch.randn(5, 5), requires_grad=True)
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        mean_1d = Variable(torch.randn(1), requires_grad=True)
+        std_1d = Variable(torch.randn(1), requires_grad=True)
+        mean_delta = torch.Tensor([1.0, 0.0])
+        std_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(LogitNormal(mean, std).sample().size(), (5, 5))
+        self.assertEqual(LogitNormal(mean, std).sample((7,)).size(), (7, 5, 5))
+        self.assertEqual(LogitNormal(mean_1d, std_1d).sample((1,)).size(), (1, 1))
+        self.assertEqual(LogitNormal(mean_1d, std_1d).sample().size(), (1,))
+        self.assertEqual(LogitNormal(0.2, .6).sample((1,)).size(), (1,))
+        self.assertEqual(LogitNormal(-0.7, 50.0).sample((1,)).size(), (1,))
+
+        # sample check for extreme value of mean, std
+        set_rng_seed(1)
+        self.assertEqual(LogitNormal(mean_delta, std_delta).sample(sample_shape=(1, 2)),
+                         torch.Tensor([[[1. / (1. + math.exp(-1)), 0.5], [1. / (1. + math.exp(-1)), 0.5]]]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(LogitNormal, (mean, std))
+        self._gradcheck_log_prob(LogitNormal, (mean, 1.0))
+        self._gradcheck_log_prob(LogitNormal, (0.0, std))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_logitnormal_logprob(self):
+        mean = Variable(torch.randn(5, 1), requires_grad=True)
+        std = Variable(torch.randn(5, 1).abs(), requires_grad=True)
+
+        def ref_log_prob(idx, x, log_prob):
+            m = mean.data.view(-1)[idx]
+            s = std.data.view(-1)[idx]
+            dist = scipy.stats.norm(loc=m, scale=s)
+            expected = dist.logpdf(math.log(x) - math.log(1 - x)) - math.log(x) - math.log(1 - x)
+            self.assertAlmostEqual(log_prob, expected, places=3)
+
+        self._check_log_prob(LogitNormal(mean, std), ref_log_prob)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_logitnormal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        for mean, std in product([-1.0, 0.0, 1.0], [0.1, 1.0, 10.0]):
+            base_dist = scipy.stats.norm(loc=mean, scale=std)
+            ref_dist = scipy.stats.norm(loc=mean, scale=std)
+            ref_dist.rvs = lambda n: 1. / (1. + np.exp(-base_dist.rvs(n)))
+            self._check_sampler_sampler(LogitNormal(mean, std), ref_dist,
+                                        'LogitNormal(loc={}, scale={})'.format(mean, std))
+
+    def test_logisticnormal(self):
+        mean = Variable(torch.randn(5, 5), requires_grad=True)
+        std = Variable(torch.randn(5, 5).abs(), requires_grad=True)
+        mean_1d = Variable(torch.randn(1), requires_grad=True)
+        std_1d = Variable(torch.randn(1), requires_grad=True)
+        mean_delta = torch.Tensor([1.0, 0.0])
+        std_delta = torch.Tensor([1e-5, 1e-5])
+        self.assertEqual(LogisticNormal(mean, std).sample().size(), (5, 6))
+        self.assertEqual(LogisticNormal(mean, std).sample((7,)).size(), (7, 5, 6))
+        self.assertEqual(LogisticNormal(mean_1d, std_1d).sample((1,)).size(), (1, 2))
+        self.assertEqual(LogisticNormal(mean_1d, std_1d).sample().size(), (2,))
+        self.assertEqual(LogisticNormal(0.2, .6).sample((1,)).size(), (2,))
+        self.assertEqual(LogisticNormal(-0.7, 50.0).sample((1,)).size(), (2,))
+
+        # sample check for extreme value of mean, std
+        set_rng_seed(1)
+        self.assertEqual(LogisticNormal(mean_delta, std_delta).sample(),
+                         torch.Tensor([math.exp(1) / (1. + 1. + math.exp(1)),
+                                       1. / (1. + 1. + math.exp(1)),
+                                       1. / (1. + 1. + math.exp(1))]),
+                         prec=1e-4)
+
+        self._gradcheck_log_prob(LogisticNormal, (mean, std))
+        self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
+        self._gradcheck_log_prob(LogisticNormal, (0.0, std))
 
     def test_normal(self):
         loc = Variable(torch.randn(5, 5), requires_grad=True)
@@ -2744,6 +2848,8 @@ class TestTransforms(TestCase):
 
     def test_univariate_forward_jacobian(self):
         for transform in self.transforms:
+            if transform.event_dim > 0:
+                continue
             x = Variable(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
@@ -2759,6 +2865,8 @@ class TestTransforms(TestCase):
 
     def test_univariate_inverse_jacobian(self):
         for transform in self.transforms:
+            if transform.event_dim > 0:
+                continue
             y = Variable(self._generate_data(transform.inv), requires_grad=True)
             try:
                 x = transform.inv(y)

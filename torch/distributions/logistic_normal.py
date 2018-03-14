@@ -36,7 +36,7 @@ class LogisticNormal(TransformedDistribution):
         self._event_shape = self._event_shape.__class__([
             s + 1 for s in self._event_shape
         ])
-    
+
     def log_prob(self, value):
         """
         Scores the sample by inverting the transform(s) and computing the score
