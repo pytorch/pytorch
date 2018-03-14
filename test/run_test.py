@@ -48,21 +48,13 @@ DISTRIBUTED_TESTS_CONFIG = {
 
 
 def shell(command, cwd):
-    popen = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        universal_newlines=True,
-        cwd=cwd,
-        shell=True)
-    for stdout_line in iter(popen.stdout.readline, ''):
-        print(stdout_line.strip('\n'))
-    popen.stdout.close()
-    return_code = popen.wait()
-    return return_code == 0
+    # bufsize = 1 means line-buffered output (rather than fully-buffered)
+    return subprocess.call(
+        command.split(), universal_newlines=True, bufsize=1, cwd=cwd) == 0
 
 
 def get_shell_output(command):
-    return subprocess.check_output(command, shell=True).decode().strip()
+    return subprocess.check_output(command.split()).decode().strip()
 
 
 def run_test(python, test_module, test_directory, options):
