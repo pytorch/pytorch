@@ -26,15 +26,12 @@ struct PyTensorType {
   PyTypeObject py_type;
   at::Type* aten_type;
   THPDtype *dtype;
-  // The base tensor type i.e. `torch.Tensor`. All tensors are pass isinstance
-  // checks on the base type.
-  bool is_base_type;
   char name[64];
 };
 
 static_assert(std::is_standard_layout<PyTensorType>::value, "PyTensorType must be standard layout");
 
-static PyTensorType* default_tensor_type;
+static at::Type* default_tensor_type;
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types);
 
@@ -61,10 +58,6 @@ static PyObject* Tensor_new(PyTypeObject *type, PyObject *args, PyObject *kwargs
 static PyObject* Tensor_instancecheck(PyTensorType* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (THPVariable_Check(arg)) {
-    if (self->is_base_type) {
-      // Every tensor is treated as an instance of torch.Tensor
-      Py_RETURN_TRUE;
-    }
     auto& var = ((THPVariable*)arg)->cdata;
     if (&var.type() == self->aten_type) {
       Py_RETURN_TRUE;
@@ -216,7 +209,7 @@ static std::vector<PyTensorType> tensor_types;
 static void initialize_aten_types(std::vector<PyTensorType>& tensor_types) {
   // includes CUDA types even when PyTorch is not built with CUDA
   auto declared_types = torch::utils::all_declared_types();
-  tensor_types.resize(declared_types.size() + 1);
+  tensor_types.resize(declared_types.size());
 
   for (size_t i = 0, end = declared_types.size(); i != end; i++) {
     auto& tensor_type = tensor_types[i];
@@ -225,12 +218,6 @@ static void initialize_aten_types(std::vector<PyTensorType>& tensor_types) {
     set_type(tensor_type, backend, scalar_type);
     set_name(tensor_type, get_name(backend, scalar_type));
   }
-
-  // The type object for torch.Tensor is at the end.
-  default_tensor_type = &tensor_types.back();
-  set_type(*default_tensor_type, kCPU, kFloat);
-  set_name(*default_tensor_type, "torch.Tensor");
-  default_tensor_type->is_base_type = true;
 }
 
 void initialize_python_bindings() {
@@ -238,18 +225,17 @@ void initialize_python_bindings() {
   // vector. After this call, the vector must not be resized.
   initialize_aten_types(tensor_types);
 
-  // Initialize the Python metaclass for the torch.Tensor, torch.FloatTensor,
-  // etc. types. The metaclass handles __instancecheck__ checks and binds the
-  // dtype property on the type objects.
+  // Initialize the Python metaclass for the torch.FloatTensor, etc. types.
+  // The metaclass handles __instancecheck__ checks and binds the dtype property
+  // on the type objects.
   py_initialize_metaclass(metaclass);
 
   // Get the tp_dict of the Variable class. We copy function definitions
   // onto each Tensor type object so that they can be accessed via e.g.
-  // `torch.Tensor.add`.
+  // `torch.FloatTensor.add`.
   auto var_dict = get_variable_dict();
 
-  // Initialize each Python type object torch.FloatTensor, torch.DoubleTensor,
-  // etc. and the "default" type object torch.Tensor.
+  // Initialize each Python type object torch.FloatTensor, torch.DoubleTensor, etc.
   for (auto& tensor_type : tensor_types) {
     py_initialize_tensor_type(tensor_type.py_type, tensor_type.name, var_dict.get());
   }
@@ -258,9 +244,6 @@ void initialize_python_bindings() {
   // is added to the `torch` module as `FloatTensor`. Also add all the type
   // objects to the set torch._tensor_classes.
   py_bind_tensor_types(tensor_types);
-
-  // Add torch.Storage corresponding to the default tensor type.
-  py_bind_torch_storage(tensor_types.back());
 }
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) {
@@ -318,10 +301,6 @@ static PyTensorType& get_tensor_type(THPDtype *obj) {
   return *it;
 }
 
-void set_default_tensor_type(const at::Type& type) {
-  set_type(*default_tensor_type, type.backend(), type.scalarType());
-}
-
 void py_set_default_tensor_type(PyObject* obj) {
   PyTensorType *type;
   if (PyTensorType_Check(obj)) {
@@ -345,7 +324,7 @@ void py_set_default_tensor_type(PyObject* obj) {
 
   // get the storage first, so if it doesn't exist we don't change the default tensor type
   THPObjectPtr storage = get_storage_obj(*type);
-  set_default_tensor_type(*type->aten_type);
+  default_tensor_type = type->aten_type;
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();
@@ -357,8 +336,8 @@ void py_set_default_tensor_type(PyObject* obj) {
 }
 
 at::Type& get_default_tensor_type() {
-  TORCH_ASSERT(default_tensor_type && default_tensor_type->aten_type);
-  return *default_tensor_type->aten_type;
+  TORCH_ASSERT(default_tensor_type);
+  return *default_tensor_type;
 }
 
 }} // namespace torch::tensor
