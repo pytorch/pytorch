@@ -4329,92 +4329,50 @@ class TestNN(NNTestCase):
                                 "\ninp_size: " + str(inp_size) +
                                 "\ndilation: " + str(dilation))
 
-    def test_grad_conv2d_weight(self):
-        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
+    def run_grad_conv_test(self, func_forward, func_backward, dim=1, gradient='input'):
+        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
             for batch, stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [1, 2], [0, 1, 2], [2], [3], dilations):
-                input_shape = (batch, chan_in, inp_size, inp_size)
-                weight_shape = (chan_out, chan_in, kern, kern)
+                    product([1, 2], [1, 2], [0, 1, 2], [2], [3], [1]):
+
+                input_shape = [batch, chan_in]
+                weight_shape = [chan_out, chan_in]
+                for _ in range(dim):
+                    input_shape.append(inp_size)
+                    weight_shape.append(kern)
+
                 input = torch.autograd.Variable(torch.randn(input_shape), requires_grad=True)
                 weight = torch.autograd.Variable(torch.randn(weight_shape), requires_grad=True)
-                output = F.conv2d(input, weight, stride=stride, padding=padding, dilation=dilation)
+                output = func_forward(input, weight, stride=stride, padding=padding, dilation=dilation)
 
                 gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-                gradient_w = torch.autograd.grad(output, weight, gradient_o)
+                gradient_w = torch.autograd.grad(output, input if (gradient == 'input') else weight, gradient_o)
 
                 self.assertAlmostEqual(gradient_w[0],
-                                       F.grad.conv2d_weight(
-                                           input,
-                                           weight_shape,
+                                       func_backward(
+                                           input_shape if (gradient == 'input') else input,
+                                           weight_shape if (gradient == 'weight') else weight,
                                            gradient_o,
                                            stride=stride,
                                            padding=padding,
                                            dilation=dilation))
+
+    def test_grad_conv1d_input(self):
+        self.run_grad_conv_test(F.conv1d, F.grad.conv1d_input, 1, 'input')
+
+    def test_grad_conv1d_weight(self):
+        self.run_grad_conv_test(F.conv1d, F.grad.conv1d_weight, 1, 'weight')
 
     def test_grad_conv2d_input(self):
-        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
-            for batch, stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [1, 2], [0, 1, 2], [2], [3], [1]):
-                input_shape = (batch, chan_in, inp_size, inp_size)
-                weight_shape = (chan_out, chan_in, kern, kern)
-                input = torch.autograd.Variable(torch.randn(input_shape), requires_grad=True)
-                weight = torch.autograd.Variable(torch.randn(weight_shape), requires_grad=True)
-                output = F.conv2d(input, weight, stride=stride, padding=padding, dilation=dilation)
+        self.run_grad_conv_test(F.conv2d, F.grad.conv2d_input, 2, 'input')
 
-                gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-                gradient_w = torch.autograd.grad(output, input, gradient_o)
-
-                self.assertAlmostEqual(gradient_w[0],
-                                       F.grad.conv2d_input(
-                                           input_shape,
-                                           weight,
-                                           gradient_o,
-                                           stride=stride,
-                                           padding=padding,
-                                           dilation=dilation))
-
-    def test_grad_conv3d_weight(self):
-        for kern, inp_size, dilations in [(3, 6, [1, 2]), (3, 7, [1]), (4, 9, [1])]:
-            for batch, stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [1, 2], [0, 1, 2], [2], [3], dilations):
-                input_shape = (batch, chan_in, inp_size, inp_size, inp_size)
-                weight_shape = (chan_out, chan_in, kern, kern, kern)
-                input = torch.autograd.Variable(torch.randn(input_shape), requires_grad=True)
-                weight = torch.autograd.Variable(torch.randn(weight_shape), requires_grad=True)
-                output = F.conv3d(input, weight, stride=stride, padding=padding, dilation=dilation)
-                gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-                gradient_w = torch.autograd.grad(output, weight, gradient_o)
-
-                self.assertAlmostEqual(gradient_w[0],
-                                       F.grad.conv3d_weight(
-                                           input,
-                                           weight_shape,
-                                           gradient_o,
-                                           stride=stride,
-                                           padding=padding,
-                                           dilation=dilation))
+    def test_grad_conv2d_weight(self):
+        self.run_grad_conv_test(F.conv2d, F.grad.conv2d_weight, 2, 'weight')
 
     def test_grad_conv3d_input(self):
-        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
-            for batch, stride, padding, chan_in, chan_out, dilation in \
-                    product([1, 2], [1, 2], [0, 1, 2], [2], [3], [1]):
-                input_shape = (batch, chan_in, inp_size, inp_size, inp_size)
-                weight_shape = (chan_out, chan_in, kern, kern, kern)
-                input = torch.autograd.Variable(torch.randn(input_shape), requires_grad=True)
-                weight = torch.autograd.Variable(torch.randn(weight_shape), requires_grad=True)
-                output = F.conv3d(input, weight, stride=stride, padding=padding, dilation=dilation)
+        self.run_grad_conv_test(F.conv3d, F.grad.conv3d_input, 3, 'input')
 
-                gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-                gradient_w = torch.autograd.grad(output, input, gradient_o)
-
-                self.assertAlmostEqual(gradient_w[0],
-                                       F.grad.conv3d_input(
-                                           input_shape,
-                                           weight,
-                                           gradient_o,
-                                           stride=stride,
-                                           padding=padding,
-                                           dilation=dilation))
+    def test_grad_conv3d_weight(self):
+        self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
 
 
 class TestNNInit(TestCase):
