@@ -66,3 +66,17 @@ rm -rf ninja
 pushd vision
 time python setup.py install
 popd
+
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7.2 ]]; then
+   echo "Testing libtorch with NO_PYTHON"
+   LIBTORCH_INSTALL_PREFIX=`pwd`/../libtorch
+   pushd tools/cpp_build
+
+   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
+     "$LIBTORCH_INSTALL_PREFIX"/bin/test_jit
+   else
+     "$LIBTORCH_INSTALL_PREFIX"/bin/test_jit "[cpu]"
+   fi
+   popd
+fi
