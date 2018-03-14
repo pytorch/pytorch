@@ -27,7 +27,24 @@ from future.utils import viewitems
 from caffe2.python.predictor_constants import predictor_constants as pc
 import caffe2.python.predictor.predictor_exporter as pe
 import caffe2.python.predictor.predictor_py_utils as pred_utils
-from caffe2.proto import caffe2_pb2
+from caffe2.proto import caffe2_pb2, metanet_pb2
+
+
+class MetaNetDefTest(unittest.TestCase):
+    def test_minimal(self):
+        '''
+        Tests that a NetsMap message can be created with a NetDef message
+        '''
+        # This calls the constructor for a metanet_pb2.NetsMap
+        metanet_pb2.NetsMap(key="test_key", value=caffe2_pb2.NetDef())
+
+    def test_adding_net(self):
+        '''
+        Tests that NetDefs can be added to MetaNetDefs
+        '''
+        meta_net_def = metanet_pb2.MetaNetDef()
+        net_def = caffe2_pb2.NetDef()
+        meta_net_def.nets.add(key="test_key", value=net_def)
 
 class PredictorExporterTest(unittest.TestCase):
     def _create_model(self):

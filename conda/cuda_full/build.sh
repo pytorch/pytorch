@@ -34,12 +34,17 @@ CMAKE_ARGS+=("-DUSE_LMDB=ON")
 CMAKE_ARGS+=("-DUSE_NCCL=ON")
 CMAKE_ARGS+=("-DUSE_OPENCV=ON")
 
-# cudnn comes from a module location
-#-DCUDNN_ROOT_DIR=/public/apps/cudnn/v7.0/cuda/ \
+# cuDNN and NCCL come from module locations
+CMAKE_ARGS+=("-DCUDNN_ROOT_DIR=/public/apps/cudnn/v7.0/cuda/")
+CMAKE_ARGS+=("-DNCCL_ROOT_DIR=$NCCL_ROOT_DIR")
 
 # openmpi is needed but can't be included from conda, b/c it's only available
 # in conda-forge, which uses gcc 4.8.5
 CMAKE_ARGS+=("-DUSE_MPI=ON")
+
+# Use MKL and hack around a broken eigen op
+CMAKE_ARGS+=("-DBLAS=MKL")
+rm -rf ./caffe2/operators/conv_op_eigen.cc
 
 # Explicitly turn unused packages off to prevent cmake from trying to find
 # system libraries. If conda packages are built with any system libraries then
@@ -52,10 +57,7 @@ CMAKE_ARGS+=("-DUSE_ROCKSDB=OFF")
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 
-# No rpaths will work for anaconda?
-# -DCMAKE_SKIP_RPATH=ON \
-
-
+# Build
 mkdir -p build
 cd build
 cmake "${CMAKE_ARGS[@]}"  $CONDA_CMAKE_ARGS $PYTHON_ARGS ..

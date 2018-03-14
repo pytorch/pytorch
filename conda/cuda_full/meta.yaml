@@ -11,7 +11,8 @@ build:
   number: 0
   skip: True  # [win]
   script_env:
-    - CONDA_CMAKE_ARGS
+    - CONDA_CMAKE_BUILD_ARGS
+    - NCCL_ROOT_DIR
 
 requirements:
   build:
@@ -20,6 +21,8 @@ requirements:
     - glog
     - gflags
     - lmdb
+    - mkl
+    - mkl-include
     - numpy
     - opencv
     - python
@@ -30,6 +33,8 @@ requirements:
     - glog
     - gflags
     - lmdb
+    - mkl
+    - mkl-include
     - numpy
     - opencv
     - protobuf

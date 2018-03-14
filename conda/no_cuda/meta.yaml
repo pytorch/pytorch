@@ -11,26 +11,15 @@ build:
   number: 0
   skip: True  # [win]
   script_env:
-    - CONDA_CMAKE_ARGS
+    - CONDA_CMAKE_BUILD_ARGS
 
 requirements:
   build:
     - cmake
     - future
-    - glog
     - gflags
-    - lmdb
-    - mkl-include
-    - mkl
-    - numpy
-    - opencv
-    - python
-    - protobuf {{ protobuf }}
-    - six
-  run:
-    - future
     - glog
-    - gflags
+    - leveldb
     - lmdb
     - mkl
     - mkl-include
@@ -39,6 +28,21 @@ requirements:
     - protobuf
     - python
     - six
+    # other packages here
+  run:
+    - future
+    - gflags
+    - glog
+    - leveldb
+    - lmdb
+    - mkl
+    - mkl-include
+    - numpy
+    - opencv
+    - protobuf
+    - python
+    - six
+    # other packages here
 
 test:
   imports:
