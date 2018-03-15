@@ -284,18 +284,30 @@ class _DistTestBase(object):
 
     # BROADCAST
     def _test_broadcast_helper(self, group, group_id, rank, cuda=False):
-        for src in group:
-            expected_tensor = _build_tensor(src + 1)
-            if cuda:
-                expected_tensor = expected_tensor.cuda()
-            if rank == src:
-                dist.broadcast(expected_tensor, src, group_id)
-            else:
-                tensor = _build_tensor(src + 1, -1)
+        for ttype, value, requires_cuda in [
+            ('torch.FloatTensor', -1e-10, False),
+            ('torch.DoubleTensor', -1e-100, False),
+            ('torch.HalfTensor', -0.1, True),
+            ('torch.CharTensor', -2, False),
+            ('torch.ByteTensor', 129, False),
+            ('torch.IntTensor', -1e5, False),
+            ('torch.LongTensor', -1e15, False),
+        ]:
+            if requires_cuda and not cuda:
+                continue
+            for src in group:
+                expected_tensor = _build_tensor(src + 1, value).type(ttype)
                 if cuda:
-                    tensor = tensor.cuda()
-                dist.broadcast(tensor, src, group_id)
-                self.assertEqual(tensor, expected_tensor)
+                    expected_tensor = expected_tensor.cuda()
+                if rank == src:
+                    dist.broadcast(expected_tensor, src, group_id)
+                else:
+                    tensor = _build_tensor(src + 1, -1).type(ttype)
+                    if cuda:
+                        tensor = tensor.cuda()
+                    dist.broadcast(tensor, src, group_id)
+                    self.assertEqual(tensor.size(), expected_tensor.size())
+                    self.assertEqual(tensor.ne(expected_tensor).max(), 0)
 
         self._barrier()
 
