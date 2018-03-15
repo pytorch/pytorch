@@ -7,7 +7,21 @@
 #include <memory>
 #include <stdexcept>
 
-namespace thd { namespace rpc {
+namespace thd {
+RPCType type_traits<char>::type = RPCType::CHAR;
+RPCType type_traits<int8_t>::type = RPCType::CHAR;
+RPCType type_traits<uint8_t>::type = RPCType::UCHAR;
+RPCType type_traits<float>::type = RPCType::FLOAT;
+RPCType type_traits<double>::type = RPCType::DOUBLE;
+RPCType type_traits<int16_t>::type = RPCType::SHORT;
+RPCType type_traits<int32_t>::type = RPCType::INT;
+RPCType type_traits<uint32_t>::type = RPCType::UINT;
+RPCType type_traits<uint16_t>::type = RPCType::USHORT;
+RPCType type_traits<int64_t>::type = std::is_same<int64_t, long>::value ? RPCType::LONG : RPCType::LONG_LONG;
+RPCType type_traits<uint64_t>::type = std::is_same<uint64_t, unsigned long>::value ? RPCType::ULONG : RPCType::ULONG_LONG;
+RPCType type_traits<std::conditional<std::is_same<int64_t, long>::value, long long, long>::type>::type = std::is_same<int64_t, long>::value ? RPCType::LONG_LONG : RPCType::LONG;
+RPCType type_traits<std::conditional<std::is_same<uint64_t, unsigned long>::value, unsigned long long, unsigned long>::type>::type = std::is_same<uint64_t, unsigned long>::value ? RPCType::ULONG_LONG : RPCType::ULONG;
+namespace rpc {
 
 RPCMessage::RPCMessage()
   : _msg(0)
