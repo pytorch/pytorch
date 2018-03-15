@@ -115,8 +115,7 @@ void test(Type &T) {
     if (t.numel() != 0) {
       ASSERT(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      // FIXME: you should be able to reduce over size {0}
-      ASSERT_THROWS(t.sum(0));
+      ASSERT(t.sum(0).equal(T.tensor({0})));
     }
 
     // reduce (with dimension argument and with 2 return arguments)
