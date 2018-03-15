@@ -201,6 +201,7 @@ class Caffe2Backend(Backend):
         'RNN': '_create_rnn',
         'Sqrt': '_create_sqrt',
         'Reciprocal': '_create_reciprocal',
+        'MatMul': '_create_matmul',
     }
 
     # NB: By default, you will use the LATEST definition of the operator,
@@ -959,6 +960,14 @@ class Caffe2Backend(Backend):
             [Y],
             exponent=-1.0,
         )
+
+    @classmethod
+    def _create_matmul(cls, init_model, pred_model, n, opset_version):
+        op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
+        broadcast_arg = op.arg.add()
+        broadcast_arg.name = "broadcast"
+        broadcast_arg.i = 1
+        return op
 
     @classmethod
     def _direct_initialize_parameters(cls, initializer, ws, device_option):

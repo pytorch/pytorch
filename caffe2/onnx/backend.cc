@@ -345,7 +345,8 @@ Caffe2Backend::get_special_operators() const {
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
               {"Sqrt", &Caffe2Backend::CreateSqrt},
-              {"Reciprocal", &Caffe2Backend::CreateReciprocal}};
+              {"Reciprocal", &Caffe2Backend::CreateReciprocal},
+              {"MatMul", &Caffe2Backend::CreateMatMul}};
   return kSpecialOperators;
 }
 
@@ -800,6 +801,27 @@ Caffe2Ops Caffe2Backend::CreateSlice(const ModelProto &init_model,
   }
 
   return ret;
+}
+
+Caffe2Ops Caffe2Backend::CreateMatMul(
+    const ModelProto& init_model,
+    const ModelProto& pred_model,
+    OnnxNode* onnx_node,
+    int opset_version) {
+  const auto& node = onnx_node->node;
+  if (node.input_size() != 2) {
+    throw std::runtime_error("MatMul should have 2 inputs");
+  }
+
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(init_model, pred_model, onnx_node,
+                                         opset_version);
+  assert(c2_op.ops.size() == 1);
+  auto* op = c2_op.ops.Mutable(0);
+  auto* broadcast_arg = op->add_arg();
+  broadcast_arg->set_name("broadcast");
+  broadcast_arg->set_i(1);
+
+  return c2_op;
 }
 
 //==============================================
