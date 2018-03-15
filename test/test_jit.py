@@ -1628,6 +1628,18 @@ class TestJit(TestCase):
 
         self.checkScript(func, [x, y], expected_out, False, capture_output=True)
 
+    def test_multiple_assignment(self):
+        def outer_func(x):
+            return x * 2, x + 2
+
+        @torch.jit.script
+        def func(x):
+            y, z = outer_func(x)
+            return y + z
+
+        x = torch.arange(4)
+        self.assertEqual(func(x), x * 2 + x + 2)
+
     def test_trace_annotation(self):
         @torch.jit.trace(Variable(torch.rand(1)))
         def foo(a):
