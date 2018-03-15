@@ -209,6 +209,10 @@ def sum(g, self, dim=None, keepdim=None):
     return g.op("ReduceSum", self, axes_i=[dim], keepdims_i=keepdim)
 
 
+def cumsum(g, input, dim):
+    return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
+
+
 def prod(g, self, dim=None, keepdim=None):
     if dim is None:
         dims = None
@@ -230,6 +234,23 @@ def expand(g, self, size):
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
+
+
+def embedding_bag(g,
+                  embedding_matrix,
+                  indices,
+                  offsets,
+                  scale_grad_by_freq,
+                  mode,
+                  sparse):
+    return g.op("ATen",
+                embedding_matrix,
+                indices,
+                offsets,
+                operator_s="embedding_bag",
+                scale_grad_by_freq_i=scale_grad_by_freq,
+                mode_i=mode,
+                sparse_i=sparse)
 
 
 def transpose(g, self, dim0, dim1):
