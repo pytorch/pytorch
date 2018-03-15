@@ -45,6 +45,7 @@ def capture_stdout():
     import os
     import fcntl
     import errno
+    sys.stdout.flush()
     stdout_fd = os.dup(1)
     r, w = os.pipe()
     try:
@@ -1758,6 +1759,20 @@ class TestJit(TestCase):
             outputs = self._make_scalar_vars([6], np.float32)
 
             self.assertEqual(foo(*inputs), outputs)
+
+    def test_desugar_module(self):
+        import torch.nn.functional as F
+
+        def fn(x, slope):
+            a = torch.abs(x)
+            b = torch.nn.functional.prelu(x, slope)
+            c = F.prelu(x, slope)
+            return a, b, c
+
+        x = torch.arange(-3, 4)
+        slope = torch.tensor([0.5])
+        outputs = fn(x, slope)
+        self.checkScript(fn, [x, slope], outputs, True)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
