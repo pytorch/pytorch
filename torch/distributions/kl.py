@@ -27,6 +27,7 @@ from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost
 from torch.autograd import Variable, variable
+from torch.distributions.utils import _sum_rightmost
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -312,14 +313,11 @@ def _kl_poisson_poisson(p, q):
 def _kl_transformed_transformed(p, q):
     if p.transforms != q.transforms:
         raise NotImplementedError
-    return kl_divergence(p.base_dist, q.base_dist)
-
-
-@register_kl(LogisticNormal, LogisticNormal)
-def _kl_logistic_normal(p, q):
-    if p.transforms != q.transforms:
+    if p.event_shape != q.event_shape:
         raise NotImplementedError
-    return kl_divergence(p.base_dist, q.base_dist).sum(-1)
+    event_dim = len(p.event_shape)
+    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
+    return _sum_rightmost(base_kl_divergence, event_dim)
 
 
 @register_kl(Uniform, Uniform)
