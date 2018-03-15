@@ -22,6 +22,7 @@ fi
 if [[ "$GIT_COMMIT" == *origin/master* ]]; then
     # Prepare new baseline file
     cp perf_test_numbers_cpu.json new_perf_test_numbers_cpu.json
+    export TEST_DIR=$PWD
     python update_commit_hash.py new_perf_test_numbers_cpu.json ${PYTORCH_COMMIT_ID}
 fi
 
@@ -38,12 +39,15 @@ else
     run_test test_cpu_speed_mnist 20 compare_with_baseline
 fi
 
+# Make sure perf repo local checkout is up-to-date
+cd /var/lib/jenkins/host-workspace
+git config --global user.email jenkins@ci.pytorch.org
+git config --global user.name Jenkins
+git pull origin cpu
+
 if [[ "$GIT_COMMIT" == *origin/master* ]]; then
     # Push new baseline file
-    cp new_perf_test_numbers_cpu.json /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json
-    cd /var/lib/jenkins/host-workspace
-    git config --global user.email jenkins@ci.pytorch.org
-    git config --global user.name Jenkins
+    cp $TEST_DIR/new_perf_test_numbers_cpu.json /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json
     git add perf_test_numbers_cpu.json
     git commit -m "New CPU perf test baseline from ${PYTORCH_COMMIT_ID}"
 fi
