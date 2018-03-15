@@ -335,6 +335,9 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   
   if (mode == MODE_MAX) {
     max_indices = at::zeros(indices.type(), {offsets.sizes()[0], weight.sizes()[1]});
+  } else {
+    // No need to allocate if we aren't doing a backwards pass
+    max_indices = at::zeros(indices.type(), {0});
   }
 
   dim3 block = dim3(32, 8);
