@@ -8,15 +8,6 @@ import warnings
 import weakref
 from torch._six import imap
 from torch._C import _add_docstr
-import torch.onnx
-
-
-def _size_as_tensor(g, input):
-    return g.op('Shape', input)
-
-
-def _resize_from_tensor(g, input, shape):
-    return g.op('ReshapeDynamic', input, shape)
 
 
 class Variable(_C._VariableBase):
@@ -267,15 +258,6 @@ class Variable(_C._VariableBase):
             return factorization, pivots
         else:
             return super(Variable, self).btrifact(pivot=pivot)
-
-    @torch.onnx.symbolic_override(_size_as_tensor)
-    def size_as_tensor(self):
-        return torch.Tensor(tuple(self.size()))
-
-    @torch.onnx.symbolic_override(_resize_from_tensor)
-    def resize_from_tensor(self, size):
-        from ._functions import Resize
-        return Resize.apply(self, torch.Size(size()))
 
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")
