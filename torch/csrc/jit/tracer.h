@@ -152,24 +152,6 @@ inline Value* getValueTrace(const std::shared_ptr<TracingState>& state, const Va
   auto vts = detail::getValueState(state, var, true);
   if (vts->trace) return vts->trace;
 
-  // HACK.  In an ideal world, buffers would be wrapped in variables, permitting
-  // us to trace them just like we normally would.  In fact, internally, within
-  // ATen, buffers get precisely this treatment.
-  //
-  // However, propagating this treatment would require us to do some fairly
-  // disruptive changes to Python userland, where buffers are expected to be
-  // passed around as plain tensors inside modules.  Some day we should do
-  // this, but for now, we wrap all buffers in one-off Variables.  This means
-  // they'll show up as constants when we trace.
-  //
-  // To deal with this, we cheat a little and consult the buffer map to
-  // see if the wrapped tensor corresponds to a buffer.  If it does, use
-  // that instead of making a constant.
-  auto it = state->buffer_map.find(var.data().unsafeGetTH(false));
-  if (it != state->buffer_map.end()) {
-    return it->second;
-  }
-
   Value *constant = state->graph->appendNode(state->graph->createConstant(var.data()))->output();
   constant->inferTypeFrom(var.data());
   setValueTrace(state, var, constant);
@@ -193,15 +175,6 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
   return vts->trace;
 }
 
-// Only one field may be non-null
-struct TraceInput {
-  Variable variable;
-  at::Tensor buffer;
-  TraceInput(Variable variable) : variable(std::move(variable)) {}
-  TraceInput(at::Tensor buffer) : buffer(std::move(buffer)) {}
-  TraceInput() {}
-};
-
 // Start tracing, treating 'inputs' as inputs to the trace, which can be
 // varied on subsequent invocations of the trace.  Any other variables
 // will be treated as constants.
@@ -209,32 +182,19 @@ struct TraceInput {
 // NB: Why does this take an rvalue reference?  We need to get a non-const
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
-inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(std::vector<TraceInput>&& trace_inputs, std::size_t num_stages) {
+inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
+    variable_list inputs, std::size_t num_stages) {
   auto state = std::make_shared<TracingState>(num_stages);
-  variable_list inputs;
-  for (auto& trace_input : trace_inputs) {
-    if (trace_input.variable.defined()) {
-      JIT_ASSERT(!trace_input.buffer.defined());
-      auto input = trace_input.variable;
-      auto * value_state = detail::getValueState(state, input, false);
-      if (value_state) {
-        // See Note [Repeated inputs] in tracer.cpp
-        input = input.view(input.sizes());
-      }
-      auto input_node = state->graph->addInput(input.name());
-      setValueTrace(state, input, input_node);
-      input_node->inferTypeFrom(input.data());
-      inputs.push_back(input);
-    } else {
-      JIT_ASSERT(trace_input.buffer.defined());
-      // NON-owning reference.  Pointers may be dead!
-      auto& buffer = trace_input.buffer;
-      auto n = state->graph->addInput();
-      state->buffer_map.insert({buffer.unsafeGetTH(false), n});
-      n->inferTypeFrom(buffer);
+  for (auto& input : inputs) {
+    auto * value_state = detail::getValueState(state, input, false);
+    if (value_state) {
+      // See Note [Repeated inputs] in tracer.cpp
+      input = input.view(input.sizes());
     }
+    auto input_node = state->graph->addInput(input.name());
+    setValueTrace(state, input, input_node);
+    input_node->inferTypeFrom(input.data());
   }
-  // TODO: this might not work with the way we handle buffers
   state->var_flags[0].first = detail::getVarFlags(inputs);
   state->active = true;
   state->inputs = inputs;

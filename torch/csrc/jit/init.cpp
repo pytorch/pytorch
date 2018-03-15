@@ -22,6 +22,8 @@ namespace torch  { namespace jit {
 
 namespace {
 
+using autograd::variable_list;
+
 bool loadPythonClasses() {
   // Leaving this code here, because it will likely be useful at some point
   //PyObject *jit_module = PyImport_ImportModule("torch.jit");
@@ -51,10 +53,10 @@ struct PythonGraphExecutor : GraphExecutor {
 // such as being able to hold parameters...
 PythonGraphExecutor createExecutorByTracing(
         py::function func,
-        std::vector<tracer::TraceInput> inputs,
-        std::vector<tracer::TraceInput> captures,
+        variable_list inputs,
+        variable_list captures,
         bool optimize) {
-  std::vector<tracer::TraceInput> trace_inputs;
+  variable_list trace_inputs;
   trace_inputs.insert(trace_inputs.end(), inputs.begin(), inputs.end());
   trace_inputs.insert(trace_inputs.end(), captures.begin(), captures.end());
   auto enter_info = tracer::enter(std::move(trace_inputs), 1);
@@ -64,9 +66,7 @@ PythonGraphExecutor createExecutorByTracing(
   }
   // All conditions that could trigger this should be asserted on the Python side
   for (size_t i = 0; i < captures.size(); ++i) {
-    // TODO: remove TraceInput, since everything is a Variable now
-    JIT_ASSERT(captures[i].variable.defined());
-    JIT_ASSERT(enter_info.second[i + inputs.size()].is_same(captures[i].variable));
+    JIT_ASSERT(enter_info.second[i + inputs.size()].is_same(captures[i]));
   }
   // Call back into Python function
   auto out = py::reinterpret_steal<py::object>(PyObject_CallObject(func.ptr(), py_inputs.ptr()));
@@ -126,14 +126,14 @@ void initJITBindings(PyObject *module) {
   py::class_<PythonGraphExecutor>(m, "GraphExecutor")
       .def(
           py::init([](py::function func,
-                      std::vector<tracer::TraceInput> inputs,
-                      std::vector<tracer::TraceInput> captures,
+                      variable_list inputs,
+                      variable_list captures,
                       bool optimize) {
             return createExecutorByTracing(func, std::move(inputs), std::move(captures), optimize);
           }),
           py::arg("func"),
           py::arg("inputs"),
-          py::arg("captures") = std::vector<tracer::TraceInput>{},
+          py::arg("captures") = variable_list{},
           py::arg("optimize") = true)
       .def(
           py::init([](std::shared_ptr<Graph> graph, bool optimize) {
