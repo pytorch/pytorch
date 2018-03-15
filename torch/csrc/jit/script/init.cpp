@@ -142,9 +142,15 @@ struct ModuleValue : public SugaredValue {
       return std::make_shared<MethodValue>(module, *v);
     } else if(auto v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
-    } else {
-      throw ErrorReport(loc) << "module has no attribute '" << field << "'";
     }
+    // this can also be a call to a non-script module, if so return this as a python value
+    py::object py_module = py::cast(module);
+    if(py::object attr = py::getattr(py_module, field.c_str(), py::none())) {
+      if(py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
+        return std::make_shared<PythonValue>(attr);
+      }
+    }
+    throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
   virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {

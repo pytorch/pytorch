@@ -583,26 +583,32 @@ class OrderedDictWrapper(object):
 class OrderedModuleDict(OrderedDictWrapper):
     def __init__(self, module):
         super(OrderedModuleDict, self).__init__(module)
+        # contains _both_ script modules and non-script python-only modules
+
+        # because script modules are subclassed in python and the
+        # C++ script::Module class will not hold references to them,
+        # to ensure that you always get the same python value here
+        # we store it in the python dict as well
+        self._python_modules = OrderedDict()
 
     def items(self):
-        r = self.module._get_modules()
+        r = self._python_modules.items()
         return r
 
     def __contains__(self, k):
-        return self.module._has_module(k)
+        return k in self._python_modules
 
-    # TODO: allow for python modules in addition to script modules
     def __setitem__(self, k, v):
-        self.module._register_module(k, v)
-        # note: script modules are subclassed in python and the
-        # C++ script::Module class will not hold references to them
-        # to ensure that you always get the same python value here
-        # we store it as a native attribute _in addition to_
-        # registering it with the C++ script::Module
-        object.__setattr__(self.module, k, v)
+        if k in self._python_modules:
+            raise RuntimeError("cannot re-assign modules in a ScriptModule")
+
+        if isinstance(v, ScriptModule):
+            self.module._register_module(k, v)
+
+        self._python_modules[k] = v
 
     def __getitem__(self, k):
-        return self._get_module(k)
+        return self._python_modules[k]
 
 
 class OrderedParameterDict(OrderedDictWrapper):
