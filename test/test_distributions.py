@@ -793,7 +793,7 @@ class TestDistributions(TestCase):
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().size(), (3,))
         self.assertTrue(isinstance(RelaxedOneHotCategorical(probs=p, temperature=temp).sample().data, torch.Tensor))
         self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((2, 2)).size(), (2, 2, 3))
-        self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample_n(1).size(), (1, 3))
+        self.assertEqual(RelaxedOneHotCategorical(probs=p, temperature=temp).sample((1,)).size(), (1, 3))
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
 
     def test_relaxed_one_hot_categorical_2d(self):
@@ -805,7 +805,7 @@ class TestDistributions(TestCase):
         s = Variable(torch.Tensor(probabilities_1), requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample(sample_shape=(3, 4)).size(), (3, 4, 2, 3))
-        self.assertEqual(RelaxedOneHotCategorical(temp, p).sample_n(6).size(), (6, 2, 3))
+        self.assertEqual(RelaxedOneHotCategorical(temp, p).sample((6,)).size(), (6, 2, 3))
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp, p))
         self._gradcheck_log_prob(RelaxedOneHotCategorical, (temp_2, p))
 
@@ -1022,6 +1022,46 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(LogisticNormal, (mean, std))
         self._gradcheck_log_prob(LogisticNormal, (mean, 1.0))
         self._gradcheck_log_prob(LogisticNormal, (0.0, std))
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_logisticnormal_logprob(self):
+        mean = Variable(torch.randn(5, 7), requires_grad=True)
+        std = Variable(torch.randn(5, 7).abs(), requires_grad=True)
+
+        # Smoke test for now 
+        # TODO: Once _check_log_prob works with multidimensional distributions,
+        #       add proper testing of the log probabilities.
+        dist = LogisticNormal(mean, std)
+        assert dist.log_prob(dist.sample()).data.cpu().numpy().shape == (5,)
+
+    def _get_logistic_normal_ref_sampler(self, base_dist):
+
+        def _sampler(num_samples):
+            x = base_dist.rvs(num_samples)
+            offset = np.log((x.shape[-1] + 1) - np.ones_like(x).cumsum(-1))
+            z = 1. / (1.  + np.exp(offset - x))
+            z_cumprod = np.cumprod(1 - z, axis=-1)
+            y1 = np.pad(z, ((0, 0), (0, 1)), mode='constant', constant_values=1.)
+            y2 = np.pad(z_cumprod, ((0, 0), (1, 0)), mode='constant', constant_values=1.)
+            return y1 * y2
+
+        return _sampler
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_logisticnormal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        means = map(np.asarray, [(-1.0, -1.0), (0.0, 0.0), (1.0, 1.0)])
+        covs = map(np.diag, [(0.1, 0.1), (1.0, 1.0), (10.0, 10.0)])
+        for mean, cov in product(means, covs):
+            base_dist = scipy.stats.multivariate_normal(mean=mean, cov=cov)
+            ref_dist = scipy.stats.multivariate_normal(mean=mean, cov=cov)
+            ref_dist.rvs = self._get_logistic_normal_ref_sampler(base_dist)
+            mean_th = torch.Tensor(mean)
+            std_th = torch.Tensor(np.sqrt(np.diag(cov)))
+            self._check_sampler_sampler(
+                LogisticNormal(mean_th, std_th), ref_dist,
+                'LogisticNormal(loc={}, scale={})'.format(mean_th, std_th),
+                multivariate=True)
 
     def test_normal(self):
         loc = Variable(torch.randn(5, 5), requires_grad=True)
