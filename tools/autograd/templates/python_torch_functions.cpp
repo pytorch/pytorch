@@ -108,6 +108,7 @@ static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, 
 {
   HANDLE_TH_ERRORS
   return THPVariable_Wrap(torch::utils::new_sparse_coo_tensor(default_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
 }
 
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
