@@ -64,6 +64,23 @@ private:
   Value* value;
 };
 
+struct BuiltinFunction : public SugaredValue {
+  BuiltinFunction(const std::string& name, Value* value=nullptr)
+    : name(name), value(value) {}
+  std::string name;
+  Value* value;
+
+  virtual std::string kind() const override {
+    return "builtin";
+  }
+  virtual std::vector<Value*> call(
+    SourceRange loc,
+    Method & m,
+    at::ArrayRef<Value*> inputs_,
+    List<Attribute> attributes,
+    size_t n_outputs) override;
+};
+
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
 void defineMethodsInModule(
   Module & m,

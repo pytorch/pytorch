@@ -225,6 +225,22 @@ Node* emitBuiltinCall(
   return n;
 }
 
+std::vector<Value*> BuiltinFunction::call(
+    SourceRange loc,
+    Method & m,
+    at::ArrayRef<Value*> inputs_,
+    List<Attribute> attributes,
+    size_t n_outputs) {
+  std::vector<Value*> inputs;
+  if (value) inputs.push_back(value);
+  inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
+  Node * n = emitBuiltinCall(loc, m, name, inputs, attributes, n_outputs);
+  if (!hasTensorOp(n)) {
+    throw ErrorReport(loc) << "unknown builtin op";
+  }
+  return n->outputs();
+}
+
 struct to_ir {
   to_ir(
       Def def,
@@ -769,31 +785,7 @@ private:
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
-  struct InfixCall : public SugaredValue {
-    InfixCall(const std::string& field, Value* value)
-    : field(field), value(value) {}
-    std::string field;
-    Value* value;
-
-    virtual std::string kind() const override {
-      return "builtin";
-    }
-    virtual std::vector<Value*> call(
-      SourceRange loc,
-      Method & m,
-      at::ArrayRef<Value*> inputs_,
-      List<Attribute> attributes,
-      size_t n_outputs) override {
-        std::vector<Value*> inputs { value };
-        inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-        Node * n = emitBuiltinCall(loc, m, field, inputs, attributes, n_outputs);
-        if(!hasTensorOp(n)) {
-          throw ErrorReport(loc) << "unknown builtin op";
-        }
-        return n->outputs();
-    }
-  };
-  return std::make_shared<InfixCall>(field, value);
+  return std::make_shared<BuiltinFunction>(field, value);
 }
 
 
