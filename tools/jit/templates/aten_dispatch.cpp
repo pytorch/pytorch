@@ -92,12 +92,14 @@ ConstructorsMap constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  s << n->kind().toString();
+  // TODO: Only ATen operators get JIT dispatchers.  Test if this is the case
+  // and complain if it's not.
+  s << n->kind().toUnqualString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();
   else
     s << "-*";
-  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toString(); });
+  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toUnqualString(); });
   std::sort(attr_names.begin(), attr_names.end(), [](const char *a, const char *b) {
     return std::strcmp(a, b) < 0;
   });

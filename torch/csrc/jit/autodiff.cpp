@@ -152,11 +152,11 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
     }
     throw std::runtime_error(std::string("don't support differentiation of `") +
-                            node->kind().toString() + "`");
+                            node->kind().toDisplayString() + "`");
   };
   const auto has_tensor_type = [](Value *v) { return v->isTensor(); };
   if (!isDifferentiable(node)) {
-    throw std::runtime_error(std::string("differentiation of ") + node->kind().toString() + " "
+    throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
   }
   if (!std::all_of(node->inputs().begin(), node->inputs().end(), has_tensor_type) ||

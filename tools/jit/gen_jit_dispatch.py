@@ -30,7 +30,7 @@ TYPE_CASTS = {
 }
 
 KW_ASSIGNMENT = CodeTemplate("""\
-auto ${name} = ${type_cast}(node->${method}(Symbol("${name}")));\
+auto ${name} = ${type_cast}(node->${method}(Symbol::attr("${name}")));\
 """)
 
 POS_ASSIGNMENT = CodeTemplate("""\

@@ -22,16 +22,20 @@ public:
   PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
 
   bool load(handle src, bool) {
+    // TODO: Is there a way to py::cast that doesn't raise an exception on
+    // failure?  Can we catch pybind11::cast_error here instead?
+    std::string src_str;
     try {
-      value = torch::jit::Symbol(py::cast<std::string>(src));
+      src_str = py::cast<std::string>(src);
     } catch (std::exception& e) {
       return false;
     }
+    value = torch::jit::Symbol::parseQualString(src_str);
     return true;
   }
 
   static handle cast(torch::jit::Symbol src, return_value_policy /* policy */, handle /* parent */) {
-    return py::cast(std::string(src.toString()), return_value_policy::copy).release();
+    return py::cast(std::string(src.toQualString()), return_value_policy::copy).release();
   }
 };
 

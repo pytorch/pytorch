@@ -70,7 +70,8 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor) {
 
 void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   auto attr = n_p->add_attribute();
-  attr->set_name(name.toString());
+  // TODO: Test name is attribute namespace
+  attr->set_name(name.toUnqualString());
   switch(n->kindOf(name)) {
     case AttributeKind::f:
       attr->set_f(n->f(name));
@@ -206,7 +207,8 @@ void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g, const
     for(auto output : node->outputs()) {
       p_n->add_output(value_name(output));
     }
-    p_n->set_op_type(node->kind().toString());
+    // TODO: Assert this is an ONNX node
+    p_n->set_op_type(node->kind().toUnqualString());
     for(auto attr_name : node->attributeNames()) {
       addAttribute(p_n, node, attr_name);
     }
@@ -259,7 +261,8 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
             "Couldn't export operator expand; this usually means you used a form of broadcasting that ONNX does not currently support. Node defined at:\n" +
             getNodeStackTraceString(node));
       }
-      std::string n = node->kind().toString();
+      // TODO: Replace this with a proper namespace check!
+      std::string n = node->kind().toUnqualString();
       if (n.size() == 0) {
         FAIL_EXPORT("Operator to export had empty name (please file an issue)")
       }

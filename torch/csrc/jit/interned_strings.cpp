@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <mutex>
+#include <sstream>
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 
@@ -59,7 +60,24 @@ static InternedStrings & globalStrings() {
   return s;
 }
 
-const char * Symbol::toString() const {
+Symbol Symbol::parseQualString(const std::string & s) {
+  return Symbol(s);
+}
+
+const char * Symbol::toUnqualString() const {
+  return globalStrings().string(*this);
+}
+
+std::string Symbol::toQualString() const {
+  std::ostringstream oss;
+  return globalStrings().string(*this);
+}
+
+const char * Symbol::toRawString() const {
+  return globalStrings().string(*this);
+}
+
+const char * Symbol::toDisplayString() const {
   return globalStrings().string(*this);
 }
 

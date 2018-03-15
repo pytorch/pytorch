@@ -165,10 +165,10 @@ PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
   return info;
 }
 
-PreTraceInfo preRecordTrace(std::string op, // TODO: make this a Symbol
+PreTraceInfo preRecordTrace(Symbol op,
                             at::ArrayRef<Variable> inputs) {
   return makePreTraceInfo(inputs, [&op](Graph& graph) {
-    return graph.create(Symbol(op), 0 /* initial outputs */);
+    return graph.create(op, 0 /* initial outputs */);
   });
 }
 

@@ -119,7 +119,7 @@ profiler::RecordFunction profiler("${name}");""")
 PRE_RECORD_TRACE = CodeTemplate("""\
 jit::tracer::PreTraceInfo trace_info;
 if (jit::tracer::isTracing( ${tensor_args} )) {
-  trace_info = jit::tracer::preRecordTrace( "${trace_name}", ${trace_inputs} );
+  trace_info = jit::tracer::preRecordTrace( jit::Symbol::attr("${trace_name}"), ${trace_inputs} );
   ${record_attributes}
 }
 """)
@@ -131,7 +131,7 @@ if (trace_info.state != nullptr) {
 """)
 
 RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::Symbol("${name}"), ${name});""")
+setattr(trace_info.n, jit::Symbol::attr("${name}"), ${name});""")
 
 
 def gen_variable_type(out, aten_declarations):

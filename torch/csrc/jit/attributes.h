@@ -18,6 +18,8 @@ static inline const char * toString(AttributeKind kind) {
   return names[int(kind)];
 }
 
+// TODO: Assert all Symbols are attribute nodes
+
 struct AttributeValue {
   AttributeValue(Symbol name)
   : name(name) {}
@@ -171,7 +173,7 @@ private:
       return v->name == name;
     });
     if(required && it == values_.end()) {
-      ::torch::barf("%s:%u: %s: required undefined attribute '%s'", __FILE__, __LINE__, __func__, name.toString());
+      ::torch::barf("%s:%u: %s: required undefined %s", __FILE__, __LINE__, __func__, name.toDisplayString());
     }
     JIT_ASSERT(!required || it != values_.end());
     return it;

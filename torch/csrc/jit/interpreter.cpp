@@ -949,7 +949,9 @@ struct CodeImpl {
     };
     auto & inst = instructions.at(pc);
     writeList(inst.outputs);
-    out << " = " << inst.debug_name.toString() << " ";
+    // NB: debug names are the kind of operator used to select
+    // dispatch
+    out << " = " << inst.debug_name.toUnqualString() << " ";
     writeUseList(inst.inputs);
   }
   void dump(std::ostream & out) const {
