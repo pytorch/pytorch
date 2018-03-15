@@ -851,6 +851,8 @@ class TestSparse(TestCase):
             for use_tensor_idx in [True, False]:
                 for use_tensor_val in [True, False]:
                     for use_cuda in ([False] if not torch.cuda.is_available() else [True, False]):
+                        # have to include size with cuda sparse tensors
+                        include_size = include_size or use_cuda
                         dtype = torch.cuda.float64 if use_cuda else torch.float64
                         long_dtype = torch.cuda.int64 if use_cuda else torch.int64
                         sparse_dtype = torch.cuda.sparse.float64 if use_cuda else torch.sparse.float64

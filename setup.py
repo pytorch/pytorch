@@ -533,6 +533,7 @@ main_sources = [
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
+    "torch/csrc/utils/tensor_conversion_dispatch.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
     "torch/csrc/allocators.cpp",
