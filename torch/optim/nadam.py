@@ -106,11 +106,11 @@ class NAdam(torch.optim.Optimizer):
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
                         
                 g_prime = torch.div(grad, 1. - m_schedule_new)
-                exp_avg_prime = torch.div(exp_avg,  1. - m_schedule_next)
-                exp_avg_sq_prime = torch.div(exp_avg_sq,  1. - pow(beta2, state['step']))
+                exp_avg_prime = torch.div(exp_avg, 1. - m_schedule_next)
+                exp_avg_sq_prime = torch.div(exp_avg_sq, 1. - pow(beta2, state['step']))
                 
-                exp_avg_bar = torch.add((1. - momentum_cache_t) * g_prime,
-                    momentum_cache_t_1, exp_avg_prime)
+                exp_avg_bar = torch.add((1. - momentum_cache_t) * g_prime, 
+                                        momentum_cache_t_1, exp_avg_prime)
 
                 denom = exp_avg_sq_prime.sqrt().add_(group['eps'])
 
