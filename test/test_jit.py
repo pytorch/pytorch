@@ -1388,7 +1388,7 @@ class TestJit(TestCase):
     def test_script_triple(self):
         script = '''
         def func(x):
-            return 3f * x
+            return 3. * x
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
@@ -1874,8 +1874,8 @@ class TestJit(TestCase):
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
         def test_fuser_multiple_blocks(this, that, theother, meme):
-            i = 0LL
-            while i < 20LL:
+            i = 0
+            while i < 20:
                 this = cat(this, meme, dim=0)
                 that = cat(that, meme, dim=0)
                 theother = cat(theother, meme, dim=0)
