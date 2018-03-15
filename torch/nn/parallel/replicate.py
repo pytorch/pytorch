@@ -9,7 +9,6 @@ def replicate(network, devices):
 
     params = list(network.parameters())
     cuda_params = list(filter(lambda x: x.is_cuda, params))
-    cpu_params = list(filter(lambda x: not x.is_cuda, params))
     cuda_param_indices = {param: idx for idx, param in enumerate(cuda_params)}
     cuda_param_copies = Broadcast.apply(devices, *cuda_params)
     if len(params) > 0:
