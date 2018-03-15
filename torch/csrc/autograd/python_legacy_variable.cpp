@@ -1,4 +1,4 @@
-#include "python_variable.h"
+#include "python_legacy_variable.h"
 
 #include <ATen/ATen.h>
 

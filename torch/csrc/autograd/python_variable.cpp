@@ -120,13 +120,10 @@ static void THPVariable_dealloc(THPVariable* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
   auto& default_type = torch::tensor::get_default_tensor_type();
-  if (default_type.is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
   auto tensor = torch::utils::legacy_tensor_ctor(default_type, args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
   END_HANDLE_TH_ERRORS

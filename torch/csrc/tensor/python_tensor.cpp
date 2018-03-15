@@ -4,6 +4,7 @@
 #include <pybind11/pybind11.h>
 #include <sstream>
 
+#include "torch/torch.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
@@ -162,15 +163,12 @@ static std::string get_name(Backend backend, ScalarType scalarType) {
   return ss.str();
 }
 
-static THPObjectPtr get_storage_obj(const PyTensorType& py_type) {
-  if (!py_type.aten_type) {
-    throw TypeError("tried to get storage object for invalid Type %s", py_type.name);
-  }
-  auto module_name = get_module(py_type.aten_type->backend());
+static THPObjectPtr get_storage_obj(const Type& type) {
+  auto module_name = get_module(type.backend());
   auto module_obj = THPObjectPtr(PyImport_ImportModule(module_name));
   if (!module_obj) throw python_error();
 
-  auto storage_name = std::string(at::toString(py_type.aten_type->scalarType())) + "Storage";
+  auto storage_name = std::string(at::toString(type.scalarType())) + "Storage";
   THPObjectPtr storage(PyObject_GetAttrString(module_obj.get(), storage_name.c_str()));
   if (!storage.get()) {
     throw TypeError("couldn't find storage object %s", storage_name.c_str());
@@ -191,23 +189,23 @@ static void set_name(PyTensorType& type_obj, const std::string& name) {
   type_obj.name[n - 1] = '\0';
 }
 
-static THPObjectPtr get_variable_dict() {
-  auto autograd = THPObjectPtr(PyImport_ImportModule("torch.autograd"));
-  if (!autograd) throw python_error();
+static THPObjectPtr get_tensor_dict() {
+  auto torch = THPObjectPtr(PyImport_ImportModule("torch"));
+  if (!torch) throw python_error();
 
-  auto variable_class = THPObjectPtr(PyObject_GetAttrString(autograd.get(), "Variable"));
-  if (!variable_class) throw python_error();
+  auto tensor_class = THPObjectPtr(PyObject_GetAttrString(torch, "Tensor"));
+  if (!tensor_class) throw python_error();
 
-  auto variable_type = (PyTypeObject*)variable_class.get();
-  TORCH_ASSERTM(variable_type->tp_base, "missing base type for Variable");
+  auto tensor_type = (PyTypeObject*)tensor_class.get();
+  TORCH_ASSERTM(tensor_type->tp_base, "missing base type for Tensor");
 
   auto res = THPObjectPtr(PyDict_New());
   if (!res) throw python_error();
 
-  if (PyDict_Merge(res.get(), variable_type->tp_dict, 0) < 0) {
+  if (PyDict_Merge(res.get(), tensor_type->tp_dict, 0) < 0) {
     throw python_error();
   }
-  if (PyDict_Merge(res.get(), variable_type->tp_base->tp_dict, 0) < 0) {
+  if (PyDict_Merge(res.get(), tensor_type->tp_base->tp_dict, 0) < 0) {
     throw python_error();
   }
 
@@ -243,17 +241,20 @@ void initialize_python_bindings() {
   // Get the tp_dict of the Variable class. We copy function definitions
   // onto each Tensor type object so that they can be accessed via e.g.
   // `torch.FloatTensor.add`.
-  auto var_dict = get_variable_dict();
+  auto tensor_dict = get_tensor_dict();
 
   // Initialize each Python type object torch.FloatTensor, torch.DoubleTensor, etc.
   for (auto& tensor_type : tensor_types) {
-    py_initialize_tensor_type(tensor_type.py_type, tensor_type.name, var_dict.get());
+    py_initialize_tensor_type(tensor_type.py_type, tensor_type.name, tensor_dict.get());
   }
 
   // Add the type objects to their corresponding modules. e.g. torch.FloatTensor
   // is added to the `torch` module as `FloatTensor`. Also add all the type
   // objects to the set torch._tensor_classes.
   py_bind_tensor_types(tensor_types);
+
+  // Use torch.float32 as the default tensor type
+  set_default_tensor_type(torch::CPU(kFloat));
 }
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) {
@@ -314,18 +315,21 @@ void py_set_default_tensor_type(PyObject* obj) {
   if (!type->aten_type) {
     throw unavailable_type(*type);
   }
+  set_default_tensor_type(*type->aten_type);
+}
 
-  if (!at::isFloatingType(type->aten_type->scalarType())) {
+void set_default_tensor_type(const at::Type& type) {
+  if (!at::isFloatingType(type.scalarType())) {
     throw TypeError("only floating-point types are supported as the default type");
   }
 
-  if (type->aten_type->is_sparse()) {
+  if (type.is_sparse()) {
     throw TypeError("only dense types are supported as the default type");
   }
 
   // get the storage first, so if it doesn't exist we don't change the default tensor type
-  THPObjectPtr storage = get_storage_obj(*type);
-  default_tensor_type = type->aten_type;
+  THPObjectPtr storage = get_storage_obj(type);
+  default_tensor_type = const_cast<Type*>(&type);
 
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
   if (!torch_module) throw python_error();
