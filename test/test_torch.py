@@ -1400,6 +1400,13 @@ class TestTorch(TestCase):
 
         torch.set_default_tensor_type(default_type)
 
+    def test_type(self):
+        x = torch.randn(3, 3).double()
+        self.assertEqual(x.type('torch.FloatTensor').dtype, torch.float32)
+        self.assertEqual(x.type(torch.FloatTensor).dtype, torch.float32)
+        self.assertEqual(x.int().type(torch.Tensor).dtype, torch.get_default_dtype())
+        self.assertEqual(x.type(torch.int32).dtype, torch.int32)
+
     def test_tensor_factory(self):
         expected = torch.Tensor([1, 1])
         # test data
