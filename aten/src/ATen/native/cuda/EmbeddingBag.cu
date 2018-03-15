@@ -330,7 +330,12 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   cudaStream_t stream = globalContext().getCurrentCUDAStream();
 
   auto output = at::zeros(weight.type(), {offsets.sizes()[0], weight.sizes()[1]});
-  auto max_indices = at::zeros(indices.type(), {offsets.sizes()[0], weight.sizes()[1]});
+  
+  Tensor max_indices;
+  
+  if (mode == MODE_MAX) {
+    max_indices = at::zeros(indices.type(), {offsets.sizes()[0], weight.sizes()[1]});
+  }
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
@@ -340,7 +345,7 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
         indices.data<int64_t>(), offsets.data<int64_t>(),
         weight.data<cuda_scalar_t>(), output.data<cuda_scalar_t>(),
         offset2bag.data<int64_t>(), numIndices, numBags, stride, mode,
-        bag_size.data<int64_t>(), max_indices.data<int64_t>());
+        bag_size.data<int64_t>(), mode == MODE_MAX ? max_indices.data<int64_t>() : NULL);
   });
 
   THCudaCheck(cudaGetLastError());

@@ -177,7 +177,7 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
     }
     make_bag_size(offsets, indices, mode, bag_size);
     auto ret = apply_bag_size(offsets, indices, mode, output, bag_size);
-    return std::tuple<Tensor, Tensor, Tensor>(ret, offset2bag, bag_size);
+    return std::tuple<Tensor, Tensor, Tensor, Tensor>(ret, offset2bag, bag_size, bag_size);
   } else { // MODE_MAX
     return AT_DISPATCH_FLOATING_TYPES_AND_HALF(
       weight.type(), "embedding_bag_cpu_max", [&]() {
@@ -296,37 +296,19 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
           if (grad.type().scalarType() == kFloat) {
             auto igwd = index_grad_weight.data<float>();
             auto gd = grad.data<float>();
-            THFloatBlas_axpy(ddim, (float)scale, gd + ddim * source, 1,
-                             igwd + ddim * index, 1);
+            axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
+                        igwd + ddim * index, 1);
           } else if (grad.type().scalarType() == kDouble) {
             auto igwd = index_grad_weight.data<double>();
             auto gd = grad.data<double>();
-            THDoubleBlas_axpy(ddim, (double)scale, gd + ddim * source, 1,
-                              igwd + ddim * index, 1);
-          } else {
-            index_grad_weight[index].add_(grad[source], scale);
+            axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
+                         igwd + ddim * index, 1);
           }
         }
-<<<<<<< HEAD
-      }
-      int64_t ddim = grad.sizes()[1];
-      if (grad.type().scalarType() == kFloat) {
-        auto igwd = index_grad_weight.data<float>();
-        auto gd = grad.data<float>();
-        axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
-                    igwd + ddim * index, 1);
-      } else if (grad.type().scalarType() == kDouble) {
-        auto igwd = index_grad_weight.data<double>();
-        auto gd = grad.data<double>();
-        axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
-                     igwd + ddim * index, 1);
-      }
-=======
       } 
   } else if (mode == MODE_MAX) {
     for (int64_t dim = 0; dim < grad.sizes()[1]; dim++) {
       index_grad_weight.select(1, dim).index_add_(0, max_indices_.select(1, dim), grad_.select(1, dim));
->>>>>>> Add max mode support to EmbeddingBag
     }
   }
 
