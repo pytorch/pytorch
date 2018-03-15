@@ -72,6 +72,28 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+## Unit testing
+
+PyTorch's testing is located under `test/`. Run the entire test suite with
+
+```
+python test/run_test.py
+```
+
+or run individual test files, like `python test/test_nn.py`, for individual test suites.
+
+### Better local unit tests with pytest
+We don't officially support `pytest`, but it works well with our `unittest` tests and offers
+a number of useful features for local developing. Install it via `pip install pytest`.
+
+If you want to just run tests that contain a specific substring, you can use the `-k` flag:
+
+```
+pytest test/test_nn.py -k Loss -v
+```
+
+The above is an example of testing a change to Loss functions: this command runs tests such as
+`TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
 ## Writing documentation
 
