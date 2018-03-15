@@ -9,19 +9,6 @@ typedef SSIZE_T ssize_t;
 
 namespace torch { namespace jit {
 
-// Broadcasting operators have the following property:
-// They support a 'broadcast' flag, which enables broadcasting
-// on the last argument.  ATM this is not full-Numpy broadcasting,
-// only left-size extension (no size 1 to size n broadcast)
-std::unordered_set<NodeKind> broadcasting = {
-  kAdd,
-  kDiv,
-  kMul,
-  kPow,
-  kSub,
-  kGemm,
-};
-
 bool isRNN(const Node *node) {
   auto k = node->kind();
   return k == kRNN || k == kLSTM || k == kGRU;
@@ -48,7 +35,19 @@ std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
   return ret;
 }
 
-bool isBroadcasting(Node *node) {
+bool isBroadcasting(Node* node) {
+  // Broadcasting operators have the following property:
+  // They support a 'broadcast' flag, which enables broadcasting
+  // on the last argument.  ATM this is not full-Numpy broadcasting,
+  // only left-size extension (no size 1 to size n broadcast)
+  static std::unordered_set<NodeKind> broadcasting = {
+      kAdd,
+      kDiv,
+      kMul,
+      kPow,
+      kSub,
+      kGemm,
+  };
   return broadcasting.count(node->kind());
 }
 

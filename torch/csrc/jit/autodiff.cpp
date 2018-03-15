@@ -12,14 +12,13 @@ namespace torch { namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-// TODO: unsqueeze!
-std::unordered_set<Symbol> differentiable_kinds = {
-  kadd, ksub, kmul, kConstant, kReplaceIfUndef,
-  ksigmoid, ktanh, kmm, kchunk, ksplit, kt, kneg,
-  kunsqueeze
-};
-
 bool isDifferentiable(Node * n) {
+  // TODO: unsqueeze!
+  static std::unordered_set<Symbol> differentiable_kinds = {
+    kadd, ksub, kmul, kConstant, kReplaceIfUndef,
+    ksigmoid, ktanh, kmm, kchunk, ksplit, kt, kneg,
+    kunsqueeze
+  };
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
