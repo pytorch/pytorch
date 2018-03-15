@@ -352,12 +352,12 @@ at::Tensor _convolution(
 #if AT_CUDNN_ENABLED()
     if (input.type() != weight.type()){
       std::stringstream ss;
-      ss << "Input type (" << input.toString() << ") and weight type (" << weight.toString() << ") should be the same";
+      ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
       throw std::runtime_error(ss.str());
     }
     if (bias.defined() && input.type() != bias.type()){
       std::stringstream ss;
-      ss << "Input type (" << input.toString() << ") and bias type (" << bias.toString() << ") should be the same";
+      ss << "Input type (" << input.type().toString() << ") and bias type (" << bias.type().toString() << ") should be the same";
       throw std::runtime_error(ss.str());
     }
 
