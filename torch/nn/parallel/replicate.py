@@ -8,11 +8,12 @@ def replicate(network, devices):
     num_replicas = len(devices)
 
     params = list(network.parameters())
-    param_indices = {param: idx for idx, param in enumerate(params)}
-    param_copies = Broadcast.apply(devices, *params)
+    cuda_params = list(filter(lambda x: x.is_cuda, params))
+    cuda_param_indices = {param: idx for idx, param in enumerate(cuda_params)}
+    cuda_param_copies = Broadcast.apply(devices, *cuda_params)
     if len(params) > 0:
-        param_copies = [param_copies[i:i + len(params)]
-                        for i in range(0, len(param_copies), len(params))]
+        cuda_param_copies = [cuda_param_copies[i:i + len(cuda_params)]
+                        for i in range(0, len(cuda_param_copies), len(cuda_params))]
 
     buffers = list(network._all_buffers())
     buffer_indices = {buf: idx for idx, buf in enumerate(buffers)}
@@ -49,10 +50,15 @@ def replicate(network, devices):
                     replica = module_copies[j][i]
                     replica._parameters[key] = None
             else:
-                param_idx = param_indices[param]
-                for j in range(num_replicas):
-                    replica = module_copies[j][i]
-                    replica._parameters[key] = param_copies[j][param_idx]
+                if param.is_cuda:
+                    param_idx = cuda_param_indices[param]
+                    for j in range(num_replicas):
+                        replica = module_copies[j][i]
+                        replica._parameters[key] = cuda_param_copies[j][param_idx]
+                else:
+                    for j in range(num_replicas):
+                        replica = module_copies[j][i]
+                        replica._parameters[key] = param
         for key, buf in module._buffers.items():
             if buf is None:
                 for j in range(num_replicas):
