@@ -44,6 +44,7 @@ ${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
 # 2. broadcasting functions are implemented in Type.cpp
 TYPE_METHOD_DEFINITION_BROADCAST = CodeTemplate("""\
 ${return_type} Type::${api_name}(${type_method_formals}) const {
+${unify_types}
     Tensor ${broadcast_returns};
     std::tie(${broadcast_returns}) = ${broadcast_function}(${broadcast_actuals}, "${api_name}");
     return ${method_prefix_derived}${api_name}(${broadcast_modified_actuals});
@@ -147,6 +148,15 @@ CONDITIONAL_INITIALIZER = CodeTemplate("""\
 if (${name}.defined()) {
     ${initializer}
 }""")
+
+UNIFY_ACTUAL = CodeTemplate("""\
+${actual}.type() != (**new_type) ? (**new_type).copy(${actual}) : ${actual}\
+""")
+UNIFY_TYPES = CodeTemplate("""\
+    if (auto new_type = unifyTypes(${to_unify_actuals})) {
+        return (*new_type)->${api_name}(${unified_actuals});
+    }
+""")
 
 CALL_TEMPLATE = CodeTemplate("${cname}(${actuals})")
 
@@ -291,6 +301,9 @@ class nested_dict(object):
         if r is not None:
             return r
         return self.parent[x]
+
+    def __setitem__(self, key, value):
+        return self.base.__setitem__(key, value)
 
 
 Environment = TypedDict('Environment', {
@@ -732,6 +745,23 @@ def create_generic(top_env, declarations):
             top_env['type_method_definitions'].append(
                 TYPE_METHOD_DEFINITION_ABSTRACT.substitute(env))
 
+            # Set up type promotion, if used
+            unify_types = ''
+            has_side_effects = any('Tensor' in f and 'const' not in f
+                                   for f in option['formals'])
+            if option.get('zero_dim_dispatch_when_scalar') and not has_side_effects:
+                to_unify_actuals = [f['name']
+                                    for f in option['formals_list']
+                                    if f['dynamic_type'] == 'Tensor']
+                # These are only the limitations of the code below. If you happen to
+                # trigger those assertions you will need to make it more robust.
+                assert len(to_unify_actuals) == 2
+                unified_actuals = [UNIFY_ACTUAL.substitute(actual=act) for act in to_unify_actuals]
+                unify_types = UNIFY_TYPES.substitute(env,
+                    to_unify_actuals=to_unify_actuals,
+                    unified_actuals=unified_actuals)
+
+            # Set up broadcasting
             broadcast_inplace = 'inplace' in broadcast_arg['broadcast']
             broadcast_dims = 'dims:' in broadcast_arg['broadcast']
             option['broadcast_actuals'] = get_broadcast_actuals(broadcast_arg, broadcast_inplace, broadcast_dims)
@@ -746,7 +776,8 @@ def create_generic(top_env, declarations):
             option['broadcast_modified_actuals'] = ['b_' + y if 'b_' + y in option['broadcast_returns'] else y
                                                     for y in option['actuals']]
             top_env['type_method_definitions'].append(
-                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env))
+                TYPE_METHOD_DEFINITION_BROADCAST.substitute(env,
+                    unify_types=unify_types))
 
         method_of = ['Type']
         if is_method:
@@ -1079,13 +1110,9 @@ def create_derived(backend_type_env, declarations):
             return backend_type_env['AccScalarName'] == 'Long'
         return False
 
-    def get_zero_dim_dispatch_when_scalar(option):
-        # type: (FunctionOption) -> str
-        return option.get('zero_dim_dispatch_when_scalar', False)  # type: ignore
-
     def handle_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
-        zero_dim_dispatch = get_zero_dim_dispatch_when_scalar(option)
+        zero_dim_dispatch = option.get('zero_dim_dispatch_when_scalar', '')
         if not zero_dim_dispatch:
             return []
         zero_dim_actuals = [arg['name']
@@ -1096,7 +1123,7 @@ def create_derived(backend_type_env, declarations):
     def handle_only_zero_dim(env, option):
         # type: (Environment, FunctionOption) -> List[str]
         if option.get('zero_dim_tensor_only', False):
-            check_name = get_zero_dim_dispatch_when_scalar(option)
+            check_name = option['zero_dim_dispatch_when_scalar']
             return [ZERO_DIM_ONLY.substitute(env, check_name=check_name)]
         else:
             return None

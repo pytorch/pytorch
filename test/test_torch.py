@@ -780,6 +780,20 @@ class TestTorch(TestCase):
         long_res1 = long_m1.clone()
         long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
+    def test_cross_type_binary_operators(self):
+        x = torch.randn(2, 2, dtype=torch.float)
+        y = torch.tensor(2., dtype=torch.double)
+
+        operators = [
+            operator.add, operator.sub, operator.mul, operator.truediv,
+            operator.pow, operator.mod, operator.lt, operator.le, operator.gt,
+            operator.ge, operator.eq, operator.ne
+        ]
+
+        for arg1, arg2, arg_same_type in [(x, y, y.float()), (y, x, x.double())]:
+            for op in operators:
+                self.assertEqual(op(arg1, arg2), op(arg1, arg_same_type))
+
     def test_mm(self):
         # helper function
         def matrixmultiply(mat1, mat2):

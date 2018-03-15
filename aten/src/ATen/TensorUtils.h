@@ -3,6 +3,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/TensorGeometry.h"
 #include "ATen/Utils.h"
+#include "ATen/optional.h"
 
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 
@@ -77,5 +78,31 @@ void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
 // Methods for getting data_ptr if tensor is defined
 void * maybe_data_ptr(const Tensor& tensor);
 void * maybe_data_ptr(const TensorArg& tensor);
+
+
+inline at::optional<at::Type*> unifyTypes(const Tensor& a, const Tensor& b) {
+  static const auto promoteTensors = [](const Tensor& x, const Tensor& y) -> at::optional<at::Type*> {
+    auto result_scalar_type = promoteTypes(x.type().scalarType(), y.type().scalarType());
+    return {&x.type().toScalarType(result_scalar_type)};
+  };
+  if (a.type() == b.type())
+    return nullopt;
+  bool a_scalar = a.dim() == 0;
+  bool b_scalar = b.dim() == 0;
+  if (a_scalar && b_scalar) {
+    return promoteTensors(a, b);
+  } else if (a_scalar || b_scalar) {
+    const Tensor& scalar_tensor = a_scalar ? a : b;
+    const Tensor& nonscalar_tensor = a_scalar ? b : a;
+    if (isFloatingType(scalar_tensor.type().scalarType()) && isIntegralType(nonscalar_tensor.type().scalarType())) {
+      return promoteTensors(a, b);
+    } else {
+      return {&nonscalar_tensor.type()};
+    }
+  } else {
+    // XXX: this will fail type checks, but that's what we do for now
+    return nullopt;
+  }
+}
 
 }

@@ -5,6 +5,7 @@ import math
 import torch
 import unittest
 import warnings
+import operator
 from copy import deepcopy
 from collections import OrderedDict
 from itertools import product
@@ -1832,6 +1833,19 @@ class TestAutograd(TestCase):
         run_test((10,), 3)
         run_test((10,), 1)
         run_test((10,), 1.5)
+
+    def test_scalar_binop_grad(self):
+        x = torch.tensor([1, 2, 3, 4], dtype=torch.float, requires_grad=True)
+        y = torch.tensor(2., dtype=torch.double, requires_grad=True)
+
+        operators = [
+            operator.add, operator.sub, operator.mul, operator.truediv, operator.pow,
+        ]
+
+        for arg1, arg2 in [(x, y), (y, x)]:
+            for op in operators:
+                # We need a large eps, because floats are too inaccurate for gradchecks
+                gradcheck(lambda x, y: op(x, y).sum(), [arg1, arg2], raise_exception=True, eps=1e-2)
 
     def test_profiler(self):
         x = Variable(torch.randn(10, 10))
