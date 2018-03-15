@@ -51,6 +51,12 @@ NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -lineinfo -std=c++11 -maxrregcount 9
 # Use addprefix so that we can specify more than one path
 LDFLAGS    := $(addprefix -L,${CUDA_LIB}) -lcudart -lrt
 
+# If CUDA < 8.0, add workaround C++ flags
+CUDA_MAJOR_LT_8 := $(shell [ $(CUDA_MAJOR) -lt 8 ] && echo true)
+ifeq ($(CUDA_MAJOR_LT_8), true)
+CXXFLAGS += -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__
+endif
+
 ifeq ($(DEBUG), 0)
 NVCUFLAGS += -O3
 CXXFLAGS  += -O3
@@ -252,4 +258,3 @@ fortest : forlib
 	$(MAKE) -C fortran test
 forclean :
 	$(MAKE) -C fortran clean
-

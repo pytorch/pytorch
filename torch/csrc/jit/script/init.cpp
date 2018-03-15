@@ -15,8 +15,6 @@ using ResolutionCallback = std::function<py::function(std::string)>;
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-
-
 static void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {
   if(expected != actual) {
     throw ErrorReport(loc) << "expected " << expected << " " << what << " but found " << actual;
@@ -29,7 +27,8 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
-    ensureSizeMatches(loc, 0, attributes.size(), "keyword arguments");
+    if (attributes.size() > 0)
+      throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     // Release the function object so we can wrap it in a PythonOp
     Graph& g = *m.graph();
     py::object func = self;
@@ -44,12 +43,43 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     return outputs;
   }
 
+  virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) {
+    // We generally don't want to allow traversing arbitrary Python objects, but we
+    // make an exception for traversing modules because we want to be access
+    // torch, torch.nn.functional, and the functions they expose.
+    py::object member = getattr(loc, field);
+    if (isBuiltinModule() && py::isinstance<py::function>(member)) {
+      return std::make_shared<BuiltinFunction>(field);
+    }
+    if (py::isinstance<py::module>(self) && py::isinstance<py::module>(member)) {
+      return std::make_shared<PythonValue>(member);
+    }
+    throw ErrorReport(loc) << "unsupported attribute lookup on " << py::repr(self) << ".";
+  }
+
   virtual std::string kind() const override {
     std::stringstream ss;
     ss << "python value'" << py::repr(self) << "'";
     return ss.str();
   }
+
 private:
+  bool isBuiltinModule() {
+    // XXX: these can't be static, or they will be destructed after the Python interpreter
+    // exits and that generally sounds like a bad idea
+    py::object torch = py::module::import("torch");
+    py::object functional = py::module::import("torch.nn.functional");
+    return self.is(torch) || self.is(functional);
+  }
+
+  py::object getattr(SourceRange loc, const std::string& name) {
+    try {
+      return py::getattr(self, name.c_str());
+    } catch (py::error_already_set& e) {
+      throw ErrorReport(loc) << "object has no attribute " << name;
+    }
+  }
+
   py::object self;
 };
 

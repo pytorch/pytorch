@@ -77,79 +77,79 @@ struct type_traits {};
 
 template<>
 struct type_traits<char> {
-  static constexpr RPCType type = RPCType::CHAR;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<int8_t> {
-  static constexpr RPCType type = RPCType::CHAR;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<uint8_t> {
-  static constexpr RPCType type = RPCType::UCHAR;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<float> {
-  static constexpr RPCType type = RPCType::FLOAT;
+  static RPCType type;
   static constexpr bool is_floating_point = true;
 };
 
 template<>
 struct type_traits<double> {
-  static constexpr RPCType type = RPCType::DOUBLE;
+  static RPCType type;
   static constexpr bool is_floating_point = true;
 };
 
 template<>
 struct type_traits<int16_t> {
-  static constexpr RPCType type = RPCType::SHORT;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<uint16_t> {
-  static constexpr RPCType type = RPCType::USHORT;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<int32_t> {
-  static constexpr RPCType type = RPCType::INT;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<uint32_t> {
-  static constexpr RPCType type = RPCType::UINT;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<int64_t> {
-  static constexpr RPCType type = std::is_same<int64_t, long>::value ? RPCType::LONG : RPCType::LONG_LONG;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<uint64_t> {
-  static constexpr RPCType type = std::is_same<uint64_t, unsigned long>::value ? RPCType::ULONG : RPCType::ULONG_LONG;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<std::conditional<std::is_same<int64_t, long>::value, long long, long>::type> {
-  static constexpr RPCType type = std::is_same<int64_t, long>::value ? RPCType::LONG_LONG : RPCType::LONG;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
 template<>
 struct type_traits<std::conditional<std::is_same<uint64_t, unsigned long>::value, unsigned long long, unsigned long>::type> {
-  static constexpr RPCType type = std::is_same<uint64_t, unsigned long>::value ? RPCType::ULONG_LONG : RPCType::ULONG;
+  static RPCType type;
   static constexpr bool is_floating_point = false;
 };
 
