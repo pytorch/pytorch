@@ -45,6 +45,7 @@ def capture_stdout():
     import os
     import fcntl
     import errno
+    sys.stdout.flush()
     stdout_fd = os.dup(1)
     r, w = os.pipe()
     try:
@@ -1759,7 +1760,6 @@ class TestJit(TestCase):
         x = torch.arange(-3, 4)
         slope = torch.tensor([0.5])
         outputs = fn(x, slope)
-        print(outputs)
         self.checkScript(fn, [x, slope], outputs, True)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
