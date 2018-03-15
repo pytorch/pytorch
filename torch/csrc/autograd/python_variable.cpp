@@ -129,6 +129,7 @@ static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject 
   END_HANDLE_TH_ERRORS
 }
 
+// Instantiates a subclass of torch.Tensor. Used by nn.Parameter()
 static PyObject* THPVariable_make_subclass(PyObject* _ignored, PyObject* args, PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
