@@ -76,7 +76,7 @@ class TransformedDistribution(Distribution):
         Scores the sample by inverting the transform(s) and computing the score
         using the score of the base distribution and the log abs det jacobian.
         """
-        self.base_dist._validate_log_prob_arg(value)
+        self._validate_log_prob_arg(value)
         event_dim = len(self.event_shape)
         log_prob = 0.0
         y = value

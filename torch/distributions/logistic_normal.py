@@ -1,3 +1,4 @@
+import torch
 from torch.distributions import constraints
 from torch.distributions.normal import Normal
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -33,27 +34,7 @@ class LogisticNormal(TransformedDistribution):
         super(LogisticNormal, self).__init__(
             Normal(loc, scale), StickBreakingTransform())
         # Adjust event shape since StickBreakingTransform adds 1 dimension
-        self._event_shape = self._event_shape.__class__([
-            s + 1 for s in self._event_shape
-        ])
-
-    def log_prob(self, value):
-        """
-        Scores the sample by inverting the transform(s) and computing the score
-        using the score of the base distribution and the log abs det jacobian.
-        """
-        self.base_dist._validate_log_prob_arg(value[..., :-1])
-        event_dim = len(self.event_shape)
-        log_prob = 0.0
-        y = value
-        for transform in reversed(self.transforms):
-            x = transform.inv(y)
-            log_prob -= _sum_rightmost(transform.log_abs_det_jacobian(x, y),
-                                       event_dim - transform.event_dim)
-            y = x
-        log_prob += _sum_rightmost(self.base_dist.log_prob(y),
-                                   event_dim - len(self.base_dist.event_shape))
-        return log_prob
+        self._event_shape = torch.Size([s + 1 for s in self._event_shape])
 
     @property
     def loc(self):
