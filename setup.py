@@ -503,7 +503,10 @@ if IS_DARWIN:
 
 if IS_WINDOWS:
     ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
-    NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
+    if DEBUG:
+        NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
+    else:
+        NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
