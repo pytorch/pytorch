@@ -34,7 +34,9 @@ class TransformedDistribution(Distribution):
         event_shape = shape[len(shape) - event_dim:]
         super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
-    params = {}
+    @constraints.dependent_property
+    def params(self):
+        return self.base_dist.params  # TODO add params of transforms?
 
     @constraints.dependent_property
     def support(self):
