@@ -1,7 +1,7 @@
 #pragma once
 
 // Instantiates torch._C._LegacyVariableBase, which defines the Python
-// construct (__new__) for torch.autograd.Variable.
+// constructor (__new__) for torch.autograd.Variable.
 
 #include <Python.h>
 
