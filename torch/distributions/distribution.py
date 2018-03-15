@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import warnings
+from torch.distributions import constraints
 
 
 class Distribution(object):
@@ -10,10 +11,27 @@ class Distribution(object):
 
     has_rsample = False
     has_enumerate_support = False
+    _validate_args = False
+    support = None
+    params = {}
 
-    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size()):
+    @staticmethod
+    def set_default_validate_args(value):
+        if value not in [True, False]:
+            raise ValueError
+        Distribution._validate_args = value
+
+    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=None):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
+        if validate_args is not None:
+            self._validate_args = validate_args
+        if self._validate_args:
+            if not constraints.is_dependent(self.params):
+                for param, constraint in self.params.items():
+                    if not constraints.is_dependent(constraint):
+                        if not constraint.check(self.__getattribute__(param)).all():
+                            raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
@@ -158,11 +176,12 @@ class Distribution(object):
         """
         return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
-    def _validate_log_prob_arg(self, value):
+    def _validate_sample(self, value):
         """
-        Argument validation for `log_prob` methods. The rightmost dimensions
-        of a value to be scored via `log_prob` must agree with the distribution's
-        batch and event shapes.
+        Argument validation for distribution methods such as `log_prob`,
+        `cdf` and `icdf`. The rightmost dimensions of a value to be
+        scored via these methods must agree with the distribution's batch
+        and event shapes.
 
         Args:
             value (Tensor): the tensor whose log probability is to be
@@ -185,6 +204,9 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
+
+        if not self.support.check(value).all():
+            raise ValueError('The value argument must be within the support')
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
