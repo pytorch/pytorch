@@ -40,4 +40,21 @@ struct type_caster<at::Tensor> {
   }
 };
 
+template<> struct type_caster<torch::autograd::Variable> {
+public:
+  PYBIND11_TYPE_CASTER(torch::autograd::Variable, _("torch::autograd::Variable"));
+  bool load(handle src, bool) {
+    PyObject *source = src.ptr();
+    if (THPVariable_Check(source)) {
+      value = ((THPVariable*)source)->cdata;
+      return true;
+    } else {
+      return false;
+    }
+  }
+  static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
+    return handle(THPVariable_Wrap(src));
+  }
+};
+
 }} // namespace pybind11::detail

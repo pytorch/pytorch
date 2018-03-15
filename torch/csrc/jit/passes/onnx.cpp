@@ -33,7 +33,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   }
 
   auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
-  std::unordered_map<void*, Value*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;
   ctx.graph = new_graph.get();
@@ -56,10 +55,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     n->setStage(input->stage());
     env[input] = n;
   }
-  for (auto kv : state->buffer_map) {
-    new_buffer_map[kv.first] = envFn(kv.second);
-  }
-
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
@@ -226,7 +221,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   // Copy stage from original graph
   new_graph->setStage(state->graph->stage());
   state->graph = std::move(new_graph);
-  state->buffer_map = std::move(new_buffer_map);
 }
 
 }}
