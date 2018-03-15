@@ -17,7 +17,6 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
-from .logit_normal import LogitNormal
 from .logistic_normal import LogisticNormal
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -27,7 +26,6 @@ from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost
 from torch.autograd import Variable, variable
-from torch.distributions.utils import _sum_rightmost
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -315,9 +313,10 @@ def _kl_transformed_transformed(p, q):
         raise NotImplementedError
     if p.event_shape != q.event_shape:
         raise NotImplementedError
-    event_dim = len(p.event_shape)
+    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
+    extra_event_dim = len(p.event_shape)
     base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
-    return _sum_rightmost(base_kl_divergence, event_dim)
+    return _sum_rightmost(base_kl_divergence, extra_event_dim)
 
 
 @register_kl(Uniform, Uniform)
