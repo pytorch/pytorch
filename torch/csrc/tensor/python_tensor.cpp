@@ -41,8 +41,6 @@ static at::Type* default_tensor_type;
 
 static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types);
 
-static void py_bind_torch_storage(const PyTensorType& py_type);
-
 static TypeError unavailable_type(const PyTensorType& type) {
   const char* cuda_msg = torch::utils::cuda_enabled() ? ". Torch not compiled with CUDA enabled." : "";
   return TypeError("type %s not available%s", type.name, cuda_msg);
@@ -282,15 +280,6 @@ static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types) 
     if (PySet_Add(tensor_classes.get(), type_obj) < 0) {
       throw python_error();
     }
-  }
-}
-
-static void py_bind_torch_storage(const PyTensorType& py_type) {
-  auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
-  if (!torch_module) throw python_error();
-
-  if (PyModule_AddObject(torch_module.get(), "Storage", get_storage_obj(py_type).release()) < 0) {
-    throw python_error();
   }
 }
 

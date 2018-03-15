@@ -1372,26 +1372,27 @@ class TestTorch(TestCase):
         default_type = torch.Tensor().type()
         self.assertIs(torch.Tensor().dtype, torch.get_default_dtype())
 
+        self.assertIs(torch.uint8, torch.ByteTensor.dtype)
+        self.assertIs(torch.float32, torch.FloatTensor.dtype)
+        self.assertIs(torch.float64, torch.DoubleTensor.dtype)
+
         torch.set_default_tensor_type('torch.FloatTensor')
         self.assertIs(torch.float32, torch.get_default_dtype())
-        self.assertIs(torch.float32, torch.FloatTensor.dtype)
-        self.assertEqual(torch.FloatStorage, torch.Storage)
+        self.assertIs(torch.FloatStorage, torch.Storage)
 
         torch.set_default_tensor_type(torch.float64)
         self.assertIs(torch.float64, torch.get_default_dtype())
-        self.assertIs(torch.float64, torch.DoubleTensor.dtype)
-        self.assertEqual(torch.DoubleStorage, torch.Storage)
+        self.assertIs(torch.DoubleStorage, torch.Storage)
 
         torch.set_default_tensor_type(torch.FloatTensor)
         self.assertIs(torch.float32, torch.get_default_dtype())
-        self.assertIs(torch.float32, torch.DoubleTensor.dtype)
-        self.assertEqual(torch.FloatStorage, torch.Storage)
+        self.assertIs(torch.FloatStorage, torch.Storage)
 
         if torch.cuda.is_available():
             torch.set_default_tensor_type(torch.cuda.float32)
             self.assertIs(torch.cuda.float32, torch.get_default_dtype())
             self.assertIs(torch.cuda.float32, torch.cuda.FloatTensor.dtype)
-            self.assertEqual(torch.cuda.FloatStorage, torch.Storage)
+            self.assertIs(torch.cuda.FloatStorage, torch.Storage)
 
         # don't support integral or sparse default types.
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
