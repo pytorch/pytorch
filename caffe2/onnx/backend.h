@@ -206,6 +206,12 @@ class Caffe2Backend {
       OnnxNode* onnx_node,
       int opset_version);
 
+  Caffe2Ops CreateMatMul(
+      const ModelProto& init_model,
+      const ModelProto& pred_model,
+      OnnxNode* onnx_node,
+      int opset_version);
+
   // LUT related getters
   const std::unordered_map<std::string, std::string>& get_renamed_operators() const;
   const std::unordered_set<std::string>& get_rnn_operators() const;
