@@ -690,7 +690,8 @@ class TestNN(NNTestCase):
         with torch.no_grad():
             return criterion.forward(input, target)
 
-    def _backward_criterion(self, criterion, input, target):
+    def _backward_criterion(self, criterion, input, target, gradOutput=None):
+        # Ignore gradOutput. It's used for non-legacy tests.
         with torch.no_grad():
             return criterion.backward(input, target)
 
