@@ -14,11 +14,8 @@ namespace script {
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 using FunctionTable = std::unordered_map<std::string, Method&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
-using AttributeMap =
-    std::unordered_map<std::string, std::pair<double, std::string>>;
-using ListAttributeMap = std::unordered_map<
-    std::string,
-    std::pair<const std::vector<double>, std::string>>;
+using AttributeMap = std::unordered_map<std::string, Const>;
+using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
@@ -191,33 +188,32 @@ Node* emitBuiltinCall(
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (const auto& attr : attributes) {
-    const auto& name = attr.name().name();
-    const Expr& value = attr.value();
-    // TODO: handle non-float attributes
-    switch (value.kind()) {
+    const auto& name = Symbol(attr.name().name());
+    const Expr& value_expr = attr.value();
+    switch (value_expr.kind()) {
       case TK_CONST: {
-        auto v = value.get()->tree(0)->doubleValue();
-        const auto& type = value.get()->tree(1)->stringValue();
-        if(type == "f")
-          n->f_(Symbol(name), v);
-        else
-          n->i_(Symbol(name), v);
+        Const value {value_expr};
+        if (value.isFloatingPoint()) {
+          n->f_(name, value.asFloatingPoint());
+        } else {
+          n->i_(name, value.asIntegral());
+        }
       } break;
       case TK_LIST_LITERAL: {
-        std::vector<double> vs{};
-        std::string type = "f"; // TODO: handle possibly mixed constants better
-        for (const auto& tree : ListLiteral(value).inputs()) {
-          vs.push_back(tree.get()->tree(0)->doubleValue());
-          type = tree.get()->tree(1)->stringValue();
-        }
-        if(type == "f") {
-          n->fs_(Symbol(name), std::move(vs));
+        List<Const> value_list {ListLiteral(value_expr).inputs()};
+        std::vector<Const> values;
+        for (Const number : value_list)
+          values.push_back(std::move(number));
+        bool is_float = std::any_of(values.begin(), values.end(),
+                                    [](const Const& c) { return c.isFloatingPoint(); });
+        if (is_float) {
+          n->fs_(name, fmap(values, [](const Const& c) { return c.asFloatingPoint(); }));
         } else {
-          n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
+          n->is_(name, fmap(values, [](const Const& c) { return c.asIntegral(); }));
         }
       } break;
     default:
-        throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+        throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value_expr.kind();
         break;
     }
   }
@@ -434,7 +430,7 @@ private:
     // in a way that ensure single static assignment.
 
     // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(stmt.range(), INT_MAX, "i")[0];
+    Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
     Node* n = graph->insertNode(create(kLoop, stmt.range(), 0));
@@ -653,8 +649,7 @@ private:
       } break;
       case TK_CONST: {
         expectOutputs(tree, output_size, 1);
-        return emitConst(tree->range(),
-            tree->tree(0)->doubleValue(), tree->tree(1)->stringValue());
+        return emitConst(Const(tree));
       } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
@@ -706,17 +701,11 @@ private:
         ->outputs();
   }
 
-  std::vector<Value*> emitConst(const SourceRange& loc, const double val, const std::string& type) {
-    if (type == "f") {
-      return {createConstant(loc, at::CPU(at::kFloat).scalarTensor(val))};
-    } else if (type == "LL") {
-      return {createConstant(loc, at::CPU(at::kLong).scalarTensor(val))};
-    } else if (type == "b") {
-      return {createConstant(loc, at::CPU(at::kByte).scalarTensor(val))};
-    } else if (type == "i") {
-      return {createConstant(loc, at::CPU(at::kInt).scalarTensor(val))};
+  std::vector<Value*> emitConst(const Const& c) {
+    if (c.isFloatingPoint()) {
+      return {createConstant(c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()))};
     } else {
-      throw std::runtime_error("unknown const type " + type);
+      return {createConstant(c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()))};
     }
   }
 
