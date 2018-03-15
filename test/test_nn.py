@@ -333,13 +333,13 @@ class TestNN(NNTestCase):
             output = criterion(input, target)
         return output.item()
 
-    def _backward_criterion(self, criterion, input, target):
+    def _backward_criterion(self, criterion, input, target, gradOutput=torch.ones(())):
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
             if i.grad is not None:
                 i.grad.data.zero_()
         args = input_tuple + (target,)
-        criterion(*args).backward()
+        criterion(*args).backward(gradOutput.type_as(input_tuple[0]))
         if isinstance(input, tuple):
             return tuple(map(lambda i: i.grad.data, input))
         else:

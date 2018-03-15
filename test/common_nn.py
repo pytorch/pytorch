@@ -1115,8 +1115,9 @@ class CriterionTest(TestBase):
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
             test_case.assertEqual(cpu_output, gpu_output, 4e-4)
 
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target)
+            gradOutput = torch.randn(())
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, gradOutput)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, gradOutput)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 4e-4)
         except NotImplementedError:
             pass
