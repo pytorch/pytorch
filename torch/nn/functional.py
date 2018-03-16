@@ -9,7 +9,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
-from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
