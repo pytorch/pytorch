@@ -145,6 +145,10 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::string kind, const Expr& expr) {
       return UnaryOp::create(range, stringToKind(kind), expr);
     }));
+  py::class_<Const, Expr>(m, "Const")
+    .def(py::init([](const SourceRange& range, std::string value) {
+      return Const::create(range, value);
+    }));
   py::class_<Apply, Expr>(m, "Apply")
     .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
       auto r = expr.range();
@@ -159,6 +163,10 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<TernaryIf, Expr>(m, "TernaryIf")
     .def(py::init([](const Expr& cond, const Expr& true_expr, const Expr& false_expr) {
       return TernaryIf::create(cond.range(), cond, true_expr, false_expr);
+    }));
+  py::class_<ListLiteral, Expr>(m, "ListLiteral")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
+      return ListLiteral::create(range, wrap_list(range, std::move(args)));
     }));
 }
 

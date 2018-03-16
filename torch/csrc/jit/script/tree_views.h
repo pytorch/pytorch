@@ -54,6 +54,7 @@ namespace script {
 //       | Slice(Expr value, Maybe<Expr> first, Maybe<Expr> second)     TK_SLICE
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
+//       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
 //
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
@@ -667,8 +668,8 @@ struct TernaryIf : public Expr {
 };
 
 
-struct ListLiteral : public TreeView {
-  explicit ListLiteral(const TreeRef& tree) : TreeView(tree) {
+struct ListLiteral : public Expr {
+  explicit ListLiteral(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_LIST_LITERAL);
   }
   List<Expr> inputs() const {
