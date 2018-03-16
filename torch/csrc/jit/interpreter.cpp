@@ -58,12 +58,79 @@ namespace torch { namespace jit {
 void desugarTripCounts(Block * b) {
   for(auto n : b->nodes()) {
     if(n->kind() == prim::Loop) {
-
-      // remove the trip count from Loop inputs, we don't support it yet
+      // First, replace the max trip count input with the initial trip count.
+      // This means we can treat trip count as a loop-carried dependency and
+      // simply emit an increment in the body of the loop
+      Value* max_trip_count_value = n->input(0);
+      Value* initial_trip_count =
+          n->owningGraph()
+              ->createConstant(at::zeros(at::CPU(at::kLong), {1}))
+              ->output();
+      initial_trip_count->node()->insertBefore(n);
+      // Also move trip count to the end because we need to mutate it after this
+      // transformation and it's easier to append an output in the block than it
+      // is to prepend.
       n->removeInput(0);
-      JIT_ASSERT(n->blocks()[0]->inputs()[0]->uses().size() == 0 &&
-        "NYI - use of trip count variable");
-      n->blocks()[0]->eraseInput(0);
+      n->addInput(initial_trip_count);
+
+      auto body_block = n->blocks()[0];
+
+      Value* block_trip_count_input = body_block->addInput();
+      body_block->inputs()[0]->replaceAllUsesWith(block_trip_count_input);
+      body_block->eraseInput(0);
+      n->addOutput();
+
+      auto insertAfter =
+          [n](NodeKind kind, std::vector<Value*> inputs, Node* insert_after) {
+            Node* new_n = n->owningGraph()->create(kind, 1);
+            for (auto* input : inputs) {
+              new_n->addInput(input);
+            }
+            new_n->insertAfter(insert_after);
+
+            return new_n;
+          };
+
+      // Emit initial comparison -- initial_trip_count < max_trip_count
+      auto* initial_comparison = insertAfter(
+          klt,
+          {initial_trip_count, max_trip_count_value},
+          initial_trip_count->node());
+      Value* initial_comparison_value = initial_comparison->output();
+
+      // Replace initial condition with logical and of trip count and
+      // initial condition
+      auto* conjunct = insertAfter(
+          k__and__,
+          {initial_comparison_value, n->input(0)},
+          initial_comparison);
+      Value* new_cond = conjunct->output();
+      n->replaceInput(0, new_cond);
+
+      // Trip count is now a loop carried dependency. We emit an op to incrmeent
+      // the trip count at the end of the body. Then, emit the same conjunctive
+      // stopping condition as above.
+      Value* const_one = body_block->owningGraph()
+                             ->createConstant(at::ones(at::CPU(at::kLong), {1}))
+                             ->output();
+      const_one->node()->insertAfter(body_block->outputs()[0]->node());
+
+      auto* inc_trip_count = insertAfter(
+          kadd,
+          {block_trip_count_input, const_one, const_one},
+          const_one->node());
+      body_block->registerOutput(inc_trip_count->output());
+
+      auto* body_comparison = insertAfter(
+          klt,
+          {inc_trip_count->output(), max_trip_count_value},
+          inc_trip_count);
+
+      Value* save_cond = body_block->outputs()[0];
+      auto* body_conjunct =
+          insertAfter(k__and__, {body_comparison->output()}, body_comparison);
+      body_block->outputs()[0]->replaceAllUsesWith(body_conjunct->output());
+      body_conjunct->addInput(save_cond);
     }
     for(auto sb : n->blocks()) {
       desugarTripCounts(sb);
