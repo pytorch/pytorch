@@ -67,6 +67,9 @@ typedef struct {
 } THMapInfo;
 
 char * unknown_filename = "filename not specified";
+#ifdef _WIN32
+char * unknown_eventname = "eventname not specified";
+#endif
 
 THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags)
 {
@@ -81,17 +84,19 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
   if (filename) {
     ctx->filename = THAlloc(strlen(filename)+1);
     strcpy(ctx->filename, filename);
-  } else {
-    ctx->filename = unknown_filename;
-  }
-
-  #ifdef _WIN32
+#ifdef _WIN32
   char *suffixname = "_event";
   size_t namelen = strlen(filename)+1+strlen(suffixname);
   ctx->eventname = THAlloc(namelen);
-  strcpy_s(ctx->eventname, namelen, ctx->filename);
-  strcat_s(ctx->eventname, namelen, suffixname);
-  #endif
+  strcpy(ctx->eventname, ctx->filename);
+  strcat(ctx->eventname, suffixname);
+#endif
+  } else {
+    ctx->filename = unknown_filename;
+#ifdef _WIN32
+    ctx->eventname = unknown_eventname;
+#endif
+  }
 
   ctx->flags = flags;
   ctx->size = 0;
@@ -150,31 +155,26 @@ void THMapAllocatorContext_free(THMapAllocatorContext *ctx)
 typedef struct{
   HANDLE event;
   HANDLE handle;
-  void *data;
+  HANDLE wait;
 } ReleaseContext;
-static DWORD WINAPI WaitForReleaseHandle(LPVOID lpParam) {
-  ReleaseContext *cxt = (ReleaseContext *)lpParam;
+static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
+{
+  if (lpParam) {
+    ReleaseContext *cxt = (ReleaseContext *)lpParam;
 
-  HANDLE event = cxt->event;
-  HANDLE handle = cxt->handle;
-  void *data = cxt->data;
-
-  while (TRUE) {
-    WaitForSingleObject(event, INFINITE);
+    HANDLE event = cxt->event;
+    HANDLE handle = cxt->handle;
+    HANDLE wait = cxt->wait;
 
     SetEvent(event);
     CloseHandle(event);
     CloseHandle(handle);
 
-    if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
-      THError("could not unmap the shared memory file");
+    if (wait)
+      UnregisterWait(wait);
 
-    break;
+    THFree(cxt);
   }
-
-  THFree(cxt);
-
-  return 0;
 }
 #endif
 
@@ -537,14 +537,15 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
 
 #ifdef _WIN32
   ReleaseContext* cxt = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
+  HANDLE wait;
   cxt->handle = ctx->handle;
   cxt->event = ctx->event;
-  cxt->data = (void*)data;
-  HANDLE thread = CreateThread(NULL, 0, WaitForReleaseHandle, (LPVOID)cxt, 0, NULL);
-  if (!thread) {
-    THError("Couldn't create daemon thread, error code: <%d>", GetLastError());
+  cxt->wait = NULL;
+  BOOL can_wait = RegisterWaitForSingleObject(&wait, ctx->event, WaitForReleaseHandle, (PVOID)cxt, INFINITE, WT_EXECUTEONLYONCE);
+  if (!can_wait) {
+    THError("Couldn't register wait on event, error code: <%d>", GetLastError());
   }
-  CloseHandle(thread);
+  cxt->wait = wait;
 #endif
 
   if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
@@ -568,6 +569,8 @@ static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
   if (THAtomicDecrementRef(&info->refcount)) {
     SetEvent(ctx->event); 
   }
+  if(UnmapViewOfFile(((char*)data) - TH_ALLOC_ALIGNMENT) == 0)
+    THError("could not unmap the shared memory file");
 #else /* _WIN32 */
 
   THMapInfo *info = (THMapInfo*)(((char*)data) - TH_ALLOC_ALIGNMENT);
