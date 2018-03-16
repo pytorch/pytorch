@@ -446,6 +446,21 @@ def upsample_nearest2d(g, input, scale_factor):
                 height_scale_f=scale_factor, mode_s="nearest")
 
 
+def upsample_bilinear2d(g, input, output_size):
+    w_scale = float(output_size[-1]) / input.type().sizes()[-1]
+    h_scale = float(output_size[-2]) / input.type().sizes()[-2]
+    return g.op("Upsample", input, width_scale_f=w_scale,
+                height_scale_f=h_scale, mode_s="bilinear")
+
+
+def gt(g, input, other):
+    return g.op("Greater", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
+def lt(g, input, other):
+    return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 
