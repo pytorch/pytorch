@@ -75,7 +75,7 @@ int deviceForInputs(Stack & stack, size_t N) {
 // A list of functions taking TensorList arguments (where we can't use
 // the number of inputs to choose an overload).
 std::unordered_set<Symbol> tensor_vararg_fns = {
-  kcat,
+  aten::cat,
 };
 
 template<size_t N>
@@ -92,12 +92,13 @@ ConstructorsMap constructors = {
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  s << n->kind().toString();
+  JIT_ASSERT(n->kind().is_aten());
+  s << n->kind().toUnqualString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();
   else
     s << "-*";
-  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toString(); });
+  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toUnqualString(); });
   std::sort(attr_names.begin(), attr_names.end(), [](const char *a, const char *b) {
     return std::strcmp(a, b) < 0;
   });

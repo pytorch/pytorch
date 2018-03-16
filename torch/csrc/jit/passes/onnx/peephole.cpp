@@ -11,7 +11,7 @@ namespace torch { namespace jit {
 
 bool isRNN(const Node *node) {
   auto k = node->kind();
-  return k == kRNN || k == kLSTM || k == kGRU;
+  return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
 }
 
 bool isNopTranspose(const std::vector<int64_t> & perm) {
@@ -41,13 +41,14 @@ bool isBroadcasting(Node* node) {
   // on the last argument.  ATM this is not full-Numpy broadcasting,
   // only left-size extension (no size 1 to size n broadcast)
   static std::unordered_set<NodeKind> broadcasting = {
-      kAdd,
-      kDiv,
-      kMul,
-      kPow,
-      kSub,
-      kGemm,
+    onnx::Add,
+    onnx::Div,
+    onnx::Mul,
+    onnx::Pow,
+    onnx::Sub,
+    onnx::Gemm,
   };
+
   return broadcasting.count(node->kind());
 }
 
@@ -123,14 +124,14 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     // TODO: Actually, maybe you can, if there is a broadcast for some
     // dims, and then another broadcast for the rest.  But this will
     // never happen in practice so I didn't implement it.
-    if (n->hasAttribute(kbroadcast) && n->i(kbroadcast)) continue;
-    JIT_ASSERT(!n->hasAttribute(kaxis));
+    if (n->hasAttribute(attr::broadcast) && n->i(attr::broadcast)) continue;
+    JIT_ASSERT(!n->hasAttribute(attr::axis));
 
     auto input_index = n->inputs().size() - 1;
     auto* expanded_rhs = n->input(input_index)->node();
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
-    if (expanded_rhs->kind() != kExpand) continue;
+    if (expanded_rhs->kind() != aten::expand) continue;
 
     auto* unexpanded_rhs = expanded_rhs->input();
 
@@ -150,9 +151,9 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
       continue;
 
     n->replaceInput(input_index, unexpanded_rhs);
-    n->i_(kbroadcast, 1);
+    n->i_(attr::broadcast, 1);
     if (axis) {
-      n->i_(kaxis, axis.value());
+      n->i_(attr::axis, axis.value());
     }
     if (!expanded_rhs->hasUses()) {
       expanded_rhs->destroy();
@@ -163,9 +164,9 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
   for(auto n : graph->nodes()) {
 
-    if (n->kind() == kTranspose && n->input()->node()->kind() == kTranspose) {
+    if (n->kind() == onnx::Transpose && n->input()->node()->kind() == onnx::Transpose) {
       auto origInput = n->input();
-      n->is_(kperm, composeTransposes(origInput->node()->is(kperm), n->is(kperm)));
+      n->is_(attr::perm, composeTransposes(origInput->node()->is(attr::perm), n->is(attr::perm)));
       n->replaceInput(0, origInput->node()->input());
       if (origInput->uses().size() == 0) {
         origInput->node()->destroy();
@@ -178,8 +179,8 @@ void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
 void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
   for(auto it = graph->nodes().begin(), end = graph->nodes().end(); it != end; ++it) {
     auto n = *it;
-    if (n->kind() == kTranspose) {
-      if (isNopTranspose(n->is(kperm))) {
+    if (n->kind() == onnx::Transpose) {
+      if (isNopTranspose(n->is(attr::perm))) {
         n->replaceAllUsesWith(n->input()->node());
         it.destroyCurrent();
         continue;
@@ -193,11 +194,11 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
 
   for(auto n : graph->nodes()) {
 
-    if (n->kind() == kGemm) {
+    if (n->kind() == onnx::Gemm) {
       for (size_t i : {0,1}) {
         auto inp = n->inputs()[i];
-        auto trans = i == 0 ? ktransA : ktransB;
-        if (inp->node()->kind() == kTranspose && inp->node()->is(kperm) == simpleTransPerm) {
+        auto trans = i == 0 ? attr::transA : attr::transB;
+        if (inp->node()->kind() == onnx::Transpose && inp->node()->is(attr::perm) == simpleTransPerm) {
           n->replaceInput(i, inp->node()->input());
           n->i_(trans, n->hasAttribute(trans) ? !n->i(trans) : 1);
           if (inp->uses().size() == 0) {
@@ -229,7 +230,7 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
 
-    if (n->kind() != kPackPadded) {
+    if (n->kind() != prim::PackPadded) {
       continue;
     }
     if (n->outputs()[0]->uses().size() != 1) {
@@ -249,7 +250,7 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
     n->outputs()[1]->replaceFirstUseWith(n->inputs()[1]);
 
     // and insert new PackPadded after the RNN
-    Node * newPackPadded = graph->create(kPackPadded, 2);
+    Node * newPackPadded = graph->create(prim::PackPadded, 2);
     newPackPadded->insertAfter(rnn);
 
     // make things consume from the new PackPadded
@@ -268,11 +269,11 @@ void removeNopPacking(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
 
-    if (n->kind() != kPadPacked) {
+    if (n->kind() != prim::PadPacked) {
       continue;
     }
     Node* input = n->inputs()[0]->node();
-    if (input->kind() != kPackPadded) {
+    if (input->kind() != prim::PackPadded) {
       continue;
     }
     if (input->outputs()[0] != n->inputs()[0]) {

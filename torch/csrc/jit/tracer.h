@@ -242,7 +242,7 @@ struct PreTraceInfo {
   Node *n;
 };
 
-PreTraceInfo preRecordTrace(std::string op, at::ArrayRef<Variable> inputs);
+PreTraceInfo preRecordTrace(Symbol op, at::ArrayRef<Variable> inputs);
 #ifndef NO_PYTHON
 PreTraceInfo preRecordPythonTrace(
     THPObjectPtr pyobj, std::string arg_types, at::ArrayRef<Variable> inputs,

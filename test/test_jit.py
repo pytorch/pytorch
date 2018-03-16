@@ -917,7 +917,7 @@ class TestJit(TestCase):
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
 
-        t_node = g2.create("TensorTest").t_("a", torch.ones([2, 2]))
+        t_node = g2.create("prim::TensorTest").t_("a", torch.ones([2, 2]))
         assert(t_node.attributeNames() == ["a"])
         g2.appendNode(t_node)
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
