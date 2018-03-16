@@ -23,6 +23,7 @@ namespace script {
 // Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
+//       | For(List<Ident> targets, List<Expr> itrs, List<Stmt> body)   TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
@@ -202,6 +203,7 @@ struct Stmt : public TreeView {
   explicit Stmt(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
       case TK_IF:
+      case TK_FOR:
       case TK_WHILE:
       case TK_GLOBAL:
       case TK_ASSIGN:
@@ -380,6 +382,28 @@ struct While : public Stmt {
   }
   static While create(const SourceRange& range, const Expr& cond, const List<Stmt>& body) {
     return While(Compound::create(TK_WHILE, range, {cond, body}));
+  }
+};
+
+struct For : public Stmt {
+  explicit For(const TreeRef& tree) : Stmt(tree) {
+    tree->match(TK_FOR);
+  }
+  List<Ident> targets() const {
+    return List<Ident>(subtree(0));
+  }
+  List<Expr> itrs() const {
+    return List<Expr>(subtree(1));
+  }
+  List<Stmt> body() const {
+    return List<Stmt>(subtree(2));
+  }
+  static For create(
+      const SourceRange& range,
+      const List<Ident>& targets,
+      const List<Expr>& itrs,
+      const List<Stmt>& body) {
+    return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
   }
 };
 

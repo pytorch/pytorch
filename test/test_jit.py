@@ -1594,6 +1594,17 @@ class TestJit(TestCase):
         outputs = self._make_scalar_vars([-4321], np.int32)
         self.checkScript(script, inputs, outputs[0], True, 'test_if_while')
 
+    def test_script_for_in_range(self):
+        script = '''
+        def test_for_in_range():
+            c = 0
+            for i in range(100):
+                c += i
+            return c
+        '''
+        outputs = self._make_scalar_vars([4950], np.int32)
+        self.checkScript(script, [], outputs[0], True, 'test_for_in_range')
+
     def test_script_ternary(self):
         cu = torch.jit.CompilationUnit('''
         def test_ternary_control(a, b):
