@@ -1617,6 +1617,21 @@ class TestJit(TestCase):
         '''
         self.checkScript(script, [], [161700], True, 'test_script_for_in_range_dynamic')
 
+    def test_script_for_in_range_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_ast(zero, hunnid):
+            c = zero
+            for i in range(hunnid):
+                acc = zero
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+
+        inputs = self._make_scalar_vars([0, 100], np.int64)
+
+        self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
+
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
