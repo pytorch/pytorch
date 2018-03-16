@@ -779,10 +779,9 @@ class _DistTestBase(object):
                 return F.softmax(x, dim=1)
 
         def model_step(model):
-            for layer in model.modules():
-                if isinstance(layer, nn.Linear):
-                    layer.weight.data += layer.weight.grad
-                    layer.weight.grad = None
+            for param in model.parameters():
+                param.data += param.grad
+                param.grad = None
 
         def assert_equal_param(param_gpu, param_DDP):
             self.assertEqual(len(param_gpu), len(param_DDP))
@@ -823,7 +822,7 @@ class _DistTestBase(object):
 
             # Update weights and run a second iteration to shake out errors
             model_step(model_gpu)
-            model_step(model_DDP.module)
+            model_step(model_DDP)
 
             assert_equal_param(list(model_gpu.parameters()), list(model_DDP.module.parameters()))
 
