@@ -34,10 +34,12 @@ struct Parser {
   TreeRef parseBaseExp() {
     TreeRef prefix;
     switch (L.cur().kind) {
-      case TK_NUMBER:
+      case TK_NUMBER: {
+        prefix = parseConst();
+      } break;
       case TK_TRUE:
       case TK_FALSE: {
-        prefix = parseConst();
+        prefix = c(L.cur().kind, L.next().range, {});
       } break;
       case '(': {
         L.next();
@@ -151,11 +153,6 @@ struct Parser {
   }
   Const parseConst() {
     auto range = L.cur().range;
-    if (L.nextIf(TK_TRUE)) {
-      return Const::create(range, "1");
-    } else if (L.nextIf(TK_FALSE)) {
-      return Const::create(range, "0");
-    }
     std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
     return Const::create(t.range, unary_prefix + t.text());

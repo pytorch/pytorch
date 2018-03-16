@@ -1722,8 +1722,16 @@ class TestScript(TestCase):
                 c += i
             return c
         '''
-        outputs = self._make_scalar_vars([4950], np.int32)
-        self.checkScript(script, [], outputs[0], True, 'test_for_in_range')
+        self.checkScript(script, [], [4950], True, 'test_for_in_range')
+
+    def test_script_bool_constant(self):
+        script = '''
+        def test_script_bool_constant():
+            a = True
+            return a
+        '''
+        outputs = [True]
+        self.checkScript(script, [], outputs[0], True, 'test_script_bool_constant')
 
     def test_ternary(self):
         def func(a, b):
