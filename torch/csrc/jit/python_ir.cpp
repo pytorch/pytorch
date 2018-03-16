@@ -1,6 +1,7 @@
 #include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/import.h"
 #include "torch/csrc/jit/pybind.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/utils/pybind.h"
@@ -29,11 +30,11 @@ void initPythonIRBindings(PyObject * module_) {
       PropagateInputShapes(g, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
-                      int64_t onnx_opset_version, bool defer_weight_export=false) {
+                      int64_t onnx_opset_version, bool defer_weight_export, bool export_raw_ir) {
       std::string graph;
       RawDataExportMap export_map;
       std::tie(graph, export_map) = ExportGraph(
-        g, initializers, onnx_opset_version, defer_weight_export);
+        g, initializers, onnx_opset_version, defer_weight_export, export_raw_ir);
       std::unordered_map<std::string, py::bytes> python_serialized_export_map;
       for (auto& kv : export_map) {
         auto t = kv.second;
@@ -44,12 +45,18 @@ void initPythonIRBindings(PyObject * module_) {
         python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
       }
       return std::make_tuple(py::bytes(graph), python_serialized_export_map);
-    })
+    }, py::arg("initializers"),
+       py::arg("onnx_opset_version")=0,
+       py::arg("defer_weight_export")=false,
+       py::arg("export_raw_ir")=false )
     .def("prettyPrintExport", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
-                      int64_t onnx_opset_version, bool defer_weight_export=false) {
+                      int64_t onnx_opset_version, bool defer_weight_export, bool export_raw_ir) {
       return PrettyPrintExportedGraph(
-        g, initializers, onnx_opset_version, defer_weight_export);
-    })
+        g, initializers, onnx_opset_version, defer_weight_export, export_raw_ir);
+    }, py::arg("initializers"),
+       py::arg("onnx_opset_version")=0,
+       py::arg("defer_weight_export")=false,
+       py::arg("export_raw_ir")=false )
     .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
       // This function should be used for situations where we have a Python function
       // that should have different behavior when exporting for JIT interpreter
@@ -328,6 +335,17 @@ void initPythonIRBindings(PyObject * module_) {
 
   m.def("_jit_get_graph", [](tracer::TracingState* s) {
     return s->graph;
+  });
+  m.def("_jit_import_graph", [](const std::string& serialized_graph) {
+    std::vector<at::Tensor> initializers;
+    auto graph = ImportIRGraph(serialized_graph, initializers);
+    std::vector<torch::autograd::Variable> variables;
+    variables.reserve(initializers.size());
+    for (auto& tensor : initializers) {
+      variables.push_back(torch::autograd::make_variable(
+          std::move(tensor), /*requires_grad=*/false));
+    }
+    return std::make_tuple(graph, variables);
   });
   m.def("_jit_is_tracing", [](const autograd::Variable& var) {
     return tracer::isTracing(var);

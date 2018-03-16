@@ -315,6 +315,7 @@ public:
 class NodeProto : public MicroProto<onnx_NodeProto> {
 private:
   std::string op_type;
+  std::string domain;
   std::string doc_string;
   unique_vector<std::string> inputs;
   unique_vector<std::string> outputs;
@@ -334,7 +335,8 @@ public:
     attributes.emplace_back(ptr);
     return ptr;
   }
-  void set_op_type(const std::string& s) { proto.op_type= string(&op_type, s); }
+  void set_op_type(const std::string& s) { proto.op_type = string(&op_type, s); }
+  void set_domain(const std::string& s) { proto.domain = string(&domain, s); }
   void set_doc_string(const std::string& s) { proto.doc_string = string(&doc_string, s); }
   void dump(std::ostream& stream, size_t indent = 0);
 };

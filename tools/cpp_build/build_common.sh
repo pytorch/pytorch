@@ -15,6 +15,7 @@ if [ -x "$(command -v nvcc)" ]; then
 fi
 
 ATEN_BUILDPATH="$BUILD_PATH/aten"
+NANOPB_BUILDPATH="$BUILD_PATH/nanopb"
 LIBTORCH_BUILDPATH="$BUILD_PATH/libtorch"
 
 # Build with Ninja if available. It has much cleaner output.
@@ -34,7 +35,7 @@ set +e
 if [[ "$(uname)" == "Linux" ]]; then
   # https://stackoverflow.com/questions/6481005/how-to-obtain-the-number-of-cpus-cores-in-linux-from-the-command-line
   JOBS="$(grep -c '^processor' /proc/cpuinfo)"
-else # if [[ "$(uname)" -eq "Darwin"]]
+else # if [[ "$(uname)" == "Darwin"]]
   # https://stackoverflow.com/questions/1715580/how-to-discover-number-of-logical-cores-on-mac-os-x
   JOBS="$(sysctl -n hw.ncpu)"
 fi
