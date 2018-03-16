@@ -3,6 +3,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/TensorCompare.h"
 
 namespace {
 template <typename scalar_t>
@@ -25,7 +26,7 @@ void where_cpu(
 }
 
 template<template<typename T> class Comparator, typename scalar_out, typename scalar>
-struct CmpOpTensor {
+struct CmpOp {
   static void apply(at::Tensor& ret, const at::Tensor& self, const at::Tensor& other) {
     at::CPU_tensor_apply3<scalar_out, scalar, scalar>(ret, self, other,
         [](scalar_out& ret_val, const scalar& self_val, const scalar& other_val) {
@@ -33,10 +34,7 @@ struct CmpOpTensor {
         }
     );
   }
-};
 
-template<template<typename T> class Comparator, typename scalar_out, typename scalar>
-struct CmpOp {
   static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
     auto other_val = other.to<scalar>();
     at::CPU_tensor_apply2<scalar_out, scalar>(ret, self,
@@ -47,102 +45,16 @@ struct CmpOp {
   }
 };
 
-// <=, >=, ==, != have special cases for integral tensors and floating scalars due to
-// the floating scalars being automatically cast to integral types during the comparison
-template<typename scalar_out, typename scalar>
-struct CmpOp<std::less_equal, scalar_out, scalar> {
-  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
-    auto other_val = other.to<scalar>();
-
-    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-      auto other_double = other.to<double>();
-      auto other_long = other.to<int64_t>();
-      if (other_double != other_long) {
-        other_val = at::convert<scalar>(floor(other_double));
-      }
-    }
-
-    at::CPU_tensor_apply2<scalar_out, scalar>(ret, self,
-        [other_val](scalar_out& ret_val, const scalar& self_val) {
-          ret_val = at::convert<scalar_out>(std::less_equal<scalar>()(self_val, other_val));
-      }
-    );
-  }
-};
-
-template<typename scalar_out, typename scalar>
-struct CmpOp<std::greater_equal, scalar_out, scalar> {
-  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
-    auto other_val = other.to<scalar>();
-
-    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-      auto other_double = other.to<double>();
-      auto other_long = other.to<int64_t>();
-      if (other_double != other_long) {
-        other_val = at::convert<scalar>(ceil(other_double));
-      }
-    }
-
-    at::CPU_tensor_apply2<scalar_out, scalar>(ret, self,
-        [other_val](scalar_out& ret_val, const scalar& self_val) {
-          ret_val = at::convert<scalar_out>(std::greater_equal<scalar>()(self_val, other_val));
-      }
-    );
-  }
-};
-
-template<typename scalar_out, typename scalar>
-struct CmpOp<std::equal_to, scalar_out, scalar> {
-  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
-    auto other_val = other.to<scalar>();
-
-    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-      auto other_double = other.to<double>();
-      auto other_long = other.to<int64_t>();
-      if (other_double != other_long) {
-        ret.fill_(0);
-      }
-    } else {
-      at::CPU_tensor_apply2<scalar_out, scalar>(ret, self,
-          [other_val](scalar_out& ret_val, const scalar& self_val) {
-            ret_val = at::convert<scalar_out>(std::equal_to<scalar>()(self_val, other_val));
-        }
-      );
-    }
-  }
-};
-
-template<typename scalar_out, typename scalar>
-struct CmpOp<std::not_equal_to, scalar_out, scalar> {
-  static void apply(at::Tensor& ret, const at::Tensor& self, at::Scalar other) {
-    auto other_val = other.to<scalar>();
-
-    if (isIntegralType(self.type().scalarType()) && other.isFloatingPoint()) {
-      auto other_double = other.to<double>();
-      auto other_long = other.to<int64_t>();
-      if (other_double != other_long) {
-        ret.fill_(1);
-      }
-    } else {
-      at::CPU_tensor_apply2<scalar_out, scalar>(ret, self,
-          [other_val](scalar_out& ret_val, const scalar& self_val) {
-            ret_val = at::convert<scalar_out>(std::not_equal_to<scalar>()(self_val, other_val));
-        }
-      );
-    }
-  }
-};
-
-template<template<typename T> class Comparator>
+template<template<typename> class Comparator>
 at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, at::Scalar other, const char* op_name) {
   result.resize_(self.sizes());
   AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
-    CmpOp<Comparator, uint8_t, scalar_t>::apply(result, self, other);
+    CmpOpScalar<Comparator, uint8_t, scalar_t, CmpOp>::apply(result, self, other);
   });
   return result;
 }
 
-template<template<typename T> class Comparator>
+template<template<typename> class Comparator>
 at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, const at::Tensor& other, const char* op_name) {
   if (other.dim() == 0) {
     return cmp_out_cpu<Comparator>(result, self, other.pImpl->localScalar(), op_name);
@@ -152,7 +64,7 @@ at::Tensor& cmp_out_cpu(at::Tensor& result, const at::Tensor& self, const at::Te
   std::tie(b_self, b_other) = at::expand_outplace(self, other, op_name);
   result.resize_(b_self.sizes());
   AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
-    CmpOpTensor<Comparator, uint8_t, scalar_t>::apply(result, b_self, b_other);
+    CmpOp<Comparator, uint8_t, scalar_t>::apply(result, b_self, b_other);
   });
   return result;
 }
@@ -176,7 +88,7 @@ at::Tensor cmp_cpu(const at::Tensor& self, const at::Tensor& other, const char* 
 template<template<typename T> class Comparator>
 at::Tensor& cmp_inplace_cpu(at::Tensor& self, at::Scalar other, const char* op_name) {
   AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
-    CmpOp<Comparator, scalar_t, scalar_t>::apply(self, self, other);
+    CmpOpScalar<Comparator, scalar_t, scalar_t, CmpOp>::apply(self, self, other);
   });
   return self;
 }
@@ -190,7 +102,7 @@ at::Tensor& cmp_inplace_cpu(at::Tensor& self, const at::Tensor& other, const cha
   at::Tensor b_other;
   std::tie(b_other) = at::expand_inplace(self, other, op_name);
   AT_DISPATCH_ALL_TYPES(self.type(), op_name, [&]() {
-    CmpOpTensor<Comparator, scalar_t, scalar_t>::apply(self, self, b_other);
+    CmpOp<Comparator, scalar_t, scalar_t>::apply(self, self, b_other);
   });
   return self;
 }
@@ -237,147 +149,31 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
   return ret;
 }
 
-Tensor lt_cpu(const Tensor& self, Scalar other) {
-  return cmp_cpu<std::less>(self, other, "lt");
-}
+#define TENSOR_IMPLEMENT_COMPARATOR(NAME, COMP)                                     \
+  Tensor NAME##_cpu(const Tensor& self, Scalar other) {                             \
+    return cmp_cpu<COMP>(self, other, #NAME);                                       \
+  }                                                                                 \
+  Tensor& NAME##_out_cpu(Tensor& result, const Tensor& self, Scalar other) {        \
+    return cmp_out_cpu<COMP>(result, self, other, #NAME);                           \
+  }                                                                                 \
+  Tensor NAME##_cpu(const Tensor& self, const Tensor& other) {                      \
+    return cmp_cpu<COMP>(self, other, #NAME);                                       \
+  }                                                                                 \
+  Tensor& NAME##_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) { \
+    return cmp_out_cpu<COMP>(result, self, other, #NAME);                           \
+  }                                                                                 \
+  Tensor& NAME##_inplace_cpu(Tensor& self, Scalar other) {                          \
+    return cmp_inplace_cpu<COMP>(self, other, #NAME);                               \
+  }                                                                                 \
+  Tensor& NAME##_inplace_cpu(Tensor& self, const Tensor& other) {                   \
+    return cmp_inplace_cpu<COMP>(self, other, #NAME);                               \
+  }                                                                                 \
 
-Tensor gt_cpu(const Tensor& self, Scalar other) {
-  return cmp_cpu<std::greater>(self, other, "gt");
-}
 
-Tensor le_cpu(const Tensor& self, Scalar other) {
-  return cmp_cpu<std::less_equal>(self, other, "le");
-}
-
-Tensor ge_cpu(const Tensor& self, Scalar other) {
-  return cmp_cpu<std::greater_equal>(self, other, "le");
-}
-
-Tensor eq_cpu(const Tensor& self, Scalar other) {
-  return cmp_cpu<std::equal_to>(self, other, "eq");
-}
-
-Tensor ne_cpu(const Tensor& self, Scalar other) {
-  return cmp_cpu<std::not_equal_to>(self, other, "ne");
-}
-
-Tensor& lt_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
-  return cmp_out_cpu<std::less>(result, self, other, "lt");
-}
-
-Tensor& gt_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
-  return cmp_out_cpu<std::greater>(result, self, other, "gt");
-}
-
-Tensor& le_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
-  return cmp_out_cpu<std::less_equal>(result, self, other, "le");
-}
-
-Tensor& ge_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
-  return cmp_out_cpu<std::greater_equal>(result, self, other, "ge");
-}
-
-Tensor& eq_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
-  return cmp_out_cpu<std::equal_to>(result, self, other, "eq");
-}
-
-Tensor& ne_out_cpu(Tensor& result, const Tensor& self, Scalar other) {
-  return cmp_out_cpu<std::not_equal_to>(result, self, other, "ne");
-}
-
-Tensor lt_cpu(const Tensor& self, const Tensor& other) {
-  return cmp_cpu<std::less>(self, other, "lt");
-}
-
-Tensor gt_cpu(const Tensor& self, const Tensor& other) {
-  return cmp_cpu<std::greater>(self, other, "gt");
-}
-
-Tensor le_cpu(const Tensor& self, const Tensor& other) {
-  return cmp_cpu<std::less_equal>(self, other, "le");
-}
-
-Tensor ge_cpu(const Tensor& self, const Tensor& other) {
-  return cmp_cpu<std::greater_equal>(self, other, "le");
-}
-
-Tensor eq_cpu(const Tensor& self, const Tensor& other) {
-  return cmp_cpu<std::equal_to>(self, other, "eq");
-}
-
-Tensor ne_cpu(const Tensor& self, const Tensor& other) {
-  return cmp_cpu<std::not_equal_to>(self, other, "ne");
-}
-
-Tensor& lt_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
-  return cmp_out_cpu<std::less>(result, self, other, "lt");
-}
-
-Tensor& gt_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
-  return cmp_out_cpu<std::greater>(result, self, other, "gt");
-}
-
-Tensor& le_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
-  return cmp_out_cpu<std::less_equal>(result, self, other, "le");
-}
-
-Tensor& ge_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
-  return cmp_out_cpu<std::greater_equal>(result, self, other, "ge");
-}
-
-Tensor& eq_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
-  return cmp_out_cpu<std::equal_to>(result, self, other, "eq");
-}
-
-Tensor& ne_out_cpu(Tensor& result, const Tensor& self, const Tensor& other) {
-  return cmp_out_cpu<std::not_equal_to>(result, self, other, "ne");
-}
-
-Tensor& lt_inplace_cpu(Tensor& self, Scalar other) {
-  return cmp_inplace_cpu<std::less>(self, other, "lt_");
-}
-
-Tensor& gt_inplace_cpu(Tensor& self, Scalar other) {
-  return cmp_inplace_cpu<std::greater>(self, other, "gt_");
-}
-
-Tensor& le_inplace_cpu(Tensor& self, Scalar other) {
-  return cmp_inplace_cpu<std::less_equal>(self, other, "le_");
-}
-
-Tensor& ge_inplace_cpu(Tensor& self, Scalar other) {
-  return cmp_inplace_cpu<std::greater_equal>(self, other, "ge_");
-}
-
-Tensor& eq_inplace_cpu(Tensor& self, Scalar other) {
-  return cmp_inplace_cpu<std::equal_to>(self, other, "eq_");
-}
-
-Tensor& ne_inplace_cpu(Tensor& self, Scalar other) {
-  return cmp_inplace_cpu<std::not_equal_to>(self, other, "ne_");
-}
-
-Tensor& lt_inplace_cpu(Tensor& self, const Tensor& other) {
-  return cmp_inplace_cpu<std::less>(self, other, "lt_");
-}
-
-Tensor& gt_inplace_cpu(Tensor& self, const Tensor& other) {
-  return cmp_inplace_cpu<std::greater>(self, other, "gt_");
-}
-
-Tensor& le_inplace_cpu(Tensor& self, const Tensor& other) {
-  return cmp_inplace_cpu<std::less_equal>(self, other, "le_");
-}
-
-Tensor& ge_inplace_cpu(Tensor& self, const Tensor& other) {
-  return cmp_inplace_cpu<std::greater_equal>(self, other, "ge_");
-}
-
-Tensor& eq_inplace_cpu(Tensor& self, const Tensor& other) {
-  return cmp_inplace_cpu<std::equal_to>(self, other, "eq_");
-}
-
-Tensor& ne_inplace_cpu(Tensor& self, const Tensor& other) {
-  return cmp_inplace_cpu<std::not_equal_to>(self, other, "ne_");
-}
+TENSOR_IMPLEMENT_COMPARATOR(lt, std::less)
+TENSOR_IMPLEMENT_COMPARATOR(gt, std::greater)
+TENSOR_IMPLEMENT_COMPARATOR(le, std::less_equal)
+TENSOR_IMPLEMENT_COMPARATOR(ge, std::greater_equal)
+TENSOR_IMPLEMENT_COMPARATOR(eq, std::equal_to)
+TENSOR_IMPLEMENT_COMPARATOR(ne, std::not_equal_to)
 }} // namespace at::native

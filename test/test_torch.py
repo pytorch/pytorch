@@ -4788,6 +4788,10 @@ class TestTorch(TestCase):
 
     def test_comparator_integral_tensor_floating_scalar(self):
         t = torch.LongTensor([-2, -1, 0, 1, 2])
+        self.assertEqual(t.lt(0.5), [1, 1, 1, 0, 0])
+        self.assertEqual(t.lt(-0.5), [1, 1, 0, 0, 0])
+        self.assertEqual(t.gt(0.5), [0, 0, 0, 1, 1])
+        self.assertEqual(t.gt(-0.5), [0, 0, 1, 1, 1])
         self.assertEqual(t.ge(0.5), [0, 0, 0, 1, 1])
         self.assertEqual(t.ge(-0.5), [0, 0, 1, 1, 1])
         self.assertEqual(t.le(0.5), [1, 1, 1, 0, 0])
@@ -4798,6 +4802,10 @@ class TestTorch(TestCase):
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_comparator_integral_tensor_floating_scalar_cuda(self):
         t = torch.LongTensor([-2, -1, 0, 1, 2]).cuda()
+        self.assertEqual(t.lt(0.5), [1, 1, 1, 0, 0])
+        self.assertEqual(t.lt(-0.5), [1, 1, 0, 0, 0])
+        self.assertEqual(t.gt(0.5), [0, 0, 0, 1, 1])
+        self.assertEqual(t.gt(-0.5), [0, 0, 1, 1, 1])
         self.assertEqual(t.ge(0.5), [0, 0, 0, 1, 1])
         self.assertEqual(t.ge(-0.5), [0, 0, 1, 1, 1])
         self.assertEqual(t.le(0.5), [1, 1, 1, 0, 0])

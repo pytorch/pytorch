@@ -22,12 +22,6 @@
 #include "generic/THCTensorMathReduce.h"
 #include "THCGenerateAllTypes.h"
 
-#include "generic/THCTensorMathCompare.h"
-#include "THCGenerateAllTypes.h"
-
-#include "generic/THCTensorMathCompareT.h"
-#include "THCGenerateAllTypes.h"
-
 #include "generic/THCTensorMathScan.h"
 #include "THCGenerateAllTypes.h"
 
