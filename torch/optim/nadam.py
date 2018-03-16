@@ -19,7 +19,7 @@ class NAdam(torch.optim.Optimizer):
     exp_avg_sq                    v_t                             n_t
     exp_avg_sq_prime         \prime{v}_t               \prime{n}_t
     beta1                              beta_1                       \mu
-    beta2                              beta_2                       v=0.999                            
+    beta2                              beta_2                       \v=0.999
     It has been proposed in `Incorporating Nesterov Momentum into Adam`_.
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -29,7 +29,7 @@ class NAdam(torch.optim.Optimizer):
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0), 
+        weight_decay (float, optional): weight decay (L2 penalty) (default: 0),
             but not used in NAdam
         schedule_decay (float, optional): coefficients used for computing
             moment schedule (default: 0.004)
@@ -79,13 +79,13 @@ class NAdam(torch.optim.Optimizer):
                     state['exp_avg'] = torch.zeros_like(p.data)
                     # Exponential moving average of squared gradient values
                     state['exp_avg_sq'] = torch.zeros_like(p.data)
-                    # \mu^{t} 
+                    # \mu^{t}
                     state['m_schedule'] = 1.
 
                 exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
 
                 beta1, beta2 = group['betas']
-                
+
                 schedule_decay = group['schedule_decay']
 
                 state['step'] += 1
@@ -104,19 +104,18 @@ class NAdam(torch.optim.Optimizer):
                 # Decay the first and second moment running average coefficient
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
-                        
+
                 g_prime = torch.div(grad, 1. - m_schedule_new)
                 exp_avg_prime = torch.div(exp_avg, 1. - m_schedule_next)
                 exp_avg_sq_prime = torch.div(exp_avg_sq, 1. - pow(beta2, state['step']))
-                
-                exp_avg_bar = torch.add((1. - momentum_cache_t) * g_prime, 
+
+                exp_avg_bar = torch.add((1. - momentum_cache_t) * g_prime,
                                         momentum_cache_t_1, exp_avg_prime)
 
                 denom = exp_avg_sq_prime.sqrt().add_(group['eps'])
 
-                step_size = group['lr'] 
+                step_size = group['lr']
 
                 p.data.addcdiv_(-step_size, exp_avg_bar, denom)
-                                      
-        return loss
-    
+
+                return loss
