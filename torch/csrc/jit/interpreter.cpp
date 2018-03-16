@@ -57,7 +57,7 @@ namespace torch { namespace jit {
 // provide a loop counter
 void desugarTripCounts(Block * b) {
   for(auto n : b->nodes()) {
-    if(n->kind() == kLoop) {
+    if(n->kind() == prim::Loop) {
 
       // remove the trip count from Loop inputs, we don't support it yet
       n->removeInput(0);
@@ -82,7 +82,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
   auto it = graph.nodes().begin();
   for(size_t i = 0; i <= graph.stage(); i++) {
     stage_input_types.emplace_back();
-    auto store = graph.create(kStore, 0)->insertBefore(*it);
+    auto store = graph.create(prim::Store, 0)->insertBefore(*it);
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
@@ -92,7 +92,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     }
     while(it != graph.nodes().end() && it->stage() == i)
       ++it;
-    auto load = graph.create(kLoad, 0)->insertBefore(*it);
+    auto load = graph.create(prim::Load, 0)->insertBefore(*it);
     while(output_pos < graph.outputs().size() && graph.outputs()[output_pos]->stage() == i) {
       load->addInput(graph.outputs()[output_pos]);
       output_pos++;
@@ -121,7 +121,7 @@ void dropUnused(Block *b) {
     }
     if(to_drop.size() == 0)
       return nullptr;
-    return b->owningGraph()->create(kDrop, to_drop, 0);
+    return b->owningGraph()->create(prim::Drop, to_drop, 0);
   };
 
   if(auto d = createDropIfUnused(b->inputs())) {
@@ -226,7 +226,7 @@ std::unordered_map<Node*, std::vector<uint8_t>> findLastUses(Graph & g) {
     Node * findOrCreateDropInstructionForNode(Node * n) {
       auto it = drop_for_node.find(n);
       if(it == drop_for_node.end()) {
-        auto drop_node = graph.create(kDrop, 0);
+        auto drop_node = graph.create(prim::Drop, 0);
         drop_node->insertAfter(n);
         it = drop_for_node.emplace(n, drop_node).first;
       }
@@ -589,13 +589,13 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
     };
   IR_ELSEIF(Constant)
   if (values_are_variables) {
-    auto t = torch::autograd::make_variable(value->t(kvalue), false);
+    auto t = torch::autograd::make_variable(value->t(attr::value), false);
     return [t](Stack& stack) {
       stack.push_back(t);
       return 0;
     };
     } else {
-      auto t = value->t(kvalue);
+      auto t = value->t(attr::value);
       return [t](Stack & stack) {
         stack.push_back(t);
         return 0;
@@ -629,7 +629,8 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
         } else if (!i.defined()) {
           std::cout << "<undefined tensor>";
         } else {
-          std::cout << "<" << typeid(*i.get()).name() << " at " << i << ">";
+          auto& r = *i.get();
+          std::cout << "<" << typeid(r).name() << " at " << i << ">";
         }
       }
       drop(stack, num_inputs);
@@ -637,7 +638,7 @@ Operation getOperation(jit::Node* node, bool values_are_variables) {
       return 0;
     };
   IR_ELSEIF(GraphExecutor)
-    GraphExecutor executor(value->g(kSubgraph));
+    GraphExecutor executor(value->g(attr::Subgraph));
     auto num_inputs = value->inputs().size();
     return [=](Stack& stack) mutable {
       autograd::profiler::RecordFunction record("GraphExecutor");
@@ -723,42 +724,42 @@ struct CodeImpl {
   // jump when input is 0
   void createJumpZ(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == kPlaceholder);
+    JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
       auto t = tensor_as<int64_t>(pop(stack));
       return (t == 0) ? offset : 0;
     };
-    inst.debug_name = kJumpZ;
+    inst.debug_name = prim::JumpZ;
   }
 
   // jump when input is not 0
   void createJumpNZ(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == kPlaceholder);
+    JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
       auto t = tensor_as<int64_t>(pop(stack));
       return (t != 0) ? offset : 0;
     };
-    inst.debug_name = kJumpNZ;
+    inst.debug_name = prim::JumpNZ;
   }
 
   void createJump(int from_inst, int to_inst) {
     auto & inst = instructions[from_inst];
-    JIT_ASSERT(inst.debug_name == kPlaceholder);
+    JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [=](Stack & stack) {
       return offset;
     };
-    inst.debug_name = kJump;
+    inst.debug_name = prim::Jump;
   }
 
   void insertNodesFromBlock(Block* block) {
     for(auto node : block->nodes()) {
       const auto & source_location = node->getSourceLocation();
       switch(node->kind()) {
-        case kIf: {
+        case prim::If: {
           // x = if c:
           //   <then_block>
           //   -> (vt)
@@ -776,21 +777,21 @@ struct CodeImpl {
           //   x = vt
           // end:
 
-          // kPlaceholder instructions are replaced with branch instructions
+          // prim::Placeholder instructions are replaced with branch instructions
           // when the branch target locations are known
-          auto cond_branch = insertInstruction(kPlaceholder, source_location, node->inputs(), moveFlags(node), {});
+          auto cond_branch = insertInstruction(prim::Placeholder, source_location, node->inputs(), moveFlags(node), {});
           auto then_block = node->blocks()[0];
           auto else_block = node->blocks()[1];
           insertNodesFromBlock(else_block);
           insertAssign(source_location,else_block->outputs(), moveFlags(else_block), node->outputs());
-          auto jump = insertInstruction(kPlaceholder, source_location, {}, {}, {});
+          auto jump = insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           auto then_block_start = instructions.size();
           insertNodesFromBlock(then_block);
           insertAssign(source_location, then_block->outputs(), moveFlags(then_block), node->outputs());
           createJump(jump, instructions.size());
           createJumpNZ(cond_branch, then_block_start);
         } break;
-        case kLoop: {
+        case prim::Loop: {
           // o0 = while c i0
           //        block 0: l0
           //          <body>
@@ -811,7 +812,7 @@ struct CodeImpl {
           insertAssign(source_location, node->inputs(), moveFlags(node), body_block->inputs());
           // after assign op: stack: ... <cond>
           // cond_branch consumes <cond> from top of the stack
-          auto cond_branch = insertInstruction(kPlaceholder, source_location,{}, {}, {});
+          auto cond_branch = insertInstruction(prim::Placeholder, source_location,{}, {}, {});
           // after branch: stack: ...
 
           auto entry = instructions.size();
@@ -819,7 +820,7 @@ struct CodeImpl {
           // before assign op: stack: ... <cond> <loop-carried-depdencies>
           insertAssign(source_location, body_block->outputs(), moveFlags(body_block), body_block->inputs());
           // after assign op: stack: ... <cond>
-          auto cond_branch_end = insertInstruction(kPlaceholder, source_location, {}, {}, {});
+          auto cond_branch_end = insertInstruction(prim::Placeholder, source_location, {}, {}, {});
           // after branch: stack: ...
 
           aliasRegistersTo(node->outputs(), body_block->inputs());
@@ -833,7 +834,7 @@ struct CodeImpl {
       // each stage ends with a load instruction
       // we record where these instructions occur, and use them to
       // exit the interpreter
-      if(node->kind() == kLoad) {
+      if(node->kind() == prim::Load) {
         stage_end.push_back(instructions.size());
       }
     }
@@ -875,7 +876,7 @@ struct CodeImpl {
   }
 
   size_t insertAssign(std::shared_ptr<SourceLocation> debug_location, ArrayRef<Value*> inputs, ArrayRef<uint8_t> move_flags, ArrayRef<Value*> outputs) {
-    auto inst = insertInstruction(kAssign, std::move(debug_location),inputs, move_flags, outputs);
+    auto inst = insertInstruction(prim::Assign, std::move(debug_location),inputs, move_flags, outputs);
     // This node effectively forwards its inputs into different places in a register list.
     // We don't need to manipulate the stack in any way, because all inputs are also outputs,
     // and the interpreter will take care of putting them in correct places.
@@ -949,7 +950,9 @@ struct CodeImpl {
     };
     auto & inst = instructions.at(pc);
     writeList(inst.outputs);
-    out << " = " << inst.debug_name.toString() << " ";
+    // NB: debug names are the kind of operator used to select
+    // dispatch
+    out << " = " << inst.debug_name.toUnqualString() << " ";
     writeUseList(inst.inputs);
   }
   void dump(std::ostream & out) const {

@@ -113,9 +113,9 @@ void EliminateCommonSubexpression(Block * block) {
   std::unordered_set<Node*, HashNodeCSE, EqualNodeCSE> subexprs;
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
-    if (node->kind() == kPythonOp
-        || node->kind() == kCppOp
-        || node->kind() == kEval
+    if (node->kind() == prim::PythonOp
+        || node->kind() == prim::CppOp
+        || node->kind() == prim::Eval
        ) {
       // Do NOT have enough information to do CSE on these nodes.
       continue;

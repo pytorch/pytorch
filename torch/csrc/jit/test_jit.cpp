@@ -232,10 +232,10 @@ static void fusionTests() {
 struct Attr : public Attributes<Attr> {
 };
 void attributesTest() {
-  auto one = kParam;
-  auto two = kReturn;
-  auto three = kConstant;
-  auto four = kSlice;
+  auto one = attr::alpha;
+  auto two = attr::device;
+  auto three = attr::end;
+  auto four = attr::perm;
   Attr attr;
   attr.f_(one,3.4)->i_(two,5)->s_(three,"what");
   JIT_ASSERT(attr.f(one) == 3.4);
@@ -258,18 +258,36 @@ void attributesTest() {
 
 void internedStringsTests () {
 
-  JIT_ASSERT(kParam == Symbol("Param"));
-  JIT_ASSERT(kReturn == Symbol("Return"));
-  JIT_ASSERT(Symbol(kReturn).toString() == std::string("Return"));
-  size_t symstart = Symbol("__NEW_SYMBOL");
-  JIT_ASSERT(Symbol("What") == symstart+1);
-  JIT_ASSERT(Symbol("What2") == symstart+2);
-  JIT_ASSERT(Symbol("What") == symstart+1);
-  JIT_ASSERT(Symbol("What2") == symstart+2);
-  JIT_ASSERT(Symbol(symstart+2).toString() == std::string("What2"));
+  JIT_ASSERT(prim::Param == Symbol::prim("Param"));
+  JIT_ASSERT(prim::Return == Symbol::prim("Return"));
+  JIT_ASSERT(prim::Return.toUnqualString() == std::string("Return"));
+  JIT_ASSERT(prim::Return.toQualString() == std::string("prim::Return"));
+  Symbol newsym = Symbol::aten("__NEW_SYMBOL");
+  size_t symstart = newsym;
+  JIT_ASSERT(newsym.toQualString() == std::string("aten::__NEW_SYMBOL"));
+  // TODO: This test is a bit too close to the implementation details.
+  JIT_ASSERT(Symbol::aten("What") == symstart+1);
+  JIT_ASSERT(Symbol::aten("What2") == symstart+2);
+  JIT_ASSERT(Symbol::aten("What") == symstart+1);
+  JIT_ASSERT(Symbol::aten("What2") == symstart+2);
+  JIT_ASSERT(Symbol(SymbolNamespace::aten, symstart+2).toUnqualString() == std::string("What2"));
 }
 
-
+void fromQualStringTests() {
+  JIT_ASSERT(Symbol::fromQualString("prim::Param") == Symbol::prim("Param"));
+  JIT_ASSERT(Symbol::fromQualString("aten::mm") == Symbol::aten("mm"));
+  JIT_ASSERT(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
+  JIT_ASSERT(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
+  JIT_ASSERT(Symbol::fromQualString("scope::") == Symbol::scope(""));
+  auto bad_inputs = {"scope", "foo::bar", "prim:Param", "::", ":", ""};
+  for (auto input : bad_inputs) {
+    try {
+      Symbol::fromQualString(input);
+      JIT_ASSERT(0);
+    } catch (std::runtime_error c) {
+    }
+  }
+}
 
 at::Tensor t_use(at::Tensor x) {
   return x;
@@ -788,7 +806,7 @@ void testBlocks(std::ostream & out) {
   auto a = Var::asNewInput(g, "a");
   auto b = Var::asNewInput(g, "b");
   auto c = a + b;
-  auto r = g.appendNode(g.create(kIf, {Var::asNewInput(g, "c").value()}));
+  auto r = g.appendNode(g.create(prim::If, {Var::asNewInput(g, "c").value()}));
   auto then_block = r->addBlock();
   auto else_block = r->addBlock();
   {
@@ -871,6 +889,7 @@ std::string runJITCPPTests() {
   fusionTests();
   attributesTest();
   internedStringsTests();
+  fromQualStringTests();
   argumentSpecTest();
   shapeAnalysisTest();
   return out.str();
