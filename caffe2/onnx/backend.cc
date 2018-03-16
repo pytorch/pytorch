@@ -21,7 +21,7 @@ namespace caffe2 { namespace onnx {
 
 namespace {
 
-constexpr static int kKnownOpsetVersion = 4;
+constexpr static int kKnownOpsetVersion = 5;
 
 bool AlmostEqual(double a, double b) {
   constexpr static double kEps = 1e-15;
