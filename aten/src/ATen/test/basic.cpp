@@ -272,6 +272,9 @@ static void test(Type & type) {
     for (int64_t i = 0; i < tensor.numel(); ++i) {
       ASSERT(tensor[i].equal(one * i));
     }
+    for (size_t i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * static_cast<int64_t>(i)));
+    }
     for (int i = 0; i < tensor.numel(); ++i) {
       ASSERT(tensor[i].equal(one * i));
     }
