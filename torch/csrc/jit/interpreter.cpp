@@ -85,7 +85,7 @@ void desugarTripCounts(Block * b) {
         // Emit initial comparison -- initial_trip_count < max_trip_count
         Value* initial_comparison_value =
             g->insertNode(
-                 g->create(klt, {initial_trip_count, max_trip_count_value}, 1))
+                 g->create(aten::lt, {initial_trip_count, max_trip_count_value}, 1))
                 ->output();
 
         // Replace initial condition with logical and of trip count and
@@ -93,7 +93,7 @@ void desugarTripCounts(Block * b) {
 
         Value* new_cond =
             g->insertNode(g->create(
-                k__and__, {initial_comparison_value, n->input(0)}, 1))
+                aten::__and__, {initial_comparison_value, n->input(0)}, 1))
              ->output();
         n->replaceInput(0, new_cond);
       }
@@ -109,18 +109,18 @@ void desugarTripCounts(Block * b) {
 
         Value* inc_trip_count =
             g->insertNode(g->create(
-                    kadd, {block_trip_count_input, const_one, const_one}, 1))
+                    aten::add, {block_trip_count_input, const_one, const_one}, 1))
              ->output();
         body_block->registerOutput(inc_trip_count);
 
         Value* body_comparison =
             g->insertNode(
-                 g->create(klt, {inc_trip_count, max_trip_count_value}, 1))
+                 g->create(aten::lt, {inc_trip_count, max_trip_count_value}, 1))
                 ->output();
 
         Value* save_cond = body_block->outputs()[0];
         Node* body_conjunct =
-            g->insertNode(g->create(k__and__, {body_comparison}, 1));
+            g->insertNode(g->create(aten::__and__, {body_comparison}, 1));
         body_block->outputs()[0]->replaceAllUsesWith(body_conjunct->output());
         body_conjunct->addInput(save_cond);
       }
