@@ -271,7 +271,7 @@
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
-- func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6) -> Tensor
+- func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor

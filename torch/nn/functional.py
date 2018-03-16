@@ -1936,31 +1936,11 @@ def pad(input, pad, mode='constant', value=0):
 
 # distance
 
-def pairwise_distance(x1, x2, p=2, eps=1e-6):
+def pairwise_distance(x1, x2, p=2, eps=1e-6, keepdim=False):
     r"""
-    Computes the batchwise pairwise distance between vectors v1,v2:
-
-    .. math ::
-        \Vert x \Vert _p := \left( \sum_{i=1}^n  \vert x_i \vert ^ p \right) ^ {1/p}
-
-    Args:
-        x1: first input tensor
-        x2: second input tensor
-        p: the norm degree. Default: 2
-        eps (float, optional): Small value to avoid division by zero. Default: 1e-6
-
-    Shape:
-        - Input: :math:`(N, D)` where `D = vector dimension`
-        - Output: :math:`(N)`
-
-    Example::
-
-        >>> input1 = torch.randn(100, 128)
-        >>> input2 = torch.randn(100, 128)
-        >>> output = F.pairwise_distance(input1, input2, p=2)
-        >>> output.backward()
+    See :class:`torch.nn.PairwiseDistance` for details
     """
-    return torch._C._VariableFunctions.pairwise_distance(x1, x2, p, eps)
+    return torch._C._VariableFunctions.pairwise_distance(x1, x2, p, eps, keepdim)
 
 
 def cosine_similarity(x1, x2, dim=1, eps=1e-8):
