@@ -781,14 +781,13 @@ class _DistTestBase(object):
         def model_step(model):
             for layer in model.modules():
                 if isinstance(layer, nn.Linear):
-                    layer.weight.data = layer.weight.data + layer.weight.grad
+                    layer.weight.data += layer.weight.grad
                     layer.weight.grad = None
 
-        def assert_equal_model(model_gpu, model_DDP):
-            for layer_gpu, layer_DDP in zip(model_gpu.modules(), model_DDP.module.modules()):
-                if isinstance(layer_gpu, nn.Linear):
-                    self.assertEqual(layer_gpu.weight.data, layer_DDP.weight.data)
-                    self.assertEqual(layer_gpu.weight.grad, layer_DDP.weight.grad)
+        def assert_equal_param(param_gpu, param_DDP):
+            self.assertEqual(len(param_gpu), len(param_DDP))
+            for p_gpu, p_DDP in zip(param_gpu, param_DDP):
+                self.assertEqual(p_gpu, p_DDP)
 
         # cpu training setup
         model = Net()
@@ -809,40 +808,27 @@ class _DistTestBase(object):
         target = torch.randn(batch_size, 4)
         loss = nn.MSELoss()
 
-        # single gpu training
-        self._test_DDP_helper(model_gpu,
-                              input_cpu.cuda(gpu_subset[0]),
-                              target.cuda(gpu_subset[0]),
-                              loss)
+        for i in range(2):
+            # single gpu training
+            self._test_DDP_helper(model_gpu,
+                                  input_cpu.cuda(gpu_subset[0]),
+                                  target.cuda(gpu_subset[0]),
+                                  loss)
 
-        # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
-        self._test_DDP_helper(model_DDP,
-                              input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
-                              target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
-                              loss)
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            self._test_DDP_helper(model_DDP,
+                                  input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
+                                  target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
+                                  loss)
 
-        assert_equal_model(model_gpu, model_DDP)
+            # Update weights and run a second iteration to shake out errors
+            model_step(model_gpu)
+            model_step(model_DDP.module)
 
-        # Update weights and run a second iteration to shake out errors
-        model_step(model_gpu)
-        model_step(model_DDP.module)
+            assert_equal_param(list(model_gpu.parameters()), list(model_DDP.module.parameters()))
 
-        # Shuffle the input so that DDP input is different from the first iteration
-        input_cpu = input_cpu[torch.randperm(batch_size)]
-
-        # Run the second iteration for single gpu
-        self._test_DDP_helper(model_gpu,
-                              input_cpu.cuda(gpu_subset[0]),
-                              target.cuda(gpu_subset[0]),
-                              loss)
-
-        # Run the second iteration for DDP
-        self._test_DDP_helper(model_DDP,
-                              input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
-                              target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
-                              loss)
-
-        assert_equal_model(model_gpu, model_DDP)
+            # Shuffle the input so that DDP input is different
+            input_cpu = input_cpu[torch.randperm(batch_size)]
 
         self._barrier()
 
