@@ -36,7 +36,17 @@ static inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
     // can't wrap empty TensorList; rely on underlying implementation to throw error if necessary.
     return dim;
   }
-  return maybe_wrap_dim(dim, tensors[0].dim());
+  // In an ideal world empty tensors should be broadcastable to any number of dims.
+  // Because that's not the case, we have to special case them to do the following:
+  // - we should wrap to the dim() of the first non-empty tensor.
+  // - If all tensors are empty, wrap_dim should return 0.
+  for (auto& tensor : tensors) {
+    if (tensor.numel() == 0) {
+      continue;
+    }
+    return maybe_wrap_dim(dim, tensor.dim());
+  }
+  return 0;
 }
 
 }

@@ -299,6 +299,11 @@ def saved_variables(formula, args):
             'suffix': lambda m: '_sizes_{}'.format(*m.groups()),
             'type': 'IntList',
         }),
+        # replace at::maybe_wrap_dim(dim, tensors) with dim_wrapped_by_tensors
+        (r'at::maybe_wrap_dim\({}, (\w+)\)', {
+            'suffix': lambda m: '_wrapped_by_{}'.format(*m.groups()),
+            'type': 'int64_t',
+        }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {
             'suffix': '_geometry',

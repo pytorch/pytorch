@@ -155,7 +155,7 @@
   self: not_implemented("btrisolve")
 
 - name: cat(TensorList tensors, int64_t dim)
-  tensors: cat_tensors_backward(grad, to_arg_sizes(tensors, dim), dim)
+  tensors: cat_tensors_backward(grad, to_arg_sizes(tensors, dim), at::maybe_wrap_dim(dim, tensors))
 
 - name: cauchy_(Tensor self, double median, double sigma, Generator generator)
   self: zeros_like(grad)
