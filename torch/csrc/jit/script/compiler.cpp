@@ -516,23 +516,11 @@ private:
       }
     }
 
-    int max_trip_count_val;
-    {
-      List<Expr> args = range_iterator.inputs();
-      // TODO: start, stop, step loop
-      if (args.size() != 1) {
-        throw ErrorReport(stmt)
-            << "range() expects one argument but got" << args.size();
-      }
-
-      if (args[0].kind() != TK_CONST) {
-        throw ErrorReport(stmt) << "Argument to range() must be a constant";
-      }
-      Const range_val(args[0]);
-      if (!range_val.isIntegral()) {
-        throw ErrorReport(stmt) << "Argument to range() must be an integer";
-      }
-      max_trip_count_val = range_val.asFloatingPoint();
+    List<Expr> args = range_iterator.inputs();
+    // TODO: start, stop, step loop
+    if (args.size() != 1) {
+      throw ErrorReport(stmt)
+          << "range() expects one argument but got" << args.size();
     }
 
     auto target_list = List<Ident>(targets);
@@ -542,7 +530,7 @@ private:
       target_idents.push_back(Ident(t).name());
     }
 
-    Value* max_trip_count = emitConst(Const::create(stmt.range(), std::to_string(max_trip_count_val)))[0];
+    Value* max_trip_count = emitExpr(args[0], 1)[0];
     Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
 
     emitLoopCommon(

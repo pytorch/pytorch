@@ -23,7 +23,7 @@ namespace script {
 // Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
-//       | For(List<Ident> targets, List<Expr> itrs, List<Stmt> body)   TK_FOR
+//       | For(List<Ident> targets, List<Expr> iters, List<Stmt> body)  TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
