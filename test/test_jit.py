@@ -1604,6 +1604,19 @@ class TestJit(TestCase):
         '''
         self.checkScript(script, [], [4950], True, 'test_for_in_range')
 
+    def test_script_for_in_range_dynamic(self):
+        script = '''
+        def test_script_for_in_range_dynamic():
+            c = 0
+            for i in range(100):
+                acc = 0
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+        '''
+        self.checkScript(script, [], [161700], True, 'test_script_for_in_range_dynamic')
+
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
