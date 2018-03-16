@@ -57,6 +57,9 @@ inline Tensor Tensor::operator[](Tensor index) const {
   // The Scalar(Tensor) constructor is explicit, so we need to call it.
   return this->operator[](Scalar(index));
 }
+inline Tensor Tensor::operator[](int64_t index) const {
+  return select(0, index);
+}
 
 #define AT_FORALL_BINARY_OPS(_) \
 _(+,x.add(y), y.add(x)) \
