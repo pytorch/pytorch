@@ -39,7 +39,10 @@ struct Parser {
       } break;
       case TK_TRUE:
       case TK_FALSE: {
-        prefix = c(L.cur().kind, L.next().range, {});
+        auto k = L.cur().kind;
+        auto r = L.cur().range;
+        prefix = c(k, r, {});
+        L.next();
       } break;
       case '(': {
         L.next();
