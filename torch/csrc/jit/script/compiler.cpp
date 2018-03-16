@@ -442,10 +442,10 @@ private:
       const Expr* cond,
       const std::vector<std::string>& itr_idents) {
     Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
-    Value* trip_count = n->addInput(max_trip_count);
+    n->addInput(max_trip_count);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
-    body_block->addInput(); // Iteration num
+    Value* trip_count = body_block->addInput(); // Iteration num
     size_t skip_inputs_num = 1;
 
     {
@@ -465,7 +465,7 @@ private:
         Value* body_cond_value = emitExpr(*cond, 1)[0];
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = emitConst(Const::create(stmt.range(), "1"))[0];
+        Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -543,7 +543,7 @@ private:
     }
 
     Value* max_trip_count = emitConst(Const::create(stmt.range(), std::to_string(max_trip_count_val)))[0];
-    Value* cond_value_dummy = emitConst(Const::create(stmt.range(), "1"))[0];
+    Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
 
     emitLoopCommon(
         max_trip_count,
@@ -745,6 +745,10 @@ private:
         expectOutputs(tree, output_size, 1);
         return emitConst(Const(tree));
       } break;
+      case TK_TRUE:
+      case TK_FALSE: {
+        return emitBooleanConst(tree);
+      } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
         const auto slice = Slice(tree);
@@ -793,6 +797,15 @@ private:
                {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
         ->outputs();
+  }
+
+  std::vector<Value*> emitBooleanConst(const TreeRef& tree, bool val) {
+    return {createConstant(tree->range(), at::CPU(at::kByte).scalarTensor(val))};
+  }
+
+  std::vector<Value*> emitBooleanConst(const TreeRef& tree) {
+    bool val = tree->kind() == TK_TRUE;
+    return emitBooleanConst(tree, val);
   }
 
   std::vector<Value*> emitConst(const Const& c) {
