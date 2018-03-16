@@ -22,72 +22,6 @@
 
 namespace torch { namespace jit {
 
-std::unordered_map<NodeKind, std::string> simple_map_ops = {
-  // unary
-  {kabs, "absf(${0})"},
-  {ksigmoid, "1.f / (1.f + expf(-${0}))"},
-  {klog, "logf(${0})"},
-  {klog1p, "log1pf(${0})"},
-  {klgamma, "lgammaf(${0})"},
-  {kexp, "expf(${0})"},
-  {kexpm1, "expm1f(${0})"},
-  {kcos, "cosf(${0})"},
-  {kacos, "acosf(${0})"},
-  {kcosh, "coshf(${0})"},
-  {ksin, "sinf(${0})"},
-  {kasin, "asinf(${0})"},
-  {ksinh, "sinhf(${0})"},
-  {ktan, "tanf(${0})"},
-  {katan, "atanf(${0})"},
-  {ktanh, "tanhf(${0})"},
-  {ksqrt, "sqrtf(${0})"},
-  {krsqrt, "rsqrtf(${0})"},
-  {kceil, "ceilf(${0})"},
-  {kfloor, "floorf(${0})"},
-  {kround, "roundf(${0})"},
-  {ktrunc, "truncf(${0})"},
-  {kfrac, "fracf(${0})"},
-  {kreciprocal, "reciprocalf(${0})"},
-  {kneg, "-${0}"},
-  //simple binary
-  {katan2, "atan2(${0}, ${1})"},
-  {kmin, "fminf(${0}, ${1})"},
-  {kmax, "fmaxf(${0}, ${1})"},
-
-  //binary with other
-  // TODO: some of these ops will not get generated because
-  // we only work on float inputs/outputs, but they are here to record
-  // that they are valid mappable ops once we handle more type
-  {k__and__, "${0} && ${1}"},
-  {k__lshift__, "${0} << ${1}"},
-  {k__or__, "${0} || ${1}"},
-  {k__rshift__, "${0} >> ${1}"},
-  {k__xor__, "${0} ^ ${1}"},
-  {kdiv, "${0} / ${1}"},
-  {keq, "${0} == ${1}"},
-  {kfmod, "fmodf(${0}, ${1})"},
-  {kge, "${0} >= ${1})"},
-  {kgt, "${0} > ${1}"},
-  {kle, "${0} <= ${1})"},
-  {klt, "${0} < ${1}"},
-  {kmul, "${0} * ${1}"},
-  {kne, "${0} != ${1}"},
-  {kremainder, "remainderf(${0}, ${1})"},
-  {kpow, "powf(${0}, ${1})"},
-
-  //alpha
-  {kadd, "${0} + ${alpha}*${1}"},
-  {ksub, "(${0} - ${alpha}*${1})"},
-
-  // special
-  {klerp, "${0} + ${weight}*(${1} - ${0})"},
-  {kclamp, "min(max(${0},${min}),${max})"},
-
-  // simple derivatives
-  {k_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
-  {k_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
-};
-
 std::vector<bool> TensorDesc::findContiguous(
     const at::IntList& sizes,
     const at::IntList& strides) {
@@ -219,6 +153,72 @@ const char * scalarTypeName(at::ScalarType type) {
 }
 
 std::string encodeRHS(Node * n) {
+  static std::unordered_map<NodeKind, std::string> simple_map_ops = {
+    // unary
+    {kabs, "absf(${0})"},
+    {ksigmoid, "1.f / (1.f + expf(-${0}))"},
+    {klog, "logf(${0})"},
+    {klog1p, "log1pf(${0})"},
+    {klgamma, "lgammaf(${0})"},
+    {kexp, "expf(${0})"},
+    {kexpm1, "expm1f(${0})"},
+    {kcos, "cosf(${0})"},
+    {kacos, "acosf(${0})"},
+    {kcosh, "coshf(${0})"},
+    {ksin, "sinf(${0})"},
+    {kasin, "asinf(${0})"},
+    {ksinh, "sinhf(${0})"},
+    {ktan, "tanf(${0})"},
+    {katan, "atanf(${0})"},
+    {ktanh, "tanhf(${0})"},
+    {ksqrt, "sqrtf(${0})"},
+    {krsqrt, "rsqrtf(${0})"},
+    {kceil, "ceilf(${0})"},
+    {kfloor, "floorf(${0})"},
+    {kround, "roundf(${0})"},
+    {ktrunc, "truncf(${0})"},
+    {kfrac, "fracf(${0})"},
+    {kreciprocal, "reciprocalf(${0})"},
+    {kneg, "-${0}"},
+    //simple binary
+    {katan2, "atan2(${0}, ${1})"},
+    {kmin, "fminf(${0}, ${1})"},
+    {kmax, "fmaxf(${0}, ${1})"},
+
+    //binary with other
+    // TODO: some of these ops will not get generated because
+    // we only work on float inputs/outputs, but they are here to record
+    // that they are valid mappable ops once we handle more type
+    {k__and__, "${0} && ${1}"},
+    {k__lshift__, "${0} << ${1}"},
+    {k__or__, "${0} || ${1}"},
+    {k__rshift__, "${0} >> ${1}"},
+    {k__xor__, "${0} ^ ${1}"},
+    {kdiv, "${0} / ${1}"},
+    {keq, "${0} == ${1}"},
+    {kfmod, "fmodf(${0}, ${1})"},
+    {kge, "${0} >= ${1})"},
+    {kgt, "${0} > ${1}"},
+    {kle, "${0} <= ${1})"},
+    {klt, "${0} < ${1}"},
+    {kmul, "${0} * ${1}"},
+    {kne, "${0} != ${1}"},
+    {kremainder, "remainderf(${0}, ${1})"},
+    {kpow, "powf(${0}, ${1})"},
+
+    //alpha
+    {kadd, "${0} + ${alpha}*${1}"},
+    {ksub, "(${0} - ${alpha}*${1})"},
+
+    // special
+    {klerp, "${0} + ${weight}*(${1} - ${0})"},
+    {kclamp, "min(max(${0},${min}),${max})"},
+
+    // simple derivatives
+    {k_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
+    {k_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
+  };
+
   TemplateEnv env;
   size_t i = 0;
   for(auto in : n->inputs()) {
