@@ -3985,16 +3985,16 @@ add_docstr(torch.qr,
            r"""
 qr(input, out=None) -> (Tensor, Tensor)
 
-Computes the QR decomposition of a matrix :attr:`input`: returns matrices
-`Q` and `R` such that :math:`\text{input} = Q R`, with `Q` being an orthogonal matrix
-and `R` being an upper triangular matrix.
+Computes the QR decomposition of a matrix :attr:`input`, and returns matrices
+`Q` and `R` such that :math:`\text{input} = Q R`, with :math:`Q` being an
+orthogonal matrix and :math:`R` being an upper triangular matrix.
 
 This returns the thin (reduced) QR factorization.
 
 .. note:: precision may be lost if the magnitudes of the elements of :attr:`input`
           are large
 
-.. note:: while it should always give you a valid decomposition, it may not
+.. note:: While it should always give you a valid decomposition, it may not
           give you the same one across platforms - it will depend on your
           LAPACK implementation.
 
@@ -4847,7 +4847,7 @@ real matrix `A` of size `(n x m)` such that :math:`A = USV^T`.
 `U` is of shape :math:`(n \times n)`.
 
 `S` is a diagonal matrix of shape :math:`(n \times m)`, represented as a vector
-of size :math:`\min(n, m)` containing the diagonal entries.
+of size :math:`\min(n, m)` containing the non-negative diagonal entries.
 
 `V` is of shape :math:`(m \times m)`.
 
@@ -4859,13 +4859,11 @@ contain only :math:`min(n, m)` orthonormal columns.
 
 .. note:: Extra care needs to be taken when backward through `U` and `V`
           outputs. Such operation is really only stable when :attr:`input` is
-          full rank with all distinct singular values. Otherwise, `NaN` can
+          full rank with all distinct singular values. Otherwise, ``NaN`` can
           appear as the gradients are not properly defined. Also, when
-          :attr:`some` = `False`, the gradients on `U[:, min(n, m):]` and
-          `V[:, min(n, m):]` will be ignored as those vectors can be arbitrary
+          :attr:`some` = ``False``, the gradients on ``U[:, min(n, m):]`` and
+          ``V[:, min(n, m):]`` will be ignored as those vectors can be arbitrary
           bases of the subspaces.
-
-.. note:: Double backward through :meth:`~torch.svd` is not supported currently.
 
 Args:
     input (Tensor): the input 2-D tensor
@@ -5635,7 +5633,7 @@ btrifact_with_info(A, pivot=True) -> (Tensor, IntTensor, IntTensor)
 Batch LU factorization with additional error information.
 
 This is a version of :meth:`torch.btrifact` that always creates an info
-`IntTensor`, and returns it as the third return value
+`IntTensor`, and returns it as the third return value.
 
 Arguments:
     A (Tensor): the tensor to factor
@@ -5817,5 +5815,85 @@ Excemple::
      1.0000  1.0000
      1.0000  0.5734
     [torch.FloatTensor of size (3,2)]
+
+""")
+
+add_docstr(torch.logdet,
+           r"""
+logdet(A) -> Tensor
+
+Calculates log determinant of a 2D square tensor.
+
+.. note::
+    Result is ``-inf`` if :attr:`A` has zero log determinant, and is ``nan`` if
+    :attr:`A` has negative determinant.
+
+.. note::
+    Backward through :meth:`logdet` internally uses SVD results. So double
+    backward through :meth:`logdet` will need to backward through
+    :meth:`~Tensor.svd`. This can be unstable in certain cases. Please see
+    :meth:`~torch.svd` for details.
+
+Arguments:
+    A (Tensor): The input 2D square tensor
+
+Example::
+
+    >>> A = torch.randn(3, 3)
+    >>> torch.det(A)
+
+    1.9386
+    [torch.FloatTensor of size ()]
+
+    >>> torch.logdet(A)
+
+    0.6620
+    [torch.FloatTensor of size ()]
+
+""")
+
+add_docstr(torch.slogdet,
+           r"""
+slogdet(A) -> (Tensor, Tensor)
+
+Calculates the sign and log value of a 2D square tensor's determinant.
+
+.. note::
+    If ``A`` has zero determinant, this returns ``(0, -inf)``.
+
+.. note::
+    Backward through :meth:`slogdet` internally uses SVD results. So double
+    backward through :meth:`slogdet` will need to backward through
+    :meth:`~Tensor.svd`. This can be unstable in certain cases. Please see
+    :meth:`~torch.svd` for details.
+
+Arguments:
+    A (Tensor): The input 2D square tensor
+
+Returns:
+    A tuple containing the sign of the determinant, and the log value of the
+    absolute determinant.
+
+Example::
+
+    >>> A = torch.randn(3, 3)
+    >>> torch.det(A)
+
+    -0.3534
+    [torch.FloatTensor of size ()]
+
+    >>> torch.logdet(A)
+
+    nan
+    [torch.FloatTensor of size ()]
+
+    >>> torch.slogdet(A)
+    (
+    -1
+    [torch.FloatTensor of size ()]
+    ,
+    -1.0402
+    [torch.FloatTensor of size ()]
+    )
 
 """)
