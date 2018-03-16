@@ -33,6 +33,7 @@ def split_name_params(prototype):
     name, params = re.match('(\w+)\((.*)\)', prototype).groups()
     return name, params.split(', ')
 
+
 # When tracing, we record inplace operations as out-of-place operations,
 # because we don't have a story for side effects in the IR yet.
 #
