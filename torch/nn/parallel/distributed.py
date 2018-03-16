@@ -131,12 +131,13 @@ class DistributedDataParallel(Module):
             # TODO: we don't need to replicate params in here. they're always going to
             # be broadcasted using larger blocks in broadcast_coalesced, so it might be
             # better to not pollute the caches with these small blocks
-            self._module_copies = replicate(self.module, self.device_ids)
+            self._module_copies = replicate(self.module, self.device_ids, detach=True)
             self._module_copies[0] = self.module
+
             for module_copy in self._module_copies[1:]:
                 for param, copy_param in zip(self.module.parameters(), module_copy.parameters()):
-                    copy_param.detach_()
                     copy_param.requires_grad = param.requires_grad
+
         else:
             self._module_copies = [self.module]
 
