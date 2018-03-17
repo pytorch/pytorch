@@ -578,6 +578,11 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
+def _unique(g, input, sorted, return_inverse):
+    return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
+                return_inverse_i=return_inverse, outputs=2)
+
+
 # Metaprogram symbolics for each ATen native specialized cast operator.
 # For e.g. we specify a function named `_cast_uint8_t` that instantiates an
 # ONNX cast node with `to` attribute 'UINT8'
