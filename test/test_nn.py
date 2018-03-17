@@ -3814,18 +3814,40 @@ class TestNN(NNTestCase):
                          loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, margin=0.5, reduce=False))
 
     def test_triplet_margin_loss(self):
-        input1 = Variable(torch.randn(4, 4), requires_grad=True)
-        input2 = Variable(torch.randn(4, 4), requires_grad=True)
-        input3 = Variable(torch.randn(4, 4), requires_grad=True)
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
             x1, x2, x3), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3))
 
-    def test_triplet_margin_swap_loss(self):
-        input1 = Variable(torch.randn(4, 4), requires_grad=True)
-        input2 = Variable(torch.randn(4, 4), requires_grad=True)
-        input3 = Variable(torch.randn(4, 4), requires_grad=True)
+    def test_triplet_margin_loss_swap(self):
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
             x1, x2, x3, swap=True), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True))
+
+    def test_triplet_margin_loss_no_reduce(self):
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduce=False), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduce=False),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, reduce=False))
+
+    def test_triplet_margin_loss_swap_no_reduce(self):
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, swap=True, reduce=False), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduce=False),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduce=False))
 
     def test_cosine_similarity(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
