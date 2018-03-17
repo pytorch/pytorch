@@ -87,7 +87,17 @@ rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
 
 set NO_CUDA=
 
-python setup.py install && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+python setup.py install
+
+if %errorlevel% neq 0 exit /b %errorlevel%
+
+if "%GIT_BRANCH%" == "origin/master" (
+    git log -n 1 --pretty=format:"%H" origin/master > C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch\\COMMIT_HASH
+)
+
+7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+
+python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
 
 EOL
 
