@@ -76,9 +76,9 @@ static Tensor new_with_type_conversion(const Type& type, Tensor other, int64_t d
 }
 
 static Tensor new_with_tensor_copy(const Type& type, Tensor other, int64_t device) {
-  AutoGPU auto_gpu(device);
-  AutoNoGIL no_gil;
   maybe_initialize_cuda(type);
+  AutoNoGIL no_gil;
+  AutoGPU auto_gpu(device);
   return type.copy(other);
 }
 
