@@ -79,7 +79,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 2
+_onnx_opset_version = 5
 
 
 # ---------------------------------------------------------------------
@@ -271,7 +271,8 @@ def permute(g, self, dims):
 def view(g, self, size):
     if self.type().sizes()[0] == size[0] and len(size) == 2:
         return g.op("Flatten", self, axis_i=1)
-    return g.op("Reshape", self, shape_i=size)
+    shape = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Reshape", self, shape)
 
 
 def split(g, self, split_size, dim):
