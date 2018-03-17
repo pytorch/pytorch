@@ -366,10 +366,15 @@ class ExprBuilder(Builder):
         return result
 
     @staticmethod
+    def build_List(ctx, expr):
+        return ListLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+                           [build_expr(ctx, e) for e in expr.elts])
+
+    @staticmethod
     def build_Num(ctx, expr):
-        # TODO: fix this once we have a nice Number node in our AST
-        err_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
-        raise NotSupportedError(err_range, "scalar constants aren't supported")
+        value = str(expr.n)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
+        return Const(r, value)
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
