@@ -71,6 +71,9 @@
 
 - func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
 
+- func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
+  variants: function
+
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
