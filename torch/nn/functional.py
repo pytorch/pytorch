@@ -9,7 +9,6 @@ import torch
 from torch._C import _infer_size, _add_docstr
 from . import _functions
 from .modules import utils
-from ._functions.linear import Bilinear
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
@@ -1001,10 +1000,7 @@ def linear(input, weight, bias=None):
 
 
 def bilinear(input1, input2, weight, bias=None):
-    if bias is None:
-        return Bilinear.apply(input1, input2, weight)
-    else:
-        return Bilinear.apply(input1, input2, weight, bias)
+    return torch._C._VariableFunctions.bilinear(input1, input2, weight, bias)
 
 
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
