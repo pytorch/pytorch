@@ -1664,6 +1664,14 @@ class TestJit(TestCase):
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
 
+    def test_script_literals(self):
+        @torch.jit.script
+        def fn(a):
+            return a.view(size=[1, 2, 3])
+
+        a = torch.randn(6)
+        self.assertEqual(fn(a).shape, torch.Size([1, 2, 3]))
+
     def test_script_error(self):
         @torch.jit.script
         def foo(a):
