@@ -44,9 +44,6 @@ requirements:
     - six
     # other packages here
 
-test:
-  imports:
-    - caffe2.python.core
 
 about:
   home: https://caffe2.ai/

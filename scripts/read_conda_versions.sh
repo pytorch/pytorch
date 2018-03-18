@@ -1,7 +1,10 @@
 # Simple script used to easily search all packages in conda for their
 # dependency requirements
+# TODO also search through output of ldd
+# TODO update conda info syntax for different channels
 
 if [ -z "$CONDA_ROOT" ]; then
+  # TODO create our own environment
   echo "Please set CONDA_ROOT so that I know where to search for conda libraries"
   echo "I expect CONDA_ROOT to be the path to the current conda environment."
   echo "Also FYI I will probably mess up the current conda environment."

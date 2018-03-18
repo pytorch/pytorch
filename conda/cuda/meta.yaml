@@ -26,6 +26,7 @@ requirements:
     - python
     - protobuf {{ protobuf }}
     - six
+    # other packages here
   run:
     - future
     - glog
@@ -37,6 +38,7 @@ requirements:
     - protobuf
     - python
     - six
+    # other packages here
 
 test:
   imports:
