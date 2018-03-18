@@ -46,10 +46,10 @@ from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
-                                            BoltzmannTransform,
                                             ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             SigmoidTransform,
+                                            SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
 from torch.distributions.utils import _finfo, probs_to_logits, softmax
@@ -2838,8 +2838,8 @@ class TestTransforms(TestCase):
                 AffineTransform(variable(torch.Tensor(4, 5).normal_()),
                                 variable(torch.Tensor(4, 5).normal_()),
                                 cache_size=cache_size),
-                BoltzmannTransform(cache_size=cache_size),
                 StickBreakingTransform(cache_size=cache_size),
+                SoftmaxTransform(cache_size=cache_size),
                 LowerCholeskyTransform(cache_size=cache_size),
                 ComposeTransform([
                     AffineTransform(variable(torch.Tensor(4, 5).normal_()),
@@ -2983,7 +2983,7 @@ class TestTransforms(TestCase):
 
     def test_transform_shapes(self):
         transform0 = ExpTransform()
-        transform1 = BoltzmannTransform()
+        transform1 = SoftmaxTransform()
         transform2 = LowerCholeskyTransform()
 
         self.assertEqual(transform0.event_dim, 0)
@@ -2995,7 +2995,7 @@ class TestTransforms(TestCase):
 
     def test_transformed_distribution_shapes(self):
         transform0 = ExpTransform()
-        transform1 = BoltzmannTransform()
+        transform1 = SoftmaxTransform()
         transform2 = LowerCholeskyTransform()
         base_dist0 = Normal(variable(torch.zeros(4, 4)), variable(torch.ones(4, 4)))
         base_dist1 = Dirichlet(variable(torch.ones(4, 4)))

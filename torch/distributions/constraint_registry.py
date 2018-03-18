@@ -39,7 +39,7 @@ invariant.::
 
     An example where ``transform_to`` and ``biject_to`` differ is
     ``constraints.simplex``: ``transform_to(constraints.simplex)`` returns a
-    :class:`~torch.distributions.transforms.BoltzmannTransform` that simply
+    :class:`~torch.distributions.transforms.SoftmaxTransform` that simply
     exponentiates and normalizes its inputs; this is a cheap and mostly
     coordinate-wise operation appropriate for algorithms like SVI. In
     contrast, ``biject_to(constraints.simplex)`` returns a
@@ -197,7 +197,7 @@ def _transform_to_interval(constraint):
 
 
 biject_to.register(constraints.simplex, transforms.StickBreakingTransform())
-transform_to.register(constraints.simplex, transforms.BoltzmannTransform())
+transform_to.register(constraints.simplex, transforms.SoftmaxTransform())
 
 # TODO define a bijection for LowerCholeskyTransform
 transform_to.register(constraints.lower_cholesky, transforms.LowerCholeskyTransform())

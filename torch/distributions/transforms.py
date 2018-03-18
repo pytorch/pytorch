@@ -1,4 +1,6 @@
 import weakref
+from fractions import Fraction
+from decimal import Decimal
 
 import torch
 from torch.autograd import Variable
@@ -10,11 +12,12 @@ from torch.nn.functional import sigmoid
 __all__ = [
     'AbsTransform',
     'AffineTransform',
-    'BoltzmannTransform',
     'ComposeTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
+    'PowerTransform',
     'SigmoidTransform',
+    'SoftmaxTransform',
     'StickBreakingTransform',
     'Transform',
     'identity_transform',
@@ -277,8 +280,8 @@ identity_transform = ComposeTransform([])
 
 
 class ExpTransform(Transform):
-    """
-    Transform via the mapping `y = exp(x)`.
+    r"""
+    Transform via the mapping :math:`y = \exp(x)`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -298,9 +301,60 @@ class ExpTransform(Transform):
         return x
 
 
-class SigmoidTransform(Transform):
+class PowerTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = x^{\text{exponent}}`.
     """
-    Transform via the mapping `y = sigmoid(x)` and `x = logit(y)`.
+    def __init__(self, exponent):
+        self.exponent = exponent
+
+    # Currently only implementing this for instances of numbers.Number
+    @constraints.dependent_property
+    def domain(self):
+        frac = Fraction(Decimal(str(self.exponent)))
+        if frac.denominator % 2 == 1:
+            return constraints.real
+        else:
+            return constraints.positive
+
+    @constraints.dependent_property
+    def codomain(self):
+        frac = Fraction(Decimal(str(self.exponent)))
+        if frac.numerator % 2 == 1:
+            return constraints.real
+        else:
+            return constraints.positive
+
+    @constraints.dependent_property
+    def bijective(self):
+        frac = Fraction(Decimal(str(self.exponent)))
+        if frac.numerator % 2 == 1 and frac.denominator % 2 == 1:
+            return True
+        else:
+            return False
+
+    def __eq__(self, other):
+        if not isinstance(other, PowerTransform):
+            return False
+        else:
+            if other.exponent == self.exponent:
+                return True
+            else:
+                return False
+
+    def _call(self, x):
+        return x.pow(self.exponent)
+
+    def _inverse(self, y):
+        if not self.bijective:
+            raise NotImplementedError
+        else:
+            x.pow(1 / self.exponent)
+
+
+class SigmoidTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = \frac{1}{1 + \exp(-x)}` and :math:`x = \text{logit}(y)`.
     """
     domain = constraints.real
     codomain = constraints.unit_interval
@@ -321,8 +375,8 @@ class SigmoidTransform(Transform):
 
 
 class AbsTransform(Transform):
-    """
-    Transform via the mapping `y = abs(x)`.
+    r"""
+    Transform via the mapping :math:`y = |x|`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -338,8 +392,8 @@ class AbsTransform(Transform):
 
 
 class AffineTransform(Transform):
-    """
-    Transform via the pointwise affine mapping `y = loc + scale * x`.
+    r"""
+    Transform via the pointwise affine mapping :math:`y = \text{loc} + \text{scale} \times x`.
 
     Args:
         loc (Tensor): Location parameter.
@@ -385,9 +439,9 @@ class AffineTransform(Transform):
         return result.expand(shape)
 
 
-class BoltzmannTransform(Transform):
-    """
-    Transform from unconstrained space to the simplex via `y = exp(x)` then
+class SoftmaxTransform(Transform):
+    r"""
+    Transform from unconstrained space to the simplex via :math:`y = \exp(x)` then
     normalizing.
 
     This is not bijective and cannot be used for HMC. However this acts mostly
@@ -399,7 +453,7 @@ class BoltzmannTransform(Transform):
     event_dim = 1
 
     def __eq__(self, other):
-        return isinstance(other, BoltzmannTransform)
+        return isinstance(other, SoftmaxTransform)
 
     def _call(self, x):
         logprobs = x
