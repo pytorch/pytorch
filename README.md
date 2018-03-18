@@ -164,6 +164,8 @@ If you want to compile with CUDA support, install
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
+If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
+
 #### Install optional dependencies
 
 On Linux
@@ -182,6 +184,11 @@ On macOS
 export CMAKE_PREFIX_PATH=[anaconda root directory]
 conda install numpy pyyaml setuptools cmake cffi typing
 ```
+
+On Windows
+```cmd
+conda install numpy pyyaml setuptools cmake cffi typing
+```
 #### Get the PyTorch source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
@@ -197,6 +204,17 @@ python setup.py install
 On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
+```
+
+On Windows
+```cmd
+xcopy /Y aten\src\ATen\common_with_cwrap.py tools\shared\cwrap_common.py
+
+set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
+set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
+
+call "%VS150COMNTOOLS%\vcvarsx86_amd64.bat"
+python setup.py install
 ```
 
 ### Docker image
