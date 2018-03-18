@@ -1,18 +1,20 @@
 #pragma once
 
-#include <memory>
-#include <limits>
-#include <functional>
-
-#include "ATen/ATenGeneral.h"
+#include "ATen/Allocator.h"
 #include "ATen/ArrayRef.h"
+#include "ATen/ATenGeneral.h"
 #include "ATen/Generator.h"
 #include "ATen/Half.h"
-#include "ATen/SparseTensorRef.h"
-#include "ATen/ScalarType.h"
 #include "ATen/Scalar.h"
+#include "ATen/ScalarType.h"
+#include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
-#include "ATen/Allocator.h"
+
+#include <array>
+#include <cstdint>
+#include <functional>
+#include <limits>
+#include <memory>
 
 // To solve the conflict of s_addr in inaddr.h
 #ifdef _MSC_VER
@@ -24,9 +26,9 @@
 namespace at {
 
 class Context;
-struct Storage;
-struct Generator;
 struct Allocator;
+struct Generator;
+struct Storage;
 
 // Note [Empty versus 0-dim tensors]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -52,14 +54,15 @@ enum class TypeID {
 
 
 struct AT_API Type {
-  explicit Type(Context * context)
-  : context(context) {}
+  explicit Type(Context * context, bool is_variable_or_undefined)
+  : context(context), is_variable_or_undefined_(is_variable_or_undefined) {}
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
   virtual bool is_cuda() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
+  bool is_variable_or_undefined() const noexcept { return is_variable_or_undefined_; }
   static void registerAll(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
@@ -96,7 +99,11 @@ struct AT_API Type {
   ${type_method_declarations}
 protected:
   Context* context;
+  bool is_variable_or_undefined_ = false;
 };
 
-
+inline bool Tensor::is_variable_or_undefined() const noexcept {
+  return type().is_variable_or_undefined();
 }
+
+} // namespace at

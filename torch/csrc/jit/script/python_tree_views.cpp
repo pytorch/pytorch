@@ -97,13 +97,11 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<Def, TreeView>(m, "Def")
     .def(py::init([](const Ident& name,
                      std::vector<Param> params,
-                     std::vector<Param> returns,
                      std::vector<Stmt> body) {
       auto r = name.range();
       return Def::create(r,
                          name,
                          wrap_list(r, std::move(params)),
-                         wrap_list(r, std::move(returns)),
                          wrap_list(r, std::move(body)));
     }));
 
@@ -113,6 +111,10 @@ void initTreeViewBindings(PyObject *module) {
       auto r = lhs.at(0).range();
       auto kind = AssignKind(Compound::create(stringToKind(kind_str), r, {}));
       return Assign::create(r, List<Ident>::create(r, std::move(lhs)), kind, rhs);
+    }));
+  py::class_<Return, Stmt>(m, "Return")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> values) {
+      return Return::create(range, wrap_list(range, std::move(values)));
     }));
   py::class_<If, Stmt>(m, "If")
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> true_branch, std::vector<Stmt> false_branch) {
@@ -143,15 +145,28 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::string kind, const Expr& expr) {
       return UnaryOp::create(range, stringToKind(kind), expr);
     }));
+  py::class_<Const, Expr>(m, "Const")
+    .def(py::init([](const SourceRange& range, std::string value) {
+      return Const::create(range, value);
+    }));
   py::class_<Apply, Expr>(m, "Apply")
-    .def(py::init([](const Ident& name, std::vector<Expr> args, std::vector<Attribute> kwargs) {
-      auto r = name.range();
-      return Apply::create(name.range(), name,
+    .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
+      auto r = expr.range();
+      return Apply::create(expr.range(), expr,
                            wrap_list(r, std::move(args)), wrap_list(r, std::move(kwargs)));
+    }));
+  py::class_<Select, Expr>(m, "Select")
+    .def(py::init([](const Expr& expr, const Ident& field) {
+      auto r = expr.range();
+      return Select::create(expr.range(), expr, field);
     }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")
     .def(py::init([](const Expr& cond, const Expr& true_expr, const Expr& false_expr) {
       return TernaryIf::create(cond.range(), cond, true_expr, false_expr);
+    }));
+  py::class_<ListLiteral, Expr>(m, "ListLiteral")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
+      return ListLiteral::create(range, wrap_list(range, std::move(args)));
     }));
 }
 

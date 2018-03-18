@@ -45,6 +45,7 @@ def capture_stdout():
     import os
     import fcntl
     import errno
+    sys.stdout.flush()
     stdout_fd = os.dup(1)
     r, w = os.pipe()
     try:
@@ -916,7 +917,7 @@ class TestJit(TestCase):
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
 
-        t_node = g2.create("TensorTest").t_("a", torch.ones([2, 2]))
+        t_node = g2.create("prim::TensorTest").t_("a", torch.ones([2, 2]))
         assert(t_node.attributeNames() == ["a"])
         g2.appendNode(t_node)
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
@@ -1362,9 +1363,10 @@ class TestJit(TestCase):
 
     def test_script_add(self):
         script = '''
-        def func(a, b) -> (c):
+        def func(a, b):
             c = a + b
             c += a
+            return c
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
@@ -1374,8 +1376,8 @@ class TestJit(TestCase):
 
     def test_script_mul(self):
         script = '''
-        def func(a, b) -> (c):
-            c = a * b
+        def func(a, b):
+            return a * b
         '''
 
         a = Variable(torch.rand(1), requires_grad=True)
@@ -1385,8 +1387,8 @@ class TestJit(TestCase):
 
     def test_script_triple(self):
         script = '''
-        def func(x) -> (y):
-            y = 3f * x
+        def func(x):
+            return 3. * x
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
@@ -1394,8 +1396,8 @@ class TestJit(TestCase):
 
     def test_script_slice(self):
         script = '''
-        def func(x) -> (head):
-            head = x[:5]
+        def func(x):
+            return x[:5]
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[:5]
@@ -1403,8 +1405,8 @@ class TestJit(TestCase):
 
     def test_script_gather(self):
         script = '''
-        def func(x) -> (y):
-            y = x[0]
+        def func(x):
+            return x[0]
         '''
         x = Variable(torch.rand(10).float(), requires_grad=True)
         outputs = x[0]
@@ -1412,14 +1414,14 @@ class TestJit(TestCase):
 
     def test_script_func_call(self):
         script = '''
-        def add(a, b) -> (c):
-            c = a + b
+        def add(a, b):
+            return a + b
 
-        def mul(a, x) -> (y):
-            y = a * x
+        def mul(a, x):
+            return a * x
 
-        def func(alpha, beta, x, y) -> (z):
-            z = add(mul(alpha, x), mul(beta, y))
+        def func(alpha, beta, x, y):
+            return add(mul(alpha, x), mul(beta, y))
         '''
         alpha = Variable(torch.rand(1).float(), requires_grad=True)
         beta = Variable(torch.rand(1).float(), requires_grad=True)
@@ -1433,8 +1435,8 @@ class TestJit(TestCase):
     @unittest.skip("RuntimeError: VariableType::ID() not implemented")
     def test_script_cast(self):
         script = '''
-        def to_int(x) -> (y):
-            y = int(x)
+        def to_int(x):
+            return int(x)
         '''
         x = Variable(torch.FloatTensor([1.1, 2.3]), requires_grad=True)
         outputs = Variable(torch.IntTensor([1, 2]), requires_grad=True)
@@ -1462,11 +1464,12 @@ class TestJit(TestCase):
 
     def test_script_while(self):
         script = '''
-        def test_while(a, b, max) -> (c):
+        def test_while(a, b, max):
             while a < max:
                 a = a + 1
                 b = b + 1
             c = a + b
+            return c
         '''
         inputs = self._make_scalar_vars([1, 1, 10], np.int32)
         outputs = self._make_scalar_vars([20], np.int32)
@@ -1474,7 +1477,7 @@ class TestJit(TestCase):
 
     def test_script_fibb(self):
         script = '''
-        def test_while(lim) -> (third, st, fs):
+        def test_while(lim):
             first = 1
             second = 1
             i = 1
@@ -1494,6 +1497,7 @@ class TestJit(TestCase):
 
             st = second + third
             fs = first + second
+            return third, st, fs
         '''
         inputs = self._make_scalar_vars([10], np.int32)
         outputs = self._make_scalar_vars([2, 4, 3], np.int32)
@@ -1501,7 +1505,7 @@ class TestJit(TestCase):
 
     def test_script_if(self):
         script = '''
-        def test_if(a, b) -> (c):
+        def test_if(a, b):
             d = 3
             if a > 10:
                 a = 3 + d
@@ -1509,6 +1513,7 @@ class TestJit(TestCase):
                 b = 3 + d
                 d = 4
             c = a + b
+            return c
         '''
         inputs = self._make_scalar_vars([1, -1], np.int32)
         outputs = self._make_scalar_vars([7], np.int32)
@@ -1516,10 +1521,11 @@ class TestJit(TestCase):
 
     def test_script_if_noelse(self):
         script = '''
-        def test_if_noelse(a, b) -> (c):
+        def test_if_noelse(a, b):
             if a > 10:
                 a = 3 + b
             c = a + b
+            return c
         '''
         inputs = self._make_scalar_vars([-1, 1], np.int32)
         outputs = self._make_scalar_vars([0], np.int32)
@@ -1528,30 +1534,30 @@ class TestJit(TestCase):
     def test_script_while_nonexistant_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
             torch.jit.CompilationUnit('''
-            def test_while(a, b) -> (c):
+            def test_while(a, b):
                 while a < 10:
                     a = a + x
                     b = b + 1
-                c = a + b
+                return a + b
             ''')
 
     def test_script_while_nonexistant_cond_value(self):
         with self.assertRaisesRegex(RuntimeError, "undefined value x"):
             torch.jit.CompilationUnit('''
-            def test_while(a, b) -> (c):
+            def test_while(a, b):
                 while a < x:
                     a = a + 1
                     b = b + 1
-                c = a + b
+                return a + b
             ''')
 
     def test_script_while_write_outer_then_read(self):
         script = '''
-        def test_while(a, b) -> (c):
+        def test_while(a, b):
             while a < 10:
                 a = a + 1
                 b = a + 1
-            c = a + b
+            return a + b
         '''
         inputs = self._make_scalar_vars([42, 1337], np.int32)
         outputs = self._make_scalar_vars([1379], np.int32)
@@ -1559,7 +1565,7 @@ class TestJit(TestCase):
 
     def test_script_while_nest_if(self):
         script = '''
-        def test_while_if(a, b) -> (c):
+        def test_while_if(a, b):
             c = 0
             while a < 10:
                 a = a + 1
@@ -1568,7 +1574,7 @@ class TestJit(TestCase):
                     c = -a
                 else:
                     c = -b
-            c = c + 1
+            return c + 1
         '''
         inputs = self._make_scalar_vars([-1234, 4321], np.int32)
         outputs = self._make_scalar_vars([-5564], np.int32)
@@ -1576,12 +1582,13 @@ class TestJit(TestCase):
 
     def test_script_if_nest_while(self):
         script = '''
-        def test_if_while(a, b) -> (c):
+        def test_if_while(a, b):
             c = 0
             if a > b:
                 while a > b:
                     b = b + 1
                     c = -b
+            return c
         '''
         inputs = self._make_scalar_vars([4321, 1234], np.int32)
         outputs = self._make_scalar_vars([-4321], np.int32)
@@ -1589,21 +1596,23 @@ class TestJit(TestCase):
 
     def test_script_ternary(self):
         cu = torch.jit.CompilationUnit('''
-        def test_ternary_control(a, b) -> (c):
+        def test_ternary_control(a, b):
             c = 3
             if a > 3:
                 c = a + b
             else:
                 c = b
+            return c
         ''')
         cu2 = torch.jit.CompilationUnit('''
-        def test_ternary(a, b) -> (c):
+        def test_ternary(a, b):
             c = 3
             c = a + b if a > 3 else b
+            return c
         ''')
         self.assertEqual(
-            str(cu.cu.get_graph('test_ternary_control')),
-            str(cu2.cu.get_graph('test_ternary')),
+            str(cu.test_ternary_control.graph()),
+            str(cu2.test_ternary.graph()),
         )
 
     def test_python_frontend_run(self):
@@ -1620,6 +1629,18 @@ class TestJit(TestCase):
 
         self.checkScript(func, [x, y], expected_out, False, capture_output=True)
 
+    def test_multiple_assignment(self):
+        def outer_func(x):
+            return x * 2, x + 2
+
+        @torch.jit.script
+        def func(x):
+            y, z = outer_func(x)
+            return y + z
+
+        x = torch.arange(4)
+        self.assertEqual(func(x), x * 2 + x + 2)
+
     def test_trace_annotation(self):
         @torch.jit.trace(Variable(torch.rand(1)))
         def foo(a):
@@ -1629,8 +1650,9 @@ class TestJit(TestCase):
 
     def test_script_cu(self):
         cu = torch.jit.CompilationUnit('''
-            def foo(a) -> (b):
+            def foo(a):
                 b = a
+                return b
         ''')
         a = Variable(torch.rand(1))
         self.assertEqual(a, cu.foo(a))
@@ -1642,12 +1664,21 @@ class TestJit(TestCase):
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
 
+    def test_script_literals(self):
+        @torch.jit.script
+        def fn(a):
+            return a.view(size=[1, 2, 3])
+
+        a = torch.randn(6)
+        self.assertEqual(fn(a).shape, torch.Size([1, 2, 3]))
+
     def test_script_error(self):
         @torch.jit.script
         def foo(a):
-            return a.mm(a)
+            return a.t()
         s = Variable(torch.rand(10))
-        with self.assertRaisesRegex(RuntimeError, "failed shape propagation"):
+        # XXX: this should stay quiet in stay propagation and only fail in the interpreter
+        with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             foo(s)
 
         @torch.jit.script
@@ -1662,10 +1693,10 @@ class TestJit(TestCase):
             return a * 3.0
 
         cu = torch.jit.CompilationUnit('''
-        def other_func(a) -> (b):
-            b = a + a
+        def other_func(a):
+            return a + a
 
-        def test_call_python(a) -> (b):
+        def test_call_python(a):
             b = pyfunc(a)
             b = other_func(b)
             i = 0
@@ -1675,6 +1706,7 @@ class TestJit(TestCase):
                 if b > 3.0:
                     b = pyfunc(b)
                 i = 11
+            return b
         ''')
         inputs = self._make_scalar_vars([1], np.float32)
         outputs = self._make_scalar_vars([54], np.float32)
@@ -1682,15 +1714,15 @@ class TestJit(TestCase):
         self.assertEqual(cu.test_call_python(*inputs), outputs[0])
 
     def test_script_python_call_failure(self):
-        with self.assertRaisesRegex(RuntimeError, "Unknown function pyfunc2"):
+        with self.assertRaisesRegex(RuntimeError, "undefined value pyfunc2"):
             def pyfunc(a):
                 return a * 3.0
 
             cu = torch.jit.CompilationUnit('''
-            def other_func(a) -> (b):
-                b = a + a
+            def other_func(a):
+                return a + a
 
-            def test_call_python(a) -> (b):
+            def test_call_python(a):
                 b = pyfunc(a)
                 b = other_func(b)
                 i = 0
@@ -1700,6 +1732,7 @@ class TestJit(TestCase):
                     if b > 3.0:
                         b = pyfunc(b)
                     i = 11
+                return b
             ''')
             inputs = self._make_scalar_vars([1], np.float32)
             outputs = self._make_scalar_vars([54], np.float32)
@@ -1721,7 +1754,7 @@ class TestJit(TestCase):
         self.assertEqual(foo(*inputs), outputs[0])
 
     def test_script_python_call_annotation_failure(self):
-        with self.assertRaisesRegex(RuntimeError, "Unknown function pyfunc2"):
+        with self.assertRaisesRegex(RuntimeError, "undefined value pyfunc2"):
             def pyfunc(a):
                 return a * 3.0
 
@@ -1734,6 +1767,20 @@ class TestJit(TestCase):
             outputs = self._make_scalar_vars([6], np.float32)
 
             self.assertEqual(foo(*inputs), outputs)
+
+    def test_desugar_module(self):
+        import torch.nn.functional as F
+
+        def fn(x, slope):
+            a = torch.abs(x)
+            b = torch.nn.functional.prelu(x, slope)
+            c = F.prelu(x, slope)
+            return a, b, c
+
+        x = torch.arange(-3, 4)
+        slope = torch.tensor([0.5])
+        outputs = fn(x, slope)
+        self.checkScript(fn, [x, slope], outputs, True)
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
@@ -1800,9 +1847,10 @@ class TestJit(TestCase):
     def test_shape_prop_mismatch_output(self):
         with self.assertRaises(RuntimeError):
             cu = torch.jit.CompilationUnit('''
-            def test_shape_prop_mismatch_output(a) -> (b):
+            def test_shape_prop_mismatch_output(a):
                 b = slice(a, dim=0, end=-2, start=2, step=1)
                 b = topk(a, dim=0, k=2, largest=True, sorted=True)
+                return b
             ''')
             inputs = [torch.zeros(10)]
             outputs = [torch.zeros(2), torch.from_numpy(np.array([1, 5])).long()]
@@ -1812,8 +1860,8 @@ class TestJit(TestCase):
 
     def test_view_shape_prop(self):
         cu = torch.jit.CompilationUnit('''
-        def test_view_shape_prop(a) -> (b):
-            b = view(a, size=[-1])
+        def test_view_shape_prop(a):
+            return view(a, size=[-1])
         ''')
         inputs = [torch.zeros(10, 10)]
         outputs = torch.zeros(100)
@@ -1823,8 +1871,8 @@ class TestJit(TestCase):
 
     def test_integral_shape_inference(self):
         cu = torch.jit.CompilationUnit('''
-        def test_integral_shape_inference(a) -> (b):
-            b = a / a
+        def test_integral_shape_inference(a):
+            return a / a
         ''')
         inputs = [torch.ones(10, 10).type(torch.LongTensor)]
         outputs = torch.ones(10, 10)
@@ -1833,13 +1881,14 @@ class TestJit(TestCase):
 
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
-        def test_fuser_multiple_blocks(this, that, theother, meme) -> (this, that, theother):
-            i = 0LL
-            while i < 20LL:
+        def test_fuser_multiple_blocks(this, that, theother, meme):
+            i = 0
+            while i < 20:
                 this = cat(this, meme, dim=0)
                 that = cat(that, meme, dim=0)
                 theother = cat(theother, meme, dim=0)
                 i = i + 1
+            return this, that, theother
         ''')
 
         inputs = [torch.ones(0, 10, 10)] * 3
@@ -1850,8 +1899,9 @@ class TestJit(TestCase):
 
     def test_print_graph_executor(self):
         cu = torch.jit.CompilationUnit('''
-        def test_print_graph_executor(meme) -> ():
+        def test_print_graph_executor(meme):
             print(meme)
+            return meme
         ''')
 
         inputs = [torch.ones(5, 5)]
@@ -1862,6 +1912,57 @@ class TestJit(TestCase):
         if not WINDOWS:
             self.assertExpected(captured[0])
 
+    def test_script_module(self):
+        class M1(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M1, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                # test submodule
+                self.sub = M1()
+                # test parameters
+                self.weight = nn.Parameter(torch.randn(2, 3))
+                self.bias = nn.Parameter(torch.randn(2))
+                # test defining a method from a string
+                self.define("""
+                    def hi(self, a):
+                        return self.weight.mm(a)
+                """)
+            # test script methods
+
+            @torch.jit.script_method
+            def doit(self, input):
+                # test use of parameter
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def doit2(self, input):
+                return self.weight.mm(input)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                a = self.doit(input)
+                b = self.doit2(input)
+                c = self.hi(input)
+                return a + b + self.bias + self.sub(a) + c
+        m2 = M2()
+        input = torch.randn(3, 2)
+        a = m2.weight.mm(input)
+        b = m2.weight.mm(input)
+        c = m2.weight.mm(input)
+        ref = a + b + m2.bias + m2.sub.weight + a + c
+        self.assertEqual(ref, m2.forward(input))
+        m2.weight = nn.Parameter(torch.zeros_like(m2.weight))
+        m2.bias = nn.Parameter(torch.zeros_like(m2.bias))
+        m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
+        self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
 if __name__ == '__main__':
     run_tests()

@@ -10,7 +10,7 @@ import warnings
 from .variable import Variable
 from .function import Function, NestedIOFunction
 from .gradcheck import gradcheck
-from .grad_mode import no_grad, enable_grad
+from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from . import profiler
 
 __all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable']

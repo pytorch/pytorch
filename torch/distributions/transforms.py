@@ -404,8 +404,7 @@ class BoltzmannTransform(Transform):
     def _call(self, x):
         logprobs = x
         probs = (logprobs - logprobs.max(-1, True)[0]).exp()
-        probs /= probs.sum(-1, True)
-        return probs
+        return probs / probs.sum(-1, True)
 
     def _inverse(self, y):
         probs = y

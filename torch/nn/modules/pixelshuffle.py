@@ -3,8 +3,8 @@ from .. import functional as F
 
 
 class PixelShuffle(Module):
-    r"""Rearranges elements in a Tensor of shape :math:`(*, C * r^2, H, W]` to a
-    tensor of shape :math:`(C, H * r, W * r)`.
+    r"""Rearranges elements in a Tensor of shape :math:`(*, r^2C, H, W)` to a
+    tensor of shape :math:`(C, rH, rW)`.
 
     This is useful for implementing efficient sub-pixel convolution
     with a stride of :math:`1/r`.
@@ -17,8 +17,8 @@ class PixelShuffle(Module):
         upscale_factor (int): factor to increase spatial resolution by
 
     Shape:
-        - Input: :math:`(N, C * {upscale\_factor}^2, H, W)`
-        - Output: :math:`(N, C, H * {upscale\_factor}, W * {upscale\_factor})`
+        - Input: :math:`(N, C * \text{upscale_factor}^2, H, W)`
+        - Output: :math:`(N, C, H * \text{upscale_factor}, W * \text{upscale_factor})`
 
     Examples::
 

@@ -30,9 +30,10 @@ class LogisticNormal(TransformedDistribution):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, loc, scale):
+    def __init__(self, loc, scale, validate_args=None):
         super(LogisticNormal, self).__init__(
-            Normal(loc, scale), StickBreakingTransform())
+            Normal(loc, scale), StickBreakingTransform(),
+            validate_args=validate_args)
         # Adjust event shape since StickBreakingTransform adds 1 dimension
         self._event_shape = torch.Size([s + 1 for s in self._event_shape])
 

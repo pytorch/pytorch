@@ -1,11 +1,9 @@
+#ifndef NO_PYTHON
 #include <Python.h>
+#endif
 #include "ir.h"
 
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/autograd/function.h"
-
-#include "pybind11/pybind11.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -16,11 +14,18 @@
 #include <algorithm>
 #include <string>
 
+#ifndef NO_PYTHON
+#include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/python_strings.h"
+#include "pybind11/pybind11.h"
+
 namespace py = pybind11;
 
 namespace torch { namespace jit {
 
-constexpr int max_tensor_display_size = 10;
+// Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
+constexpr Symbol CppOp::Kind;
+constexpr Symbol PythonOp::Kind;
 
 std::string getPythonName(const PyObject* obj, bool is_legacy) {
   AutoGIL gil;
@@ -34,26 +39,7 @@ std::string getPythonName(const PyObject* obj, bool is_legacy) {
     return THPUtils_unpackString(name.get());
   }
 }
-void printValueRef(std::ostream & out, const Value * n) {
-  out << "%" << n->uniqueName();
-}
 
-template <typename T>
-std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
-  out << at::ArrayRef<T>{nodes};
-  return out;
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
-  size_t i = 0;
-  for(auto n : nodes) {
-    if(i++ > 0)
-      out << ", ";
-    printValueRef(out, n);
-  }
-  return out;
-}
 std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
   AutoGIL gil;
   auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
@@ -95,6 +81,67 @@ std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
 
 std::string PythonOp::name() const {
   return getPythonName(pyobj.get(),is_legacy);
+}
+
+void PythonOp::cloneFrom(Node * other_) {
+  Node::cloneFrom(other_);
+  auto other = other_->cast<PythonOp>();
+  this->cconv = other->cconv;
+  this->is_legacy = other->is_legacy;
+  Py_INCREF(other->pyobj.get());
+  this->pyobj = THPObjectPtr(other->pyobj.get());
+  this->var_flags = other->var_flags;
+  for(auto & sa : other->scalar_args) {
+    Py_INCREF(sa.get());
+    this->scalar_args.emplace_back(sa.get());
+  }
+  this->tracing_autograd_python_function =
+      other->tracing_autograd_python_function;
+}
+
+}} // namespace torch::jit
+
+#else
+
+namespace torch { namespace jit {
+
+std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
+  throw std::runtime_error("Trying to print Python object from a C++ build");
+}
+
+std::string PythonOp::name() const {
+  throw std::runtime_error("Trying to call PythonOp::name from a C++ build");
+  return std::string();
+}
+
+}} // namespace torch::jit
+
+#endif
+
+
+namespace torch { namespace jit {
+
+constexpr int max_tensor_display_size = 10;
+
+void printValueRef(std::ostream & out, const Value * n) {
+  out << "%" << n->uniqueName();
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream & out, const std::vector<T> & nodes) {
+  out << at::ArrayRef<T>{nodes};
+  return out;
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
+  size_t i = 0;
+  for(auto n : nodes) {
+    if(i++ > 0)
+      out << ", ";
+    printValueRef(out, n);
+  }
+  return out;
 }
 
 std::string CppOp::name() const {
@@ -147,7 +194,11 @@ void printAttributes(std::ostream & out, const Node * n) {
   for(auto name : names) {
     if(i++ > 0)
       out << ", ";
-    out << name.toString() <<"=";
+    // TODO: debugging mode to see the qualifier.  We definitely
+    // don't want to print the qualifier since it should always
+    // be attribute, but you might be able to track down a weird
+    // bug by printing it out.
+    out << name.toUnqualString() <<"=";
     switch(n->kindOf(name)) {
       case AttributeKind::f:
         out << n->f(name);
@@ -230,15 +281,15 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_ELSEIFM_CONST(CppOp)
     out << "CppOp[" << value->name() << "]";
   IR_ELSE()
-    if(n->hasAttribute(kSubgraph)) {
+    if(n->hasAttribute(attr::Subgraph)) {
       if(groups) {
-        out << n->kind().toString() << "_" << groups->size();
+        out << n->kind().toQualString() << "_" << groups->size();
         groups->push_back(n);
       } else {
-        out << n->kind().toString() << "[" << *n->g(kSubgraph) << "]";
+        out << n->kind().toQualString() << "[" << *n->g(attr::Subgraph) << "]";
       }
     } else {
-      out << n->kind().toString();
+      out << n->kind().toQualString();
       if(n->hasAttributes()) {
         printAttributes(out,n);
       }
@@ -283,7 +334,7 @@ std::ostream& operator<<(std::ostream & out, const Graph & g) {
   out << "  return (" << g.outputs() << ");\n}\n";
   size_t i = 0;
   for(auto fg : groups) {
-    out << "with " << fg->kind().toString() << "_" <<i++ << " = " << *fg->g(kSubgraph);
+    out << "with " << fg->kind().toQualString() << "_" <<i++ << " = " << *fg->g(attr::Subgraph);
   }
   /*
   // Uncomment this to debug all_nodes issues
@@ -401,7 +452,7 @@ void Node::lint() const {
   IR_ELSEIF(FusionGroup)
     checkSameDevice(value);
     // TODO: Typecheck the parameters
-    value->g(kSubgraph)->lint();
+    value->g(attr::Subgraph)->lint();
   IR_END()
 
 }
@@ -497,16 +548,16 @@ void Graph::lint() const {
     void check_block(const Block *b) {
       for (auto input : b->inputs()) {
         check_value(input);
-        JIT_ASSERT(input->node()->kind_ == kParam);
+        JIT_ASSERT(input->node()->kind_ == prim::Param);
       }
 
       for (auto n : b->nodes()) {
-        JIT_ASSERT(n->kind_ != kParam);
-        JIT_ASSERT(n->kind_ != kReturn);
+        JIT_ASSERT(n->kind_ != prim::Param);
+        JIT_ASSERT(n->kind_ != prim::Return);
         check_node(n);
       }
 
-      JIT_ASSERT(b->output_->kind() == kReturn);
+      JIT_ASSERT(b->output_->kind() == prim::Return);
       check_node(b->output_);
 
       // all_nodes
@@ -555,23 +606,6 @@ void LintGraph(std::shared_ptr<Graph>& graph) {
   graph->lint();
 }
 
-
-void PythonOp::cloneFrom(Node * other_) {
-  Node::cloneFrom(other_);
-  auto other = other_->cast<PythonOp>();
-  this->cconv = other->cconv;
-  this->is_legacy = other->is_legacy;
-  Py_INCREF(other->pyobj.get());
-  this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->var_flags = other->var_flags;
-  for(auto & sa : other->scalar_args) {
-    Py_INCREF(sa.get());
-    this->scalar_args.emplace_back(sa.get());
-  }
-  this->tracing_autograd_python_function =
-      other->tracing_autograd_python_function;
-}
-
 void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
   std::unordered_map<Value*, Value*> local_map;
   auto env = [&](Value * v) {
@@ -612,4 +646,4 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
-}}
+}} // namespace torch::jit

@@ -333,13 +333,15 @@ class TestNN(NNTestCase):
             output = criterion(input, target)
         return output.item()
 
-    def _backward_criterion(self, criterion, input, target):
+    def _backward_criterion(self, criterion, input, target, gradOutput=None):
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
             if i.grad is not None:
                 i.grad.data.zero_()
         args = input_tuple + (target,)
-        criterion(*args).backward()
+        if gradOutput is None:
+            gradOutput = torch.ones(())
+        criterion(*args).backward(gradOutput.type_as(input_tuple[0]))
         if isinstance(input, tuple):
             return tuple(map(lambda i: i.grad.data, input))
         else:
@@ -739,14 +741,22 @@ class TestNN(NNTestCase):
         with self.assertRaises(KeyError):
             m.register_buffer('attribute_name', torch.rand(5))
 
+    def test_register_buffer_raises_error_if_not_tensor(self):
+        m = nn.Module()
+        with self.assertRaises(TypeError):
+            m.register_buffer('attribute_name', 5)
+
     def test_register_buffer_allows_overwriting_with_same_name(self):
         m = nn.Module()
         buffer1 = torch.rand(5)
         buffer2 = buffer1 + 5
+        buffer3 = None
         m.register_buffer('buffer_name', buffer1)
         self.assertEqual(m.buffer_name, buffer1)
         m.register_buffer('buffer_name', buffer2)
         self.assertEqual(m.buffer_name, buffer2)
+        m.register_buffer('buffer_name', buffer3)
+        self.assertEqual(m.buffer_name, buffer3)
 
     def test_register_parameter_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -768,10 +778,13 @@ class TestNN(NNTestCase):
         m = nn.Module()
         param1 = nn.Parameter(torch.rand(5))
         param2 = nn.Parameter(param1.data + 5)
+        param3 = None
         m.register_parameter('param_name', param1)
         self.assertEqual(m.param_name, param1)
         m.register_parameter('param_name', param2)
         self.assertEqual(m.param_name, param2)
+        m.register_parameter('param_name', param3)
+        self.assertEqual(m.param_name, param3)
 
     def test_add_module_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -795,10 +808,11 @@ class TestNN(NNTestCase):
         l3 = nn.Linear(30, 40)
         l4 = nn.Linear(40, 50)
         n = nn.Sequential(l1, l2, l3, l4)
-        self.assertEqual(n[0], l1)
-        self.assertEqual(n[1], l2)
-        self.assertEqual(n[2], l3)
-        self.assertEqual(n[3], l4)
+        self.assertIs(n[0], l1)
+        self.assertIs(n[1], l2)
+        self.assertIs(n[2], l3)
+        self.assertIs(n[3], l4)
+        self.assertIs(n[torch.tensor(3, dtype=torch.int64)], l4)
         self.assertEqual(n[1:], nn.Sequential(l2, l3, l4))
         self.assertEqual(n[3:], nn.Sequential(l4))
         self.assertEqual(n[:-1], nn.Sequential(l1, l2, l3))
@@ -813,8 +827,10 @@ class TestNN(NNTestCase):
         n = nn.Sequential(l1, l2, l3)
         n[0] = l4
         n[-1] = l4
-        self.assertEqual(n[0], l4)
-        self.assertEqual(n[2], l4)
+        n[torch.tensor(1, dtype=torch.int16)] = l1
+        self.assertIs(n[0], l4)
+        self.assertIs(n[1], l1)
+        self.assertIs(n[2], l4)
 
     def test_Sequential_setitem_named(self):
         l1 = nn.Linear(10, 20)
@@ -837,7 +853,6 @@ class TestNN(NNTestCase):
         l2 = nn.Linear(20, 30)
         l3 = nn.Linear(30, 40)
         l4 = nn.Linear(40, 50)
-        l5 = nn.Linear(50, 60)
         n = nn.Sequential(l1, l2, l3, l4)
         del n[-1]
         self.assertEqual(n, nn.Sequential(l1, l2, l3))
@@ -870,6 +885,11 @@ class TestNN(NNTestCase):
         check()
         modules[2] = nn.Conv2d(5, 3, 2)
         module_list[2] = modules[2]
+        check()
+        idx = torch.tensor(2, dtype=torch.int32)
+        modules[2] = nn.Conv2d(5, 3, 2)
+        module_list[idx] = modules[2]
+        self.assertIs(module_list[idx], modules[2])
         check()
         self.assertEqual(module_list[1:], nn.ModuleList(modules[1:]))
         self.assertEqual(module_list[3:], nn.ModuleList(modules[3:]))
@@ -933,6 +953,11 @@ class TestNN(NNTestCase):
         check()
         parameters[2] = make_param()
         param_list[2] = parameters[2]
+        check()
+        idx = torch.tensor(2, dtype=torch.int32)
+        parameters[2] = make_param()
+        param_list[idx] = parameters[2]
+        self.assertIs(param_list[idx], parameters[2])
         check()
         self.assertEqual(param_list[1:], nn.ParameterList(parameters[1:]))
         self.assertEqual(param_list[3:], nn.ParameterList(parameters[3:]))
@@ -2767,6 +2792,11 @@ class TestNN(NNTestCase):
         padded = rnn_utils.pad_sequence([a, b, c])
         self.assertEqual(padded, expected.transpose(0, 1))
 
+        # pad with non-zero value
+        expected = Variable(torch.Tensor([[1, 2, 3], [4, 5, 1], [6, 1, 1]]))
+        padded = rnn_utils.pad_sequence([a, b, c], True, 1)
+        self.assertEqual(padded, expected)
+
         # more dimensional
         maxlen = 9
         for num_dim in (0, 1, 2, 3):
@@ -3767,19 +3797,59 @@ class TestNN(NNTestCase):
         input2 = Variable(torch.randn(4, 4), requires_grad=True)
         self.assertTrue(gradcheck(lambda x, y: F.pairwise_distance(x, y), (input1, input2)))
 
+    def test_cosine_embedding_loss_no_reduce(self):
+        input1 = Variable(torch.randn(15, 10), requires_grad=True)
+        input2 = Variable(torch.randn(15, 10), requires_grad=True)
+        target = Variable(torch.randn(15).sign())
+        self.assertTrue(gradcheck(lambda x, y, z: F.cosine_embedding_loss(
+            x, y, z, reduce=False), (input1, input2, target)))
+        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, reduce=False),
+                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, reduce=False))
+
+    def test_cosine_embedding_loss_margin_no_reduce(self):
+        input1 = Variable(torch.randn(15, 10), requires_grad=True)
+        input2 = Variable(torch.randn(15, 10), requires_grad=True)
+        target = Variable(torch.randn(15).sign())
+        self.assertTrue(gradcheck(lambda x, y, z: F.cosine_embedding_loss(
+            x, y, z, margin=0.5, reduce=False), (input1, input2, target)))
+        self.assertEqual(F.cosine_embedding_loss(input1, input2, target, margin=0.5, reduce=False),
+                         loss_reference_fns['CosineEmbeddingLoss'](input1, input2, target, margin=0.5, reduce=False))
+
     def test_triplet_margin_loss(self):
-        input1 = Variable(torch.randn(4, 4), requires_grad=True)
-        input2 = Variable(torch.randn(4, 4), requires_grad=True)
-        input3 = Variable(torch.randn(4, 4), requires_grad=True)
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
             x1, x2, x3), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3))
 
-    def test_triplet_margin_swap_loss(self):
-        input1 = Variable(torch.randn(4, 4), requires_grad=True)
-        input2 = Variable(torch.randn(4, 4), requires_grad=True)
-        input3 = Variable(torch.randn(4, 4), requires_grad=True)
+    def test_triplet_margin_loss_swap(self):
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
         self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
             x1, x2, x3, swap=True), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True))
+
+    def test_triplet_margin_loss_no_reduce(self):
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduce=False), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduce=False),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, reduce=False))
+
+    def test_triplet_margin_loss_swap_no_reduce(self):
+        input1 = Variable(torch.randn(5, 10), requires_grad=True)
+        input2 = Variable(torch.randn(5, 10), requires_grad=True)
+        input3 = Variable(torch.randn(5, 10), requires_grad=True)
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, swap=True, reduce=False), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduce=False),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduce=False))
 
     def test_cosine_similarity(self):
         input1 = Variable(torch.randn(4, 4), requires_grad=True)
@@ -4098,6 +4168,13 @@ class TestNN(NNTestCase):
 
         _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
+
+    def test_bilinear_broadcasting(self):
+        m = nn.Bilinear(5, 6, 8)
+        input1 = torch.randn(2, 3, 5)
+        input2 = torch.randn(2, 3, 6)
+        expected = m(input1.view(6, 5), input2.view(6, 6)).view(2, 3, 8)
+        self.assertEqual(expected, m(input1, input2))
 
     def test_conv_tbc(self):
         inp = Variable(torch.randn(9, 4, 5), requires_grad=True)
@@ -5949,21 +6026,18 @@ new_module_tests = [
         module_name='MaxPool3d',
         constructor_args=((2, 2, 2),),
         input_size=(2, 3, 5, 5, 5),
-        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, (2, 2, 2)),
         input_size=(2, 3, 5, 5, 5),
         desc='stride',
-        check_gradgrad=False,
     ),
     dict(
         module_name='MaxPool3d',
         constructor_args=(2, 2, (1, 1, 1)),
         input_size=(2, 3, 5, 5, 5),
         desc='stride_padding',
-        check_gradgrad=False,
     ),
     dict(
         module_name='AvgPool3d',

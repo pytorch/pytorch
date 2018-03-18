@@ -12,7 +12,7 @@
 #include <curand_mtgp32_host.h>
 #include <curand_mtgp32dc_p_11213.h>
 
-#define MAX_NUM_BLOCKS 64
+#define MAX_NUM_BLOCKS 200 
 #define BLOCK_SIZE 256
 
 

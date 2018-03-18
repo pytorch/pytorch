@@ -1,5 +1,34 @@
 # See README.md in this directory for more guidance
 
+
+# Temporary type cast operators. These are needed to trace type-casts now since
+# Type's are not supported in the IR. Instead, we call down to these
+# specialized operators for each datatype.
+# TODO: remove when we have Type support in the IR
+- func: _cast_uint8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int8_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_double(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_float(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int64_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_int16_t(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
+- func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
+  variants: function, method
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
@@ -23,12 +52,27 @@
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
 
+- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: arange_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: arange(Type dtype, Scalar end) -> Tensor
+  variants: function
+
+- func: arange_out(Tensor reuslt, Scalar end) -> Tensor
+  variants: function
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
 
 - func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+
+- func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
+  variants: function
 
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
@@ -76,6 +120,9 @@
   variants: function
 
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
+  variants: function
+
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
@@ -149,7 +196,12 @@
   variants: function
 
 - func: det(Tensor self) -> Tensor
-- func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
+
+- func: diagflat(Tensor self, int64_t offset=0) -> Tensor
+  variants: function
+
+- func: diagonal(Tensor self, int64_t offset=0) -> Tensor
+  variants: function
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
@@ -174,12 +226,6 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
-- func: empty_like(Tensor self) -> Tensor
-  variants: function
-
-- func: empty_like(Tensor self, *, Type dtype) -> Tensor
-  variants: function
-
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor)
   variants: function
   dispatch:
@@ -198,11 +244,44 @@
     CPU: embedding_bag_backward_cpu
     CUDA: embedding_bag_backward_cuda
 
+- func: empty(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: empty_out(Tensor result, IntList size) -> Tensor
+  variants: function
+
+- func: empty_like(Tensor self) -> Tensor
+  variants: function
+
+- func: empty_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
+  variants: function
+
+- func: eye_out(Tensor result, int64_t n, int64_t m=-1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: eye_out_cpu
+    CUDA: eye_out_cuda
+
+- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
+  variants: function
+
+- func: full_out(Tensor result, IntList size, Scalar fill_value) -> Tensor
+  variants: function
+
+- func: full_like(Tensor self, Scalar fill_value) -> Tensor
+  variants: function
+
+- func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
+  variants: function
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
@@ -230,6 +309,20 @@
 - func: is_signed(Tensor self) -> bool
 
 - func: is_sparse(Tensor self) -> bool
+
+- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: logdet(Tensor self) -> Tensor
+
+- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
@@ -262,10 +355,19 @@
 - func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
   variants: function
 
+- func: ones(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: ones_out(Tensor result, IntList size) -> Tensor
+  variants: function
+
 - func: ones_like(Tensor self) -> Tensor
   variants: function
 
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
+- func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
@@ -273,10 +375,22 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: rand_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: rand_like(Tensor self) -> Tensor
   variants: function
 
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
+- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randn_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
 
 - func: randn_like(Tensor self) -> Tensor
@@ -285,8 +399,22 @@
 - func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
+
+- func: reshape(Tensor self, IntList shape) -> Tensor
 
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
@@ -308,6 +436,10 @@
 
 - func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
+- func: relu(Tensor self) -> Tensor
+
+- func: relu_(Tensor self) -> Tensor
+
 - func: selu(Tensor self) -> Tensor
   variants: function
 
@@ -318,9 +450,13 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
+- func: slogdet(Tensor self) -> (Tensor, Tensor)
+
 - func: smm(Tensor self, Tensor mat2) -> Tensor
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
+
+- func: split_with_sizes(Tensor self, IntList split_sizes, int64_t dim=0) -> TensorList
 
 - func: squeeze(Tensor self) -> Tensor
 
@@ -354,14 +490,48 @@
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
 
+- func: sum(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sum_cpu
+    CUDA: _sum_cuda
+
+- func: sum(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: sum_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sum_out_cpu
+    CUDA: _sum_out_cuda
+
+- func: prod(Tensor self) -> Tensor
+  dispatch:
+    CPU: _prod_cpu
+    CUDA: _prod_cuda
+
+- func: prod(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: prod_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _prod_out_cpu
+    CUDA: _prod_out_cuda
+
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
+  variants: function
 
 - func: t_(Tensor self) -> Tensor
   variants: method
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
+
+- func: _unique(Tensor self, bool sorted=false, bool return_inverse=false) -> (Tensor, Tensor)
+  dispatch:
+    CPU: _unique_cpu
+    CUDA: _unique_cuda
 
 - func: _unsafe_view(Tensor self, IntList size) -> Tensor
   variants: function
@@ -382,6 +552,12 @@
   dispatch:
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
+
+- func: zeros(Type dtype, IntList size) -> Tensor
+  variants: function
+
+- func: zeros_out(Tensor result, IntList size) -> Tensor
+  variants: function
 
 - func: zeros_like(Tensor self) -> Tensor
   variants: function

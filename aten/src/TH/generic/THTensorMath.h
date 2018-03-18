@@ -142,6 +142,9 @@ TH_API void THTensor_(geTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(neTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 TH_API void THTensor_(eqTensorT)(THTensor *r_, THTensor *ta, THTensor *tb);
 
+TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, real value);
+TH_API void THTensor_(tpow)(THTensor *r_, real value, THTensor *t);
+
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
 TH_API void THTensor_(abs)(THTensor *r_, THTensor *t);
 #endif
@@ -169,8 +172,6 @@ TH_API void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty);
 TH_API void THTensor_(tanh)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erf)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(erfinv)(THTensor *r_, THTensor *t);
-TH_API void THTensor_(pow)(THTensor *r_, THTensor *t, real value);
-TH_API void THTensor_(tpow)(THTensor *r_, real value, THTensor *t);
 TH_API void THTensor_(sqrt)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(rsqrt)(THTensor *r_, THTensor *t);
 TH_API void THTensor_(ceil)(THTensor *r_, THTensor *t);

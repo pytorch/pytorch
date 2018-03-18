@@ -18,8 +18,6 @@ struct PythonEngine : public Engine {
       bool keep_graph,
       bool create_graph,
       const edge_list& outputs = {}) override;
-
-  static PythonEngine& getDefaultEngine();
 };
 
 }}} // namespace torch::autograd::python

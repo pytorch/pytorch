@@ -18,13 +18,14 @@ struct Parser {
     // of the Compound tree are in the same place.
     return Ident::create(t.range, t.text());
   }
-  TreeRef createApply(TreeRef ident, TreeList& inputs) {
+  TreeRef createApply(Expr expr) {
     TreeList attributes;
     auto range = L.cur().range;
+    TreeList inputs;
     parseOperatorArguments(inputs, attributes);
     return Apply::create(
         range,
-        Ident(ident),
+        expr,
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
@@ -55,23 +56,15 @@ struct Parser {
       } break;
       default: {
         Ident name = parseIdent();
-        if (L.cur().kind == '(') {
-          TreeList inputs;
-          prefix = createApply(name, inputs);
-        } else {
-          prefix = Var::create(name.range(), name);
-        }
+        prefix = Var::create(name.range(), name);
       } break;
     }
     while (true) {
       if (L.nextIf('.')) {
         const auto name = parseIdent();
-        if (L.cur().kind == '(') {
-          TreeList inputs = {prefix};
-          prefix = createApply(name, inputs);
-        } else {
-          prefix = Select::create(name.range(), Expr(prefix), Ident(name));
-        }
+        prefix = Select::create(name.range(), Expr(prefix), Ident(name));
+      } else if (L.cur().kind == '(') {
+        prefix = createApply(Expr(prefix));
       } else if (L.cur().kind == '[') {
         prefix = parseSliceOrGather(prefix);
       } else {
@@ -107,7 +100,8 @@ struct Parser {
   // precedence strictly greater than 'precedence'
   // precedence == 0 will parse _all_ expressions
   // this is the core loop of 'top-down precedence parsing'
-  TreeRef parseExp(int precedence = 0) {
+  Expr parseExp() { return parseExp(0); }
+  Expr parseExp(int precedence) {
     TreeRef prefix = nullptr;
     int unary_prec;
     if (shared.isUnary(L.cur().kind, &unary_prec)) {
@@ -138,69 +132,41 @@ struct Parser {
 
       prefix = c(kind, pos, {prefix, parseExp(binary_prec)});
     }
-    return prefix;
+    return Expr(prefix);
   }
-  TreeRef
-  parseList(int begin, int sep, int end, std::function<TreeRef(int)> parse) {
+  template<typename T>
+  List<T> parseList(int begin, int sep, int end, T (Parser::*parse)()) {
     auto r = L.cur().range;
-    L.expect(begin);
-    TreeList elements;
+    if (begin != TK_NOTHING)
+      L.expect(begin);
+    std::vector<T> elements;
     if (L.cur().kind != end) {
-      int i = 0;
       do {
-        elements.push_back(parse(i++));
+        elements.push_back((this->*parse)());
       } while (L.nextIf(sep));
     }
-    L.expect(end);
-    return c(TK_LIST, r, std::move(elements));
+    if (end != TK_NOTHING)
+      L.expect(end);
+    return List<T>::create(r, elements);
   }
-  TreeRef parseNonEmptyList(int sep, std::function<TreeRef(int)> parse) {
-    TreeList elements;
-    int i = 0;
-    do {
-      elements.push_back(parse(i++));
-    } while (L.nextIf(sep));
-    return c(TK_LIST, elements[0]->range(), std::move(elements));
-  }
-  TreeRef parseExpList() {
-    return parseList('(', ',', ')', [&](int i) { return parseExp(); });
-  }
-  TreeRef parseConst() {
-    // 'b' - boolean
-    // 'LL' 64-bit integer
-    // 'f' single-precision float
-    // 'i' 32-bit integer
-    // 'f' is default if '.' appears in the number
+  Const parseConst() {
     auto range = L.cur().range;
     if (L.nextIf(TK_TRUE)) {
-      return c(TK_CONST, range, {d(1), s("b")});
+      return Const::create(range, "1");
     } else if (L.nextIf(TK_FALSE)) {
-      return c(TK_CONST, range, {d(0), s("b")});
+      return Const::create(range, "0");
     }
-    float mult = 1.0f;
-    while (L.nextIf('-')) {
-      mult *= -1.0f;
-    }
+    std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
-    std::string type_ident =
-        (t.text().find('.') == std::string::npos) ? "i" : "f";
-    if (L.cur().kind == TK_IDENT) {
-      Token type_ident_tok = L.expect(TK_IDENT);
-      type_ident = type_ident_tok.text();
-      if (type_ident != "LL" && type_ident != "f") {
-        throw ErrorReport(type_ident_tok)
-            << "expected 'f' or 'LL' "
-            << "as numeric type identifier but found '" << type_ident << "'";
-      }
-    }
-    return c(TK_CONST, t.range, {d(mult * t.doubleValue()), s(type_ident)});
+    return Const::create(t.range, unary_prefix + t.text());
   }
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
     switch (kind) {
-      case '[':
-        return parseList('[', ',', ']', [&](int i) { return parseConst(); });
-      default:
+      case '[': {
+        auto list = parseList('[', ',', ']', &Parser::parseConst);
+        return ListLiteral::create(list.range(), List<Expr>(list));
+      } default:
         return parseConst();
     }
   }
@@ -253,9 +219,6 @@ struct Parser {
 
     return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
   }
-  TreeRef parseIdentList() {
-    return parseList('(', ',', ')', [&](int i) { return parseIdent(); });
-  }
   TreeRef parseParam() {
     auto typ = parseType();
     if (L.cur().kind != TK_IDENT && typ->trees()[0]->kind() == TK_IDENT) {
@@ -297,12 +260,15 @@ struct Parser {
         return parseWhile();
       case TK_GLOBAL: {
         auto range = L.next().range;
-        std::vector<TreeRef> idents;
-        do {
-          idents.push_back(parseIdent());
-        } while (L.nextIf(','));
+        auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
         expectEndOfLine();
-        return c(TK_GLOBAL, range, std::move(idents));
+        return Global::create(range, idents);
+      }
+      case TK_RETURN: {
+        auto range = L.next().range;
+        auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        expectEndOfLine();
+        return Return::create(range, values);
       }
       default: {
         Expr r = Expr(parseExp());
@@ -331,7 +297,7 @@ struct Parser {
   TreeRef parseOptionalIdentList() {
     TreeRef list = nullptr;
     if (L.cur().kind == '(') {
-      list = parseIdentList();
+      list = parseList('(', ',', ')', &Parser::parseIdent);
     } else {
       list = c(TK_LIST, L.cur().range, {});
     }
@@ -385,15 +351,11 @@ struct Parser {
   TreeRef parseFunction() {
     L.expect(TK_DEF);
     auto name = parseIdent();
-    auto paramlist =
-        parseList('(', ',', ')', [&](int i) { return parseParam(); });
-    L.expect(TK_ARROW);
-    auto retlist =
-        parseList('(', ',', ')', [&](int i) { return parseParam(); });
+    auto paramlist = parseList('(', ',', ')', &Parser::parseParam);
     L.expect(':');
     auto stmts_list = parseStatements();
     return Def::create(name.range(), Ident(name), List<Param>(paramlist),
-                                      List<Param>(retlist), List<Stmt>(stmts_list));
+                       List<Stmt>(stmts_list));
   }
   Lexer& lexer() {
     return L;
@@ -401,12 +363,6 @@ struct Parser {
 
  private:
   // short helpers to create nodes
-  TreeRef d(double v) {
-    return Number::create(v);
-  }
-  TreeRef s(const std::string& s) {
-    return String::create(s);
-  }
   TreeRef c(int kind, const SourceRange& range, TreeList&& trees) {
     return Compound::create(kind, range, std::move(trees));
   }

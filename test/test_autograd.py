@@ -35,6 +35,9 @@ class NoArgsClass(object):
         raise StopIteration()
     next = __next__  # Python 2 compatibility
 
+    def __len__(self):
+        return 0
+
 NO_ARGS = NoArgsClass()
 
 
@@ -299,12 +302,12 @@ class TestAutograd(TestCase):
             self.assertEqual(l.grad.data, i * i * (1 + l.data))
 
     def test_backward_badcalls(self):
-        x = Variable(torch.ones(1))
+        x = torch.ones(1)
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
             x.backward()
 
     def test_grad_badcalls(self):
-        x = Variable(torch.ones(1))
+        x = torch.ones(1)
         y = x ** 2
         with self.assertRaisesRegex(RuntimeError, 'does not require grad'):
             torch.autograd.grad(x, y)
@@ -1691,6 +1694,19 @@ class TestAutograd(TestCase):
         c.backward(torch.ones(c.size()))
         self.assertEqual(x.grad.data, torch.ones(x.size()))
 
+    def test_set_grad_enabled(self):
+        x = torch.tensor([1], requires_grad=True)
+        with torch.set_grad_enabled(False):
+            y = x * 2
+        self.assertFalse(y.requires_grad)
+        with torch.set_grad_enabled(True):
+            y = x * 2
+        self.assertTrue(y.requires_grad)
+        with torch.set_grad_enabled(False):
+            torch.set_grad_enabled(True)
+            y = x * 2
+        self.assertTrue(y.requires_grad)
+
     def test_reentrant(self):
         y_data = torch.randn(2, 2)
 
@@ -2099,14 +2115,38 @@ def random_square_matrix_of_rank(l, rank):
 
 def random_symmetric_matrix(l):
     A = torch.randn(l, l)
+    for i in range(l):
+        for j in range(i):
+            A[i, j] = A[j, i]
+    return A
+
+
+def random_symmetric_psd_matrix(l):
+    A = torch.randn(l, l)
     return A.mm(A.transpose(0, 1))
+
+
+def random_symmetric_pd_matrix(l, eps=1e-5):
+    A = torch.randn(l, l)
+    return A.mm(A.transpose(0, 1)) + torch.eye(l) * eps
+
+
+def make_nonzero_det(A, sign=None, min_singular_value=0.1):
+    u, s, v = A.svd()
+    s[s < min_singular_value] = min_singular_value
+    A = u.mm(torch.diag(s)).mm(v.t())
+    det = A.det().item()
+    if sign is not None:
+        if (det < 0) ^ (sign < 0):
+            A[0, :].neg_()
+    return A
 
 
 def random_fullrank_matrix_distinct_singular_value(l):
     A = torch.randn(l, l)
     u, _, v = A.svd()
     s = torch.arange(1, l + 1).mul_(1.0 / (l + 1))
-    return u.mm(torch.diag(s)).mm(v.transpose(0, 1))
+    return u.mm(torch.diag(s)).mm(v.t())
 
 
 def uniform_scalar(offset=0, requires_grad=False):
@@ -2133,7 +2173,14 @@ L = 20
 M = 10
 S = 5
 
-# (name, size, args...)
+# (
+#   method name,
+#   input size/constructing fn,
+#   args (tuple represents shape of a tensor arg),
+#   test variant name (will be used at test name suffix),  // optional
+#   indices for possible dim arg,                          // optional
+#   output indices that should be gradcheck'ed,            // optional
+# )
 method_tests = [
     ('add', (S, S, S), ((S, S, S),)),
     ('add', (S, S, S), ((S, S),), 'broadcast_rhs'),
@@ -2200,6 +2247,11 @@ method_tests = [
     ('view', (S,), (S,), '1d'),
     ('view', (), (dont_convert(()),), 'scalar_to_scalar'),
     ('view', (), (1,), 'scalar_to_1d'),
+    ('reshape', (S, S, S), (S * S, S),),
+    ('reshape', (S, S, S), (torch.Size([S * S, S]),), 'size'),
+    ('reshape', (S,), (S,), '1d'),
+    ('reshape', (), (dont_convert(()),), 'scalar_to_scalar'),
+    ('reshape', (), (1,), 'scalar_to_1d'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
@@ -2532,13 +2584,40 @@ method_tests = [
     ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
-    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric'),
-    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null'),
-    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1'),
-    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2'),
+    ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_symmetric_psd_matrix(S), NO_ARGS, 'symmetric_psd', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_symmetric_pd_matrix(S), NO_ARGS, 'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_square_matrix_of_rank(S, S - 2), NO_ARGS, 'dim2_null', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_square_matrix_of_rank(S, 1), NO_ARGS, 'rank1', NO_ARGS, [skipIfNoLapack]),
+    ('det', lambda: random_square_matrix_of_rank(S, 2), NO_ARGS, 'rank2', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
-     'distinct_postive_s', NO_ARGS, [skipIfNoLapack]),
-    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, ''),
+     'distinct_singular_values', NO_ARGS, [skipIfNoLapack]),
+    # For `logdet` and `slogdet`, the function at det=0 is not smooth.
+    # We need to exclude tests with det=0 (e.g. dim2_null, rank1, rank2) and use
+    # `make_nonzero_det` to make the random matrices have nonzero det. For
+    # `logdet`, we also set `make_nonzero_det(matrix, sign=1)` to make the
+    # matrix have positive det.
+    ('logdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('logdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
+    ('logdet', lambda: make_nonzero_det(random_symmetric_matrix(S), 1), NO_ARGS,
+     'symmetric', NO_ARGS, [skipIfNoLapack]),
+    ('logdet', lambda: make_nonzero_det(random_symmetric_pd_matrix(S), 1), NO_ARGS,
+     'symmetric_pd', NO_ARGS, [skipIfNoLapack]),
+    ('logdet', lambda: make_nonzero_det(random_fullrank_matrix_distinct_singular_value(S), 1, 0), NO_ARGS,
+     'distinct_singular_values', NO_ARGS, [skipIfNoLapack]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), 1), NO_ARGS, '1x1_pos_det', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(1, 1), -1), NO_ARGS,
+     '1x1_neg_det', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), 1), NO_ARGS, 'pos_det', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: make_nonzero_det(torch.randn(S, S), -1), NO_ARGS, 'neg_det', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: make_nonzero_det(random_symmetric_matrix(S)), NO_ARGS,
+     'symmetric', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: random_symmetric_pd_matrix(S), NO_ARGS, 'symmetric_pd', NO_ARGS, [skipIfNoLapack], [1]),
+    ('slogdet', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS,
+     'distinct_singular_values', NO_ARGS, [skipIfNoLapack], [1]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('svd', lambda: random_fullrank_matrix_distinct_singular_value(M), NO_ARGS, 'large', NO_ARGS, [skipIfNoLapack]),
     ('gesv', (S, S), ((S, S),), '', NO_ARGS, [skipIfNoLapack]),
     ('fill_', (S, S, S), (1,), 'number'),
     ('fill_', (), (1,), 'number_scalar'),
@@ -2599,6 +2678,8 @@ method_tests = [
     ('chunk', (S, S, S), (S, 1), 'dim', [1]),
     ('split', (S, S, S), (2,)),
     ('split', (S, S, S), (S, 1), 'dim', [1]),
+    ('split', (S, S, S), ([int(S / 3), S - int(S / 3) * 2, int(S / 3)],), 'size_list'),
+    ('split', (S, S, S), ([int(S / 2), S - int(S / 2) * 2, int(S / 2)], 2), 'size_list_dim', [1]),
     ('gather', (M, S), (0, gather_variable((S, S), 1, M, True)), 'dim0', [0]),
     ('gather', (M, S), (1, gather_variable((M, S // 2), 0, S, True)), 'dim1', [0]),
     ('gather', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_input', [0]),
@@ -2617,10 +2698,9 @@ method_tests = [
      'broadcast_all'),
     ('masked_select', (), (torch.tensor(1, dtype=torch.uint8),), 'scalar'),
     ('masked_select', (M, M), (torch.tensor(1, dtype=torch.uint8),), 'scalar_broadcast_rhs'),
-    ('masked_select', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False),), 'scalar_broadcast_lhs'),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), 10)),
-    ('masked_fill', (M, M), (Variable(torch.ByteTensor(M, M).bernoulli_(), requires_grad=False), torch.tensor(10)),
-     'tensor'),
+    ('masked_select', (), (mask_not_all_zeros((M, M)),), 'scalar_broadcast_lhs'),
+    ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), 10)),
+    ('masked_fill', (M, M), (torch.ByteTensor(M, M).bernoulli_(), torch.tensor(10)), 'tensor'),
     # no lhs or all broadcast on masked_fill or masked_scatter because it's always inplace
     ('masked_fill', (M, M), (torch.ByteTensor(M,).bernoulli_(), 10), 'broadcast_rhs'),
     ('masked_fill', (), (torch.tensor(0, dtype=torch.uint8, requires_grad=False).bernoulli_(), 10), 'scalar'),
@@ -2656,13 +2736,13 @@ method_tests = [
     ('topk', (), (1, 0, True, True), 'dim_desc_sort_scalar', [1]),
     ('take', (S, S, S), (torch.LongTensor([[-3, 2], [20, 2]]),)),
     ('take', (S, S, S), (torch.tensor(0, dtype=torch.int64),), 'scalar_index'),
-    ('take', (), (Variable(torch.LongTensor([0])),), 'scalar_data'),
+    ('take', (), (torch.LongTensor([0]),), 'scalar_data'),
     ('take', (), (torch.tensor(0, dtype=torch.int64),), 'scalar_both'),
     ('where', (M, M), (mask_not_all_zeros((M, M)), (M, M))),
     ('where', (M, 1, M), (mask_not_all_zeros((M, M)), (M, M, 1)), 'broadcast_all'),
     ('where', (), (bernoulli_scalar(), ()), 'scalar'),
     ('where', (M, 1, M), (bernoulli_scalar(), (M, M, 1)), 'scalar_broadcast_mask'),
-    ('where', (), (Variable(mask_not_all_zeros((M, M)), requires_grad=False), ()), 'scalar_broadcast_non_mask'),
+    ('where', (), (mask_not_all_zeros((M, M)), ()), 'scalar_broadcast_non_mask'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([1, 2]),)),
     ('__getitem__', torch.randn(S, S, S), (slice(0, 3),), 'slice'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([slice(0, 3), 1]),), 'slice_index'),
@@ -2676,7 +2756,7 @@ method_tests = [
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], slice(None)]),), 'adv_index_sub_2'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 3], Ellipsis]),), 'adv_index_sub_3'),
     ('__getitem__', torch.randn(S, S, S), (dont_convert([[0, 2, 3], [1, 3, 3],
-     Variable(torch.LongTensor([0, 0, 2]))]),), 'adv_index_var'),
+     torch.LongTensor([0, 0, 2])]),), 'adv_index_var'),
 ]
 # TODO: clamp with min/max
 
@@ -2733,22 +2813,32 @@ EXCLUDE_FUNCTIONAL = {
     'addmv_',
     'addr',
     'addr_',
+    'reshape',
     'where'  # argument order
 }
 EXCLUDE_GRADCHECK = {
 }
 EXCLUDE_GRADGRADCHECK = {
-    'svd'
 }
 EXCLUDE_GRADGRADCHECK_BY_TEST_NAME = {
-    # Some of the following det ones pass because random matrix has full rank
-    # with high probability. But we can't rely on this. So only test gradgrad on
-    # test_det_distinct_postive_s.
+    # *det methods uses svd in backward when matrix is not invertible. However,
+    # svd backward is unstable unless the matrix has positive distinct singular
+    # values. Generated random matrices satisfy this with high probability, but
+    # we can't rely on it. So only test gradgrad on invertible test cases and
+    # _distinct_singular_values.
     'test_det',
+    'test_det_1x1',
     'test_det_symmetric',
+    'test_det_symmetric_psd',
     'test_det_dim2_null',
     'test_det_rank1',
-    'test_det_rank2'
+    'test_det_rank2',
+    'test_logdet',
+    'test_logdet_1x1',
+    'test_logdet_symmetric',
+    'test_slogdet_1x1_neg_det',
+    'test_slogdet_neg_det',
+    'test_slogdet_symmetric',
 }
 
 
@@ -2842,9 +2932,11 @@ for test in method_tests:
     if len(test) >= 4 and test[3] != '':
         basic_test_name += '_' + test[3]
 
-    dim_args_idx = test[4] if len(test) == 5 else []
+    dim_args_idx = test[4] if len(test) >= 5 else []
 
-    skipTestIf = test[5] if len(test) == 6 else []
+    skipTestIf = test[5] if len(test) >= 6 else []
+
+    test_output_indices = test[6] if len(test) >= 7 else None
 
     for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
         test_name = basic_test_name
@@ -2854,7 +2946,8 @@ for test in method_tests:
 
         # for-loop bodies don't define scopes, so we have to save the variables
         # we want to close over in some way
-        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name):
+        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+                    test_output_indices=test_output_indices):
             def check(name):
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
@@ -2874,18 +2967,30 @@ for test in method_tests:
                     self.assertEqual(unpack_variables(output_variable), output_tensor)
                     # TODO: check that both have changed after adding all inplace ops
 
+                def fn(*inputs):
+                    output = getattr(inputs[0], name)(*inputs[1:])
+                    if test_output_indices is None:
+                        return output
+                    else:
+                        return tuple(output[i] for i in test_output_indices)
+
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
-                    run_grad_and_gradgrad_checks(self, name, test_name,
-                                                 lambda *inputs: getattr(inputs[0], name)(*inputs[1:]),
+                    run_grad_and_gradgrad_checks(self, name, test_name, fn,
                                                  output_variable, (self_variable,) + args_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                    def fn(*inputs):
+                        output = getattr(torch, name)(*inputs)
+                        if test_output_indices is None:
+                            return output
+                        else:
+                            return tuple(output[i] for i in test_output_indices)
+
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
                     # could run the gradchecks again, but skip since we did it for the methods above.
-                    run_functional_checks(self, test_name, name,
-                                          lambda *inputs: getattr(torch, name)(*inputs),
+                    run_functional_checks(self, test_name, name, fn,
                                           False, f_args_variable, f_args_tensor)
 
                 # check for correct type of input.data and input.grad.data
@@ -2943,7 +3048,7 @@ for test in method_tests:
             inplace_name = name + '_'
             # can't broadcast inplace to left hand side
             broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
-            if hasattr(Variable(torch.ones(1)), inplace_name) and not broadcast_skip_inplace:
+            if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
                 check(inplace_name)
 
         assert not hasattr(TestAutograd, test_name), 'Two tests have the same name: ' + test_name

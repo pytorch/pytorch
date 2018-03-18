@@ -48,19 +48,12 @@ void THNN_(GatedLinear_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
   THCTensor *firstHalf = THCTensor_(newNarrow)(state, input, dim, 0, inputSize);
-  THCTensor *secondHalf = THCTensor_(newNarrow)(state, input, dim, inputSize, inputSize);
   THCTensor *gradInputfirstHalf = THCTensor_(newNarrow)(state, gradInput, dim, 0, inputSize);
-  THCTensor *gradInputsecondHalf = THCTensor_(newNarrow)(state, gradInput, dim, inputSize, inputSize);
-  // first half of derivative
-  THC_pointwiseApply3(state, gradInputfirstHalf, secondHalf, gradOutput, gatedLinearCSigMul_functor<real, accreal>());
-  // second half of derivative
-  THCTensor_(copy)(state, gradInputsecondHalf, firstHalf);
-  THC_pointwiseApply3(state, gradInputsecondHalf, secondHalf, gradOutput, gatedLinearDerivativeSecondHalf_functor<real, accreal>());
-
+  const int64_t stride_i = THCTensor_(stride)(state, input, dim) * inputSize;
+  const int64_t stride_gI = THCTensor_(stride)(state, gradInput, dim) * inputSize;
+  THC_pointwiseApply3(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<real,accreal>(stride_i, stride_gI)); 
   THCTensor_(free)(state, firstHalf);
-  THCTensor_(free)(state, secondHalf);
   THCTensor_(free)(state, gradInputfirstHalf);
-  THCTensor_(free)(state, gradInputsecondHalf);
 }
 
 #endif

@@ -37,25 +37,28 @@ class Exponential(ExponentialFamily):
     def variance(self):
         return self.rate.pow(-2)
 
-    def __init__(self, rate):
+    def __init__(self, rate, validate_args=None):
         self.rate, = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, Number) else self.rate.size()
-        super(Exponential, self).__init__(batch_shape)
+        super(Exponential, self).__init__(batch_shape, validate_args=validate_args)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         return self.rate.new(shape).exponential_() / self.rate
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return self.rate.log() - self.rate * value
 
     def cdf(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return 1 - torch.exp(-self.rate * value)
 
     def icdf(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return -torch.log(1 - value) / self.rate
 
     def entropy(self):

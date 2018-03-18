@@ -238,9 +238,9 @@ tests = [
     ('div', small_3d, lambda t: [number(3.14, 3, t)],),
     ('div', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
     ('pow', small_3d, lambda t: [number(3.14, 3, t)], None, float_types),
-    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', float_types),
-    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', float_types),
-    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', float_types),
+    ('pow', small_3d, lambda t: [number(1., 1, t)], 'pow1', types),
+    ('pow', small_3d, lambda t: [number(2., 2, t)], 'pow2', types),
+    ('pow', small_3d, lambda t: [number(3., 3, t)], 'pow3', types),
     ('pow', small_3d, lambda t: [number(-1., -1, t)], 'pow-1', float_types),
     # HalfTensor gives bad result at pow-2 with data sampled from torch.randn
     ('pow', small_3d, lambda t: [number(-2., -2, t)], 'pow-2', float_types_no_half),
@@ -406,7 +406,6 @@ tests = [
     ('qr', large_2d_lapack, lambda t: [], 'big', float_types),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types),
-    # TODO: add det to here once Variable and Tensor are the same thing
 ]
 
 # TODO: random functions, cat, gather, scatter, index*, masked*,
@@ -1314,8 +1313,8 @@ class TestCuda(TestCase):
         return TestTorch._select_broadcastable_dims(dims_full)
 
     @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
-    def test_det(self):
-        TestTorch._test_det(self, lambda t: t.cuda())
+    def test_det_logdet_slogdet(self):
+        TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
@@ -1325,6 +1324,27 @@ class TestCuda(TestCase):
 
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
+
+        # Test a corner case from older PyTorch (Issue #4858)
+        freqs = torch.cuda.FloatTensor([
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.03178183361887932, 0.027680952101945877, 0.033176131546497345,
+            0.046052902936935425, 0.07742464542388916, 0.11543981730937958,
+            0.14148041605949402, 0.15784293413162231, 0.13180233538150787,
+            0.08271478116512299, 0.049702685326337814, 0.027557924389839172,
+            0.018125897273421288, 0.011851548217236996, 0.010252203792333603,
+            0.007422595750540495, 0.005372154992073774, 0.0045109698548913,
+            0.0036087757907807827, 0.0035267581697553396, 0.0018864056328311563,
+            0.0024605290964245796, 0.0022964938543736935, 0.0018453967059031129,
+            0.0010662291897460818, 0.0009842115687206388, 0.00045109697384759784,
+            0.0007791675161570311, 0.00020504408166743815, 0.00020504408166743815,
+            0.00020504408166743815, 0.00012302644609007984, 0.0,
+            0.00012302644609007984, 4.100881778867915e-05, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0])
+
+        torch.cuda.manual_seed(11042)
+        sample = torch.multinomial(freqs, 1000, True)
+        self.assertNotEqual(freqs[sample].min(), 0)
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
@@ -1343,6 +1363,36 @@ class TestCuda(TestCase):
 
     def test_advancedindex(self):
         TestTorch._test_advancedindex(self, lambda t: t.cuda())
+
+    def test_advancedindex_mixed_cpu_cuda(self):
+        def test(x, ia, ib):
+            self.assertEqual(x[:, ia, None, ib, 0].cpu(),
+                             x.cpu()[:, ia.cpu(), None, ib.cpu(), 0])
+            self.assertEqual(x[ia], x.cpu()[ia.cpu()])
+
+        # Index cpu tensor with cuda tensor
+        x = torch.randn(3, 4, 4, 4, 3)
+        ia = torch.cuda.LongTensor([0, 2, 1])
+        ib = torch.cuda.LongTensor([0, 2, 1])
+        test(x, ia, ib)
+
+        # Index cuda tensor with cpu tensor
+        x = x.cuda()
+        ia = ia.cpu()
+        ib = ib.cpu()
+        test(x, ia, ib)
+
+        # Index cpu tensor with mixed cpu, cuda tensors
+        x = x.cpu()
+        ia = ia.cpu()
+        ib = ib.cuda()
+        test(x, ia, ib)
+
+        # Index cuda tensor with mixed cpu, cuda tensors
+        x = x.cuda()
+        ia = ia.cpu()
+        ib = ib.cuda()
+        test(x, ia, ib)
 
     def test_advancedindex_big(self):
         TestTorch._test_advancedindex_big(self, lambda t: t.cuda())
@@ -1380,6 +1430,9 @@ class TestCuda(TestCase):
 
         _, v = y.min(dim=0)
         self.assertEqual(v, expected)
+
+    def test_int_pow(self):
+        TestTorch._test_int_pow(self, lambda x: x.cuda())
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -1486,6 +1539,12 @@ class TestCuda(TestCase):
             b = torch.__dict__[t]()
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
+
+    def test_diagonal(self):
+        TestTorch._test_diagonal(self, dtype=torch.cuda.float32)
+
+    def test_diagflat(self):
+        TestTorch._test_diagflat(self, dtype=torch.cuda.float32)
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):

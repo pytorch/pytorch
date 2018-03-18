@@ -1,5 +1,3 @@
-#include <Python.h>
-
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
@@ -28,7 +26,7 @@ static at::Tensor zeroTensorWithType(const TensorType & type) {
   auto & at_type = at::getType(device, type.scalarType());
   // note: this has to be a contiguous tensor of zeros, because the fusion engine
   // specialized to what is normally here which might be fully dense
-  return at_type.zeros(type.sizes());
+  return at::zeros(at_type, type.sizes());
 }
 
 autograd::variable_list InterpreterAutogradFunction::apply(

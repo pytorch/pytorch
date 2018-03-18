@@ -109,27 +109,22 @@ void rearrangeDims(TensorInfo<T1, IndexType>* aInfo,
 
 // Threads per block for our apply kernel
 // FIXME: use occupancy calculator instead
-#define THC_APPLY_THREADS_PER_BLOCK 32 * 16
+#define THC_APPLY_THREADS_PER_BLOCK (32 * 16)
 #define THC_APPLY_BLOCKS_PER_SM 4
 template <typename Op,
           typename Ta,
           typename IndexType,
           int ADims>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
-#endif
 __global__ void
-kernelPointwiseApply1(TensorInfo<Ta, IndexType> a,
+kernelPointwiseApply1(const OffsetInfo<Ta, IndexType, ADims> a,
                       IndexType totalElements,
                       Op op) {
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  // NOTE: The two typecasts below are essential when IndexType is 64-bit;
+  //       without them, results are silently truncated to 32 bits!
+  for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
-       linearIndex += gridDim.x * blockDim.x) {
-    // Convert `linearIndex` into an offset of `a`
-    const IndexType aOffset =
-      IndexToOffset<Ta, IndexType, ADims>::get(linearIndex, a);
-
-    op(&a.data[aOffset]);
+       linearIndex += (IndexType) gridDim.x * blockDim.x) {
+    op(a.get(linearIndex));
   }
 }
 
@@ -137,26 +132,15 @@ template <typename Op,
           typename Ta, typename Tb,
           typename IndexType,
           int ADims, int BDims>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
-#endif
 __global__ void
-kernelPointwiseApply2(TensorInfo<Ta, IndexType> a,
-                      TensorInfo<Tb, IndexType> b,
+kernelPointwiseApply2(const OffsetInfo<Ta, IndexType, ADims> a,
+                      const OffsetInfo<Tb, IndexType, BDims> b,
                       IndexType totalElements,
                       Op op) {
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
-       linearIndex += gridDim.x * blockDim.x) {
-    // Convert `linearIndex` into an offset of `a`
-    const IndexType aOffset =
-      IndexToOffset<Ta, IndexType, ADims>::get(linearIndex, a);
-
-    // Convert `linearIndex` into an offset of `b`
-    const IndexType bOffset =
-      IndexToOffset<Tb, IndexType, BDims>::get(linearIndex, b);
-
-    op(&a.data[aOffset], &b.data[bOffset]);
+       linearIndex += (IndexType) gridDim.x * blockDim.x) {
+    op(a.get(linearIndex), b.get(linearIndex));
   }
 }
 
@@ -164,31 +148,16 @@ template <typename Op,
           typename Ta, typename Tb, typename Tc,
           typename IndexType,
           int ADims, int BDims, int CDims>
-#if __CUDA_ARCH__ >= 350
-__launch_bounds__(THC_APPLY_THREADS_PER_BLOCK, THC_APPLY_BLOCKS_PER_SM)
-#endif
 __global__ void
-kernelPointwiseApply3(TensorInfo<Ta, IndexType> a,
-                      TensorInfo<Tb, IndexType> b,
-                      TensorInfo<Tc, IndexType> c,
+kernelPointwiseApply3(const OffsetInfo<Ta, IndexType, ADims> a,
+                      const OffsetInfo<Tb, IndexType, BDims> b,
+                      const OffsetInfo<Tc, IndexType, CDims> c,
                       IndexType totalElements,
                       Op op) {
-  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+  for (IndexType linearIndex = (IndexType) blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalElements;
-       linearIndex += gridDim.x * blockDim.x) {
-    // Convert `linearIndex` into an offset of `a`
-    const IndexType aOffset =
-      IndexToOffset<Ta, IndexType, ADims>::get(linearIndex, a);
-
-    // Convert `linearIndex` into an offset of `b`
-    const IndexType bOffset =
-      IndexToOffset<Tb, IndexType, BDims>::get(linearIndex, b);
-
-    // Convert `linearIndex` into an offset of `c`
-    const IndexType cOffset =
-      IndexToOffset<Tc, IndexType, CDims>::get(linearIndex, c);
-
-    op(&a.data[aOffset], &b.data[bOffset], &c.data[cOffset]);
+       linearIndex += (IndexType) gridDim.x * blockDim.x) {
+    op(a.get(linearIndex), b.get(linearIndex), c.get(linearIndex));
   }
 }
 
@@ -205,6 +174,12 @@ inline bool getApplyGrid(THCState* state, uint64_t totalElements, dim3& grid) {
   uint64_t maxGridX = THCState_getCurrentDeviceProperties(state)->maxGridSize[0];
   if (numBlocks > maxGridX)
       numBlocks = maxGridX;
+
+  // For 32-bit indices, make sure that gridDim.x * blockDim.x fits in 32 bits.
+  if (totalElements <= INT32_MAX &&
+      numBlocks > INT32_MAX / THC_APPLY_THREADS_PER_BLOCK)
+    numBlocks = INT32_MAX / THC_APPLY_THREADS_PER_BLOCK;
+
   grid = dim3(numBlocks);
   return true;
 }
@@ -261,10 +236,12 @@ bool THC_pointwiseApply1(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, A)                                            \
   kernelPointwiseApply1<Op,                                             \
-                        typename TensorUtils<TensorTypeA>::DataType,   \
+                        typename TensorUtils<TensorTypeA>::DataType,    \
                         TYPE, A>                                        \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
-      aInfo, (TYPE) totalElements, op);
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
+          (aInfo),                                                      \
+      (TYPE) totalElements, op);
 
 #define HANDLE_A_CASE(TYPE, A)                  \
   {                                             \
@@ -309,21 +286,25 @@ bool THC_pointwiseApply1(THCState* state,
     // version and the completely generic version, to reduce
     // compilation time.
     if (aInfo.isContiguous()) {
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -2>
+        aOffset(aInfo);
       kernelPointwiseApply1<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             uint64_t, -2>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, (uint64_t) totalElements, op);
+          aOffset, (uint64_t) totalElements, op);
     } else {
 
 #if CUDA_VERSION < 9000
         grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -1>
+        aOffset(aInfo);
       kernelPointwiseApply1<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             uint64_t, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, (uint64_t) totalElements, op);
+          aOffset, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -412,7 +393,11 @@ bool THC_pointwiseApply2(THCState* state,
                         typename TensorUtils<TensorTypeB>::DataType,    \
                         TYPE, A, B>                                     \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
-      aInfo, bInfo, (TYPE) totalElements, op);
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
+          (aInfo),                                                      \
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, TYPE, B>  \
+          (bInfo),                                                      \
+      (TYPE) totalElements, op);
 
 #define HANDLE_B_CASE(TYPE, A, B)               \
   {                                             \
@@ -484,22 +469,30 @@ bool THC_pointwiseApply2(THCState* state,
     // version and the completely generic version, to reduce
     // compilation time.
     if (aInfo.isContiguous() && bInfo.isContiguous()) {
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -2>
+        aOffset(aInfo);
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -2>
+        bOffset(bInfo);
       kernelPointwiseApply2<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             uint64_t, -2, -2>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, (uint64_t) totalElements, op);
+          aOffset, bOffset, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
       grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -1>
+        aOffset(aInfo);
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -1>
+        bOffset(bInfo);
       kernelPointwiseApply2<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             uint64_t, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, (uint64_t) totalElements, op);
+          aOffset, bOffset, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE
@@ -603,7 +596,13 @@ bool THC_pointwiseApply3(THCState* state,
                         typename TensorUtils<TensorTypeC>::DataType,    \
                         TYPE, A, B, C>                                  \
     <<<grid, block, 0, THCState_getCurrentStream(state)>>>(             \
-      aInfo, bInfo, cInfo, (TYPE) totalElements, op);
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, TYPE, A>  \
+          (aInfo),                                                      \
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, TYPE, B>  \
+          (bInfo),                                                      \
+      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, TYPE, C>  \
+          (cInfo),                                                      \
+      (TYPE) totalElements, op);
 
 #define HANDLE_C_CASE(TYPE, A, B, C)            \
   {                                             \
@@ -703,25 +702,37 @@ bool THC_pointwiseApply3(THCState* state,
     // version and the completely generic version, to reduce
     // compilation time.
     if (aInfo.isContiguous() && bInfo.isContiguous() && cInfo.isContiguous()) {
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -2>
+        aOffset(aInfo);
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -2>
+        bOffset(bInfo);
+      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t, -2>
+        cOffset(cInfo);
       kernelPointwiseApply3<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             typename TensorUtils<TensorTypeC>::DataType,
                             uint64_t, -2, -2, -2>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
+          aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     } else {
 #if CUDA_VERSION < 9000
       grid.x = min(THCState_getCurrentDeviceProperties(state)->multiProcessorCount * THC_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
-	kernelPointwiseApply3<Op,
+      OffsetInfo<typename TensorUtils<TensorTypeA>::DataType, uint64_t, -1>
+        aOffset(aInfo);
+      OffsetInfo<typename TensorUtils<TensorTypeB>::DataType, uint64_t, -1>
+        bOffset(bInfo);
+      OffsetInfo<typename TensorUtils<TensorTypeC>::DataType, uint64_t, -1>
+        cOffset(cInfo);
+      kernelPointwiseApply3<Op,
                             typename TensorUtils<TensorTypeA>::DataType,
                             typename TensorUtils<TensorTypeB>::DataType,
                             typename TensorUtils<TensorTypeC>::DataType,
                             uint64_t, -1, -1, -1>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-          aInfo, bInfo, cInfo, (uint64_t) totalElements, op);
+          aOffset, bOffset, cOffset, (uint64_t) totalElements, op);
     }
   }
 #undef HANDLE_CASE

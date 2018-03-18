@@ -40,13 +40,17 @@ class Uniform(Distribution):
     def variance(self):
         return (self.high - self.low).pow(2) / 12
 
-    def __init__(self, low, high):
+    def __init__(self, low, high, validate_args=None):
         self.low, self.high = broadcast_all(low, high)
+
         if isinstance(low, Number) and isinstance(high, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.low.size()
-        super(Uniform, self).__init__(batch_shape)
+        super(Uniform, self).__init__(batch_shape, validate_args=validate_args)
+
+        if self._validate_args and not torch.lt(self.low, self.high).all():
+            raise ValueError("Uniform is not defined when low>= high")
 
     @constraints.dependent_property
     def support(self):
@@ -58,18 +62,21 @@ class Uniform(Distribution):
         return self.low + rand * (self.high - self.low)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         lb = value.ge(self.low).type_as(self.low)
         ub = value.lt(self.high).type_as(self.low)
         return torch.log(lb.mul(ub)) - torch.log(self.high - self.low)
 
     def cdf(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         result = (value - self.low) / (self.high - self.low)
         return result
 
     def icdf(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         result = value * (self.high - self.low) + self.low
         return result
 

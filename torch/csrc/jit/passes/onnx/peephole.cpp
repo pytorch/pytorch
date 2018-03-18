@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
 
+#include <ATen/optional.h>
+
 #if defined(_MSC_VER)
 #include <BaseTsd.h>
 typedef SSIZE_T ssize_t;
@@ -7,22 +9,9 @@ typedef SSIZE_T ssize_t;
 
 namespace torch { namespace jit {
 
-// Broadcasting operators have the following property:
-// They support a 'broadcast' flag, which enables broadcasting
-// on the last argument.  ATM this is not full-Numpy broadcasting,
-// only left-size extension (no size 1 to size n broadcast)
-std::unordered_set<NodeKind> broadcasting = {
-  kAdd,
-  kDiv,
-  kMul,
-  kPow,
-  kSub,
-  kGemm,
-};
-
 bool isRNN(const Node *node) {
   auto k = node->kind();
-  return k == kRNN || k == kLSTM || k == kGRU;
+  return k == onnx::RNN || k == onnx::LSTM || k == onnx::GRU;
 }
 
 bool isNopTranspose(const std::vector<int64_t> & perm) {
@@ -46,7 +35,20 @@ std::vector<int64_t> composeTransposes(const std::vector<int64_t> & t1,
   return ret;
 }
 
-bool isBroadcasting(Node *node) {
+bool isBroadcasting(Node* node) {
+  // Broadcasting operators have the following property:
+  // They support a 'broadcast' flag, which enables broadcasting
+  // on the last argument.  ATM this is not full-Numpy broadcasting,
+  // only left-size extension (no size 1 to size n broadcast)
+  static std::unordered_set<NodeKind> broadcasting = {
+    onnx::Add,
+    onnx::Div,
+    onnx::Mul,
+    onnx::Pow,
+    onnx::Sub,
+    onnx::Gemm,
+  };
+
   return broadcasting.count(node->kind());
 }
 
@@ -54,14 +56,21 @@ bool isBroadcasting(Node *node) {
 // dimensions that are simply one, since they can be trivially broadcasted.
 // When iterating over the dimension sizes (with reduced 'from' tensor),
 // starting at the trailing dimension, the dimension sizes must either be equal,
-// or one of them does not exist.
+// or one of them does not exist. If a broadcast candidate is not found at the
+// trailing dimension, search at the leading dimension. If one is found here,
+// return the `axis` argument to be emitted to ONNX on the broadcasting operator
 //
 // Note that this is NOT equivalent to numpy broadcasting semantics, and do
-// not represent that generalized broadcasting that Pytorch implements in
-// general. Rather, this is Caffe2-style broadcasting.
-bool fusibleExpandTo(at::IntList from, at::IntList to) {
+// not represent the generalized broadcasting that Pytorch implements.
+// Rather, this is Caffe2-style broadcasting.
+//
+// Return value is 1) Whether this expand is fusable, 2) the `axis` argument we
+// should emit to ONNX. Coming from a Pytorch frontend, this should either not
+// be emitted (if we're broadcasting trailing dimensions) or it should be
+// emitted as `0` (leading dimensions.)
+std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::IntList to) {
   if (from.size() > to.size()) {
-    return false;
+    return std::make_tuple(false, at::nullopt);
   }
   ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
   while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
@@ -73,14 +82,36 @@ bool fusibleExpandTo(at::IntList from, at::IntList to) {
 
   ssize_t f = from_dim_end;
   ssize_t t = to.size() - 1;
+  bool trailing_expand = true;
   for (; f >= from_dim_start && t >= 0; --f, --t) {
-    if (from[f] != to[t]) return false;
+    if (from[f] != to[t]) {
+      trailing_expand = false;
+      break;
+    }
   }
 
   // In the case that the 'to' tensor has leading ones in the same place that
   // the 'from' tensor does, f will be less than from_dim_start rather than
   // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
-  return f <= from_dim_start;
+  if (trailing_expand && f <= from_dim_start) {
+    return std::make_tuple(true, at::nullopt);
+  }
+
+  f = from_dim_start;
+  t = 0;
+  bool leading_expand = true;
+  for (; f <= from_dim_end && t < static_cast<ssize_t>(to.size()); ++f, ++t) {
+    if (from[f] != to[t]) {
+      leading_expand = false;
+      break;
+    }
+  }
+
+  if (leading_expand && f >= from_dim_end) {
+    return std::make_tuple(true, 0);
+  }
+
+  return std::make_tuple(false, at::nullopt);
 }
 
 void fuseBroadcast(std::shared_ptr<Graph>& graph) {
@@ -93,14 +124,14 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     // TODO: Actually, maybe you can, if there is a broadcast for some
     // dims, and then another broadcast for the rest.  But this will
     // never happen in practice so I didn't implement it.
-    if (n->hasAttribute(kbroadcast) && n->i(kbroadcast)) continue;
-    JIT_ASSERT(!n->hasAttribute(kaxis));
+    if (n->hasAttribute(attr::broadcast) && n->i(attr::broadcast)) continue;
+    JIT_ASSERT(!n->hasAttribute(attr::axis));
 
     auto input_index = n->inputs().size() - 1;
     auto* expanded_rhs = n->input(input_index)->node();
 
     // The expanded_rhs input isn't actually an expand, so no fusion available
-    if (expanded_rhs->kind() != kExpand) continue;
+    if (expanded_rhs->kind() != aten::expand) continue;
 
     auto* unexpanded_rhs = expanded_rhs->input();
 
@@ -111,12 +142,19 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
     if (!unexpanded_rhs->isTensor()) continue;
 
     // Not all broadcasts are supported by ONNX broadcast.
-    if (!fusibleExpandTo(unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-                         expanded_rhs->output()->type()->expect<TensorType>()->sizes())   // to
-       ) continue;
+    bool fusible_expand;
+    at::optional<size_t> axis;
+    std::tie(fusible_expand, axis) = fusibleExpandTo(
+        unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
+        expanded_rhs->output()->type()->expect<TensorType>()->sizes()); // to
+    if (!fusible_expand)
+      continue;
 
     n->replaceInput(input_index, unexpanded_rhs);
-    n->i_(kbroadcast, 1);
+    n->i_(attr::broadcast, 1);
+    if (axis) {
+      n->i_(attr::axis, axis.value());
+    }
     if (!expanded_rhs->hasUses()) {
       expanded_rhs->destroy();
     }
@@ -126,9 +164,9 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
   for(auto n : graph->nodes()) {
 
-    if (n->kind() == kTranspose && n->input()->node()->kind() == kTranspose) {
+    if (n->kind() == onnx::Transpose && n->input()->node()->kind() == onnx::Transpose) {
       auto origInput = n->input();
-      n->is_(kperm, composeTransposes(origInput->node()->is(kperm), n->is(kperm)));
+      n->is_(attr::perm, composeTransposes(origInput->node()->is(attr::perm), n->is(attr::perm)));
       n->replaceInput(0, origInput->node()->input());
       if (origInput->uses().size() == 0) {
         origInput->node()->destroy();
@@ -141,8 +179,8 @@ void fuseConsecutiveTransposes(std::shared_ptr<Graph>& graph) {
 void eliminateNopTranspose(std::shared_ptr<Graph>& graph) {
   for(auto it = graph->nodes().begin(), end = graph->nodes().end(); it != end; ++it) {
     auto n = *it;
-    if (n->kind() == kTranspose) {
-      if (isNopTranspose(n->is(kperm))) {
+    if (n->kind() == onnx::Transpose) {
+      if (isNopTranspose(n->is(attr::perm))) {
         n->replaceAllUsesWith(n->input()->node());
         it.destroyCurrent();
         continue;
@@ -156,11 +194,11 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
 
   for(auto n : graph->nodes()) {
 
-    if (n->kind() == kGemm) {
+    if (n->kind() == onnx::Gemm) {
       for (size_t i : {0,1}) {
         auto inp = n->inputs()[i];
-        auto trans = i == 0 ? ktransA : ktransB;
-        if (inp->node()->kind() == kTranspose && inp->node()->is(kperm) == simpleTransPerm) {
+        auto trans = i == 0 ? attr::transA : attr::transB;
+        if (inp->node()->kind() == onnx::Transpose && inp->node()->is(attr::perm) == simpleTransPerm) {
           n->replaceInput(i, inp->node()->input());
           n->i_(trans, n->hasAttribute(trans) ? !n->i(trans) : 1);
           if (inp->uses().size() == 0) {
@@ -192,7 +230,7 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
 
-    if (n->kind() != kPackPadded) {
+    if (n->kind() != prim::PackPadded) {
       continue;
     }
     if (n->outputs()[0]->uses().size() != 1) {
@@ -212,7 +250,7 @@ void pushPackingPastRnn(std::shared_ptr<Graph>& graph) {
     n->outputs()[1]->replaceFirstUseWith(n->inputs()[1]);
 
     // and insert new PackPadded after the RNN
-    Node * newPackPadded = graph->create(kPackPadded, 2);
+    Node * newPackPadded = graph->create(prim::PackPadded, 2);
     newPackPadded->insertAfter(rnn);
 
     // make things consume from the new PackPadded
@@ -231,11 +269,11 @@ void removeNopPacking(std::shared_ptr<Graph>& graph) {
   for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
     auto* n = *it;
 
-    if (n->kind() != kPadPacked) {
+    if (n->kind() != prim::PadPacked) {
       continue;
     }
     Node* input = n->inputs()[0]->node();
-    if (input->kind() != kPackPadded) {
+    if (input->kind() != prim::PackPadded) {
       continue;
     }
     if (input->outputs()[0] != n->inputs()[0]) {

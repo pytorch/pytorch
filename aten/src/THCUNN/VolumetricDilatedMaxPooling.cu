@@ -11,7 +11,7 @@
 
 template <typename Dtype>
 __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
-  THCDeviceTensor<Dtype, 4> input,
+  Dtype* inputData, int inputT, int inputH, int inputW,
   THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<Dtype, 4> output,
   int kT, int kH, int kW,
@@ -27,56 +27,53 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
 
   if (oRow < output.getSize(2) && oColumn < output.getSize(3))
   {
-    int iColumn = oColumn * dW - padW;
-    int iRow    = oRow    * dH - padH;
-    int iFrame  = oFrame  * dT - padT;
+    int tStart = oFrame  * dT - padT;
+    int hStart = oRow    * dH - padH;
+    int wStart = oColumn * dW - padW;
+    int tEnd = fminf(tStart + (kT - 1) * dilationT + 1, inputT);
+    int hEnd = fminf(hStart + (kH - 1) * dilationH + 1, inputH);
+    int wEnd = fminf(wStart + (kW - 1) * dilationW + 1, inputW);
 
-    int maxColumn = 0;
-    int maxRow = 0;
-    int maxFrame = 0;
+    while(tStart < 0)
+      tStart += dilationT;
+    while(hStart < 0)
+      hStart += dilationH;
+    while(wStart < 0)
+      wStart += dilationW;
+
+    int index = 0;
+    int maxIndex = -1;
+    inputData += slice * inputT * inputH * inputW;
 
     Dtype max = THCNumerics<Dtype>::min();
 
-    for (int frame = 0; frame < kT; ++frame)
+    for (int t = tStart; t < tEnd; t += dilationT)
     {
-      if (iFrame + frame * dilationT < input.getSize(1) && iFrame + frame * dilationT >= 0)
+      for (int h = hStart; h < hEnd; h += dilationH)
       {
-        for (int row = 0; row < kH; ++row)
+        for (int w = wStart; w < wEnd; w += dilationW)
         {
-          if (iRow + row * dilationH < input.getSize(2) && iRow + row * dilationH >= 0)
-          {
-            for (int column = 0; column < kW; ++column)
-            {
-              if (iColumn + column * dilationW < input.getSize(3) && iColumn + column * dilationW >= 0)
-              {
-                Dtype val = input[slice][iFrame + frame * dilationT][iRow + row * dilationH][iColumn + column * dilationW];
+          index = t * inputH * inputW + h * inputW + w;
+          Dtype val = inputData[index];
 
-                if (max < val)
-                {
-                  max = val;
-                  maxColumn = column;
-                  maxRow    = row;
-                  maxFrame  = frame;
-                }
-              }
-            }
+          if (max < val)
+          {
+            max = val;
+            maxIndex = index;
           }
         }
       }
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    THCIndex_t *idx = &indices[slice][oFrame][oRow][oColumn];
-    ((unsigned char*)(idx))[0] = maxFrame;
-    ((unsigned char*)(idx))[1] = maxRow;
-    ((unsigned char*)(idx))[2] = maxColumn;
-    ((unsigned char*)(idx))[3] = 0;
+    indices[slice][oFrame][oRow][oColumn] = maxIndex + TH_INDEX_BASE;
   }
 }
 
 template <int KERNEL_WIDTH, typename Dtype>
 __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
-  THCDeviceTensor<Dtype, 4> input, THCDeviceTensor<THCIndex_t, 4> indices,
+  Dtype* inputData, int inputT, int inputH, int inputW,
+  THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<Dtype, 4> output,
   int kT, int kH,
   int dT, int dH, int dW,
@@ -91,50 +88,45 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateOutput(
 
   if (oRow < output.getSize(2) && oColumn < output.getSize(3))
   {
-    int iColumn = oColumn * dW - padW;
-    int iRow    = oRow    * dH - padH;
-    int iFrame  = oFrame  * dT - padT;
+    int tStart = oFrame  * dT - padT;
+    int hStart = oRow    * dH - padH;
+    int wStart = oColumn * dW - padW;
+    int tEnd = fminf(tStart + (kT - 1) * dilationT + 1, inputT);
+    int hEnd = fminf(hStart + (kH - 1) * dilationH + 1, inputH);
+    int wEnd = fminf(wStart + (KERNEL_WIDTH - 1) * dilationW + 1, inputW);
 
-    int maxColumn = 0;
-    int maxRow = 0;
-    int maxFrame;
+    while(tStart < 0)
+      tStart += dilationT;
+    while(hStart < 0)
+      hStart += dilationH;
+    while(wStart < 0)
+      wStart += dilationW;
+
+    int index = 0;
+    int maxIndex = -1;
 
     Dtype max = THCNumerics<Dtype>::min();
 
-    for (int frame = 0; frame < kT; ++frame)
+    for (int t = tStart; t < tEnd; t += dilationT)
     {
-      if (iFrame + frame * dilationT < input.getSize(1) && iFrame + frame * dilationT >= 0)
+      for (int h = hStart; h < hEnd; h += dilationH)
       {
-        for (int row = 0; row < kH; ++row)
+        for (int w = wStart; w < wEnd; w += dilationW)
         {
-          if (iRow + row * dilationH < input.getSize(2) && iRow + row * dilationH >= 0)
-          {
-            for (int column = 0; column < KERNEL_WIDTH; ++column)
-            {
-              if (iColumn + column * dilationW < input.getSize(3) && iColumn + column * dilationW >= 0)
-              {
-                Dtype val = input[slice][iFrame + frame * dilationT][iRow + row * dilationH][iColumn + column * dilationW];
+          index = t * inputH * inputW + h * inputW + w;
+          Dtype val = inputData[slice * inputT * inputH * inputW + index];
 
-                if (max < val)
-                {
-                  max = val;
-                  maxColumn = column;
-                  maxRow    = row;
-                  maxFrame  = frame;
-                }
-              }
-            }
+          if (max < val)
+          {
+            max = val;
+            maxIndex = index;
           }
         }
       }
     }
 
     output[slice][oFrame][oRow][oColumn] = max;
-    THCIndex_t *idx = &indices[slice][oFrame][oRow][oColumn];
-    ((unsigned char*)(idx))[0] = maxFrame;
-    ((unsigned char*)(idx))[1] = maxRow;
-    ((unsigned char*)(idx))[2] = maxColumn;
-    ((unsigned char*)(idx))[3] = 0;
+    indices[slice][oFrame][oRow][oColumn] = maxIndex + TH_INDEX_BASE;
   }
 }
 
@@ -142,7 +134,8 @@ template <typename Dtype>
 __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
   THCDeviceTensor<Dtype, 4> gradOutput,
   THCDeviceTensor<THCIndex_t, 4> indices,
-  THCDeviceTensor<Dtype, 4> gradInput,
+  Dtype* gradInputData,
+  int inputT, int inputH, int inputW,
   int dT, int dH, int dW,
   int padT, int padH, int padW,
   int dilationT, int dilationH, int dilationW,
@@ -155,12 +148,11 @@ __global__ void cuda_VolumetricDilatedMaxPooling_updateGradInput(
 
   if (oRow < gradOutput.getSize(2) && oColumn < gradOutput.getSize(3))
   {
-    THCIndex_t *idx = &indices[slice][oFrame][oRow][oColumn];
-    int iFrame  = ((unsigned char*)(idx))[0] * dilationT + oFrame  * dT - padT;
-    int iRow    = ((unsigned char*)(idx))[1] * dilationH + oRow    * dH - padH;
-    int iColumn = ((unsigned char*)(idx))[2] * dilationW + oColumn * dW - padW;
-    atomicAdd(&gradInput[slice][iFrame][iRow][iColumn],
-              gradOutput[slice][oFrame][oRow][oColumn]);
+    int maxIndex = indices[slice][oFrame][oRow][oColumn] - TH_INDEX_BASE;
+    if (maxIndex != -1) {
+      atomicAdd(&gradInputData[slice * inputT * inputH * inputW + maxIndex],
+                gradOutput[slice][oFrame][oRow][oColumn]);
+    }
   }
 }
 
