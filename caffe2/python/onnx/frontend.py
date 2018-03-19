@@ -235,12 +235,13 @@ class Caffe2Frontend(object):
 
         legacy_pad_attr = attrs.pop('legacy_pad', None)
         if legacy_pad_attr:
-            assert node.op_type.endswith("Pool")
-            assert not node.op_type.startswith("Global")
+            assert node.op_type.endswith('Pool')
             input_size = shapes[node.input[0]]
             output_size = shapes[node.output[0]]
             assert len(output_size) == 4
-            if legacy_pad_attr.i == caffe2_legacy_pb2.NOTSET:
+            if node.op_type.startswith('Global'):
+                pass
+            elif legacy_pad_attr.i == caffe2_legacy_pb2.NOTSET:
                 pass
             elif legacy_pad_attr.i == caffe2_legacy_pb2.VALID:
                 assert not 'pads' in attrs
