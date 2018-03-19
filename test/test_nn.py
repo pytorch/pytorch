@@ -1906,6 +1906,15 @@ class TestNN(NNTestCase):
             self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_broadcast_no_grad(self):
+        x = torch.randn(1, 2, dtype=torch.cuda.float32, requires_grad=True)
+        with torch.no_grad():
+            broadcasted = Broadcast.apply((0, 1), x)
+        self.assertTrue(x.requires_grad)
+        for output in broadcasted:
+            self.assertFalse(output.requires_grad)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
         input = Variable(torch.randn(2, 10).float().cuda())
