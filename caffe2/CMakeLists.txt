@@ -77,10 +77,16 @@ install(FILES ${PROJECT_BINARY_DIR}/caffe2/core/macros.h
 
 # ---[ List of libraries to link with
 
+add_library(caffe2_protos $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
+add_dependencies(caffe2_protos Caffe_PROTO Caffe2_PROTO)
+# TODO: enable using lite protobuf.
+target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
+target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
+install(TARGETS caffe2_protos EXPORT Caffe2Targets DESTINATION lib)
+
 # Compile exposed libraries.
-add_library(caffe2 ${Caffe2_CPU_SRCS} $<TARGET_OBJECTS:Caffe_PROTO> $<TARGET_OBJECTS:Caffe2_PROTO>)
-add_dependencies(caffe2 Caffe_PROTO Caffe2_PROTO)
-target_link_libraries(caffe2 PUBLIC ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
+add_library(caffe2 ${Caffe2_CPU_SRCS})
+target_link_libraries(caffe2 PUBLIC caffe2_protos ${Caffe2_PUBLIC_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_LIBS})
 target_link_libraries(caffe2 PRIVATE ${Caffe2_DEPENDENCY_WHOLE_LINK_LIBS})
 target_include_directories(caffe2 INTERFACE $<INSTALL_INTERFACE:include>)
