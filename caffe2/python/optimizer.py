@@ -130,7 +130,8 @@ class Optimizer(object):
 
         if self._lr_multiplier is not None:
             current_scope = scope.CurrentDeviceScope()
-            if (current_scope.device_type == caffe2_pb2.CUDA
+            if (current_scope is not None
+                    and current_scope.device_type == caffe2_pb2.CUDA
                     and not self._lr_multiplier_on_gpu):
                 lr_multiplier = net.CopyFromCPUInput(
                     self._lr_multiplier,
@@ -224,7 +225,8 @@ class SgdOptimizer(Optimizer):
             current_scope = scope.CurrentDeviceScope()
             self.add_lr_multiplier(
                 lr_lars_multiplier,
-                is_gpu_blob=(current_scope.device_type == caffe2_pb2.CUDA),
+                is_gpu_blob=(current_scope is not None
+                    and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         # We need negative sign for LR when used directly with WeightedSum
@@ -499,7 +501,8 @@ class AdagradOptimizer(Optimizer):
             current_scope = scope.CurrentDeviceScope()
             self.add_lr_multiplier(
                 lr_lars_multiplier,
-                is_gpu_blob=(current_scope.device_type == caffe2_pb2.CUDA),
+                is_gpu_blob=(current_scope is not None
+                    and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         lr, _ = self.build_lr(
