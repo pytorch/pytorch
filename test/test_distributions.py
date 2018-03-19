@@ -203,18 +203,18 @@ EXAMPLES = [
     ]),
     Example(MultivariateNormal, [
         {
-            'loc': Variable(torch.randn(5, 2), requires_grad=True),
-            'covariance_matrix': Variable(torch.Tensor([[2.0, 0.3], [0.3, 0.25]]), requires_grad=True),
+            'loc': variable(torch.randn(5, 2), requires_grad=True),
+            'covariance_matrix': variable(torch.Tensor([[2.0, 0.3], [0.3, 0.25]]), requires_grad=True),
         },
         {
-            'loc': Variable(torch.randn(5, 3, 2), requires_grad=True),
-            'scale_tril': Variable(torch.Tensor([[[2.0, 0.0], [-0.5, 0.25]],
+            'loc': variable(torch.randn(5, 3, 2), requires_grad=True),
+            'scale_tril': variable(torch.Tensor([[[2.0, 0.0], [-0.5, 0.25]],
                                                  [[2.0, 0.0], [0.3, 0.25]],
                                                  [[5.0, 0.0], [-0.5, 1.5]]]), requires_grad=True),
         },
         {
-            'loc': Variable(torch.Tensor([1.0, -1.0])),
-            'covariance_matrix': Variable(torch.Tensor([[5.0, -0.5], [-0.5, 1.5]])),
+            'loc': variable(torch.Tensor([1.0, -1.0])),
+            'covariance_matrix': variable(torch.Tensor([[5.0, -0.5], [-0.5, 1.5]])),
         },
     ]),
     Example(Normal, [
@@ -1185,20 +1185,20 @@ class TestDistributions(TestCase):
                                         'Normal(mean={}, std={})'.format(loc, scale))
 
     def test_multivariate_normal_shape(self):
-        mean = Variable(torch.randn(5, 3), requires_grad=True)
-        mean_no_batch = Variable(torch.randn(3), requires_grad=True)
-        mean_multi_batch = Variable(torch.randn(6, 5, 3), requires_grad=True)
+        mean = torch.tensor(torch.randn(5, 3), requires_grad=True)
+        mean_no_batch = torch.tensor(torch.randn(3), requires_grad=True)
+        mean_multi_batch = torch.tensor(torch.randn(6, 5, 3), requires_grad=True)
 
         # construct PSD covariance
         tmp = torch.randn(3, 10)
-        cov = Variable(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
-        scale_tril = Variable(torch.potrf(cov.data, upper=False), requires_grad=True)
+        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
 
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
-        cov_batched = Variable((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
+        cov_batched = torch.tensor((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
         scale_tril_batched = [torch.potrf(C, upper=False) for C in cov_batched.data.view((-1, 3, 3))]
-        scale_tril_batched = Variable(torch.stack(scale_tril_batched).view(cov_batched.shape))
+        scale_tril_batched = torch.stack(scale_tril_batched).view(cov_batched.shape)
 
         # ensure that sample, batch, event shapes all handled correctly
         self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
@@ -1223,31 +1223,12 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(MultivariateNormal, (mean, None, scale_tril))
         self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, scale_tril_batched))
 
-        # check these also work for tensors, not just variables
-        mean = mean.data
-        mean_no_batch = mean_no_batch.data
-        mean_multi_batch = mean_multi_batch.data
-        cov = cov.data
-        cov_batched = cov_batched.data
-        self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
-        self.assertEqual(MultivariateNormal(mean_no_batch, cov).sample().size(), (3,))
-        self.assertEqual(MultivariateNormal(mean_multi_batch, cov).sample().size(), (6, 5, 3))
-        self.assertEqual(MultivariateNormal(mean, cov).sample((2,)).size(), (2, 5, 3))
-        self.assertEqual(MultivariateNormal(mean_no_batch, cov).sample((2,)).size(), (2, 3))
-        self.assertEqual(MultivariateNormal(mean_multi_batch, cov).sample((2,)).size(), (2, 6, 5, 3))
-        self.assertEqual(MultivariateNormal(mean, cov).sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(MultivariateNormal(mean_no_batch, cov).sample((2, 7)).size(), (2, 7, 3))
-        self.assertEqual(MultivariateNormal(mean_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(MultivariateNormal(mean, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(MultivariateNormal(mean_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(MultivariateNormal(mean_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
-
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
-        mean = Variable(torch.randn(3), requires_grad=True)
+        mean = torch.tensor(torch.randn(3), requires_grad=True)
         tmp = torch.randn(3, 10)
-        cov = Variable(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
-        scale_tril = Variable(torch.potrf(cov.data, upper=False), requires_grad=True)
+        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
@@ -1262,9 +1243,9 @@ class TestDistributions(TestCase):
         self.assertAlmostEqual(0.0, np.mean((dist2.log_prob(x).data.numpy() - expected)**2), places=3)
 
         # Double-check that batched versions behave the same as unbatched
-        mean = Variable(torch.randn(5, 3), requires_grad=True)
+        mean = torch.tensor(torch.randn(5, 3), requires_grad=True)
         tmp = torch.randn(5, 3, 10)
-        cov = Variable((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
+        cov = torch.tensor((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
 
         dist_batched = MultivariateNormal(mean, cov)
         dist_unbatched = [MultivariateNormal(mean[i], cov[i]) for i in range(mean.size(0))]
@@ -1279,10 +1260,10 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        mean = Variable(torch.randn(3), requires_grad=True)
+        mean = torch.tensor(torch.randn(3), requires_grad=True)
         tmp = torch.randn(3, 10)
-        cov = Variable(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
-        scale_tril = Variable(torch.potrf(cov.data, upper=False), requires_grad=True)
+        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
 
         self._check_sampler_sampler(MultivariateNormal(mean, cov),
                                     scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
