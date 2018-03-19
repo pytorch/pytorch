@@ -52,14 +52,14 @@ class Multinomial(Distribution):
     def variance(self):
         return self.total_count * self.probs * (1 - self.probs)
 
-    def __init__(self, total_count=1, probs=None, logits=None):
+    def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if not isinstance(total_count, Number):
             raise NotImplementedError('inhomogeneous total_count is not supported')
         self.total_count = total_count
         self._categorical = Categorical(probs=probs, logits=logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(Multinomial, self).__init__(batch_shape, event_shape)
+        super(Multinomial, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
@@ -93,7 +93,8 @@ class Multinomial(Distribution):
         return counts.type_as(self.probs)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         logits, value = broadcast_all(self.logits.clone(), value)
         log_factorial_n = torch.lgamma(value.sum(-1) + 1)
         log_factorial_xs = torch.lgamma(value + 1).sum(-1)

@@ -594,7 +594,7 @@ static void _trace_post_record(
   jit::tracer::postRecordTrace(trace_info, output_vars);
 
   auto state_lock = trace_info.state->lock();
-  trace_info.n->i_(kinplace, is_inplace);
+  trace_info.n->i_(attr::inplace, is_inplace);
 
   // See definition in function.cpp.
   THPObjectPtr passes_py_bool {PyObject_GetAttrString(op_obj, "is_traceable")};

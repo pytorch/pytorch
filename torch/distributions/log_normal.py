@@ -27,8 +27,8 @@ class LogNormal(TransformedDistribution):
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, loc, scale):
-        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform())
+    def __init__(self, loc, scale, validate_args=None):
+        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform(), validate_args=validate_args)
 
     @property
     def loc(self):

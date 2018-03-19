@@ -17,6 +17,7 @@
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/python_tuples.h"
 #include "torch/csrc/utils/tensor_apply.h"
+#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 #include "torch/csrc/utils/tensor_list.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
@@ -297,32 +298,13 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_type(const Tensor & self, const at::Type & type, int device, bool non_blocking) {
-  if (type.is_cuda()) {
-    torch::utils::cuda_lazy_init();
-  }
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
-  int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
-  if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
-    // copy if the devices are different even if the types are the same
-    return type.copy(self, non_blocking);
-  }
-  return self.toType(type, non_blocking);
-}
-
-static Tensor dispatch_type(const Tensor & self, const at::Type & type) {
-  int64_t device = self.is_cuda() ? self.get_device() : -1;
-  return dispatch_type(self, type, device, false);
-}
-
 static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
 {
    HANDLE_TH_ERRORS
    auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
    auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
    auto& type = self_.type().toBackend(backend);
-   return wrap(dispatch_type(self_, type));
+   return wrap(torch::utils::dispatch_type_conversion(self_, type));
    END_HANDLE_TH_ERRORS
 }
 
@@ -339,7 +321,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
   auto& type = self_.type().toBackend(backend);
   auto device = r.toInt64(0);
-  return THPVariable_Wrap(dispatch_type(self_, type, device, r.toBool(1)));
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -347,7 +329,7 @@ static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   auto& type = self_.type().toScalarType(scalarType);
-  return THPVariable_Wrap(dispatch_type(self_, type));
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type));
   END_HANDLE_TH_ERRORS
 }
 static PyObject * THPVariable_byte(PyObject* self, PyObject* args) {
@@ -576,7 +558,7 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
     throw TypeError("dtype must be a type, str, or dtype object");
   }
   auto& type = is_dtype ? r.type(0) : torch::utils::type_from_string(type_name);
-  return THPVariable_Wrap(dispatch_type(self_, type, -1, r.toBool(1)));
+  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, -1, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }
 

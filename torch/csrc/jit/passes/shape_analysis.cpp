@@ -57,7 +57,7 @@ void PropagateShapeOnNode(Node * node) {
   // These don't require the types and present flag. Return early after we
   // process them
   switch(node->kind()) {
-    case kIf: {
+    case prim::If: {
       auto then_block = node->blocks().at(0);
       auto else_block = node->blocks().at(1);
       PropagateShapeOnBlock(then_block);
@@ -65,7 +65,7 @@ void PropagateShapeOnNode(Node * node) {
       mergeTypes(then_block->outputs(), else_block->outputs(), node->outputs());
       return;
     }
-    case kLoop: {
+    case prim::Loop: {
       auto body_block = node->blocks().at(0);
       // propagate counter type
       body_block->inputs().at(0)->setType(node->inputs().at(0)->type());
@@ -116,11 +116,11 @@ void PropagateShapeOnNode(Node * node) {
     //TODO: for expensive ops we can directly encode their shape propagation
     // here, otherwise we fallback to running a fake version of the op
     // to get a quick and dirty propagation
-    case kneg: {
+    case aten::neg: {
       if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) break;
       node->output()->setType(types.at(0)->contiguous());
     } break;
-    case kmm: {
+    case aten::mm: {
       if (!check_overload(/*num_inputs=*/2, /*num_outputs=*/1)) break;
       auto lhs_type = types.at(0);
       auto rhs_type = types.at(1);
@@ -129,7 +129,7 @@ void PropagateShapeOnNode(Node * node) {
         lhs_type->scalarType(), lhs_type->device(),
         at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
     } break;
-    case kt: {
+    case aten::t: {
       if (!check_overload(/*num_inputs=*/1, /*num_outputs=*/1)) break;
       auto tp = types.at(0);
       auto sizes = tp->sizes();
@@ -139,28 +139,28 @@ void PropagateShapeOnNode(Node * node) {
       std::swap(strides.at(0), strides.at(1));
       node->output()->setType(tp->withSizesStrides(sizes, strides));
     } break;
-    case knarrow: {
+    case aten::narrow: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, kdim},
-                          {AKind::i, klength}})) {
+                         {{AKind::i, attr::dim},
+                          {AKind::i, attr::length}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
-        int64_t dim = node->i(kdim);
-        int64_t length = node->i(klength);
+        int64_t dim = node->i(attr::dim);
+        int64_t length = node->i(attr::length);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         sizes.at(dim) = length;
         node->output()->setType(tp->withSizesStrides(sizes, tp->strides()));
       }
     } break;
-    case ksum: {
+    case aten::sum: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, kdim},
-                          {AKind::i, kkeepdim}})) {
+                         {{AKind::i, attr::dim},
+                          {AKind::i, attr::keepdim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
-        int64_t dim = node->i(kdim);
+        int64_t dim = node->i(attr::dim);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
-        if (node->i(kkeepdim)) {
+        if (node->i(attr::keepdim)) {
           sizes.at(dim) = 1;
         } else {
           sizes.erase(sizes.begin() + dim);
@@ -170,13 +170,13 @@ void PropagateShapeOnNode(Node * node) {
         node->output()->setType(types.at(0)->withSizes({}));
       }
     } break;
-    case ksqueeze: {
+    case aten::squeeze: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, kdim}})) {
+                         {{AKind::i, attr::dim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
         auto strides = tp->strides();
-        int64_t dim = node->i(kdim);
+        int64_t dim = node->i(attr::dim);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (sizes.at(dim) == 1) {
           sizes.erase(sizes.begin() + dim);
@@ -185,23 +185,23 @@ void PropagateShapeOnNode(Node * node) {
         node->output()->setType(tp->withSizesStrides(sizes, strides));
       }
     } break;
-    case kunsqueeze: {
+    case aten::unsqueeze: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, kdim}})) {
+                         {{AKind::i, attr::dim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
         auto strides = tp->strides();
-        int64_t dim = node->i(kdim);
+        int64_t dim = node->i(attr::dim);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) <= sizes.size());
         sizes.insert(sizes.begin() + dim, 1);
         strides.insert(strides.begin() + dim, 1);
         node->output()->setType(tp->withSizesStrides(sizes, strides));
       }
     } break;
-    case kview: {
+    case aten::view: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::is, ksize}})) {
-        auto sizes = node->is(ksize);
+                         {{AKind::is, attr::size}})) {
+        auto sizes = node->is(attr::size);
         bool inferred = false;
         size_t inferred_idx;
         int64_t size_product = 1;
@@ -224,7 +224,7 @@ void PropagateShapeOnNode(Node * node) {
         node->output()->setType(types.at(0)->withSizes(sizes));
       }
     } break;
-    case kReplaceIfUndef: {
+    case prim::ReplaceIfUndef: {
       // If types[0] has a type, then it is not defined, and the type will
       // get set to types[0] because that will be the value propagated.
       // If its type is not defined, then unification is an undefined type.
@@ -232,19 +232,19 @@ void PropagateShapeOnNode(Node * node) {
       node->output()->setType(types.at(0)->shared_from_this());
       handled = true;
     } break;
-    case kConstant: {
-      node->output()->inferTypeFrom(node->t(kvalue));
+    case prim::Constant: {
+      node->output()->inferTypeFrom(node->t(attr::value));
       handled = true;
     } break;
-    case kUndefined: {
+    case prim::Undefined: {
       node->output()->setType(DynamicType::get());
       handled = true;
     } break;
-    case kPythonOp: {
+    case prim::PythonOp: {
       setDynamicType(node);
       handled = true;
     } break;
-    case kPrint: {
+    case prim::Print: {
       setDynamicType(node);
       handled = true;
     } break;

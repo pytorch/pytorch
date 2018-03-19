@@ -284,18 +284,30 @@ class _DistTestBase(object):
 
     # BROADCAST
     def _test_broadcast_helper(self, group, group_id, rank, cuda=False):
-        for src in group:
-            expected_tensor = _build_tensor(src + 1)
-            if cuda:
-                expected_tensor = expected_tensor.cuda()
-            if rank == src:
-                dist.broadcast(expected_tensor, src, group_id)
-            else:
-                tensor = _build_tensor(src + 1, -1)
+        for ttype, value, requires_cuda in [
+            ('torch.FloatTensor', -1e-10, False),
+            ('torch.DoubleTensor', -1e-100, False),
+            ('torch.HalfTensor', -0.1, True),
+            ('torch.CharTensor', -2, False),
+            ('torch.ByteTensor', 129, False),
+            ('torch.IntTensor', -1e5, False),
+            ('torch.LongTensor', -1e15, False),
+        ]:
+            if requires_cuda and not cuda:
+                continue
+            for src in group:
+                expected_tensor = _build_tensor(src + 1, value).type(ttype)
                 if cuda:
-                    tensor = tensor.cuda()
-                dist.broadcast(tensor, src, group_id)
-                self.assertEqual(tensor, expected_tensor)
+                    expected_tensor = expected_tensor.cuda()
+                if rank == src:
+                    dist.broadcast(expected_tensor, src, group_id)
+                else:
+                    tensor = _build_tensor(src + 1, -1).type(ttype)
+                    if cuda:
+                        tensor = tensor.cuda()
+                    dist.broadcast(tensor, src, group_id)
+                    self.assertEqual(tensor.size(), expected_tensor.size())
+                    self.assertEqual(tensor.ne(expected_tensor).max(), 0)
 
         self._barrier()
 
@@ -778,6 +790,16 @@ class _DistTestBase(object):
                 x = self.fc3(x)
                 return F.softmax(x, dim=1)
 
+        def model_step(model):
+            for param in model.parameters():
+                param.data += param.grad
+                param.grad = None
+
+        def assert_equal_param(param_gpu, param_DDP):
+            self.assertEqual(len(param_gpu), len(param_DDP))
+            for p_gpu, p_DDP in zip(param_gpu, param_DDP):
+                self.assertEqual(p_gpu, p_DDP)
+
         # cpu training setup
         model = Net()
 
@@ -790,8 +812,6 @@ class _DistTestBase(object):
         model_DDP = copy.deepcopy(model)
         model_DDP.cuda(gpu_subset[0])
         model_DDP = nn.parallel.DistributedDataParallel(model_DDP, device_ids=gpu_subset)
-        optimizer = optim.SGD(model_DDP.parameters(), lr=1e-2)
-        optimizer.zero_grad()
 
         # batch_size for DDP should be divisible by #GPU per node.
         batch_size = len(gpu_subset) * int(WORLD_SIZE)
@@ -799,28 +819,27 @@ class _DistTestBase(object):
         target = torch.randn(batch_size, 4)
         loss = nn.MSELoss()
 
-        # single gpu training
-        self._test_DDP_helper(model_gpu,
-                              input_cpu.cuda(gpu_subset[0]),
-                              target.cuda(gpu_subset[0]),
-                              loss)
+        for i in range(2):
+            # single gpu training
+            self._test_DDP_helper(model_gpu,
+                                  input_cpu.cuda(gpu_subset[0]),
+                                  target.cuda(gpu_subset[0]),
+                                  loss)
 
-        # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
-        self._test_DDP_helper(model_DDP,
-                              input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
-                              target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
-                              loss)
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            self._test_DDP_helper(model_DDP,
+                                  input_cpu[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)],
+                                  target[rank * len(gpu_subset):(rank + 1) * len(gpu_subset)].cuda(gpu_subset[0]),
+                                  loss)
 
-        for layer_gpu, layer_DDP in zip(model_gpu.modules(), model_DDP.module.modules()):
-            if isinstance(layer_gpu, nn.Linear):
-                self.assertEqual(layer_gpu.weight.grad, layer_DDP.weight.grad)
+            # Update weights and run a second iteration to shake out errors
+            model_step(model_gpu)
+            model_step(model_DDP)
 
-        # Run SGD and second iteration to shake out errors
-        optimizer.step()
-        self._test_DDP_helper(model_DDP,
-                              input_cpu,
-                              target.cuda(gpu_subset[0]),
-                              loss)
+            assert_equal_param(list(model_gpu.parameters()), list(model_DDP.module.parameters()))
+
+            # Shuffle the input so that DDP input is different
+            input_cpu = input_cpu[torch.randperm(batch_size)]
 
         self._barrier()
 

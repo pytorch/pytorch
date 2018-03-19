@@ -18,13 +18,14 @@ struct Parser {
     // of the Compound tree are in the same place.
     return Ident::create(t.range, t.text());
   }
-  TreeRef createApply(TreeRef ident, TreeList& inputs) {
+  TreeRef createApply(Expr expr) {
     TreeList attributes;
     auto range = L.cur().range;
+    TreeList inputs;
     parseOperatorArguments(inputs, attributes);
     return Apply::create(
         range,
-        Ident(ident),
+        expr,
         List<Expr>(makeList(range, std::move(inputs))),
         List<Attribute>(makeList(range, std::move(attributes))));
   }
@@ -55,23 +56,15 @@ struct Parser {
       } break;
       default: {
         Ident name = parseIdent();
-        if (L.cur().kind == '(') {
-          TreeList inputs;
-          prefix = createApply(name, inputs);
-        } else {
-          prefix = Var::create(name.range(), name);
-        }
+        prefix = Var::create(name.range(), name);
       } break;
     }
     while (true) {
       if (L.nextIf('.')) {
         const auto name = parseIdent();
-        if (L.cur().kind == '(') {
-          TreeList inputs = {prefix};
-          prefix = createApply(name, inputs);
-        } else {
-          prefix = Select::create(name.range(), Expr(prefix), Ident(name));
-        }
+        prefix = Select::create(name.range(), Expr(prefix), Ident(name));
+      } else if (L.cur().kind == '(') {
+        prefix = createApply(Expr(prefix));
       } else if (L.cur().kind == '[') {
         prefix = parseSliceOrGather(prefix);
       } else {
@@ -156,42 +149,24 @@ struct Parser {
       L.expect(end);
     return List<T>::create(r, elements);
   }
-  TreeRef parseConst() {
-    // 'b' - boolean
-    // 'LL' 64-bit integer
-    // 'f' single-precision float
-    // 'i' 32-bit integer
-    // 'f' is default if '.' appears in the number
+  Const parseConst() {
     auto range = L.cur().range;
     if (L.nextIf(TK_TRUE)) {
-      return c(TK_CONST, range, {d(1), s("b")});
+      return Const::create(range, "1");
     } else if (L.nextIf(TK_FALSE)) {
-      return c(TK_CONST, range, {d(0), s("b")});
+      return Const::create(range, "0");
     }
-    float mult = 1.0f;
-    while (L.nextIf('-')) {
-      mult *= -1.0f;
-    }
+    std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
-    std::string type_ident =
-        (t.text().find('.') == std::string::npos) ? "i" : "f";
-    if (L.cur().kind == TK_IDENT) {
-      Token type_ident_tok = L.expect(TK_IDENT);
-      type_ident = type_ident_tok.text();
-      if (type_ident != "LL" && type_ident != "f") {
-        throw ErrorReport(type_ident_tok)
-            << "expected 'f' or 'LL' "
-            << "as numeric type identifier but found '" << type_ident << "'";
-      }
-    }
-    return c(TK_CONST, t.range, {d(mult * t.doubleValue()), s(type_ident)});
+    return Const::create(t.range, unary_prefix + t.text());
   }
   TreeRef parseAttributeValue() {
     int kind = L.cur().kind;
     switch (kind) {
-      case '[':
-        return parseList('[', ',', ']', &Parser::parseConst);
-      default:
+      case '[': {
+        auto list = parseList('[', ',', ']', &Parser::parseConst);
+        return ListLiteral::create(list.range(), List<Expr>(list));
+      } default:
         return parseConst();
     }
   }
@@ -286,11 +261,13 @@ struct Parser {
       case TK_GLOBAL: {
         auto range = L.next().range;
         auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+        expectEndOfLine();
         return Global::create(range, idents);
       }
       case TK_RETURN: {
         auto range = L.next().range;
         auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+        expectEndOfLine();
         return Return::create(range, values);
       }
       default: {
@@ -386,12 +363,6 @@ struct Parser {
 
  private:
   // short helpers to create nodes
-  TreeRef d(double v) {
-    return Number::create(v);
-  }
-  TreeRef s(const std::string& s) {
-    return String::create(s);
-  }
   TreeRef c(int kind, const SourceRange& range, TreeList&& trees) {
     return Compound::create(kind, range, std::move(trees));
   }

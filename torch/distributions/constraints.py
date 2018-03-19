@@ -142,24 +142,24 @@ class _Real(Constraint):
 
 class _GreaterThan(Constraint):
     """
-    Constrain to a real half line `[lower_bound, inf]`.
+    Constrain to a real half line `(lower_bound, inf]`.
     """
     def __init__(self, lower_bound):
         self.lower_bound = lower_bound
 
     def check(self, value):
-        return self.lower_bound <= value
+        return self.lower_bound < value
 
 
 class _LessThan(Constraint):
     """
-    Constrain to a real half line `[inf, upper_bound]`.
+    Constrain to a real half line `[-inf, upper_bound)`.
     """
     def __init__(self, upper_bound):
         self.upper_bound = upper_bound
 
     def check(self, value):
-        return value <= self.upper_bound
+        return value < self.upper_bound
 
 
 class _Interval(Constraint):
@@ -180,7 +180,7 @@ class _Simplex(Constraint):
     Specifically: `x >= 0` and `x.sum(-1) == 1`.
     """
     def check(self, value):
-        return (value >= 0) & ((value.sum(-1, True) - 1).abs() < 1e-6)
+        return (value >= 0).all() & ((value.sum(-1, True) - 1).abs() < 1e-6).all()
 
 
 class _LowerTriangular(Constraint):

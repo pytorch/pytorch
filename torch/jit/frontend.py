@@ -105,7 +105,8 @@ class NotSupportedError(FrontendError):
 class UnsupportedNodeError(NotSupportedError):
     def __init__(self, ctx, offending_node):
         # If we don't have a specific token, we default to length of 1
-        range_len = len(node_start_tokens.get(type(offending_node), ' '))
+        node_type = type(offending_node)
+        range_len = len(node_start_tokens.get(node_type, ' '))
         source_range = ctx.make_range(offending_node.lineno,
                                       offending_node.col_offset,
                                       offending_node.col_offset + range_len)
@@ -183,15 +184,21 @@ class StmtBuilder(Builder):
     def get_assign_ident(ctx, expr):
         var = build_expr(ctx, expr)
         if not isinstance(var, Var):
-            raise NotSupportedError("the only expressions allowed on the left hand side of "
-                                    "assignments are variable names", var.range())
+            raise NotSupportedError(var.range(),
+                                    "the only expressions allowed on the left hand side of "
+                                    "assignments are variable names")
         return var.name
 
     @staticmethod
     def build_Assign(ctx, stmt):
-        return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in stmt.targets],
-                      '=',
-                      build_expr(ctx, stmt.value))
+        rhs = build_expr(ctx, stmt.value)
+        if len(stmt.targets) > 1:
+            start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
+            raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
+                                    "Performing multiple assignments in a single line isn't supported")
+        py_lhs = stmt.targets[0]
+        py_lhs_exprs = py_lhs.elts if isinstance(py_lhs, ast.Tuple) else [py_lhs]
+        return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in py_lhs_exprs], '=', rhs)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -234,11 +241,10 @@ class StmtBuilder(Builder):
         if stmt.dest:
             raise NotSupportedError(r, "print statements with non-default destinations aren't supported")
         args = [build_expr(ctx, val) for val in stmt.values]
-        return ExprStmt(Apply(Ident(r, "print"), args, []))
+        return ExprStmt(Apply(Var(Ident(r, "print")), args, []))
 
 
 class ExprBuilder(Builder):
-    _MethodRef = namedtuple('MethodRef', ['self', 'name'])
     binop_map = {
         ast.Add: '+',
         ast.Sub: '-',
@@ -278,27 +284,18 @@ class ExprBuilder(Builder):
         while source[pos] in _identifier_chars:  # Find the identifier itself
             pos += 1
         name_range = ctx.make_raw_range(start_pos, pos)
-        return ExprBuilder._MethodRef(value, Ident(name_range, expr.attr))
+        return Select(value, Ident(name_range, expr.attr))
 
     @staticmethod
     def build_Call(ctx, expr):
-        ref = build_expr(ctx, expr.func, allow_methods=True)
+        func = build_expr(ctx, expr.func)
         args = [build_expr(ctx, py_arg) for py_arg in expr.args]
         kwargs = []
         for kw in expr.keywords:
-            expr = build_expr(ctx, kw.value)
+            kw_expr = build_expr(ctx, kw.value)
             # XXX: we could do a better job at figuring out the range for the name here
-            kwargs.append(Attribute(Ident(expr.range(), kw.arg), expr))
-        if type(ref) is ExprBuilder._MethodRef:  # Method call
-            return Apply(ref.name, [ref.self] + args, kwargs)
-        elif isinstance(ref, Var):  # Top-level function call
-            return Apply(ref.name, args, kwargs)
-        else:
-            ref_range = ref.range()
-            parenthesis_range = find_after(ctx, ref_range.end, '(')
-            raise FrontendTypeError(
-                ctx.make_raw_range(ref_range.start, parenthesis_range.end),
-                "trying to call a non-function object")
+            kwargs.append(Attribute(Ident(kw_expr.range(), kw.arg), kw_expr))
+        return Apply(func, args, kwargs)
 
     @staticmethod
     def build_Name(ctx, expr):
@@ -369,18 +366,15 @@ class ExprBuilder(Builder):
         return result
 
     @staticmethod
+    def build_List(ctx, expr):
+        return ListLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+                           [build_expr(ctx, e) for e in expr.elts])
+
+    @staticmethod
     def build_Num(ctx, expr):
-        # TODO: fix this once we have a nice Number node in our AST
-        err_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
-        raise NotSupportedError(err_range, "scalar constants aren't supported")
-
-    def __call__(self, ctx, expr, allow_methods=False):
-        result = super(ExprBuilder, self).__call__(ctx, expr)
-        if type(result) is ExprBuilder._MethodRef and not allow_methods:
-            err_range = ctx.make_raw_range(result.self.range().start, result.name.range().end)
-            raise FrontendTypeError(err_range, "taking attributes/function values isn't supported")
-        return result
-
+        value = str(expr.n)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
+        return Const(r, value)
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()

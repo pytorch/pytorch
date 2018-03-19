@@ -32,6 +32,14 @@ static void test(Type & type) {
 
   {
     std::cout << "ones and dot:" << std::endl;
+    Tensor b0 = ones(type, {1, 1});
+    std::cout << b0 << std::endl;
+    ASSERT(2 == (b0+b0).sum().toCDouble());
+
+    Tensor b1 = ones(type, {1, 2});
+    std::cout << b1 << std::endl;
+    ASSERT(4 == (b1+b1).sum().toCDouble());
+
     Tensor b = ones(type, {3, 4});
     std::cout << b << std::endl;
     ASSERT(24 == (b+b).sum().toCDouble());
@@ -257,7 +265,62 @@ static void test(Type & type) {
     std::string expect = "1e-07 *";
     ASSERT(s.str().substr(0,expect.size()) == expect);
   }
-
+  {
+    // Indexing by Scalar
+    Tensor tensor = CPU(kInt).arange(0, 10);
+    Tensor one = CPU(kInt).ones({1});
+    for (int64_t i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    for (size_t i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * static_cast<int64_t>(i)));
+    }
+    for (int i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    for (int16_t i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    for (int8_t i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[i].equal(one * i));
+    }
+    try {
+      ASSERT(tensor[Scalar(3.14)].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+          std::string(error.what()) ==
+          "Can only index tensors with integral scalars (got CPUDoubleType)");
+    }
+  }
+  {
+    // Indexing by zero-dim tensor
+    Tensor tensor = CPU(kInt).arange(0, 10);
+    Tensor one = CPU(kInt).ones({});
+    for (int i = 0; i < tensor.numel(); ++i) {
+      ASSERT(tensor[one * i].equal(one * i));
+    }
+    try {
+      ASSERT(tensor[CPU(kFloat).ones({}) * 3.14].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+          std::string(error.what()) ==
+          "Can only index tensors with integral scalars (got CPUFloatType)");
+    }
+    try {
+      ASSERT(tensor[Tensor()].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+          std::string(error.what()) ==
+          "Can only index with tensors that are defined");
+    }
+    try {
+      ASSERT(tensor[CPU(kInt).ones({2, 3, 4})].equal(one));
+    } catch (const std::runtime_error& error) {
+      ASSERT(
+        std::string(error.what()) ==
+        "Can only index with tensors that are scalars (zero-dim)");
+    }
+  }
 }
 
 int main(int argc, char ** argv)

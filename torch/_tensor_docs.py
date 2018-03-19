@@ -1267,7 +1267,7 @@ repeat(*sizes) -> Tensor
 
 Repeats this tensor along the specified dimensions.
 
-Unlike :meth:`~Tensor.expand`, this function copies the tensor’s data.
+Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1288,6 +1288,19 @@ Example::
 
     torch.Size([4, 2, 3])
 
+""")
+
+add_docstr_all('reshape',
+               r"""
+reshape(*shape) -> Tensor
+
+Returns a tensor with the same data and number of elements as :attr:`self`,
+but with the specified shape.
+
+Args:
+    shape (tuple of ints or int...): the desired shape
+
+See :func:`torch.reshape`
 """)
 
 add_docstr_all('resize_',
@@ -1762,6 +1775,40 @@ trunc_() -> Tensor
 In-place version of :meth:`~Tensor.trunc`
 """)
 
+add_docstr_all('type',
+               r"""
+type(dtype=None, non_blocking=False, **kwargs) -> str or Tensor
+Returns the type if `dtype` is not provided, else casts this object to
+the specified type.
+
+If this is already of the correct type, no copy is performed and the
+original object is returned.
+
+Args:
+    dtype (type or string): The desired type
+    non_blocking (bool): If ``True``, and the source is in pinned memory
+        and destination is on the GPU or vice versa, the copy is performed
+        asynchronously with respect to the host. Otherwise, the argument
+        has no effect.
+    **kwargs: For compatibility, may contain the key ``async`` in place of
+        the ``non_blocking`` argument. The ``async`` arg is deprecated.
+""")
+
+add_docstr_all('type_as',
+               r"""
+type_as(tensor) -> Tensor
+
+Returns this tensor cast to the type of the given tensor.
+
+This is a no-op if the tensor is already of the correct type. This is
+equivalent to::
+
+    self.type(tensor.type())
+
+Params:
+    tensor (Tensor): the tensor which has the desired type
+""")
+
 add_docstr_all('unfold',
                r"""
 unfold(dim, size, step) -> Tensor
@@ -1970,4 +2017,18 @@ where(condition, y) -> Tensor
 
 ``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
 See :func:`torch.where`
+""")
+
+add_docstr_all('logdet',
+               r"""
+logdet() -> Tensor
+
+See :func:`torch.logdet`
+""")
+
+add_docstr_all('slogdet',
+               r"""
+slogdet() -> (Tensor, Tensor)
+
+See :func:`torch.slogdet`
 """)

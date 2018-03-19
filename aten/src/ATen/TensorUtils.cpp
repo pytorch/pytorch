@@ -162,6 +162,26 @@ void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType ty) {
   }
 }
 
+void checkScalarTypes(CheckedFrom c, const TensorArg& t,
+                      at::ArrayRef<ScalarType> l) {
+    if (std::find(l.begin(), l.end(), t->type().scalarType()) == l.end()) {
+      std::ostringstream oss;
+      oss << "Expected tensor for " << t << " to have one of the following "
+          << "scalar types: ";
+      size_t i = 0;
+      for (auto ty : l) {
+        if (i != 0) {
+          oss << ", ";
+        }
+        oss << toString(ty);
+        i++;
+      }
+      oss << "; but got " << t->toString()
+          << " instead (while checking arguments for " << c << ")";
+      throw std::runtime_error(oss.str());
+    }
+}
+
 void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors) {
   checkAllSame(c, tensors, checkSameType);
 }

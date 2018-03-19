@@ -32,6 +32,11 @@ ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
 
+# windef.h will define max/min macros if NOMINMAX is not defined
+IF(MSVC)
+  add_definitions(/DNOMINMAX)
+ENDIF(MSVC)
+
 #Check if certain std functions are supported. Sometimes
 #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
 CHECK_CXX_SOURCE_COMPILES("
@@ -445,7 +450,7 @@ if(NO_NNPACK)
 else()
   find_package(NNPACK)
   if(NOT NNPACK_FOUND)
-    MESSAGE(STATUS "NNPACK not found. Compiling without nNPACK support")
+    MESSAGE(STATUS "NNPACK not found. Compiling without NNPACK support")
     set(AT_NNPACK_ENABLED 0)
   ELSE()
     INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})

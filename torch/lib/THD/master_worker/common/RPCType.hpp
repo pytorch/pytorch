@@ -75,6 +75,9 @@ inline bool isObject(RPCType t) {
 template<typename T>
 struct type_traits {};
 
+// NOTE: The `type` static constexpr variables of these specializations are
+// additionally defined in master_worker/common/RPC.cpp to avoid undefined
+// reference errors in C++11.
 template<>
 struct type_traits<char> {
   static constexpr RPCType type = RPCType::CHAR;

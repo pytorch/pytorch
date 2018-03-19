@@ -5,8 +5,13 @@ import warnings
 
 import torch.onnx
 
+from functools import partial
+
 # EDITING THIS FILE? READ THIS FIRST!
 #
+# - This file is ONLY for ATen operators (e.g., operators that show up in the
+#   trace as aten::blah).  If you need to special case a primitive operator,
+#   look at _run_symbolic_function
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
 #   tensors are always first, then non-tensor arguments.
 # - Parameter names must *exactly* match the names in VariableType.cpp, because
@@ -116,11 +121,7 @@ _onnx_opset_version = 2
 
 # used to represent "missing" optional inputs
 def unused(g):
-    return g.op("Undefined")
-
-
-def Constant(g, value):
-    return g.op("Constant", value_t=value)
+    return g.op("prim::Undefined")
 
 
 def add(g, self, other, alpha):
@@ -207,6 +208,10 @@ def sum(g, self, dim=None, keepdim=None):
     return g.op("ReduceSum", self, axes_i=[dim], keepdims_i=keepdim)
 
 
+def cumsum(g, input, dim):
+    return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
+
+
 def prod(g, self, dim=None, keepdim=None):
     if dim is None:
         dims = None
@@ -221,13 +226,30 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
+# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size):
-    # TODO: This is not a real ONNX operator at the moment
-    return g.op("Expand", self, shape_i=size)
+    return None
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
     return g.op("Gather", weight, indices)
+
+
+def embedding_bag(g,
+                  embedding_matrix,
+                  indices,
+                  offsets,
+                  scale_grad_by_freq,
+                  mode,
+                  sparse):
+    return g.op("ATen",
+                embedding_matrix,
+                indices,
+                offsets,
+                operator_s="embedding_bag",
+                scale_grad_by_freq_i=scale_grad_by_freq,
+                mode_i=mode,
+                sparse_i=sparse)
 
 
 def transpose(g, self, dim0, dim1):
@@ -288,6 +310,10 @@ def squeeze(g, self, dim=None):
 
 def prelu(g, self, weight):
     return g.op("PRelu", self, weight)
+
+
+def relu(g, input):
+    return g.op("Relu", input)
 
 
 def threshold(g, self, threshold, value):
@@ -419,6 +445,21 @@ def upsample_nearest2d(g, input, scale_factor):
                 height_scale_f=scale_factor, mode_s="nearest")
 
 
+def upsample_bilinear2d(g, input, output_size):
+    w_scale = float(output_size[-1]) / input.type().sizes()[-1]
+    h_scale = float(output_size[-2]) / input.type().sizes()[-2]
+    return g.op("Upsample", input, width_scale_f=w_scale,
+                height_scale_f=h_scale, mode_s="bilinear")
+
+
+def gt(g, input, other):
+    return g.op("Greater", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
+def lt(g, input, other):
+    return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 
@@ -429,7 +470,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if bias.node().kind() != "Undefined" and len(bias.type().sizes()) == 1:
+    if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -450,7 +491,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if bias.node().kind() != "Undefined" and len(bias.type().sizes()) != 1:
+    if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) != 1:
         return g.op("Add", n, bias, broadcast_i=1, axis_i=1)
     else:
         return n
@@ -537,10 +578,59 @@ def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
+def _unique(g, input, sorted, return_inverse):
+    return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
+                return_inverse_i=return_inverse, outputs=2)
+
+
+# Metaprogram symbolics for each ATen native specialized cast operator.
+# For e.g. we specify a function named `_cast_uint8_t` that instantiates an
+# ONNX cast node with `to` attribute 'UINT8'
+#
+# TODO: remove these once we support Type's in the JIT IR and we can once again
+# use the unified toType operator
+cast_pytorch_to_onnx = {
+    'uint8_t': 'UINT8',
+    'int8_t': 'INT8',
+    'double': 'DOUBLE',
+    'float': 'FLOAT',
+    'Half': 'FLOAT16',
+    'int': 'INT32',
+    'int64_t': 'INT64',
+    'int16_t': 'INT16',
+}
+
+
+def _cast_func_template(to_s, g, input, non_blocking):
+    return g.op("Cast", input, to_s=to_s)
+
+
+for k, v in cast_pytorch_to_onnx.items():
+    name = '_cast_{}'.format(k)
+    globals()[name] = partial(_cast_func_template, v)
+
+
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def alias(g, self):
+    return self
+
+
+def unsqueeze(g, self, dim):
+    return g.op("Unsqueeze", self, axes_i=[dim])
+
+
+def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
+    if out is not None:
+        _unimplemented("TopK", "Out parameter is not supported for topk")
+    if not largest:
+        _unimplemented("TopK", "Ascending TopK is not supported")
+
+    return g.op("TopK", self, k_i=k, axis_i=dim, outputs=2)
 
 
 def instance_norm(g, input, **kwargs):
