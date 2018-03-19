@@ -74,7 +74,7 @@ fi
 
 if [[ "$BUILD_ENVIRONMENT" != *cuda* ]]; then
   echo "Testing ATen"
-  time tools/run_aten_tests.sh
+  ( unset LD_PRELOAD; time tools/run_aten_tests.sh )
 fi
 
 # Test C FFI plugins
@@ -99,7 +99,8 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7.2 ]]; then
   echo "Building libtorch with NO_PYTHON"
-  pushd tools/cpp_build || exit 1
-  bash build_all.sh
+  LIBTORCH_INSTALL_PREFIX=`pwd`/../libtorch
+  pushd tools/cpp_build
+  bash build_all.sh "$LIBTORCH_INSTALL_PREFIX" || exit 1
   popd
 fi
