@@ -132,6 +132,16 @@ class CuDNNPoolOp : public ConvPoolOpBase<CUDAContext> {
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&bottom_desc_));
     CUDNN_ENFORCE(cudnnCreateTensorDescriptor(&top_desc_));
     CUDNN_ENFORCE(cudnnCreatePoolingDescriptor(&pooling_desc_));
+    OPERATOR_NEEDS_FEATURE(kernel_.size() >=2 && kernel_.size() <=3,
+        "Cudnn pooling only supports 4d and 5d tensor");
+    if (legacy_pad_ != LegacyPadding::CAFFE_LEGACY_POOLING) {
+      for (int i = 0; i < kernel_.size(); ++i) {
+        OPERATOR_NEEDS_FEATURE(
+            pads_[i] == pads_[kernel_.size() + i],
+            "The current padding scheme leads to unequal padding on the left "
+            "and right, which is not supported by cudnn.");
+      }
+    }
     // Figure out the pooling descriptor.
     if (operator_def.type().substr(0, 7) == "MaxPool") {
       bool deterministic =
