@@ -10,7 +10,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 export PATH=/opt/conda/bin:$PATH
 
 if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-  export LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:$LD_LIBRARY_PATH
   export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
   # The ccache wrapper should be able to find the real nvcc
   export PATH="/usr/local/cuda/bin:$PATH"
