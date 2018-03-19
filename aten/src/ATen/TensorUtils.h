@@ -85,6 +85,7 @@ inline at::optional<at::Type*> unifyTypes(const Tensor& a, const Tensor& b) {
     auto result_scalar_type = promoteTypes(x.type().scalarType(), y.type().scalarType());
     return {&x.type().toScalarType(result_scalar_type)};
   };
+  if (!a.defined() || !b.defined()) return nullopt;
   if (a.type() == b.type())
     return nullopt;
   bool a_scalar = a.dim() == 0;
