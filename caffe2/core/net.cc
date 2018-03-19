@@ -104,14 +104,16 @@ bool NetBase::RunAsync() {
   return DoRunAsync();
 }
 
-static NetObserverCreator GlobalNetObserverCreator = [](NetBase* net) {
-  // A no-op ObserverBase<NetBase> observer
-  return std::unique_ptr<NetObserver>(new NetObserver(net));
-};
+namespace {
+std::vector<NetObserverCreator>* GetNetObserverCreators() {
+  static std::vector<NetObserverCreator> creators;
+  return &creators;
+}
+} // namespace
 
-void SetGlobalNetObserverCreator(NetObserverCreator creator) {
-  GlobalNetObserverCreator = creator;
-  VLOG(1) << "Have set custom GlobalNetObserverCreator";
+void AddGlobalNetObserverCreator(NetObserverCreator creator) {
+  GetNetObserverCreators()->push_back(creator);
+  VLOG(1) << "Have set a custom GlobalNetObserverCreator";
 }
 
 unique_ptr<NetBase> CreateNet(const NetDef& net_def, Workspace* ws) {
@@ -132,7 +134,10 @@ unique_ptr<NetBase> CreateNet(
   }
   VLOG(1) << "Adding a global observer to a net";
   if (net) {
-    net->AttachObserver(GlobalNetObserverCreator(net.get()));
+    auto* observer_creators = GetNetObserverCreators();
+    for (auto& creator : *observer_creators) {
+      net->AttachObserver(creator(net.get()));
+    }
   }
   return net;
 }
