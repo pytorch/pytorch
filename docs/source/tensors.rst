@@ -114,6 +114,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli_
    .. automethod:: bmm
    .. automethod:: byte
+   .. automethod:: btrifact
+   .. automethod:: btrifact_with_info
+   .. automethod:: btrisolve
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
@@ -134,6 +137,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: det
    .. automethod:: diag
    .. automethod:: dim
    .. automethod:: dist
@@ -196,6 +200,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lerp
    .. automethod:: lerp_
    .. automethod:: log
+   .. automethod:: logdet
    .. automethod:: log1p
    .. automethod:: log1p_
    .. automethod:: log_
@@ -273,6 +278,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sinh
    .. automethod:: sinh_
    .. automethod:: size
+   .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
    .. automethod:: sqrt
