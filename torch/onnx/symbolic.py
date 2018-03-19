@@ -357,8 +357,8 @@ def softmax(g, input, dim=None):
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
     if dim < 0:
-        check_dim = len(input.type().sizes()) + dim
-    if len(input.type().sizes()) != check_dim + 1:
+        dim = len(input.type().sizes()) + dim
+    if len(input.type().sizes()) != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op('Softmax', input, axis_i=dim)
 
