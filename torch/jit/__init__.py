@@ -462,6 +462,9 @@ def trace(*args, **kwargs):
         executor_options = {'optimize': True}
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
+        if len(kwargs) != 0:
+            raise TypeError("got unexpected keyword arguments: {}".format(",".join(kwargs.keys())))
+
         if isinstance(func, torch.nn.Module):
             module = TracedModule(func, **executor_options)
             module._create_method_from_trace('forward', func, args)
@@ -506,7 +509,8 @@ def createResolutionCallback(frame_id=2):
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
-        self.module = torch._C.ScriptModule(optimize)
+        self.module = torch._C.ScriptModule()
+        self.module._set_optimized(optimize)
         if lang is not None:
             self.define(lang, frame_id=3)
         self.optimize = optimize
@@ -673,25 +677,28 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
-        # prevent messing with original script module
-        if len(methods) > 0:
-            # after the user's __init__ register all the script methods
-            # with the module
-            original_init = getattr(cls, '__init__', lambda self: None)
+        # after the user's __init__ register all the script methods
+        # with the module
+        original_init = getattr(cls, '__init__', lambda self: None)
 
-            def init_then_register(self, *args, **kwargs):
-                original_init(self, *args, **kwargs)
-                for m in methods:
-                    self._create_method(m.ast, m.resolution_callback)
+        def init_then_register(self, *args, **kwargs):
+            # ensure even if the user forgets to call super that
+            # the pybind object is initialized so it will not segfault
+            # run this once, before the most-derived __init__ is called
+            if cls is type(self):
+                torch._C.ScriptModule.__init__(self)
+            original_init(self, *args, **kwargs)
+            for m in methods:
+                self._create_method(m.ast, m.resolution_callback)
 
-            cls.__init__ = init_then_register
+        cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __init__(self, optimize=True):
         Module.__init__(self)
-        torch._C.ScriptModule.__init__(self, optimize)
+        self._set_optimized(optimize)
         self._parameters = OrderedParameterDict(self)
         self._buffers = OrderedBufferDict(self)
         self._modules = OrderedModuleDict(self)
@@ -700,6 +707,9 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
         if self._has_method(attr):
             return self._get_method(attr)
         return Module.__getattr__(self, attr)
+
+    def __dir__(self):
+        return sorted(Module.__dir__(self) + self._method_names())
 
     # Module already has this method defined, so we
     # need to override it and send it through the ScriptModule lookup
@@ -771,6 +781,11 @@ class TracedModule(ScriptModule):
             self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
 
         self._freeze()
+
+    def forward(self, *args, **kwargs):
+        if self._has_method('forward'):
+            return self._get_method('forward')(*args, **kwargs)
+        raise RuntimeError('Trace submodules cannot be called.')
 
     def _freeze(self):
         self.__frozen = True

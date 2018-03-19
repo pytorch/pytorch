@@ -84,7 +84,7 @@ void initJITBindings(PyObject *module) {
                       variable_list inputs,
                       bool optimize) {
               size_t num_inputs = inputs.size();
-              auto graph = script::createGraphByTracing(func, std::move(inputs), num_inputs);
+              auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
               return GraphExecutor(graph, optimize);
           }),
           py::arg("func"),

@@ -126,8 +126,13 @@ private:
 // contains only the minimum necessary functionality for Module
 template<typename T>
 struct OrderedDict {
-  OrderedDict() {}
-  T& insert(const std::string& name,  T&& value, const char* what) {
+  OrderedDict(const char * what)
+  : what(what) {}
+  // note: slight difference from python here.
+  // we do not allow for insertion of an already existing value,
+  // because we not allow allow methods or submodules to be updated
+  // once created
+  T& insert(const std::string& name,  T&& value) {
     if(index_.count(name) != 0) {
       std::stringstream ss;
       ss << "module " << what << "'" << name << "' already defined.";
@@ -149,7 +154,7 @@ struct OrderedDict {
       return at::nullopt;
     return at::optional<const T&>(values_.at(it->second));
   }
-  T& get(const std::string& name, const char * what) {
+  T& get(const std::string& name) {
     if(auto v = find(name)) {
       return *v;
     }
@@ -157,7 +162,7 @@ struct OrderedDict {
     ss << "module " << what << "'" << name << "' is not defined.";
     throw std::runtime_error(ss.str());
   }
-  const T& get(const std::string& name, const char * what) const {
+  const T& get(const std::string& name) const {
     if(auto v = find(name)) {
       return *v;
     }
@@ -171,12 +176,22 @@ struct OrderedDict {
 private:
   std::unordered_map<std::string, size_t> index_;
   std::vector<T> values_;
+  const char * what;
 };
 
 struct Module : public std::enable_shared_from_this<Module> {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module(bool optimize)
-  : optimize(optimize) {}
+  Module()
+  : modules("modules")
+  , parameters("parameters")
+  , methods("methods")
+  , optimize(true) {}
+
+  // note this doesn't change the flags of existing methods just ones
+  // added afterward.
+  void set_optimized(bool o) {
+    optimize = o;
+  }
 
   void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
     if(auto p = parameters.find(name)){
@@ -184,10 +199,10 @@ struct Module : public std::enable_shared_from_this<Module> {
       p->is_buffer = is_buffer;
       return;
     }
-    parameters.insert(name, NamedParameter(name, std::move(v), is_buffer), "parameter");
+    parameters.insert(name, NamedParameter(name, std::move(v), is_buffer));
   }
   void register_module(const std::string& name, std::shared_ptr<Module> module) {
-    modules.insert(name, {name, std::move(module)}, "module");
+    modules.insert(name, {name, std::move(module)});
   }
 
   Method& create_method(const std::string & name, std::shared_ptr<Graph> graph = nullptr, std::vector<at::Tensor*> member_inputs = {}) {
@@ -195,11 +210,11 @@ struct Module : public std::enable_shared_from_this<Module> {
       graph = std::make_shared<Graph>();
     std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs)));
 
-    return *methods.insert(name, std::move(method), "method");
+    return *methods.insert(name, std::move(method));
   }
 
   at::Tensor* parameter_slot(const std::string & name) const {
-    return parameters.get(name, "parameter").slot();
+    return parameters.get(name).slot();
   }
 
   void set_parameter(const std::string & name, at::Tensor v) {
@@ -213,11 +228,11 @@ struct Module : public std::enable_shared_from_this<Module> {
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destoryed
   Method& get_method(const std::string& name) const {
-    return *methods.get(name, "method");
+    return *methods.get(name);
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    return modules.get(name, "module").module;
+    return modules.get(name).module;
   }
 
   const std::vector<NamedModule>& get_modules() const {
@@ -225,6 +240,9 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
   const  std::vector<NamedParameter>& get_parameters() const {
     return parameters.values();
+  }
+  const  std::vector<std::unique_ptr<Method>>& get_methods() const {
+    return methods.values();
   }
 
 

@@ -8,6 +8,7 @@
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
+#include "torch/csrc/utils/pybind.h"
 
 #include <memory>
 #include <mutex>
@@ -15,7 +16,6 @@
 #include <iostream>
 #include <cstdint>
 #include <unordered_map>
-
 
 namespace torch { namespace jit { namespace tracer {
 
@@ -249,5 +249,10 @@ PreTraceInfo preRecordPythonTrace(
     pyobj_list scalar_args);
 #endif
 void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
+
+std::shared_ptr<Graph> createGraphByTracing(
+        py::function func,
+        variable_list inputs,
+        size_t num_inputs);
 
 }}} // namespace torch::jit::tracer

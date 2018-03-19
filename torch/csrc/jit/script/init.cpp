@@ -1,6 +1,5 @@
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch {
 namespace jit {
@@ -136,11 +135,11 @@ struct ModuleValue : public SugaredValue {
 
   // select an attribute on it, e.g. `this.field`
   virtual std::shared_ptr<SugaredValue> attr(SourceRange loc, Method & m, const std::string& field) override {
-    if(auto v = module->find_module(field)) {
+    if(at::optional<NamedModule&> v = module->find_module(field)) {
       return std::make_shared<ModuleValue>(v->module);
-    } else if(auto v = module->find_method(field)) {
+    } else if(at::optional<Method&> v = module->find_method(field)) {
       return std::make_shared<MethodValue>(module, *v);
-    } else if(auto v = module->find_parameter(field)) {
+    } else if(at::optional<NamedParameter&> v = module->find_parameter(field)) {
       return std::make_shared<SimpleValue>(m.get_or_add_parameter(v->slot()));
     }
     // this can also be a call to a non-script module, if so return this as a python value
@@ -189,37 +188,12 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   }
 }
 
-// This is a temporary constructor so that we can write python tests of
-// the executor. It does not have most of the functionality of CompiledFunction
-// such as being able to hold parameters...
-std::shared_ptr<Graph> createGraphByTracing(
-        py::function func,
-        tracer::variable_list trace_inputs,
-        size_t num_func_inputs) {
-  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
-  py::tuple py_inputs(num_func_inputs);
-  for(size_t i = 0; i < num_func_inputs; ++i) {
-    py_inputs[i] = py::cast(enter_info.second[i]);
-  }
-  auto out = func(*py_inputs);
-  std::vector<autograd::Variable> outputs;
-  if(PyTuple_Check(out.ptr())) {
-    outputs = py::cast<std::vector<autograd::Variable>>(out);
-  } else {
-    outputs.push_back(py::cast<autograd::Variable>(out));
-  }
-  tracer::exit(outputs);
-  auto graph = enter_info.first->graph;
-  EliminateDeadCode(graph);
-  return graph;
-}
-
-static void gatherStateDict(std::vector<at::Tensor*> & values, const Module & m) {
+static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const Module & m) {
   for(auto & params : m.get_parameters()) {
     values.push_back(params.slot());
   }
   for(const auto & sub : m.get_modules()) {
-    gatherStateDict(values, *sub.module);
+    gatherParametersAndBuffers(values, *sub.module);
   }
 }
 
@@ -229,7 +203,8 @@ void initJitScriptBindings(PyObject* module) {
   // Methods here are prefixed with _ since they should not be
   // public.
   py::class_<Module, std::shared_ptr<Module>>(m, "ScriptModule")
-      .def(py::init<bool>())
+      .def(py::init<>())
+      .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
           [](Module& m,
@@ -259,10 +234,7 @@ void initJitScriptBindings(PyObject* module) {
         py::tuple result(modules.size());
         for(size_t i = 0; i < modules.size(); ++i) {
           auto & nm = modules[i];
-          py::tuple pair(2);
-          pair[0] = nm.name;
-          pair[1] = nm.module;
-          result[i] = pair;
+          result[i] = std::make_pair(nm.name, nm.module);
         }
         return result;
       })
@@ -272,10 +244,11 @@ void initJitScriptBindings(PyObject* module) {
         for(size_t i = 0; i < parameters.size(); ++i) {
           auto & p = parameters[i];
           py::tuple r(3);
-          r[0] = p.name;
-          r[1] = static_cast<const autograd::Variable&>(*p.slot());
-          r[2] = p.is_buffer;
-          result[i] = r;
+          result[i] = std::make_tuple(
+            p.name,
+            static_cast<const autograd::Variable&>(*p.slot()),
+            p.is_buffer);
+
         }
         return result;
       })
@@ -297,6 +270,13 @@ void initJitScriptBindings(PyObject* module) {
       .def("_has_method", [](Module& self, const std::string& name) {
         return bool(self.find_method(name));
       })
+      .def("_method_names", [](Module& self) {
+        std::vector<std::string> r;
+        for(auto& m : self.get_methods()) {
+          r.push_back(m->name());
+        }
+        return r;
+      })
       .def("_create_method_from_trace", [](
         Module& self,
         const std::string& name,
@@ -304,11 +284,11 @@ void initJitScriptBindings(PyObject* module) {
         tracer::variable_list inputs) {
           size_t num_inputs = inputs.size();
           std::vector<at::Tensor*> parameters;
-          gatherStateDict(parameters, self);
+          gatherParametersAndBuffers(parameters, self);
           for(at::Tensor* param : parameters) {
             inputs.push_back(static_cast<autograd::Variable&>(*param));
           }
-          auto graph = createGraphByTracing(func, std::move(inputs), num_inputs);
+          auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
           self.create_method(name, std::move(graph), std::move(parameters));
       });
 
