@@ -1,10 +1,10 @@
 #pragma once
+#include <ATen/ATen.h>
+#include <ATen/Parallel.h>
 #include "CapabilityDispatch.h"
-#include "Parallel.h"
 #include "Vec256.h"
 #include <stdexcept>
 
-#include "ATen/ATen.h"
 
 namespace at {
 namespace native {

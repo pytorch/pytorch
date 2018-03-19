@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ATen/ATenGeneral.h"
+#include <ATen/CPUGeneral.h>
 #include "ATen/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
@@ -93,6 +94,12 @@ AT_API Context & globalContext();
 
 static inline void init() {
   globalContext();
+  if (const char *env_p = std::getenv("OMP_NUM_THREADS")) {
+    at::set_num_threads(std::stoi(env_p));
+  }
+  if (const char *env_p = std::getenv("MKL_NUM_THREADS")) {
+    at::set_num_threads(std::stoi(env_p));
+  }
 }
 
 static inline Type& getType(Backend p, ScalarType s) {
