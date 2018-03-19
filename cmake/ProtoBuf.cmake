@@ -69,9 +69,6 @@ if ((NOT TARGET protobuf::libprotobuf) AND (NOT TARGET protobuf::libprotobuf-lit
   #     "Please set the proper paths so that I can find protobuf correctly.")
 endif()
 
-# TODO: enable using lite protobuf.
-list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS protobuf::libprotobuf)
-
 # Protobuf generated files use <> as inclusion path, so following normal
 # convention we will use SYSTEM inclusion path.
 get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
