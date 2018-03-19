@@ -101,7 +101,7 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   # and manually set the package name ourself.
   CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-cuda${CAFFE2_CUDA_VERSION}-cudnn${CAFFE2_CUDNN_VERSION}"
 fi
-if [[ -z GCC_USE_C11 ]]; then
+if [[ $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
 fi

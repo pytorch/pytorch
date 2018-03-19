@@ -13,6 +13,12 @@ RUN bash ./install_base.sh && rm install_base.sh
 ADD ./install_ccache.sh install_ccache.sh
 RUN bash ./install_ccache.sh && rm install_ccache.sh
 
+# (optional) Install non-default GCC version
+ARG GCC_VERSION
+ADD ./install_gcc.sh install_gcc.sh
+RUN if [ -n "${GCC_VERSION}" ]; then bash ./install_gcc.sh; fi
+RUN rm install_gcc.sh
+
 # Install NCCL for all CUDA builds
 ARG UBUNTU_VERSION
 ARG CUDA_VERSION
