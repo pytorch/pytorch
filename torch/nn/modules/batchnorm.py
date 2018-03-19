@@ -27,9 +27,9 @@ class _BatchNorm(Module):
             self.register_buffer('running_var', torch.ones(num_features))
             self.register_buffer('num_batches_tracked', torch.LongTensor([0]))
         else:
-            self.register_parameter('running_mean', None)
-            self.register_parameter('running_var', None)
-            self.register_parameter('num_batches_tracked', None)
+            self.register_buffer('running_mean', None)
+            self.register_buffer('running_var', None)
+            self.register_buffer('num_batches_tracked', None)
         self.reset_parameters()
 
     def reset_running_stats(self):
@@ -63,6 +63,16 @@ class _BatchNorm(Module):
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats,
             exponential_average_factor, self.eps)
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'track_running_stats'):
+            self.track_running_stats = True
+        if not hasattr(self, 'num_batches_tracked'):
+            if self.track_running_stats:
+                self.register_buffer('num_batches_tracked', torch.LongTensor([0]))
+            else:
+                self.register_buffer('num_batches_tracked', None)
 
     def __repr__(self):
         return ('{name}({num_features}, eps={eps}, momentum={momentum},'
