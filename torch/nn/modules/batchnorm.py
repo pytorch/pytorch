@@ -64,6 +64,16 @@ class _BatchNorm(Module):
             self.training or not self.track_running_stats,
             exponential_average_factor, self.eps)
 
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        if not hasattr(self, 'track_running_stats'):
+            self.track_running_stats = True
+        if not hasattr(self, 'num_batches_tracked'):
+            if self.track_running_stats:
+                self.register_buffer('num_batches_tracked', torch.LongTensor([0]))
+            else:
+                self.register_parameter('num_batches_tracked', None)
+
     def __repr__(self):
         return ('{name}({num_features}, eps={eps}, momentum={momentum},'
                 ' affine={affine}, track_running_stats={track_running_stats})'
