@@ -161,7 +161,7 @@ unique_ptr<NetBase> CreateNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws);
 
-void SetGlobalNetObserverCreator(NetObserverCreator creator);
+void AddGlobalNetObserverCreator(NetObserverCreator creator);
 
 } // namespace caffe2
 

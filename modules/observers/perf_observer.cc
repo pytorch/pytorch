@@ -10,7 +10,7 @@ namespace caffe2 {
 namespace {
 
 bool registerGlobalPerfNetObserverCreator(int* /*pargc*/, char*** /*pargv*/) {
-  SetGlobalNetObserverCreator([](NetBase* subject) {
+  AddGlobalNetObserverCreator([](NetBase* subject) {
     return caffe2::make_unique<PerfNetObserver>(subject);
   });
   return true;
