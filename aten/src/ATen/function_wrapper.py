@@ -302,9 +302,6 @@ class nested_dict(object):
             return r
         return self.parent[x]
 
-    def __setitem__(self, key, value):
-        return self.base.__setitem__(key, value)
-
 
 Environment = TypedDict('Environment', {
     'ScalarName': str,
