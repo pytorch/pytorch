@@ -2,10 +2,9 @@ import math
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import broadcast_all, lazy_property
+from torch.distributions.utils import lazy_property
 
 
 def _get_batch_shape(bmat, bvec):
@@ -107,7 +106,7 @@ class MultivariateNormal(Distribution):
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, loc, covariance_matrix=None, scale_tril=None):
+    def __init__(self, loc, covariance_matrix=None, scale_tril=None, validate_args=None):
         event_shape = torch.Size(loc.shape[-1:])
         if (covariance_matrix is None) == (scale_tril is None):
             raise ValueError("Exactly one of covariance_matrix or scale_tril may be specified (but not both).")
@@ -122,7 +121,7 @@ class MultivariateNormal(Distribution):
             self.scale_tril = scale_tril
             batch_shape = _get_batch_shape(scale_tril, loc)
         self.loc = loc
-        super(MultivariateNormal, self).__init__(batch_shape, event_shape)
+        super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     @lazy_property
     def scale_tril(self):
@@ -140,7 +139,8 @@ class MultivariateNormal(Distribution):
         return self.loc + _batch_mv(self.scale_tril, eps)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         diff = value - self.loc
         M = _batch_mahalanobis(self.scale_tril, diff)
         log_det = _batch_diag(self.scale_tril).abs().log().sum(-1)
