@@ -780,15 +780,20 @@ class LPPool2d(Module):
     - At p = :math:`\infty`, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
-    The parameters :attr:`kernel_size`, :attr:`stride` can either be:
+    The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding` can either be:
 
         - a single ``int`` -- in which case the same value is used for the height and width dimension
         - a ``tuple`` of two ints -- in which case, the first `int` is used for the height dimension,
           and the second `int` for the width dimension
 
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points.  This raises an error if :attr:`norm_type`:math:`\leq 0`,
+    as zero cannot be raised to non-positive powers.
+
     Args:
         kernel_size: the size of the window
         stride: the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
@@ -813,22 +818,24 @@ class LPPool2d(Module):
 
     """
 
-    def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
+    def __init__(self, norm_type, kernel_size, stride=None, padding=0, ceil_mode=False):
         super(LPPool2d, self).__init__()
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
+        self.padding = padding
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
         return F.lp_pool2d(input, self.norm_type, self.kernel_size,
-                           self.stride, self.ceil_mode)
+                           self.stride, self.padding, self.ceil_mode)
 
     def __repr__(self):
         return self.__class__.__name__ + '(' \
             + str(self.norm_type) + ', ' \
             + str(self.kernel_size) + ', ' \
             + 'stride=' + str(self.stride) + ', ' \
+            + 'padding=' + str(self.padding) + ', '\
             + 'ceil_mode=' + str(self.ceil_mode) + ')'
 
 
@@ -844,10 +851,16 @@ class LPPool1d(Module):
     - At p = infinity, one gets Max Pooling
     - At p = 1, one gets Sum Pooling (which is proportional to Average Pooling)
 
+    If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
+    for :attr:`padding` number of points.  This raises an error if :attr:`norm_type`:math:`\leq 0`,
+    as zero cannot be raised to non-positive powers.
+
     Args:
         kernel_size: a single int, the size of the window
         stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
+        padding: implicit zero padding to be added on both sides
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
@@ -864,22 +877,24 @@ class LPPool1d(Module):
         >>> output = m(input)
     """
 
-    def __init__(self, norm_type, kernel_size, stride=None, ceil_mode=False):
+    def __init__(self, norm_type, kernel_size, stride=None, padding=0, ceil_mode=False):
         super(LPPool1d, self).__init__()
         self.norm_type = norm_type
         self.kernel_size = kernel_size
         self.stride = stride
+        self.padding = padding
         self.ceil_mode = ceil_mode
 
     def forward(self, input):
         return F.lp_pool1d(input, self.norm_type, self.kernel_size,
-                           self.stride, self.ceil_mode)
+                           self.stride, self.padding, self.ceil_mode)
 
     def __repr__(self):
         return self.__class__.__name__ + '(' \
             + str(self.norm_type) + ', ' \
             + str(self.kernel_size) + ', ' \
             + 'stride=' + str(self.stride) + ', ' \
+            + 'padding=' + str(self.padding) + ', '\
             + 'ceil_mode=' + str(self.ceil_mode) + ')'
 
 

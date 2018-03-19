@@ -444,24 +444,28 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     return torch._C._nn.max_unpool3d(input, indices, output_size, stride, padding)
 
 
-def lp_pool2d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+def lp_pool2d(input, norm_type, kernel_size, stride=None, padding=0, ceil_mode=False):
     r"""Applies a 2D power-average pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
+    if norm_type <= 0 and padding != 0:
+        raise ValueError("Cannot have zero padding for a non-positive norm type.")
     kw, kh = utils._pair(kernel_size)
-    out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    out = avg_pool2d(input.pow(norm_type), kernel_size, stride, padding, ceil_mode)
     return out.mul(kw * kh).pow(1. / norm_type)
 
 
-def lp_pool1d(input, norm_type, kernel_size, stride=None, ceil_mode=False):
+def lp_pool1d(input, norm_type, kernel_size, stride=None, padding=0, ceil_mode=False):
     r"""Applies a 1D power-average pooling over an input signal composed of
     several input planes.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
-    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
+    if norm_type <= 0 and padding != 0:
+        raise ValueError("Cannot have zero padding for a non-positive norm type.")
+    out = avg_pool1d(input.pow(norm_type), kernel_size, stride, padding, ceil_mode)
     return out.mul(kernel_size).pow(1. / norm_type)
 
 
