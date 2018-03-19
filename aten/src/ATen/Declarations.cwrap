@@ -4062,7 +4062,6 @@
       output: True
     - TensorList tensors
     - arg: int64_t dim
-      wrap_dim: tensors
       default: 0
 ]]
 

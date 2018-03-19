@@ -364,8 +364,30 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
   return self;
 }
 
+
+// FIXME when empty tensors with arbitrary shapes is implemented
+// When using cat on empty tensors, the following is legacy behavior
+// when the non-empty `tensor` and `empty` do not have matching sizes:
+// 1) torch.cat([empty, tensor]) should ignore empty tensors
+// 2) torch.cat([tensor, empty]) should ignore empty tensors
+// 3) torch.cat([empty, empty, ..., empty]) should be empty
+// The following function wraps dim on the first non-empty shape
+// to preserve legacy behavior.
+static inline int64_t legacy_cat_wrap_dim(int64_t dim, const std::vector<std::vector<int64_t>>& tensor_sizes) {
+  if (tensor_sizes.size() == 0) {
+    return dim;
+  }
+  for (auto& sizes : tensor_sizes) {
+    if (sizes == std::vector<int64_t>({0})) {
+      continue;
+    }
+    return at::maybe_wrap_dim(dim, sizes.size());
+  }
+  return 0;
+}
+
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
-  dim = at::maybe_wrap_dim(dim, sizes);
+  dim = legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
   int64_t accumulate = 0;
   for (size_t i = 0; i < sizes.size(); ++i) {

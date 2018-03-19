@@ -2309,6 +2309,24 @@ class TestTorch(TestCase):
                                      'zero-dimensional.*cannot be concatenated'):
             torch.cat([x, y])
 
+    def test_cat_empty(self):
+        # FIXME: this is legacy behavior and should be removed
+        # when we support empty tensors with arbitrary sizes
+        x = torch.randn(4, 3, 32, 32)
+        empty = torch.randn(0)
+
+        res1 = torch.cat([x, empty], dim=1)
+        res2 = torch.cat([empty, x], dim=1)
+        self.assertEqual(res1, res2)
+
+        conv = torch.nn.Conv2d(3, 3, kernel_size=1)
+        res1 = torch.cat([conv(x), empty], dim=1)
+        res2 = torch.cat([empty, conv(x)], dim=1)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.cat([empty, empty], dim=1)
+        self.assertEqual(res1, empty)
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
