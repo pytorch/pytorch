@@ -308,8 +308,9 @@ class PowerTransform(Transform):
     bijective = True
     sign = +1
 
-    def __init__(self, exponent):
-        self.exponent = exponent
+    def __init__(self, exponent, cache_size=0):
+        super(PowerTransform, self).__init__(cache_size=cache_size)
+        self.exponent = broadcast_all(exponent)[0]
 
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):
@@ -323,7 +324,7 @@ class PowerTransform(Transform):
         return x.pow(self.exponent)
 
     def _inverse(self, y):
-        return x.pow(1 / self.exponent)
+        return y.pow(1 / self.exponent)
 
     def log_abs_det_jacobian(self, x, y):
         return self.exponent * y / x
