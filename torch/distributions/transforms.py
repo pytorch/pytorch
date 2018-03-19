@@ -1,6 +1,4 @@
 import weakref
-from fractions import Fraction
-from decimal import Decimal
 
 import torch
 from torch.autograd import Variable
@@ -305,51 +303,30 @@ class PowerTransform(Transform):
     r"""
     Transform via the mapping :math:`y = x^{\text{exponent}}`.
     """
+    domain = constraints.positive
+    codomain = constraints.positive
+    bijective = True
+    sign = +1
+
     def __init__(self, exponent):
         self.exponent = exponent
-
-    # Currently only implementing this for instances of numbers.Number
-    @constraints.dependent_property
-    def domain(self):
-        frac = Fraction(Decimal(str(self.exponent)))
-        if frac.denominator % 2 == 1:
-            return constraints.real
-        else:
-            return constraints.positive
-
-    @constraints.dependent_property
-    def codomain(self):
-        frac = Fraction(Decimal(str(self.exponent)))
-        if frac.numerator % 2 == 1:
-            return constraints.real
-        else:
-            return constraints.positive
-
-    @constraints.dependent_property
-    def bijective(self):
-        frac = Fraction(Decimal(str(self.exponent)))
-        if frac.numerator % 2 == 1 and frac.denominator % 2 == 1:
-            return True
-        else:
-            return False
 
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):
             return False
-        else:
-            if other.exponent == self.exponent:
-                return True
-            else:
-                return False
+        result = self.exponent.eq(other.exponent).all()
+        if isinstance(result, Variable):
+            result = result.data.view(-1)[0]
+        return result
 
     def _call(self, x):
         return x.pow(self.exponent)
 
     def _inverse(self, y):
-        if not self.bijective:
-            raise NotImplementedError
-        else:
-            x.pow(1 / self.exponent)
+        return x.pow(1 / self.exponent)
+
+    def log_abs_det_jacobian(self, x, y):
+        return self.exponent * y / x
 
 
 class SigmoidTransform(Transform):
