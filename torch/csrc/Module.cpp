@@ -110,6 +110,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
   THSetNumThreads((int)THPUtils_unpackLong(arg));
+  at::set_num_threads((int)THPUtils_unpackLong(arg));
   Py_RETURN_NONE;
 }
 
