@@ -35,7 +35,8 @@ backend_test = onnx.backend.test.BackendTest(c2, __name__)
 
 backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_mean|test_hardmax'  # Does not support Mean and Hardmax.
-                     '|test_cast.*FLOAT16.*)')  # Does not support Cast on Float16.
+                     '|test_cast.*FLOAT16.*'  # Does not support Cast on Float16.
+                     '|test_averagepool_.*same.*)')  # Does not support Cast on Float16.
 
 # Skip vgg to speed up CI
 if 'JENKINS_URL' in os.environ:
