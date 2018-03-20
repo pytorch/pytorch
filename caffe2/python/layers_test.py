@@ -1699,3 +1699,74 @@ class TestLayers(LayersTestCase):
         # Eval net assertions
         eval_net = self.get_eval_net()
         self.assertNetContainOps(eval_net, [conv_spec])
+
+    @given(
+        num=st.integers(min_value=10, max_value=100),
+        feed_weight=st.booleans(),
+        **hu.gcs
+    )
+    def testAdaptiveWeight(self, num, feed_weight, gc, dc):
+        input_record = self.new_record(schema.RawTuple(num))
+        data = np.random.random(num)
+        schema.FeedRecord(
+            input_record,
+            [np.array(x).astype(np.float32) for x in data]
+        )
+        weights = np.random.random(num) if feed_weight else None
+        result = self.model.AdaptiveWeight(input_record, weights=weights)
+        train_init_net, train_net = self.get_training_nets(True)
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        result = workspace.FetchBlob(result())
+        if not feed_weight:
+            weights = 1. / num
+        expected = np.sum(weights * data + np.log(1. / 2. / weights))
+        npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
+
+    @given(num=st.integers(min_value=10, max_value=100), **hu.gcs)
+    def testConstantWeight(self, num, gc, dc):
+        input_record = self.new_record(schema.RawTuple(num))
+        data = np.random.random(num)
+        schema.FeedRecord(
+            input_record, [np.array(x).astype(np.float32) for x in data]
+        )
+        weights = np.random.random(num)
+        result = self.model.ConstantWeight(input_record, weights=weights)
+        train_init_net, train_net = self.get_training_nets(True)
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        result = workspace.FetchBlob(result())
+        expected = np.sum(weights * data)
+        npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
+
+    @given(**hu.gcs)
+    def testHomotopyWeight(self, gc, dc):
+        input_record = self.new_record(schema.RawTuple(2))
+        data = np.random.random(2)
+        schema.FeedRecord(
+            input_record, [np.array(x).astype(np.float32) for x in data]
+        )
+        half_life = int(np.random.random() * 1e2)
+        quad_life = int(np.random.random() * 1e3 + 2 * half_life)
+        result = self.model.HomotopyWeight(
+            input_record,
+            min_weight=0.,
+            max_weight=1.,
+            half_life=half_life,
+            quad_life=quad_life,
+        )
+        train_init_net, train_net = self.get_training_nets(True)
+        workspace.RunNetOnce(train_init_net)
+        workspace.CreateNet(train_net)
+        workspace.RunNet(train_net.Name(), num_iter=half_life)
+        half_life_result = workspace.FetchBlob(result())
+        workspace.RunNet(train_net.Name(), num_iter=quad_life - half_life)
+        quad_life_result = workspace.FetchBlob(result())
+        expected_half_life_result = 0.5 * data[0] + 0.5 * data[1]
+        expected_quad_life_result = 0.25 * data[0] + 0.75 * data[1]
+        npt.assert_allclose(
+            expected_half_life_result, half_life_result, atol=1e-2, rtol=1e-2
+        )
+        npt.assert_allclose(
+            expected_quad_life_result, quad_life_result, atol=1e-2, rtol=1e-2
+        )
