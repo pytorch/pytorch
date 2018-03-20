@@ -1052,6 +1052,10 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
   }
 }
 
+static inline bool has_different_sign(real a, real b) {
+  return (a < 0) != (b < 0);
+}
+
 void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
@@ -1070,7 +1074,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       rp[i] = tp[i] % value;
-      if ((rp[i] < 0) != (value < 0))
+      if (has_different_sign(rp[i], value))
         rp[i] += value;
 #endif
     }
@@ -1085,7 +1089,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data % value;
-                                        if ((*r__data < 0) != (value < 0)) *r__data += value;);
+                                        if (has_different_sign(*r__data, value)) *r__data += value;);
 #endif
     }
 #else
@@ -1098,7 +1102,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
-                                          if ((*r__data < 0) != (value < 0)) *r__data += value;);
+                                          if (has_different_sign(*r__data, value)) *r__data += value;);
 #endif
   }
 }

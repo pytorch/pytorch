@@ -245,14 +245,14 @@ struct TensorRemainderOp {
   TensorRemainderOp(T v) : val(v) {}
   __device__ __forceinline__ void operator()(T* out, T* in) {
     *out = *in % val;
-    if ((*out < 0) != (val < 0)){
+    if (has_different_sign<T>(*out, val)){
       *out += val;
     }
   }
 
   __device__ __forceinline__ void operator()(T* v) {
     *v = *v % val;
-    if ((*v < 0) != (val < 0)){
+    if (has_different_sign<T>(*v, val)){
       *v += val;
     }
   }
