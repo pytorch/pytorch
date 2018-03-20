@@ -245,14 +245,14 @@ struct TensorRemainderOp {
   TensorRemainderOp(T v) : val(v) {}
   __device__ __forceinline__ void operator()(T* out, T* in) {
     *out = *in % val;
-    if ((*out * val) < 0){
+    if ((*out < 0) != (val < 0)){
       *out += val;
     }
   }
 
   __device__ __forceinline__ void operator()(T* v) {
     *v = *v % val;
-    if ((*v * val) < 0){
+    if ((*v < 0) != (val < 0)){
       *v += val;
     }
   }
