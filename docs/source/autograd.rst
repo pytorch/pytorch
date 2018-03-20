@@ -20,21 +20,8 @@ Locally disabling gradient computation
 
 .. autoclass:: set_grad_enabled
 
-Variable
---------
-
-API compatibility
-^^^^^^^^^^^^^^^^^
-
-Variable API is nearly the same as regular Tensor API (with the exception
-of a couple in-place methods, that would overwrite inputs required for
-gradient computation). In most cases Tensors can be safely replaced with
-Variables and the code will remain to work just fine. Because of this,
-we're not documenting all the operations on variables, and you should
-refer to :class:`torch.Tensor` docs for this purpose.
-
-In-place operations on Variables
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+In-place operations on Tensors
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Supporting in-place operations in autograd is a hard matter, and we discourage
 their use in most cases. Autograd's aggressive buffer freeing and reuse makes
@@ -43,27 +30,38 @@ actually lower memory usage by any significant amount. Unless you're operating
 under heavy memory pressure, you might never need to use them.
 
 In-place correctness checks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------
 
-All :class:`Variable` s keep track of in-place operations applied to them, and
-if the implementation detects that a variable was saved for backward in one of
+All :class:`Tensor` s keep track of in-place operations applied to them, and
+if the implementation detects that a tensor was saved for backward in one of
 the functions, but it was modified in-place afterwards, an error will be raised
 once backward pass is started. This ensures that if you're using in-place
 functions and not seeing any errors, you can be sure that the computed
 gradients are correct.
 
+Variable (deprecated)
+^^^^^^^^^^^^^^^^^^^^^
 
+.. warning::
+    The Variable API has been deprecated: Variables are no longer necessary to
+    use autograd with tensors. Autograd automatically supports Tensors with
+    ``requires_grad`` set to ``True``. In addition, ``Variable(tensor)`` now returns
+    a :class:`torch.Tensor`.
+
+..  FIXME: the below section details Variable methods that pertain to autograd, like
+    detach. It would nice to have something similar for Tensor.
 .. autoclass:: Variable
     :members:
 
+
 :hidden:`Function`
-------------------
+^^^^^^^^^^^^^^^^^
 
 .. autoclass:: Function
     :members:
 
 Profiler
---------
+^^^^^^^^
 
 Autograd includes a profiler that lets you inspect the cost of different
 operators inside your model - both on the CPU and GPU. There are two modes
