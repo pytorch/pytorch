@@ -33,7 +33,14 @@ specified number. All input and output indices are enforced to be positive.
     .Input(0, "Indices", "Input feature indices.")
     .Output(0, "HashedIndices", "Hashed feature indices.")
     .Arg("seed", "seed for the hash function")
-    .Arg("modulo", "must be > 0, hashed ids will be modulo this number");
+    .Arg("modulo", "must be > 0, hashed ids will be modulo this number")
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      std::vector<TensorShape> out(1);
+      std::vector<TIndex> output_dims = GetDimsVector(in[0]);
+      out[0] = CreateTensorShape(output_dims, in[0].data_type());
+      return out;
+    });
 
 SHOULD_NOT_DO_GRADIENT(IndexHash);
 

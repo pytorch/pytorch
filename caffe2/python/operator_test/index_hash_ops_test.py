@@ -17,7 +17,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
-from caffe2.python import core
+from caffe2.python import core, workspace
 from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
@@ -53,3 +53,26 @@ class TestIndexHashOps(hu.HypothesisTestCase):
 
         self.assertDeviceChecks(dc, op, [indices], [0])
         self.assertReferenceChecks(gc, op, [indices], index_hash)
+
+    def test_shape_and_type_inference(self):
+        with hu.temp_workspace("shape_type_inf_int64"):
+            net = core.Net('test_net')
+            net.ConstantFill(
+                [], "values", shape=[64], dtype=core.DataType.INT64,
+            )
+            net.IndexHash(['values'], ['values_output'])
+            (shapes, types) = workspace.InferShapesAndTypes([net], {})
+
+            self.assertEqual(shapes["values_output"], [64])
+            self.assertEqual(types["values_output"], core.DataType.INT64)
+
+        with hu.temp_workspace("shape_type_inf_int32"):
+            net = core.Net('test_net')
+            net.ConstantFill(
+                [], "values", shape=[2, 32], dtype=core.DataType.INT32,
+            )
+            net.IndexHash(['values'], ['values_output'])
+            (shapes, types) = workspace.InferShapesAndTypes([net], {})
+
+            self.assertEqual(shapes["values_output"], [2, 32])
+            self.assertEqual(types["values_output"], core.DataType.INT32)
