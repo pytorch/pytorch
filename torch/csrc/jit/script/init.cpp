@@ -271,11 +271,9 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        std::vector<std::string> r;
-        for(auto& m : self.get_methods()) {
-          r.push_back(m->name());
-        }
-        return r;
+        return fmap(self.get_methods(), [](const std::unique_ptr<Method> & m) {
+          return m->name();
+        });
       })
       .def("_create_method_from_trace", [](
         Module& self,

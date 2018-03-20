@@ -463,7 +463,7 @@ def trace(*args, **kwargs):
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
         if len(kwargs) != 0:
-            raise TypeError("got unexpected keyword arguments: {}".format(",".join(kwargs.keys())))
+            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         if isinstance(func, torch.nn.Module):
             module = TracedModule(func, **executor_options)
