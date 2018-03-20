@@ -12,8 +12,8 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Abs|Yes|OK|&#x1F49A;OK|
 |Add|Yes|OK|&#x1F49A;OK|
 |And|Yes|Support int tensor, but no bool tensor|&#x1F49A;OK|
-|ArgMax|||&#x1F494;No op|
-|ArgMin|||&#x1F494;No op|
+|ArgMax|||&#x1F49B;About to land|
+|ArgMin|||&#x1F49B;About to land|
 |AveragePool||OK|&#x1F49A;OK|
 |BatchNormalization||OK|&#x1F49A;OK|
 |Cast|Yes||&#x1F494;Need extendtion|
