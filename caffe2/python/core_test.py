@@ -605,6 +605,31 @@ class TestInferDevice(test_util.TestCase):
             op_option=self.cpu_option
         )
 
+    def test_device_inference_function(self):
+        # ConcatOp.
+        op_option = self.cuda_option
+        with core.DeviceScope(op_option):
+            op = core.CreateOperator(
+                'Concat',
+                ['X_{}'.format(i) for i in range(4)],
+                ['concat_result', 'split_info'],
+                axis=1)
+        input_dev, output_dev = core.InferOpBlobDevices(op)
+        # 2nd output's type is CPU irrespective of Concat op's device option.
+        self.assertEqual(output_dev[1], self.cpu_option)
+
+        #SplitOp.
+        op_option = self.cuda_option
+        with core.DeviceScope(op_option):
+            op = core.CreateOperator(
+                'Split',
+                ['input', 'split'],
+                ['X_{}'.format(i) for i in range(4)],
+                axis=0)
+        input_dev, output_dev = core.InferOpBlobDevices(op)
+        # 2nd input's type is CPU irrespective of Split op's device option.
+        self.assertEqual(input_dev[1], self.cpu_option)
+
     def test_inject_copy(self):
         net = core.Net("test")
         init_net = core.Net("init")

@@ -17,8 +17,24 @@
 #include "caffe2/operators/concat_split_op.h"
 
 namespace caffe2 {
+namespace {
+std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>> splitOpDevInfer(
+    const OperatorDef& def) {
+  auto op_device =
+      def.has_device_option() ? def.device_option() : DeviceOption();
+  vector<DeviceOption> in_dev(def.input_size(), op_device);
+  vector<DeviceOption> out_dev(def.output_size(), op_device);
+
+  // If we obtain split from input tensor, then 2nd input's type is always CPU.
+  if (def.input_size() == SplitOp<CPUContext>::kSplitOpInputSize) {
+    CAFFE_ENFORCE_GT(in_dev.size(), 1);
+    in_dev[1] = DeviceOption();
+  }
+  return std::make_pair(in_dev, out_dev);
+}
+} // namespace.
+
 REGISTER_CPU_OPERATOR(Split, SplitOp<CPUContext>);
-REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
 OPERATOR_SCHEMA(Split)
     .NumInputs(1, 2)
     .NumOutputs(1, INT_MAX)
@@ -27,6 +43,7 @@ OPERATOR_SCHEMA(Split)
     .Arg("axis", "Which axis to split on")
     .Arg("split", "length of each output")
     .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
+    .DeviceInferenceFunction(splitOpDevInfer)
     .SetDoc(R"DOC(
 Split a tensor into a list of tensors, along the specified
 'axis'. The lengths of the split can be specified using argument 'split' or
@@ -65,13 +82,29 @@ OpSchema::Cost CostInferenceForConcat(
   cost.params_bytes = 0;
   return cost;
 }
+
+std::pair<std::vector<DeviceOption>, std::vector<DeviceOption>>
+concatOpDevInfer(const OperatorDef& def) {
+  auto op_device =
+      def.has_device_option() ? def.device_option() : DeviceOption();
+  vector<DeviceOption> in_dev(def.input_size(), op_device);
+  vector<DeviceOption> out_dev(def.output_size(), op_device);
+
+  // 2nd output's type is always CPU irrespective of op's device option.
+  CAFFE_ENFORCE_GT(out_dev.size(), 1);
+  out_dev[1] = DeviceOption();
+  return std::make_pair(in_dev, out_dev);
+}
 } // namespace
 
+REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
 OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
     .Arg("axis", "Which axis to concat on")
-    .Arg("order", "Either NHWC or NCHW, will concat on C axis, defaults to NCHW")
+    .Arg(
+        "order",
+        "Either NHWC or NCHW, will concat on C axis, defaults to NCHW")
     .Arg(
         "add_axis",
         "Pass 1 to add the axis specified in arg 'axis' to all "
@@ -148,6 +181,7 @@ OPERATOR_SCHEMA(Concat)
           CreateTensorShape(split_shape, TensorProto::INT32)};
     })
     .CostInferenceFunction(CostInferenceForConcat)
+    .DeviceInferenceFunction(concatOpDevInfer)
     .SetDoc("Concatenate a list of tensors into a single tensor")
     .Output(0, "concat_result", "Concatenated tensor")
     .Output(1, "split_info", "The dimensions of the inputs.");
@@ -177,7 +211,9 @@ class GetSplitGradient : public GradientMakerBase {
       return {};
     }
     return SingleGradientDef(
-        "Concat", "", output_grads,
+        "Concat",
+        "",
+        output_grads,
         vector<string>{GI(0), "_" + GI(0) + "_dims"});
   }
 };
@@ -194,10 +230,9 @@ class GetConcatGradient : public GradientMakerBase {
     for (int i = 0; i < def_.input_size(); ++i) {
       grads.push_back(GI(i));
     }
-    return SingleGradientDef(
-        "Split", "", vector<string>{GO(0), O(1)}, grads);
+    return SingleGradientDef("Split", "", vector<string>{GO(0), O(1)}, grads);
   }
 };
 REGISTER_GRADIENT(Concat, GetConcatGradient);
 REGISTER_GRADIENT(DepthConcat, GetConcatGradient);
-}  // namespace caffe2
+} // namespace caffe2
