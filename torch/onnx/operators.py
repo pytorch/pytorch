@@ -1,5 +1,7 @@
-r"""
-This file provides a location for operators that help exporting models via onnx. E.g. shape_as_tensor and reshape_from_tensor_shape are to make all dynamic sizes operations traceble.
+r"""This file provides a location for operators that help exporting
+models via onnx. E.g. shape_as_tensor and reshape_from_tensor_shape
+are to make all dynamic sizes operations traceble.
+
 """
 
 import torch
