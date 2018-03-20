@@ -69,7 +69,7 @@ class LayersTestCase(test_util.TestCase):
     def new_record(self, schema_obj):
         return schema.NewRecord(self.model.net, schema_obj)
 
-    def get_training_nets(self):
+    def get_training_nets(self, add_constants=False):
         """
         We don't use
         layer_model_instantiator.generate_training_nets_forward_only()
@@ -77,7 +77,10 @@ class LayersTestCase(test_util.TestCase):
         testing tricky
         """
         train_net = core.Net('train_net')
-        train_init_net = core.Net('train_init_net')
+        if add_constants:
+            train_init_net = self.model.create_init_net('train_init_net')
+        else:
+            train_init_net = core.Net('train_init_net')
         for layer in self.model.layers:
             layer.add_operators(train_net, train_init_net)
         return train_init_net, train_net
