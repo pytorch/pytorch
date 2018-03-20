@@ -117,8 +117,12 @@ class OperatorBase : public Observable<OperatorBase> {
     return outputs_.at(idx)->template IsType<T>();
   }
 
-  inline int InputSize() { return inputs_.size(); }
-  inline int OutputSize() { return outputs_.size(); }
+  inline int InputSize() const {
+    return inputs_.size();
+  }
+  inline int OutputSize() const {
+    return outputs_.size();
+  }
   inline const vector<const Blob*>& Inputs() const { return inputs_; }
   inline const vector<Blob*>& Outputs() { return outputs_; }
   vector<TensorShape> InputTensorShapes();
