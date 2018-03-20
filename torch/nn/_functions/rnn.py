@@ -23,7 +23,7 @@ def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    if input.is_cuda:
+    if fusedBackend.LSTMFused:
         igates = F.linear(input, w_ih)
         hgates = F.linear(hidden[0], w_hh)
         state = fusedBackend.LSTMFused.apply
@@ -47,7 +47,7 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
-    if input.is_cuda:
+    if fusedBackend.GRUFused:
         gi = F.linear(input, w_ih)
         gh = F.linear(hidden, w_hh)
         state = fusedBackend.GRUFused.apply
