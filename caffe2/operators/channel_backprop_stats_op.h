@@ -38,6 +38,9 @@ class ChannelBackpropStatsOp : public Operator<Context> {
  protected:
   INPUT_TAGS(INPUT, SAVED_MEAN, SAVED_INV_STDDEV, OUTPUT_GRAD);
   OUTPUT_TAGS(SCALE_GRAD, BIAS_GRAD);
+
+  Tensor<Context> dBiasScratch_;
+  Tensor<Context> dScaleScratch_;
 };
 
 } // namespace caffe2

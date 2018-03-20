@@ -36,7 +36,6 @@ class TestChannelBackpropStats(hu.HypothesisTestCase):
     )
     def testChannelBackpropStats(self, size, inputChannels, batchSize, gc, dc):
 
-        assume(gc.device_type != caffe2_pb2.CUDA)
         op = core.CreateOperator(
             "ChannelBackpropStats",
             ["X", "mean", "invStdDev", "outputGrad"],
