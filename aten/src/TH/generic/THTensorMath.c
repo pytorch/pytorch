@@ -1070,7 +1070,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       rp[i] = tp[i] % value;
-      if (rp[i] * value < 0)
+      if ((rp[i] < 0) != (value < 0))
         rp[i] += value;
 #endif
     }
@@ -1085,7 +1085,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data % value;
-                                        if (*r__data * value < 0) *r__data += value;);
+                                        if ((*r__data < 0) != (value < 0)) *r__data += value;);
 #endif
     }
 #else
@@ -1098,7 +1098,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
-                                          if (*r__data * value < 0) *r__data += value;);
+                                          if ((*r__data < 0) != (value < 0)) *r__data += value;);
 #endif
   }
 }
