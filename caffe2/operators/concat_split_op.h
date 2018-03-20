@@ -42,12 +42,15 @@ inline int GetDimFromOrderString(const string& str) {
 template <class Context>
 class SplitOp final : public Operator<Context> {
  public:
+  static const int kSplitOpInputSize = 2;
+
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   SplitOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
         split_(OperatorBase::GetRepeatedArgument<int>("split")) {
     CAFFE_ENFORCE(
-      !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
+        !(OperatorBase::HasArgument("axis") &&
+          OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to split, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
@@ -78,7 +81,8 @@ class ConcatOp final : public Operator<Context> {
   ConcatOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
     CAFFE_ENFORCE(
-      !(OperatorBase::HasArgument("axis") && OperatorBase::HasArgument("order")),
+        !(OperatorBase::HasArgument("axis") &&
+          OperatorBase::HasArgument("order")),
         "You shouldn't specify both the dim to concat, and the order "
         "in the case of 4-D images.");
     if (OperatorBase::HasArgument("axis")) {
@@ -110,7 +114,7 @@ bool SplitOp<Context>::RunOnDevice() {
   const int input_channels = input.dim32(canonical_axis);
   const int* axis_data;
   vector<int> equal_split;
-  if (InputSize() == 2) {
+  if (InputSize() == kSplitOpInputSize) {
     // We obtain split from the input tensor.
     CAFFE_ENFORCE_EQ(
         split_.size(),
@@ -187,10 +191,7 @@ bool ConcatOp<Context>::RunOnDevice() {
   auto& input_zero = Input(0);
   int adj_size = input_zero.ndim() + (add_axis_ ? 1 : 0);
   int canonical_axis = canonical_axis_index_(axis_, adj_size);
-  CAFFE_ENFORCE_LT(
-      canonical_axis,
-      adj_size,
-      "Axis not in input ndim range.");
+  CAFFE_ENFORCE_LT(canonical_axis, adj_size, "Axis not in input ndim range.");
   for (int i = 1; i < InputSize(); ++i) {
     CAFFE_ENFORCE(
         Input(i).meta() == input_zero.meta(),
