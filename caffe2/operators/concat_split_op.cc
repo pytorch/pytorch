@@ -29,7 +29,7 @@ OPERATOR_SCHEMA(Split)
     .Arg("order", "Either NHWC or NCWH, will split on C axis, defaults to NCHW")
     .SetDoc(R"DOC(
 Split a tensor into a list of tensors, along the specified
-'axis'. The lengths of the split can be specified using argument 'axis' or
+'axis'. The lengths of the split can be specified using argument 'split' or
 optional second input blob to the operator. Otherwise, the tensor is split
 to equal sized parts.
 )DOC");
