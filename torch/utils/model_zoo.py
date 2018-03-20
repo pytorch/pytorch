@@ -9,7 +9,7 @@ import tempfile
 
 try:
     from requests.utils import urlparse
-    import requests.get as urlopen
+    from requests import get as urlopen
     requests_available = True
 except ImportError:
     requests_available = False
