@@ -84,6 +84,7 @@ class NetBuilder(object):
             net = self.current_net()
             self._stop_blob = core.BlobReference(
                 net.NextName('stop_blob'), net=net)
+            net.Const(False, blob_out=self._stop_blob)
             if self._current_net != self._children[0]:
                 self._children.insert(0, core.Net('stop_blob_init'))
                 self._children[0].Const(False, blob_out=self._stop_blob)
@@ -92,7 +93,8 @@ class NetBuilder(object):
     def stop_if(self, blob):
         assert not self._use_control_ops, \
             'Stop blobs are not used with control operators'
-        ops.Copy(blob, self.stop_blob())
+        stop_blob = self.stop_blob()
+        ops.Or([stop_blob, blob], [stop_blob])
         self._current_net = None
 
     def _assert_mutable(self):
