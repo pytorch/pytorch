@@ -33,17 +33,22 @@ class ComputeNormForBlobs(NetModifier):
         blobs: list of blobs to compute norm for
         logging_frequency: frequency for printing norms to logs
         p: type of norm. Currently it supports p=1 or p=2
+        compute_averaged_norm: norm or averaged_norm (averaged_norm = norm/size)
     """
 
-    def __init__(self, blobs, logging_frequency, p=2):
+    def __init__(self, blobs, logging_frequency, p=2, compute_averaged_norm=False):
         self._blobs = blobs
         self._logging_frequency = logging_frequency
         self._p = p
+        self._compute_averaged_norm = compute_averaged_norm
         self._field_name_suffix = '_l{}_norm'.format(p)
+        if compute_averaged_norm:
+            self._field_name_suffix = '_averaged' + self._field_name_suffix
 
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
 
         p = self._p
+        compute_averaged_norm = self._compute_averaged_norm
 
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
@@ -52,7 +57,7 @@ class ComputeNormForBlobs(NetModifier):
                     blob, net.Name()))
 
             norm_name = net.NextScopedBlob(prefix=blob + self._field_name_suffix)
-            norm = net.LpNorm(blob, norm_name, p=p)
+            norm = net.LpNorm(blob, norm_name, p=p, average=compute_averaged_norm)
 
             if self._logging_frequency >= 1:
                 net.Print(norm, [], every_n=self._logging_frequency)
