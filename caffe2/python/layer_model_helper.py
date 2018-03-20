@@ -96,6 +96,8 @@ class LayerModelHelper(model_helper.ModelHelper):
         ) if not keep_blobs else trainer_extra_schema.clone()
         self._metrics_schema = schema.Struct()
 
+        self._preproc_output_schema = None
+
         self._init_global_constants()
         self.param_init_net = self.create_init_net('param_init_net')
         self._initialize_params = True
@@ -399,6 +401,16 @@ class LayerModelHelper(model_helper.ModelHelper):
     def output_schema(self, schema):
         assert self._output_schema is None
         self._output_schema = schema
+
+    @property
+    def preproc_output_schema(self):
+        assert self._preproc_output_schema is not None
+        return self._preproc_output_schema
+
+    @preproc_output_schema.setter
+    def preproc_output_schema(self, schema):
+        assert self._preproc_output_schema is None
+        self._preproc_output_schema = schema
 
     @property
     def loss(self):
