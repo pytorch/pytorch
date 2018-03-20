@@ -23,7 +23,7 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Constant|Yes|OK|&#x1F49B;Special handling|
 |Conv|Yes|OK|&#x1F49A;OK|
 |ConvTranspose|Yes||&#x1F49A;OK|
-|DepthToSpace|||&#x1F49B;Should be BatchToSpace, no tests|
+|DepthToSpace|Yes||&#x1F494;No op|
 |Div|Yes|OK|&#x1F49A;OK|
 |Dropout|Yes|OK|&#x1F49A;OK|
 |Elu|Yes|OK|&#x1F49A;OK|
@@ -86,7 +86,7 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Softmax|Yes|OK|&#x1F494;Axis and dim has different semantics|
 |Softplus|Yes|OK|&#x1F49A;OK|
 |Softsign|Yes||&#x1F49A;OK|
-|SpaceToDepth|||&#x1F49B;Should be SpaceToBatch, no tests|
+|SpaceToDepth|||&#x1F494;No op|
 |Split|Yes|OK|&#x1F49A;OK|
 |Sqrt|Yes||&#x1F49A;OK|
 |Squeeze|Yes||&#x1F49A;OK|
