@@ -2492,7 +2492,7 @@ class TestNN(NNTestCase):
     def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
-        bias = Variable(torch.randn(1).half().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
 
         with torch.backends.cudnn.flags(enabled=False):
             # inconsistent types should raise an exception
@@ -2507,7 +2507,7 @@ class TestNN(NNTestCase):
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
-        bias = Variable(torch.randn(1).half().cuda())
+        bias = Variable(torch.randn(1).double().cuda())
 
         with torch.backends.cudnn.flags(enabled=True):
             # inconsistent types should raise an exception
