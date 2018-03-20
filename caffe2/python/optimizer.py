@@ -55,7 +55,10 @@ class Optimizer(object):
     '''
     def __call__(self, net, param_init_net, param, grad=None):
         if grad is None:
-            assert isinstance(param, parameter_info.ParameterInfo)
+            assert isinstance(param, parameter_info.ParameterInfo), (
+                "Expected parameter to be of type ParameterInfo, got {}".format(
+                    param
+                ))
             assert param.grad is not None
         else:
             if isinstance(param, basestring):
@@ -155,7 +158,8 @@ class Optimizer(object):
 
     @staticmethod
     def dedup(net, sparse_dedup_aggregator, grad):
-        assert (isinstance(grad, core.GradientSlice))
+        assert isinstance(grad, core.GradientSlice), (
+            "Dedup only works for sparse gradient, got {}".format(grad))
         if sparse_dedup_aggregator:
             return net.DeduplicateGradientSlices(
                 grad, aggregator=sparse_dedup_aggregator)
@@ -213,11 +217,14 @@ class SgdOptimizer(Optimizer):
         grad = param_info.grad
         if self.base_learning_rate == 0:
             return
-        assert self.base_learning_rate > 0
+        assert self.base_learning_rate > 0, (
+            "Expect positive base learning rate, got {}".format(
+                self.base_learning_rate))
 
         # TODO(zqq): support LARS for sparse parameters
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
-            assert self.lars >= 0, 'Lars offset must be nonnegative.'
+            assert self.lars >= 0, (
+                'Lars offset must be nonnegative, got {}'.format(self.lars))
             lr_lars_multiplier = net.Lars(
                 [param, grad],
                 self.make_unique_blob_name(str(param) + "_lars"),
@@ -317,7 +324,9 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
         grad = param_info.grad
         if self.base_learning_rate == 0:
             return
-        assert self.base_learning_rate > 0
+        assert self.base_learning_rate > 0, (
+            "Expect positive base learning rate, got {}".format(
+                self.base_learning_rate))
 
         lr, _ = self.build_lr(
             net, param_init_net,
@@ -330,8 +339,8 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
             param_fp32, str(param) + "_momentum", value=0.)
         self._aux_params.local.append(momentum_data)
 
-        assert not isinstance(grad, core.GradientSlice), \
-                "Doesn't support sparse gradients"
+        assert not isinstance(grad, core.GradientSlice), (
+            "MultiPrecisionSgd does not support sparse gradients")
 
         # Copy gradient to fp32
         grad_fp32 = net.HalfToFloat(grad, grad + "_fp32")
@@ -404,7 +413,9 @@ class FP16SgdOptimizer(SgdOptimizer):
 
         if self.base_learning_rate == 0:
             return
-        assert self.base_learning_rate > 0
+        assert self.base_learning_rate > 0, (
+            "Expect positive base learning rate, got {}".format(
+                self.base_learning_rate))
 
         lr, _ = self.build_lr(
             net, param_init_net,
@@ -421,8 +432,8 @@ class FP16SgdOptimizer(SgdOptimizer):
 
         self._aux_params.local.append(momentum_data)
 
-        assert not isinstance(grad, core.GradientSlice), \
-                "Doesn't support sparse gradients"
+        assert not isinstance(grad, core.GradientSlice), (
+            "FP16Sgd does not support sparse gradients")
 
         if fp32_update_flag == 0:
             net.FP16MomentumSGDUpdate(
@@ -462,7 +473,8 @@ class WeightDecayBuilder(Optimizer):
         )
 
         if isinstance(param_info.grad, core.GradientSlice):
-            assert "Weight decay does not yet support sparse gradients"
+            raise ValueError(
+                "Weight decay does not yet support sparse gradients")
         else:
             net.WeightedSum(
                 [param_info.grad, ONE, param_info.blob, WD],
@@ -493,7 +505,8 @@ class AdagradOptimizer(Optimizer):
             return
 
         if self.lars is not None and not isinstance(grad, core.GradientSlice):
-            assert self.lars >= 0, 'Lars offset must be nonnegative.'
+            assert self.lars >= 0, (
+                'Lars offset must be nonnegative, got {}'.format(self.lars))
             lr_lars_multiplier = net.Lars(
                 [param, grad],
                 self.make_unique_blob_name(str(param) + "_lars"),
@@ -796,7 +809,7 @@ class YellowFinOptimizer(Optimizer):
 
         assert self.alpha > 0
         assert not isinstance(grad, core.GradientSlice), \
-            "Doesn't support sparse gradients"
+            "YellowFin does not support sparse gradients"
 
         if not param_init_net.BlobIsDefined(_OPTIMIZER_ITERATION_NAME):
             # Add training operators.

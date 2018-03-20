@@ -1488,21 +1488,23 @@ class AbstractLengthsOp : public Operator<Context> {
           idx = indices[dataIndex];
           CAFFE_ENFORCE(
               0 <= idx && idx < dataSize,
-              "Index ",
+              "The ",
               dataIndex,
-              " is out of bounds: ",
+              "th index from the input indices is out of bounds: ",
               idx,
-              ", range 0 to ",
+              " vs. valid range 0 to ",
               dataSize);
         } else {
           idx = dataIndex;
           CAFFE_ENFORCE(
-              idx < dataSize,
-              "Range ",
+              0 <= idx && idx < dataSize,
+              "When calculating the ",
               rangeIndex,
-              " of length ",
+              "th output with length=",
               lengths[rangeIndex],
-              " is out of bound ",
+              ", the index is out of bounds: ",
+              idx,
+              " vs. valid range 0 to ",
               dataSize);
         }
 
