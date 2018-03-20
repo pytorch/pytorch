@@ -18,6 +18,7 @@
 #include "caffe2/mobile/contrib/arm-compute/core/context.h"
 #include "caffe2/core/net.h"
 
+#include <iostream>
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
@@ -103,8 +104,8 @@ vector<float> GLNet::TEST_Benchmark(
     const int warmup_runs,
     const int main_runs,
     const bool run_individual) {
-  LOG(INFO) << "Starting benchmark.";
-  LOG(INFO) << "Running warmup runs.";
+  std::cout << "Starting benchmark." << std::endl;
+  std::cout << "Running warmup runs." << std::endl;
   CAFFE_ENFORCE(
       warmup_runs >= 0,
       "Number of warm up runs should be non negative, provided ",
@@ -120,7 +121,7 @@ vector<float> GLNet::TEST_Benchmark(
   // Enforce gpu execution
   g_.sync();
 
-  LOG(INFO) << "Main runs.";
+  std::cout << "Main runs." << std::endl;
   CAFFE_ENFORCE(
       main_runs >= 0,
       "Number of main runs should be non negative, provided ",
@@ -133,9 +134,9 @@ vector<float> GLNet::TEST_Benchmark(
   g_.sync();
 
   auto millis = timer.MilliSeconds();
-  LOG(INFO) << "[C2DEBUG] Main run finished. Milliseconds per iter: "
+  std::cout << "[C2DEBUG] Main run finished. Milliseconds per iter: "
             << millis / main_runs
-            << ". Iters per second: " << 1000.0 * main_runs / millis;
+            << ". Iters per second: " << 1000.0 * main_runs / millis << std::endl;
 
   vector<float> time_per_op(operators_.size(), 0);
   vector<uint64_t> flops_per_op(operators_.size(), 0);
@@ -190,12 +191,12 @@ vector<float> GLNet::TEST_Benchmark(
                   << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
                   << " GFLOPS)";
       }
-      LOG(INFO) << "[C2DEBUG] Operator #" << idx << " (" << print_name << ", " << op_type
+      std::cout << "[C2DEBUG] Operator #" << idx << " (" << print_name << ", " << op_type
                 << ") " << time_per_op[idx] / main_runs << " ms/iter"
-                << flops_str.str();
+                << flops_str.str() << std::endl;
       ++idx;
     }
-    LOG(INFO) << "[C2DEBUG] Time per operator type:";
+    std::cout << "[C2DEBUG] Time per operator type:" << std::endl;
     // sort by decreasing time spending.
     std::vector<std::pair<string, float>> time_per_op_type_vec(
         time_per_op_type.begin(), time_per_op_type.end());
@@ -204,8 +205,8 @@ vector<float> GLNet::TEST_Benchmark(
         time_per_op_type_vec.end(),
         PairLargerThan<string, float>);
     for (const auto& item : time_per_op_type_vec) {
-      LOG(INFO) << "[C2DEBUG] " << std::setw(15) << std::setfill(' ') << item.second / main_runs
-                << " " << item.first;
+      std::cout << "[C2DEBUG] " << std::setw(15) << std::setfill(' ') << item.second / main_runs
+                << " " << item.first << std::endl;
     }
   }
   // We will reuse time_per_op to return the result of BenchmarkNet.
