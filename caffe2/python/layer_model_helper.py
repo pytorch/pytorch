@@ -404,8 +404,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
     @property
     def preproc_output_schema(self):
-        if self._preproc_output_schema is None:
-            self._preproc_output_schema = self.input_feature_schema + self.trainer_extra_schema
+        assert self._preproc_output_schema is not None
         return self._preproc_output_schema
 
     @preproc_output_schema.setter
