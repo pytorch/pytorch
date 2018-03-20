@@ -41,6 +41,7 @@ class BatchLRLoss(ModelLayer):
         jsd_weight=0.0,
         pos_label_target=1.0,
         neg_label_target=0.0,
+        homotopy_weighting=False,
         **kwargs
     ):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
@@ -55,16 +56,13 @@ class BatchLRLoss(ModelLayer):
             input_record
         ))
 
+        self.jsd_fuse = False
         assert jsd_weight >= 0 and jsd_weight <= 1
-        self.jsd_weight = jsd_weight
-        if self.jsd_weight > 0:
+        if jsd_weight > 0 or homotopy_weighting:
             assert 'prediction' in input_record
-            self.jsd_weight_const = model.add_global_constant(
-                'jsd_weight', self.jsd_weight
-            )
-            self.xent_weight_const = model.add_global_constant(
-                'xent_weight', 1 - self.jsd_weight
-            )
+            self.init_weight(jsd_weight, homotopy_weighting)
+            self.jsd_fuse = True
+        self.homotopy_weighting = homotopy_weighting
 
         assert pos_label_target <= 1 and pos_label_target >= 0
         assert neg_label_target <= 1 and neg_label_target >= 0
@@ -78,6 +76,68 @@ class BatchLRLoss(ModelLayer):
             np.float32,
             self.get_next_blob_reference('output')
         )
+
+    def init_weight(self, jsd_weight, homotopy_weighting):
+        if homotopy_weighting:
+            self.mutex = self.create_param(
+                param_name=('%s_mutex' % self.name),
+                shape=None,
+                initializer=('CreateMutex', ),
+                optimizer=self.model.NoOptim,
+            )
+            self.counter = self.create_param(
+                param_name=('%s_counter' % self.name),
+                shape=[1],
+                initializer=(
+                    'ConstantFill', {
+                        'value': 0,
+                        'dtype': core.DataType.INT64
+                    }
+                ),
+                optimizer=self.model.NoOptim,
+            )
+            self.xent_weight = self.create_param(
+                param_name=('%s_xent_weight' % self.name),
+                shape=[1],
+                initializer=(
+                    'ConstantFill', {
+                        'value': 1.,
+                        'dtype': core.DataType.FLOAT
+                    }
+                ),
+                optimizer=self.model.NoOptim,
+            )
+            self.jsd_weight = self.create_param(
+                param_name=('%s_jsd_weight' % self.name),
+                shape=[1],
+                initializer=(
+                    'ConstantFill', {
+                        'value': 0.,
+                        'dtype': core.DataType.FLOAT
+                    }
+                ),
+                optimizer=self.model.NoOptim,
+            )
+        else:
+            self.jsd_weight = self.model.add_global_constant(
+                '%s_jsd_weight' % self.name, jsd_weight
+            )
+            self.xent_weight = self.model.add_global_constant(
+                '%s_xent_weight' % self.name, 1. - jsd_weight
+            )
+
+    def update_weight(self, net):
+        net.AtomicIter([self.mutex, self.counter], [self.counter])
+        # iter = 0: lr = 1;
+        # iter = 1e6; lr = 0.5^0.1  = 0.93
+        # iter = 1e9; lr = 1e-3^0.1 = 0.50
+        net.LearningRate([self.counter], [self.xent_weight], base_lr=1.0,
+                         policy='inv', gamma=1e-6, power=0.1,)
+        net.Sub(
+            [self.model.global_constants['ONE'], self.xent_weight],
+            [self.jsd_weight]
+        )
+        return self.xent_weight, self.jsd_weight
 
     def add_ops(self, net):
         # numerically stable log-softmax with crossentropy
@@ -104,19 +164,19 @@ class BatchLRLoss(ModelLayer):
             net.NextScopedBlob('cross_entropy'),
         )
         # fuse with JSD
-        if self.jsd_weight > 0:
+        if self.jsd_fuse:
             jsd = net.BernoulliJSD(
                 [self.input_record.prediction(), label],
                 net.NextScopedBlob('jsd'),
             )
+            if self.homotopy_weighting:
+                self.update_weight(net)
             loss = net.WeightedSum(
-                [xent, self.xent_weight_const, jsd, self.jsd_weight_const],
+                [xent, self.xent_weight, jsd, self.jsd_weight],
                 net.NextScopedBlob('loss'),
             )
         else:
             loss = xent
-
-
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()
             if self.input_record.weight.field_type().base != np.float32:
