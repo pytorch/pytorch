@@ -226,10 +226,14 @@ class ReaderBuilder(object):
     def schema(self):
         raise NotImplementedError()
 
-    def splits(self, net):
+    def setup(self, **kwargs):
+        """
+        Optionally, perform one-time setup before calling new_reader().
+        Subclass should make sure this function is only called once.
+        """
         raise NotImplementedError()
 
-    def new_reader(self, split_reader=None, **kwargs):
+    def new_reader(self, **kwargs):
         raise NotImplementedError()
 
 
@@ -253,19 +257,13 @@ class PipedReaderBuilder(ReaderBuilder):
     def schema(self):
         return self._builder.schema()
 
-    def splits(self, net):
-        return self._builder.splits(net)
+    def setup(self, **kwargs):
+        self._builder.setup(**kwargs)
 
-    def new_reader(self, split_reader=None, init_group=None, pipe_group=None,
-                   **kwargs):
-        output = self._piper(
-            self._builder.new_reader(
-                split_reader,
-                init_group=init_group,
-                pipe_group=pipe_group
-            ),
-            **kwargs
-        )
+    def new_reader(self, **kwargs):
+        # Passing everything down since you could wrap a PipedReaderBuilder in
+        # another PipedReaderBuilder
+        output = self._piper(self._builder.new_reader(**kwargs), **kwargs)
         return output if isinstance(output, Reader) else output.reader()
 
 
