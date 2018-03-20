@@ -283,6 +283,8 @@ void initJitScriptBindings(PyObject* module) {
         py::function func,
         tracer::variable_list inputs) {
           size_t num_inputs = inputs.size();
+          // prereq: Module's buffers and parameters are unique
+          // this was ensured in python before calling this function
           std::vector<at::Tensor*> parameters;
           gatherParametersAndBuffers(parameters, self);
           for(at::Tensor* param : parameters) {
