@@ -33,6 +33,18 @@ class Caffe2CppRep(BackendRep):
         self.__external_inputs = cpp_rep.external_inputs()
         self.__uninitialized_inputs = cpp_rep.uninitialized_inputs()
 
+    def init_net(self):
+        return self.__core.init_net()
+
+    def pred_net(self):
+        return self.__core.pred_net()
+
+    def external_outputs(self):
+        return self.__core.external_outputs()
+
+    def external_inputs(self):
+        return self.__core.external_inputs()
+
     def run(self, inputs):
         output_values = None
         if isinstance(inputs, dict):
