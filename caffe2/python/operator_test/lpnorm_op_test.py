@@ -70,3 +70,19 @@ class LpnormTest(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         # Gradient check wrt X
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=1e-2, threshold=1e-2)
+
+        op = core.CreateOperator(
+            'LpNorm',
+            ['X'],
+            ['l2_averaged_norm'],
+            p=2,
+            average=True
+        )
+        self.ws.run(op)
+
+        np.testing.assert_allclose(
+            self.ws.blobs[("l2_averaged_norm")].fetch(),
+            np.linalg.norm((X).flatten(), ord=2)**2 / X.size,
+            rtol=1e-4,
+            atol=1e-4
+        )

@@ -24,14 +24,18 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
   auto* norm = Output(OUT);
   norm->Resize(1);
   const float* X_data = X.data<float>();
+  const float size = average_ ? (float)X.size() : 1.0f;
+  CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
     *(norm->mutable_data<float>()) =
-        (ConstEigenVectorMap<float>(X_data, X.size()).array()).abs().sum();
-    // L1(x) = sum(|x|)
+        (ConstEigenVectorMap<float>(X_data, X.size()).array()).abs().sum() /
+        size;
+    // L1(x) = sum(|x|), L1_average(x) = sum(\x\) / x.size()
   } else if (p_ == 2) {
     *(norm->mutable_data<float>()) =
-        (ConstEigenVectorMap<float>(X_data, X.size()).array()).square().sum();
-    // L2(x) = (sum(|x|^2))
+        (ConstEigenVectorMap<float>(X_data, X.size()).array()).square().sum() /
+        size;
+    // L2(x) = (sum(|x|^2)), L2_average(x) = sum(|x|^2) / x.size()
   }
   return true;
 }
@@ -45,15 +49,15 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dnorm.dim32(0), 1);
   dX->ResizeLike(X);
   const float kEps = 1e-12f;
-
+  const float size = average_ ? (float)X.size() : 1.0f;
   if (p_ == 1) {
     // Todo: implement in eigen
     for (int i = 0; i < X.size(); ++i) {
       float temp = (X.data<float>())[i];
       if (temp < -kEps) {
-        dX->mutable_data<float>()[i] = -(dnorm.data<float>())[0];
+        dX->mutable_data<float>()[i] = -(dnorm.data<float>())[0] / size;
       } else if (temp > kEps) {
-        dX->mutable_data<float>()[i] = (dnorm.data<float>())[0];
+        dX->mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
       } else {
         dX->mutable_data<float>()[i] = 0;
       }
@@ -61,7 +65,7 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
   } else if (p_ == 2) {
     EigenVectorMap<float>(dX->mutable_data<float>(), X.size()).array() =
         ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0f *
-        (dnorm.data<float>())[0];
+        ((dnorm.data<float>())[0] / size);
   }
 
   return true;
@@ -83,7 +87,12 @@ determined by the argument p.
 )DOC")
     .Input(0, "X", "1D input tensor")
     .Output(0, "Z", "1D output tensor")
-    .Arg("p", "Order of the norm in p-norm");
+    .Arg("p", "Order of the norm in p-norm")
+    .Arg(
+        "average",
+        "whehther we calculate norm or averaged_norm."
+        "The Lp_averaged_norm(x) is defined as"
+        "Lp_averaged_norm(x) = LpNorm(x) / size(x)");
 
 OPERATOR_SCHEMA(LpNormGradient)
     .NumInputs(2)
@@ -97,7 +106,12 @@ supports l1 and l2 norm) determined by the argument p.
     .Input(0, "X", "1D input tensor")
     .Input(1, "dout", "1D input tensor")
     .Output(0, "dx", "1D output tensor")
-    .Arg("p", "Order of the norm in p-norm");
+    .Arg("p", "Order of the norm in p-norm")
+    .Arg(
+        "average",
+        "whehther we calculate norm or averaged_norm."
+        "The Lp_averaged_norm(x) is defined as"
+        "Lp_averaged_normgradient(x) = LpNormGradient(x) / size(x)");
 
 class GetLpNormGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
