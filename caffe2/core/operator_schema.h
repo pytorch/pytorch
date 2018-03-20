@@ -407,8 +407,9 @@ class OpSchemaRegistry {
   static OpSchema&
   NewSchema(const string& key, const string& file, const int line) {
     auto& m = map();
-    if (m.count(key)) {
-      const auto& schema = m[key];
+    auto it = m.find(key);
+    if (it != m.end()) {
+      const auto& schema = it->second;
       std::ios_base::Init init;
       std::cerr << "Trying to register schema with name " << key
                 << " from file " << file << " line " << line
@@ -422,8 +423,9 @@ class OpSchemaRegistry {
 
   static const OpSchema* Schema(const string& key) {
     auto& m = map();
-    if (m.count(key)) {
-      return &m[key];
+    auto it = m.find(key);
+    if (it != m.end()) {
+      return &it->second;
     } else {
       return nullptr;
     }
