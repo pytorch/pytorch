@@ -18,10 +18,11 @@ import numpy as np
 class MarginRankLoss(ModelLayer):
 
     def __init__(self, model, input_record, name='margin_rank_loss',
-                 margin=0.1, **kwargs):
+                 margin=0.1, average_loss=False, **kwargs):
         super(MarginRankLoss, self).__init__(model, name, input_record, **kwargs)
         assert margin >= 0, ('For hinge loss, margin should be no less than 0')
         self._margin = margin
+        self._average_loss = average_loss
         assert schema.is_schema_subset(
             schema.Struct(
                 ('pos_prediction', schema.Scalar()),
@@ -55,4 +56,7 @@ class MarginRankLoss(ModelLayer):
             net.NextScopedBlob('rank_loss'),
             margin=self._margin,
         )
-        net.SumElements(rank_loss, self.output_schema.field_blobs())
+        if self._average_loss:
+            net.AveragedLoss(rank_loss, self.output_schema.field_blobs())
+        else:
+            net.ReduceFrontSum(rank_loss, self.output_schema.field_blobs())
