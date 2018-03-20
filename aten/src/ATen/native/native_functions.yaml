@@ -82,9 +82,6 @@
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
-  variants: function
-
 - func: cudnn_is_acceptable(Tensor self) -> bool
   variants: function
 
@@ -325,6 +322,9 @@
   variants: function
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
