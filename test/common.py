@@ -40,6 +40,7 @@ def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
 PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
 
