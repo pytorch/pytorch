@@ -53,7 +53,7 @@ This doc keeps tracking why operators are not covered by the testcases.
 |Max|Yes|OK|&#x1F49A;OK|
 |MaxPool||OK|&#x1F49A;OK|
 |MaxRoiPool|||&#x1F494;No op|
-|Mean|||&#x1F494;No op|
+|Mean|||&#x1F49A;OK|
 |Min|Yes|OK|&#x1F49A;OK|
 |Mul|Yes|OK|&#x1F49A;OK|
 |Neg|Yes|OK|&#x1F49A;OK|
