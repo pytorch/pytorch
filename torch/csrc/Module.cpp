@@ -110,6 +110,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
   THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
           "but got %s", THPUtils_typename(arg));
   THSetNumThreads((int)THPUtils_unpackLong(arg));
+  at::set_num_threads((int)THPUtils_unpackLong(arg));
   Py_RETURN_NONE;
 }
 
@@ -503,6 +504,8 @@ static PyObject* initModule() {
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
 
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
   THPDefaultGenerator = (THPGenerator*)THPGenerator_NewWithGenerator(

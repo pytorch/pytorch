@@ -2305,7 +2305,9 @@ class TestTorch(TestCase):
     def test_cat_scalars(self):
         x = torch.tensor(0)
         y = torch.tensor(1)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
+        with self.assertRaisesRegexp(RuntimeError,
+                                     'zero-dimensional.*cannot be concatenated'):
+            torch.cat([x, y])
 
     def test_stack(self):
         x = torch.rand(2, 3, 4)

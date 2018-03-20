@@ -88,6 +88,7 @@ from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .multinomial import Multinomial
+from .multivariate_normal import MultivariateNormal
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -117,6 +118,7 @@ __all__ = [
     'LogNormal',
     'LogisticNormal',
     'Multinomial',
+    'MultivariateNormal',
     'Normal',
     'OneHotCategorical',
     'Pareto',
