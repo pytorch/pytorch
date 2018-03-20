@@ -39,7 +39,7 @@ invariant.::
 
     An example where ``transform_to`` and ``biject_to`` differ is
     ``constraints.simplex``: ``transform_to(constraints.simplex)`` returns a
-    :class:`~torch.distributions.transforms.BoltzmannTransform` that simply
+    :class:`~torch.distributions.transforms.SoftmaxTransform` that simply
     exponentiates and normalizes its inputs; this is a cheap and mostly
     coordinate-wise operation appropriate for algorithms like SVI. In
     contrast, ``biject_to(constraints.simplex)`` returns a
@@ -65,7 +65,10 @@ You can create your own registry by creating a new :class:`ConstraintRegistry`
 object.
 """
 
+import numbers
+
 from torch.distributions import constraints, transforms
+from torch.distributions.utils import broadcast_all
 
 __all__ = [
     'ConstraintRegistry',
@@ -81,42 +84,37 @@ class ConstraintRegistry(object):
     def __init__(self):
         self._registry = {}
 
-    def register(self, constraint, transform=None):
+    def register(self, constraint, factory=None):
         """
         Registers a :class:`~torch.distributions.constraints.Constraint`
-        subclass or singleton object in this registry. Usage as decorator::
+        subclass in this registry. Usage::
 
             @my_registry.register(MyConstraintClass)
             def construct_transform(constraint):
                 assert isinstance(constraint, MyConstraint)
                 return MyTransform(constraint.params)
 
-        Usage on singleton instances::
-
-            my_registry.register(my_constraint_singleton, MyTransform())
-
         Args:
-            constraint (:class:`~torch.distributions.constraints.Constraint`):
-                Either a specific constraint instance or a subclass of
-                constraints.
-            transform (:class:`~torch.distributions.transforms.Transform`):
-                Either a transform object or a callable that inputs a
-                constraint object and returns a transform object.
+            constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
+                A subclass of :class:`~torch.distributions.constraints.Constraint`, or
+                a singleton object of the desired class.
+            factory (callable): A callable that inputs a constraint object and returns
+                a  :class:`~torch.distributions.transforms.Transform` object.
         """
         # Support use as decorator.
-        if transform is None:
-            return lambda transform: self.register(constraint, transform)
+        if factory is None:
+            return lambda factory: self.register(constraint, factory)
 
+        # Support calling on singleton instances.
         if isinstance(constraint, constraints.Constraint):
-            # Register singleton instances.
-            self._registry[constraint] = transform
-        elif issubclass(constraint, constraints.Constraint):
-            # Register Constraint subclass.
-            self._registry[constraint] = transform
-        else:
+            constraint = type(constraint)
+
+        if not isinstance(constraint, type) or not issubclass(constraint, constraints.Constraint):
             raise TypeError('Expected constraint to be either a Constraint subclass or instance, '
                             'but got {}'.format(constraint))
-        return transform
+
+        self._registry[constraint] = factory
+        return factory
 
     def __call__(self, constraint):
         """
@@ -137,11 +135,6 @@ class ConstraintRegistry(object):
         Raises:
             `NotImplementedError` if no transform has been registered.
         """
-        # Look up by singleton instance.
-        try:
-            return self._registry[constraint]
-        except KeyError:
-            pass
         # Look up by Constraint subclass.
         try:
             factory = self._registry[type(constraint)]
@@ -154,22 +147,27 @@ class ConstraintRegistry(object):
 biject_to = ConstraintRegistry()
 transform_to = ConstraintRegistry()
 
+
 ################################################################################
 # Registration Table
 ################################################################################
 
-biject_to.register(constraints.real, transforms.identity_transform)
-transform_to.register(constraints.real, transforms.identity_transform)
+@biject_to.register(constraints.real)
+@transform_to.register(constraints.real)
+def _transform_to_real(constraint):
+    return transforms.identity_transform
 
-biject_to.register(constraints.positive, transforms.ExpTransform())
-transform_to.register(constraints.positive, transforms.ExpTransform())
+
+@biject_to.register(constraints.positive)
+@transform_to.register(constraints.positive)
+def _transform_to_positive(constraint):
+    return transforms.ExpTransform()
 
 
 @biject_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than)
 def _transform_to_greater_than(constraint):
-    loc = constraint.lower_bound
-    scale = loc.new([1]).expand_as(loc)
+    loc, scale = broadcast_all(constraint.lower_bound, 1)
     return transforms.ComposeTransform([transforms.ExpTransform(),
                                         transforms.AffineTransform(loc, scale)])
 
@@ -177,27 +175,37 @@ def _transform_to_greater_than(constraint):
 @biject_to.register(constraints.less_than)
 @transform_to.register(constraints.less_than)
 def _transform_to_less_than(constraint):
-    loc = constraint.upper_bound
-    scale = loc.new([-1]).expand_as(loc)
+    loc, scale = broadcast_all(constraint.upper_bound, -1)
     return transforms.ComposeTransform([transforms.ExpTransform(),
                                         transforms.AffineTransform(loc, scale)])
-
-
-biject_to.register(constraints.unit_interval, transforms.SigmoidTransform())
-transform_to.register(constraints.unit_interval, transforms.SigmoidTransform())
 
 
 @biject_to.register(constraints.interval)
 @transform_to.register(constraints.interval)
 def _transform_to_interval(constraint):
+    # Handle the special case of the unit interval.
+    lower_is_0 = isinstance(constraint.lower_bound, numbers.Number) and constraint.lower_bound == 0
+    upper_is_1 = isinstance(constraint.upper_bound, numbers.Number) and constraint.upper_bound == 1
+    if lower_is_0 and upper_is_1:
+        return transforms.SigmoidTransform()
+
     loc = constraint.lower_bound
     scale = constraint.upper_bound - constraint.lower_bound
     return transforms.ComposeTransform([transforms.SigmoidTransform(),
                                         transforms.AffineTransform(loc, scale)])
 
 
-biject_to.register(constraints.simplex, transforms.StickBreakingTransform())
-transform_to.register(constraints.simplex, transforms.BoltzmannTransform())
+@biject_to.register(constraints.simplex)
+def _biject_to_simplex(constraint):
+    return transforms.StickBreakingTransform()
+
+
+@transform_to.register(constraints.simplex)
+def _transform_to_simplex(constraint):
+    return transforms.SoftmaxTransform()
+
 
 # TODO define a bijection for LowerCholeskyTransform
-transform_to.register(constraints.lower_cholesky, transforms.LowerCholeskyTransform())
+@transform_to.register(constraints.lower_cholesky)
+def _transform_to_lower_cholesky(constraint):
+    return transforms.LowerCholeskyTransform()
