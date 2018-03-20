@@ -99,6 +99,12 @@ class OperatorBase : public Observable<OperatorBase> {
     return outputs_.at(idx)->template GetMutable<T>();
   }
 
+  template <typename T>
+  inline T* Output(int idx, T* allocated) {
+    outputs_.at(idx)->Reset(allocated);
+    return allocated;
+  }
+
   inline const Blob& InputBlob(int idx) {
     return *inputs_.at(idx);
   }
