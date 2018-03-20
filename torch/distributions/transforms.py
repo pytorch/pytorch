@@ -10,11 +10,11 @@ from torch.nn.functional import pad, sigmoid
 __all__ = [
     'AbsTransform',
     'AffineTransform',
-    'BoltzmannTransform',
     'ComposeTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
     'SigmoidTransform',
+    'SoftmaxTransform',
     'StickBreakingTransform',
     'Transform',
     'identity_transform',
@@ -385,7 +385,7 @@ class AffineTransform(Transform):
         return result.expand(shape)
 
 
-class BoltzmannTransform(Transform):
+class SoftmaxTransform(Transform):
     """
     Transform from unconstrained space to the simplex via `y = exp(x)` then
     normalizing.
@@ -399,7 +399,7 @@ class BoltzmannTransform(Transform):
     event_dim = 1
 
     def __eq__(self, other):
-        return isinstance(other, BoltzmannTransform)
+        return isinstance(other, SoftmaxTransform)
 
     def _call(self, x):
         logprobs = x
