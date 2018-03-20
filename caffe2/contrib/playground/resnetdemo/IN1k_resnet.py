@@ -13,7 +13,7 @@ from caffe2.proto import caffe2_pb2
 def init_model(self):
     train_model = cnn.CNNModelHelper(
         order="NCHW",
-        name="resnet50",
+        name="resnet",
         use_cudnn=True,
         cudnn_exhaustive_search=False
     )
@@ -21,7 +21,7 @@ def init_model(self):
 
     test_model = cnn.CNNModelHelper(
         order="NCHW",
-        name="resnet50_test",
+        name="resnet_test",
         use_cudnn=False,
         cudnn_exhaustive_search=False,
         init_params=False,

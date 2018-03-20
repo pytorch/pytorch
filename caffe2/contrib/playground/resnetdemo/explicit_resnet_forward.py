@@ -8,6 +8,19 @@ logging.basicConfig()
 log = logging.getLogger("AnyExp")
 log.setLevel(logging.DEBUG)
 
+# For more depths, add the block config here
+BLOCK_CONFIG = {
+    18: (2, 2, 2, 2),
+    34: (3, 4, 6, 3),
+    50: (3, 4, 6, 3),
+    101: (3, 4, 23, 3),
+    152: (3, 8, 36, 3),
+    200: (3, 32, 36, 3),
+    264: (3, 64, 36, 3),
+    284: (3, 32, 64, 3),
+}
+
+
 def gen_forward_pass_builder_fun(self, model, dataset, is_train):
     split = 'train' if is_train else 'test'
     opts = self.opts
@@ -27,7 +40,7 @@ def gen_forward_pass_builder_fun(self, model, dataset, is_train):
 
 def resnet_imagenet_create_model(model, data, labels, split, opts, dataset):
     model_helper = ResNetModelHelper(model, split, opts)
-    opts_depth = 101
+    opts_depth = opts['model_param']['num_layer']
     log.info(' | ResNet-{} Imagenet'.format(opts_depth))
     assert opts_depth in BLOCK_CONFIG.keys(), \
         'Block config is not defined for specified model depth. Please check.'
@@ -78,6 +91,23 @@ def resnet_imagenet_create_model(model, data, labels, split, opts, dataset):
             residual_block, blob_in, dim_in, 2048, stride=2, num_blocks=n4,
             prefix='res5', dim_inner=512
         )
+    elif opts_depth in [18, 34]:
+        blob_in, dim_in = model_helper.residual_layer(
+            residual_block, max_pool, 64, 64, stride=1, num_blocks=n1,
+            prefix='res2',
+        )
+        blob_in, dim_in = model_helper.residual_layer(
+            residual_block, blob_in, dim_in, 128, stride=2, num_blocks=n2,
+            prefix='res3',
+        )
+        blob_in, dim_in = model_helper.residual_layer(
+            residual_block, blob_in, dim_in, 256, stride=2, num_blocks=n3,
+            prefix='res4',
+        )
+        blob_in, dim_in = model_helper.residual_layer(
+            residual_block, blob_in, dim_in, 512, stride=2, num_blocks=n4,
+            prefix='res5',
+        )
 
     pool_blob = model.AveragePool(blob_in, 'pool5', kernel=7, stride=1)
 
@@ -99,16 +129,6 @@ def resnet_imagenet_create_model(model, data, labels, split, opts, dataset):
         scale=loss_scale)
     model.Accuracy(['softmax', labels], 'accuracy')
     return model, softmax, loss
-
-
-BLOCK_CONFIG = {
-    18: (2, 2, 2, 2),
-    34: (3, 4, 6, 3),
-    50: (3, 4, 6, 3),
-    101: (3, 4, 23, 3),
-    152: (3, 8, 36, 3),
-    284: (3, 32, 64, 3),
-}
 
 
 class ResNetModelHelper():

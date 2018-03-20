@@ -4,29 +4,29 @@ from __future__ import print_function
 from __future__ import unicode_literals
 
 # Input
-import caffe2.contrib.playground.resnet50demo.\
+import caffe2.contrib.playground.resnetdemo.\
     gfs_IN1k as gfs_IN1k  # noqa
 
 # model
-import caffe2.contrib.playground.resnet50demo.\
-    IN1k_resnet50 as IN1k_resnet50 # noqa
+import caffe2.contrib.playground.resnetdemo.\
+    IN1k_resnet as IN1k_resnet # noqa
 
 # FORWARD_PASS
-import caffe2.contrib.playground.resnet50demo.\
+import caffe2.contrib.playground.resnetdemo.\
     caffe2_resnet50_default_forward as caffe2_resnet50_default_forward # noqa
 
-import caffe2.contrib.playground.resnet50demo.\
+import caffe2.contrib.playground.resnetdemo.\
     explicit_resnet_forward as explicit_resnet_forward # noqa
 
 # PARAMETER_UPDATE
-import caffe2.contrib.playground.resnet50demo.\
+import caffe2.contrib.playground.resnetdemo.\
     caffe2_resnet50_default_param_update as caffe2_resnet50_default_param_update # noqa
 
-import caffe2.contrib.playground.resnet50demo.\
+import caffe2.contrib.playground.resnetdemo.\
     explicit_resnet_param_update as explicit_resnet_param_update # noqa
 
 # RENDEZVOUS
-import caffe2.contrib.playground.resnet50demo.\
+import caffe2.contrib.playground.resnetdemo.\
     rendezvous_filestore as rendezvous_filestore # noqa
 
 # OUTPUT

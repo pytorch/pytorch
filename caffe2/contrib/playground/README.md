@@ -12,7 +12,7 @@ Playground project highlight:
 
 
 ### Example Usage
-Playground comes with a resnet50 example, located in resnet50demo folder.  To see how playground works, do the following:
+Playground comes with a resnet example, located in resnetdemo folder.  To see how playground works, do the following:
 
 1. make sure your caffe2 build successful with openCV and lmdb dependencies supported.
 
@@ -27,8 +27,8 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
 
     "input":{
         "input_name_py":"gfs_IN1k",
-        "train_input_path":"/mnt/vol/gfsai-oregon/ai-group/datasets/imagenet_lmdb/ilsvrc12_train_lmdb/",
-        "test_input_path":"/mnt/vol/gfsai-oregon/ai-group/datasets/imagenet_lmdb/ilsvrc12_val_lmdb",
+        "train_input_path":"/path/to/your/training/data_lmdb/",
+        "test_input_path":"/path/to/your/testing/data_lmdb/",
         "scale_jitter_type": 1, "color_jitter": true,      "color_lighting": true,
         "namespace": "aml",  "table": "imagenet_data",  "column_handle": "everstore_handle",
         "column_label": "label", "column_id": "image_id",  "label_type": 0,
@@ -37,7 +37,7 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
         "num_classes":1000, "loadsize" : 256, "imsize": 224, "decode_threads": 8, "datasets":[]},
 
     "model":{
-        "model_name_py":"IN1k_resnet50",
+        "model_name_py":"IN1k_resnet",
         "forward_pass_py":"caffe2_resnet50_default_forward",
         "parameter_update_py":"explicit_resnet_param_update",
         "optimizer_py":"",
@@ -50,8 +50,8 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
         "bn_init_gamma":1e-323, "weight_decay":1e-4, "weight_decay_bn":1e-323},
 
     "epoch_iter":{
-        "num_train_sample_per_epoch":512,
-        "num_test_sample": 250,
+        "num_train_sample_per_epoch":10240,
+        "num_test_sample": 5000,
         "num_epochs":10,
         "num_epochs_per_flow_schedule":5,
         "num_train_iteration_per_test": 10,
@@ -68,7 +68,7 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
     "output":{
         "gen_output_py":"output_generator",
         "gen_checkpoint_path_py":"gen_checkpoint_path",
-        "checkpoint_folder":"/home/diyu/model_checkpoint/",
+        "checkpoint_folder":"/home/your_user_name/model_checkpoint/",
         "metrics":[
             {"name":"train_loss",
              "meter_py":"ComputeLoss",
@@ -100,13 +100,13 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
             {"x":"epochs", "x_title":"epochs",
              "ys":["train_accuracy_top1","test_accuracy_top1",
                    "train_accuracy_top5","test_accuracy_top5"],
-             "y_title":""}]}}
+             "y_title":"Accuracy: Train top1, Test top1, Train top5, Test top5"}]}}
 
 }'
 
-5. now you can switch to different components that supplied in resnet50demo folder like so:
+5. now you can switch to different components that supplied in resnetdemo folder like so:
 
-   "forward_pass_py":"caffe2_resnet50_default_forward", --> "explicit_resnet_forward"  (which is a resnet100 model)
+   "forward_pass_py":"caffe2_resnet50_default_forward", --> "explicit_resnet_forward"  (which is a resnet model that allow you specify layers with "model_param"."num_layer")
 
    and/or
 
@@ -138,9 +138,9 @@ $ python caffe2/contrib/playground/AnyExpOnTerm.py --parameters-json '{
 
 1. Create a folder for your own experiment under caffe2/contrib/playground/ and go to this folder.
 
-2. Create a base model file, for example IN1kResnet50.py.  In this script you need to implement init function and in it, instantiate your train/test model and give them to self.train_model and self.test_model.  In this base model class, you can also chose to override other functions you'd like to customize, for example if you want to iterate according to accuracy instead of fixed number of loops, override list_of_epochs(), and list_of_epoch_iters()
+2. Create a base model file, for example IN1kResnet.py.  In this script you need to implement init function and in it, instantiate your train/test model and give them to self.train_model and self.test_model.  In this base model class, you can also chose to override other functions you'd like to customize, for example if you want to iterate according to accuracy instead of fixed number of loops, override list_of_epochs(), and list_of_epoch_iters()
 
-3. Create component py scripts implementing the generators arguments of data_parallel_model.Parallelize().  Total four of them: input_builder_fun, forward_pass_builder_fun,  one of param_update_builder_fun or optimizer_builder_fun, and rendezvous.  This is where you can switch between different components. Examples: for the demo IN1k_resnet50 experiments, I created two different forward function: explicit_resnet50_forward.py and caffe2_resnet50_default_forward.py.  Both implemented the API "gen_param_update_builder_fun", which is abstract method in the framework class AnyExp.py
+3. Create component py scripts implementing the generators arguments of data_parallel_model.Parallelize().  Total four of them: input_builder_fun, forward_pass_builder_fun,  one of param_update_builder_fun or optimizer_builder_fun, and rendezvous.  This is where you can switch between different components. Examples: for the demo IN1k_resnet experiments, I created two different forward function: explicit_resnet_forward.py and caffe2_resnet50_default_forward.py.  Both implemented the API "gen_param_update_builder_fun", which is abstract method in the framework class AnyExp.py
 
 4. Next import the module components you created into module_map.py.  This import is needed to include these packages during building.  Give imported module a module name, normally if module is just a simple file contains some functions, just use the py script file name.  If the module contains class and the class is needed for module input, name it with the class name, examples are the meter classes like compute_loss.  When launching your experiment, in opts for the term “xxx_py” fill in the name you chose in module_map.py.  Playground will find your module and load it.
 
