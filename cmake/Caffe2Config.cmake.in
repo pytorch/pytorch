@@ -13,10 +13,8 @@ set(CAFFE2_VERSION "@CAFFE2_VERSION@")
 # Utils functions.
 include("${CMAKE_CURRENT_LIST_DIR}/public/utils.cmake")
 
-# Depending on whether Caffe2 is built with threads, include threads lib.
-if(@USE_THREADS@)
-  include("${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake")
-endif()
+# Include threads lib.
+include("${CMAKE_CURRENT_LIST_DIR}/public/threads.cmake")
 
 # Depending on whether Caffe2 uses gflags during compile time or
 # not, invoke gflags.
