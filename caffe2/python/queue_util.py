@@ -23,6 +23,11 @@ from __future__ import unicode_literals
 from caffe2.python import core, dataio
 from caffe2.python.task import TaskGroup
 
+import logging
+
+
+logger = logging.getLogger(__name__)
+
 
 class _QueueReader(dataio.Reader):
     def __init__(self, wrapper, num_dequeue_records=1):
@@ -107,7 +112,16 @@ class Queue(QueueWrapper):
 def enqueue(net, queue, data_blobs, status=None):
     if status is None:
         status = net.NextName('status')
-    results = net.SafeEnqueueBlobs([queue] + data_blobs, data_blobs + [status])
+    # Enqueueing moved the data into the queue;
+    # duplication will result in data corruption
+    queue_blobs = []
+    for blob in data_blobs:
+        if blob not in queue_blobs:
+            queue_blobs.append(blob)
+        else:
+            logger.warning("Need to copy blob {} to enqueue".format(blob))
+            queue_blobs.append(net.Copy(blob))
+    results = net.SafeEnqueueBlobs([queue] + queue_blobs, queue_blobs + [status])
     return results[-1]
 
 
