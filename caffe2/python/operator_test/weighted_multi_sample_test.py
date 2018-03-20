@@ -17,7 +17,7 @@ class TestWeightedMultiSample(hu.HypothesisTestCase):
     @given(
         num_samples=st.integers(min_value=0, max_value=128),
         data_len=st.integers(min_value=0, max_value=10000),
-        **hu.gcs
+        **hu.gcs_cpu_only
     )
     def test_weighted_multi_sample(self, num_samples, data_len, gc, dc):
         weights = np.zeros((data_len))
