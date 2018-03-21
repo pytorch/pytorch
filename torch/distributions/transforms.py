@@ -5,7 +5,7 @@ from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
-from torch.nn.functional import sigmoid
+from torch.nn.functional import pad, sigmoid
 
 __all__ = [
     'AbsTransform',
@@ -433,21 +433,24 @@ class StickBreakingTransform(Transform):
         return isinstance(other, StickBreakingTransform)
 
     def _call(self, x):
-        shape = x.shape[:-1] + (1 + x.shape[-1],)
-        one = x.new([1]).expand(x.shape[:-1] + (1,))
-        numer = sigmoid(x)
-        denom = (1 - numer).cumprod(-1)
-        probs = torch.cat([numer, one], -1) * torch.cat([one, denom], -1)
-        return probs
+        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+        z = sigmoid(x - offset.log())
+        z_cumprod = (1 - z).cumprod(-1)
+        y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
+        return y
 
     def _inverse(self, y):
-        pmf = y
-        cmf = pmf.cumsum(-1)
-        sf = 1 - cmf
-        units = y[..., :-1] / sf[..., :-1]
-        return units.log()
+        shape = y.shape[:-1] + (y.shape[-1] - 1,)
+        offset = (shape[-1] + 1) - y.new([1]).expand(shape).cumsum(-1)
+        sf = (1 - y.cumsum(-1))[..., :-1]
+        x = y[..., :-1].log() - sf.log() + offset.log()
+        return x
 
-    # TODO implement .log_abs_det_jacobian()
+    def log_abs_det_jacobian(self, x, y):
+        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+        z = sigmoid(x - offset.log())
+        detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
+        return detJ
 
 
 class LowerCholeskyTransform(Transform):
