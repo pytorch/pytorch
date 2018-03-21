@@ -918,11 +918,9 @@ PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
-  THPObjectPtr warnings(PyImport_ImportModule("warnings"));
-  if (!warnings) throw python_error();
-  THPObjectPtr result(PyObject_CallMethod(warnings.get(), "warn", "s",
-      "'saved_variables' is deprecated; use 'saved_tensors'"));
-  if (!result) throw python_error();
+  auto r = PyErr_WarnEx(PyExc_DeprecationWarning,
+      "'saved_variables' is deprecated; use 'saved_tensors'", 0);
+  if (r != 0) throw python_error();
   return unpack_saved_variables(self, [](const Variable& var) {
     return THPVariable_Wrap(var);
   });
