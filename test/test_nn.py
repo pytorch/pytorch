@@ -31,7 +31,7 @@ from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     TEST_CUDNN_VERSION, loss_reference_fns, get_size_average, get_weight, \
     smoothl1loss_reference, kldivloss_reference
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
-    TEST_SCIPY, download_file, PY3, PY34
+    TEST_SCIPY, download_file, PY3, PY34, to_gpu, get_function_arglist
 
 if TEST_SCIPY:
     from scipy import stats
@@ -296,6 +296,22 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                         test_case.assertIsInstance(p, torch.cuda.FloatTensor)
                         test_case.assertEqual(p.get_device(), 1)
 
+                # test double()
+                input = input.double().cuda()
+                module.double().cuda()
+                module(input)
+                for p in module.parameters():
+                    test_case.assertIsInstance(p, torch.cuda.DoubleTensor)
+                    test_case.assertEqual(p.get_device(), 0)
+
+                # test half()
+                input = input.half().cuda()
+                module.half().cuda()
+                module(input)
+                for o in module.parameters():
+                    test_case.assertIsInstance(p, torch.cuda.HalfTensor)
+                    test_case.assertEqual(p.get_device(), 0)
+
     def _get_target(self):
         return self._get_arg('target', False)
 
@@ -333,6 +349,57 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         # currently compute the gradient w.r.t. target for loss functions.
         gradcheck(apply_fn, inputs)
         gradgradcheck(apply_fn, inputs)
+
+    def test_cuda(self, test_case, dtype=None):
+        def convert_dtype(obj, dtype, requires_grad=False):
+            if isinstance(obj, Variable):
+                return Variable(obj.data.type(dtype), requires_grad=requires_grad)
+            elif torch.is_tensor(obj):
+                return obj.type(dtype)
+            elif isinstance(obj, tuple):
+                return tuple(convert_dtype(o, dtype, requires_grad) for o in obj)
+            else:
+                return obj
+
+        if not TEST_CUDA or not self.should_test_cuda:
+            raise unittest.SkipTest('Excluded from CUDA tests')
+        try:
+            cpu_input = self._get_input()
+            cpu_target = self._get_target()
+            cpu_module = self.constructor(*self.constructor_args)
+            gpu_module = self.constructor(*self.constructor_args)
+
+            # Convert input, target and module parameters to dtype
+            if dtype is not None:
+                cpu_input = convert_dtype(cpu_input, dtype, True)
+                # NLLLoss requires target to be LongTensor
+                if not isinstance(cpu_target, torch.LongTensor):
+                    cpu_target = convert_dtype(cpu_target, dtype)
+                cpu_module.type(dtype)
+                gpu_module.type(dtype)
+
+            # GPU setup
+            gpu_input = to_gpu(cpu_input)
+            gpu_target = to_gpu(cpu_target)
+            gpu_module.cuda()
+
+            # torch.HalfTensor doesn't support most operations, converting back to default
+            if dtype == torch.HalfTensor:
+                cpu_input = self._get_input()
+                cpu_target = self._get_target()
+                # Loss modules with weights require consistent input/module weight types
+                cpu_module = self.constructor(*self.constructor_args)
+
+            cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
+            gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
+            # dtype can be None, so set precision in this way instead of a precision map
+            test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype == torch.HalfTensor else 4e-4)
+
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target)
+            test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype == torch.HalfTensor else 4e-4)
+        except NotImplementedError:
+            pass
 
     def _get_target(self):
         return self._get_arg('target', False)
@@ -4839,7 +4906,16 @@ def add_test(test):
     setattr(TestNN, test_name, lambda self, test=test: test(self))
     # Hardshrink is not implemented in CUDA, so we must not test it.
     if not test_name.startswith("test_Hardshrink"):
-        setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
+        # With dtype enable, it's good enough to test against three floating types
+        if 'dtype' in get_function_arglist(test.test_cuda):
+            setattr(TestNN, cuda_test_name + '_float', lambda self,
+                    test=test: test.test_cuda(self, dtype=torch.FloatTensor))
+            setattr(TestNN, cuda_test_name + '_double', lambda self,
+                    test=test: test.test_cuda(self, dtype=torch.DoubleTensor))
+            setattr(TestNN, cuda_test_name + '_half', lambda self,
+                    test=test: test.test_cuda(self, dtype=torch.HalfTensor))
+        else:
+            setattr(TestNN, cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 def wrap_functional(fn, **kwargs):
