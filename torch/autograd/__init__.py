@@ -34,7 +34,7 @@ def _make_grads(outputs, grads):
     return tuple(new_grads)
 
 
-def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False):
+def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, grad_variables=None):
     """Computes the sum of gradients of given tensors w.r.t. graph leaves.
 
     The graph is differentiated using the chain rule. If any of ``tensors``
@@ -62,6 +62,14 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False):
             be constructed, allowing to compute higher order derivative products.
             Defaults to ``False``.
     """
+    if grad_variables is not None:
+        warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
+        if grad_tensors is None:
+            grad_tensors = grad_variables
+        else:
+            warnings.warn("'grad_tensors' and 'grad_variables' (deprecated) arguments both "
+                          "passed to backward(). Using 'grad_tensors'.")
+
     tensors = (tensors,) if isinstance(tensors, Variable) else tuple(tensors)
 
     if grad_tensors is None:
