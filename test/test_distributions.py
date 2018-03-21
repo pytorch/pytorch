@@ -2653,7 +2653,7 @@ class TestKL(TestCase):
                     actual = dist.entropy()
                 except NotImplementedError:
                     continue
-                x = dist.sample(sample_shape=(50000,))
+                x = dist.sample(sample_shape=(60000,))
                 expected = -dist.log_prob(x).mean(0)
                 if isinstance(actual, Variable):
                     actual = actual.data
