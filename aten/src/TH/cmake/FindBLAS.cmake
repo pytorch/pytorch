@@ -1,6 +1,6 @@
 # - Find BLAS library
-# This module finds an installed fortran library that implements the BLAS 
-# linear-algebra interface (see http://www.netlib.org/blas/).  
+# This module finds an installed fortran library that implements the BLAS
+# linear-algebra interface (see http://www.netlib.org/blas/).
 # The list of libraries searched for is taken
 # from the autoconf macro file, acx_blas.m4 (distributed at
 # http://ac-archive.sourceforge.net/ac-archive/acx_blas.html).
@@ -28,7 +28,7 @@ INCLUDE(CheckFortranFunctionExists)
 
 MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
   # This macro checks for the existence of the combination of fortran libraries
-  # given by _list.  If the combination is found, this macro checks (using the 
+  # given by _list.  If the combination is found, this macro checks (using the
   # Check_Fortran_Function_Exists macro) whether can link against that library
   # combination using the name of a routine given by _name using the linker
   # flags given by _flags.  If the combination of libraries is found and passes
@@ -36,7 +36,7 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
   # have been found.  Otherwise, LIBRARIES is set to NOTFOUND.
   # N.B. _prefix is the prefix applied to the names of all cached variables that
   # are generated internally and marked advanced by this macro.
-  
+
   set(__list)
   foreach(_elem ${_list})
     if(__list)
@@ -56,18 +56,18 @@ MACRO(Check_Fortran_Libraries LIBRARIES _prefix _name _flags _list)
       if ( WIN32 )
         find_library(${_prefix}_${_library}_LIBRARY
           NAMES ${_library}
-          PATHS ENV LIB 
+          PATHS ENV LIB
           PATHS ENV PATH )
       endif ( WIN32 )
-      if ( APPLE ) 
+      if ( APPLE )
         find_library(${_prefix}_${_library}_LIBRARY
           NAMES ${_library}
-          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 
+          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
           ENV DYLD_LIBRARY_PATH )
       else ( APPLE )
         find_library(${_prefix}_${_library}_LIBRARY
           NAMES ${_library}
-          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64 
+          PATHS /usr/local/lib /usr/lib /usr/local/lib64 /usr/lib64
           ENV LD_LIBRARY_PATH )
       endif( APPLE )
       mark_as_advanced(${_prefix}_${_library}_LIBRARY)
