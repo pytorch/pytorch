@@ -16,12 +16,21 @@ elseif(Protobuf_FOUND OR PROTOBUF_FOUND)
   # If the modern targets are not present, we will generate them for you for
   # backward compatibility. This is backported from CMake's new FindProtobuf.cmake
   # content.
+  if ((NOT PROTOBUF_LIBRARY) AND (NOT PROTOBUF_LITE_LIBRARY))
+    message(FATAL_ERROR
+        "Caffe2: Found protobuf with old style targets, but could not find targets."
+        " PROTOBUF_LIBRARY: " ${PROTOBUF_LIBRARY}
+        " PROTOBUF_LITE_LIBRARY: " ${PROTOBUF_LITE_LIBRARY}
+        " Protobuf_LIBRARY: " ${Protobuf_LIBRARY}
+        " Protobuf_LITE_LIBRARY: " ${Protobuf_LITE_LIBRARY})
+  endif()
   message(STATUS "Caffe2: Found protobuf with old-style protobuf targets.")
+
   if(PROTOBUF_LIBRARY)
     if (NOT TARGET protobuf::libprotobuf)
       add_library(protobuf::libprotobuf UNKNOWN IMPORTED)
       set_target_properties(protobuf::libprotobuf PROPERTIES
-          INTERFACE_INCLUDE_DIRECTORIES "${Protobuf_INCLUDE_DIR}")
+          INTERFACE_INCLUDE_DIRECTORIES "${PROTOBUF_INCLUDE_DIRS}")
     endif()
     if(EXISTS "${PROTOBUF_LIBRARY}")
       set_target_properties(protobuf::libprotobuf PROPERTIES
@@ -45,7 +54,7 @@ elseif(Protobuf_FOUND OR PROTOBUF_FOUND)
     if (NOT TARGET protobuf::libprotobuf-lite)
       add_library(protobuf::libprotobuf-lite UNKNOWN IMPORTED)
       set_target_properties(protobuf::libprotobuf-lite PROPERTIES
-          INTERFACE_INCLUDE_DIRECTORIES "${Protobuf_INCLUDE_DIR}")
+          INTERFACE_INCLUDE_DIRECTORIES "${PROTOBUF_INCLUDE_DIRS}")
     endif()
     if(EXISTS "${PROTOBUF_LITE_LIBRARY}")
       set_target_properties(protobuf::libprotobuf-lite PROPERTIES

@@ -20,7 +20,6 @@
 
 #include "caffe2/core/net.h"
 #include "caffe2/core/operator.h"
-#include "google/protobuf/text_format.h"
 #include <gtest/gtest.h>
 
 namespace caffe2 {
@@ -104,7 +103,7 @@ namespace {
 int RunNetAndGetDuration(const string& net_def_str, const string& type) {
   NetDef net_def;
   CAFFE_ENFORCE(
-      google::protobuf::TextFormat::ParseFromString(net_def_str, &net_def));
+      TextFormat::ParseFromString(net_def_str, &net_def));
   net_def.set_type(type);
   Workspace ws;
   unique_ptr<NetBase> net(CreateNet(net_def, &ws));

@@ -31,6 +31,10 @@ namespace caffe2 {
 using std::string;
 using ::google::protobuf::MessageLite;
 
+// A wrapper function to shut down protobuf library (this is needed in ASAN
+// testing and valgrind cases to avoid protobuf appearing to "leak" memory).
+void ShutdownProtobufLibrary();
+
 // A wrapper function to return device name string for use in blob serialization
 // / deserialization. This should have one to one correspondence with
 // caffe2/proto/caffe2.proto: enum DeviceType.
@@ -60,6 +64,14 @@ inline void WriteProtoToBinaryFile(const MessageLite& proto,
 }
 
 #ifdef CAFFE2_USE_LITE_PROTO
+
+namespace TextFormat {
+inline bool ParseFromString(const string& spec, MessageLite* proto) {
+  LOG(FATAL) << "If you are running lite version, you should not be "
+             << "calling any text-format protobuffers.";
+}
+} // namespace TextFormat
+
 
 inline string ProtoDebugString(const MessageLite& proto) {
   return proto.SerializeAsString();
@@ -102,6 +114,10 @@ inline bool ReadProtoFromFile(const string& filename, MessageLite* proto) {
 #else  // CAFFE2_USE_LITE_PROTO
 
 using ::google::protobuf::Message;
+
+namespace TextFormat {
+bool ParseFromString(const string& spec, Message* proto);
+} // namespace TextFormat
 
 inline string ProtoDebugString(const Message& proto) {
   return proto.ShortDebugString();
