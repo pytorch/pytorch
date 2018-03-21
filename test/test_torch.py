@@ -780,6 +780,19 @@ class TestTorch(TestCase):
         long_res1 = long_m1.clone()
         long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
 
+    @staticmethod
+    def _test_remainder_overflow(self, dtype=torch.int64):
+        # Check Integer Overflows
+        x = torch.tensor(23500, dtype=dtype)
+        q = 392486996410368
+        self.assertEqual(x % q, x)
+        self.assertEqual(-x % q, q - x)
+        self.assertEqual(x % -q, x - q)
+        self.assertEqual(-x % -q, -x)
+
+    def test_remainder_overflow(self):
+        self._test_remainder_overflow(self, dtype=torch.int64)
+
     def test_mm(self):
         # helper function
         def matrixmultiply(mat1, mat2):
