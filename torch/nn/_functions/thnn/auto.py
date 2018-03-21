@@ -61,7 +61,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
     @staticmethod
     def backward(ctx, grad_output):
-        input, target = ctx.saved_variables
+        input, target = ctx.saved_tensors
         # apply returns grad_input, so we need to return Nones for target (1) + 1 for each extra arg passed to forward.
         return ((backward_cls.apply(input, target, grad_output, ctx.additional_args, ctx._backend),) +
                 (None,) * (ctx.forward_args_count + 1))
@@ -199,7 +199,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     @staticmethod
     def backward(ctx, grad_output):
-        t = ctx.saved_variables
+        t = ctx.saved_tensors
         input, tensor_params = t[0], t[1:]
         # Some notes on this function call:
         # 1) We need to pass params as *params so they are unwrapped correctly in backward_cls_forward.

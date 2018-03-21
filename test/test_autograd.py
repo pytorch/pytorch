@@ -96,7 +96,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                var1, var2 = ctx.saved_variables
+                var1, var2 = ctx.saved_tensors
                 # NOTE: self is the test case here
                 self.assertIsInstance(var1, Variable)
                 self.assertIsInstance(var2, Variable)
@@ -606,7 +606,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_b):
-                b, = ctx.saved_variables
+                b, = ctx.saved_tensors
                 self.assertEqual(b.output_nr, 1)
 
         TestFn.apply(b).sum().backward()
