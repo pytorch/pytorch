@@ -1699,8 +1699,17 @@ class TestOperators(hu.HypothesisTestCase):
                                               num_iter=num_iters)
         for i in range(num_nets):
             net = core.Net("net_{}".format(i))
+            # clear stats from global stats registry
+            net.StatRegistryExport(
+                [], ["_k{}".format(i), "_v{}".format(i), "_t{}".format(i)])
             net.AtomicIter([iter_mutex, "iter"], ["iter"])
             step = core.ExecutionStep("step", [net])
+            net.StatRegistryExport(
+                [], [
+                    "stat_key_{}".format(i), "stat_value_{}".format(i),
+                    "stat_ts_{}".format(i)
+                ]
+            )
             concurrent_steps.AddSubstep(step)
 
         concurrent_steps.SetConcurrentSubsteps(True)
@@ -1712,6 +1721,14 @@ class TestOperators(hu.HypothesisTestCase):
         iters = self.ws.blobs[("iter")].fetch()
         self.assertEqual(iters.dtype, np.int64)
         self.assertEqual(iters[0], initial_iters + num_iters * num_nets)
+
+        for i in range(num_nets):
+            stat_key = self.ws.blobs[("stat_key_{}".format(i))].fetch()
+            self.assertEqual(b'atomic_iter/stats/iter/num_iter', stat_key[0])
+            stat_value = self.ws.blobs[("stat_value_{}".format(i))].fetch()
+            self.assertEqual(np.int64, stat_value.dtype)
+            if num_iters > 0:
+                self.assertEqual(1, stat_value[0])
 
     @given(a=hu.tensor(),
            src=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),

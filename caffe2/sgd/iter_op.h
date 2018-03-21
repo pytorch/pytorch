@@ -23,6 +23,7 @@
 #include "caffe2/core/blob_serialization.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/core/stats.h"
 
 namespace caffe2 {
 
@@ -76,14 +77,22 @@ class AtomicIterOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
   AtomicIterOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {}
+      : Operator<Context>(operator_def, ws),
+        stats_(std::string("atomic_iter/stats/") + operator_def.input(1)) {}
 
   bool RunOnDevice() override {
     auto& mutex = OperatorBase::Input<std::unique_ptr<std::mutex>>(0);
     std::lock_guard<std::mutex> lg(*mutex);
     IncrementIter(OperatorBase::Output<TensorCPU>(0));
+    CAFFE_EVENT(stats_, num_iter);
     return true;
   }
+
+ private:
+  struct AtomicIterOpStats {
+    CAFFE_STAT_CTOR(AtomicIterOpStats);
+    CAFFE_EXPORTED_STAT(num_iter);
+  } stats_;
 };
 
 class MutexSerializer : public BlobSerializerBase {
