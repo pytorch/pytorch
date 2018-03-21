@@ -1207,8 +1207,8 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
-def instance_norm(input, running_mean, running_var, weight=None, bias=None,
-                  use_input_stats=True, momentum=0.1, eps=1e-5):
+def instance_norm(input, running_mean=None, running_var=None, weight=None,
+                  bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -1244,7 +1244,7 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
             input_reshaped, running_mean, running_var, weight=weight, bias=bias,
             training=use_input_stats, momentum=momentum, eps=eps)
 
-        # Reshape back
+        # Reshape and copy back
         if running_mean is not None:
             running_mean_orig.copy_(running_mean.view(b, c).mean(0, keepdim=False))
         if running_var is not None:
@@ -1257,7 +1257,7 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
                           eps=eps)
 
 
-def layer_norm(input, normalized_shape, running_mean, running_var,
+def layer_norm(input, normalized_shape, running_mean=None, running_var=None,
                weight=None, bias=None, use_input_stats=True,
                momentum=0.1, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
@@ -1266,6 +1266,16 @@ def layer_norm(input, normalized_shape, running_mean, running_var,
     """
     if not use_input_stats and (running_mean is None or running_var is None):
         raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
+
+    if weight is not None and weight.size() != normalized_shape:
+        raise ValueError('Expected weight to be of same shape as '
+                         'normalized_shape, but got {} weight and '
+                         'normalized_shape={}'.format(weight.size(), normalized_shape))
+
+    if bias is not None and bias.size() != normalized_shape:
+        raise ValueError('Expected bias to be of same shape as '
+                         'normalized_shape, but got {} bias and '
+                         'normalized_shape={}'.format(bias.size(), normalized_shape))
 
     normalized_ndim = len(normalized_shape)
     input_shape = input.size()
@@ -1307,6 +1317,53 @@ def layer_norm(input, normalized_shape, running_mean, running_var,
         return torch.add(out, bias)
     else:
         return out
+
+
+def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+    r"""Applies Group Normalization for last certain number of dimensions.
+
+    See :class:`~torch.nn.GroupNorm` for details.
+    """
+
+    input_shape = input.size()
+    b = input_shape[0]
+    c = input_shape[1]
+    g = num_groups
+
+    if c % num_groups != 0:
+        raise ValueError('Expected number of channels in input to be divisible '
+                         'by num_groups, but got {} input and num_groups={}'
+                         .format(input_shape, num_groups))
+
+    if weight is not None and (weight.dim() != 1 or weight.numel() != c):
+        raise ValueError('Expected weight to be a vector of size equal to the '
+                         'number of channels in input, but got {} weight and {} '
+                         'input'.format(weight.size(), input_shape))
+
+    if bias is not None and (bias.dim() != 1 or bias.numel() != c):
+        raise ValueError('Expected bias to be a vector of size equal to the '
+                         'number of channels in input, but got {} bias and {} '
+                         'input'.format(bias.size(), input_shape))
+
+    # Apply group norm
+    input_reshaped = input.contiguous().view(1, b * g, -1)
+
+    out = batch_norm(input_reshaped, None, None, None, None, True, 0, eps)
+
+    out = out.view(*input_shape)
+
+    if weight is None and bias is None:
+        return out
+
+    affine_param_shape = [1 for _ in input_shape]
+    affine_param_shape[1] = c
+
+    if weight is not None and bias is not None:
+        return torch.addcmul(bias.view(affine_param_shape), 1, out, weight.view(affine_param_shape))
+    elif weight is not None:
+        return torch.mul(out, weight.view(affine_param_shape))
+    else:
+        return torch.add(out, bias.view(affine_param_shape))
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
