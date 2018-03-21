@@ -7,20 +7,25 @@ cd .jenkins/perf_test
 
 echo "Running CPU perf test for PyTorch..."
 
-# Get last master commit hash
-export PYTORCH_COMMIT_ID=$(git log --format="%H" -n 1)
+pip install awscli
 
-# Get baseline file from https://github.com/yf225/perf-tests
-if [ -f /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json ]; then
-    cp /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json perf_test_numbers_cpu.json
-else
-    curl https://raw.githubusercontent.com/yf225/perf-tests/master/perf_test_numbers_cpu.json -O
+export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+
+if [[ "$COMMIT_SOURCE" == *master* ]]; then
+    # Get current master commit hash
+    export MASTER_COMMIT_ID=$(git log --format="%H" -n 1)
 fi
 
-if [[ "$GIT_COMMIT" == *origin/master* ]]; then
+# Get baseline file from ossci-perf-test S3 bucket
+aws s3 cp s3://ossci-perf-test/pytorch/cpu_runtime/LATEST_TESTED_COMMIT LATEST_TESTED_COMMIT
+export LATEST_TESTED_COMMIT="$(cat LATEST_TESTED_COMMIT)"
+aws s3 cp s3://ossci-perf-test/pytorch/cpu_runtime/${LATEST_TESTED_COMMIT}.json cpu_runtime.json
+
+if [[ "$COMMIT_SOURCE" == *master* ]]; then
     # Prepare new baseline file
-    cp perf_test_numbers_cpu.json new_perf_test_numbers_cpu.json
-    python update_commit_hash.py new_perf_test_numbers_cpu.json ${PYTORCH_COMMIT_ID}
+    cp cpu_runtime.json new_cpu_runtime.json
+    python update_commit_hash.py new_cpu_runtime.json ${MASTER_COMMIT_ID}
 fi
 
 # Include tests
@@ -28,7 +33,7 @@ fi
 . ./test_cpu_speed_mnist.sh
 
 # Run tests
-if [[ "$GIT_COMMIT" == *origin/master* ]]; then
+if [[ "$COMMIT_SOURCE" == *master* ]]; then
     run_test test_cpu_speed_mini_sequence_labeler 20 compare_and_update
     run_test test_cpu_speed_mnist 20 compare_and_update
 else
@@ -36,12 +41,14 @@ else
     run_test test_cpu_speed_mnist 20 compare_with_baseline
 fi
 
-if [[ "$GIT_COMMIT" == *origin/master* ]]; then
-    # Push new baseline file
-    cp new_perf_test_numbers_cpu.json /var/lib/jenkins/host-workspace/perf_test_numbers_cpu.json
-    cd /var/lib/jenkins/host-workspace
-    git config --global user.email jenkins@ci.pytorch.org
-    git config --global user.name Jenkins
-    git add perf_test_numbers_cpu.json
-    git commit -m "New CPU perf test baseline from ${PYTORCH_COMMIT_ID}"
+if [[ "$COMMIT_SOURCE" == *master* ]]; then
+    aws s3 cp new_cpu_runtime.json s3://ossci-perf-test/pytorch/cpu_runtime/${MASTER_COMMIT_ID}.json --acl public-read
+
+    # If current commit is newer, then we put it in LATEST_TESTED_COMMIT
+    aws s3 cp s3://ossci-perf-test/pytorch/cpu_runtime/LATEST_TESTED_COMMIT LATEST_TESTED_COMMIT
+    export LATEST_TESTED_COMMIT="$(cat LATEST_TESTED_COMMIT)"
+    if ! git merge-base --is-ancestor ${MASTER_COMMIT_ID} ${LATEST_TESTED_COMMIT}; then
+        echo "${MASTER_COMMIT_ID}" > LATEST_TESTED_COMMIT
+        aws s3 cp LATEST_TESTED_COMMIT s3://ossci-perf-test/pytorch/cpu_runtime/LATEST_TESTED_COMMIT --acl public-read
+    fi
 fi
