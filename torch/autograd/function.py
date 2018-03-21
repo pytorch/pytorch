@@ -10,16 +10,13 @@ from collections import OrderedDict
 class _ContextMethodMixin(object):
 
     def save_for_backward(self, *tensors):
-        # FIXME: are saved Tensors now under saved_variables or saved_tensors?
         """Saves given tensors for a future call to :func:`~Function.backward`.
 
         **This should be called at most once, and only from inside the**
         :func:`forward` **method.**
 
         Later, saved tensors can be accessed through the :attr:`saved_tensors`
-        attribute; or, if the corresponding Variable is needed (e.g. for double
-        backwards), those can be accessed through the :attr:`saved_variables`
-        attribute.  Before returning them to the user, a check is made, to ensure
+        attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
         Arguments can also be ``None``.
