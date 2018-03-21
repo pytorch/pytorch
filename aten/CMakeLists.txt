@@ -385,6 +385,11 @@ IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    IF(NOT BLAS_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL header files not found. If using conda, please run \
+        `conda install mkl-include`. Otherwise, please make sure that CMake will \
+        search the directory containing the header files, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
     INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
     SET(AT_MKL_ENABLED 1)
   ENDIF()
