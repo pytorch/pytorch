@@ -248,7 +248,7 @@ class DistributedDataParallel(Module):
             outputs = self.parallel_apply(self._module_copies, inputs, kwargs)
             return self.gather(outputs, self.output_device)
         else:
-            #for cpu only with mpi backend
+            # for cpu only with mpi backend
             if self.first_call:
                 print("first broadcast start")
                 for param in self.module.parameters():
