@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import inspect
 import argparse
 import unittest
 import warnings
@@ -109,6 +110,10 @@ def to_gpu(obj, type_map={}):
         return tuple(to_gpu(o, type_map) for o in obj)
     else:
         return deepcopy(obj)
+
+
+def get_function_arglist(func):
+    return inspect.getargspec(func).args
 
 
 def set_rng_seed(seed):
