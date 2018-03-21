@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/SpatialUpSamplingBilinear.cu"
 #else
 
+#include "../linear_upsampling.h"
+
 static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
                         (THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
@@ -31,7 +33,8 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            int outputHeight,
-           int outputWidth)
+           int outputWidth,
+           bool align_corners)
 {
   int nbatch = THCTensor_(size)(state, input, 0);
   int channels = THCTensor_(size)(state, input, 1);
@@ -52,14 +55,14 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   THCDeviceTensor<real, 4> idata = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> odata = toDeviceTensor<real, 4>(state, output);
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
-  const accreal rheight= (outputHeight > 1) ? (accreal)inputHeight / outputHeight : accreal(0);
-  const accreal rwidth = (outputWidth > 1) ? (accreal)inputWidth / outputWidth : accreal(0);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
-   0 , stream>>>(num_kernels, rheight, rwidth, idata, odata);
+   0 , stream>>>(num_kernels, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, input);
 }
@@ -74,7 +77,8 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
            int inputHeight,
            int inputWidth,
            int outputHeight,
-           int outputWidth)
+           int outputWidth,
+           bool align_corners)
 {
   THNN_(SpatialUpSamplingBilinear_shapeCheck)
        (state, NULL, gradOutput,
@@ -93,14 +97,14 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   int height2 = data2.getSize(2);
   int width2 = data2.getSize(3);
   assert(height1 > 0 && width1 > 0 && height2 > 0 && width2 > 0);
-  const accreal rheight= (height2 > 1) ? (accreal)height1 / height2 : accreal(0);
-  const accreal rwidth = (width2 > 1) ? (accreal)width1 / width2 : accreal(0);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = height2 * width2;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
-  num_threads, 0, stream>>>(num_kernels, rheight, rwidth, data1, data2);
+  num_threads, 0, stream>>>(num_kernels, rheight, rwidth, align_corners, data1, data2);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);

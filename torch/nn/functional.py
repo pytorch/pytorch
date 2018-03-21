@@ -1706,7 +1706,7 @@ def pixel_shuffle(input, upscale_factor):
     return shuffle_out.view(batch_size, channels, out_height, out_width)
 
 
-def upsample(input, size=None, scale_factor=None, mode='nearest'):
+def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
     r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -1722,12 +1722,26 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     `bilinear` (4D-only), `trilinear` (5D-only)
 
     Args:
-        input (Variable): input
+        input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
+        align_corners (bool, optional): if True, the corner pixels of the input
+            and output tensors are aligned, and thus preserving the values at
+            those pixels. This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, or `trilinear`. Default: False
+
+    .. warning::
+        With ``align_corners = True``, the linearly interpolating modes
+        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
+        output and input pixels, and thus the output values can depend on the
+        input size. This was the default behavior for these modes up to version
+        0.3.1. Since then, the default behavior is ``align_corners = False``.
+        See :class:`nn.Upsample` for concrete examples on how this affects the
+        outputs.
+
     """
     from numbers import Integral
     from .modules.utils import _ntuple
@@ -1766,6 +1780,18 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
         scale_factors = _ntuple(dim)(scale_factor)
         return [input.size(i + 2) * scale_factors[i] for i in range(dim)]
 
+    if mode == 'nearest':
+        if align_corners is not None:
+            raise ValueError("align_corners option can only be set with the "
+                             "interpolating modes: linear | bilinear | trilinear")
+    else:
+        if align_corners is None:
+            warnings.warn("Default upsampling behavior when mode={} is changed "
+                          "to align_corners=False since 0.4.0. Please specify "
+                          "align_corners=True if the old behavior is desired. "
+                          "See the documentation of nn.Upsample for details.".format(mode))
+            align_corners = False
+
     if input.dim() == 3 and mode == 'nearest':
         return torch._C._nn.upsample_nearest1d(input, _scale_factor(1))
     elif input.dim() == 4 and mode == 'nearest':
@@ -1773,7 +1799,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 5 and mode == 'nearest':
         return torch._C._nn.upsample_nearest3d(input, _scale_factor(3))
     elif input.dim() == 3 and mode == 'linear':
-        return torch._C._nn.upsample_linear1d(input, _output_size(1))
+        return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners)
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     elif input.dim() == 3 and mode == 'trilinear':
@@ -1781,7 +1807,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 4 and mode == 'linear':
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
-        return torch._C._nn.upsample_bilinear2d(input, _output_size(2))
+        return torch._C._nn.upsample_bilinear2d(input, _output_size(2), align_corners)
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -1789,7 +1815,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        return torch._C._nn.upsample_trilinear3d(input, _output_size(3))
+        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners)
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | trilinear"
@@ -1799,7 +1825,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
 def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
-    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+    .. warning::
+        This function is deprecated in favor of :meth:`nn.functional.upsample`.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -1816,9 +1843,12 @@ def upsample_nearest(input, size=None, scale_factor=None):
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
-    r"""Upscales the input, using bilinear upsampling.
+    r"""Upsamples the input, using bilinear upsampling.
 
-    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+    .. warning::
+        This function is deprecated in favor of :meth:`nn.functional.upsample`.
+        This is equivalent with
+        ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
 
     Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
     volumetric (5 dimensional) inputs.
@@ -1830,7 +1860,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.upsample instead.")
-    return upsample(input, size, scale_factor, mode='bilinear')
+    return upsample(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):

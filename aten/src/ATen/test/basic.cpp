@@ -232,7 +232,7 @@ static void test(Type & type) {
     for (int64_t i = 0; i < tensor.numel(); ++i) {
       REQUIRE(tensor[i].equal(one * i));
     }
-    for (size_t i = 0; i < tensor.numel(); ++i) {
+    for (size_t i = 0; i < (uint64_t) tensor.numel(); ++i) {
       REQUIRE(tensor[i].equal(one * static_cast<int64_t>(i)));
     }
     for (int i = 0; i < tensor.numel(); ++i) {
