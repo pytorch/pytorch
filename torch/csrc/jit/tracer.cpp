@@ -8,7 +8,6 @@
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/pybind.h"
 
 #include <string>
 #include <sstream>
@@ -17,6 +16,7 @@
 #ifndef NO_PYTHON
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/jit/pybind.h"
 #include <frameobject.h>
 #include <patchlevel.h>
 
