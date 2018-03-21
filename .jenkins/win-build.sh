@@ -32,8 +32,9 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-aws s3 cp s3://ossci-windows/mkl.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl
-set LIB=%cd%\\mkl;%LIB%
+aws s3 cp s3://ossci-windows/mkl_with_headers.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl
+set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
+set LIB=%cd%\\mkl\\lib;%LIB
 
 :: Install MAGMA
 aws s3 cp s3://ossci-windows/magma_cuda90_release.7z magma_cuda90_release.7z --quiet && 7z x -aoa magma_cuda90_release.7z -omagma_cuda90_release
@@ -47,7 +48,7 @@ IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
 curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
 .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-call conda install -y -q numpy mkl cffi pyyaml boto3
+call conda install -y -q numpy cffi pyyaml boto3
 
 :: Install ninja
 pip install ninja

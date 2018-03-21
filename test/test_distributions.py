@@ -35,22 +35,22 @@ from torch.autograd import Variable, grad, gradcheck, variable
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Cauchy, Chi2, Dirichlet, Distribution,
                                  Exponential, ExponentialFamily,
-                                 FisherSnedecor, Gamma, Geometric,
-                                 Gumbel, Laplace, LogNormal, Multinomial,
-                                 Normal, OneHotCategorical, Pareto, Poisson,
-                                 RelaxedBernoulli, RelaxedOneHotCategorical, StudentT,
+                                 FisherSnedecor, Gamma, Geometric, Gumbel,
+                                 Laplace, LogNormal, Multinomial,
+                                 MultivariateNormal, Normal, OneHotCategorical,
+                                 Pareto, Poisson, RelaxedBernoulli,
+                                 RelaxedOneHotCategorical, StudentT,
                                  TransformedDistribution, Uniform, constraints,
                                  kl_divergence)
-from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
+from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
                                             PowerTransform,
-                                            SigmoidTransform,
-                                            SoftmaxTransform,
+                                            SigmoidTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
 from torch.distributions.utils import _finfo, probs_to_logits, softmax
@@ -200,6 +200,22 @@ EXAMPLES = [
         {
             'loc': variable([1.0, 0.0], requires_grad=True),
             'scale': variable([1e-5, 1e-5], requires_grad=True),
+        },
+    ]),
+    Example(MultivariateNormal, [
+        {
+            'loc': variable(torch.randn(5, 2), requires_grad=True),
+            'covariance_matrix': variable(torch.Tensor([[2.0, 0.3], [0.3, 0.25]]), requires_grad=True),
+        },
+        {
+            'loc': variable(torch.randn(5, 3, 2), requires_grad=True),
+            'scale_tril': variable(torch.Tensor([[[2.0, 0.0], [-0.5, 0.25]],
+                                                 [[2.0, 0.0], [0.3, 0.25]],
+                                                 [[5.0, 0.0], [-0.5, 1.5]]]), requires_grad=True),
+        },
+        {
+            'loc': variable(torch.Tensor([1.0, -1.0])),
+            'covariance_matrix': variable(torch.Tensor([[5.0, -0.5], [-0.5, 1.5]])),
         },
     ]),
     Example(Normal, [
@@ -1168,6 +1184,96 @@ class TestDistributions(TestCase):
             self._check_sampler_sampler(Normal(loc, scale),
                                         scipy.stats.norm(loc=loc, scale=scale),
                                         'Normal(mean={}, std={})'.format(loc, scale))
+
+    def test_multivariate_normal_shape(self):
+        mean = torch.tensor(torch.randn(5, 3), requires_grad=True)
+        mean_no_batch = torch.tensor(torch.randn(3), requires_grad=True)
+        mean_multi_batch = torch.tensor(torch.randn(6, 5, 3), requires_grad=True)
+
+        # construct PSD covariance
+        tmp = torch.randn(3, 10)
+        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
+
+        # construct batch of PSD covariances
+        tmp = torch.randn(6, 5, 3, 10)
+        cov_batched = torch.tensor((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
+        scale_tril_batched = [torch.potrf(C, upper=False) for C in cov_batched.data.view((-1, 3, 3))]
+        scale_tril_batched = torch.stack(scale_tril_batched).view(cov_batched.shape)
+
+        # ensure that sample, batch, event shapes all handled correctly
+        self.assertEqual(MultivariateNormal(mean, cov).sample().size(), (5, 3))
+        self.assertEqual(MultivariateNormal(mean_no_batch, cov).sample().size(), (3,))
+        self.assertEqual(MultivariateNormal(mean_multi_batch, cov).sample().size(), (6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, cov).sample((2,)).size(), (2, 5, 3))
+        self.assertEqual(MultivariateNormal(mean_no_batch, cov).sample((2,)).size(), (2, 3))
+        self.assertEqual(MultivariateNormal(mean_multi_batch, cov).sample((2,)).size(), (2, 6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, cov).sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(MultivariateNormal(mean_no_batch, cov).sample((2, 7)).size(), (2, 7, 3))
+        self.assertEqual(MultivariateNormal(mean_multi_batch, cov).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+
+        # check gradients
+        self._gradcheck_log_prob(MultivariateNormal, (mean, cov))
+        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov))
+        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov_batched))
+        self._gradcheck_log_prob(MultivariateNormal, (mean, None, scale_tril))
+        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, scale_tril_batched))
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_multivariate_normal_log_prob(self):
+        mean = torch.tensor(torch.randn(3), requires_grad=True)
+        tmp = torch.randn(3, 10)
+        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
+
+        # check that logprob values match scipy logpdf,
+        # and that covariance and scale_tril parameters are equivalent
+        dist1 = MultivariateNormal(mean, cov)
+        dist2 = MultivariateNormal(mean, scale_tril=scale_tril)
+        ref_dist = scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy())
+
+        x = dist1.sample((10,))
+        expected = ref_dist.logpdf(x.data.numpy())
+
+        self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).data.numpy() - expected)**2), places=3)
+        self.assertAlmostEqual(0.0, np.mean((dist2.log_prob(x).data.numpy() - expected)**2), places=3)
+
+        # Double-check that batched versions behave the same as unbatched
+        mean = torch.tensor(torch.randn(5, 3), requires_grad=True)
+        tmp = torch.randn(5, 3, 10)
+        cov = torch.tensor((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
+
+        dist_batched = MultivariateNormal(mean, cov)
+        dist_unbatched = [MultivariateNormal(mean[i], cov[i]) for i in range(mean.size(0))]
+
+        x = dist_batched.sample((10,))
+        batched_prob = dist_batched.log_prob(x)
+        unbatched_prob = torch.stack([dist_unbatched[i].log_prob(x[:, i]) for i in range(5)]).t()
+
+        self.assertEqual(batched_prob.shape, unbatched_prob.shape)
+        self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
+
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multivariate_normal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.tensor(torch.randn(3), requires_grad=True)
+        tmp = torch.randn(3, 10)
+        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
+
+        self._check_sampler_sampler(MultivariateNormal(mean, cov),
+                                    scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
+                                    'MultivariateNormal(loc={}, cov={})'.format(mean, cov),
+                                    multivariate=True)
+        self._check_sampler_sampler(MultivariateNormal(mean, scale_tril=scale_tril),
+                                    scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
+                                    'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
+                                    multivariate=True)
 
     def test_exponential(self):
         rate = variable(torch.randn(5, 5).abs(), requires_grad=True)
@@ -2841,8 +2947,8 @@ class TestTransforms(TestCase):
                 AffineTransform(variable(torch.Tensor(4, 5).normal_()),
                                 variable(torch.Tensor(4, 5).normal_()),
                                 cache_size=cache_size),
-                StickBreakingTransform(cache_size=cache_size),
                 SoftmaxTransform(cache_size=cache_size),
+                StickBreakingTransform(cache_size=cache_size),
                 LowerCholeskyTransform(cache_size=cache_size),
                 ComposeTransform([
                     AffineTransform(variable(torch.Tensor(4, 5).normal_()),
