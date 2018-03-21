@@ -14,6 +14,9 @@
  * limitations under the License.
  */
 
+
+#include <iostream>
+
 #include "caffe2/core/common.h"
 
 
@@ -405,7 +408,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               profile.output_transform * 1E3,
               gflops);
           CAFFE_ENFORCE(ret > 0);
-          LOG(INFO) << buffer;
+          std::cout << buffer << std::endl;
         }
       }
     }
