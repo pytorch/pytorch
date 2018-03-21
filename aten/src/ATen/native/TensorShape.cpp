@@ -18,27 +18,6 @@ static void check_cat_no_zero_dim(TensorList tensors) {
   }
 }
 
-// FIXME when empty tensors with arbitrary shapes is implemented
-// When using cat on empty tensors, the following is legacy behavior
-// when the non-empty `tensor` and `empty` do not have matching sizes:
-// 1) torch.cat([empty, tensor]) should ignore empty tensors
-// 2) torch.cat([tensor, empty]) should ignore empty tensors
-// 3) torch.cat([empty, empty, ..., empty]) should be empty
-// The following function wraps dim on the first non-empty tensor
-// to preserve legacy behavior.
-static inline int64_t legacy_cat_wrap_dim(int64_t dim, TensorList tensors) {
-  if (tensors.size() == 0) {
-    return dim;
-  }
-  for (auto& tensor : tensors) {
-    if (tensor.numel() == 0) {
-      continue;
-    }
-    return at::maybe_wrap_dim(dim, tensor.dim());
-  }
-  return 0;
-}
-
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
   dim = legacy_cat_wrap_dim(dim, tensors);

@@ -2327,6 +2327,10 @@ class TestTorch(TestCase):
         res1 = torch.cat([empty, empty], dim=1)
         self.assertEqual(res1, empty)
 
+        with self.assertRaisesRegexp(RuntimeError,
+                                     'expected a non-empty list of Tensors'):
+            torch.cat([], dim=1)
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)
