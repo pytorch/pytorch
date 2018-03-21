@@ -52,6 +52,6 @@ int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
   caffe2::run();
   // This is to allow us to use memory leak checks.
-  google::protobuf::ShutdownProtobufLibrary();
+  caffe2::ShutdownProtobufLibrary();
   return 0;
 }

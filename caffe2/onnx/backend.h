@@ -5,7 +5,6 @@
 #include "device.h"
 #include "onnx/onnx_pb.h"
 
-#include <google/protobuf/text_format.h>
 #include <functional>
 #include <string>
 #include <unordered_map>

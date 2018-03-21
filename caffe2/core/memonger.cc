@@ -20,7 +20,6 @@
 #include <unordered_set>
 
 #include "caffe2/utils/proto_utils.h"
-#include "google/protobuf/text_format.h"
 
 namespace caffe2 {
 namespace memonger {
@@ -305,7 +304,7 @@ class ComputeBlobRecyclingForDag {
         } else {
           NetDef step_net;
           CAFFE_ENFORCE(
-              google::protobuf::TextFormat::ParseFromString(
+              TextFormat::ParseFromString(
                   arg->s(), &step_net),
               "Could not parse step net:",
               name);

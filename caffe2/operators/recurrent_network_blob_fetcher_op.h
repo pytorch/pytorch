@@ -22,7 +22,6 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/operators/recurrent_network_op.h"
-#include "google/protobuf/text_format.h"
 
 #include <string>
 
