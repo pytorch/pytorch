@@ -466,7 +466,7 @@ def trace(*args, **kwargs):
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         if isinstance(func, torch.nn.Module):
-            module = TracedModule(func, **executor_options)
+            module = TopLevelTracedModule(func, **executor_options)
             module._create_method_from_trace('forward', func, args)
             return module
         else:
@@ -783,8 +783,6 @@ class TracedModule(ScriptModule):
         self._freeze()
 
     def forward(self, *args, **kwargs):
-        if self._has_method('forward'):
-            return self._get_method('forward')(*args, **kwargs)
         raise RuntimeError('Trace submodules cannot be called.')
 
     def _freeze(self):
@@ -797,6 +795,12 @@ class TracedModule(ScriptModule):
         if not self.__frozen or hasattr(self, attr):
             return super(TracedModule, self).__setattr__(attr, value)
         raise RuntimeError("Cannot set new properties on a traced module.")
+
+
+class TopLevelTracedModule(TracedModule):
+    def forward(self, *args, **kwargs):
+        return self._get_method('forward')(*args, **kwargs)
+
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
