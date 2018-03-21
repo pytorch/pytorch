@@ -86,6 +86,7 @@ from .gumbel import Gumbel
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
+from .logistic_normal import LogisticNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .normal import Normal
@@ -115,6 +116,7 @@ __all__ = [
     'Gumbel',
     'Laplace',
     'LogNormal',
+    'LogisticNormal',
     'Multinomial',
     'MultivariateNormal',
     'Normal',

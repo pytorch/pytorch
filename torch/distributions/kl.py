@@ -17,6 +17,7 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
+from .logistic_normal import LogisticNormal
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -310,7 +311,12 @@ def _kl_poisson_poisson(p, q):
 def _kl_transformed_transformed(p, q):
     if p.transforms != q.transforms:
         raise NotImplementedError
-    return kl_divergence(p.base_dist, q.base_dist)
+    if p.event_shape != q.event_shape:
+        raise NotImplementedError
+    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
+    extra_event_dim = len(p.event_shape)
+    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
+    return _sum_rightmost(base_kl_divergence, extra_event_dim)
 
 
 @register_kl(Uniform, Uniform)
