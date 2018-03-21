@@ -70,13 +70,15 @@ class LocallyConnectedOp final : public ConvPoolOpBase<Context> {
   void SetColumnBufferShape(
       const int N,
       const int C,
-      const int kernel_dim,
-      const std::vector<int>& output_image_dims,
+      const int kernel_size,
+      const int output_image_size,
       std::vector<int>* column_dims,
       std::vector<int>* column_transposed_dims);
 
   void SetYTranposedBufferShape(
-      const std::vector<int>& Y_dims,
+      const int N,
+      const int M,
+      const int output_image_size,
       std::vector<int>* Y_transposed_dims);
 
   Tensor<Context> bias_multiplier_;
@@ -149,13 +151,15 @@ class LocallyConnectedGradientOp final : public ConvPoolOpBase<Context> {
   void SetColumnBufferShape(
       const int N,
       const int C,
-      const int kernel_dim,
-      const std::vector<int>& output_image_dims,
+      const int kernel_size,
+      const int output_image_size,
       std::vector<int>* column_dims,
       std::vector<int>* column_transposed_dims);
 
   void SetDYTranposedBufferShape(
-      const std::vector<int>& dY_dims,
+      const int N,
+      const int M,
+      const int output_image_size,
       std::vector<int>* dY_transposed_dims);
 
   const bool no_bias_;
