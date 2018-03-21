@@ -79,7 +79,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 5
+_onnx_opset_version = 6
 
 
 # ---------------------------------------------------------------------
@@ -505,7 +505,6 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
                is_test_i=not training,
                epsilon_f=eps,
                momentum_f=1 - momentum,
-               consumed_inputs_i=(0, 0, 0, 1, 1),
                outputs=1 if not training else 5)
     if not training:
         return out
