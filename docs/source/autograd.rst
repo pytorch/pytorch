@@ -46,16 +46,22 @@ Variable (deprecated)
     The Variable API has been deprecated: Variables are no longer necessary to
     use autograd with tensors. Autograd automatically supports Tensors with
     ``requires_grad`` set to ``True``. In addition, ``Variable(tensor)`` now returns
-    a :class:`torch.Tensor`.
+    a :class:`torch.Tensor`. Below please find a quick guide on what has changed:
 
-..  FIXME: the below section details Variable methods that pertain to autograd, like
-    detach. It would nice to have something similar for Tensor.
-.. autoclass:: Variable
-    :members:
+    - ``Variable(tensor, requires_grad=True)`` is now ``torch.tensor(tensor, requires_grad=True)``
+    - ``var.data`` is now just ``tensor``. If you don't want to record operations on tensors,
+      declare then with ``requires_grad=False`` or detach them from the computation graph with
+      :func:`torch.Tensor.detach`.
+    - Methods such as ``var.backward(), var.detach(), var.register_hook()`` now work on tensors
+      with the same name.
 
+Tensor autograd functions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. autoclass:: torch.Tensor
+    :members: backward, detach, detach_, register_hook, retain_grad
 
 :hidden:`Function`
-^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: Function
     :members:
