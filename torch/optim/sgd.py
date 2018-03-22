@@ -93,7 +93,7 @@ class SGD(Optimizer):
                         buf = param_state['momentum_buffer']
                         buf.mul_(momentum).add_(1 - dampening, d_p)
                     if nesterov:
-                        d_p = d_p.add(momentum, buf)
+                        d_p = buf.add(momentum, buf)
                     else:
                         d_p = buf
 
