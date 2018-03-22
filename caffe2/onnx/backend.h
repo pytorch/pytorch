@@ -62,6 +62,16 @@ class OnnxAttributes {
     }
   }
 
+  const AttributeProto* remove(const std::string& key) {
+    const AttributeProto* result = nullptr;
+    auto iter = onnx_attrs_.find(key);
+    if (iter != onnx_attrs_.end()) {
+      result = iter->second;
+      onnx_attrs_.erase(iter);
+    }
+    return result;
+  }
+
  private:
   std::unordered_map<std::string, const AttributeProto*> onnx_attrs_;
   std::unordered_map<std::string, AttributeProto> rewritten_onnx_attrs_;
@@ -153,6 +163,8 @@ class Caffe2Backend {
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, int opset_version);
+
+  Caffe2Ops CreateBatchNormalization(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateMatMul(OnnxNode* onnx_node, int opset_version);
 
