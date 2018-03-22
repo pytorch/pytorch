@@ -314,6 +314,9 @@ private:
         case TK_WHILE:
           emitWhile(While(stmt));
           break;
+        case TK_FOR:
+          emitFor(For(stmt));
+          break;
         case TK_ASSIGN:
           emitAssignment(Assign(stmt));
           break;
@@ -414,45 +417,57 @@ private:
     }
   }
 
-  void emitWhile(const While& stmt) {
-    // Emits a loop operators conforming to the semantics specified at
-    // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
-    // TODO: implement scan_outputs
+  // *********************** Loop Operators ************************************
+  // Emits a loop operators conforming to the semantics specified at
+  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
+  // TODO: implement scan_outputs
 
-    // the format of the Loop instruction is:
-    // loop_carried_outputs* = Loop(max_trip_count, start_condition, loop_carried_inputs*)
-    //                          block0(loop_counter, loop_carried_block*) {
-    //                             <body>
-    //                             -> (continue_condition, loop_carried_block_outputs*)
-    //                          }
-    // all loop_carried_... lists are the same length and represent the value of
-    // loop-carried variables whose definitions are updated as the loop executes
-    // in a way that ensure single static assignment.
+  // the format of the Loop instruction is:
+  // loop_carried_outputs* = Loop(max_trip_count, start_condition,
+  // loop_carried_inputs*)
+  //                          block0(loop_counter, loop_carried_block*) {
+  //                             <body>
+  //                             -> (continue_condition,
+  //                             loop_carried_block_outputs*)
+  //                          }
+  // all loop_carried_... lists are the same length and represent the value of
+  // loop-carried variables whose definitions are updated as the loop executes
+  // in a way that ensure single static assignment.
 
-    // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
-    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
-
+  void emitLoopCommon(
+      Value* max_trip_count,
+      Value* cond_value,
+      const List<Stmt>& body,
+      const Stmt& stmt,
+      const Expr* cond,
+      const std::vector<std::string>& itr_idents) {
     Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
-    n->addInput(max_trip_count_dummy);
+    n->addInput(max_trip_count);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
-    // Trip count required by spec. Since this is a while loop, we do not
-    // provide access to this from user code
-    // TODO: it seems like we should implement a `for` loop as well, otherwise
-    // we'll probably have to pattern match iteration number machinery in user
-    // code to conform to the spec
-    body_block->addInput(); // Iteration num
+    Value* trip_count = body_block->addInput(); // Iteration num
     size_t skip_inputs_num = 1;
 
     {
       pushFrame(body_block);
+      if (itr_idents.size() > 1) {
+        throw ErrorReport(stmt)
+            << "Only one iteration variable allowed right now.";
+      }
+      for (size_t i = 0; i < itr_idents.size(); ++i) {
+        environment_stack->setVar(itr_idents[i], trip_count);
+      }
       WithInsertPoint guard(body_block);
-      emitStatements(stmt.body());
+      emitStatements(body);
 
       // Also emit the conditional
-      Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
-      body_block->registerOutput(body_cond_value);
+      if (cond != nullptr) {
+        Value* body_cond_value = emitExpr(*cond, 1)[0];
+        body_block->registerOutput(body_cond_value);
+      } else {
+        Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
+        body_block->registerOutput(cond_value_dummy);
+      }
 
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
@@ -468,6 +483,73 @@ private:
       }
 
     }
+  }
+
+  void emitFor(const For& stmt) {
+    // For now, we only support range loops. e.g. for i in range(3): ...
+
+    auto targets = stmt.targets();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+
+    // itrs must consist of a single Apply node
+    if (stmt.itrs().size() != 1) {
+      throw ErrorReport(stmt)
+          << "List of iterables is not supported currently.";
+    }
+    if (itrs[0].kind() != TK_APPLY) {
+      throw ErrorReport(stmt)
+          << "Non-range for loops are currently not supported.";
+    }
+
+    Apply range_iterator = Apply(itrs[0]);
+    if (range_iterator.callee().kind() != TK_VAR) {
+      throw ErrorReport(stmt)
+          << "Non-range for loops are currently not supported.";
+    }
+
+    {
+      Var var = Var(range_iterator.callee());
+      if (var.name().name() != "range") {
+        throw ErrorReport(stmt)
+            << "Non-range for loops are currently not supported.";
+      }
+    }
+
+    List<Expr> args = range_iterator.inputs();
+    // TODO: start, stop, step loop
+    if (args.size() != 1) {
+      throw ErrorReport(stmt)
+          << "range() expects one argument but got" << args.size();
+    }
+
+    auto target_list = List<Ident>(targets);
+    std::vector<std::string> target_idents;
+    target_idents.reserve(target_list.size());
+    for (const auto& t : target_list) {
+      target_idents.push_back(Ident(t).name());
+    }
+
+    Value* max_trip_count = emitExpr(args[0], 1)[0];
+    Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
+
+    emitLoopCommon(
+        max_trip_count,
+        cond_value_dummy,
+        stmt.body(),
+        stmt,
+        nullptr,
+        target_idents);
+  }
+
+  void emitWhile(const While& stmt) {
+    // TODO: clarify that this is an optional input that isn't needed here
+    Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
+    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+
+    auto cond = stmt.cond();
+    emitLoopCommon(
+        max_trip_count_dummy, cond_value, stmt.body(), stmt, &cond, {});
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -651,6 +733,10 @@ private:
         expectOutputs(tree, output_size, 1);
         return emitConst(Const(tree));
       } break;
+      case TK_TRUE:
+      case TK_FALSE: {
+        return emitBooleanConst(tree);
+      } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
         const auto slice = Slice(tree);
@@ -699,6 +785,15 @@ private:
                {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
         ->outputs();
+  }
+
+  std::vector<Value*> emitBooleanConst(const TreeRef& tree, bool val) {
+    return {createConstant(tree->range(), at::CPU(at::kByte).scalarTensor(val))};
+  }
+
+  std::vector<Value*> emitBooleanConst(const TreeRef& tree) {
+    bool val = tree->kind() == TK_TRUE;
+    return emitBooleanConst(tree, val);
   }
 
   std::vector<Value*> emitConst(const Const& c) {

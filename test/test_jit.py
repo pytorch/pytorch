@@ -1594,6 +1594,53 @@ class TestJit(TestCase):
         outputs = self._make_scalar_vars([-4321], np.int32)
         self.checkScript(script, inputs, outputs[0], True, 'test_if_while')
 
+    def test_script_for_in_range(self):
+        script = '''
+        def test_for_in_range():
+            c = 0
+            for i in range(100):
+                c += i
+            return c
+        '''
+        self.checkScript(script, [], [4950], True, 'test_for_in_range')
+
+    def test_script_for_in_range_dynamic(self):
+        script = '''
+        def test_script_for_in_range_dynamic():
+            c = 0
+            for i in range(100):
+                acc = 0
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+        '''
+        self.checkScript(script, [], [161700], True, 'test_script_for_in_range_dynamic')
+
+    def test_script_for_in_range_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_ast(zero, hunnid):
+            c = zero
+            for i in range(hunnid):
+                acc = zero
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+
+        inputs = self._make_scalar_vars([0, 100], np.int64)
+
+        self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
+
+    def test_script_bool_constant(self):
+        script = '''
+        def test_script_bool_constant():
+            a = True
+            return a
+        '''
+        outputs = [True]
+        self.checkScript(script, [], outputs[0], True, 'test_script_bool_constant')
+
     def test_script_ternary(self):
         cu = torch.jit.CompilationUnit('''
         def test_ternary_control(a, b):

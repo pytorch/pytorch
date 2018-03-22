@@ -57,13 +57,73 @@ namespace torch { namespace jit {
 // provide a loop counter
 void desugarTripCounts(Block * b) {
   for(auto n : b->nodes()) {
-    if(n->kind() == prim::Loop) {
 
-      // remove the trip count from Loop inputs, we don't support it yet
-      n->removeInput(0);
-      JIT_ASSERT(n->blocks()[0]->inputs()[0]->uses().size() == 0 &&
-        "NYI - use of trip count variable");
-      n->blocks()[0]->eraseInput(0);
+    if(n->kind() == prim::Loop) {
+      auto g = n->owningGraph();
+      auto body_block = n->blocks()[0];
+
+      Value* block_trip_count_input = body_block->addInput();
+      body_block->inputs()[0]->replaceAllUsesWith(block_trip_count_input);
+      body_block->eraseInput(0);
+      n->addOutput();
+
+      Value* max_trip_count_value = n->input(0);
+      // First, replace the max trip count input with the initial trip count.
+      // This means we can treat trip count as a loop-carried dependency and
+      // simply emit an increment in the body of the loop
+      {
+        WithInsertPoint guard(n);
+        Value* initial_trip_count =
+            g->insertNode(g->createConstant(at::zeros(at::CPU(at::kLong), {1})))
+                ->output();
+        // Also move trip count to the end because we need to mutate it after
+        // this transformation and it's easier to append an output in the block
+        // than it is to prepend.
+        n->removeInput(0);
+        n->addInput(initial_trip_count);
+
+        // Emit initial comparison -- initial_trip_count < max_trip_count
+        Value* initial_comparison_value =
+            g->insertNode(
+                 g->create(aten::lt, {initial_trip_count, max_trip_count_value}, 1))
+                ->output();
+
+        // Replace initial condition with logical and of trip count and
+        // initial condition
+
+        Value* new_cond =
+            g->insertNode(g->create(
+                aten::__and__, {initial_comparison_value, n->input(0)}, 1))
+             ->output();
+        n->replaceInput(0, new_cond);
+      }
+
+      {
+        WithInsertPoint guard(body_block);
+        // Trip count is now a loop carried dependency. We emit an op to
+        // incrmeent the trip count at the end of the body. Then, emit the same
+        // conjunctive stopping condition as above.
+        Value* const_one =
+            g->insertNode(g->createConstant(at::ones(at::CPU(at::kLong), {1})))
+                ->output();
+
+        Value* inc_trip_count =
+            g->insertNode(g->create(
+                    aten::add, {block_trip_count_input, const_one, const_one}, 1))
+             ->output();
+        body_block->registerOutput(inc_trip_count);
+
+        Value* body_comparison =
+            g->insertNode(
+                 g->create(aten::lt, {inc_trip_count, max_trip_count_value}, 1))
+                ->output();
+
+        Value* save_cond = body_block->outputs()[0];
+        Node* body_conjunct =
+            g->insertNode(g->create(aten::__and__, {body_comparison}, 1));
+        body_block->outputs()[0]->replaceAllUsesWith(body_conjunct->output());
+        body_conjunct->addInput(save_cond);
+      }
     }
     for(auto sb : n->blocks()) {
       desugarTripCounts(sb);
