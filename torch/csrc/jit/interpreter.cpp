@@ -52,6 +52,28 @@ namespace torch { namespace jit {
 //   these can be removed once the the backward tracer is no longer used
 
 
+namespace {
+
+// new_cond = (i < max_trip_count) && cond
+Value * createTripCountConjunctiveCondition(Graph * g, Value * cur_trip_count, Value * max_trip_count, Value * cond) {
+  // Emit initial comparison -- initial_trip_count < max_trip_count
+  Value* initial_comparison_value =
+      g->insertNode(
+           g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
+          ->output();
+
+  // Replace initial condition with logical `and` of trip count and
+  // initial condition
+  Value* new_cond =
+      g->insertNode(g->create(
+          aten::__and__, {initial_comparison_value, cond}, 1))
+       ->output();
+  return new_cond;
+}
+
+}  // namespace
+
+
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
 // provide a loop counter
@@ -80,18 +102,7 @@ void desugarTripCounts(Block * b) {
         // LCD's start at index 1.
         n->insertInput(1, initial_trip_count);
 
-        // Emit initial comparison -- initial_trip_count < max_trip_count
-        Value* initial_comparison_value =
-            g->insertNode(
-                 g->create(aten::lt, {initial_trip_count, max_trip_count_value}, 1))
-                ->output();
-
-        // Replace initial condition with logical `and` of trip count and
-        // initial condition
-        Value* new_cond =
-            g->insertNode(g->create(
-                aten::__and__, {initial_comparison_value, n->input(0)}, 1))
-             ->output();
+        Value* new_cond = createTripCountConjunctiveCondition(g, initial_trip_count, max_trip_count_value, n->input(0));
         n->replaceInput(0, new_cond);
       }
 
@@ -111,16 +122,9 @@ void desugarTripCounts(Block * b) {
              ->output();
         body_block->insertOutput(1, inc_trip_count);
 
-        Value* body_comparison =
-            g->insertNode(
-                 g->create(aten::lt, {inc_trip_count, max_trip_count_value}, 1))
-                ->output();
-
-        Value* save_cond = body_block->outputs()[0];
-        Node* body_conjunct =
-            g->insertNode(g->create(aten::__and__, {body_comparison}, 1));
-        save_cond->replaceAllUsesWith(body_conjunct->output());
-        body_conjunct->addInput(save_cond);
+        Value* body_cond = createTripCountConjunctiveCondition(g, inc_trip_count, max_trip_count_value, body_block->outputs()[0]);
+        body_block->eraseOutput(0);
+        body_block->insertOutput(0, body_cond);
       }
     }
     for(auto sb : n->blocks()) {
