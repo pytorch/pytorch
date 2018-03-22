@@ -439,6 +439,24 @@ class build_ext(build_ext_parent):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
+        # Copy the essential export library to compile C++ extensions.
+        if IS_WINDOWS:
+            build_temp = self.build_temp
+            build_dir = 'torch/csrc'
+
+            ext_filename = self.get_ext_filename('_C')
+            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
+
+            export_lib = os.path.join(
+                build_temp, build_dir, lib_filename).replace('\\', '/')
+
+            build_lib = self.build_lib
+            build_dir = 'torch/lib'
+
+            target_lib = os.path.join(build_lib, build_dir, '_C.lib')
+
+            self.copy_file(export_lib, target_lib)
+
 
 class build(distutils.command.build.build):
     sub_commands = [
