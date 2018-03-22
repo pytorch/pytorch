@@ -16,6 +16,14 @@
 
 #include "caffe2/operators/reduce_ops.h"
 
+#include "Eigen/Core"
+
+#if !EIGEN_VERSION_AT_LEAST(3, 3, 0)
+#error "Caffe2 requires Eigen to be at least 3.3.0.";
+#endif
+
+#include <unsupported/Eigen/CXX11/Tensor>
+
 namespace caffe2 {
 
 // For a Tensor X of n dimensions (dims[0], ..., dims[ndim-1]), given index
@@ -73,6 +81,30 @@ void ComputeOp(
   }
 }
 
+namespace {
+
+template <typename U, int DIMS>
+using ReductionTensor = Eigen::Tensor<U, DIMS, Eigen::RowMajor>;
+
+template <int DIMS>
+using DSizesType = Eigen::DSizes<Eigen::DenseIndex, DIMS>;
+
+template <int DIMS>
+DSizesType<DIMS> calcDSize(vector<TIndex>& dims) {
+  Eigen::DSizes<Eigen::DenseIndex, DIMS> dsizes_out;
+  size_t i = 0;
+  for (i = 0; i < DIMS; ++i) {
+    if (i < dims.size()) {
+      dsizes_out[i] = dims[i];
+    } else {
+      dsizes_out[i] = 1;
+    }
+  }
+  return dsizes_out;
+}
+
+} // namespace
+
 template <typename T, class Context>
 bool ReduceSumOp<T, Context>::Compute(
     const T* X_data,
@@ -81,9 +113,66 @@ bool ReduceSumOp<T, Context>::Compute(
     T* Y_data,
     const TIndex Y_size,
     vector<int>& axes,
+    vector<TIndex>& Y_dims,
     int keepdims) {
-  math::Set<T, Context>(Y_size, 0.f, Y_data, &context_);
-  ComputeOp<T, Context>(X_data, X_size, dims, Y_data, axes, keepdims, Add);
+  switch (dims.size()) {
+    case 1: {
+      std::array<int, 1> reduce_dims{{0}};
+      Eigen::DSizes<Eigen::DenseIndex, 1> dsizes_X = calcDSize<1>(dims);
+      Eigen::DSizes<Eigen::DenseIndex, 1> dsizes_Y = calcDSize<1>(Y_dims);
+      auto X_ten =
+          Eigen::TensorMap<ReductionTensor<const T, 1>>(X_data, dsizes_X);
+      auto Y_ten = Eigen::TensorMap<ReductionTensor<T, 1>>(Y_data, dsizes_Y);
+      Y_ten = X_ten.sum(reduce_dims);
+    } break;
+    case 2: {
+      Eigen::DSizes<Eigen::DenseIndex, 2> dsizes_X = calcDSize<2>(dims);
+      Eigen::DSizes<Eigen::DenseIndex, 2> dsizes_Y = calcDSize<2>(Y_dims);
+      auto X_ten =
+          Eigen::TensorMap<ReductionTensor<const T, 2>>(X_data, dsizes_X);
+      auto Y_ten = Eigen::TensorMap<ReductionTensor<T, 2>>(Y_data, dsizes_Y);
+      switch (axes.size()) {
+        case 1: {
+          std::array<int, 1> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.sum(reduce_dims);
+        } break;
+        case 2: {
+          std::array<int, 2> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.sum(reduce_dims);
+        } break;
+      }
+    } break;
+    case 3: {
+      Eigen::DSizes<Eigen::DenseIndex, 3> dsizes_X = calcDSize<3>(dims);
+      Eigen::DSizes<Eigen::DenseIndex, 3> dsizes_Y = calcDSize<3>(Y_dims);
+      auto X_ten =
+          Eigen::TensorMap<ReductionTensor<const T, 3>>(X_data, dsizes_X);
+      auto Y_ten = Eigen::TensorMap<ReductionTensor<T, 3>>(Y_data, dsizes_Y);
+      switch (axes.size()) {
+        case 1: {
+          std::array<int, 1> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.sum(reduce_dims);
+        } break;
+        case 2: {
+          std::array<int, 2> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.sum(reduce_dims);
+        } break;
+        case 3: {
+          std::array<int, 3> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.sum(reduce_dims);
+        }
+      }
+    } break;
+    default: {
+      math::Set<T, Context>(Y_size, 0.f, Y_data, &context_);
+      ComputeOp<T, Context>(X_data, X_size, dims, Y_data, axes, keepdims, Add);
+    }
+  }
   return true;
 }
 
@@ -95,11 +184,72 @@ bool ReduceMeanOp<T, Context>::Compute(
     T* Y_data,
     const TIndex Y_size,
     vector<int>& axes,
+    vector<TIndex>& Y_dims,
     int keepdims) {
-  math::Set<T, Context>(Y_size, 0.f, Y_data, &context_);
-  ComputeOp<T, Context>(X_data, X_size, dims, Y_data, axes, keepdims, Add);
-  math::Scale(
-      Y_size, static_cast<float>(Y_size) / X_size, Y_data, Y_data, &context_);
+  switch (dims.size()) {
+    case 1: {
+      std::array<int, 1> reduce_dims{{0}};
+      Eigen::DSizes<Eigen::DenseIndex, 1> dsizes_X = calcDSize<1>(dims);
+      Eigen::DSizes<Eigen::DenseIndex, 1> dsizes_Y = calcDSize<1>(Y_dims);
+      auto X_ten =
+          Eigen::TensorMap<ReductionTensor<const T, 1>>(X_data, dsizes_X);
+      auto Y_ten = Eigen::TensorMap<ReductionTensor<T, 1>>(Y_data, dsizes_Y);
+      Y_ten = X_ten.mean(reduce_dims);
+    } break;
+    case 2: {
+      Eigen::DSizes<Eigen::DenseIndex, 2> dsizes_X = calcDSize<2>(dims);
+      Eigen::DSizes<Eigen::DenseIndex, 2> dsizes_Y = calcDSize<2>(Y_dims);
+      auto X_ten =
+          Eigen::TensorMap<ReductionTensor<const T, 2>>(X_data, dsizes_X);
+      auto Y_ten = Eigen::TensorMap<ReductionTensor<T, 2>>(Y_data, dsizes_Y);
+      switch (axes.size()) {
+        case 1: {
+          std::array<int, 1> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.mean(reduce_dims);
+        } break;
+        case 2: {
+          std::array<int, 2> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.mean(reduce_dims);
+        } break;
+      }
+    } break;
+    case 3: {
+      Eigen::DSizes<Eigen::DenseIndex, 3> dsizes_X = calcDSize<3>(dims);
+      Eigen::DSizes<Eigen::DenseIndex, 3> dsizes_Y = calcDSize<3>(Y_dims);
+      auto X_ten =
+          Eigen::TensorMap<ReductionTensor<const T, 3>>(X_data, dsizes_X);
+      auto Y_ten = Eigen::TensorMap<ReductionTensor<T, 3>>(Y_data, dsizes_Y);
+      switch (axes.size()) {
+        case 1: {
+          std::array<int, 1> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.mean(reduce_dims);
+        } break;
+        case 2: {
+          std::array<int, 2> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.mean(reduce_dims);
+        } break;
+        case 3: {
+          std::array<int, 3> reduce_dims;
+          std::copy(axes.begin(), axes.end(), reduce_dims.begin());
+          Y_ten = X_ten.mean(reduce_dims);
+        }
+      }
+    } break;
+    default: {
+      math::Set<T, Context>(Y_size, 0.f, Y_data, &context_);
+      ComputeOp<T, Context>(X_data, X_size, dims, Y_data, axes, keepdims, Add);
+      math::Scale(
+          Y_size,
+          static_cast<float>(Y_size) / X_size,
+          Y_data,
+          Y_data,
+          &context_);
+    } break;
+  }
 
   return true;
 }
