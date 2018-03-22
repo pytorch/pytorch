@@ -579,7 +579,7 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, output_size);
   }
 
-  // any expression that can produce a SugaredValue are handled here
+  // any expression that can produce a SugaredValue is handled here
   // with emitExpr falling back to this function to handle them
   // the kinds handled here should be kept in sync with [SUGARED VALUES]
   // in emitExpr
@@ -801,7 +801,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
 }
 
 std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
-  Module m(/*optimize=*/false); //note: we don't use 'm' to execute so this setting is unused
+  Module m; //note: we don't use 'm' to execute so this setting is unused
   defineMethodsInModule(m, {def}, resolver, nullptr);
   return m.get_method(def.name().name()).graph();
 }
