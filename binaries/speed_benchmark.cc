@@ -49,6 +49,9 @@ CAFFE2_DEFINE_string(
     "semicolon to separate the dimension of different "
     "tensors.");
 CAFFE2_DEFINE_string(
+    input_type,
+    "", "Input type (uint8_t/float)");
+CAFFE2_DEFINE_string(
     output,
     "",
     "Output that should be dumped after the execution "
@@ -99,23 +102,44 @@ int main(int argc, char** argv) {
         CAFFE_ENFORCE(caffe2::ReadProtoFromFile(input_files[i], &blob_proto));
         workspace->CreateBlob(input_names[i])->Deserialize(blob_proto);
       }
-    } else if (caffe2::FLAGS_input_dims.size()) {
+    } else if (caffe2::FLAGS_input_dims.size() || caffe2::FLAGS_input_type.size()) {
+      CAFFE_ENFORCE_NE(0, caffe2::FLAGS_input_dims.size(),
+          "Input dims must be specified when input tensors are used.");
+      CAFFE_ENFORCE_NE(0, caffe2::FLAGS_input_type.size(),
+          "Input type must be specified when input tensors are used.");
+
       vector<string> input_dims_list =
           caffe2::split(';', caffe2::FLAGS_input_dims);
       CAFFE_ENFORCE_EQ(
           input_names.size(),
           input_dims_list.size(),
           "Input name and dims should have the same number of items.");
-      for (int i = 0; i < input_names.size(); ++i) {
+      vector<string> input_type_list =
+          caffe2::split(';', caffe2::FLAGS_input_type);
+      CAFFE_ENFORCE_EQ(
+          input_names.size(),
+          input_type_list.size(),
+          "Input name and type should have the same number of items.");
+      for (size_t i = 0; i < input_names.size(); ++i) {
         vector<string> input_dims_str = caffe2::split(',', input_dims_list[i]);
         vector<int> input_dims;
         for (const string& s : input_dims_str) {
           input_dims.push_back(caffe2::stoi(s));
         }
-        caffe2::TensorCPU* tensor =
-            workspace->GetBlob(input_names[i])->GetMutable<caffe2::TensorCPU>();
+        caffe2::Blob* blob = workspace->GetBlob(input_names[i]);
+        if (blob == nullptr) {
+          blob = workspace->CreateBlob(input_names[i]);
+        }
+        caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
+        CHECK_NOTNULL(tensor);
         tensor->Resize(input_dims);
-        tensor->mutable_data<float>();
+        if (input_type_list[i] == "uint8_t") {
+          tensor->mutable_data<uint8_t>();
+        } else if (input_type_list[i] == "float") {
+          tensor->mutable_data<float>();
+        }  else {
+          CAFFE_THROW("Unsupported input type: ", input_type_list[i]);
+        }
       }
     } else {
       CAFFE_THROW(
