@@ -1,7 +1,7 @@
 # Caffe2
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-brightgreen.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Jenkins Build Status](https://ci.pytorch.org/jenkins/job/caffe2-master/badge/icon)](https://ci.pytorch.org/jenkins/job/caffe2-master)
+[![Jenkins Build Status](https://ci.pytorch.org/jenkins/job/caffe2-master/lastCompletedBuild/badge/icon)](https://ci.pytorch.org/jenkins/job/caffe2-master)
 [![Appveyor Build Status](https://img.shields.io/appveyor/ci/Yangqing/caffe2.svg)](https://ci.appveyor.com/project/Yangqing/caffe2)
 
 Caffe2 is a lightweight, modular, and scalable deep learning framework. Building on the original [Caffe](http://caffe.berkeleyvision.org), Caffe2 is designed with expression, speed, and modularity in mind.
