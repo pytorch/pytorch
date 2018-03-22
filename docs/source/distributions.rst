@@ -161,8 +161,11 @@ Probability distributions - torch.distributions
 :hidden:`MultivariateNormal`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. currentmodule:: torch.distributions.multivariate_normal
 .. autoclass:: MultivariateNormal
     :members:
+    :undoc-members:
+    :show-inheritance:
 
 :hidden:`Normal`
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -245,7 +248,7 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
-KL Divergence
+`KL Divergence`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.kl
@@ -254,21 +257,21 @@ KL Divergence
 .. autofunction:: kl_divergence
 .. autofunction:: register_kl
 
-Transforms
+`Transforms`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.transforms
     :members:
     :member-order: bysource
 
-Constraints
+`Constraints`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.constraints
     :members:
     :member-order: bysource
 
-Constraint Registry
+`Constraint Registry`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. automodule:: torch.distributions.constraint_registry
