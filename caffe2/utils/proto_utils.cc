@@ -17,7 +17,25 @@
 
 using ::google::protobuf::MessageLite;
 
+namespace caffe {
+
+// Caffe wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
+// used to avoid duplicated global variable in the case when protobuf
+// is built with hidden visibility.
+const ::std::string& GetEmptyStringAlreadyInited() {
+  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
+}
+
+}  // namespace caffe
+
 namespace caffe2 {
+
+// Caffe2 wrapper functions for protobuf's GetEmptyStringAlreadyInited() function
+// used to avoid duplicated global variable in the case when protobuf
+// is built with hidden visibility.
+const ::std::string& GetEmptyStringAlreadyInited() {
+  return ::google::protobuf::internal::GetEmptyStringAlreadyInited();
+}
 
 void ShutdownProtobufLibrary() {
   ::google::protobuf::ShutdownProtobufLibrary();
@@ -107,6 +125,10 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
 };
 }  // namespace
 
+string ProtoDebugString(const MessageLite& proto) {
+  return proto.SerializeAsString();
+}
+
 bool ParseProtoFromLargeString(const string& str, MessageLite* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
   ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
@@ -149,6 +171,10 @@ bool ParseFromString(const string& spec, Message* proto) {
   return ::google::protobuf::TextFormat::ParseFromString(spec, proto);
 }
 } // namespace TextFormat
+
+string ProtoDebugString(const Message& proto) {
+  return proto.ShortDebugString();
+}
 
 bool ParseProtoFromLargeString(const string& str, Message* proto) {
   ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
