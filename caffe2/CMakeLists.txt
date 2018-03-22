@@ -8,6 +8,7 @@ add_subdirectory(proto)
 
 add_subdirectory(contrib)
 add_subdirectory(core)
+add_subdirectory(core/nomnigraph)
 add_subdirectory(cuda_rtc)
 add_subdirectory(db)
 add_subdirectory(distributed)
