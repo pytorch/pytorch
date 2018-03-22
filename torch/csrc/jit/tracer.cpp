@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/functions/special.h"
+#include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 #include <string>
 #include <sstream>
@@ -15,8 +16,10 @@
 #ifndef NO_PYTHON
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/jit/pybind.h"
 #include <frameobject.h>
 #include <patchlevel.h>
+
 
 // Python interpreter retrieval routine adapted from
 // https://stackoverflow.com/a/8706144
@@ -36,6 +39,30 @@ std::string torch::jit::tracer::getPythonInterpreterStackTrace() {
     }
   }
   return stack_trace.str();
+}
+// This is a temporary constructor so that we can write python tests of
+// the executor. It does not have most of the functionality of CompiledFunction
+// such as being able to hold parameters...
+std::shared_ptr<torch::jit::Graph> torch::jit::tracer::createGraphByTracing(
+        py::function func,
+        tracer::variable_list trace_inputs,
+        size_t num_func_inputs) {
+  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
+  py::tuple py_inputs(num_func_inputs);
+  for(size_t i = 0; i < num_func_inputs; ++i) {
+    py_inputs[i] = py::cast(enter_info.second[i]);
+  }
+  auto out = func(*py_inputs);
+  std::vector<autograd::Variable> outputs;
+  if(PyTuple_Check(out.ptr())) {
+    outputs = py::cast<std::vector<autograd::Variable>>(out);
+  } else {
+    outputs.push_back(py::cast<autograd::Variable>(out));
+  }
+  tracer::exit(outputs);
+  auto graph = enter_info.first->graph;
+  EliminateDeadCode(graph);
+  return graph;
 }
 #endif
 

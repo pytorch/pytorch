@@ -2,6 +2,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
+#include <ATen/optional.h>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -15,11 +16,24 @@ namespace torch { namespace jit { namespace script {
 //   @script_method
 //   def f(self, x):
 //     ...
+// Note: because Method/Module are exposed to python these
+// classes use python method naming conventions
+
 struct Method {
-  Method(std::string name, bool optimize)
+  Method(std::string name, bool optimize,
+         std::shared_ptr<Graph> graph,
+         std::vector<at::Tensor*> initial_members)
   : name_(std::move(name))
-  , graph_(std::make_shared<Graph>())
-  , optimize(optimize) {}
+  , graph_(std::move(graph))
+  , optimize(optimize)
+  , member_inputs(std::move(initial_members)) {
+    JIT_ASSERT(graph_->inputs().size() >= member_inputs.size());
+    int i = graph_->inputs().size() - member_inputs.size();
+    for(at::Tensor* member : member_inputs) {
+      member_input_index[member] = i++;
+    }
+  }
+
   variable_tensor_list run(variable_tensor_list && inputs) {
     std::call_once(executor_init, [&]{
       executor = GraphExecutor(graph_, optimize);
@@ -41,7 +55,7 @@ struct Method {
 
   // defined here to keep details of member_input handling confined to this class
   std::vector<Value*> emit_call_to(Method & callee, ArrayRef<Value*> inputs);
-  
+
   size_t num_inputs() const {
     return graph_->inputs().size() - member_inputs.size();
   }
@@ -62,8 +76,7 @@ private:
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
   // inputs that come from the members of the Module or its submodules.
-  // each is a pointer to a slot in the module that owns this Method or a submethod
-  // of the module.
+  // each is a pointer to a slot in the module that owns this parameter
   // parameters and submodules can only be _added_ to script Modules to ensure
   // these pointers always stay valid
   std::vector<at::Tensor*> member_inputs;
@@ -91,10 +104,14 @@ struct NamedModule {
 };
 
 struct NamedParameter {
-  NamedParameter(std::string name, at::Tensor tensor)
-  : name(std::move(name)), parameter(new at::Tensor(std::move(tensor))) {}
+  NamedParameter(std::string name, at::Tensor tensor, bool is_buffer)
+  : name(std::move(name))
+  , is_buffer(is_buffer)
+  , parameter(new at::Tensor(std::move(tensor))) {}
 
-  std::string name;
+  const std::string name;
+  bool is_buffer; // buffers are part of the module state but
+                        // are not modified by optimizers during SGD
   at::Tensor* slot() const {
     return parameter.get();
   }
@@ -105,124 +122,151 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-struct NamedMember {
-  enum Kind { Module, Parameter, Method, None };
-  // note: None is used to report undefined attributes;
-  Kind kind;
-  size_t offset;
-
-  static const char * kind_string(Kind kind) {
-    switch(kind) {
-      case Module: return "module";
-      case Parameter: return "parameter";
-      case Method: return "method";
-      case None: return "none";
-      default: return "unknown";
+// simple ordered dict used only in Module
+// contains only the minimum necessary functionality for Module
+template<typename T>
+struct OrderedDict {
+  OrderedDict(const char * what)
+  : what(what) {}
+  // note: slight difference from python here.
+  // we do not allow for insertion of an already existing value,
+  // because we not allow allow methods or submodules to be updated
+  // once created
+  T& insert(const std::string& name,  T&& value) {
+    if(index_.count(name) != 0) {
+      std::stringstream ss;
+      ss << "module " << what << "'" << name << "' already defined.";
+      throw std::runtime_error(ss.str());
     }
+    values_.push_back(std::move(value));
+    index_[name] = values_.size() - 1;
+    return values_.back();
   }
+  at::optional<T&> find(const std::string& str) {
+    auto it = index_.find(str);
+    if(it == index_.end())
+      return at::nullopt;
+    return at::optional<T&>(values_.at(it->second));
+  }
+  at::optional<const T&> find(const std::string& str) const {
+    auto it = index_.find(str);
+    if(it == index_.end())
+      return at::nullopt;
+    return at::optional<const T&>(values_.at(it->second));
+  }
+  T& get(const std::string& name) {
+    if(auto v = find(name)) {
+      return *v;
+    }
+    std::stringstream ss;
+    ss << "module " << what << "'" << name << "' is not defined.";
+    throw std::runtime_error(ss.str());
+  }
+  const T& get(const std::string& name) const {
+    if(auto v = find(name)) {
+      return *v;
+    }
+    std::stringstream ss;
+    ss << "module " << what << "'" << name << "' is not defined.";
+    throw std::runtime_error(ss.str());
+  }
+  const std::vector<T>& values() const {
+    return values_;
+  }
+private:
+  std::unordered_map<std::string, size_t> index_;
+  std::vector<T> values_;
+  const char * what;
 };
 
 struct Module : public std::enable_shared_from_this<Module> {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module(bool optimize)
-  : optimize(optimize) {}
+  Module()
+  : modules("modules")
+  , parameters("parameters")
+  , methods("methods")
+  , optimize(true) {}
 
-  void register_parameter(const std::string & name, at::Tensor v) {
-    parameters.push_back(NamedParameter(name, std::move(v)));
-    add_member(name, NamedMember::Parameter, parameters.size() - 1);
+  // note this doesn't change the flags of existing methods just ones
+  // added afterward.
+  void set_optimized(bool o) {
+    optimize = o;
   }
-  void register_or_set_parameter(const std::string & name, autograd::Variable v) {
-    if(find_attribute(name) == NamedMember::Parameter) {
-      set_parameter(name, v);
-    } else {
-      register_parameter(name, v);
+
+  void register_parameter(const std::string & name, autograd::Variable v, bool is_buffer) {
+    if(auto p = parameters.find(name)){
+      *p->slot() = v;
+      p->is_buffer = is_buffer;
+      return;
     }
+    parameters.insert(name, NamedParameter(name, std::move(v), is_buffer));
   }
   void register_module(const std::string& name, std::shared_ptr<Module> module) {
-    JIT_ASSERT(module);
-    modules.push_back(NamedModule {name, std::move(module)});
-    add_member(name, NamedMember::Module, modules.size() - 1);
+    modules.insert(name, {name, std::move(module)});
   }
 
-  Method& create_method(const std::string & name) {
-    methods.emplace_back(new Method(name, optimize));
-    add_member(name, NamedMember::Method, methods.size() - 1);
-    return *methods.back();
+  Method& create_method(const std::string & name, std::shared_ptr<Graph> graph = nullptr, std::vector<at::Tensor*> member_inputs = {}) {
+    if(!graph)
+      graph = std::make_shared<Graph>();
+    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs)));
+
+    return *methods.insert(name, std::move(method));
   }
 
-  at::Tensor* parameter_slot(const std::string & name) {
-    return parameters.at(find_member(name, NamedMember::Parameter)).slot();
+  at::Tensor* parameter_slot(const std::string & name) const {
+    return parameters.get(name).slot();
   }
 
   void set_parameter(const std::string & name, at::Tensor v) {
     *parameter_slot(name) = std::move(v);
   }
 
-  at::Tensor get_parameter(const std::string& name) {
-    return *parameter_slot(name);
+  autograd::Variable get_parameter(const std::string& name) const {
+    return static_cast<autograd::Variable&>(*parameter_slot(name));
   }
 
   // each module owns its method. The reference returned here
   // is guarenteed to stay valid until this module has been destoryed
   Method& get_method(const std::string& name) const {
-    return *methods.at(find_member(name, NamedMember::Method));
+    return *methods.get(name);
   }
 
   std::shared_ptr<Module> get_module(const std::string& name) const {
-    auto loc = find_member(name, NamedMember::Module);
-    return modules.at(loc).module;
+    return modules.get(name).module;
   }
 
-  NamedMember::Kind find_attribute(const std::string& name) {
-    auto it = members.find(name);
-    if(it == members.end())
-      return NamedMember::None;
-    return it->second.kind;
+  const std::vector<NamedModule>& get_modules() const {
+    return modules.values();
+  }
+  const  std::vector<NamedParameter>& get_parameters() const {
+    return parameters.values();
+  }
+  const  std::vector<std::unique_ptr<Method>>& get_methods() const {
+    return methods.values();
   }
 
-  void dump() const {
-    for(auto entry : members) {
-      std::cout << entry.first << ": " << NamedMember::kind_string(entry.second.kind) << "\n";
-    }
+
+  at::optional<NamedParameter&> find_parameter(const std::string& name) {
+    return parameters.find(name);
+  }
+  at::optional<NamedModule&> find_module(const std::string& name) {
+    return modules.find(name);
+  }
+  at::optional<Method&> find_method(const std::string& name) {
+    if(auto pm = methods.find(name))
+      return at::optional<Method&>(**pm);
+    return at::nullopt;
   }
 
 private:
-  size_t find_member(const std::string& name, NamedMember::Kind kind) const  {
-    auto it = members.find(name);
-    if(it == members.end()) {
-      std::stringstream ss;
-      ss << "unknown " << NamedMember::kind_string(kind) << " '" << name << "'";
-      throw std::runtime_error(ss.str());
-    }
-    if(it->second.kind != kind) {
-      std::stringstream ss;
-      ss << "Expected attribute '" << name << "' to be a "
-        << NamedMember::kind_string(kind) << " but found "
-        << NamedMember::kind_string(it->second.kind);
-      throw std::runtime_error(ss.str());
-    }
-    JIT_ASSERT(it != members.end() && it->second.kind == kind);
-    return it->second.offset;
-  }
-  void add_member(const std::string& name, NamedMember::Kind kind, size_t offset) {
-    auto it = members.find(name);
-    if(it != members.end()) {
-      std::stringstream ss;
-      ss << "attempting to add " << NamedMember::kind_string(kind) << " '" << name << "' but Module already contains "
-      << NamedMember::kind_string(it->second.kind) << " '" << name << "'";
-      throw std::runtime_error(ss.str());
-    }
-    members[std::move(name)] = NamedMember { kind, offset };
-  }
+
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  std::vector<NamedModule> modules;
-  std::vector<NamedParameter> parameters;
-  std::vector<std::unique_ptr<Method>> methods;
-
-  std::unordered_map<std::string, NamedMember> members;
+  OrderedDict<NamedModule> modules;
+  OrderedDict<NamedParameter> parameters;
+  OrderedDict<std::unique_ptr<Method>> methods;
   bool optimize;
 };
 
