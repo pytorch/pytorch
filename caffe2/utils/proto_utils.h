@@ -77,6 +77,8 @@ inline string ProtoDebugString(const MessageLite& proto) {
   return proto.SerializeAsString();
 }
 
+bool ParseProtoFromLargeString(const string& str, MessageLite* proto);
+
 // Text format MessageLite wrappers: these functions do nothing but just
 // allowing things to compile. It will produce a runtime error if you are using
 // MessageLite but still want text support.
@@ -118,6 +120,8 @@ using ::google::protobuf::Message;
 namespace TextFormat {
 bool ParseFromString(const string& spec, Message* proto);
 } // namespace TextFormat
+
+bool ParseProtoFromLargeString(const string& str, Message* proto);
 
 inline string ProtoDebugString(const Message& proto) {
   return proto.ShortDebugString();
