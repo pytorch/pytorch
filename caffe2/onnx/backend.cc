@@ -332,11 +332,11 @@ Caffe2Backend::get_special_operators() const {
       unordered_map<std::string, Caffe2Backend::SpecialOpConverter>
           kSpecialOperators = {
               {"Constant", &Caffe2Backend::CreateConstant},
-              {"Conv", &Caffe2Backend::CreateConvePoolOpBase},
-              {"AveragePool", &Caffe2Backend::CreateConvePoolOpBase},
-              {"GlobalAveragePool", &Caffe2Backend::CreateConvePoolOpBase},
-              {"GlobalMaxPool", &Caffe2Backend::CreateConvePoolOpBase},
-              {"MaxPool", &Caffe2Backend::CreateConvePoolOpBase},
+              {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
+              {"AveragePool", &Caffe2Backend::CreateConvPoolOpBase},
+              {"GlobalAveragePool", &Caffe2Backend::CreateConvPoolOpBase},
+              {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
+              {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
               {"Gather", &Caffe2Backend::CreateGather},
               {"Gemm", &Caffe2Backend::CreateGemm},
@@ -396,11 +396,10 @@ Caffe2Ops Caffe2Backend::CreateConstant(const ModelProto &init_model,
 //  furthermore, this is *mandatory.*
 //
 //  Finally, ConvPoolOpBase is not the only class of it's kind; there is
-//  also ConvTransposeUnpoolBase, which backs ConvTranspose.  So don't
 //  be tricked by the fact that Conv and ConvTranspose have similar
 //  parameters; they exercise different codepaths and need to be handled
 //  differently.
-Caffe2Ops Caffe2Backend::CreateConvePoolOpBase(const ModelProto &init_model,
+Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(const ModelProto &init_model,
                                                const ModelProto &pred_model,
                                                OnnxNode *onnx_node,
                                                int opset_version) {
