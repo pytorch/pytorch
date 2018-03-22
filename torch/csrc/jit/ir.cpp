@@ -23,10 +23,6 @@ namespace py = pybind11;
 
 namespace torch { namespace jit {
 
-// Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol CppOp::Kind;
-constexpr Symbol PythonOp::Kind;
-
 std::string getPythonName(const PyObject* obj, bool is_legacy) {
   AutoGIL gil;
   if (is_legacy) {
@@ -120,6 +116,10 @@ std::string PythonOp::name() const {
 
 
 namespace torch { namespace jit {
+
+// Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
+constexpr Symbol CppOp::Kind;
+constexpr Symbol PythonOp::Kind;
 
 constexpr int max_tensor_display_size = 10;
 
