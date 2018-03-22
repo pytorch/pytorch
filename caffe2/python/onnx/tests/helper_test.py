@@ -40,6 +40,10 @@ class TestCaffe2Basic(TestCase):
         names_3 = [dummy_name() for _ in range(3)]
         self.assertFalse(set(names_1) & set(names_3))
 
+        dummy_name(set(names_1))
+        names_4 = [dummy_name() for _ in range(3)]
+        self.assertFalse(set(names_1) & set(names_4))
+
 
 if __name__ == '__main__':
     unittest.main()

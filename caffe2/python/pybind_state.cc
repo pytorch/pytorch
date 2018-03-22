@@ -724,32 +724,48 @@ void addObjectMethods(py::module& m) {
 
   py::class_<caffe2::onnx::Caffe2Backend>(m, "Caffe2Backend")
       .def(py::init<>())
-      .def("prepare",
-           [](caffe2::onnx::Caffe2Backend &instance,
-              const py::bytes &onnx_model_str, const std::string &device,
-              const std::vector<caffe2::onnx::Caffe2Ops> &extras) {
-             auto *rep = instance.Prepare(onnx_model_str.cast<std::string>(),
-                                          device, extras);
-             return rep;
-           })
-      .def("convert_node",
-           [](caffe2::onnx::Caffe2Backend &instance, const py::bytes &node_str,
-              int opset_version) -> std::vector<py::bytes> {
-             auto c2ops = instance.ConvertNode(node_str.cast<std::string>(),
-                                               opset_version);
-             std::vector<py::bytes> vals;
-             for (const auto &init_op : c2ops.init_ops) {
-               std::string out;
-               init_op.SerializeToString(&out);
-               vals.emplace_back(py::bytes(out));
-             }
-             for (const auto &op : c2ops.ops) {
-               std::string out;
-               op.SerializeToString(&out);
-               vals.emplace_back(py::bytes(out));
-             }
-             return vals;
-           });
+      .def(
+          "support_onnx_import",
+          [](caffe2::onnx::Caffe2Backend& instance,
+             const std::string& op) -> bool { return instance.SupportOp(op); })
+      .def(
+          "prepare",
+          [](caffe2::onnx::Caffe2Backend& instance,
+             const py::bytes& onnx_model_str,
+             const std::string& device,
+             const std::vector<caffe2::onnx::Caffe2Ops>& extras) {
+            auto* rep = instance.Prepare(
+                onnx_model_str.cast<std::string>(), device, extras);
+            return rep;
+          })
+      .def(
+          "convert_node",
+          [](caffe2::onnx::Caffe2Backend& instance,
+             const py::bytes& node_str,
+             int opset_version) -> std::vector<std::vector<py::bytes>> {
+            // Note that we return two lists of serialized ops. The first set is
+            // init_ops and the second set is ops for pred net. When converting
+            // RNN related op, it is possible that we will create ops in the
+            // init_net. Hence the return structure here
+            auto c2ops = instance.ConvertNode(
+                node_str.cast<std::string>(), opset_version);
+            std::vector<std::vector<py::bytes>> vals;
+            vals.emplace_back();
+            auto& init_vals = vals.back();
+            for (const auto& init_op : c2ops.init_ops) {
+              std::string out;
+              init_op.SerializeToString(&out);
+              init_vals.emplace_back(py::bytes(out));
+            }
+            vals.emplace_back();
+            auto& normal_vals = vals.back();
+            for (const auto& op : c2ops.ops) {
+              std::string out;
+              op.SerializeToString(&out);
+              normal_vals.emplace_back(py::bytes(out));
+            }
+            return vals;
+          });
 
   py::class_<Predictor>(m, "Predictor")
       .def(
@@ -1367,14 +1383,15 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
   });
-  m.def("make_dummy",
-        [](const std::unordered_set<std::string> &args) -> std::string {
-          if (args.empty()) {
-            return caffe2::onnx::DummyName::NewDummyName();
-          } else {
-            return "";
-          }
-        });
+  m.def(
+      "reset_dummy_name",
+      [](const std::unordered_set<std::string>& args) -> std::string {
+        caffe2::onnx::DummyName::Reset(args);
+        return "";
+      });
+  m.def("new_dummy_name", []() -> std::string {
+    return caffe2::onnx::DummyName::NewDummyName();
+  });
 
 #define CAFFE2_CPU_FEATURE_SUPPORT(feature) \
   m.def("builtin_cpu_supports_" #feature, []() { return GetCpuId().feature(); })

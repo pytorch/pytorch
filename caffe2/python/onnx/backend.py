@@ -183,24 +183,9 @@ class Caffe2Backend(Backend):
     # the value is an attribute of this class that is a
     # function from ToffeIR node_def to caffe2 op_def
     _special_operators = {
-        'Constant': '_create_constant',
-        'Conv': '_create_conv_pool_op_base',
-        'AveragePool': '_create_conv_pool_op_base',
-        'GlobalAveragePool': '_create_conv_pool_op_base',
-        'GlobalMaxPool': '_create_conv_pool_op_base',
-        'MaxPool': '_create_conv_pool_op_base',
-        'Reshape': '_create_reshape',
-        'Gather': '_create_gather',
-        'Gemm': '_create_gemm',
-        'Pad': '_create_pad',
-        'Concat': '_create_concat',
-        'LogSoftmax': '_create_logsoftmax',
-        'Slice': '_create_slice',
         'LSTM': '_create_lstm',
         'GRU': '_create_gru',
         'RNN': '_create_rnn',
-        'Reciprocal': '_create_reciprocal',
-        'MatMul': '_create_matmul',
     }
 
     # NB: By default, you will use the LATEST definition of the operator,
@@ -224,7 +209,7 @@ class Caffe2Backend(Backend):
             ops = []
             cbackend = C.Caffe2Backend()
             ops_str = cbackend.convert_node(node.SerializeToString(), opset_version)
-            for s in ops_str:
+            for s in ops_str[0] + ops_str[1]:
                 op = caffe2_pb2.OperatorDef()
                 op.ParseFromString(s)
                 op.device_option.CopyFrom(device_option)
@@ -294,75 +279,6 @@ class Caffe2Backend(Backend):
         c2_op.output.append(name)
 
         return c2_op
-
-    @classmethod
-    def _create_constant(cls, init_model, pred_model, n, opset_version):
-        assert len(n.outputs) == 1
-        return cls._create_tensor_filling_op(n.attrs["value"], n.outputs[0])
-
-    @classmethod
-    def _create_gather(cls, init_model, pred_model, n, opset_version):
-        (A, B) = n.inputs
-        (Y, ) = n.outputs
-        axis = n.attrs.get('axis', 0)
-
-        if axis == 0:
-            return core.CreateOperator("Gather", [A, B], [Y])
-        elif axis == 1:
-            return core.CreateOperator("BatchGather", [A, B], [Y])
-        raise ValueError(
-            'Caffe2 only supports Gather with axis being 0 or 1,' +
-            'whereas axis is ' + str(axis))
-
-    @classmethod
-    def _create_logsoftmax(cls, init_model, pred_model, n, opset_version):
-        # NB: this implementation is not backward stable.
-        (A,) = n.inputs
-        (Y,) = n.outputs
-        axis = n.attrs.get('axis', 1)
-        ops = []
-        softmax_A = dummy_name()
-        ops.append(core.CreateOperator('Softmax', [A], [softmax_A], axis=axis))
-        ops.append(core.CreateOperator('Log', [softmax_A], [Y]))
-        return ops
-
-    @classmethod
-    def _create_gemm(cls, init_model, pred_model, n, opset_version):
-        (A, B, C) = n.inputs
-        (Y,) = n.outputs
-        alpha = n.attrs.get('alpha', 1.)
-        beta = n.attrs.get('beta', 1.)
-
-        ops = []
-        if alpha != 1:
-            scaled_A = dummy_name()
-            ops.append(core.CreateOperator('Scale', [A], [scaled_A], scale=alpha))
-            A = scaled_A
-        if beta != 1:
-            scaled_C = dummy_name()
-            ops.append(core.CreateOperator('Scale', [C], [scaled_C], scale=beta))
-            C = scaled_C
-
-        trans_a = n.attrs.get('transA', 0)
-        trans_b = n.attrs.get('transB', 0)
-        broadcast = n.attrs.get('broadcast', 0)
-        if not trans_a and trans_b and broadcast:
-            ops.append(core.CreateOperator('FC',
-                                           [A, B, C],
-                                           [Y]))
-        else:
-            AB = dummy_name()
-            ops.append(core.CreateOperator('MatMul',
-                                           [A, B],
-                                           [AB],
-                                           trans_a=trans_a,
-                                           trans_b=trans_b))
-            ops.append(core.CreateOperator('Add',
-                                           [AB, C],
-                                           [Y],
-                                           broadcast=broadcast))
-
-        return ops
 
     @classmethod
     def _rnn_shape_inference(cls, init_model, pred_model, n, input_blob, W):
@@ -750,214 +666,6 @@ class Caffe2Backend(Backend):
                          list(pred_mh.Proto().external_input))
 
     @classmethod
-    def _create_pad(cls, init_model, pred_model, n, opset_version):
-        if opset_version < 2:
-            pads = n.attrs['paddings']
-        else:
-            pads = n.attrs['pads']
-        if not (len(pads) == 8 and
-                # first two dim is for batch and channel
-                set(pads[:2] + pads[4:6]) == {0}):
-            raise ValueError('Caffe2 only supports padding 2D Tensor, whereas padding is ' + str(pads))
-        # Guard the invalid (negative) pads attribute.
-        if min(pads) < 0:
-            raise ValueError('ONNX does not support negative pads in Pad, but get {}.'.format(pads))
-        pads[:] = pads[2:4] + pads[6:8]
-        return cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-
-    @classmethod
-    def _create_concat(cls, init_model, pred_model, n, opset_version):
-        # TODO: Caffe2 Concat has an extra output. It should be only
-        # used when doing training, so we should change Caffe2 to allow
-        # 1 output.
-        op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        assert len(op.output) == 1
-        op.output.append(dummy_name())
-        return op
-
-    @classmethod
-    def _create_slice(cls, init_model, pred_model, n, opset_version):
-        op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        args = {arg.name: arg for arg in op.arg}
-        starts_vals = np.array(
-            args.pop('starts').ints, dtype=np.int64).tolist()
-        ends_vals = np.array(
-            [i - 1 if i < 0 else i for i in args.pop('ends').ints],
-            dtype=np.int64).tolist()
-        if 'axes' in args:
-            axes_vals = np.array(
-                args.pop('axes').ints, dtype=np.int32).tolist()
-        else:
-            ndims = len(starts_vals)
-            axes_vals = np.array(range(ndims), dtype=np.int32).tolist()
-
-        data, = op.input
-        ops = []
-
-        shape_tensor = dummy_name()
-        ops.append(core.CreateOperator(
-            'Shape',
-            [data],
-            [shape_tensor]
-        ))
-
-        axes_tensor = dummy_name()
-        ops.extend([
-            core.CreateOperator(
-                'GivenTensorIntFill',
-                [],
-                [axes_tensor],
-                shape=[len(axes_vals)],
-                values=axes_vals,
-            ),
-        ])
-
-        starts_vals_tensor = dummy_name()
-        starts_tensor = dummy_name()
-        casted_starts_tensor = dummy_name()
-        ops.extend([
-            core.CreateOperator(
-                'GivenTensorInt64Fill',
-                [],
-                [starts_vals_tensor],
-                shape=[len(starts_vals)],
-                values=starts_vals,
-            ),
-            core.CreateOperator(
-                'ConstantFill',
-                [shape_tensor],
-                [starts_tensor],
-                dtype=caffe2_pb2.TensorProto.INT64,
-                value=0,
-            ),
-            core.CreateOperator(
-                'ScatterAssign',
-                [starts_tensor, axes_tensor, starts_vals_tensor],
-                [starts_tensor],
-            ),
-            # Slice only accepts starts as int
-            core.CreateOperator(
-                'Cast',
-                [starts_tensor],
-                [casted_starts_tensor],
-                to=caffe2_pb2.TensorProto.INT32,
-            ),
-        ])
-
-        ends_vals_tensor = dummy_name()
-        ends_tensor = dummy_name()
-        casted_ends_tensor = dummy_name()
-        ops.extend([
-            core.CreateOperator(
-                'GivenTensorInt64Fill',
-                [],
-                [ends_vals_tensor],
-                shape=[len(ends_vals)],
-                values=ends_vals,
-            ),
-            core.CreateOperator(
-                'ConstantFill',
-                [shape_tensor],
-                [ends_tensor],
-                dtype=caffe2_pb2.TensorProto.INT64,
-                value=-1,
-            ),
-            core.CreateOperator(
-                'ScatterAssign',
-                [ends_tensor, axes_tensor, ends_vals_tensor],
-                [ends_tensor],
-            ),
-            # Slice only accepts ends as int
-            core.CreateOperator(
-                'Cast',
-                [ends_tensor],
-                [casted_ends_tensor],
-                to=caffe2_pb2.TensorProto.INT32,
-            ),
-        ])
-
-        op.input[:] = [data, casted_starts_tensor, casted_ends_tensor]
-        del op.arg[:]
-        op.arg.extend(args.values())
-        ops.append(op)
-
-        return ops
-
-    # Note [Caffe2 ConvPoolOpBase]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # To understand what is going on here, we have to talk a little bit about
-    # Caffe2's internals.
-    #
-    # First, it's important to know that all of Caffe2's pooling and convolution
-    # operators inherit from "ConvPoolOpBase", which is an abstract class that
-    # defines all of the attributes (kernels, dilations, strides, etc) which one
-    # sees on these operators.  Unfortunately, Caffe2's documentation generator
-    # doesn't know how to handle cases like this, so for example, if you look at
-    # the docs for MaxPool at <https://caffe2.ai/docs/operators-catalogue.html#maxpool>
-    # you won't see any of the attributes.  You have to go source diving to
-    # find the information; in particular, you want to look at:
-    # https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h
-    # This class handles *global* pooling as well.
-    #
-    # Second, it's important to know what Caffe2 expects for padding, which can
-    # be somewhat difficult to understand from the code because Caffe2 handles
-    # both singular/pluralized spellings of padding, and there is also legacy
-    # padding business.  The short version of the story is that, for NON-legacy
-    # padding (which is what we want to output), padding is expected to be
-    # *twice* the size of kernels.  So if you have a 2D convolution, Caffe2
-    # will accept two values in 'kernels', but FOUR values in 'pads';
-    # furthermore, this is *mandatory.*
-    #
-    # Finally, ConvPoolOpBase is not the only class of it's kind; there is
-    # also ConvTransposeUnpoolBase, which backs ConvTranspose.  So don't
-    # be tricked by the fact that Conv and ConvTranspose have similar
-    # parameters; they exercise different codepaths and need to be handled
-    # differently.
-
-    @classmethod
-    def _create_conv_pool_op_base(cls, init_model, pred_model, n, opset_version):
-        if n.op_type.startswith('Global'):
-            n.attrs['global_pooling'] = 1
-
-        try:
-            kernels = n.attrs['kernel_shape']
-            pads = n.attrs['pads']
-        except KeyError:
-            pass
-        else:
-            if len(kernels) == len(pads):
-                # Caffe2 requires pads to be twice the size of kernels.
-                n.attrs['pads'] = pads * 2
-
-        return cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-
-    @classmethod
-    def _create_reshape(cls, init_model, pred_model, n, opset_version):
-        c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        # Caffe2 has an extra output
-        c2_op.output.append(dummy_name())
-        return c2_op
-
-    @classmethod
-    def _create_reciprocal(cls, init_model, pred_model, n, opset_version):
-        (X,) = n.inputs
-        (Y,) = n.outputs
-        return core.CreateOperator(
-            'Pow',
-            [X],
-            [Y],
-            exponent=-1.0,
-        )
-
-    @classmethod
-    def _create_matmul(cls, init_model, pred_model, n, opset_version):
-        op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        broadcast_arg = op.arg.add()
-        broadcast_arg.name = "broadcast"
-        broadcast_arg.i = 1
-        return op
-
-    @classmethod
     def _direct_initialize_parameters(cls, initializer, ws, device_option):
         for tp in initializer:
             ws.FeedBlob(tp.name, onnx.numpy_helper.to_array(tp), device_option)
@@ -1036,7 +744,7 @@ class Caffe2Backend(Backend):
             cbackend = C.Caffe2Backend()
             rep = cbackend.prepare(model.SerializeToString(), device, c2_rnn_ops)
             # For testing
-            # Dump the net descritpions to file for comparison with the Python ones
+            # Dump the net descriptions to file for comparison with the Python ones
             if "ONNX_CAFFE2_DEBUG" in os.environ:
                 pred_net_str = rep.pred_net()
                 pn = caffe2_pb2.NetDef()
@@ -1082,6 +790,21 @@ class Caffe2Backend(Backend):
     @classmethod
     # TODO: This method needs a refactor for clarity
     def _onnx_node_to_caffe2_op(cls, init_model, pred_model, node_def, opset_version):
+        cbackend = C.Caffe2Backend()
+        if cbackend.support_onnx_import(node_def.op_type):
+            op_strs = cbackend.convert_node(node_def.SerializeToString(), opset_version)
+            init_ops = []
+            for s in op_strs[0]:
+                op = caffe2_pb2.OperatorDef()
+                op.ParseFromString(s)
+                init_ops.append(op)
+            ops = []
+            for s in op_strs[1]:
+                op = caffe2_pb2.OperatorDef()
+                op.ParseFromString(s)
+                ops.append(op)
+            return Caffe2Ops(ops, init_ops, [])
+
         if node_def.op_type in cls._special_operators:
             translator = getattr(cls, cls._special_operators[node_def.op_type])
         else:
