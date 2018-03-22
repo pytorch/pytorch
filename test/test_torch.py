@@ -570,7 +570,8 @@ class TestTorch(TestCase):
         sizes += [[4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]
         sizes += [[1, 32 * 8 * 32 * 8]]
         sizes += [[1, 32770]]
-        map(_run_test, sizes)
+        for size in sizes:
+            _run_test(size)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
