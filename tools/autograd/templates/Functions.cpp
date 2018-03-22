@@ -121,9 +121,10 @@ Tensor reduce_to(const Tensor & grad, IntList sizes) {
 
 Tensor permute_backwards(const Tensor & grad, IntList fwd_dims) {
   // invert the permutation
-  std::vector<int64_t> dims(fwd_dims.size());
-  for (size_t i = 0; i < fwd_dims.size(); i++) {
-    dims[fwd_dims[i]] = i;
+  auto ndims = fwd_dims.size();
+  std::vector<int64_t> dims(ndims);
+  for (size_t i = 0; i < ndims; i++) {
+    dims[at::maybe_wrap_dim(fwd_dims[i], ndims)] = i;
   }
   return grad.permute(dims);
 }
