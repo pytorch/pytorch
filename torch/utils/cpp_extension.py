@@ -178,6 +178,16 @@ def CppExtension(name, sources, *args, **kwargs):
     include_dirs = kwargs.get('include_dirs', [])
     include_dirs += include_paths()
     kwargs['include_dirs'] = include_dirs
+
+    if sys.platform == 'win32':
+        library_dirs = kwargs.get('library_dirs', [])
+        library_dirs += library_paths()
+        kwargs['library_dirs'] = library_dirs
+
+        libraries = kwargs.get('libraries', [])
+        libraries.append('ATen')
+        kwargs['libraries'] = libraries
+
     kwargs['language'] = 'c++'
     return setuptools.Extension(name, sources, *args, **kwargs)
 
@@ -211,12 +221,13 @@ def CUDAExtension(name, sources, *args, **kwargs):
                 })
     '''
     library_dirs = kwargs.get('library_dirs', [])
-    lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
-    library_dirs.append(_join_cuda_home(lib_dir))
+    library_dirs += library_paths(cuda=True)
     kwargs['library_dirs'] = library_dirs
 
     libraries = kwargs.get('libraries', [])
     libraries.append('cudart')
+    if sys.platform == 'win32':
+        libraries.append('ATen')
     kwargs['libraries'] = libraries
 
     include_dirs = kwargs.get('include_dirs', [])
@@ -250,6 +261,31 @@ def include_paths(cuda=False):
     ]
     if cuda:
         paths.append(_join_cuda_home('include'))
+    return paths
+
+
+def library_paths(cuda=False):
+    '''
+    Get the library paths required to build a C++ or CUDA extension.
+
+    Args:
+        cuda: If `True`, includes CUDA-specific include paths.
+
+    Returns:
+        A list of include path strings.
+    '''
+    paths = []
+
+    if sys.platform == 'win32':
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
+
+        paths.append(lib_path)
+
+    if cuda:
+        lib_dir = 'lib/x64' if sys.platform == 'win32' else 'lib64'
+        paths.append(_join_cuda_home(lib_dir))
     return paths
 
 
