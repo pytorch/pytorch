@@ -3158,7 +3158,7 @@ of tensor :attr:`input`.
 Indices are ordered from left to right according to when each was sampled
 (first samples are placed in first column).
 
-If :attr:`input` is a vector, :attr:`out` is a vector of size `num_samples`.
+If :attr:`input` is a vector, :attr:`out` is a vector of size `num\_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
 :math:`(m \times num\_samples)`.
