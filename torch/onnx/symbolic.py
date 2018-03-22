@@ -247,6 +247,7 @@ def embedding_bag(g,
                 indices,
                 offsets,
                 operator_s="embedding_bag",
+                outputs=3,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
                 sparse_i=sparse)
