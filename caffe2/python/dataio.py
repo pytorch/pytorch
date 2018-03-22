@@ -263,7 +263,10 @@ class PipedReaderBuilder(ReaderBuilder):
     def new_reader(self, **kwargs):
         # Passing everything down since you could wrap a PipedReaderBuilder in
         # another PipedReaderBuilder
-        output = self._piper(self._builder.new_reader(**kwargs), **kwargs)
+        output = self._piper(
+            reader=self._builder.new_reader(**kwargs),
+            **kwargs
+        )
         return output if isinstance(output, Reader) else output.reader()
 
 
