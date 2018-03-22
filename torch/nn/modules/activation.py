@@ -55,7 +55,7 @@ class Threshold(Module):
 
 class ReLU(Threshold):
     r"""Applies the rectified linear unit function element-wise
-    :math:`\text{ReLU}(x)= max(0, x)`
+    :math:`\text{ReLU}(x)= \max(0, x)`
 
     .. image:: _static/img/activation/ReLU.png
 
@@ -200,7 +200,7 @@ class Hardtanh(Module):
 
 
 class ReLU6(Hardtanh):
-    r"""Applies the element-wise function :math:`\text{ReLU6}(x) = min(max(0,x), 6)`
+    r"""Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`
 
     Args:
         inplace: can optionally do the operation in-place. Default: ``False``
@@ -279,7 +279,7 @@ class Tanh(Module):
 
 class ELU(Module):
     r"""Applies element-wise,
-    :math:`\text{ELU}(x) = max(0,x) + min(0, \alpha * (\exp(x) - 1))`
+    :math:`\text{ELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x) - 1))`
 
     Args:
         alpha: the :math:`\alpha` value for the ELU formulation. Default: 1.0
@@ -433,7 +433,7 @@ class LeakyReLU(Module):
         \text{LeakyRELU}(x) =
         \begin{cases}
         x, & \text{ if } x \geq 0 \\
-        \text{negative_slope} x, & \text{ otherwise }
+        \text{negative_slope} \times x, & \text{ otherwise }
         \end{cases}
 
     Args:
@@ -578,15 +578,17 @@ class Softshrink(Module):
 
 class PReLU(Module):
     r"""Applies element-wise the function
-    :math:`\text{PReLU}(x) = max(0,x) + a * min(0,x)` or
+    :math:`\text{PReLU}(x) = \max(0,x) + a * \min(0,x)` or
 
     .. math::
         \text{PReLU}(x) =
+        \begin{cases}
         x, & \text{ if } x \geq 0 \\
         ax, & \text{ otherwise }
+        \end{cases}
 
-    Here :math:`a` is a learnable parameter. When called without arguments, nn.PReLU() uses a single
-    parameter :math:`a` across all input channels. If called with nn.PReLU(nChannels),
+    Here :math:`a` is a learnable parameter. When called without arguments, `nn.PReLU()` uses a single
+    parameter :math:`a` across all input channels. If called with `nn.PReLU(nChannels)`,
     a separate :math:`a` is used for each input channel.
 
 

@@ -2312,7 +2312,7 @@
     - THTensor* self
 ]]
 [[
-  name: sum
+  name: _sumall
   variants:
     - method
     - function
@@ -2321,6 +2321,13 @@
       return: accreal
       arguments:
         - THTensor* self
+]]
+[[
+  name: _sum
+  variants:
+    - method
+    - function
+  options:
     - cname: sum
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -2334,7 +2341,7 @@
           default: "false"
 ]]
 [[
-  name: prod
+  name: _prodall
   variants:
     - method
     - function
@@ -2343,6 +2350,13 @@
       return: accreal
       arguments:
         - THTensor* self
+]]
+[[
+  name: _prod
+  variants:
+    - method
+    - function
+  options:
     - cname: prod
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -4050,17 +4064,6 @@
     - arg: int64_t dim
       wrap_dim: tensors
       default: 0
-]]
-
-[[
-  name: reshape_
-  cname: resize
-  cpu_half: True
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THSize* size
-    - arg: THStride* stride
 ]]
 
 [[

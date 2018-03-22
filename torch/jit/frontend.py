@@ -184,15 +184,21 @@ class StmtBuilder(Builder):
     def get_assign_ident(ctx, expr):
         var = build_expr(ctx, expr)
         if not isinstance(var, Var):
-            raise NotSupportedError("the only expressions allowed on the left hand side of "
-                                    "assignments are variable names", var.range())
+            raise NotSupportedError(var.range(),
+                                    "the only expressions allowed on the left hand side of "
+                                    "assignments are variable names")
         return var.name
 
     @staticmethod
     def build_Assign(ctx, stmt):
-        return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in stmt.targets],
-                      '=',
-                      build_expr(ctx, stmt.value))
+        rhs = build_expr(ctx, stmt.value)
+        if len(stmt.targets) > 1:
+            start_point = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + 1)
+            raise NotSupportedError(ctx.make_raw_range(start_point.start, rhs.range().end),
+                                    "Performing multiple assignments in a single line isn't supported")
+        py_lhs = stmt.targets[0]
+        py_lhs_exprs = py_lhs.elts if isinstance(py_lhs, ast.Tuple) else [py_lhs]
+        return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in py_lhs_exprs], '=', rhs)
 
     @staticmethod
     def build_Return(ctx, stmt):
@@ -360,10 +366,34 @@ class ExprBuilder(Builder):
         return result
 
     @staticmethod
+    def build_Subscript(ctx, expr):
+        base = build_expr(ctx, expr.value)
+        sub_type = type(expr.slice)
+        if sub_type is ast.Index:
+            index = build_expr(ctx, expr.slice.value)
+            return Gather(base, index)
+        elif sub_type is ast.Slice:
+            lower = build_expr(ctx, expr.slice.lower) if expr.slice.lower is not None else None
+            upper = build_expr(ctx, expr.slice.upper) if expr.slice.upper is not None else None
+            if expr.slice.step is not None:
+                step = build_expr(ctx, expr.slice.step)
+                raise NotSupportedError(step.range(), "slices with ranges are not supported yet")
+            return Slice(base, lower, upper)
+        elif sub_type is ast.ExtSlice:
+            raise NotSupportedError(base.range(), "slicing multiple dimensions at the same time isn't supported yet")
+        else:  # Ellipsis (can only happen in Python 2)
+            raise NotSupportedError(base.range(), "ellipsis is not supported")
+
+    @staticmethod
+    def build_List(ctx, expr):
+        return ListLiteral(ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1),
+                           [build_expr(ctx, e) for e in expr.elts])
+
+    @staticmethod
     def build_Num(ctx, expr):
-        # TODO: fix this once we have a nice Number node in our AST
-        err_range = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
-        raise NotSupportedError(err_range, "scalar constants aren't supported")
+        value = str(expr.n)
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
+        return Const(r, value)
 
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()

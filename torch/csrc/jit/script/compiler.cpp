@@ -14,11 +14,8 @@ namespace script {
 using SugaredValuePtr = std::shared_ptr<SugaredValue>;
 using FunctionTable = std::unordered_map<std::string, Method&>;
 using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
-using AttributeMap =
-    std::unordered_map<std::string, std::pair<double, std::string>>;
-using ListAttributeMap = std::unordered_map<
-    std::string,
-    std::pair<const std::vector<double>, std::string>>;
+using AttributeMap = std::unordered_map<std::string, Const>;
+using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
@@ -105,7 +102,7 @@ struct Environment {
   }
   void setSugaredVar(const std::string& name, SugaredValuePtr value) {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
-        getBlockOwningKind() == kLoop)
+        getBlockOwningKind() == prim::Loop)
       createCapturedInput(name);
     value_table[name] = std::move(value);
   }
@@ -121,7 +118,7 @@ struct Environment {
     auto retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == kLoop) {
+        getBlockOwningKind() == prim::Loop) {
       retval = createCapturedInput(ident);
     }
 
@@ -185,44 +182,59 @@ Node* emitBuiltinCall(
   List<Attribute> attributes,
   size_t n_outputs) {
 
-  NodeKind kind(name);
+  NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
   auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (const auto& attr : attributes) {
-    const auto& name = attr.name().name();
-    const Expr& value = attr.value();
-    // TODO: handle non-float attributes
-    switch (value.kind()) {
+    const auto& name = Symbol::attr(attr.name().name());
+    const Expr& value_expr = attr.value();
+    switch (value_expr.kind()) {
       case TK_CONST: {
-        auto v = value.get()->tree(0)->doubleValue();
-        const auto& type = value.get()->tree(1)->stringValue();
-        if(type == "f")
-          n->f_(Symbol(name), v);
-        else
-          n->i_(Symbol(name), v);
+        Const value {value_expr};
+        if (value.isFloatingPoint()) {
+          n->f_(name, value.asFloatingPoint());
+        } else {
+          n->i_(name, value.asIntegral());
+        }
       } break;
       case TK_LIST_LITERAL: {
-        std::vector<double> vs{};
-        std::string type = "f"; // TODO: handle possibly mixed constants better
-        for (const auto& tree : ListLiteral(value).inputs()) {
-          vs.push_back(tree.get()->tree(0)->doubleValue());
-          type = tree.get()->tree(1)->stringValue();
-        }
-        if(type == "f") {
-          n->fs_(Symbol(name), std::move(vs));
+        List<Const> value_list {ListLiteral(value_expr).inputs()};
+        std::vector<Const> values;
+        for (Const number : value_list)
+          values.push_back(std::move(number));
+        bool is_float = std::any_of(values.begin(), values.end(),
+                                    [](const Const& c) { return c.isFloatingPoint(); });
+        if (is_float) {
+          n->fs_(name, fmap(values, [](const Const& c) { return c.asFloatingPoint(); }));
         } else {
-          n->is_(Symbol(name), std::vector<int64_t>(vs.begin(), vs.end()));
+          n->is_(name, fmap(values, [](const Const& c) { return c.asIntegral(); }));
         }
       } break;
     default:
-        throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value.kind();
+        throw ErrorReport(attr) << "Unexpected kind of attribute value: " << value_expr.kind();
         break;
     }
   }
 
   return n;
+}
+
+std::vector<Value*> BuiltinFunction::call(
+    SourceRange loc,
+    Method & m,
+    at::ArrayRef<Value*> inputs_,
+    List<Attribute> attributes,
+    size_t n_outputs) {
+  std::vector<Value*> inputs;
+  if (value) inputs.push_back(value);
+  inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
+  Node * n = emitBuiltinCall(loc, m, name, inputs, attributes, n_outputs);
+  if (!hasTensorOp(n)) {
+    throw ErrorReport(loc) << "unknown builtin op";
+  }
+  return n->outputs();
 }
 
 struct to_ir {
@@ -347,7 +359,7 @@ private:
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kIf, expr.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -372,7 +384,7 @@ private:
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kIf, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -418,10 +430,10 @@ private:
     // in a way that ensure single static assignment.
 
     // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(stmt.range(), INT_MAX, "i")[0];
+    Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kLoop, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
     n->addInput(max_trip_count_dummy);
     n->addInput(cond_value);
     auto* body_block = n->addBlock();
@@ -484,34 +496,34 @@ private:
   NodeKind getNodeKind(int kind, int ninputs) {
     switch (kind) {
       case '+':
-        return kadd;
+        return aten::add;
       case '-':
         if (ninputs == 1)
-          return kneg;
+          return aten::neg;
         else
-          return ksub;
+          return aten::sub;
       case '*':
-        return kmul;
+        return aten::mul;
       case '/':
-        return kdiv;
+        return aten::div;
       case TK_NE:
-        return kne;
+        return aten::ne;
       case TK_EQ:
-        return keq;
+        return aten::eq;
       case '<':
-        return klt;
+        return aten::lt;
       case '>':
-        return kgt;
+        return aten::gt;
       case TK_LE:
-        return kle;
+        return aten::le;
       case TK_GE:
-        return kge;
+        return aten::ge;
       case TK_AND:
-        return k__and__;
+        return aten::__and__;
       case TK_OR:
-        return k__or__;
+        return aten::__or__;
       case TK_NOT:
-        return k__not__;
+        return aten::__not__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -550,7 +562,7 @@ private:
       expectOutputs(ident, output_size, 0);
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
-      return emitNode(kPrint, ident.range(), inputs, 0 )->outputs();
+      return emitNode(prim::Print, ident.range(), inputs, 0 )->outputs();
     }
     Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, output_size);
     if (hasTensorOp(builtin)) {
@@ -567,7 +579,7 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, output_size);
   }
 
-  // any expression that can produce a SugaredValue are handled here
+  // any expression that can produce a SugaredValue is handled here
   // with emitExpr falling back to this function to handle them
   // the kinds handled here should be kept in sync with [SUGARED VALUES]
   // in emitExpr
@@ -617,8 +629,8 @@ private:
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
-        if (kind != kneg)
-          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        if (kind != aten::neg)
+          node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {
@@ -637,8 +649,7 @@ private:
       } break;
       case TK_CONST: {
         expectOutputs(tree, output_size, 1);
-        return emitConst(tree->range(),
-            tree->tree(0)->doubleValue(), tree->tree(1)->stringValue());
+        return emitConst(Const(tree));
       } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
@@ -683,24 +694,18 @@ private:
         throw ErrorReport(input) << "Unrecognized type: " << type;
     }
     return emitNode(
-               Symbol("type_as"),
+               Symbol::aten("type_as"),
                input->range(),
                {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
         ->outputs();
   }
 
-  std::vector<Value*> emitConst(const SourceRange& loc, const double val, const std::string& type) {
-    if (type == "f") {
-      return {createConstant(loc, at::CPU(at::kFloat).scalarTensor(val))};
-    } else if (type == "LL") {
-      return {createConstant(loc, at::CPU(at::kLong).scalarTensor(val))};
-    } else if (type == "b") {
-      return {createConstant(loc, at::CPU(at::kByte).scalarTensor(val))};
-    } else if (type == "i") {
-      return {createConstant(loc, at::CPU(at::kInt).scalarTensor(val))};
+  std::vector<Value*> emitConst(const Const& c) {
+    if (c.isFloatingPoint()) {
+      return {createConstant(c.range(), at::CPU(at::kFloat).scalarTensor(c.asFloatingPoint()))};
     } else {
-      throw std::runtime_error("unknown const type " + type);
+      return {createConstant(c.range(), at::CPU(at::kLong).scalarTensor(c.asIntegral()))};
     }
   }
 
@@ -726,17 +731,17 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
-    const auto& end = at::Scalar(input_values[2]->node()->t(kvalue)).toInt();
+    const auto& begin = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
+    const auto& end = at::Scalar(input_values[2]->node()->t(attr::value)).toInt();
     return emitNode(
-               Symbol("slice"),
+               Symbol::aten("slice"),
                loc,
                {tensor},
                output_size)
-               ->i_(kdim, 0)
-               ->i_("step"_sym, 1)
-               ->i_("start"_sym, begin)
-               ->i_("end"_sym, end)->outputs();
+               ->i_(attr::dim, 0)
+               ->i_(attr::step, 1)
+               ->i_(attr::start, begin)
+               ->i_(attr::end, end)->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -748,14 +753,14 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
+    const auto& idx = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
     return emitNode(
-               Symbol("select"),
+               Symbol::aten("select"),
                loc,
                {tensor},
                output_size)
-               ->i_(kdim, 0)
-               ->i_(kindex, idx)
+               ->i_(attr::dim, 0)
+               ->i_(attr::index, idx)
                ->outputs();
   }
 
@@ -769,31 +774,7 @@ private:
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
 // callable value that will resolve to foo(x, y, z) when called.
 std::shared_ptr<SugaredValue> SimpleValue::attr(SourceRange loc, Method & m, const std::string& field) {
-  struct InfixCall : public SugaredValue {
-    InfixCall(const std::string& field, Value* value)
-    : field(field), value(value) {}
-    std::string field;
-    Value* value;
-
-    virtual std::string kind() const override {
-      return "builtin";
-    }
-    virtual std::vector<Value*> call(
-      SourceRange loc,
-      Method & m,
-      at::ArrayRef<Value*> inputs_,
-      List<Attribute> attributes,
-      size_t n_outputs) override {
-        std::vector<Value*> inputs { value };
-        inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-        Node * n = emitBuiltinCall(loc, m, field, inputs, attributes, n_outputs);
-        if(!hasTensorOp(n)) {
-          throw ErrorReport(loc) << "unknown builtin op";
-        }
-        return n->outputs();
-    }
-  };
-  return std::make_shared<InfixCall>(field, value);
+  return std::make_shared<BuiltinFunction>(field, value);
 }
 
 
@@ -820,7 +801,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
 }
 
 std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
-  Module m(/*optimize=*/false); //note: we don't use 'm' to execute so this setting is unused
+  Module m; //note: we don't use 'm' to execute so this setting is unused
   defineMethodsInModule(m, {def}, resolver, nullptr);
   return m.get_method(def.name().name()).graph();
 }

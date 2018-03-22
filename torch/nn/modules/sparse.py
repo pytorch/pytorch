@@ -33,8 +33,8 @@ class Embedding(Module):
 
     Notes:
         Keep in mind that only a limited number of optimizers support
-        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`),
-        `optim.SparseAdam` (`cuda` and `cpu`) and `optim.Adagrad` (`cpu`)
+        sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
+        :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
 
     Examples::
 
@@ -177,14 +177,14 @@ class EmbeddingBag(Module):
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
 
     Inputs: input, offsets
-        - **input** (N or BxN): LongTensor containing the indices of the embeddings
+        - **input** (``N`` or ``B x N``): LongTensor containing the indices of the embeddings
                                 to extract. When `input` is 1D Tensor of shape `N`,
                                 an `offsets` Tensor is given, that contains the
                                 starting position of each new sequence in the
                                 mini-batch.
-        - **offsets** (B or None): LongTensor containing the starting positions of
+        - **offsets** (``B`` or ``None``): LongTensor containing the starting positions of
                                    each sample in a mini-batch of variable length
-                                   sequences. If `input` is 2D (BxN), then offsets
+                                   sequences. If `input` is 2D (``B x N``), then offsets
                                    does not need to be given, as the `input` is
                                    treated as a mini-batch of fixed length sequences
                                    of length `N` each.
@@ -192,11 +192,11 @@ class EmbeddingBag(Module):
 
     Shape:
         - Input: LongTensor `N`, N = number of embeddings to extract
-                 (or) LongTensor `BxN`, B = number of sequences in mini-batch,
+                 (or) LongTensor ``B x N``, B = number of sequences in mini-batch,
                                         N = number of embeddings per sequence
         - Offsets: LongTensor `B`, B = number of bags. The values are the
                    offsets in `input` for each bag, i.e. the cumsum of lengths.
-                   Offsets is not given if Input is 2D `BxN` Tensor,
+                   Offsets is not given if Input is 2D ``B x N`` Tensor,
                    the input is considered to be of fixed-length sequences
         - Output: `(B, embedding_dim)`
 

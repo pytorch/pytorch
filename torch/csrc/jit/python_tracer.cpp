@@ -54,8 +54,8 @@ void initPythonTracerBindings(PyObject* module_) {
       return s.is_complete();
     });
 
-  m.def("_tracer_enter", [](std::vector<TraceInput> trace_inputs, std::size_t num_backwards) {
-    return enter(std::move(trace_inputs), num_backwards + 1);
+  m.def("_tracer_enter", [](variable_list trace_inputs, std::size_t num_backwards) {
+    return tracer::enter(std::move(trace_inputs), num_backwards + 1);
   });
   m.def("_tracer_exit", [](variable_list var_outputs) {
     tracer::exit(var_outputs);

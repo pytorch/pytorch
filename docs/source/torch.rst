@@ -34,6 +34,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
+.. autofunction:: reshape
 .. autofunction:: split
 .. autofunction:: squeeze
 .. autofunction:: stack
@@ -205,6 +206,8 @@ BLAS and LAPACK Operations
 .. autofunction:: gesv
 .. autofunction:: inverse
 .. autofunction:: det
+.. autofunction:: logdet
+.. autofunction:: slogdet
 .. autofunction:: matmul
 .. autofunction:: mm
 .. autofunction:: mv

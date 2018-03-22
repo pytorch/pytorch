@@ -45,6 +45,7 @@ def capture_stdout():
     import os
     import fcntl
     import errno
+    sys.stdout.flush()
     stdout_fd = os.dup(1)
     r, w = os.pipe()
     try:
@@ -916,7 +917,7 @@ class TestJit(TestCase):
         for node in g.outputs():
             g2.registerOutput(g_to_g2[node])
 
-        t_node = g2.create("TensorTest").t_("a", torch.ones([2, 2]))
+        t_node = g2.create("prim::TensorTest").t_("a", torch.ones([2, 2]))
         assert(t_node.attributeNames() == ["a"])
         g2.appendNode(t_node)
         assert(torch.equal(torch.ones([2, 2]), t_node.t("a")))
@@ -1242,7 +1243,7 @@ class TestJit(TestCase):
         recording_inputs = [Variable(t, requires_grad=True)
                             for t in reference_tensors]
 
-        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], [], optimize)
+        ge = torch._C.GraphExecutor(func, [Variable(t) for t in input_tensors], optimize)
 
         # test no gradients case
 
@@ -1387,7 +1388,7 @@ class TestJit(TestCase):
     def test_script_triple(self):
         script = '''
         def func(x):
-            return 3f * x
+            return 3. * x
         '''
         x = Variable(torch.rand(1).float(), requires_grad=True)
         outputs = 3 * x
@@ -1628,6 +1629,18 @@ class TestJit(TestCase):
 
         self.checkScript(func, [x, y], expected_out, False, capture_output=True)
 
+    def test_multiple_assignment(self):
+        def outer_func(x):
+            return x * 2, x + 2
+
+        @torch.jit.script
+        def func(x):
+            y, z = outer_func(x)
+            return y + z
+
+        x = torch.arange(4)
+        self.assertEqual(func(x), x * 2 + x + 2)
+
     def test_trace_annotation(self):
         @torch.jit.trace(Variable(torch.rand(1)))
         def foo(a):
@@ -1650,6 +1663,14 @@ class TestJit(TestCase):
             return a + a + a
         s = Variable(torch.rand(2))
         self.assertEqual(s + s + s, foo(s))
+
+    def test_script_literals(self):
+        @torch.jit.script
+        def fn(a):
+            return a.view(size=[1, 2, 3])
+
+        a = torch.randn(6)
+        self.assertEqual(fn(a).shape, torch.Size([1, 2, 3]))
 
     def test_script_error(self):
         @torch.jit.script
@@ -1747,6 +1768,20 @@ class TestJit(TestCase):
 
             self.assertEqual(foo(*inputs), outputs)
 
+    def test_desugar_module(self):
+        import torch.nn.functional as F
+
+        def fn(x, slope):
+            a = torch.abs(x)
+            b = torch.nn.functional.prelu(x, slope)
+            c = F.prelu(x, slope)
+            return a, b, c
+
+        x = torch.arange(-3, 4)
+        slope = torch.tensor([0.5])
+        outputs = fn(x, slope)
+        self.checkScript(fn, [x, slope], outputs, True)
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "calls .cuda()")
     def test_traced_module(self):
@@ -1789,8 +1824,7 @@ class TestJit(TestCase):
             linear_submodule(x)
 
         # Type casts
-        with self.assertRaises(RuntimeError):
-            linear_submodule.cuda()
+        linear_submodule.cuda()
         traced_model.float().cuda()
         cuda_out = traced_model(x.float().cuda())
         traced_model.cpu()
@@ -1847,8 +1881,8 @@ class TestJit(TestCase):
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
         def test_fuser_multiple_blocks(this, that, theother, meme):
-            i = 0LL
-            while i < 20LL:
+            i = 0
+            while i < 20:
                 this = cat(this, meme, dim=0)
                 that = cat(that, meme, dim=0)
                 theother = cat(theother, meme, dim=0)
@@ -1887,11 +1921,20 @@ class TestJit(TestCase):
             def forward(self, thing):
                 return self.weight + thing
 
+        class PModule(nn.Module):
+            def __init__(self):
+                super(PModule, self).__init__()
+                self.a = nn.Parameter(torch.randn(2, 3))
+
+            def forward(self, a):
+                return self.a.mm(a)
+
         class M2(torch.jit.ScriptModule):
             def __init__(self):
                 super(M2, self).__init__(False)
                 # test submodule
                 self.sub = M1()
+                self.sub2 = PModule()
                 # test parameters
                 self.weight = nn.Parameter(torch.randn(2, 3))
                 self.bias = nn.Parameter(torch.randn(2))
@@ -1916,17 +1959,20 @@ class TestJit(TestCase):
                 a = self.doit(input)
                 b = self.doit2(input)
                 c = self.hi(input)
-                return a + b + self.bias + self.sub(a) + c
+                d = self.sub2(input)
+                return a + b + self.bias + self.sub(a) + c + d
         m2 = M2()
         input = torch.randn(3, 2)
         a = m2.weight.mm(input)
         b = m2.weight.mm(input)
         c = m2.weight.mm(input)
-        ref = a + b + m2.bias + m2.sub.weight + a + c
+        d = m2.sub2.a.mm(input)
+        ref = a + b + m2.bias + m2.sub.weight + a + c + d
         self.assertEqual(ref, m2.forward(input))
         m2.weight = nn.Parameter(torch.zeros_like(m2.weight))
         m2.bias = nn.Parameter(torch.zeros_like(m2.bias))
         m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
+        m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
 if __name__ == '__main__':

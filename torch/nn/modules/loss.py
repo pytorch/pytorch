@@ -806,7 +806,7 @@ class CosineEmbeddingLoss(_Loss):
     using the cosine distance, and is typically used for learning nonlinear
     embeddings or semi-supervised learning.
 
-    The loss function for each sample is::
+    The loss function for each sample is:
 
     .. math::
         \text{loss}(x, y) =
@@ -838,7 +838,7 @@ class CosineEmbeddingLoss(_Loss):
                                        self.reduce)
 
 
-class MarginRankingLoss(Module):
+class MarginRankingLoss(_Loss):
     r"""Creates a criterion that measures the loss given
     inputs `x1`, `x2`, two 1D mini-batch `Tensor`s,
     and a label 1D mini-batch tensor `y` with values (`1` or `-1`).
@@ -851,20 +851,31 @@ class MarginRankingLoss(Module):
     .. math::
         \text{loss}(x, y) = \max(0, -y * (x1 - x2) + \text{margin})
 
-    if the internal variable `size_average = True`,
-    the loss function averages the loss over the batch samples;
-    if `size_average = False`, then the loss function sums over the batch
-    samples.
-    By default, `size_average` equals to ``True``.
+    Args:
+        margin (float, optional): Has a default value of `0`.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
+        - Target: :math:`(N)`
+        - Output: scalar. If `reduce` is False, then `(N)`.
     """
 
-    def __init__(self, margin=0, size_average=True):
-        super(MarginRankingLoss, self).__init__()
+    def __init__(self, margin=0, size_average=True, reduce=True):
+        super(MarginRankingLoss, self).__init__(size_average)
         self.margin = margin
-        self.size_average = size_average
+        self.reduce = reduce
 
     def forward(self, input1, input2, target):
-        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average)
+        return F.margin_ranking_loss(input1, input2, target, self.margin, self.size_average,
+                                     self.reduce)
 
 
 class MultiMarginLoss(_WeightedLoss):
@@ -921,7 +932,7 @@ class MultiMarginLoss(_WeightedLoss):
                                    self.size_average, self.reduce)
 
 
-class TripletMarginLoss(Module):
+class TripletMarginLoss(_Loss):
     r"""Creates a criterion that measures the triplet loss given an input
     tensors x1, x2, x3 and a margin with a value greater than 0.
     This is used for measuring a relative similarity between samples. A triplet
@@ -933,20 +944,31 @@ class TripletMarginLoss(Module):
     convolutional feature descriptors with triplet losses`_ by
     V. Balntas, E. Riba et al.
 
+    The loss function for each sample in the mini-batch is:
+
     .. math::
-        L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\} \right)
+        L(a, p, n) = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
 
     where :math:`d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p`.
 
     Args:
-        anchor: anchor input tensor
-        positive: positive input tensor
-        negative: negative input tensor
-        p: the norm degree. Default: 2
+        margin (float, optional): Default: `1`.
+        p (int, optional): The norm degree for pairwise distance. Default: `2`.
+        swap (float, optional): The distance swap is described in detail in the paper
+            `Learning shallow convolutional feature descriptors with triplet losses` by
+            V. Balntas, E. Riba et al. Default: ``False``.
+        size_average (bool, optional): By default, the losses are averaged over
+            observations for each minibatch. However, if the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch.
+            Default: ``True``
+        reduce (bool, optional): By default, the losses are averaged or summed over
+            observations for each minibatch depending on :attr:`size_average`. When
+            :attr:`reduce` is ``False``, returns a loss per batch element instead and
+            ignores :attr:`size_average`. Default: ``True``
 
     Shape:
-        - Input: :math:`(N, D)` where `D = vector dimension`
-        - Output: :math:`(N, 1)`
+        - Input: :math:`(N, D)` where `D` is the vector dimension.
+        - Output: scalar. If `reduce` is False, then `(N)`.
 
     >>> triplet_loss = nn.TripletMarginLoss(margin=1.0, p=2)
     >>> input1 = torch.randn(100, 128, requires_grad=True)
@@ -959,16 +981,17 @@ class TripletMarginLoss(Module):
         http://www.iis.ee.ic.ac.uk/%7Evbalnt/shallow_descr/TFeat_paper.pdf
     """
 
-    def __init__(self, margin=1.0, p=2, eps=1e-6, swap=False):
-        super(TripletMarginLoss, self).__init__()
+    def __init__(self, margin=1.0, p=2, eps=1e-6, swap=False, size_average=True, reduce=True):
+        super(TripletMarginLoss, self).__init__(size_average)
         self.margin = margin
         self.p = p
         self.eps = eps
         self.swap = swap
+        self.reduce = reduce
 
     def forward(self, anchor, positive, negative):
-        return F.triplet_margin_loss(anchor, positive, negative, self.margin,
-                                     self.p, self.eps, self.swap)
+        return F.triplet_margin_loss(anchor, positive, negative, self.margin, self.p,
+                                     self.eps, self.swap, self.size_average, self.reduce)
 
 # TODO: L1HingeEmbeddingCriterion
 # TODO: MSECriterion weight

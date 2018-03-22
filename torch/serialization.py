@@ -151,11 +151,10 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
         Please use something like io.BytesIO instead.
 
     Example:
-        # Save to file
+        >>> # Save to file
         >>> x = torch.Tensor([0, 1, 2, 3, 4])
         >>> torch.save(x, 'tensor.pt')
-
-        # Save to io.BytesIO buffer
+        >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
         >>> torch.save(x, buffer)
     """

@@ -3,6 +3,7 @@
 #include "tree.h"
 
 #include <functional>
+#include <string>
 
 namespace torch {
 namespace jit {
@@ -14,13 +15,11 @@ namespace script {
 // A few notes on types and their aliases:
 // - List<T> is really a Tree with kind TK_LIST and elements as subtrees
 // - Maybe<T> is really a Tree with kind TK_OPTION that has 0 or 1 subtree of type T
-// - Builtin types are: Ident (TK_IDENT), String (TK_STRING),
-//                      Number (TK_NUMBER) and Bool (TK_BOOL)
+// - Builtin types are: Ident (TK_IDENT), String (TK_STRING)
 //
 // Type  = TensorType()                                                 TK_TENSOR_TYPE
 // Param = Param(Type type, Ident name)                                 TK_PARAM
 //
-// -- TODO: change returns to be a list of expressions
 // Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
@@ -47,11 +46,7 @@ namespace script {
 //       | UnaryOp(Expr expr)
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
-//       -- * is one of  |   Number  | Bool |
-//       --              +-----------+------+
-//       -- type is then | "i" | "f" |  "b" |
-//       -- TODO: change this to a generic "Scalar" node that keep arbitrary precision values
-//       | Const(* value, String type)                                  TK_CONST
+//       | Const(String value)                                          TK_CONST
 //       | Cast(ScalarType type, Expr expr)                             TK_CAST
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
@@ -59,6 +54,7 @@ namespace script {
 //       | Slice(Expr value, Maybe<Expr> first, Maybe<Expr> second)     TK_SLICE
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
+//       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
 //
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
@@ -173,6 +169,12 @@ struct Maybe : public TreeView {
   }
   TreeRef map(std::function<TreeRef(const T&)> fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
+  }
+  static Maybe<T> create(const SourceRange& range) {
+    return Maybe<T>(Compound::create(TK_OPTION, range, {}));
+  }
+  static Maybe<T> create(const SourceRange& range, const T& value) {
+    return Maybe<T>(Compound::create(TK_OPTION, range, {value}));
   }
 };
 
@@ -516,6 +518,27 @@ struct UnaryOp : public Expr {
   }
 };
 
+struct Const : public Expr {
+  explicit Const(const TreeRef& tree) : Expr(tree) {
+    tree_->matchNumSubtrees(TK_CONST, 1);
+  }
+  bool isFloatingPoint() const {
+    return subtree(0)->stringValue().find_first_of(".eE") != std::string::npos;
+  }
+  bool isIntegral() const {
+    return !isFloatingPoint();
+  }
+  int64_t asIntegral() const {
+    return std::stoll(subtree(0)->stringValue());
+  }
+  double asFloatingPoint() const {
+    return std::stod(subtree(0)->stringValue());
+  }
+  static Const create(const SourceRange& range, const std::string& value) {
+    return Const(Compound::create(TK_CONST, range, {String::create(value)}));
+  }
+};
+
 struct Cast : public Expr {
   explicit Cast(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_CAST);
@@ -598,8 +621,7 @@ struct Slice : public Expr {
   }
 private:
   Expr createInt(int value) const {
-    return Expr(Compound::create(
-        TK_CONST, range(), {Number::create(value), String::create("i")}));
+    return Expr(Const::create(range(), std::to_string(value)));
   }
 };
 
@@ -652,8 +674,8 @@ struct TernaryIf : public Expr {
 };
 
 
-struct ListLiteral : public TreeView {
-  explicit ListLiteral(const TreeRef& tree) : TreeView(tree) {
+struct ListLiteral : public Expr {
+  explicit ListLiteral(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_LIST_LITERAL);
   }
   List<Expr> inputs() const {
