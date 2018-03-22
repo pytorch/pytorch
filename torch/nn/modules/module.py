@@ -56,6 +56,7 @@ class Module(object):
         self._forward_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
         self.training = True
+        self.extra_repr = ''
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.
@@ -767,7 +768,7 @@ class Module(object):
         return self.__class__.__name__
 
     def __repr__(self):
-        tmpstr = self._get_name() + '(\n'
+        tmpstr = self._get_name() + '(' + self.extra_repr + '\n'
         for key, module in self._modules.items():
             modstr = module.__repr__()
             modstr = _addindent(modstr, 2)
