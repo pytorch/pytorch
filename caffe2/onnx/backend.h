@@ -145,7 +145,7 @@ class Caffe2Backend {
       OnnxNode* onnx_node,
       int opset_version);
 
-  Caffe2Ops CreateConvePoolOpBase(
+  Caffe2Ops CreateConvPoolOpBase(
       const ModelProto& init_model,
       const ModelProto& pred_model,
       OnnxNode* onnx_node,
