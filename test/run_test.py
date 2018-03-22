@@ -65,20 +65,12 @@ def get_shell_output(command):
 
 
 def run_test(python, test_module, test_directory, options):
-    print(sys.executable)
-    shell('which -a python', test_directory)
-    shell('which -a pip', test_directory)
-    shell('pip show torch', test_directory)
     verbose = '--verbose' if options.verbose else ''
     return shell('{} {} {}'.format(python, test_module, verbose),
                  test_directory)
 
 
 def test_cpp_extensions(python, test_module, test_directory, options):
-    print(sys.executable)
-    shell('which -a python', os.path.join(test_directory, 'cpp_extensions'))
-    shell('which -a pip', os.path.join(test_directory, 'cpp_extensions'))
-    shell('pip show torch', os.path.join(test_directory, 'cpp_extensions'))
     if not shell('{} setup.py install --root ./install'.format(python),
                  os.path.join(test_directory, 'cpp_extensions')):
         return False
