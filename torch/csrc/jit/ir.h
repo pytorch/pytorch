@@ -403,7 +403,7 @@ public:
     JIT_ASSERT(graph_ == node->owningGraph());
     node->uses_.emplace_back(this, i);
     inputs_.insert(inputs_.begin() + i, node);
-    for (size_t use_itr=i+1; use_itr < inputs_.size(); ++use_itr) {
+    for (size_t use_itr = i + 1; use_itr < inputs_.size(); ++use_itr) {
       for (auto& use : inputs_[use_itr]->uses_) {
         if (use.user == this) {
           use.offset += 1;
@@ -451,8 +451,8 @@ public:
 
   Value* insertOutput(size_t i) {
     outputs_.insert(outputs_.begin() + i, new Value(this, i));
-    for (size_t itr = i+1; itr < outputs_.size(); ++itr) {
-      outputs_[itr]->setOffset(outputs_[itr]->offset()+1);
+    for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
+      outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
     }
     return outputs_.at(i);
   }
@@ -710,9 +710,10 @@ struct Block {
     if (name != "") v->setUniqueName(name);
     return v;
   }
-  Value * insertInput(size_t i, std::string name="") {
-    Value * v = input_->insertOutput(i);
-    if (name != "") v->setUniqueName(name);
+  Value* insertInput(size_t i, std::string name = "") {
+    Value* v = input_->insertOutput(i);
+    if (name != "")
+      v->setUniqueName(name);
     return v;
   }
   void eraseInput(size_t i) {
@@ -722,7 +723,7 @@ struct Block {
     output_->addInput(n);
     return outputs().size() - 1;
   }
-  size_t insertOutput(size_t i, Value * n) {
+  size_t insertOutput(size_t i, Value* n) {
     output_->insertInput(i, n);
     return i;
   }
@@ -864,7 +865,7 @@ public:
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
   }
-  Value * insertInput(size_t i, std::string name="") {
+  Value* insertInput(size_t i, std::string name = "") {
     return block_->insertInput(i, std::move(name));
   }
   void eraseInput(size_t i) {
