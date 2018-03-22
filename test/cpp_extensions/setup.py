@@ -1,3 +1,6 @@
+import os
+os.system("where python")
+os.system("pip show torch")
 import torch.cuda
 from setuptools import setup
 from torch.utils.cpp_extension import CppExtension, CUDAExtension

@@ -71,8 +71,8 @@ def run_test(python, test_module, test_directory, options):
 
 
 def test_cpp_extensions(python, test_module, test_directory, options):
-    shell('where python')
-    shell('pip show torch')
+    shell('where python', os.path.join(test_directory, 'cpp_extensions'))
+    shell('pip show torch', os.path.join(test_directory, 'cpp_extensions'))
     if not shell('{} setup.py install --root ./install'.format(python),
                  os.path.join(test_directory, 'cpp_extensions')):
         return False
