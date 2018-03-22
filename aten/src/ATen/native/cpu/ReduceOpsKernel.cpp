@@ -95,7 +95,7 @@ inline void allImpl(Tensor & result, const Tensor & self, size_t dim, bool all, 
           &allreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>, self.data<scalar_t>(),
           (size_t)0, (size_t)self.numel(), (scalar_t)init));
     } else {
-      at::parallel_for_2d<scalar_t>(
+      at::parallel_reduce_2d<scalar_t>(
           &dimreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>,
           self.sizes()[dim], self.strides()[dim], self.numel(),
           self.data<scalar_t>(), result.data<scalar_t>());

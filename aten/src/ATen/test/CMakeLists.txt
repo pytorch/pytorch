@@ -22,6 +22,9 @@ target_link_libraries(native_test ATen)
 add_executable(scalar_tensor_test scalar_tensor_test.cpp)
 target_link_libraries(scalar_tensor_test ATen)
 
+add_executable(test_parallel test_parallel.cpp)
+target_link_libraries(test_parallel ATen)
+
 add_executable(undefined_tensor_test undefined_tensor_test.cpp)
 target_link_libraries(undefined_tensor_test ATen)
 

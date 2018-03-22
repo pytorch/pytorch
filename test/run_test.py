@@ -51,12 +51,12 @@ DISTRIBUTED_TESTS_CONFIG = {
 
 
 def print_to_stderr(message):
-    # Print to stderr because test output also goes to stderr. This ensures
-    # synchronization between the two output sources.
     print(message, file=sys.stderr)
 
 
 def shell(command, cwd):
+    sys.stdout.flush()
+    sys.stderr.flush()
     return subprocess.call(
         shlex.split(command), universal_newlines=True, cwd=cwd) == 0
 

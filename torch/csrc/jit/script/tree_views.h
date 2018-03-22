@@ -170,6 +170,12 @@ struct Maybe : public TreeView {
   TreeRef map(std::function<TreeRef(const T&)> fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
+  static Maybe<T> create(const SourceRange& range) {
+    return Maybe<T>(Compound::create(TK_OPTION, range, {}));
+  }
+  static Maybe<T> create(const SourceRange& range, const T& value) {
+    return Maybe<T>(Compound::create(TK_OPTION, range, {value}));
+  }
 };
 
 struct Ident : public TreeView {
