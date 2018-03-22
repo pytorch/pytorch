@@ -45,7 +45,7 @@ T parallel_reduce(T (*f)(const T *, size_t, size_t, T), const T *data,
 }
 
 template <class T>
-void parallel_for_2d(void (*f)(const T *, T *, size_t, size_t), size_t num_rows,
+void parallel_reduce_2d(void (*f)(const T *, T *, size_t, size_t), size_t num_rows,
                      size_t num_cols, size_t numel, const T *arr_, T *outarr_) {
 
   internal::init_tbb_num_threads();
@@ -58,23 +58,21 @@ void parallel_for_2d(void (*f)(const T *, T *, size_t, size_t), size_t num_rows,
     for (size_t i_ = 0; i_ < max_i_; i_++) {
       int64_t i = i_ * num_rows * num_cols;
       int64_t i_r = i_ * num_cols;
-      const T *arr = arr_ + i;
-      T *outarr = outarr_ + i_r;
+      const T* arr = arr_ + i;
+      T* outarr = outarr_ + i_r;
       f(arr, outarr, num_rows, num_cols);
     }
   } else {
-    tbb::parallel_for(tbb::blocked_range2d<size_t, size_t>(
-                          0, num_cols, internal::TBB_GRAIN_SIZE, 0, max_i_, 1),
+    tbb::parallel_for(tbb::blocked_range<size_t>(
+                          0, max_i_, 1),
                       [&arr_, &outarr_, num_rows, num_cols,
-                       &f](const tbb::blocked_range2d<size_t, size_t> r) {
-                        for (size_t i_ = r.cols().begin(); i_ < r.cols().end();
-                             i_++) {
+                       &f](const tbb::blocked_range<size_t> r) {
+                        for (size_t i_ = r.begin(); i_ < r.end(); i_++) {
                           int64_t i = i_ * num_rows * num_cols;
                           int64_t i_r = i_ * num_cols;
                           const T *arr = arr_ + i;
                           T *outarr = outarr_ + i_r;
-                          f(arr, outarr + r.rows().begin(), num_rows,
-                            r.rows().end() - r.rows().begin());
+                          f(arr, outarr, num_rows, num_cols);
                         }
                       },
                       ap);

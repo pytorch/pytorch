@@ -542,6 +542,36 @@ class TestTorch(TestCase):
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_cpu_parallel(self):
+        # To use parallel branches we'll need to compare on tensors
+        # that are relatively large. Even if this is run on a single
+        # core machine these tests will still give you signal on
+        # the correctness
+
+        def _run_test(size):
+            for dim in range(len(size) + 1):
+                nv = np.round(np.random.rand(*size))  # 0s and 1s
+                tv = torch.from_numpy(nv)
+                # Parallelisim is only used if numel is
+                # larger than grainsize defined in Parallel.h
+                self.assertTrue(tv.numel() > 32768)
+                if dim == len(size):
+                    nvs = nv.sum()
+                    tvs = tv.sum()
+                else:
+                    nvs = nv.sum(dim)
+                    tvs = tv.sum(dim)
+                diff = np.abs(nvs - tvs.numpy()).sum()
+                self.assertEqual(diff, 0)
+
+        sizes = []
+        sizes += [[2, 3, 3, 3, 3, 2, 2, 3, 2, 3, 2, 3, 3]]
+        sizes += [[4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]
+        sizes += [[1, 32 * 8 * 32 * 8]]
+        sizes += [[1, 32770]]
+        map(_run_test, sizes)
+
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
         size = (100, 100)
