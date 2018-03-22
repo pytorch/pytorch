@@ -1,3 +1,4 @@
+import math
 import numbers
 import weakref
 
@@ -382,7 +383,7 @@ class AffineTransform(Transform):
     @property
     def sign(self):
         if isinstance(self.scale, numbers.Number):
-            return (self.scale > 0) - (self.scale < 0)
+            return 1 if self.scale > 0 else -1 if self.scale < 0 else 0
         return self.scale.sign()
 
     def _call(self, x):
@@ -395,8 +396,9 @@ class AffineTransform(Transform):
         shape = x.shape
         scale = self.scale
         if isinstance(scale, numbers.Number):
-            scale = x.new_empty(shape).fill_(scale)
-        result = torch.abs(scale).log()
+            result = x.new_empty(shape).fill_(math.log(abs(scale)))
+        else:
+            result = torch.abs(scale).log()
         if self.event_dim:
             result_size = result.size()[:-self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)
