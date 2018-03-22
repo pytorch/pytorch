@@ -1,5 +1,8 @@
 import os
-os.system("where python")
+import sys
+print(sys.executable)
+os.system("which -a python")
+os.system("which -a pip")
 os.system("pip show torch")
 import torch.cuda
 from setuptools import setup
