@@ -4,6 +4,7 @@
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Representations/NeuralNet.h"
+#include "caffe2/core/common.h"
 #include "caffe2/proto/caffe2.pb.h"
 
 #include <unordered_map>
