@@ -43,6 +43,11 @@ List<T> wrap_list(const SourceRange& fallback_pos, std::vector<T>&& vec) {
   return List<T>::create(vec.front().range(), std::move(vec));
 }
 
+template<typename T>
+Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
+  return val ? Maybe<T>::create(val->range(), *val) : Maybe<T>::create(fallback_pos);
+}
+
 void initTreeViewBindings(PyObject *module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_jit_tree_views");
@@ -167,6 +172,17 @@ void initTreeViewBindings(PyObject *module) {
   py::class_<ListLiteral, Expr>(m, "ListLiteral")
     .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
       return ListLiteral::create(range, wrap_list(range, std::move(args)));
+    }));
+  py::class_<Gather, Expr>(m, "Gather")
+    .def(py::init([](const Expr& base, const Expr& index) {
+      return Gather::create(base.range(), base, index);
+    }));
+  py::class_<Slice, Expr>(m, "Slice")
+    .def(py::init([](const Expr& base, Expr* lower, Expr* upper) {
+      return Slice::create(base.range(),
+                           base,
+                           wrap_maybe(base.range(), lower),
+                           wrap_maybe(base.range(), upper));
     }));
 }
 
