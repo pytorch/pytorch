@@ -5,6 +5,8 @@
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
 
+#include "ATen/optional.h"
+
 #include <climits>
 
 namespace torch {
@@ -435,34 +437,44 @@ private:
   // in a way that ensure single static assignment.
 
   void emitLoopCommon(
-      Value* max_trip_count,
-      Value* cond_value,
+      at::optional<Expr> max_trip_count,
+      at::optional<Expr> cond,
       const List<Stmt>& body,
       const Stmt& stmt,
-      const Expr* cond,
-      const std::vector<std::string>& itr_idents) {
+      at::optional<Ident> itr_ident) {
     Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
-    n->addInput(max_trip_count);
-    n->addInput(cond_value);
+    Value *max_trip_count_val, *cond_val;
+    {
+      WithInsertPoint guard(n);
+      if (max_trip_count) {
+        max_trip_count_val = emitExpr(max_trip_count.value(), 1)[0];
+      } else {
+        max_trip_count_val =
+            emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
+      }
+      if (cond) {
+        cond_val = emitExpr(cond.value(), 1)[0];
+      } else {
+        cond_val = emitBooleanConst(stmt, true)[0];
+      }
+    }
+    n->addInput(max_trip_count_val);
+    n->addInput(cond_val);
     auto* body_block = n->addBlock();
     Value* trip_count = body_block->addInput(); // Iteration num
     size_t skip_inputs_num = 1;
 
     {
       pushFrame(body_block);
-      if (itr_idents.size() > 1) {
-        throw ErrorReport(stmt)
-            << "Only one iteration variable allowed right now.";
-      }
-      for (size_t i = 0; i < itr_idents.size(); ++i) {
-        environment_stack->setVar(itr_idents[i], trip_count);
+      if (itr_ident) {
+        environment_stack->setVar(itr_ident.value().name(), trip_count);
       }
       WithInsertPoint guard(body_block);
       emitStatements(body);
 
       // Also emit the conditional
-      if (cond != nullptr) {
-        Value* body_cond_value = emitExpr(*cond, 1)[0];
+      if (cond) {
+        Value* body_cond_value = emitExpr(cond.value(), 1)[0];
         body_block->registerOutput(body_cond_value);
       } else {
         Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
@@ -524,32 +536,18 @@ private:
     }
 
     auto target_list = List<Ident>(targets);
-    std::vector<std::string> target_idents;
-    target_idents.reserve(target_list.size());
-    for (const auto& t : target_list) {
-      target_idents.push_back(Ident(t).name());
+    if (target_list.size() != 1) {
+      throw ErrorReport(stmt)
+          << "Iteration variable unpacking is not supported";
     }
+    at::optional<Ident> target_ident{target_list[0]};
 
-    Value* max_trip_count = emitExpr(args[0], 1)[0];
-    Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
-
-    emitLoopCommon(
-        max_trip_count,
-        cond_value_dummy,
-        stmt.body(),
-        stmt,
-        nullptr,
-        target_idents);
+    emitLoopCommon({args[0]}, {}, stmt.body(), stmt, target_ident);
   }
 
   void emitWhile(const While& stmt) {
-    // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
-    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
-
     auto cond = stmt.cond();
-    emitLoopCommon(
-        max_trip_count_dummy, cond_value, stmt.body(), stmt, &cond, {});
+    emitLoopCommon({}, {cond}, stmt.body(), stmt, {});
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -733,9 +731,11 @@ private:
         expectOutputs(tree, output_size, 1);
         return emitConst(Const(tree));
       } break;
-      case TK_TRUE:
+      case TK_TRUE: {
+        return emitBooleanConst(tree, true);
+      } break;
       case TK_FALSE: {
-        return emitBooleanConst(tree);
+        return emitBooleanConst(tree, false);
       } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
