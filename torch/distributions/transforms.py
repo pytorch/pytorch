@@ -1,3 +1,4 @@
+import numbers
 import weakref
 
 import torch
@@ -263,12 +264,12 @@ class ComposeTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         if not self.parts:
-            return x.new([0]).expand_as(x)
+            return torch.zeros_like(x)
         result = 0
         for part in self.parts:
             y = part(x)
-            result += _sum_rightmost(part.log_abs_det_jacobian(x, y),
-                                     self.event_dim - part.event_dim)
+            result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y),
+                                             self.event_dim - part.event_dim)
             x = y
         return result
 
@@ -354,19 +355,34 @@ class AffineTransform(Transform):
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
         super(AffineTransform, self).__init__(cache_size=cache_size)
-        self.loc, self.scale = broadcast_all(loc, scale)
+        self.loc = loc
+        self.scale = scale
         self.event_dim = event_dim
 
     def __eq__(self, other):
         if not isinstance(other, AffineTransform):
             return False
-        result = self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
-        if isinstance(result, Variable):
-            result = result.data.view(-1)[0]
-        return result
+
+        if isinstance(self.loc, numbers.Number) and isinstance(other.loc, numbers.Number):
+            if self.loc != other.loc:
+                return False
+        else:
+            if (self.loc != other.loc).any().item():
+                return False
+
+        if isinstance(self.scale, numbers.Number) and isinstance(other.scale, numbers.Number):
+            if self.scale != other.scale:
+                return False
+        else:
+            if (self.scale != other.scale).any().item():
+                return False
+
+        return True
 
     @property
     def sign(self):
+        if isinstance(self.scale, numbers.Number):
+            return (self.scale > 0) - (self.scale < 0)
         return self.scale.sign()
 
     def _call(self, x):
@@ -376,8 +392,11 @@ class AffineTransform(Transform):
         return (y - self.loc) / self.scale
 
     def log_abs_det_jacobian(self, x, y):
-        result = torch.abs(self.scale).log()
         shape = x.shape
+        scale = self.scale
+        if isinstance(scale, numbers.Number):
+            scale = x.new_empty(shape).fill_(scale)
+        result = torch.abs(scale).log()
         if self.event_dim:
             result_size = result.size()[:-self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)

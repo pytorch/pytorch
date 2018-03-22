@@ -319,6 +319,11 @@ EXAMPLES = [
             'transforms': [AffineTransform(variable(torch.randn(3, 5)), variable(torch.randn(3, 5))),
                            ExpTransform()],
         },
+        {
+            'base_distribution': Normal(variable(torch.randn(2, 3, 5), requires_grad=True),
+                                        variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
+            'transforms': AffineTransform(1, 2),
+        },
     ]),
     Example(Uniform, [
         {
@@ -3020,6 +3025,8 @@ class TestTransforms(TestCase):
                 AbsTransform(cache_size=cache_size),
                 ExpTransform(cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
+                AffineTransform(0, 1, cache_size=cache_size),
+                AffineTransform(1, -2, cache_size=cache_size),
                 AffineTransform(variable(torch.Tensor(5).normal_()),
                                 variable(torch.Tensor(5).normal_()),
                                 cache_size=cache_size),
@@ -3039,6 +3046,16 @@ class TestTransforms(TestCase):
                                     variable(torch.Tensor(4, 5).normal_()),
                                     cache_size=cache_size),
                     ExpTransform(cache_size=cache_size),
+                ]),
+                ComposeTransform([
+                    AffineTransform(0, 1, cache_size=cache_size),
+                    AffineTransform(variable(torch.Tensor(4, 5).normal_()),
+                                    variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
+                    AffineTransform(1, -2, cache_size=cache_size),
+                    AffineTransform(variable(torch.Tensor(4, 5).normal_()),
+                                    variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
                 ]),
             ]
             for t in transforms[:]:
@@ -3173,6 +3190,16 @@ class TestTransforms(TestCase):
                 'Actual: {}'.format(actual),
             ]))
 
+    def test_jacobian_shape(self):
+        for transform in self.transforms:
+            x = self._generate_data(transform)
+            try:
+                y = transform(x)
+                actual = transform.log_abs_det_jacobian(x, y)
+            except NotImplementedError:
+                continue
+            self.assertEqual(actual.shape, x.shape[:x.dim() - transform.event_dim])
+
     def test_transform_shapes(self):
         transform0 = ExpTransform()
         transform1 = SoftmaxTransform()
@@ -3228,10 +3255,18 @@ class TestConstraintRegistry(TestCase):
             constraints.real,
             constraints.positive,
             constraints.greater_than(torch.tensor([-10, -2, 0, 2, 10])),
+            constraints.greater_than(0),
+            constraints.greater_than(2),
+            constraints.greater_than(-2),
             constraints.less_than(torch.tensor([-10, -2, 0, 2, 10])),
+            constraints.less_than(0),
+            constraints.less_than(2),
+            constraints.less_than(-2),
             constraints.unit_interval,
             constraints.interval(torch.tensor([-4, -2, 0, 2, 4]),
                                  torch.tensor([-3, 3, 1, 5, 5])),
+            constraints.interval(-2, -1),
+            constraints.interval(1, 2),
             constraints.simplex,
             constraints.lower_cholesky,
         ]
@@ -3253,6 +3288,9 @@ class TestConstraintRegistry(TestCase):
             x2 = t.inv(y)
             self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
 
+            j = t.log_abs_det_jacobian(x, y)
+            self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
+
     def test_transform_to(self):
         for constraint in self.constraints:
             t = transform_to(constraint)
@@ -3262,6 +3300,10 @@ class TestConstraintRegistry(TestCase):
             x2 = t.inv(y)
             y2 = t(x2)
             self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
+
+            if t.bijective:
+                j = t.log_abs_det_jacobian(x, y)
+                self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
 
 
 class TestValidation(TestCase):
