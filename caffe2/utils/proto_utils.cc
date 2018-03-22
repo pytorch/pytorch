@@ -21,10 +21,12 @@
 #include <fstream>
 
 #include <google/protobuf/io/coded_stream.h>
-#include <google/protobuf/io/zero_copy_stream_impl.h>
 
 #ifndef CAFFE2_USE_LITE_PROTO
 #include <google/protobuf/text_format.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
+#else
+#include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #endif  // !CAFFE2_USE_LITE_PROTO
 
 #include "caffe2/core/logging.h"
@@ -121,6 +123,14 @@ class IfstreamInputStream : public ::google::protobuf::io::CopyingInputStream {
 };
 }  // namespace
 
+bool ParseProtoFromLargeString(const string& str, MessageLite* proto) {
+  ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
+  ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
+  // Set PlanDef message size limit to 1G.
+  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
+  return proto->ParseFromCodedStream(&coded_stream);
+}
+
 bool ReadProtoFromBinaryFile(const char* filename, MessageLite* proto) {
   ::google::protobuf::io::CopyingInputStreamAdaptor stream(
       new IfstreamInputStream(filename));
@@ -155,6 +165,14 @@ bool ParseFromString(const string& spec, Message* proto) {
   return ::google::protobuf::TextFormat::ParseFromString(spec, proto);
 }
 } // namespace TextFormat
+
+bool ParseProtoFromLargeString(const string& str, Message* proto) {
+  ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
+  ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
+  // Set PlanDef message size limit to 1G.
+  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
+  return proto->ParseFromCodedStream(&coded_stream);
+}
 
 bool ReadProtoFromTextFile(const char* filename, Message* proto) {
   int fd = open(filename, O_RDONLY);
@@ -207,6 +225,7 @@ void WriteProtoToBinaryFile(const MessageLite& proto, const char* filename) {
 }
 
 #endif  // CAFFE2_USE_LITE_PROTO
+
 
 ArgumentHelper::ArgumentHelper(const OperatorDef& def) {
   for (auto& arg : def.arg()) {
