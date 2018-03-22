@@ -1743,7 +1743,7 @@ class TestScript(TestCase):
             a = True
             return a
         '''
-        outputs = [True]
+        outputs = [1]
         self.checkScript(script, [], outputs[0], True, 'test_script_bool_constant')
 
     def test_ternary(self):
