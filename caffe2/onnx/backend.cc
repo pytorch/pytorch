@@ -344,7 +344,6 @@ Caffe2Backend::get_special_operators() const {
               {"Concat", &Caffe2Backend::CreateConcat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
-              {"Sqrt", &Caffe2Backend::CreateSqrt},
               {"Reciprocal", &Caffe2Backend::CreateReciprocal},
               {"MatMul", &Caffe2Backend::CreateMatMul}};
   return kSpecialOperators;
@@ -441,26 +440,6 @@ Caffe2Ops Caffe2Backend::CreateReshape(const ModelProto &init_model,
   op->add_output(DummyName::NewDummyName());
 
   return c2_op;
-}
-
-Caffe2Ops Caffe2Backend::CreateSqrt(
-    const ModelProto& init_model,
-    const ModelProto& pred_model,
-    OnnxNode* onnx_node,
-    int opset_version) {
-  const auto& node = onnx_node->node;
-  if (node.input_size() != 1 || node.output_size() != 1) {
-    throw std::runtime_error("Caffe2 Sqrt should have 1 input and 1 output");
-  }
-
-  Caffe2Ops ret;
-  auto *c2_op = ret.ops.Add();
-
-  caffe2::Argument exponent;
-  exponent.set_name("exponent");
-  exponent.set_f(0.5);
-  BuildOperator(c2_op, "Pow", {node.input(0)}, {node.output(0)}, {exponent});
-  return ret;
 }
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
