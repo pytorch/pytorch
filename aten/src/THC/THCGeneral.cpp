@@ -37,7 +37,7 @@ void THCState_free(THCState* state)
 
 static cudaError_t cudaMallocWrapper(void* ctx, void** devPtr, size_t size, cudaStream_t stream)
 {
-  return cudaMalloc(devPtr, size);
+  return cudaMallocManaged(devPtr, size, CU_MEM_ATTACH_GLOBAL);
 }
 
 static cudaError_t cudaFreeWrapper(void* ctx, void* devPtr)

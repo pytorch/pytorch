@@ -197,7 +197,7 @@ static ncclResult_t closeGather(RankGather* gather, int ndev) {
 
 static ncclResult_t allocDevMem(ncclMem** ptr, size_t buffSize) {
   size_t size = offsetof(struct ncclMem, buff) + buffSize;
-  cudaError_t res = cudaMalloc((void**)ptr, size);
+  cudaError_t res = cudaMallocManaged((void**)ptr, size, CU_MEM_ATTACH_GLOBAL);
   if (res != cudaSuccess) {
     *ptr = NULL;
     WARN("failed to allocate %lu byte device buffer", size);
@@ -618,13 +618,13 @@ static ncclResult_t commAlloc(ncclComm_t* comret, int ndev, const ncclUniqueId* 
     return res;
   }
 
-  if (cudaMalloc(&comm->devRing, sizeof(DevRing<char>)) != cudaSuccess) {
+  if (cudaMallocManaged(&comm->devRing, sizeof(DevRing<char>)) != cudaSuccess, CU_MEM_ATTACH_GLOBAL) {
     WARN("rank %d failed to allocate device-side ring views", rank);
     commFree(comm);
     return ncclCudaMallocFailed;
   }
 
-  if (cudaMalloc(&comm->devUserFromRing, ndev*sizeof(int)) != cudaSuccess ) {
+  if (cudaMallocManaged(&comm->devUserFromRing, ndev*sizeof(int)) != cudaSuccess, CU_MEM_ATTACH_GLOBAL) {
     WARN("rank %d failed to allocated device maps", rank);
     commFree(comm);
     return ncclCudaMallocFailed;
@@ -698,7 +698,7 @@ static ncclResult_t devCommUpdate(ncclComm_t comm) {
 static ncclResult_t devCommSetup(ncclComm_t comm) {
   // Fully duplicate the comm on the device
   size_t commBytes = offsetof(ncclComm, ptrs) + comm->nRanks*sizeof(NodeRef);
-  if (cudaMalloc(&comm->devComm, commBytes) != cudaSuccess) {
+  if (cudaMallocManaged(&comm->devComm, commBytes) != cudaSuccess, CU_MEM_ATTACH_GLOBAL) {
     WARN("failed to allocated device comm");
     return ncclCudaMallocFailed;
   }
