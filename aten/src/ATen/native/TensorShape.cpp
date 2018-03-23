@@ -20,11 +20,13 @@ static void check_cat_no_zero_dim(TensorList tensors) {
 
 Tensor & cat_out(Tensor & result, TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
+  dim = legacy_cat_wrap_dim(dim, tensors);
   return at::_cat_out(result, tensors, dim);
 }
 
 Tensor cat(TensorList tensors, int64_t dim) {
   check_cat_no_zero_dim(tensors);
+  dim = legacy_cat_wrap_dim(dim, tensors);
   return at::_cat(tensors, dim);
 }
 
