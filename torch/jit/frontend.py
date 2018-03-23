@@ -229,6 +229,13 @@ class StmtBuilder(Builder):
         return While(r, build_expr(ctx, stmt.test), [build_stmt(ctx, s) for s in stmt.body])
 
     @staticmethod
+    def build_For(ctx, stmt):
+        r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
+        return For(
+            r, [StmtBuilder.get_assign_ident(ctx, stmt.target)],
+            [build_expr(ctx, stmt.iter)], [build_stmt(ctx, s) for s in stmt.body])
+
+    @staticmethod
     def build_If(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("if"))
         return If(r, build_expr(ctx, stmt.test),

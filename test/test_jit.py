@@ -1737,6 +1737,21 @@ class TestScript(TestCase):
         '''
         self.checkScript(script, [], outputs=[161700], optimize=True, name='test_script_for_in_range_dynamic')
 
+    def test_script_for_in_range_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_ast(zero):
+            c = zero
+            for i in range(100):
+                acc = zero
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+
+        inputs = self._make_scalar_vars([0], torch.int64)
+
+        self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
+
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
