@@ -73,7 +73,8 @@ are the same.
         1,
         "output",
         "Output tensor (Tensor<float>) containing clipped"
-        "input elements");
+        "input elements")
+    .InheritOnnxSchema("Clip");
 
 OPERATOR_SCHEMA(ClipGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 

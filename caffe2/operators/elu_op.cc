@@ -71,7 +71,8 @@ Elu takes one input data (Tensor<T>) and produces one output data
 
 )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Output(0, "Y", "1D input tensor")
+    .InheritOnnxSchema("Elu");
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(EluGradient)

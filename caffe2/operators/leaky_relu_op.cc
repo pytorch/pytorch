@@ -70,7 +70,8 @@ OPERATOR_SCHEMA(LeakyReluGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
-    .Arg("alpha", "Coefficient of leakage");
+    .Arg("alpha", "Coefficient of leakage")
+    .InheritOnnxSchema("LeakyRelu");
 
 class GetLeakyReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -290,7 +290,8 @@ output data (Tensor<T>) where the function `f(x) = slope * x for x < 0`,
         "Slope",
         "1D slope tensor. If `Slope` is of size 1, the value is shared"
         "across different channels")
-    .Output(0, "Y", "1D input tensor");
+    .Output(0, "Y", "1D input tensor")
+    .InheritOnnxSchema("PRelu");
 
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(PReluGradient).NumInputs(4).NumOutputs(2).SetDoc(R"DOC(

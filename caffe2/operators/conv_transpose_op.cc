@@ -60,6 +60,7 @@ conv_transpose_op.h file, which is why they are separate files.
         "Y",
         "Output data blob that contains the result of the "
         "transposed convolution. The output dimensions are functions of the kernel"
-        " size, stride size, and pad lengths.");
+        " size, stride size, and pad lengths.")
+    .InheritOnnxSchema("ConvTranspose");
 
 } // namespace caffe2

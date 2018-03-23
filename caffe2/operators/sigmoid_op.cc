@@ -63,7 +63,8 @@ Sigmoid takes one input data (Tensor<T>) and produces one output data
 tensor elementwise.
 )DOC")
   .Input(0, "X", "1D input tensor")
-  .Output(0, "Y", "1D output tensor");
+  .Output(0, "Y", "1D output tensor")
+  .InheritOnnxSchema("Sigmoid");
 // Input: Y, dY, output: dX
 OPERATOR_SCHEMA(SigmoidGradient)
   .NumInputs(2)

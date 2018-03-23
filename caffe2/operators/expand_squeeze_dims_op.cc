@@ -104,7 +104,8 @@ This is the exact inverse operation of ExpandDims given the same `dims` arg.
           SqueezeOp<CPUContext>::ComputeDims(GetDimsVector(in[0]), dims);
       out[0] = CreateTensorShape(newDims, in[0].data_type());
       return out;
-    });
+    })
+    .InheritOnnxSchema("Squeeze");
 
 class GetSqueezeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

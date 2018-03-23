@@ -15,7 +15,6 @@
  */
 
 #include "caffe2/core/operator_schema.h"
-
 #include "caffe2/core/logging.h"
 
 namespace caffe2 {
@@ -209,6 +208,11 @@ OpSchema& OpSchema::InputsCanCrossDevices() {
 OpSchema& OpSchema::TensorInferenceFunction(
     TensorInferenceFunctionType function) {
   tensor_inference_function_ = function;
+  return *this;
+}
+
+OpSchema& OpSchema::InheritOnnxSchema(const std::string& onnx_schema_name) {
+  onnx_schema_ = onnx_schema_name;
   return *this;
 }
 

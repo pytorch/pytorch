@@ -45,5 +45,6 @@ place and results will be accumulated in input0. All inputs and outputs must
 have the same shape and data type.
 )DOC")
     .Input(0, "data_0", "First of the input tensors. Can be inplace.")
-    .Output(0, "sum", "Output tensor. Same dimension as inputs.");
+    .Output(0, "sum", "Output tensor. Same dimension as inputs.")
+    .InheritOnnxSchema("Sum");
 }

@@ -43,7 +43,8 @@ OPERATOR_SCHEMA(Negative)
 Computes the element-wise negative of the input.
 )DOC")
     .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor");
+    .Output(0, "Y", "1D input tensor")
+    .InheritOnnxSchema("Neg");
 
 class GetNegativeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

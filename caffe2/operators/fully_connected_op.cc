@@ -142,7 +142,8 @@ will throw errors.
         "A tensor that is coerced into a 2D blob of size (KxN) "
         "containing fully connected weight matrix")
     .Input(2, "b", "1D blob containing bias vector")
-    .Output(0, "Y", "2D output tensor");
+    .Output(0, "Y", "2D output tensor")
+    .InheritOnnxSchema("Gemm");
 
 OPERATOR_SCHEMA(FCGradient).NumInputs(3).NumOutputs(2, 3);
 OPERATOR_SCHEMA(FCTransposedGradient).NumInputs(3).NumOutputs(2, 3);

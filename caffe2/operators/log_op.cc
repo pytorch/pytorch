@@ -47,7 +47,8 @@ and output blobs.
         0,
         "output",
         "The natural log of the input tensor computed "
-        "element-wise");
+        "element-wise")
+    .InheritOnnxSchema("Log");
 
 class GetLogGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

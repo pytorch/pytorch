@@ -70,28 +70,32 @@ OPERATOR_SCHEMA(Add)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("addition"));
+    .FillUsing(MathDocGenerator("addition"))
+    .InheritOnnxSchema("Add");
 OPERATOR_SCHEMA(Sub)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("subtraction"));
+    .FillUsing(MathDocGenerator("subtraction"))
+    .InheritOnnxSchema("Sub");
 OPERATOR_SCHEMA(Mul)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("multiplication"));
+    .FillUsing(MathDocGenerator("multiplication"))
+    .InheritOnnxSchema("Mul");
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
     .CostInferenceFunction(PointwiseCostInference<1>)
     .IdenticalTypeAndShapeOfInput(0)
-    .FillUsing(MathDocGenerator("division"));
+    .FillUsing(MathDocGenerator("division"))
+    .InheritOnnxSchema("Div");
 OPERATOR_SCHEMA(DivGradient).NumInputs(3).NumOutputs(2).AllowInplace({{0, 0}});
 
 OPERATOR_SCHEMA(SumReduceLike)
@@ -347,24 +351,26 @@ Both input operands should be of type `bool`.
   };
 }
 
-#define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol) \
+#define CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(name, symbol, onnx_schema) \
   OPERATOR_SCHEMA(name)                                   \
       .NumInputs(2)                                       \
       .NumOutputs(1)                                      \
       .AllowInplace({{0, 0}})                             \
-      .FillUsing(LogicalDocGenerator(symbol));            \
+      .FillUsing(LogicalDocGenerator(symbol))             \
+      .InheritOnnxSchema(onnx_schema);                    \
   SHOULD_NOT_DO_GRADIENT(name)
 
-CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or");
-CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(And, "and");
-CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor");
+CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Or, "or", "Or");
+CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(And, "and", "And");
+CAFFE2_SCHEMA_FOR_BINARY_LOGICAL_OP(Xor, "xor", "Xor");
 
 OPERATOR_SCHEMA(Not)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(Performs element-wise negation.)DOC")
     .Input(0, "X", "Input tensor of type `bool`.")
-    .Output(0, "Y", "Output tensor of type `bool`.");
+    .Output(0, "Y", "Output tensor of type `bool`.")
+    .InheritOnnxSchema("Not");
 SHOULD_NOT_DO_GRADIENT(Not);
 
 } // namespace caffe2

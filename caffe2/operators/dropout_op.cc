@@ -109,7 +109,8 @@ the training phase, so during testing nothing needs to be done.
     .Output(
         1,
         "mask",
-        "The output mask. If is_test is nonzero, this output is not filled.");
+        "The output mask. If is_test is nonzero, this output is not filled.")
+    .InheritOnnxSchema("Dropout");
 
 OPERATOR_SCHEMA(DropoutGrad)
     .NumInputs(1, 2)
