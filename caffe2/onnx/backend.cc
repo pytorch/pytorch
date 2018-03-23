@@ -1,8 +1,24 @@
-#include "backend.h"
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "device.h"
-#include "helper.h"
+#include "caffe2/onnx/backend.h"
+#include "caffe2/onnx/device.h"
+#include "caffe2/onnx/helper.h"
 #include "onnx/checker.h"
 #include "onnx/defs/schema.h"
 #include "onnx/optimizer/optimize.h"
@@ -10,7 +26,6 @@
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
 
-#include <cassert>
 #include <cmath>
 #include <iostream>
 #include <sstream>
@@ -38,7 +53,7 @@ bool TryConvertingTensorRawValues(
   }
 
   size_t raw_size = onnx_tensor.raw_data().size();
-  assert(raw_size % sizeof(T) == 0);
+  CAFFE_ENFORCE_EQ(raw_size % sizeof(T), 0);
 
   size_t num_elements = raw_size / sizeof(T);
   const void* src_ptr = static_cast<const void*>(onnx_tensor.raw_data().data());
@@ -89,7 +104,7 @@ ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
   } else {
     passes.emplace_back("split_predict");
   }
-  return ONNX_NAMESPACE::optimization::Optimize(input, passes);
+  return ::ONNX_NAMESPACE::optimization::Optimize(input, passes);
 }
 
 template <class T, class U>
@@ -105,11 +120,9 @@ U LookUpWithDefault(
   }
 }
 
-const ONNX_NAMESPACE::OpSchema& GetOnnxSchema(const std::string& key) {
-  const auto* schema = ONNX_NAMESPACE::OpSchemaRegistry::Schema(key);
-  if (!schema) {
-    throw std::runtime_error("No ONNX schema registered for '" + key + "'!");
-  }
+const ::ONNX_NAMESPACE::OpSchema& GetOnnxSchema(const std::string& key) {
+  const auto* schema = ::ONNX_NAMESPACE::OpSchemaRegistry::Schema(key);
+  CAFFE_ENFORCE(schema, "No ONNX schema registered for '" + key + "'!");
   return *schema;
 }
 
@@ -172,8 +185,7 @@ void CopyOnnxAttrValueToCaffe2Arg(
   } else if (attr.strings_size()) {
     arg->mutable_strings()->CopyFrom(attr.strings());
   } else {
-    throw std::runtime_error(
-        caffe2::MakeString("Unsupported ONNX attribute: ", attr.name()));
+    CAFFE_THROW("Unsupported ONNX attribute: ", attr.name());
   }
 }
 } // namespace
@@ -365,7 +377,7 @@ Caffe2Backend::get_special_operators() const {
 Caffe2Ops Caffe2Backend::CreateConstant(
     OnnxNode* onnx_node,
     int opset_version) {
-  assert(onnx_node->node.output_size() == 1);
+  CAFFE_ENFORCE_EQ(onnx_node->node.output_size(), 1);
 
   Caffe2Ops ret;
   auto* c2_op = ret.ops.Add();
@@ -438,7 +450,7 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
 
 Caffe2Ops Caffe2Backend::CreateReshape(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  assert(c2_op.ops.size() == 1);
+  CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
   op->add_output(DummyName::NewDummyName());
 
@@ -450,8 +462,7 @@ Caffe2Ops Caffe2Backend::CreateReciprocal(
     int opset_version) {
   const auto& node = onnx_node->node;
   if (node.input_size() != 1 || node.output_size() != 1) {
-    throw std::runtime_error(
-        "Caffe2 Reciprocal should have 1 input and 1 output");
+    CAFFE_THROW("Caffe2 Reciprocal should have 1 input and 1 output");
   }
 
   Caffe2Ops ret;
@@ -467,7 +478,7 @@ Caffe2Ops Caffe2Backend::CreateReciprocal(
 Caffe2Ops Caffe2Backend::CreateGather(OnnxNode* onnx_node, int opset_version) {
   const auto& node = onnx_node->node;
   if (node.input_size() < 2 || node.output_size() < 1) {
-    throw std::runtime_error("Caffe2 Gather should have 2 inputs and 1 output");
+    CAFFE_THROW("Caffe2 Gather should have 2 inputs and 1 output");
   }
 
   Caffe2Ops ret;
@@ -485,10 +496,10 @@ Caffe2Ops Caffe2Backend::CreateGather(OnnxNode* onnx_node, int opset_version) {
   } else if (axis == 1) {
     BuildOperator(c2_op, "BatchGather", inputs, outputs);
   } else {
-    throw std::runtime_error(caffe2::MakeString(
+    CAFFE_THROW(
         "Caffe2 only supports Gather with axis being 1 or 2, ",
         "whereas axis is ",
-        axis));
+        axis);
   }
 
   return ret;
@@ -497,7 +508,7 @@ Caffe2Ops Caffe2Backend::CreateGather(OnnxNode* onnx_node, int opset_version) {
 Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
   const auto& node = onnx_node->node;
   if (node.input_size() < 3 || node.output_size() < 1) {
-    throw std::runtime_error("Caffe2 Gemm should have 3 inputs and 1 output");
+    CAFFE_THROW("Caffe2 Gemm should have 3 inputs and 1 output");
   }
 
   Caffe2Ops ret;
@@ -577,8 +588,7 @@ Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
   // Guard the invalid (negative) pads attribute.
   for (const auto i : pads) {
     if (i < 0) {
-      throw std::runtime_error(caffe2::MakeString(
-          "ONNX does not support negative pads in Pad, but get ", str));
+      CAFFE_THROW("ONNX does not support negative pads in Pad, but get ", str);
     }
   }
 
@@ -586,8 +596,8 @@ Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
   // non-negative
   if (!(pads.size() == 8 &&
         (pads.Get(0) + pads.Get(1) + pads.Get(4) + pads.Get(5) == 0))) {
-    throw std::runtime_error(caffe2::MakeString(
-        "Caffe2 only supports padding 2D Tensor, whereas padding is ", str));
+    CAFFE_THROW(
+        "Caffe2 only supports padding 2D Tensor, whereas padding is ", str);
   }
 
   // rewrite the padding info
@@ -605,7 +615,7 @@ Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
 // 1 output.
 Caffe2Ops Caffe2Backend::CreateConcat(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  assert(c2_op.ops.size() == 1);
+  CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
   op->add_output(DummyName::NewDummyName());
 
@@ -617,7 +627,7 @@ Caffe2Ops Caffe2Backend::CreateLogSoftmax(
     int opset_version) {
   const auto& node = onnx_node->node;
   if (node.input_size() < 1 || node.output_size() < 1) {
-    throw std::runtime_error("LogSoftmax should have 1 input and 1 output");
+    CAFFE_THROW("LogSoftmax should have 1 input and 1 output");
   }
   auto axis = onnx_node->attributes.get<int64_t>("axis", 1L);
   caffe2::Argument arg_axis;
@@ -636,7 +646,7 @@ Caffe2Ops Caffe2Backend::CreateLogSoftmax(
 
 Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
   auto op_tmp = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  assert(op_tmp.ops.size() == 1);
+  CAFFE_ENFORCE_EQ(op_tmp.ops.size(), 1);
   auto* op = op_tmp.ops.Mutable(0);
   std::unordered_map<std::string, caffe2::Argument*> args;
   for (auto& arg : *op->mutable_arg()) {
@@ -678,7 +688,7 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
     }
   }
 
-  assert(op->input_size() >= 1);
+  CAFFE_ENFORCE_GE(op->input_size(), 1);
   auto data = op->input(0);
   auto shape_tensor = DummyName::NewDummyName();
   Caffe2Ops ret;
@@ -783,7 +793,9 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
   return ret;
 }
 
-Caffe2Ops Caffe2Backend::CreateBatchNormalization(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreateBatchNormalization(
+    OnnxNode* onnx_node,
+    int opset_version) {
   const auto& node = onnx_node->node;
   if (opset_version < 6) {
     auto& attributes = onnx_node->attributes;
@@ -796,11 +808,11 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(OnnxNode* onnx_node, int opset
 Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
   const auto& node = onnx_node->node;
   if (node.input_size() != 2) {
-    throw std::runtime_error("MatMul should have 2 inputs");
+    CAFFE_THROW("MatMul should have 2 inputs");
   }
 
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  assert(c2_op.ops.size() == 1);
+  CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
   auto* broadcast_arg = op->add_arg();
   broadcast_arg->set_name("broadcast");
@@ -859,19 +871,19 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
   auto broken_version = LookUpWithDefault(
       get_broken_operators(), onnx_op_type, std::numeric_limits<int>::max());
   if (broken_version <= opset_version) {
-    throw std::runtime_error(caffe2::MakeString(
+    CAFFE_THROW(
         "Don't know how to translate op ",
         onnx_op_type,
         " in ONNX operator set v",
         opset_version,
         " (I only support prior to v",
-        broken_version));
+        broken_version);
   }
   c2_op->set_type(
       LookUpWithDefault(get_renamed_operators(), onnx_op_type, onnx_op_type));
   if (!IsOperator(c2_op->type())) {
-    throw std::runtime_error(
-        caffe2::MakeString("Don't know how to translate op ", onnx_op_type));
+    CAFFE_THROW(
+        "Don't know how to translate op ", onnx_op_type);
   }
 
   auto mapper = [&, this](const std::string& k) {
@@ -975,10 +987,10 @@ void Caffe2Backend::OnnxToCaffe2(
           }
           net->mutable_external_input()->MergeFrom(c2ops.interface_blobs);
         } else {
-          throw std::runtime_error(caffe2::MakeString(
+          CAFFE_THROW(
               "Don't know how to convert ",
               node.op_type(),
-              " without enough extra preconverted string"));
+              " without enough extra preconverted string");
         }
       } else {
         auto onnx_node = OnnxNode(node);
@@ -1009,7 +1021,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   Caffe2BackendRep* rep = new Caffe2BackendRep();
   ModelProto onnx_model;
   ParseProtobufFromLargeString(onnx_model_str, &onnx_model);
-  ONNX_NAMESPACE::checker::check_model(onnx_model);
+  ::ONNX_NAMESPACE::checker::check_model(onnx_model);
 
   int opset_version = -1;
   for (const auto& imp : onnx_model.opset_import()) {
@@ -1031,7 +1043,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   }
   if (opset_version < 0) {
     if (onnx_model.ir_version() >= 0x00000003) {
-      throw std::runtime_error(
+      CAFFE_THROW(
           "Model with IR version >= 3 did not specify ONNX operator set "
           "version (onnx-caffe2 requires it)");
     } else {
@@ -1072,7 +1084,7 @@ void Caffe2Backend::BuildTensorFillingOp(
   CAFFE_ENFORCE(!fill_name.empty());
 
   if (onnx_tensor.has_segment()) {
-    throw std::runtime_error("Currently not supporting loading segments.");
+    CAFFE_THROW("Currently not supporting loading segments.");
   }
 
   auto* c2_values = c2_op->add_arg();
@@ -1141,8 +1153,8 @@ void Caffe2Backend::BuildTensorFillingOp(
     auto* strings = c2_values->mutable_strings();
     strings->CopyFrom(onnx_tensor.string_data());
   } else {
-    throw std::runtime_error(
-        "unrecognized tensor type: " +
+    CAFFE_THROW(
+        "unrecognized tensor type: ",
         TensorProto::DataType_Name(onnx_tensor.data_type()));
   }
 
