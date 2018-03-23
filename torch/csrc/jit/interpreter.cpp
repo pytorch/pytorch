@@ -51,19 +51,84 @@ namespace torch { namespace jit {
 // * stage_input_types: the type annotations on the inputs to each stage
 //   these can be removed once the the backward tracer is no longer used
 
+namespace {
+
+// new_cond = (i < max_trip_count) && cond
+Value* createTripCountConjunctiveCondition(
+    Graph* g,
+    Value* cur_trip_count,
+    Value* max_trip_count,
+    Value* cond) {
+  // Emit initial comparison -- initial_trip_count < max_trip_count
+  Value* initial_comparison_value =
+      g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
+          ->output();
+
+  // Replace initial condition with logical `and` of trip count and
+  // initial condition
+  Value* new_cond =
+      g->insertNode(
+           g->create(aten::__and__, {initial_comparison_value, cond}, 1))
+          ->output();
+  return new_cond;
+}
+
+} // namespace
 
 // this currently just _removes_ the trip count inputs and checks they are
 // unused. In the future they will be desugared into normal arithmetic to
 // provide a loop counter
 void desugarTripCounts(Block * b) {
   for(auto n : b->nodes()) {
-    if(n->kind() == prim::Loop) {
 
-      // remove the trip count from Loop inputs, we don't support it yet
-      n->removeInput(0);
-      JIT_ASSERT(n->blocks()[0]->inputs()[0]->uses().size() == 0 &&
-        "NYI - use of trip count variable");
-      n->blocks()[0]->eraseInput(0);
+    if(n->kind() == prim::Loop) {
+      auto g = n->owningGraph();
+      auto body_block = n->blocks()[0];
+
+      Value* block_trip_count_input = body_block->inputs()[0];
+      // Treat loop iteration number as a loop-carried dependency. We emit an
+      // increment at the end of the body block.
+      n->insertOutput(0);
+
+      Value* max_trip_count_value = n->input(0);
+      {
+        WithInsertPoint guard(n);
+        // int i = 0
+        Value* initial_trip_count =
+            g->insertNode(g->createConstant(at::zeros(at::CPU(at::kLong), {1})))
+                ->output();
+        // Set up initial iteration number value for loop-carried dependency
+        n->removeInput(0);
+        // Input 0 is now initial termination condition, insert this after that.
+        // LCD's start at index 1.
+        n->insertInput(1, initial_trip_count);
+
+        Value* new_cond = createTripCountConjunctiveCondition(
+            g, initial_trip_count, max_trip_count_value, n->input(0));
+        n->replaceInput(0, new_cond);
+      }
+
+      {
+        WithInsertPoint guard(body_block);
+        // Trip count is now a loop carried dependency. We emit an op to
+        // increment the trip count at the end of the body. Then, emit the same
+        // conjunctive stopping condition as above.
+
+        Value* const_one =
+            g->insertNode(g->createConstant(at::ones(at::CPU(at::kLong), {1})))
+                ->output();
+
+        Value* inc_trip_count =
+            g->insertNode(g->create(
+                    aten::add, {block_trip_count_input, const_one, const_one}, 1))
+             ->output();
+        body_block->insertOutput(1, inc_trip_count);
+
+        Value* body_cond = createTripCountConjunctiveCondition(
+            g, inc_trip_count, max_trip_count_value, body_block->outputs()[0]);
+        body_block->eraseOutput(0);
+        body_block->insertOutput(0, body_cond);
+      }
     }
     for(auto sb : n->blocks()) {
       desugarTripCounts(sb);

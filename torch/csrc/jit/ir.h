@@ -194,6 +194,9 @@ public:
   size_t offset() const {
     return offset_;
   }
+  void setOffset(size_t offset) {
+    offset_ = offset;
+  }
   const Node * node() const {
     return node_;
   }
@@ -394,6 +397,23 @@ public:
     return node;
   }
 
+  // Add 'node' as an input to 'this' at the specified position in the
+  // arguments. Returns the added node for ease of chaining.
+  Value* insertInput(size_t i, Value* node) {
+    JIT_ASSERT(graph_ == node->owningGraph());
+    node->uses_.emplace_back(this, i);
+    inputs_.insert(inputs_.begin() + i, node);
+    for (size_t use_itr = i + 1; use_itr < inputs_.size(); ++use_itr) {
+      for (auto& use : inputs_[use_itr]->uses_) {
+        if (use.user == this) {
+          use.offset += 1;
+          break;
+        }
+      }
+    }
+    return node;
+  }
+
   // Replace the input of 'this' at position 'i' with
   // 'newValue', returning the old node.
   //
@@ -429,6 +449,15 @@ public:
     outputs_.push_back(new Value(this, outputs_.size()));
     return outputs_.back();
   }
+
+  Value* insertOutput(size_t i) {
+    outputs_.insert(outputs_.begin() + i, new Value(this, i));
+    for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
+      outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
+    }
+    return outputs_.at(i);
+  }
+
   void eraseOutput(size_t i);
 
   Block * addBlock();
@@ -682,12 +711,22 @@ struct Block {
     if (name != "") v->setUniqueName(name);
     return v;
   }
+  Value* insertInput(size_t i, std::string name = "") {
+    Value* v = input_->insertOutput(i);
+    if (name != "")
+      v->setUniqueName(name);
+    return v;
+  }
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
   size_t registerOutput(Value * n) {
     output_->addInput(n);
     return outputs().size() - 1;
+  }
+  size_t insertOutput(size_t i, Value* n) {
+    output_->insertInput(i, n);
+    return i;
   }
   void eraseOutput(size_t i) {
     output_->removeInput(i);
@@ -826,6 +865,9 @@ public:
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
+  }
+  Value* insertInput(size_t i, std::string name = "") {
+    return block_->insertInput(i, std::move(name));
   }
   void eraseInput(size_t i) {
     block_->eraseInput(i);

@@ -34,10 +34,15 @@ struct Parser {
   TreeRef parseBaseExp() {
     TreeRef prefix;
     switch (L.cur().kind) {
-      case TK_NUMBER:
+      case TK_NUMBER: {
+        prefix = parseConst();
+      } break;
       case TK_TRUE:
       case TK_FALSE: {
-        prefix = parseConst();
+        auto k = L.cur().kind;
+        auto r = L.cur().range;
+        prefix = c(k, r, {});
+        L.next();
       } break;
       case '(': {
         L.next();
@@ -151,11 +156,6 @@ struct Parser {
   }
   Const parseConst() {
     auto range = L.cur().range;
-    if (L.nextIf(TK_TRUE)) {
-      return Const::create(range, "1");
-    } else if (L.nextIf(TK_FALSE)) {
-      return Const::create(range, "0");
-    }
     std::string unary_prefix = L.nextIf('-') ? "-" : "";
     auto t = L.expect(TK_NUMBER);
     return Const::create(t.range, unary_prefix + t.text());
@@ -258,6 +258,8 @@ struct Parser {
         return parseIf();
       case TK_WHILE:
         return parseWhile();
+      case TK_FOR:
+        return parseFor();
       case TK_GLOBAL: {
         auto range = L.next().range;
         auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
@@ -336,6 +338,16 @@ struct Parser {
     L.expect(':');
     auto body = parseStatements();
     return While::create(r, Expr(cond), List<Stmt>(body));
+  }
+  TreeRef parseFor() {
+    auto r = L.cur().range;
+    L.expect(TK_FOR);
+    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+    L.expect(TK_IN);
+    auto itrs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+    L.expect(':');
+    auto body = parseStatements();
+    return For::create(r, targets, itrs, body);
   }
   TreeRef parseStatements() {
     auto r = L.cur().range;

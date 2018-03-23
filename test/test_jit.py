@@ -1714,6 +1714,53 @@ class TestScript(TestCase):
         inputs = self._make_scalar_vars([4321, 1234], torch.int)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_script_for_in_range(self):
+        script = '''
+        def test_for_in_range():
+            c = 0
+            for i in range(100):
+                c += i
+            return c
+        '''
+        self.checkScript(script, [], outputs=[4950], optimize=True, name='test_for_in_range')
+
+    def test_script_for_in_range_dynamic(self):
+        script = '''
+        def test_script_for_in_range_dynamic():
+            c = 0
+            for i in range(100):
+                acc = 0
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+        '''
+        self.checkScript(script, [], outputs=[161700], optimize=True, name='test_script_for_in_range_dynamic')
+
+    def test_script_for_in_range_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_ast(zero):
+            c = zero
+            for i in range(100):
+                acc = zero
+                for j in range(i):
+                    acc += j
+                c += acc
+            return c
+
+        inputs = self._make_scalar_vars([0], torch.int64)
+
+        self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
+
+    def test_script_bool_constant(self):
+        script = '''
+        def test_script_bool_constant():
+            a = True
+            return a
+        '''
+        outputs = [1]
+        self.checkScript(script, [], outputs[0], True, 'test_script_bool_constant')
+
     def test_ternary(self):
         def func(a, b):
             c = 3
