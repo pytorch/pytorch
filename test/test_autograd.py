@@ -765,6 +765,32 @@ class TestAutograd(TestCase):
             self.assertFalse(v.volatile)
         self.assertIn('volatile', str(w[0].message))
 
+    def test_saved_variables_deprecated(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, tensor1, tensor2):
+                ctx.save_for_backward(tensor1, tensor2)
+                return tensor1 + tensor2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                var1, var2 = ctx.saved_variables
+                return (grad_output, grad_output)
+
+        with warnings.catch_warnings(record=True) as warns:
+            warnings.simplefilter("always")
+            x = torch.randn((3, 3), requires_grad=True)
+            y = torch.randn((3, 3), requires_grad=True)
+            model = MyFunction()
+            model.apply(x, y).sum().backward()
+
+            has_deprecated = map(lambda warn:
+                                 'deprecated' in str(warn) and
+                                 'saved_variables' in str(warn),
+                                 warns)
+            has_deprecated = reduce(lambda x, y: x or y, has_deprecated)
+            self.assertTrue(has_deprecated)
+
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
         y = Variable(torch.randn(5, 5))
