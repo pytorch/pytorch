@@ -30,7 +30,7 @@ class Beta(ExponentialFamily):
 
     def __init__(self, concentration1, concentration0, validate_args=None):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
-            concentration1_concentration0 = torch.tensor([concentration1, concentration0])
+            concentration1_concentration0 = torch.tensor([concentration1, concentration0], dtype=torch.Tensor.dtype)
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)

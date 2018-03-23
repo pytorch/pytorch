@@ -100,6 +100,47 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
   return sizes;
 }
 
+static ScalarType infer_scalar_type(PyObject *obj) {
+  if (PyFloat_Check(obj)) {
+    return ScalarType::Double;
+  }
+  if (THPUtils_checkLong(obj)) {
+    return ScalarType::Long;
+  }
+  if (PyBool_Check(obj)) {
+    // TODO: infer Bool when we have Bool ScalarType
+    return ScalarType::Byte;
+  }
+  if (THPVariable_Check(obj)) {
+    auto var = reinterpret_cast<THPVariable*>(obj)->cdata;
+    return var.type().scalarType();
+  }
+#ifdef WITH_NUMPY
+  if (PyArray_Check(obj)) {
+    auto array = (PyArrayObject*)obj;
+    return numpy_dtype_to_aten(PyArray_TYPE(array));
+  }
+#endif
+  if (PySequence_Check(obj)) {
+    ScalarType scalarType = ScalarType::NumOptions;
+    auto length = PySequence_Length(obj);
+    if (length < 0) throw python_error();
+    if (length == 0) return ScalarType::Double;  // match NumPy semantics.
+    for (int i = 0; i < length; ++i) {
+      THPObjectPtr handle(PySequence_GetItem(obj, i));
+      ScalarType item_scalarType = infer_scalar_type(handle.get());
+      scalarType = (scalarType != ScalarType::NumOptions) ?
+          at::promoteTypes(scalarType, item_scalarType) : item_scalarType;
+      if (scalarType == ScalarType::Double) {
+        // this won't change (unless we hit undefined, but that will fail later).
+        return scalarType;
+      }
+    }
+    return scalarType;
+  }
+  at::runtime_error("Could not infer dtype of %s", Py_TYPE(obj)->tp_name);
+}
+
 static void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,
                             ScalarType scalarType, int elementSize, PyObject* obj) {
   int64_t ndim = sizes.size();
@@ -125,7 +166,8 @@ static void recursive_store(char* data, IntList sizes, IntList strides, int64_t 
 }
 
 static Tensor internal_new_from_data(const Type & type, int device, PyObject* data,
-                                     bool allow_variables, bool copy_variables, bool copy_numpy) {
+                                     bool allow_variables, bool copy_variables, bool copy_numpy,
+                                     bool type_inference) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
@@ -133,33 +175,37 @@ static Tensor internal_new_from_data(const Type & type, int device, PyObject* da
   if (allow_variables) {
     if (THPVariable_Check(data)) {
       auto var = reinterpret_cast<THPVariable*>(data)->cdata;
-      return copy_variables ? new_with_tensor_copy(type, var, device) :
-                              new_with_type_conversion(type, var, device);
+      const auto& type_to_use = type_inference ? var.type() : type;
+        return copy_variables ? new_with_tensor_copy(type_to_use, var, device) :
+                                new_with_type_conversion(type_to_use, var, device);
     }
   }
 
 #ifdef WITH_NUMPY
   if (PyArray_Check(data)) {
     auto tensor = autograd::make_variable(tensor_from_numpy(data), /*requires_grad=*/false);
-    return copy_numpy ? new_with_tensor_copy(type, tensor, device) :
-                        new_with_type_conversion(type, tensor, device);
+    const auto& type_to_use = type_inference ? tensor.type() : type;
+    return copy_numpy ? new_with_tensor_copy(type_to_use, tensor, device) :
+                        new_with_type_conversion(type_to_use, tensor, device);
   }
 #endif
 
   auto sizes = compute_sizes(data);
-  auto tensor = autograd::make_variable(CPU(type.scalarType()).tensor(sizes), /*requires_grad=*/false);
+  ScalarType scalarType = type_inference ? infer_scalar_type(data) : type.scalarType();
+  auto tensor = autograd::make_variable(CPU(scalarType).tensor(sizes), /*requires_grad=*/false);
   recursive_store(
       (char*)tensor.data_ptr(), tensor.sizes(), tensor.strides(), 0,
-      type.scalarType(), tensor.type().elementSizeInBytes(), data);
-  return new_with_type_conversion(type, tensor, device);
+      scalarType, tensor.type().elementSizeInBytes(), data);
+  const auto& type_to_use = type_inference ? type.toScalarType(scalarType) : type;
+  return new_with_type_conversion(type_to_use, tensor, device);
 }
 
 Tensor legacy_new_from_data(const Type & type, int device, PyObject *data) {
-  return internal_new_from_data(type, device, data, false, false, false);
+  return internal_new_from_data(type, device, data, false, false, false, false);
 }
 
 static Tensor new_from_data_copy(const Type & type, int device, PyObject *data) {
-  return internal_new_from_data(type, device, data, true, true, true);
+  return internal_new_from_data(type, device, data, true, true, true, false);
 }
 
 static Tensor legacy_new_from_sequence(const Type & type, int device, PyObject* data) {
@@ -356,13 +402,13 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-Tensor new_sparse_coo_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
+Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   Backend sparse_backend = type.is_cuda() ? kSparseCUDA : kSparseCPU;
   const auto& default_sparse_type = type.toBackend(sparse_backend);
 
   static PythonArgParser parser({
-    "new_sparse_coo_tensor(PyObject* indices, PyObject* values, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
-    "new_sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
   });
 
   ParsedArgs<6> parsed_args;
@@ -374,8 +420,8 @@ Tensor new_sparse_coo_tensor(const Type& type, PyObject* args, PyObject* kwargs)
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.toInt64(3));
     // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true);
-    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true);
+    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, true);
+    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, true);
     return set_requires_grad(sparse_type.sparse_coo_tensor(indices, values), r.toBool(4));
   } else if (r.idx == 1) {
     const auto& sparse_type = r.typeWithDefault(3, default_sparse_type);
@@ -384,12 +430,27 @@ Tensor new_sparse_coo_tensor(const Type& type, PyObject* args, PyObject* kwargs)
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.toInt64(4));
     // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true);
-    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true);
+    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, true);
+    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, true);
     return set_requires_grad(sparse_type.sparse_coo_tensor(indices, values, r.intlist(2)), r.toBool(5));
   }
-  throw std::runtime_error("new_sparse_coo_tensor(): invalid arguments");
+  throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
+
+Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
+  static PythonArgParser parser({
+    "tensor(PyObject* data, *, Type dtype=None, int64_t? device=-1, bool requires_grad=False)",
+  });
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    bool type_inference = r.isNone(1);
+    return set_requires_grad(internal_new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0), true, true, true, type_inference), r.toBool(3));
+  }
+  throw std::runtime_error("tensor(): invalid arguments");
+}
+
 
 Tensor new_tensor(const Type& type, PyObject* args, PyObject* kwargs) {
   static PythonArgParser parser({
