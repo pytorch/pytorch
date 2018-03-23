@@ -16,7 +16,7 @@ from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
 from common_nn import TEST_CUDA
 
 
-JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
+JOIN_TIMEOUT = 18.0 if IS_WINDOWS else 7.5
 
 
 class TestDatasetRandomSplit(TestCase):
@@ -312,7 +312,6 @@ class TestDataLoader(TestCase):
         next(loader2_it)
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
-    @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
