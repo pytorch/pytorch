@@ -1839,7 +1839,7 @@ class TestNN(NNTestCase):
         for shape, g in bad_shape_g.items():
             gn = nn.GroupNorm(g, shape[1])
             input = type(*shape).uniform_(0, 10)
-            self.assertRaises(ValueError, lambda: gn(input))
+            self.assertRaises(RuntimeError, lambda: gn(input))
 
     def _test_GroupNorm_cuda_half(self):
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)

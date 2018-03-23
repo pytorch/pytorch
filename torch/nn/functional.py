@@ -1324,46 +1324,7 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-
-    input_shape = input.size()
-    b = input_shape[0]
-    c = input_shape[1]
-    g = num_groups
-
-    if c % num_groups != 0:
-        raise ValueError('Expected number of channels in input to be divisible '
-                         'by num_groups, but got {} input and num_groups={}'
-                         .format(input_shape, num_groups))
-
-    if weight is not None and (weight.dim() != 1 or weight.numel() != c):
-        raise ValueError('Expected weight to be a vector of size equal to the '
-                         'number of channels in input, but got {} weight and {} '
-                         'input'.format(weight.size(), input_shape))
-
-    if bias is not None and (bias.dim() != 1 or bias.numel() != c):
-        raise ValueError('Expected bias to be a vector of size equal to the '
-                         'number of channels in input, but got {} bias and {} '
-                         'input'.format(bias.size(), input_shape))
-
-    # Apply group norm
-    input_reshaped = input.contiguous().view(1, b * g, -1)
-
-    out = batch_norm(input_reshaped, None, None, None, None, True, 0, eps)
-
-    out = out.view(*input_shape)
-
-    if weight is None and bias is None:
-        return out
-
-    affine_param_shape = [1 for _ in input_shape]
-    affine_param_shape[1] = c
-
-    if weight is not None and bias is not None:
-        return torch.addcmul(bias.view(affine_param_shape), 1, out, weight.view(affine_param_shape))
-    elif weight is not None:
-        return torch.mul(out, weight.view(affine_param_shape))
-    else:
-        return torch.add(out, bias.view(affine_param_shape))
+    return torch.group_norm(input, num_groups, weight, bias, eps)
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
