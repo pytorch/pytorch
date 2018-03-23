@@ -75,7 +75,8 @@ will be (2, 1, 3).
         "A list of integers. By default, reverse the dimensions, "
         "otherwise permute the axes according to the values given.")
     .Input(0, "data", "An input tensor.")
-    .Output(0, "transposed", "Transposed output.");
+    .Output(0, "transposed", "Transposed output.")
+    .InheritOnnxSchema("Transpose");
 
 class GetTransposeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

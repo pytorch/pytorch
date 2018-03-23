@@ -33,7 +33,8 @@ place and results will be accumulated in input0. All inputs and outputs must
 have the same shape and data type.
 )DOC")
     .Input(0, "data_0", "First of the input tensors. Can be inplace.")
-    .Output(0, "max", "Output tensor. Same dimension as inputs.");
+    .Output(0, "max", "Output tensor. Same dimension as inputs.")
+    .InheritOnnxSchema("Max");
 
 OPERATOR_SCHEMA(Min)
     .NumInputs(1, INT_MAX)
@@ -47,7 +48,8 @@ place and results will be accumulated in input0. All inputs and outputs must
 have the same shape and data type.
 )DOC")
     .Input(0, "data_0", "First of the input tensors. Can be inplace.")
-    .Output(0, "min", "Output tensor. Same dimension as inputs.");
+    .Output(0, "min", "Output tensor. Same dimension as inputs.")
+    .InheritOnnxSchema("Min");
 
 template <typename T, class Context>
 bool MaxOp<T, Context>::Compute() {

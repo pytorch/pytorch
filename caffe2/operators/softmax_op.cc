@@ -123,7 +123,8 @@ will throw errors.
          "The input tensor that's coerced into a 2D matrix of size (NxD) "
          "as described above.")
   .Output(0, "output", "The softmax normalized output values with the same "
-          "shape as input tensor.");
+          "shape as input tensor.")
+  .InheritOnnxSchema("Softmax");
 
 // Input: Y, dY. Output: dX
 OPERATOR_SCHEMA(SoftmaxGradient).NumInputs(2).NumOutputs(1);

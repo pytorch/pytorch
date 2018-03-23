@@ -76,7 +76,8 @@ OPERATOR_SCHEMA(Conv)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
-    .FillUsing(ConvDocGenerator(""));
+    .FillUsing(ConvDocGenerator(""))
+    .InheritOnnxSchema("Conv");
 
 REGISTER_CPU_OPERATOR(Conv1D, ConvOp<float, CPUContext>);
 
@@ -84,7 +85,8 @@ OPERATOR_SCHEMA(Conv1D)
     .NumInputs(2, 3)
     .NumOutputs(1)
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
-    .FillUsing(ConvDocGenerator("1D "));
+    .FillUsing(ConvDocGenerator("1D "))
+    .InheritOnnxSchema("Conv");
 
 REGISTER_CPU_OPERATOR(Conv2D, ConvOp<float, CPUContext>);
 
@@ -94,7 +96,8 @@ OPERATOR_SCHEMA(Conv2D)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
-    .FillUsing(ConvDocGenerator("2D "));
+    .FillUsing(ConvDocGenerator("2D "))
+    .InheritOnnxSchema("Conv");
 
 REGISTER_CPU_OPERATOR(Conv3D, ConvOp<float, CPUContext>);
 
@@ -104,6 +107,7 @@ OPERATOR_SCHEMA(Conv3D)
     .CostInferenceFunction(OpSchema::CostInferenceFunctionType(
         ConvPoolOpBase<CPUContext>::CostInferenceForConv))
     .TensorInferenceFunction(ConvPoolOpBase<CPUContext>::TensorInferenceForConv)
-    .FillUsing(ConvDocGenerator("3D "));
+    .FillUsing(ConvDocGenerator("3D "))
+    .InheritOnnxSchema("Conv");
 
 } // namespace caffe2

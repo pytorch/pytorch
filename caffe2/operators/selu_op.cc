@@ -56,7 +56,8 @@ is applied to the tensor elementwise.
         "scale",
         "(float) default to 1.0507~; affects the activation function itself.")
     .Input(0, "X", "input tensor")
-    .Output(0, "Y", "input tensor");
+    .Output(0, "Y", "input tensor")
+    .InheritOnnxSchema("Selu");
 
 // Input: Y, dY; output: dX
 OPERATOR_SCHEMA(SeluGradient)

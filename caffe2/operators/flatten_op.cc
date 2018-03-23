@@ -60,7 +60,8 @@ Flattens the input tensor into a 2D matrix. If input tensor has shape
     .Arg(
         "axis",
         "(Default to 1) Indicate up to which input dimensions "
-        "(exclusive) should be flattened to the outer dimension of the output");
+        "(exclusive) should be flattened to the outer dimension of the output")
+    .InheritOnnxSchema("Flatten");
 
 class GetFlattenGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

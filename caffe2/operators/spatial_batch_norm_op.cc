@@ -308,6 +308,7 @@ Output case #2:
         4,
         "saved_var",
         "Saved variance used during training to speed up "
-        "gradient computation. Should not be used for testing.");
+        "gradient computation. Should not be used for testing.")
+    .InheritOnnxSchema("BatchNormalization");
 
 } // namespace caffe2

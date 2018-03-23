@@ -67,7 +67,8 @@ and output blobs.
         0,
         "output",
         "The softsign (x/1+|x|) values of the input tensor "
-        "computed element-wise");
+        "computed element-wise")
+    .InheritOnnxSchema("Softsign");
 
 OPERATOR_SCHEMA(SoftsignGradient)
     .NumInputs(2)

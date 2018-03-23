@@ -127,7 +127,8 @@ two diemnsional, it behaves like normal matrix multiplication.
         return vector<TensorShape>{
             CreateTensorShape(vector<TIndex>{new_dims}, in[0].data_type())};
       }
-    });
+    })
+    .InheritOnnxSchema("MatMul");
 
 class GetBatchMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
