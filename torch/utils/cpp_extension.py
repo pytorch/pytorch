@@ -38,6 +38,7 @@ def _find_cuda_home():
 
 
 MINIMUM_GCC_VERSION = (4, 9)
+MINIMUM_MSVC_VERSION = (19, 0, 24215)
 ABI_INCOMPATIBILITY_WARNING = '''
 Your compiler ({}) may be ABI-incompatible with PyTorch.
 Please use a compiler that is ABI-compatible with GCC 4.9 and above.
@@ -71,6 +72,16 @@ def check_compiler_abi_compatibility(compiler):
                 major, minor = version.groups()
                 minor = 0 if minor == 'x' else int(minor)
                 if (int(major), minor) >= MINIMUM_GCC_VERSION:
+                    return True
+                else:
+                    # Append the detected version for the warning.
+                    compiler = '{} {}'.format(compiler, version.group(0))
+        elif 'Microsoft' in info:
+            info = info.decode().lower()
+            version = re.search(r'(\d+)\.(\d+)\.(\d+)', info)
+            if version is not None:
+                major, minor, revision = version.groups()
+                if (int(major), minor) >= MINIMUM_MSVC_VERSION:
                     return True
                 else:
                     # Append the detected version for the warning.
@@ -137,6 +148,8 @@ class BuildExtension(build_ext):
         # On some platforms, like Windows, compiler_cxx is not available.
         if hasattr(self.compiler, 'compiler_cxx'):
             compiler = self.compiler.compiler_cxx[0]
+        elif sys.platform == 'win32':
+            compiler = os.environ.get('CXX', 'cl')
         else:
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
