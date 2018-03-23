@@ -268,7 +268,7 @@ private:
       std::vector<Value*> to_replace;
       // do not edit in place, since it invalidates uses iterator
       for(auto u : g.inputs()[i]->uses()) {
-        if(u.user->kind() == kReplaceIfUndef) {
+        if(u.user->kind() == prim::ReplaceIfUndef) {
           to_replace.push_back(u.user->output());
         }
       }
@@ -285,7 +285,7 @@ private:
   // 0 + a -> a
   void propagateZeros(Graph & g) {
     for(auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
-      if(it->kind() == kadd && it->inputs().size() == 2 && at::Scalar(it->t(kalpha)).toDouble() == 1.0) {
+      if(it->kind() == aten::add && it->inputs().size() == 2 && at::Scalar(it->t(attr::alpha)).toDouble() == 1.0) {
         if(isZero(it->inputs()[0])) {
           it->output()->replaceAllUsesWith(it->inputs()[1]);
           it.destroyCurrent();

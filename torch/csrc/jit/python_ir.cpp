@@ -37,16 +37,16 @@ void initPythonIRBindings(PyObject * module_) {
     .GS(eraseInput)
     .GS(registerOutput)
     .def("create",[](Graph & g, const char * str) {
-      return g.create(Symbol(str));
+      return g.create(Symbol::fromQualString(str));
     })
     .def("create",[](Graph & g, const char * str, size_t noutputs) {
-      return g.create(Symbol(str), noutputs);
+      return g.create(Symbol::fromQualString(str), noutputs);
     })
     .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs) {
-      return g.create(Symbol(str),inputs);
+      return g.create(Symbol::fromQualString(str),inputs);
     })
     .def("create",[](Graph & g, const char * str, const std::vector<Value*> & inputs, size_t noutputs) {
-      return g.create(Symbol(str),inputs, noutputs);
+      return g.create(Symbol::fromQualString(str),inputs, noutputs);
     })
     .GS(createConstant)
     .GS(createFusionGroup)
@@ -136,18 +136,23 @@ void initPythonIRBindings(PyObject * module_) {
 #define AS(name) def(#name,&Attributes<Node> :: name)
     // methods from Attributes
     .AS(copyAttributes)
+    .AS(hasAttributes)
+#undef AS
+#define AS(name) def(#name,&Attributes<Node> :: name ## S)
+    // The default method names take Symbol, but the string conversion for
+    // Symbol you to qualify with attr::. This is not very user friendly
+    // for attributes, so expose the string variants instead.
     .AS(hasAttribute)
     .AS(kindOf)
     .AS(removeAttribute)
-    .AS(hasAttributes)
     .AS(attributeNames)
 #undef AS
 #define CREATE_ACCESSOR(Kind,method) \
     def(#method "_",[](Node & n, const char * name, Kind##Attr::ValueType v) { \
-      return n . method ## _(Symbol(name), std::move(v)); \
+      return n . method ## _(Symbol::attr(name), std::move(v)); \
     }) \
     .def(#method, [](Node & n, const char * name) { \
-      return n.method(Symbol(name)); \
+      return n.method(Symbol::attr(name)); \
     })
     .CREATE_ACCESSOR(Float,f)
     .CREATE_ACCESSOR(Floats,fs)
@@ -155,25 +160,49 @@ void initPythonIRBindings(PyObject * module_) {
     .CREATE_ACCESSOR(Strings,ss)
     .CREATE_ACCESSOR(Int,i)
     .CREATE_ACCESSOR(Ints,is)
-    .CREATE_ACCESSOR(Tensor,t)
-    .CREATE_ACCESSOR(Tensors,ts)
     .CREATE_ACCESSOR(Graph,g)
     .CREATE_ACCESSOR(Graphs,gs)
 #undef CREATE_ACCESSOR
+    // Tensor (t_) -- manually written to unwrap the variable into a tensor.
+    .def("t_",[](Node & n, const char * name, torch::autograd::Variable v) {
+      return n.t_(Symbol::attr(name), std::move(v.data()));
+    })
+    .def("t", [](Node & n, const char * name) {
+      return torch::autograd::make_variable(n.t(Symbol::attr(name)), /*requires_grad=*/false);
+    })
+    // Tensors (ts_) -- manually written to unwrap variables into tensors.
+    .def("ts_",[](Node & n, const char * name, std::vector<torch::autograd::Variable> vs) {
+      std::vector<at::Tensor> tensors;
+      tensors.reserve(vs.size());
+      for (auto& variable : vs) {
+        tensors.push_back(std::move(variable.data()));
+      }
+      return n.ts_(Symbol::attr(name), std::move(tensors));
+    })
+    .def("ts", [](Node & n, const char * name) {
+      auto tensors = n.ts(Symbol::attr(name));
+      std::vector<torch::autograd::Variable> variables;
+      variables.reserve(tensors.size());
+      for (auto& tensor : tensors) {
+        variables.push_back(torch::autograd::make_variable(
+            std::move(tensor), /*requires_grad=*/false));
+      }
+      return variables;
+    })
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
-        return n.t_(Symbol(name), std::move(v.view({})));
+        return n.t_(Symbol::attr(name), std::move(v.view({})));
     })
     .def("z",[](Node & n, const char * name) {
-        return n.t(Symbol(name));
+        return n.t(Symbol::attr(name));
     })
     .def("zs_",[](Node & n, const char * name, TensorsAttr::ValueType v) {
         for (size_t i = 0; i < v.size(); ++ i) {
             v[i] = v[i].view({});
         }
-        return n.ts_(Symbol(name), std::move(v));
+        return n.ts_(Symbol::attr(name), std::move(v));
     })
     .def("zs",[](Node & n, const char * name) {
-        return n.ts(Symbol(name));
+        return n.ts(Symbol::attr(name));
     })
     .def("pyobj",[](Node & n) {
       return py::handle(n.expect<PythonOp>()->pyobj.get()).cast<py::object>();

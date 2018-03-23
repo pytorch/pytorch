@@ -1,145 +1,154 @@
+#define CATCH_CONFIG_MAIN
+#include "catch.hpp"
+
 #include "ATen/ATen.h"
-#include "test_assert.h"
 #include "test_seed.h"
 
 using namespace at;
 
-int main() {
+TEST_CASE( "broadcast", "[]" ) {
+
   manual_seed(123);
 
   Type & T = CPU(kFloat);
 
   // 0) pre-req tests:
-  // can't expand empty tensor
-  {
-    auto empty = T.randn({0});
-    ASSERT_THROWS(empty.expand({3}));
+  SECTION( "can't expand empty tensor" ) {
+    auto empty = randn(T, {0});
+    REQUIRE_THROWS(empty.expand({3}));
   }
 
   // 1) out-place function with 2 args
-  {
-    // basic
-    auto a = T.randn({3, 1});
-    auto b = T.randn({5});
-    std::vector<int64_t> expanded_sizes = {3, 5};
-    ASSERT((a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
+  SECTION( "out-place function with 2 args" ) {
 
-    // with scalar
-    auto aScalar = T.ones({1});
-    aScalar.get()->maybeScalar(true);
-    b = T.randn({3, 5});
-    ASSERT((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
-
-    // old fallback behavior yields error
-    {
-      auto a = T.randn({3, 5});
-      auto b = T.randn({5, 3});
-      ASSERT_THROWS(a + b);
+    SECTION( "basic" ) {
+      auto a = randn(T, {3, 1});
+      auto b = randn(T, {5});
+      std::vector<int64_t> expanded_sizes = {3, 5};
+      REQUIRE((a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
     }
 
-    // with mismatched sizes
-    {
-      auto a = T.randn({3, 5});
-      auto b = T.randn({7, 5});
-      ASSERT_THROWS(a + b);
-    }
-  }
-
-  // 2) out-place function with 3 args
-  {
-    // basic
-    auto a = T.randn({3, 1, 1});
-    auto b = T.randn({1, 2, 1});
-    auto c = T.randn({1, 1, 5});
-    std::vector<int64_t> expanded_sizes = {3, 2, 5};
-    ASSERT((a + b + c).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes) + c.expand(expanded_sizes)));
-
-    // with scalar
-    auto aTensorScalar = T.ones({1});
-    aTensorScalar.get()->maybeScalar(true);
-    b = T.randn({3, 2, 1});
-    c = T.randn({1, 2, 5});
-    ASSERT(aTensorScalar.addcmul(b, c).equal(
-           aTensorScalar.expand(expanded_sizes).addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
-
-    // old fallback behavior yields error
-    {
-      auto a = T.randn({3, 2, 5});
-      auto b = T.randn({2, 3, 5});
-      auto c = T.randn({5, 3, 2});
-      ASSERT_THROWS(a.addcmul(b, c));
+    SECTION( "with scalar" ) {
+      auto aScalar = ones(T, {1});
+      aScalar.get()->maybeScalar(true);
+      auto b = randn(T, {3, 5});
+      REQUIRE((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
     }
 
-    // with mismatched sizes
-    {
-      auto c = T.randn({5, 5, 5});
-      ASSERT_THROWS(a.addcmul(b, c));
+    SECTION( "old fallback behavior yields error" ) {
+      auto a = randn(T, {3, 5});
+      auto b = randn(T, {5, 3});
+      REQUIRE_THROWS(a + b);
+    }
+
+    SECTION( "with mismatched sizes" ) {
+      auto a = randn(T, {3, 5});
+      auto b = randn(T, {7, 5});
+      REQUIRE_THROWS(a + b);
     }
   }
 
-  // 3) in-place function with 2 args
-  {
-    // basic
-    auto a = T.randn({3, 5});
-    auto b = T.randn({3, 1});
-    ASSERT((a + b).equal(a + b.expand({3, 5})));
+  SECTION( "out-place function with 3 args" ) {
 
-    // with scalar
-    auto bScalar = T.ones({1});
-    bScalar.get()->maybeScalar(true);
-    ASSERT((a + bScalar).equal(a + bScalar.expand(a.sizes())));
+    SECTION( "basic" ) {
+      auto a = randn(T, {3, 1, 1});
+      auto b = randn(T, {1, 2, 1});
+      auto c = randn(T, {1, 1, 5});
+      std::vector<int64_t> expanded_sizes = {3, 2, 5};
+      REQUIRE((a + b + c).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes) + c.expand(expanded_sizes)));
+    }
 
-    // error: would have to expand inplace arg
-    {
-      auto a = T.randn({1, 5});
-      auto b = T.randn({3, 1});
-      ASSERT_THROWS(a.add_(b));
+    SECTION( "with scalar" ) {
+      auto aTensorScalar = ones(T, {1});
+      aTensorScalar.get()->maybeScalar(true);
+      auto b = randn(T, {3, 2, 1});
+      auto c = randn(T, {1, 2, 5});
+      std::vector<int64_t> expanded_sizes = {3, 2, 5};
+      REQUIRE(aTensorScalar.addcmul(b, c).equal(
+                aTensorScalar.expand(expanded_sizes).addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
+    }
+
+    SECTION( "old fallback behavior yields error" ) {
+      auto a = randn(T, {3, 2, 5});
+      auto b = randn(T, {2, 3, 5});
+      auto c = randn(T, {5, 3, 2});
+      REQUIRE_THROWS(a.addcmul(b, c));
+    }
+
+    SECTION( "with mismatched sizes" ){
+      auto a = randn(T, {3, 2, 5});
+      auto b = randn(T, {2, 3, 5});
+      auto c = randn(T, {5, 5, 5});
+      REQUIRE_THROWS(a.addcmul(b, c));
     }
   }
 
-  // 4) in-place function with 3 args
-  {
-    // basic
-    auto a = T.randn({3, 5, 2});
-    auto aClone = a.clone();
-    auto b = T.randn({3, 1, 2});
-    auto c = T.randn({1, 5, 1});
+  SECTION( "in-place function with 2 args" ) {
+    SECTION( "basic" ) {
+      auto a = randn(T, {3, 5});
+      auto b = randn(T, {3, 1});
+      REQUIRE((a + b).equal(a + b.expand({3, 5})));
+    }
 
-    ASSERT(a.addcmul_(b, c).equal(aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
+    SECTION( "with scalar" ) {
+      auto a = randn(T, {3, 5});
+      auto bScalar = ones(T, {1});
+      bScalar.get()->maybeScalar(true);
+      REQUIRE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
+    }
 
-    // with scalar
-    auto bScalar = T.ones({1});
-    bScalar.get()->maybeScalar(true);
-    ASSERT(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
-
-    // error: would have to expand inplace arg
-    {
-      auto a = T.randn({1, 3, 5});
-      auto b = T.randn({4, 1, 1});
-      auto c = T.randn({1, 3, 1});
-      ASSERT_THROWS(a.addcmul_(b, c));
+    SECTION( "error: would have to expand inplace arg" ) {
+      auto a = randn(T, {1, 5});
+      auto b = randn(T, {3, 1});
+      REQUIRE_THROWS(a.add_(b));
     }
   }
 
-  // explicit dim specification
-  {
-    // basic
-    auto a = T.randn({1});
-    auto b = T.randn({5, 3});
-    auto c = T.randn({3, 7});
-    ASSERT(a.addmm(b, c).equal(a.expand({5,7}).addmm(b, c)));
+  SECTION( "in-place function with 3 args" ) {
 
-    // with scalar
-    Tensor aScalar = T.ones({1});
-    aScalar.get()->maybeScalar(true);
-    ASSERT(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
+    auto a = randn(T, {3, 5, 2});
+    auto b = randn(T, {3, 1, 2});
+    auto c = randn(T, {1, 5, 1});
 
-    // with mismatched sizes
-    {
-      auto a = T.randn({3, 3});
-      ASSERT_THROWS(a.addmm(b, c));
+    SECTION( "basic" ) {
+      auto aClone = a.clone();
+      REQUIRE(a.addcmul_(b, c).equal(aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
+    }
+
+    SECTION( "with scalar" ) {
+      auto aClone = a.clone();
+      auto bScalar = ones(T, {1});
+      bScalar.get()->maybeScalar(true);
+      REQUIRE(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
+    }
+
+    SECTION( "error: would have to expand inplace arg" ) {
+      auto a = randn(T, {1, 3, 5});
+      auto b = randn(T, {4, 1, 1});
+      auto c = randn(T, {1, 3, 1});
+      REQUIRE_THROWS(a.addcmul_(b, c));
     }
   }
 
-  return 0;
+  SECTION( "explicit dim specification" ) {
+
+    auto a = randn(T, {1});
+    auto b = randn(T, {5, 3});
+    auto c = randn(T, {3, 7});
+
+    SECTION( "basic" ) {
+      REQUIRE(a.addmm(b, c).equal(a.expand({5,7}).addmm(b, c)));
+    }
+
+    SECTION( "with scalar" ) {
+      Tensor aScalar = ones(T, {1});
+      aScalar.get()->maybeScalar(true);
+      REQUIRE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
+    }
+
+    SECTION( "with mismatched sizes" ) {
+      auto a = randn(T, {3, 3});
+      REQUIRE_THROWS(a.addmm(b, c));
+    }
+  }
 }

@@ -3,11 +3,11 @@
 #include "ATen/Generator.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
-#include "ATen/TensorAccessor.h"
-#include "ATen/TensorImpl.h"
-#include "ATen/TensorBase.h"
-#include "ATen/Storage.h"
 #include "ATen/SparseTensorRef.h"
+#include "ATen/Storage.h"
+#include "ATen/TensorAccessor.h"
+#include "ATen/TensorBase.h"
+#include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
 
 namespace at {
@@ -75,6 +75,10 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
+  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`,
+  /// or has undefined type. Defined in Type.h because of include order issues.
+  bool is_variable_or_undefined() const noexcept;
+
   template<typename T>
   T * data() const;
 
@@ -112,7 +116,9 @@ struct Tensor : public detail::TensorBase {
   Tensor& operator*=(Scalar other);
   Tensor& operator/=(const Tensor & other);
   Tensor& operator/=(Scalar other);
-  Tensor operator[](int64_t idx) const;
+  Tensor operator[](Scalar index) const;
+  Tensor operator[](Tensor index) const;
+  Tensor operator[](int64_t index) const;
 
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.

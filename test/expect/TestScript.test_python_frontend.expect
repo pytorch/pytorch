@@ -13,12 +13,14 @@
           (variable (ident x))
           (variable (ident y)))
         (apply
-          (ident sigmoid)
-          (list (variable (ident z)))
+          (.
+            (variable (ident z))
+            (ident sigmoid))
+          (list)
           (list))))
     (expression statement
       (apply
-        (ident print)
+        (variable (ident print))
         (list (variable (ident q)))
         (list)))
     (assign

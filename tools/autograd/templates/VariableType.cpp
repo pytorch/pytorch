@@ -42,7 +42,7 @@ template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context)
+  : Type(context, /*is_variable_or_undefined=*/true)
   , baseType(baseType) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
@@ -409,12 +409,12 @@ Tensor VariableType::contiguous(const Tensor & self) const {
   return self.clone();
 }
 
-static std::vector<int64_t> to_arg_sizes(TensorList tensors, int64_t dim) {
-  std::vector<int64_t> arg_sizes(tensors.size());
+static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
+  std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    arg_sizes[i] = tensors[i].size(dim);
+    args_sizes[i] = tensors[i].sizes();
   }
-  return arg_sizes;
+  return args_sizes;
 }
 
 ${type_derived_method_definitions}

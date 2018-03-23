@@ -99,7 +99,7 @@ Tensor embedding_backward_cpu(
   }
 
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
-  auto grad_weight = grad_.type().zeros({num_weights, grad_.size(-1)});
+  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad_.size(-1)});
 
 #ifdef _OPENMP
   if (numel > 1000) {

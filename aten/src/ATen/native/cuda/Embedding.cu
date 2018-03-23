@@ -202,7 +202,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = grad_.type().zeros({num_weights, grad_.size(-1)});
+  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad_.size(-1)});
 
   int64_t stride = grad_weight.stride(0);
   cudaStream_t stream = globalContext().getCurrentCUDAStream();

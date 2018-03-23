@@ -43,6 +43,11 @@ List<T> wrap_list(const SourceRange& fallback_pos, std::vector<T>&& vec) {
   return List<T>::create(vec.front().range(), std::move(vec));
 }
 
+template<typename T>
+Maybe<T> wrap_maybe(const SourceRange& fallback_pos, T* val) {
+  return val ? Maybe<T>::create(val->range(), *val) : Maybe<T>::create(fallback_pos);
+}
+
 void initTreeViewBindings(PyObject *module) {
   auto _C = py::handle(module).cast<py::module>();
   auto m = _C.def_submodule("_jit_tree_views");
@@ -126,6 +131,16 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, const Expr& cond, std::vector<Stmt> body) {
       return While::create(range, cond, wrap_list(range, std::move(body)));
     }));
+  py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange range,
+                                                  std::vector<Ident>& targets,
+                                                  std::vector<Expr>& itrs,
+                                                  std::vector<Stmt> body) {
+    return For::create(
+        range,
+        wrap_list(range, std::move(targets)),
+        wrap_list(range, std::move(itrs)),
+        wrap_list(range, std::move(body)));
+  }));
   py::class_<ExprStmt, Stmt>(m, "ExprStmt")
     .def(py::init([](const Expr& expr) {
       return ExprStmt::create(expr.range(), expr);
@@ -145,15 +160,39 @@ void initTreeViewBindings(PyObject *module) {
     .def(py::init([](const SourceRange& range, std::string kind, const Expr& expr) {
       return UnaryOp::create(range, stringToKind(kind), expr);
     }));
+  py::class_<Const, Expr>(m, "Const")
+    .def(py::init([](const SourceRange& range, std::string value) {
+      return Const::create(range, value);
+    }));
   py::class_<Apply, Expr>(m, "Apply")
-    .def(py::init([](const Ident& name, std::vector<Expr> args, std::vector<Attribute> kwargs) {
-      auto r = name.range();
-      return Apply::create(name.range(), name,
+    .def(py::init([](const Expr& expr, std::vector<Expr> args, std::vector<Attribute> kwargs) {
+      auto r = expr.range();
+      return Apply::create(expr.range(), expr,
                            wrap_list(r, std::move(args)), wrap_list(r, std::move(kwargs)));
+    }));
+  py::class_<Select, Expr>(m, "Select")
+    .def(py::init([](const Expr& expr, const Ident& field) {
+      auto r = expr.range();
+      return Select::create(expr.range(), expr, field);
     }));
   py::class_<TernaryIf, Expr>(m, "TernaryIf")
     .def(py::init([](const Expr& cond, const Expr& true_expr, const Expr& false_expr) {
       return TernaryIf::create(cond.range(), cond, true_expr, false_expr);
+    }));
+  py::class_<ListLiteral, Expr>(m, "ListLiteral")
+    .def(py::init([](const SourceRange& range, std::vector<Expr> args) {
+      return ListLiteral::create(range, wrap_list(range, std::move(args)));
+    }));
+  py::class_<Gather, Expr>(m, "Gather")
+    .def(py::init([](const Expr& base, const Expr& index) {
+      return Gather::create(base.range(), base, index);
+    }));
+  py::class_<Slice, Expr>(m, "Slice")
+    .def(py::init([](const Expr& base, Expr* lower, Expr* upper) {
+      return Slice::create(base.range(),
+                           base,
+                           wrap_maybe(base.range(), lower),
+                           wrap_maybe(base.range(), upper));
     }));
 }
 

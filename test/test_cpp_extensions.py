@@ -23,6 +23,19 @@ class TestCppExtension(common.TestCase):
         result = mm.forward(weights)
         self.assertEqual(expected, result)
 
+    def test_backward(self):
+        mm = cpp_extension.MatrixMultiplier(4, 8)
+        weights = torch.rand(8, 4, requires_grad=True)
+        result = mm.forward(weights)
+        result.sum().backward()
+        tensor = mm.get()
+
+        expected_weights_grad = tensor.t().mm(torch.ones([4, 4]))
+        self.assertEqual(weights.grad, expected_weights_grad)
+
+        expected_tensor_grad = torch.ones([4, 4]).mm(weights.t())
+        self.assertEqual(tensor.grad, expected_tensor_grad)
+
     def test_jit_compile_extension(self):
         module = torch.utils.cpp_extension.load(
             name='jit_extension',
@@ -45,6 +58,7 @@ class TestCppExtension(common.TestCase):
 
         # Checking we can use this JIT-compiled class.
         doubler = module.Doubler(2, 2)
+        self.assertIsNone(doubler.get().grad)
         self.assertEqual(doubler.get().sum(), 4)
         self.assertEqual(doubler.forward().sum(), 8)
 

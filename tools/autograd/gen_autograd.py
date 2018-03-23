@@ -63,6 +63,11 @@ def load_aten_declarations(path):
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]
+        declaration['type_method_formals'] = [arg['type'] + ' ' + arg['name']
+                                              for arg in declaration['arguments']
+                                              if not arg.get('is_type_dispatched')]
+        declaration['type_method_args'] = [arg['name'] for arg in declaration['arguments']
+                                           if not arg.get('is_type_dispatched')]
         declaration['api_name'] = declaration['name']
         declaration['return_type'] = format_return_type(declaration['returns'])
 

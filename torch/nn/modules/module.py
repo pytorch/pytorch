@@ -1,4 +1,4 @@
-from collections import OrderedDict, Iterable
+from collections import OrderedDict
 import functools
 
 import torch
@@ -91,8 +91,12 @@ class Module(object):
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
-
-        self._buffers[name] = tensor
+        elif tensor is not None and not isinstance(tensor, torch.Tensor):
+            raise TypeError("cannot assign '{}' object to buffer '{}' "
+                            "(torch Tensor or None required)"
+                            .format(torch.typename(tensor), name))
+        else:
+            self._buffers[name] = tensor
 
     def register_parameter(self, name, param):
         r"""Adds a parameter to the module.
@@ -660,6 +664,7 @@ class Module(object):
             example, ``l`` will be returned only once.
 
         Example::
+
             >>> l = nn.Linear(2, 2)
             >>> net = nn.Sequential(l, l)
             >>> for idx, m in enumerate(net.named_modules()):
@@ -688,8 +693,10 @@ class Module(object):
     def train(self, mode=True):
         r"""Sets the module in training mode.
 
-        This has any effect only on modules such as :class:`Dropout`
-        or :class:`BatchNorm`.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
 
         Returns:
             Module: self
@@ -702,8 +709,10 @@ class Module(object):
     def eval(self):
         r"""Sets the module in evaluation mode.
 
-        This has any effect only on modules such as :class:`Dropout`
-        or :class:`BatchNorm`.
+        This has any effect only on certain modules. See documentations of
+        particular modules for details of their behaviors in training/evaluation
+        mode, if they are affected, e.g. :class:`Dropout`, :class:`BatchNorm`,
+        etc.
         """
         return self.train(False)
 

@@ -1,3 +1,5 @@
+#!/bin/bash
+
 . ./common.sh
 
 test_gpu_speed_mnist () {

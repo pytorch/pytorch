@@ -124,6 +124,8 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
     return ((CUDNN_VERSION >= (6021)) || (CUDNN_VERSION >= (6000) && prop->major >= 5)) && !is_output_padding_big();
   }
   return !is_output_padding_big();
+#else
+  (void)input; // avoid unused parameter warning
 #endif
   return false;
 }
@@ -162,9 +164,9 @@ static void check_input_shape_forward(const at::Tensor& input,
 
   if (weight_dim != k) {
     std::stringstream ss;
-    ss << "Expected " << weight_dim << "-dimensional input for " << weight_dim
-       << "-dimensional weight " << weight.sizes() << ", but got input of size "
-       << input.sizes() << " instead";
+    ss << "Expected " << k << "-dimensional weight for " << k
+       << "-dimensional input " << input.sizes() << ", but got weight of size "
+       << weight.sizes() << " instead";
     throw std::runtime_error(ss.str());
   }
   if (weight.size(0) < groups) {
@@ -350,12 +352,12 @@ at::Tensor _convolution(
 #if AT_CUDNN_ENABLED()
     if (input.type() != weight.type()){
       std::stringstream ss;
-      ss << "Input type (" << input.toString() << ") and weight type (" << weight.toString() << ") should be the same";
+      ss << "Input type (" << input.type().toString() << ") and weight type (" << weight.type().toString() << ") should be the same";
       throw std::runtime_error(ss.str());
     }
     if (bias.defined() && input.type() != bias.type()){
       std::stringstream ss;
-      ss << "Input type (" << input.toString() << ") and bias type (" << bias.toString() << ") should be the same";
+      ss << "Input type (" << input.type().toString() << ") and bias type (" << bias.type().toString() << ") should be the same";
       throw std::runtime_error(ss.str());
     }
 

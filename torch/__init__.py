@@ -173,7 +173,6 @@ def set_default_tensor_type(t):
         Tensor = _import_dotted_name(t)
         _C._set_default_tensor_type(Tensor)
 
-
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
 from ._tensor_str import set_printoptions
@@ -284,7 +283,7 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
-from torch.autograd import no_grad, enable_grad
+from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))
 

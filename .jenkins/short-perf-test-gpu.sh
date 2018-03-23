@@ -1,13 +1,9 @@
 #!/bin/bash
 
+COMPACT_JOB_NAME="short-perf-test-gpu"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 cd .jenkins/perf_test
-
-export PATH=/opt/conda/bin:$PATH
-
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64/stubs:$LD_LIBRARY_PATH
-export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 echo "Running GPU perf test for PyTorch..."
 

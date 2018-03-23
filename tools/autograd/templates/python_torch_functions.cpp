@@ -30,9 +30,9 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-static void check_out_dtype_matches(Tensor result, const at::Type &type) {
+static void check_out_type_matches(Tensor result, const at::Type &type) {
   if (result.type() != type) {
-    at::runtime_error("dtype corresponding to %s does not match type of out parameter (%s)",
+    at::runtime_error("type corresponding to %s does not match type of out parameter (%s)",
                       type.toString(), result.type().toString());
   }
 }
@@ -82,6 +82,35 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser({
+    "_promote_types(Type type1, Type type2)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    const at::Type& t1 = r.type(0);
+    const at::Type& t2 = r.type(1);
+    if (t1.backend() != t2.backend()) {
+      at::runtime_error("_promote_types only supports types with the same backends.  Got %s and %s.",
+                        at::toString(t1.backend()), at::toString(t2.backend()));
+    }
+    ScalarType promoted = at::promoteTypes(t1.scalarType(), t2.scalarType());
+    return torch::autograd::utils::wrap(torch::getDtype(t1.backend(), promoted));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::new_sparse_coo_tensor(default_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
@@ -98,7 +127,9 @@ static PyMethodDef torch_functions[] = {
   {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
   {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"sparse_coo_tensor", (PyCFunction)THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"spmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"tensor", (PyCFunction)THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}

@@ -89,6 +89,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+bool Context::hasMKL() const {
+#if AT_MKL_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasCUDA() const {
 #if AT_CUDA_ENABLED()
   int count;

@@ -1,5 +1,6 @@
 #!/bin/bash
 
+COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # Set up conda environment
@@ -8,7 +9,7 @@ rm -rf $PWD/miniconda3
 bash $PWD/miniconda3.sh -b -p $PWD/miniconda3
 export PATH="$PWD/miniconda3/bin:$PATH"
 source $PWD/miniconda3/bin/activate
-conda install -y numpy pyyaml setuptools cmake cffi ninja
+conda install -y mkl mkl-include numpy pyyaml setuptools cmake cffi ninja
 
 # Build and test PyTorch
 git submodule update --init --recursive
@@ -20,7 +21,6 @@ export CC=clang
 # If we run too many parallel jobs, we will OOM
 export MAX_JOBS=2
 python setup.py install
-cd test/
 echo "Ninja version: $(ninja --version)"
-sh run_test.sh -- -v
+python test/run_test.py --verbose
 echo "BUILD PASSED"

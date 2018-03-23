@@ -52,6 +52,8 @@ Tensor batch_norm(
                  || (!running_mean.defined() && !running_var.defined() && training))
                && input.size(0) <= 131070
                && cudnn_enabled && CUDNN_VERSION >= 5110L);
+#else
+  (void)cudnn_enabled; // avoid unused parameter warning
 #endif
 
 #if AT_CUDNN_ENABLED()

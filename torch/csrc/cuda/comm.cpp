@@ -89,7 +89,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, std::size
       std::vector<Tensor> results = broadcast(utils::flatten_dense_tensors(chunk.tensors),
                                               devices);
       for (std::size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        AutoGPU auto_gpu(devices[i]);
+        auto_gpu.setDevice(devices[i]);
         auto & device_outputs = outputs[i];
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors))
           device_outputs.push_back(std::move(t));

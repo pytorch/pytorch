@@ -237,7 +237,7 @@ class RNN(RNNBase):
 
     where :math:`h_t` is the hidden state at time `t`, and :math:`x_t` is
     the hidden state of the previous layer at time `t` or :math:`input_t`
-    for the first layer. If nonlinearity='relu', then `ReLU` is used instead
+    for the first layer. If :attr:`nonlinearity`='relu', then `ReLU` is used instead
     of `tanh`.
 
     Args:
@@ -319,7 +319,7 @@ class LSTM(RNNBase):
             \begin{array}{ll}
             i_t = \sigma(W_{ii} x_t + b_{ii} + W_{hi} h_{(t-1)} + b_{hi}) \\
             f_t = \sigma(W_{if} x_t + b_{if} + W_{hf} h_{(t-1)} + b_{hf}) \\
-            g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hc} h_{(t-1)} + b_{hg}) \\
+            g_t = \tanh(W_{ig} x_t + b_{ig} + W_{hg} h_{(t-1)} + b_{hg}) \\
             o_t = \sigma(W_{io} x_t + b_{io} + W_{ho} h_{(t-1)} + b_{ho}) \\
             c_t = f_t c_{(t-1)} + i_t g_t \\
             h_t = o_t \tanh(c_t)
@@ -497,7 +497,7 @@ class RNNCell(RNNCellBase):
 
         h' = \tanh(w_{ih} x + b_{ih}  +  w_{hh} h + b_{hh})
 
-    If nonlinearity='relu', then ReLU is used in place of tanh.
+    If :attr:`nonlinearity`='relu', then ReLU is used in place of tanh.
 
     Args:
         input_size: The number of expected features in the input `x`

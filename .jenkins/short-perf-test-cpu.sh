@@ -1,10 +1,9 @@
 #!/bin/bash
 
+COMPACT_JOB_NAME="short-perf-test-cpu"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 cd .jenkins/perf_test
-
-export PATH=/opt/conda/bin:$PATH
 
 echo "Running CPU perf test for PyTorch..."
 

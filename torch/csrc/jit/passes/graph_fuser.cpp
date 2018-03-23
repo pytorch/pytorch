@@ -14,63 +14,63 @@ namespace {
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 std::unordered_set<NodeKind> simple_mappable = {
-  k__and__,
-  k__lshift__,
-  k__or__,
-  k__rshift__,
-  k__xor__,
-  kabs,
-  kacos,
-  kadd,
-  kasin,
-  katan,
-  katan2,
-  kceil,
-  kclamp,
-  kcos,
-  kcosh,
-  kdiv,
-  keq,
-  kexp,
-  kexpm1,
-  kfloor,
-  kfmod,
-  kfrac,
-  kge,
-  kgt,
-  kle,
-  klerp,
-  klgamma,
-  klog,
-  klog1p,
-  klt,
-  kmax,
-  kmin,
-  kmul,
-  kne,
-  kneg,
-  kones,
-  kpow,
-  kreciprocal,
-  kremainder,
-  kround,
-  krsqrt,
-  ksigmoid,
-  ksin,
-  ksinh,
-  ksqrt,
-  ksub,
-  ktan,
-  ktanh,
-  ktrunc,
-  kzeros,
-  "_sigmoid_backward"_sym,
-  "_tanh_backward"_sym,
+  aten::__and__,
+  aten::__lshift__,
+  aten::__or__,
+  aten::__rshift__,
+  aten::__xor__,
+  aten::abs,
+  aten::acos,
+  aten::add,
+  aten::asin,
+  aten::atan,
+  aten::atan2,
+  aten::ceil,
+  aten::clamp,
+  aten::cos,
+  aten::cosh,
+  aten::div,
+  aten::eq,
+  aten::exp,
+  aten::expm1,
+  aten::floor,
+  aten::fmod,
+  aten::frac,
+  aten::ge,
+  aten::gt,
+  aten::le,
+  aten::lerp,
+  aten::lgamma,
+  aten::log,
+  aten::log1p,
+  aten::lt,
+  aten::max,
+  aten::min,
+  aten::mul,
+  aten::ne,
+  aten::neg,
+  aten::ones,
+  aten::pow,
+  aten::reciprocal,
+  aten::remainder,
+  aten::round,
+  aten::rsqrt,
+  aten::sigmoid,
+  aten::sin,
+  aten::sinh,
+  aten::sqrt,
+  aten::sub,
+  aten::tan,
+  aten::tanh,
+  aten::trunc,
+  aten::zeros,
+  aten::_sigmoid_backward,
+  aten::_tanh_backward,
 };
 
 bool isSimpleMap(Node *node) {
   if(simple_mappable.count(node->kind())) {
-    if(node->kind() == kmin || node->kind() == kmax)
+    if(node->kind() == aten::min || node->kind() == aten::max)
       return node->inputs().size() == 2; // unary min/max is a reduction...
     return true;
   }
@@ -91,8 +91,8 @@ struct GraphFuser {
   : block(block) {}
 
   int getDevice(Node * node) {
-    if(node->kind() == kFusionGroup) {
-      return node->i(kdevice);
+    if(node->kind() == prim::FusionGroup) {
+      return node->i(attr::device);
     }
     return node->output()->type()->expect<TensorType>()->device();
   }
@@ -120,7 +120,7 @@ struct GraphFuser {
   }
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
-    if (node->kind() == kFusionGroup) return true;
+    if (node->kind() == prim::FusionGroup) return true;
     return isSimpleMap(node) && allFloatIO(node);
   }
 
@@ -149,7 +149,7 @@ struct GraphFuser {
       return true;
     // this concat fusion only works when all the inputs are the same size
     // otherwise they cannot partipate in the same map
-    if(node->kind() == kcat && allOutputsHaveSameSize(node))
+    if(node->kind() == aten::cat && allOutputsHaveSameSize(node))
       return true;
 
     return false;
@@ -198,8 +198,8 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Graph & getSubgraph(Node * n) {
-    JIT_ASSERT(n->kind() == kFusionGroup);
-    return *n->g(kSubgraph);
+    JIT_ASSERT(n->kind() == prim::FusionGroup);
+    return *n->g(attr::Subgraph);
   }
 
   void mergeFusionGroups(Node *consumer_group, Node *producer_group) {
@@ -258,7 +258,7 @@ struct GraphFuser {
   }
 
   Node * mergeNodeIntoGroup(Node* group, Node * n) {
-    JIT_ASSERT(n->kind() != kFusionGroup);
+    JIT_ASSERT(n->kind() != prim::FusionGroup);
     auto & subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -324,10 +324,10 @@ struct GraphFuser {
 
   Node * fuse(Node * consumer, Value * producer) {
     auto group = consumer;
-    if(group->kind() != kFusionGroup) {
+    if(group->kind() != prim::FusionGroup) {
       group = createSingletonFusionGroup(consumer);
     }
-    if (producer->node()->kind() == kFusionGroup) {
+    if (producer->node()->kind() == prim::FusionGroup) {
       mergeFusionGroups(group, producer->node());
       return group;
     }
@@ -348,7 +348,7 @@ struct GraphFuser {
 
   // TODO: desugar chunks into splits and then remove this special case
   bool isChunk(Node * node) {
-    return node->kind() == ksplit || node->kind() == kchunk;
+    return node->kind() == aten::split || node->kind() == aten::chunk;
   }
 
   // in places where op can be fused into a consumer but chunk is in the way

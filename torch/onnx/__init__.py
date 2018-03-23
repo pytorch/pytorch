@@ -37,19 +37,20 @@ def _symbolic_override_wrapper_maker(symbolic_fn, might_trace, fn):
     def wrapper(*args, **kwargs):
         import torch
         import torch.jit
-        from torch.autograd import Function, function
+        from torch.autograd import Function, function, Variable
 
         # fast pass
         if not might_trace(args):
             return fn(*args, **kwargs)
 
-        flat_args = tuple(function._iter_variables(args))
-        if not any(map(torch._C._jit_is_tracing, flat_args)):
+        flat_args = tuple(function._iter_variables_permissive(args))
+        flat_args_only_variables = tuple(x for x in flat_args if isinstance(x, Variable))
+        if not any(map(torch._C._jit_is_tracing, flat_args_only_variables)):
             return fn(*args, **kwargs)
 
-        tstate = torch._C._get_tracing_state(flat_args)
+        tstate = torch._C._get_tracing_state(flat_args_only_variables)
 
-        arg_values = [torch._C._get_value_trace(tstate, x) for x in flat_args]
+        arg_values = [torch._C._get_value_trace(tstate, x) if isinstance(x, Variable) else x for x in flat_args]
 
         # This must come after the calls to get_value_trace, lest we
         # lose information due to in-place operations.

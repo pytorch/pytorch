@@ -144,6 +144,12 @@ Pooling Layers
 .. autoclass:: FractionalMaxPool2d
     :members:
 
+:hidden:`LPPool1d`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: LPPool1d
+    :members:
+
 :hidden:`LPPool2d`
 ~~~~~~~~~~~~~~~~~~
 
@@ -803,6 +809,11 @@ Pooling functions
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: max_unpool3d
+
+:hidden:`lp_pool1d`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: lp_pool1d
 
 :hidden:`lp_pool2d`
 ~~~~~~~~~~~~~~~~~~~

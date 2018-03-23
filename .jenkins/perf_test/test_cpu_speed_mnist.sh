@@ -1,3 +1,5 @@
+#!/bin/bash
+
 . ./common.sh
 
 test_cpu_speed_mnist () {
@@ -40,4 +42,3 @@ test_cpu_speed_mnist () {
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   run_test test_cpu_speed_mnist "$@"
 fi
-
