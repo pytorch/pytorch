@@ -1,23 +1,11 @@
 import torch
-from torch.autograd import Variable
 
-
-def wrap_variable(inputs):
+def detach_variable(inputs):
     if torch.is_tensor(inputs):
-        return Variable(inputs)
+        inp = inputs.detach()
+        return inp
     elif isinstance(inputs, tuple):
-        return tuple(wrap_variable(v) for v in inputs)
-    else:
-        raise RuntimeError("Unsupported input type: ", type(inputs).__name__)
-
-
-def unpack_variables(inputs):
-    if isinstance(inputs, Variable):
-        return inputs.data
-    elif torch.is_tensor(inputs):
-        return inputs
-    elif isinstance(inputs, tuple):
-        return tuple(unpack_variables(v) for v in inputs)
+        return tuple(detach_variable(v) for v in inputs)
     else:
         raise RuntimeError("Unsupported input type: ", type(inputs).__name__)
 
@@ -28,21 +16,20 @@ class CheckpointFunction(torch.autograd.Function):
     def forward(ctx, run_function, *args):
         ctx.run_function = run_function
         ctx.save_for_backward(*args)
-        var_args = wrap_variable(args)
         with torch.no_grad():
-            outputs = run_function(*var_args)
-        return unpack_variables(outputs)
+            outputs = run_function(*args)
+        return outputs
 
     @staticmethod
     def backward(ctx, *args):
         inputs = ctx.saved_tensors
-        inputs_list = wrap_variable(inputs)
+        inputs_list = detach_variable(inputs)
         with torch.enable_grad():
             outputs = ctx.run_function(*inputs_list)
 
         if isinstance(outputs, tuple):
             output_list = list(outputs)
-        elif isinstance(outputs, Variable) or torch.is_tensor(outputs):
+        elif torch.is_tensor(outputs):
             output_list = [outputs]
         out_grads = [grad for grad in args]
         torch.autograd.backward(output_list, out_grads)
@@ -51,7 +38,7 @@ class CheckpointFunction(torch.autograd.Function):
         if isinstance(inputs_list, tuple):
             input_grads = tuple(inp.grad for inp in inputs_list)
             return (None,) + input_grads
-        elif isinstance(inputs_list, Variable) or torch.is_tensor(inputs_list):
+        elif torch.is_tensor(inputs_list):
             input_grads = inputs_list.grad
             return None, input_grads
 
@@ -107,7 +94,6 @@ def checkpoint_sequential(modules, segments, *inputs):
 
     Example:
         >>> modules = [module for k, module in self._modules.items()][0]
-        >>> input_var = Variable(x.data, requires_grad=True)
         >>> input_var = checkpoint_sequential(modules, chunks, input_var)
     """
 
