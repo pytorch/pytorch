@@ -47,4 +47,40 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
 }
 
+// FIXME: when empty tensors with arbitrary shapes is implemented
+//
+// One of the invariants for `cat` should be that all tensors being
+// concatenated should have the same size in all dimensions except the
+// specified cat dimension. When we have empty tensors with arbitrary
+// shapes, they should also follow this invariant:
+// - torch.cat([tensor of size (1, 0, 4), tensor of size (1, n, 4)]) should work
+// - torch.cat([tensor of size (0,), tensor of size (1, 2)]) should fail.
+//
+// Right now, as a workaround, we support the following legacy behavior when
+// a non-empty `tensor` and empty tensor `empty` are concatenated:
+// 1) torch.cat([empty, tensor]) should ignore empty tensors
+// 2) torch.cat([tensor, empty]) should ignore empty tensors
+// 3) torch.cat([empty, empty, ..., empty]) should be empty
+// The following functions wrap dim on the first non-empty shape
+// to preserve legacy behavior.
+static inline int64_t legacy_cat_wrap_dim(int64_t dim, const std::vector<std::vector<int64_t>>& tensor_sizes) {
+  for (auto& sizes : tensor_sizes) {
+    if (sizes == std::vector<int64_t>({0})) {
+      continue;
+    }
+    return maybe_wrap_dim(dim, sizes.size());
+  }
+  return dim;
+}
+
+static inline int64_t legacy_cat_wrap_dim(int64_t dim, TensorList tensors) {
+  for (auto& tensor : tensors) {
+    if (tensor.numel() == 0) {
+      continue;
+    }
+    return maybe_wrap_dim(dim, tensor.dim());
+  }
+  return dim;
+}
+
 }
