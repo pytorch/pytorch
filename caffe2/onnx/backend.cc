@@ -22,7 +22,7 @@ namespace onnx {
 
 namespace {
 
-constexpr static int kKnownOpsetVersion = 5;
+constexpr static int kKnownOpsetVersion = 6;
 
 bool AlmostEqual(double a, double b) {
   constexpr static double kEps = 1e-15;
