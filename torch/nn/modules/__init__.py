@@ -14,6 +14,7 @@ from .pooling import AvgPool1d, AvgPool2d, AvgPool3d, MaxPool1d, MaxPool2d, MaxP
     MaxUnpool1d, MaxUnpool2d, MaxUnpool3d, FractionalMaxPool2d, LPPool1d, LPPool2d, AdaptiveMaxPool1d, \
     AdaptiveMaxPool2d, AdaptiveMaxPool3d, AdaptiveAvgPool1d, AdaptiveAvgPool2d, AdaptiveAvgPool3d
 from .batchnorm import BatchNorm1d, BatchNorm2d, BatchNorm3d
+from .groupnorm import GroupNorm2D
 from .instancenorm import InstanceNorm1d, InstanceNorm2d, InstanceNorm3d
 from .normalization import LocalResponseNorm, CrossMapLRN2d, LayerNorm
 from .dropout import Dropout, Dropout2d, Dropout3d, AlphaDropout
@@ -39,7 +40,7 @@ __all__ = [
     'ParameterList', 'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'MaxPool1d', 'MaxPool2d',
     'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d', 'FractionalMaxPool2d',
     'LPPool1d', 'LPPool2d', 'LocalResponseNorm', 'BatchNorm1d', 'BatchNorm2d', 'BatchNorm3d', 'InstanceNorm1d',
-    'InstanceNorm2d', 'InstanceNorm3d', 'LayerNorm', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout',
+    'InstanceNorm2d', 'InstanceNorm3d', 'GroupNorm2D', 'LayerNorm', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout',
     'ReflectionPad1d', 'ReflectionPad2d', 'ReplicationPad2d', 'ReplicationPad1d', 'ReplicationPad3d',
     'CrossMapLRN2d', 'Embedding', 'EmbeddingBag', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
     'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
