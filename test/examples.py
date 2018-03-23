@@ -2,7 +2,8 @@ import numpy as np
 import math
 import torch
 
-para_t = [[1.4894354822166804, 1.5105645177828495],
+para_t = [
+    [1.4894354822166804, 1.5105645177828495],
     [1.4786938359049173, 1.5213422865119404],
     [1.4678555546340186, 1.5322534398862111],
     [1.4569962420100877, 1.5432224486023272],
@@ -2001,7 +2002,8 @@ para_t = [[1.4894354822166804, 1.5105645177828495],
     [1.1275046012459606, 1.2716261970940470],
     [1.1273827873681734, 1.2713511875808789],
     [1.1272609919613510, 1.2710762494160219],
-    [1.1271392151292807, 1.2708013828202420],]
+    [1.1271392151292807, 1.2708013828202420], ]
+
 
 def nadam(opfunc, x, config, state=None):
     """ An implementation of Adam http://arxiv.org/pdf/1412.6980.pdf
@@ -2025,7 +2027,7 @@ def nadam(opfunc, x, config, state=None):
     - `f(x)`  : the value of optimized function, evaluated before the update
 
     """
-    
+
     # Initialization
     if 't' not in state:
         state['t'] = 0
@@ -2037,6 +2039,6 @@ def nadam(opfunc, x, config, state=None):
     fx = 0
 
     return x, fx
-    
+
 if __name__ == '__main__':
     pass
