@@ -1722,7 +1722,7 @@ class TestScript(TestCase):
                 c += i
             return c
         '''
-        self.checkScript(script, [], [4950], True, 'test_for_in_range')
+        self.checkScript(script, [], outputs=[4950], optimize=True, name='test_for_in_range')
 
     def test_script_for_in_range_dynamic(self):
         script = '''
@@ -1735,7 +1735,7 @@ class TestScript(TestCase):
                 c += acc
             return c
         '''
-        self.checkScript(script, [], [161700], True, 'test_script_for_in_range_dynamic')
+        self.checkScript(script, [], outputs=[161700], optimize=True, name='test_script_for_in_range_dynamic')
 
     def test_script_bool_constant(self):
         script = '''

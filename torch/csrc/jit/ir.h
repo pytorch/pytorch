@@ -407,6 +407,7 @@ public:
       for (auto& use : inputs_[use_itr]->uses_) {
         if (use.user == this) {
           use.offset += 1;
+          break;
         }
       }
     }
