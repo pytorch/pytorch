@@ -1,8 +1,24 @@
+/**
+ * Copyright (c) 2016-present, Facebook, Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #pragma once
 
-#include "backend_rep.h"
+#include "caffe2/onnx/backend_rep.h"
+#include "caffe2/onnx/device.h"
 #include "caffe2/proto/caffe2.pb.h"
-#include "device.h"
 #include "onnx/onnx_pb.h"
 
 #include <functional>
@@ -13,11 +29,11 @@
 namespace caffe2 {
 namespace onnx {
 
-using ONNX_NAMESPACE::AttributeProto;
-using ONNX_NAMESPACE::GraphProto;
-using ONNX_NAMESPACE::ModelProto;
-using ONNX_NAMESPACE::NodeProto;
-using ONNX_NAMESPACE::TensorProto;
+using ::ONNX_NAMESPACE::AttributeProto;
+using ::ONNX_NAMESPACE::GraphProto;
+using ::ONNX_NAMESPACE::ModelProto;
+using ::ONNX_NAMESPACE::NodeProto;
+using ::ONNX_NAMESPACE::TensorProto;
 
 // \brief This struct holds the converted ops after the onnx->c2 conversion.
 // Notice that for RNN ops, it may create ops in init_net. Hence we have the
@@ -112,6 +128,7 @@ class Caffe2Backend {
   bool SupportOp(const std::string tyep) const;
 
   Caffe2Ops ConvertNode(const std::string& node_str, int opset_version);
+
  private:
   using SpecialOpConverter = Caffe2Ops (Caffe2Backend::*)(OnnxNode*, int);
 
