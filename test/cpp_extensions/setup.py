@@ -4,19 +4,22 @@ from torch.utils.cpp_extension import CppExtension, CUDAExtension
 
 ext_modules = [
     CppExtension(
-        'torch_test_cpp_extensions', ['extension.cpp'],
+        'torch_test_cpp_extension', ['extension.cpp'],
         extra_compile_args=['-g']),
 ]
 
 if torch.cuda.is_available():
     extension = CUDAExtension(
-        'torch_test_cuda_extension',
-        ['cuda_extension.cpp', 'cuda_extension_kernel.cu'],
+        'torch_test_cuda_extension', [
+            'cuda_extension.cpp',
+            'cuda_extension_kernel.cu',
+            'cuda_extension_kernel2.cu',
+        ],
         extra_compile_args={'cxx': ['-g'],
                             'nvcc': ['-O2']})
     ext_modules.append(extension)
 
 setup(
-    name='torch_test_cpp_extensions',
+    name='torch_test_cpp_extension',
     ext_modules=ext_modules,
     cmdclass={'build_ext': torch.utils.cpp_extension.BuildExtension})

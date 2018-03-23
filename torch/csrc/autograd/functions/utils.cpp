@@ -22,12 +22,14 @@ variable_list wrap_outputs(const variable_list& inputs, tensor_list&& outputs,
       }
     }
   } else {
-    auto grad_fn = ctr(get_next_functions(inputs));
+    auto grad_fn = ctr(collect_next_edges(inputs));
     for (auto& output : outputs) {
       if (output.defined()) {
-        result.push_back(make_variable(output, Edge(grad_fn, grad_fn->num_inputs++)));
+        auto variable = autograd::make_variable(output, /*requires_grad=*/false);
+        autograd::create_gradient_edge(variable, grad_fn);
+        result.push_back(std::move(variable));
       } else {
-        ++grad_fn->num_inputs;
+        grad_fn->bump_inputs();
         result.emplace_back();
       }
     }
@@ -53,4 +55,4 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
     }
   }
 }
-}}
+}} // namespace torch::autograd

@@ -18,5 +18,5 @@ if [[ -x $BUILD_ROOT/src/ATen/test/cudnn_test ]]; then
 fi
 if [ "$VALGRIND" == "ON" ]
 then
-  valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic -n
+  valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic "[cpu]"
 fi

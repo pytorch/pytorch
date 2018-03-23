@@ -30,7 +30,7 @@ Tensor cudnn_affine_grid_generator_backward(
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 namespace at { namespace native {
 

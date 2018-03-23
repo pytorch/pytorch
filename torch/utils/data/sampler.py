@@ -47,7 +47,7 @@ class RandomSampler(Sampler):
         self.data_source = data_source
 
     def __iter__(self):
-        return iter(torch.randperm(len(self.data_source)).long())
+        return iter(torch.randperm(len(self.data_source)).tolist())
 
     def __len__(self):
         return len(self.data_source)
@@ -117,7 +117,7 @@ class BatchSampler(object):
     def __iter__(self):
         batch = []
         for idx in self.sampler:
-            batch.append(idx)
+            batch.append(int(idx))
             if len(batch) == self.batch_size:
                 yield batch
                 batch = []

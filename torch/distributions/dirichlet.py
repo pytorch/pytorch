@@ -9,7 +9,7 @@ from torch.distributions.utils import _finfo, broadcast_all
 
 
 def _dirichlet_sample_nograd(concentration):
-    probs = torch._C._standard_gamma(concentration)
+    probs = torch._standard_gamma(concentration)
     probs /= probs.sum(-1, True)
     eps = _finfo(probs).eps
     return probs.clamp_(min=eps, max=1 - eps)
@@ -18,7 +18,7 @@ def _dirichlet_sample_nograd(concentration):
 # This helper is exposed for testing.
 def _Dirichlet_backward(x, concentration, grad_output):
     total = concentration.sum(-1, True).expand_as(concentration)
-    grad = torch._C._dirichlet_grad(x, concentration, total)
+    grad = torch._dirichlet_grad(x, concentration, total)
     return grad * (grad_output - (x * grad_output).sum(-1, True))
 
 
@@ -49,17 +49,17 @@ class Dirichlet(ExponentialFamily):
         [torch.FloatTensor of size 2]
 
     Args:
-        concentration (Tensor or Variable): concentration parameter of the distribution
+        concentration (Tensor): concentration parameter of the distribution
             (often referred to as alpha)
     """
     params = {'concentration': constraints.positive}
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, concentration):
+    def __init__(self, concentration, validate_args=None):
         self.concentration, = broadcast_all(concentration)
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
-        super(Dirichlet, self).__init__(batch_shape, event_shape)
+        super(Dirichlet, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def rsample(self, sample_shape=()):
         shape = self._extended_shape(sample_shape)
@@ -69,7 +69,8 @@ class Dirichlet(ExponentialFamily):
         return _dirichlet_sample_nograd(concentration)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return ((torch.log(value) * (self.concentration - 1.0)).sum(-1) +
                 torch.lgamma(self.concentration.sum(-1)) -
                 torch.lgamma(self.concentration).sum(-1))

@@ -1,4 +1,3 @@
-#include <Python.h>
 #include <iostream>
 #include <vector>
 #include "torch/csrc/autograd/variable.h"
@@ -142,7 +141,7 @@ struct TensorInfo {
   }
   operator TypePtr() const {
     if(!defined())
-      return nullptr;
+      return DynamicType::get();
     return std::make_shared<TensorType>(type(), device(), sizes(), strides());
   }
 private:

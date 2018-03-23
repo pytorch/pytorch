@@ -104,7 +104,7 @@ numerical approximations using small finite differences::
 
     from torch.autograd import gradcheck
 
-    # gradchek takes a tuple of tensor as input, check if your gradient
+    # gradcheck takes a tuple of tensors as input, check if your gradient
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
     input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)

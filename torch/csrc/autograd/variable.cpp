@@ -118,8 +118,8 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
     fn->size = sizes();
     fn->stride = strides();
     fn->storage_offset = data.storage_offset();
-    fn->set_next_functions(get_next_functions(base));
-    fn->num_inputs = 1;
+    fn->set_next_edges(collect_next_edges(base));
+    fn->set_num_inputs(1);
     grad_fn = std::move(fn);
     attr_version = current_version;
   }
@@ -130,7 +130,7 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   TORCH_ASSERT(gradient_edge.input_nr == 0);
   TORCH_ASSERT(gradient_edge.function);
   TORCH_ASSERTM(
-      gradient_edge.function->num_inputs == 1,
+      gradient_edge.function->num_inputs() == 1,
       "Functions which modify views in-place must return a single Variable");
   this->output_nr = gradient_edge.input_nr;
   auto copy_slices = std::make_shared<CopySlices>(

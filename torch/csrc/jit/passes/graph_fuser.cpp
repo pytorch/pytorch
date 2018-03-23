@@ -14,63 +14,63 @@ namespace {
 // Some of these restrictions may be relaxable, but you should
 // carefully read the code first, as we rely on these assumptions.
 std::unordered_set<NodeKind> simple_mappable = {
-  k__and__,
-  k__lshift__,
-  k__or__,
-  k__rshift__,
-  k__xor__,
-  kabs,
-  kacos,
-  kadd,
-  kasin,
-  katan,
-  katan2,
-  kceil,
-  kclamp,
-  kcos,
-  kcosh,
-  kdiv,
-  keq,
-  kexp,
-  kexpm1,
-  kfloor,
-  kfmod,
-  kfrac,
-  kge,
-  kgt,
-  kle,
-  klerp,
-  klgamma,
-  klog,
-  klog1p,
-  klt,
-  kmax,
-  kmin,
-  kmul,
-  kne,
-  kneg,
-  kones,
-  kpow,
-  kreciprocal,
-  kremainder,
-  kround,
-  krsqrt,
-  ksigmoid,
-  ksin,
-  ksinh,
-  ksqrt,
-  ksub,
-  ktan,
-  ktanh,
-  ktrunc,
-  kzeros,
-  "_sigmoid_backward"_sym,
-  "_tanh_backward"_sym,
+  aten::__and__,
+  aten::__lshift__,
+  aten::__or__,
+  aten::__rshift__,
+  aten::__xor__,
+  aten::abs,
+  aten::acos,
+  aten::add,
+  aten::asin,
+  aten::atan,
+  aten::atan2,
+  aten::ceil,
+  aten::clamp,
+  aten::cos,
+  aten::cosh,
+  aten::div,
+  aten::eq,
+  aten::exp,
+  aten::expm1,
+  aten::floor,
+  aten::fmod,
+  aten::frac,
+  aten::ge,
+  aten::gt,
+  aten::le,
+  aten::lerp,
+  aten::lgamma,
+  aten::log,
+  aten::log1p,
+  aten::lt,
+  aten::max,
+  aten::min,
+  aten::mul,
+  aten::ne,
+  aten::neg,
+  aten::ones,
+  aten::pow,
+  aten::reciprocal,
+  aten::remainder,
+  aten::round,
+  aten::rsqrt,
+  aten::sigmoid,
+  aten::sin,
+  aten::sinh,
+  aten::sqrt,
+  aten::sub,
+  aten::tan,
+  aten::tanh,
+  aten::trunc,
+  aten::zeros,
+  aten::_sigmoid_backward,
+  aten::_tanh_backward,
 };
 
 bool isSimpleMap(Node *node) {
   if(simple_mappable.count(node->kind())) {
-    if(node->kind() == kmin || node->kind() == kmax)
+    if(node->kind() == aten::min || node->kind() == aten::max)
       return node->inputs().size() == 2; // unary min/max is a reduction...
     return true;
   }
@@ -78,7 +78,7 @@ bool isSimpleMap(Node *node) {
 }
 
 struct GraphFuser {
-  std::shared_ptr<Graph>& graph;
+  Block * block;
 
   // Used to order nodes so we always consider producer-consumer fusions
   // in reverse topological order.
@@ -87,21 +87,18 @@ struct GraphFuser {
   // Newly generated nodes will copy the location where they are inserted.
   std::unordered_map<Node*,size_t> topological_index;
 
-  GraphFuser(std::shared_ptr<Graph>& graph)
-  : graph(graph) {}
+  GraphFuser(Block * block)
+  : block(block) {}
 
   int getDevice(Node * node) {
-    if(node->kind() == kFusionGroup) {
-      return node->i(kdevice);
+    if(node->kind() == prim::FusionGroup) {
+      return node->i(attr::device);
     }
     return node->output()->type()->expect<TensorType>()->device();
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
   bool hasFloatType(Value * node) {
-    if(!node->hasType()) {
-      return false;
-    }
     if(auto tt = node->type()->cast<TensorType>()) {
       return tt->scalarType() == at::kFloat;
     } else {
@@ -122,8 +119,25 @@ struct GraphFuser {
     return true;
   }
   bool isFusable(Node * node) {
-    if (node->kind() == kFusionGroup) return true;
+    if (node->owningBlock() != block) return false;
+    if (node->kind() == prim::FusionGroup) return true;
     return isSimpleMap(node) && allFloatIO(node);
+  }
+
+  bool allOutputsHaveSameSize(Node * node) {
+    TensorType *tt_ptr = nullptr;
+    for (const auto i : node->inputs()) {
+      auto cur_tt_ptr = i->type()->cast<TensorType>();
+      if (!cur_tt_ptr) {
+        return false;
+      }
+
+      if (tt_ptr && tt_ptr->sizes() != cur_tt_ptr->sizes()) {
+        return false;
+      }
+      tt_ptr = cur_tt_ptr;
+    }
+    return true;
   }
 
   // Can this node produce an _output_ of a fusion group?
@@ -133,18 +147,12 @@ struct GraphFuser {
   bool isFusableAsExitNode(Node * node) {
     if(isFusable(node))
       return true;
-    if(node->kind() != kcat)
-      return false;
-
     // this concat fusion only works when all the inputs are the same size
     // otherwise they cannot partipate in the same map
-    auto sizes = node->input(0)->type()->expect<TensorType>()->sizes();
-    for(auto i : node->inputs()) {
-      if(sizes != i->type()->expect<TensorType>()->sizes()){
-        return false;
-      }
-    }
-    return true;
+    if(node->kind() == aten::cat && allOutputsHaveSameSize(node))
+      return true;
+
+    return false;
   }
 
   // necessary condition for fusion. If all of the uses of producer are consumer
@@ -190,8 +198,8 @@ struct GraphFuser {
   // DOES NOT WORK if n is a consumer of an output of the fusion group
   // returns the node _inside_ the group that represents the node
   Graph & getSubgraph(Node * n) {
-    JIT_ASSERT(n->kind() == kFusionGroup);
-    return *n->g(kSubgraph);
+    JIT_ASSERT(n->kind() == prim::FusionGroup);
+    return *n->g(attr::Subgraph);
   }
 
   void mergeFusionGroups(Node *consumer_group, Node *producer_group) {
@@ -210,7 +218,7 @@ struct GraphFuser {
 
     // Clone all nodes
     for (auto inner : producer_subgraph->nodes()) {
-      Node * outer = graph->createClone(inner, [&](Value * k) -> Value* {
+      Node * outer = block->owningGraph()->createClone(inner, [&](Value * k) -> Value* {
         return inner_to_outer.at(k);
       });
       outer->insertBefore(producer_group);
@@ -243,14 +251,14 @@ struct GraphFuser {
         consumer_subgraph->registerOutput(merged->outputs()[i]);
         auto new_output = consumer_group->addOutput();
         output->replaceAllUsesWith(new_output);
-        new_output->setType(output->typeOption());
+        new_output->setType(output->type());
       }
       node->destroy();
     }
   }
 
   Node * mergeNodeIntoGroup(Node* group, Node * n) {
-    JIT_ASSERT(n->kind() != kFusionGroup);
+    JIT_ASSERT(n->kind() != prim::FusionGroup);
     auto & subgraph = getSubgraph(group);
     // map from nodes in the surrounding graph to parameters in the fusion
     // group's subgraph that correspond to them
@@ -264,7 +272,7 @@ struct GraphFuser {
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
         auto in_group = subgraph.addInput();
-        in_group->setType(input->typeOption());
+        in_group->setType(input->type());
         inputs_map[input] = in_group;
         group->addInput(input);
       }
@@ -291,7 +299,7 @@ struct GraphFuser {
   // turn consumer node n into a fusion group with just n inside
   // to prepare for fusion and replace uses of n with the new group
   Node * createSingletonFusionGroup(Node * n) {
-    auto group = graph->createFusionGroup(getDevice(n));
+    auto group = block->owningGraph()->createFusionGroup(getDevice(n));
     // propogate position information for the new node so we can always
     // have a valid mapping
     topological_index[group] = topological_index[n];
@@ -316,10 +324,10 @@ struct GraphFuser {
 
   Node * fuse(Node * consumer, Value * producer) {
     auto group = consumer;
-    if(group->kind() != kFusionGroup) {
+    if(group->kind() != prim::FusionGroup) {
       group = createSingletonFusionGroup(consumer);
     }
-    if (producer->node()->kind() == kFusionGroup) {
+    if (producer->node()->kind() == prim::FusionGroup) {
       mergeFusionGroups(group, producer->node());
       return group;
     }
@@ -340,7 +348,7 @@ struct GraphFuser {
 
   // TODO: desugar chunks into splits and then remove this special case
   bool isChunk(Node * node) {
-    return node->kind() == ksplit || node->kind() == kchunk;
+    return node->kind() == aten::split || node->kind() == aten::chunk;
   }
 
   // in places where op can be fused into a consumer but chunk is in the way
@@ -397,7 +405,7 @@ struct GraphFuser {
       // TODO: Perhaps we should use cloneFrom now, as it seems unlikely
       // to copy select nodes now that we have refactored to have a Value
       // distinct from Node.
-      Node * input_chunk = graph->create(chunk->kind(), 0);
+      Node * input_chunk = block->owningGraph()->create(chunk->kind(), 0);
       input_chunk->copyAttributes(*chunk);
       input_chunk->addInput(input);
       insertAt(&insertion_point, input_chunk);
@@ -416,7 +424,7 @@ struct GraphFuser {
     // apply the op to each chunk of the chunked operands,
     // and then rewrite the graph to use them!
     for (auto chunk_sel : chunk->outputs()) {
-      Node * chunked_op = graph->create(producer_for_chunk_node->kind());
+      Node * chunked_op = block->owningGraph()->create(producer_for_chunk_node->kind());
       chunked_op->copyAttributes(*producer_for_chunk_node);
       // Invariant: mappable operators always produce contiguous output
       chunked_op->output()->setType(chunk_sel->type()->cast<TensorType>()->contiguous());
@@ -433,14 +441,17 @@ struct GraphFuser {
 
   // returns where to continue scanning, and whether any fusion was made
   std::pair<graph_node_list::iterator, bool> scanNode(Node * consumer) {
-    auto stage_guard = graph->setStageTemporary(consumer->stage());
+    auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
     if(isFusableAsExitNode(consumer)) {
       // handle inputs in reverse topological order as well...
       // otherwise in f(a,a+b) it will appear a is used twice if we consider
       // the f-a fusion before the f-(a+b) fusion first.
-      value_list inputs = consumer->inputs();
-      for(auto i : inputs) {
-        JIT_ASSERT(topological_index.count(i->node()) > 0);
+      value_list inputs;
+      for(auto i : consumer->inputs()) {
+        if (i->node()->owningBlock() == block) {
+          inputs.push_back(i);
+          JIT_ASSERT(topological_index.count(i->node()) > 0);
+        }
       }
       std::sort(inputs.begin(), inputs.end(), [&](Value * a, Value * b) {
         return topological_index.at(a->node()) > topological_index.at(b->node());
@@ -465,15 +476,14 @@ struct GraphFuser {
   }
 
   void run() {
-    for(auto p : graph->inputs()) {
+    for(auto p : block->inputs()) {
       topological_index[p->node()] = 0;
     }
     size_t i = 1;
-    auto nodes = graph->nodes();
-    for(auto consumer : nodes) {
+    for(auto consumer : block->nodes()) {
       topological_index[consumer] = i++;
     }
-    topological_index[graph->return_node()] = i++;
+    topological_index[block->return_node()] = i++;
 
     // Run the pass until no changes are made.
     // This is neccessary, because the algorithm can miss out on certain fusion
@@ -494,10 +504,15 @@ struct GraphFuser {
     bool any_changed = true;
     while (any_changed) {
       any_changed = false;
-      for (auto it = nodes.rbegin(); it != nodes.rend();) {
+      for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
         bool changed;
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
+      }
+    }
+    for (Node * node : block->nodes()) {
+      for (Block * sub_block : node->blocks()) {
+        GraphFuser(sub_block).run();
       }
     }
   }
@@ -506,7 +521,7 @@ struct GraphFuser {
 } // anonymous namespace
 
 void FuseGraph(std::shared_ptr<Graph>& graph) {
-  GraphFuser(graph).run();
+  GraphFuser(graph->block()).run();
 }
 
 }}

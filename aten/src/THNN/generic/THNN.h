@@ -381,16 +381,19 @@ TH_API void THNN_(MultiMarginCriterion_updateOutput)(
           bool sizeAverage,
           int p,
           THTensor* weights,      // [OPTIONAL]
-          accreal margin);
+          accreal margin,
+          bool reduce);
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
+          THTensor *gradOutput,
           THTensor *gradInput,
           bool sizeAverage,
           int p,
           THTensor *weights,      // [OPTIONAL]
-          accreal margin);
+          accreal margin,
+          bool reduce);
 
 TH_API void THNN_(PReLU_updateOutput)(
           THNNState *state,
@@ -852,8 +855,8 @@ TH_API void THNN_(BatchNormalization_updateOutput)(
           THTensor *output,
           THTensor *weight,       // [OPTIONAL]
           THTensor *bias,         // [OPTIONAL]
-          THTensor *running_mean,
-          THTensor *running_var,
+          THTensor *running_mean, // [OPTIONAL] if train
+          THTensor *running_var,  // [OPTIONAL] if train
           THTensor *save_mean,
           THTensor *save_std,
           bool train,
@@ -867,10 +870,10 @@ TH_API void THNN_(BatchNormalization_backward)(
           THTensor *gradWeight,   // [OPTIONAL]
           THTensor *gradBias,     // [OPTIONAL]
           THTensor *weight,       // [OPTIONAL]
-          THTensor *running_mean,
-          THTensor *running_var,
-          THTensor *save_mean,
-          THTensor *save_std,
+          THTensor *running_mean, // [OPTIONAL] if train
+          THTensor *running_var,  // [OPTIONAL] if train
+          THTensor *save_mean,    // [OPTIONAL] if !train
+          THTensor *save_std,     // [OPTIONAL] if !train
           bool train,
           double scale,
           double eps);
@@ -1315,6 +1318,20 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
           int padding_mode);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
+          THNNState *state,
+          THTensor *input, THTensor *gradInput,
+          THTensor *grid, THTensor *gradGrid,
+          THTensor *gradOutput,
+          int padding_mode);
+
+TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
+          THNNState *state,
+          THTensor *input,
+          THTensor *grid,
+          THTensor *output,
+          int padding_mode);
+
+TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           THNNState *state,
           THTensor *input, THTensor *gradInput,
           THTensor *grid, THTensor *gradGrid,

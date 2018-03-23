@@ -1,3 +1,5 @@
+#!/bin/bash
+
 . ./common.sh
 
 test_cpu_speed_mini_sequence_labeler () {
@@ -10,12 +12,12 @@ test_cpu_speed_mini_sequence_labeler () {
 
   cd benchmark/
 
-  git checkout 80afabc258994bbe43845d2ee7acf8498c294777
+  git checkout 726567a455edbfda6199445922a8cfee82535664
 
   cd scripts/mini_sequence_labeler
 
   SAMPLE_ARRAY=()
-  NUM_RUNS=20
+  NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
     runtime=$(get_runtime_of_command "python main.py")
@@ -28,12 +30,13 @@ test_cpu_speed_mini_sequence_labeler () {
   echo "Runtime stats in seconds:"
   echo $stats
 
-  if [ "$1" == "compare_with_baseline" ]; then
-    python ../compare_with_baseline.py ${FUNCNAME[0]} "${stats}"
+  if [ "$2" == "compare_with_baseline" ]; then
+    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}"
+  elif [ "$2" == "compare_and_update" ]; then
+    python ../compare_with_baseline.py --test-name ${FUNCNAME[0]} --sample-stats "${stats}" --update
   fi
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   run_test test_cpu_speed_mini_sequence_labeler "$@"
 fi
-

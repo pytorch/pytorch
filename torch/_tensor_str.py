@@ -23,20 +23,20 @@ def set_printoptions(
         linewidth=None,
         profile=None,
 ):
-    """Set options for printing. Items shamelessly taken from Numpy
+    r"""Set options for printing. Items shamelessly taken from NumPy
 
     Args:
         precision: Number of digits of precision for floating point output
-            (default 8).
+            (default = 8).
         threshold: Total number of array elements which trigger summarization
-            rather than full repr (default 1000).
+            rather than full `repr` (default = 1000).
         edgeitems: Number of array items in summary at beginning and end of
-            each dimension (default 3).
+            each dimension (default = 3).
         linewidth: The number of characters per line for the purpose of
-            inserting line breaks (default 80). Thresholded matricies will
+            inserting line breaks (default = 80). Thresholded matricies will
             ignore this parameter.
         profile: Sane defaults for pretty printing. Can override with any of
-            the above options. (default, short, full)
+            the above options. (any one of `default`, `short`, `full`)
     """
     if profile is not None:
         if profile == "default":
@@ -92,7 +92,7 @@ def _number_format(tensor, min_sz=-1):
     int_mode = True
     # TODO: use fmod?
     for value in tensor:
-        if value != math.ceil(value):
+        if value != math.ceil(value.item()):
             int_mode = False
             break
 
@@ -196,12 +196,12 @@ def __repr_row(row, indent, fmt, scale, sz, truncate=None):
     if truncate is not None:
         dotfmt = " {:^5} "
         return (indent +
-                ' '.join(fmt.format(val / scale) for val in row[:truncate]) +
+                ' '.join(fmt.format(val.item() / scale) for val in row[:truncate]) +
                 dotfmt.format('...') +
-                ' '.join(fmt.format(val / scale) for val in row[-truncate:]) +
+                ' '.join(fmt.format(val.item() / scale) for val in row[-truncate:]) +
                 '\n')
     else:
-        return indent + ' '.join(fmt.format(val / scale) for val in row) + '\n'
+        return indent + ' '.join(fmt.format(val.item() / scale) for val in row) + '\n'
 
 
 def _matrix_str(self, indent='', formatter=None, force_truncate=False):
@@ -232,7 +232,7 @@ def _matrix_str(self, indent='', formatter=None, force_truncate=False):
             for l in range(self.size(0)):
                 strt += indent + (' ' if scale != 1 else '')
                 row_slice = self[l, firstColumn:lastColumn + 1]
-                strt += ' '.join(fmt.format(val / scale) for val in row_slice)
+                strt += ' '.join(fmt.format(val.item() / scale) for val in row_slice)
                 strt += '\n'
             firstColumn = lastColumn + 1
     else:
@@ -277,31 +277,39 @@ def _vector_str(self):
         ident = ' '
     if self.numel() < PRINT_OPTS.threshold:
         return (strt +
-                '\n'.join(ident + fmt.format(val / scale) for val in self) +
+                '\n'.join(ident + fmt.format(val.item() / scale) for val in self) +
                 '\n')
     else:
         return (strt +
-                '\n'.join(ident + fmt.format(val / scale) for val in self[:n]) +
+                '\n'.join(ident + fmt.format(val.item() / scale) for val in self[:n]) +
                 '\n' + (ident + dotfmt.format(u"\u22EE")) +
-                '\n'.join(ident + fmt.format(val / scale) for val in self[-n:]) +
+                '\n'.join(ident + fmt.format(val.item() / scale) for val in self[-n:]) +
                 '\n')
 
 
 def _str(self, include_footer=True):
-    if self.ndimension() == 0:
+    if self.is_sparse:
+        size_str = str(tuple(self.shape)).replace(' ', '')
+        return '{} of size {} with indices:\n{}and values:\n{}'.format(
+            self.type(), size_str, self._indices(), self._values())
+
+    empty = self.numel() == 0
+    dim = self.dim()
+
+    if empty:
         strt = ''
-    elif self.ndimension() == 1:
+    elif dim == 0:
+        strt = _vector_str(self.unsqueeze(0))
+    elif dim == 1:
         strt = _vector_str(self)
-    elif self.ndimension() == 2:
+    elif dim == 2:
         strt = _matrix_str(self)
     else:
         strt = _tensor_str(self)
 
     if include_footer:
-        size_str = 'x'.join(str(size) for size in self.size())
-        size_str_prefix = 'of size ' if self.ndimension() > 0 else 'with no dimension'
+        size_str = str(tuple(self.shape)).replace(' ', '')
         device_str = '' if not self.is_cuda else \
             ' (GPU {})'.format(self.get_device())
-        strt += '[{} {}{}{}]\n'.format(torch.typename(self), size_str_prefix,
-                                       size_str, device_str)
+        strt += '[{} of size {}{}]\n'.format(self.type(), size_str, device_str)
     return '\n' + strt

@@ -6,7 +6,7 @@ from itertools import product
 
 import torch
 import torch.cuda
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors, contiguous
 import torch.backends.cudnn
@@ -263,24 +263,21 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
-    output = Variable(torch.zeros(out_size).type_as(input))
+    output = torch.zeros(out_size).type_as(input)
 
     if weight is None:
-        weight = Variable(torch.ones(C).type_as(input))
-    if torch.is_tensor(weight):
-        # TODO: remove this once Variables and tensors merge
-        weight = Variable(weight)
-    total_weight_data = 0
+        weight = torch.ones(C).type_as(input)
+    total_weight = 0
     for tup in product(*[range(size) for size in out_size]):
         t_nx = target[tup]
-        norm = 0. if ignore_index == t_nx else weight[t_nx]
+        norm = 0. if ignore_index == t_nx else weight[t_nx].item()
         input_index = list(tup)
         input_index.insert(1, t_nx)
         output[tup] = -input[tuple(input_index)] * norm
-        total_weight_data += norm
+        total_weight += norm
 
     if reduce and size_average:
-        return output.sum() / total_weight_data
+        return output.sum() / total_weight
     elif reduce:
         return output.sum()
     return output
@@ -291,23 +288,15 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
 
     def nll_loss_helper(input, target, weight, ignore_index):
         if target == ignore_index:
-            return (variable(0), variable(0))
+            return (0, 0)
         norm = 1 if weight is None else weight[target]
         result = -input[target] * norm
         return (result, norm)
 
-    if torch.is_tensor(weight):
-        # TODO: remove this once Variables and tensors merge
-        weight = Variable(weight)
     losses_and_weights = [nll_loss_helper(i, t, weight, ignore_index)
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
-    if isinstance(losses[0], Variable):
-        losses_tensor = torch.stack(losses).type_as(input)
-        if not torch._C._with_scalars():
-            losses_tensor = losses_tensor.squeeze(1)
-    else:
-        losses_tensor = torch.Tensor(losses).type_as(input)
+    losses_tensor = input.new_tensor(losses)
     if reduce and size_average:
         return sum(losses_tensor) / sum(weights)
     elif reduce:
@@ -365,11 +354,6 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
 
 
 def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
-    # needed for legacy tests
-    if not isinstance(input, Variable):
-        input = Variable(input)
-        target = Variable(target)
-
     margin_clamp = (margin - input).clamp(min=0).type_as(input)
     output = torch.where(target == 1, input, margin_clamp)
 
@@ -390,6 +374,80 @@ def softmarginloss_reference(input, target, size_average=True, reduce=True):
     return output
 
 
+def _multimarginloss_reference(input, target_idx, p, margin, weight):
+    if weight is None:
+        weight = input.new(len(input)).fill_(1)
+
+    output = 0
+    for i in range(0, len(input)):
+        if i != target_idx:
+            output += max(0, weight[target_idx] * (margin - input[target_idx] + input[i]) ** p)
+    return output
+
+
+def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_average=True,
+                              reduce=True):
+    if input.dim() == 1:
+        n = 1
+        dim = input.size(0)
+        output = input.new(1)
+        output[0] = _multimarginloss_reference(input, target[0], p, margin, weight) / dim
+        return output
+    else:
+        n = input.size(0)
+        dim = input.size(1)
+        output = input.new(n)
+        for x in range(0, n):
+            output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
+
+        if reduce and size_average:
+            return output.mean() / dim
+        elif reduce:
+            return output.sum() / dim
+        return output / dim
+
+
+def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+    def _cos(a, b):
+        cos = a.new(a.size(0))
+        for i in range(0, a.size(0)):
+            cos[i] = (a[i] * b[i]).sum() / ((((a[i] * a[i]).sum() + 1e-12) * ((b[i] * b[i]).sum() + 1e-12)) ** 0.5)
+        return cos
+
+    output = torch.where(target == 1, 1 - _cos(input1, input2), (_cos(input1, input2) - margin).clamp(min=0))
+
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
+def tripletmarginloss_reference(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False,
+                                size_average=True, reduce=True):
+    d_p = torch.pairwise_distance(anchor, positive, p, eps)
+    d_n = torch.pairwise_distance(anchor, negative, p, eps)
+    if swap:
+        d_s = torch.pairwise_distance(positive, negative, p, eps)
+        d_n = torch.min(d_n, d_s)
+
+    output = torch.clamp(margin + d_p - d_n, min=0.0)
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
+def marginrankingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+    output = (-target * (input1 - input2) + margin).clamp(min=0)
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -398,28 +456,12 @@ loss_reference_fns = {
     'MultiLabelMarginLoss': multilabelmarginloss_reference,
     'HingeEmbeddingLoss': hingeembeddingloss_reference,
     'SoftMarginLoss': softmarginloss_reference,
+    'MultiMarginLoss': multimarginloss_reference,
+    'CosineEmbeddingLoss': cosineembeddingloss_reference,
+    'TripletMarginLoss': tripletmarginloss_reference,
+    'MarginRankingLoss': marginrankingloss_reference,
 }
 
-
-sample_scalar = variable(0)
-
-
-# TODO: replace this with torch.rand() when Variables and tensors are merged;
-# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_rand(sizes, requires_grad=False):
-    if len(sizes) == 0:
-        return torch.testing.rand_like(sample_scalar, requires_grad=requires_grad)
-    else:
-        return Variable(torch.rand(*sizes), requires_grad=requires_grad)
-
-
-# TODO: replace this with torch.randn() when Variables and tensors are merged;
-# this function will correctly handle scalars (i.e. empty tuple sizes) for now.
-def torch_randn(sizes, requires_grad=False):
-    if len(sizes) == 0:
-        return torch.testing.randn_like(sample_scalar, requires_grad=requires_grad)
-    else:
-        return Variable(torch.randn(*sizes), requires_grad=requires_grad)
 
 criterion_tests = [
     dict(
@@ -558,20 +600,61 @@ criterion_tests = [
         module_name='MultiLabelSoftMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        check_gradgrad=False,
-    ),
-    dict(
-        module_name='MultiLabelSoftMarginLoss',
-        constructor_args_fn=lambda: (torch.rand(10),),
-        input_size=(5, 10),
-        target_fn=lambda: torch.rand(5, 10).mul(2).floor(),
-        desc='weights',
+        reference_fn=lambda i, t, m: -(t * i.sigmoid().log() + (1 - t) * (-i).sigmoid().log()).sum() / i.numel(),
         check_gradgrad=False,
     ),
     dict(
         module_name='MultiMarginLoss',
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        input_size=(10,),
+        target_fn=lambda: torch.rand(1).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+        desc='1d',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(2,),
+        input_fn=lambda: torch.rand(5, 10).clamp_(1e-2, 1 - 1e-2),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, p=2, size_average=get_size_average(m)),
+        desc='p',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(1, 0.5),
+        legacy_constructor_args=(1, None, 0.5),
+        input_size=(5, 10),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
+        desc='margin',
+        check_no_size_average=True,
+        check_gradgrad=False,
+    ),
+    dict(
+        module_name='MultiMarginLoss',
+        constructor_args=(1, 1, torch.rand(10)),
+        legacy_constructor_args=(1, torch.rand(10)),
+        input_size=(5, 10),
+        target_fn=lambda: torch.rand(5).mul(8).floor().long(),
+        reference_fn=lambda i, t, m:
+            multimarginloss_reference(i, t, weight=get_weight(m), size_average=get_size_average(m)),
+        desc='weights',
+        check_no_size_average=True,
         check_gradgrad=False,
     ),
     dict(
@@ -594,27 +677,35 @@ criterion_tests = [
         module_name='CosineEmbeddingLoss',
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
-        check_gradgrad=False,
+        reference_fn=lambda i, t, m:
+            cosineembeddingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
+        check_no_size_average=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
         constructor_args=(0.7,),
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
+        reference_fn=lambda i, t, m:
+            cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, size_average=get_size_average(m)),
         desc='margin',
-        check_gradgrad=False,
-    ),
-    dict(
-        module_name='MarginRankingLoss',
-        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
-        target_fn=lambda: torch.randn(50).sign(),
         check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',
-        constructor_args=(2,),
         input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target_fn=lambda: torch.randn(50).sign(),
+        reference_fn=lambda i, t, m:
+            marginrankingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
+        check_no_size_average=True,
+    ),
+    dict(
+        module_name='MarginRankingLoss',
+        constructor_args=(0.5,),
+        input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
+        target_fn=lambda: torch.randn(50).sign(),
+        reference_fn=lambda i, t, m:
+            marginrankingloss_reference(i[0], i[1], t, margin=0.5, size_average=get_size_average(m)),
         desc='margin',
         check_no_size_average=True,
     ),
@@ -680,7 +771,7 @@ class NNTestCase(TestCase):
 
             if jacobian_input:
                 for jacobian_x, d_x in zip(flat_jacobian_input, iter_tensors(d_input)):
-                    jacobian_x[:, i] = d_x
+                    jacobian_x[:, i] = d_x.contiguous().view(-1)
             if jacobian_parameters:
                 jacobian_param[:, i] = torch.cat(self._flatten_tensors(d_param), 0)
 
@@ -705,15 +796,16 @@ class NNTestCase(TestCase):
             res += get_numerical_jacobian(fw, input, input, eps=1e-6),
         if jacobian_parameters:
             param, _ = self._get_parameters(module)
-            res += torch.cat(list(get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param), 0),
+            res += torch.cat([get_numerical_jacobian(fw, input, p, eps=1e-6) for p in param], 0),
         return res
 
     def check_jacobian(self, module, input, jacobian_input=True):
         jacobian_parameters = bool(self._get_parameters(module)[0])
         analytical = self._analytical_jacobian(module, input, jacobian_input, jacobian_parameters)
         numerical = self._numerical_jacobian(module, input, jacobian_input, jacobian_parameters)
-        analytical_t = iter_tensors(analytical)
-        numerical_t = iter_tensors(numerical)
+        analytical_t = list(iter_tensors(analytical))
+        numerical_t = list(iter_tensors(numerical))
+
         # TODO: compare structure
         self.assertLessEqual(
             max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
@@ -732,7 +824,7 @@ class NNTestCase(TestCase):
             x = x.view(-1)
             d_x = d_x.view(-1)
             for i in range(x.nelement()):
-                original = x[i]
+                original = x[i].item()
                 x[i] = original + eps
                 fx1 = self._forward_criterion(criterion, input, target)
                 x[i] = original - eps
@@ -742,8 +834,9 @@ class NNTestCase(TestCase):
                 x[i] = original
 
         # TODO: check structure
-        analytical_t = iter_tensors(analytical_d_x)
-        numerical_t = iter_tensors(numerical_d_x)
+        analytical_t = list(iter_tensors(analytical_d_x))
+        numerical_t = list(iter_tensors(numerical_d_x))
+
         self.assertLessEqual(
             max(a.add(-1, n).abs().max() for a, n in zip(analytical_t, numerical_t)),
             PRECISION
@@ -821,7 +914,7 @@ class TestBase(object):
                     elif torch.is_tensor(sizes):
                         return Variable(sizes.double())
                     else:
-                        return torch_randn(sizes)
+                        return torch.randn(sizes)
 
                 self._arg_cache[name] = map_tensor_sizes(self._extra_kwargs[size_name])
 
@@ -890,13 +983,8 @@ class ModuleTest(TestBase):
         test_case._zero_grad_input(input)
         with freeze_rng_state():
             output = test_case._forward(module, input)
-            grad_output = output
-            if isinstance(grad_output, Variable):
-                grad_output = grad_output.data.clone()
-            else:
-                grad_output = grad_output.clone()
-                output = output.clone()
-            grad_output.normal_()
+            grad_output = output.new(output.shape).normal_()
+            output = output.clone()
             d_input = deepcopy(test_case._backward(module, input, output, grad_output))
             d_param = deepcopy(test_case._get_parameters(module)[1])
 
@@ -924,7 +1012,7 @@ class ModuleTest(TestBase):
             raise unittest.SkipTest('Excluded from CUDA tests')
         try:
             cpu_input = self._get_input()
-            type_map = {torch.DoubleTensor: torch.cuda.FloatTensor}
+            type_map = {'torch.DoubleTensor': torch.cuda.FloatTensor}
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
             cpu_module = self.constructor(*self.constructor_args)
@@ -1031,6 +1119,8 @@ class CriterionTest(TestBase):
             out = test_case._forward_criterion(module, input, target)
             expected_out = self.reference_fn(deepcopy(input),
                                              deepcopy(target), module)
+            if isinstance(expected_out, Variable):
+                expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
 
         test_case.check_criterion_jacobian(module, input, target)
@@ -1042,7 +1132,7 @@ class CriterionTest(TestBase):
         try:
             cpu_input = self._get_input()
             type_map = {
-                torch.DoubleTensor: torch.cuda.FloatTensor,
+                'torch.DoubleTensor': torch.cuda.FloatTensor,
             }
             gpu_input = to_gpu(cpu_input, type_map=type_map)
 
@@ -1056,8 +1146,9 @@ class CriterionTest(TestBase):
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
             test_case.assertEqual(cpu_output, gpu_output, 4e-4)
 
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target)
+            gradOutput = torch.randn(())
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, gradOutput)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, gradOutput)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 4e-4)
         except NotImplementedError:
             pass

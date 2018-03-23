@@ -4,7 +4,7 @@ from .Criterion import Criterion
 
 class MarginRankingCriterion(Criterion):
 
-    def __init__(self, margin=1, sizeAverage=True):
+    def __init__(self, margin=0, sizeAverage=True):
         super(MarginRankingCriterion, self).__init__()
         self.margin = margin
         self.sizeAverage = sizeAverage
@@ -29,7 +29,7 @@ class MarginRankingCriterion(Criterion):
 
             self._output.clamp_(min=0)
 
-            self.output = self._output.sum()
+            self.output = self._output.sum().item()
 
             if self.sizeAverage:
                 self.output = self.output / y.size(0)
@@ -55,9 +55,7 @@ class MarginRankingCriterion(Criterion):
             dist.mul_(-1).mul_(y)
             dist.add_(self.margin)
 
-            if self.mask is None:
-                self.mask = input[0].new()
-            self.mask = self.mask.resize_as_(input[0]).copy_(dist)
+            self.mask = dist > 0
             mask = self.mask
 
             torch.ge(dist, 0, out=mask)

@@ -32,54 +32,6 @@
     - CONSTANT NULL
 ]]
 [[
-  name: zeros
-  variants:
-    - function
-  aten_sparse: True
-  auto_gpu: False
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THSize* size
-      long_args: True
-]]
-[[
-  name: zeros_like
-  cname: zerosLike
-  aten_sparse: True
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
-]]
-[[
-  name: ones
-  variants:
-    - function
-  auto_gpu: False
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THSize* size
-      long_args: True
-]]
-[[
-  name: ones_like
-  cname: onesLike
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* input
-]]
-[[
   name: numel
   return: long
   cname: nElement
@@ -265,6 +217,7 @@
   cname: newClone
   return: THTensor*
   aten_sparse: True
+  cpu_half: True
   arguments:
     - THTensor* self
 ]]
@@ -305,8 +258,7 @@
     - THIndexTensor* index
 ]]
 [[
-  name: indexCopy_
-  python_name: index_copy_
+  name: _indexCopy_
   cname: indexCopy
   return: argument 0
   arguments:
@@ -391,7 +343,8 @@
     - long step
 ]]
 [[
-  name: range
+  name: _range
+  cname: range
   variants:
     - function
   backends:
@@ -411,7 +364,7 @@
       default: 1
 ]]
 [[
-  name: arange
+  name: _arange
   variants:
     - function
   backends:
@@ -528,7 +481,6 @@
   name: __iand__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitand
@@ -568,7 +520,6 @@
   name: __ior__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitor
@@ -608,7 +559,6 @@
   name: __ixor__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: bitxor
@@ -648,7 +598,6 @@
   name: __ilshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: lshift
@@ -688,7 +637,6 @@
   name: __irshift__
   variants:
     - method
-    - function
   return: argument 0
   options:
     - cname: rshift
@@ -2208,8 +2156,6 @@
 ]]
 [[
   name: pow
-  types:
-    - floating_point
   variants:
     - method
     - function
@@ -2232,8 +2178,6 @@
 ]]
 [[
   name: pow
-  types:
-    - floating_point
   variants:
     - function
   return: argument 0
@@ -2247,11 +2191,6 @@
 ]]
 [[
   name: pow_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
   return: argument 0
   cname: pow
   options:
@@ -2304,7 +2243,8 @@
     - real weight
 ]]
 [[
-  name: linspace
+  name: _linspace
+  cname: linspace
   types:
     - Float
     - Double
@@ -2322,7 +2262,8 @@
       default: 100
 ]]
 [[
-  name: logspace
+  name: _logspace
+  cname: logspace
   types:
     - Float
     - Double
@@ -2370,7 +2311,7 @@
     - THTensor* self
 ]]
 [[
-  name: sum
+  name: _sumall
   variants:
     - method
     - function
@@ -2379,6 +2320,13 @@
       return: accreal
       arguments:
         - THTensor* self
+]]
+[[
+  name: _sum
+  variants:
+    - method
+    - function
+  options:
     - cname: sum
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -2392,7 +2340,7 @@
           default: "false"
 ]]
 [[
-  name: prod
+  name: _prodall
   variants:
     - method
     - function
@@ -2401,6 +2349,13 @@
       return: accreal
       arguments:
         - THTensor* self
+]]
+[[
+  name: _prod
+  variants:
+    - method
+    - function
+  options:
     - cname: prod
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -2891,21 +2846,6 @@
     - THTensor* self
     - THTensor* other
     - arg: long dim
-      default: -1
-]]
-[[
-  name: eye
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - long n
-    - arg: long m
       default: -1
 ]]
 [[
@@ -3718,21 +3658,6 @@
     - THIntegerTensor* LU_pivots
 ]]
 [[
-  name: randperm
-  backends:
-    - CPU
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - long n
-]]
-[[
   name: random_
   backends:
     - CPU
@@ -3918,44 +3843,6 @@
       default: 1
 ]]
 [[
-  name: rand
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - arg: THSize* size
-      long_args: True
-]]
-[[
-  name: randn
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - arg: THGenerator* generator
-      default: nullptr
-      kwarg_only: True
-    - arg: THSize* size
-      long_args: True
-]]
-[[
   name: geometric_
   backends:
     - CPU
@@ -4119,7 +4006,7 @@
 
 [[
   name: as_strided_
-  variants: [method,function]
+  variants: [method]
   cpu_half: True
   return: argument 0
   arguments:
@@ -4174,19 +4061,7 @@
       output: True
     - TensorList tensors
     - arg: int64_t dim
-      wrap_dim: tensors
       default: 0
-]]
-
-[[
-  name: reshape_
-  cname: resize
-  cpu_half: True
-  return: self
-  arguments:
-    - THTensor* self
-    - arg: THSize* size
-    - arg: THStride* stride
 ]]
 
 [[

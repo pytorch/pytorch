@@ -88,14 +88,14 @@ class SpatialFullConvolution(Module):
             tW = targetTensor.size(tDims - 1)
             adjW = self._calculateAdj(tW, self.kW, self.padW, self.dW)
             adjH = self._calculateAdj(tH, self.kH, self.padH, self.dH)
-            if self.finput is None:
+            if not hasattr(self, 'finput') or self.finput is None:
                 self.finput = input[0].new()
-            if self.fgradInput is None:
+            if not hasattr(self, 'fgradInput') or self.fgradInput is None:
                 self.fgradInput = input[0].new()
         else:
-            if self.finput is None:
+            if not hasattr(self, 'finput') or self.finput is None:
                 self.finput = input.new()
-            if self.fgradInput is None:
+            if not hasattr(self, 'fgradInput') or self.fgradInput is None:
                 self.fgradInput = input.new()
 
         inputTensor = self._makeContiguous(inputTensor)

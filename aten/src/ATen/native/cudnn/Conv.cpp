@@ -80,7 +80,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 #include <functional>
 #include <iterator>

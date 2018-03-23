@@ -5,60 +5,74 @@
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
+#include <algorithm>
+
 namespace torch { namespace jit {
 
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-std::unordered_set<Symbol> differentiable_kinds = {
-  kadd, ksub, kmul, kConstant, kReplaceIfUndef,
-  ksigmoid, ktanh, kmm, kchunk, ksplit, kt
-};
-
 bool isDifferentiable(Node * n) {
+  // TODO: unsqueeze!
+  static std::unordered_set<Symbol> differentiable_kinds = {
+    aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
+    aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
+    aten::unsqueeze
+  };
   return differentiable_kinds.count(n->kind()) > 0;
 }
+
+bool isDifferentiable(Graph & g) {
+  return std::all_of(g.nodes().begin(), g.nodes().end(),
+                     static_cast<bool(*)(Node*)>(isDifferentiable));
+}
+
 
 static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_values) {
   const auto build_sym_grad = [node](const std::vector<SymbolicVariable>& grads) -> std::vector<SymbolicVariable> {
     auto inputs = fmap<SymbolicVariable>(node->inputs());
     auto outputs = fmap<SymbolicVariable>(node->outputs());
     switch(node->kind()) {
-      case kadd:
+      case aten::add:
         // o = a - alpha*other
         if(inputs.size() == 1)
           return { grads.at(0) };
           // o = a + alpha*b
-        return {grads.at(0), grads.at(0) * at::Scalar(node->t(kalpha)) };
-      case ksub:
+        return {grads.at(0), grads.at(0) * at::Scalar(node->t(attr::alpha)) };
+      case aten::sub:
         // o = a - alpha*other
         if(inputs.size() == 1)
           return {grads.at(0)};
         // o = a - alpha*b
-        return {grads.at(0), -grads.at(0) * at::Scalar(node->t(kalpha))};
-      case kmul:
+        return {grads.at(0), -grads.at(0) * at::Scalar(node->t(attr::alpha))};
+      case aten::mul:
         // o = a * other
         if(inputs.size() == 1)
-          return {grads.at(0) * at::Scalar(node->t(kother))};
+          return {grads.at(0) * at::Scalar(node->t(attr::other))};
         // o = a * b
         return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
-      case kConstant:
+      case prim::Constant:
         return {};
-      case kReplaceIfUndef:
+      case prim::ReplaceIfUndef:
         return {grads.at(0), grads.at(0)};
-      case ksigmoid:
+      case aten::sigmoid:
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
-      case ktanh:
+      case aten::tanh:
         return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
-      case kchunk:
-      case ksplit:
-        return {SymbolicVariable::cat(grads, node->i(kdim))};
-      case kt:
+      case aten::chunk:
+      case aten::split:
+        return {SymbolicVariable::cat(grads, node->i(attr::dim))};
+      case aten::t:
         return {grads.at(0).t()};
-      case kmm:
+      case aten::neg:
+        return {-grads.at(0)};
+      case aten::view:
+        return {grads.at(0).view(inputs.at(0).sizes())};
+      case aten::unsqueeze:
+        return {grads.at(0).squeeze(node->i(attr::dim))};
+      case aten::mm: {
         SymbolicVariable dmat1, dmat2;
-        if (inputs.at(0).value()->hasType()) {
-          auto type = inputs.at(0).value()->type()->expect<TensorType>();
+        if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {
           auto sizes = type->sizes(), strides = type->strides();
           if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
             dmat1 = inputs.at(1).mm(grads.at(0).t()).t();
@@ -68,8 +82,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         } else {
           dmat1 = grads.at(0).mm(inputs.at(1).t());
         }
-        if (inputs.at(1).value()->hasType()) {
-          auto type = inputs.at(1).value()->type()->expect<TensorType>();
+        if (auto type = inputs.at(1).value()->type()->cast<TensorType>()) {
           auto sizes = type->sizes(), strides = type->strides();
           if (strides.at(0) == 1 && strides.at(1) == sizes.at(0)) {
             dmat2 = grads.at(0).t().mm(inputs.at(0)).t();
@@ -80,10 +93,77 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
           dmat2 = grads.at(0).mm(inputs.at(1).t());
         }
         return {dmat1, dmat2};
+      }
+      case aten::expand: {
+        const auto& input_sizes = inputs.at(0).sizes();
+        if (input_sizes.size() == 0)
+          return {grads.at(0).sum()};
+        auto grad_sizes = node->is(attr::size);
+        auto grad = grads.at(0);
+        while (grad_sizes.size() > input_sizes.size()) {
+          grad = grad.sum(0, false);
+          grad_sizes.erase(grad_sizes.begin());
+        }
+        for (size_t i = 0; i < input_sizes.size(); ++i) {
+          if (input_sizes[i] == 1 && grad_sizes[i] > 1) {
+            grad = grad.sum(i, true);
+          }
+        }
+        return {grad};
+      }
+      case aten::squeeze: {
+        const auto& sizes = inputs.at(0).sizes();
+        if (node->hasAttribute(attr::dim)) {
+          int dim = node->i(attr::dim);
+          return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim)};
+        } else {
+          std::vector<size_t> squeezed_dims;
+          for (size_t i = 0; i < sizes.size(); ++i) {
+            if (sizes[i] != 1) continue;
+            squeezed_dims.push_back(i);
+          }
+          SymbolicVariable returned_grad = grads.at(0);
+          for (auto it = squeezed_dims.rbegin(); it != squeezed_dims.rend(); ++it)
+            returned_grad = returned_grad.unsqueeze(*it);
+          return {returned_grad};
+        }
+      }
+      case aten::cat: {
+        int dim = node->i(attr::dim);
+        const auto& first_sizes = inputs.at(0).sizes();
+        const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
+          return var.sizes() == first_sizes;
+        };
+        // NB: this is a specialization for the common case where all inputs are
+        // of equal sizes. We can use a single split operation to handle that.
+        if (std::all_of(inputs.begin(), inputs.end(), has_first_sizes)) {
+          return grads.at(0).chunk(inputs.size(), dim);
+        } else {
+          size_t offset = 0;
+          auto grad = grads.at(0);
+          std::vector<SymbolicVariable> returned_grads;
+          for (auto input : inputs) {
+            returned_grads.push_back(grad.narrow(dim, offset, input.sizes()[dim]));
+            offset += input.sizes()[dim];
+          }
+          return returned_grads;
+        }
+      }
     }
     throw std::runtime_error(std::string("don't support differentiation of `") +
-                            node->kind().toString() + "`");
+                            node->kind().toDisplayString() + "`");
   };
+  const auto has_tensor_type = [](Value *v) { return v->isTensor(); };
+  if (!isDifferentiable(node)) {
+    throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
+                             "is not supported, or it is missing necessary type information");
+  }
+  if (!std::all_of(node->inputs().begin(), node->inputs().end(), has_tensor_type) ||
+      !std::all_of(node->outputs().begin(), node->outputs().end(), has_tensor_type)) {
+    throw std::runtime_error("differentiate should be called with a graph where every value "
+                             "has a type registered");
+
+  }
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
 }
@@ -111,15 +191,15 @@ static value_set findAllRequiresGradNodes(
 }
 
 static Value* createZerosLike(Value *v) {
-  JIT_EXPECTM(v->hasType(), "can't allocate zero gradient for a value without a type");
+  JIT_EXPECTM(v->isTensor(), "can't allocate zero gradient for a value without a type");
   Graph *graph = v->owningGraph();
   auto type = v->type()->expect<TensorType>();
   AutoGPU gpu_guard(type->device());
 
   auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
-  auto zeros = at_type.zeros({1}).expand(type->sizes());
+  auto zeros = at::zeros(at_type, {1}).expand(type->sizes());
   Node *constant = graph->createConstant(zeros)
-                        ->i_(kis_zero, 1);
+                        ->i_(attr::is_zero, 1);
   graph->insertNode(constant);
   return constant->output();
 }
@@ -132,7 +212,7 @@ static Value* createZerosLike(Value *v) {
 // 'dv' is known to be undef, and the zeros will be propagated if possible.
 static Value* createUndefGuard(Value * dv, Value * alternative) {
   Graph* graph = dv->owningGraph();
-  Node * n = graph->create(kReplaceIfUndef, {dv, alternative});
+  Node * n = graph->create(prim::ReplaceIfUndef, {dv, alternative});
   return graph->insertNode(n)->output();
 }
 
@@ -161,9 +241,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   // note: reverse_node is intentionally not inserted to avoid
   // accidentally acting on it (e.g. in elminate dead code),
   // std::cout << *reverse_node << to view its state.
-  auto reverse_node = graph.create("Reverse"_sym, 0);
+  auto reverse_node = graph.create(prim::Reverse, 0);
   auto reverse_block = reverse_node->addBlock();
-  WithInsertPoint guard(graph, reverse_block);
+  WithInsertPoint guard(reverse_block);
 
   auto requires_grad_set = findAllRequiresGradNodes(graph, input_requires_grad);
   const auto requires_grad = [&](Value *v) { return requires_grad_set.count(v) > 0; };
@@ -189,7 +269,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     Value * output = outputs[i];
     if (!requires_grad(output))
       continue;
-    Value * output_grad = reverse_block->addInput()->setType(output->typeOption());
+    Value * output_grad = reverse_block->addInput()->setType(output->type());
     output_grad = createUndefGuard(output_grad, createZerosLike(output));
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
@@ -221,9 +301,9 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
 
 bool isZero(Value * v) {
   auto n = v->node();
-  return n->kind() == kConstant &&
-    n->hasAttribute(kis_zero) &&
-    n->i(kis_zero);
+  return n->kind() == prim::Constant &&
+    n->hasAttribute(attr::is_zero) &&
+    n->i(attr::is_zero);
 }
 
 // In the case where an input is routed to an output
@@ -243,7 +323,7 @@ static void passthroughUndefs(std::shared_ptr<Graph> graph) {
   bool changed = false;
   for(size_t i = 0; i < graph->outputs().size(); i++) {
       Value * v = graph->outputs()[i];
-      if(v->node()->kind() == kReplaceIfUndef) {
+      if(v->node()->kind() == prim::ReplaceIfUndef) {
         graph->return_node()->replaceInput(i, v->node()->inputs()[0]);
         changed = true;
       } else if(isZero(v)) {
@@ -349,10 +429,10 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     Value * tmp = graph.outputs().at(i);
     // Add VJP inputs only for intermediates that actually required grad.
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
-    Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->typeOption());
+    Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
     {
-      WithInsertPoint guard(graph, tmp_vjp_prev->node());
+      WithInsertPoint guard(tmp_vjp_prev->node());
       auto zeroes = createZerosLike(tmp);
       tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
     }
@@ -398,7 +478,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
   std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
-  WithInsertPoint guard(*grad_desc.f, grad_desc.f->block());
+  WithInsertPoint guard(grad_desc.f->block());
   // Fills in df_input_vjps and df_output_vjps
   auto rev_info = addReverseInline(grad_desc, requires_grad);
   // addReverseInline has to call gradientForNode if *any* of the outputs

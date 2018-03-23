@@ -23,7 +23,7 @@ class MultiLabelMarginCriterion(Criterion):
             self.sizeAverage,
             True,  # reduce
         )
-        self.output = self.output_tensor[0]
+        self.output = self.output_tensor[0].item()
         return self.output
 
     def updateGradInput(self, input, target):

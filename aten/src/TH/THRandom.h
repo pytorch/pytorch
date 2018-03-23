@@ -3,6 +3,9 @@
 
 #include "THGeneral.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
 
@@ -85,4 +88,7 @@ TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
 /* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
+#ifdef __cplusplus
+}
+#endif
 #endif

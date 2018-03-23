@@ -124,12 +124,11 @@ struct TreeToken {
   }
 
   std::vector<Node*> gatherMatMuls() {
-    static const Symbol mm_kind = "mm"_sym;
     std::vector<Node*> matmuls;
     std::vector<Node*> queue {node};
     while (!queue.empty()) {
       auto n = queue.back(); queue.pop_back();
-      if (n->kind() == mm_kind) {
+      if (n->kind() == aten::mm) {
         matmuls.push_back(n);
       } else {
         queue.push_back(n->inputs()[0]->node());
@@ -140,19 +139,16 @@ struct TreeToken {
   }
 };
 
-void BatchMM(std::shared_ptr<Graph>& graph) {
+void BatchMMBlock(Block* block) {
   enum class Side { LHS, RHS };
-  static const Symbol mm_kind = "mm"_sym;
-  static const Symbol add_kind = "add"_sym;
-  static const Symbol cat_kind = "cat"_sym;
-  static const Symbol dim_sym = "dim"_sym;
+  auto graph = block->owningGraph();
 
-  // Look for trees in the graph
+  // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
-  for (auto node : graph->nodes()) {
-    if (node->kind() == mm_kind) {
+  for (auto node : block->nodes()) {
+    if (node->kind() == aten::mm) {
       tokens[node] = TreeToken::fromMM(node);
-    } else if (node->kind() == add_kind) {
+    } else if (node->kind() == aten::add) {
       // NOTE: x + 2 is add[other={2}](%x)
       if (node->inputs().size() != 2) continue;
       Node *lhs = node->inputs()[0]->node();
@@ -169,6 +165,10 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
           lhs->output()->uses().size() == 1 && rhs->output()->uses().size() == 1) {
         if (auto token = TreeToken::unify(node, lhs_it->second, rhs_it->second))
           tokens[node] = token;
+      }
+    } else {
+      for (auto block : node->blocks()) {
+        BatchMMBlock(block);
       }
     }
   }
@@ -187,8 +187,8 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
       auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
-      Node *cat = graph->create(cat_kind, inputs)
-                       ->i_(dim_sym, cat_dim);
+      Node *cat = graph->create(aten::cat, inputs)
+                       ->i_(attr::dim, cat_dim);
       cat->insertBefore(root.node);
       cat->output()->setType(type->withSizes(cat_sizes));
       return cat->output();
@@ -196,13 +196,17 @@ void BatchMM(std::shared_ptr<Graph>& graph) {
 
     auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);
     auto rhs_batch = batch_inputs(Side::RHS, root.rhs_sizes);
-    Node *batch_mm = graph->create(mm_kind, {lhs_batch, rhs_batch});
+    Node *batch_mm = graph->create(aten::mm, {lhs_batch, rhs_batch});
     batch_mm->output()->setType(type->asShared());
     batch_mm->insertBefore(root.node);
     root.node->output()->replaceAllUsesWith(batch_mm->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.
   }
-  EliminateDeadCode(graph);
+  EliminateDeadCode(block);
+}
+
+void BatchMM(std::shared_ptr<Graph>& graph) {
+  BatchMMBlock(graph->block());
 }
 
 }}

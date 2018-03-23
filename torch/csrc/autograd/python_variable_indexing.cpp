@@ -17,8 +17,6 @@
 using namespace at;
 using namespace torch::autograd::utils;
 
-extern bool THPModule_isTensor(PyObject *obj);
-
 namespace torch { namespace autograd {
 
 Py_ssize_t THPVariable_length(PyObject* self) {
@@ -103,7 +101,7 @@ static Variable applySelect(const Variable& self, int64_t dim, int64_t index) {
 
 static Variable sequenceToVariable(const Type& type, PyObject* seq) {
   auto& idx_type = type.toScalarType(kLong);
-  return torch::utils::new_from_data(idx_type, -1, seq);
+  return torch::utils::legacy_new_from_data(idx_type, -1, seq);
 }
 
 static Variable valueToTensor(const Type & type, PyObject* value) {
@@ -115,9 +113,6 @@ static Variable valueToTensor(const Type & type, PyObject* value) {
   }
   if (PyFloat_Check(value)) {
     return type.scalarTensor(Scalar(THPUtils_unpackDouble(value)));
-  }
-  if (THPModule_isTensor(value)) {
-    return make_variable(createTensor(value), /*requires_grad=*/false);
   }
   throw TypeError("can't assign a %s to a %s", Py_TYPE(value)->tp_name, type.toString());
 }
@@ -153,8 +148,6 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       dim++;
     } else if (THPVariable_Check(obj)) {
       handle_var(reinterpret_cast<THPVariable*>(obj)->cdata);
-    } else if (THPModule_isTensor(obj)) {
-      handle_var(make_variable(createTensor(obj), /*requires_grad=*/false));
     } else if (PySequence_Check(obj)) {
       handle_var(sequenceToVariable(self.type(), obj));
     } else {

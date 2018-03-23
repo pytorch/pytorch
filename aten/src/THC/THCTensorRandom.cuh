@@ -7,7 +7,7 @@
 
 #include <curand_kernel.h>
 
-#define MAX_NUM_BLOCKS 64
+#define MAX_NUM_BLOCKS 200 
 #define BLOCK_SIZE 256
 /* Separate kernel because curand_log_normal gets extra parameters. */
 
@@ -140,8 +140,11 @@ __device__ int binarySearchForMultinomial(T* dist,
 
   if (start == size) {
     // No probability mass or precision problems; just return the
-    // first element
-    start = 0;
+    // first non-zero element by setting start to size-1 here,
+    // the code below will move it to the last non-zero probability
+    // this actually can happen when the random number is 1
+    // (github pytorch issue #4858).
+    start = size - 1;
   }
 
   T curVal = dist[start];
@@ -178,7 +181,7 @@ sampleMultinomialOnce(int64_t* dest,
     AccT sum = accZero;
     T val;
     for (int cat = threadIdx.x; cat < categories; cat += blockDim.x) {
-      val = dist[curDist * categories * stride_dist + cat * stride_categories];
+      val = dist[curDist * stride_dist + cat * stride_categories];
       assert(THCNumerics<T>::ge(val, zero));
       sum = THCNumerics<AccT>::add(sum, ScalarConvert<T, AccT>::to(val));
     }
@@ -221,7 +224,7 @@ sampleMultinomialOnce(int64_t* dest,
       AccT val =
         cat < categories ?
           THCNumerics<AccT>::div(
-              ScalarConvert<T, AccT>::to(dist[curDist * categories * stride_dist + cat * stride_categories]),
+              ScalarConvert<T, AccT>::to(dist[curDist * stride_dist + cat * stride_categories]),
               sum) :
           accZero;
 
@@ -275,7 +278,7 @@ sampleMultinomialOnce(int64_t* dest,
       // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
       // rarity in which this occurs, this should not be an issue.
       for (int cat = categories - 1; cat >= 0; --cat) {
-        if (THCNumerics<T>::gt(dist[curDist * categories * stride_dist + cat * stride_categories], zero)) {
+        if (THCNumerics<T>::gt(dist[curDist * stride_dist + cat * stride_categories], zero)) {
           dest[curDist] = cat + TH_INDEX_BASE;
           break;
         }

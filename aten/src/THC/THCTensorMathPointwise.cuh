@@ -284,11 +284,6 @@ struct TensorPowOp {
     } else if (StaticExp == 3) {
       T square = THCNumerics<T>::mul(*in, *in);
       *out = THCNumerics<T>::mul(square, *in);
-    } else if (StaticExp == -1) {
-      *out = THCNumerics<T>::cinv(*in);
-    } else if (StaticExp == -2) {
-      T square = THCNumerics<T>::mul(*in, *in);
-      *out = THCNumerics<T>::cinv(square);
     } else {
       *out = THCNumerics<T>::pow(*in, val);
     }
@@ -301,14 +296,39 @@ struct TensorPowOp {
       *v = THCNumerics<T>::mul(*v, *v);
     } else if (StaticExp == 3) {
       *v = THCNumerics<T>::mul(THCNumerics<T>::mul(*v, *v), *v);
-    } else if (StaticExp == -1) {
-      *v = THCNumerics<T>::cinv(*v);
-    } else if (StaticExp == -2) {
-      T square = THCNumerics<T>::mul(*v, *v);
-      *v = THCNumerics<T>::cinv(square);
     } else {
       *v = THCNumerics<T>::pow(*v, val);
     }
+  }
+
+  const T val;
+};
+
+template<typename T>
+struct TensorPowOp<T, -1> {
+  TensorPowOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    *out = THCNumerics<T>::cinv(*in);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    *v = THCNumerics<T>::cinv(*v);
+  }
+
+  const T val;
+};
+
+template<typename T>
+struct TensorPowOp<T, -2> {
+  TensorPowOp(T v) : val(v) {}
+  __device__ __forceinline__ void operator()(T* out, T* in) {
+    T square = THCNumerics<T>::mul(*in, *in);
+    *out = THCNumerics<T>::cinv(square);
+  }
+
+  __device__ __forceinline__ void operator()(T* v) {
+    T square = THCNumerics<T>::mul(*v, *v);
+    *v = THCNumerics<T>::cinv(square);
   }
 
   const T val;
@@ -332,13 +352,25 @@ struct TensorTPowOp {
 template <typename T>
 struct TensorCPowOp {
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = powf((float) *out, (float) *in);
+    *out = THCNumerics<T>::pow(*out, *in);
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in1, T* in2) {
-    *out = powf((float) *in1, (float) *in2);
+    *out = THCNumerics<T>::pow(*in1, *in2);
   }
 };
+
+template <>
+struct TensorCPowOp<float> {
+  __device__ __forceinline__ void operator()(float* out, float* in) {
+    *out = powf(*out, *in);
+  }
+
+  __device__ __forceinline__ void operator()(float* out, float* in1, float* in2) {
+    *out = powf(*in1, *in2);
+  }
+};
+
 
 template <>
 struct TensorCPowOp<double> {
@@ -791,7 +823,7 @@ struct TensorDigammaOp {
   using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    static const compute_type PI = 3.14159265358979323846;
+    const compute_type PI = 3.14159265358979323846;
     compute_type x = ScalarConvert<real, compute_type>::to(*in);
     compute_type result = 0;
     if (x < 0.5f) {
@@ -813,7 +845,7 @@ struct TensorTrigammaOp {
   using compute_type = typename std::conditional<std::is_same<real, half>::value, accreal, real>::type;
   __device__ __forceinline__ void
   operator()(real* out, real* in) {
-    static const compute_type PI = 3.14159265358979323846;
+    const compute_type PI = 3.14159265358979323846;
     compute_type x = ScalarConvert<real, compute_type>::to(*in);
     compute_type sign = +1;
     compute_type result = 0;

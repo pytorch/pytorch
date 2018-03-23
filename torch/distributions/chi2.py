@@ -15,9 +15,13 @@ class Chi2(Gamma):
         [torch.FloatTensor of size 1]
 
     Args:
-        df (float or Tensor or Variable): shape parameter of the distribution
+        df (float or Tensor): shape parameter of the distribution
     """
     params = {'df': constraints.positive}
 
-    def __init__(self, df):
-        super(Chi2, self).__init__(0.5 * df, 0.5)
+    def __init__(self, df, validate_args=None):
+        super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)
+
+    @property
+    def df(self):
+        return self.concentration * 2

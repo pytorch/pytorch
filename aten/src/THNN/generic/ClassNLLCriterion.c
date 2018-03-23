@@ -34,16 +34,26 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     int batch_size = THTensor_(size)(input, 0);
     THTensor_(resize1d)(output, batch_size);
 
+    int invalid_target = -1;  // We cannot throw an exception inside omp parallel
     int i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
       int cur_target = THTensor_fastGet1d(target, i) - TH_INDEX_BASE;
-      if (cur_target == ignore_index) {
-        THTensor_fastSet1d(output, i, 0.0f);
-        continue;
+
+      if (cur_target >= 0 && cur_target < n_classes) {
+          if (cur_target == ignore_index) {
+            THTensor_fastSet1d(output, i, 0.0f);
+            continue;
+          }
+          real cur_weight = weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f;
+          THTensor_fastSet1d(output, i, -THTensor_fastGet2d(input, i, cur_target) * cur_weight);
+      } else {
+        THAtomicCompareAndSwap(&invalid_target, -1, cur_target);
       }
-      real cur_weight = weights ? THTensor_fastGet1d(weights, cur_target) : 1.0f;
-      THTensor_fastSet1d(output, i, -THTensor_fastGet2d(input, i, cur_target) * cur_weight);
+    }
+
+    if (invalid_target >= 0) {
+        THError("Target %d out of bounds", invalid_target);
     }
 
     return;

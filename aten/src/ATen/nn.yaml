@@ -20,10 +20,10 @@
   scalar_check:
     output: reduce || self_->isScalar()
 
-- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true)
+- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true, bool reduce=true)
   cname: MultiMarginCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 - name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true, bool reduce=true)
   cname: MultiLabelMarginCriterion

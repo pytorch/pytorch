@@ -34,13 +34,13 @@ class Categorical(Distribution):
         [torch.LongTensor of size 1]
 
     Args:
-        probs (Tensor or Variable): event probabilities
-        logits (Tensor or Variable): event log probabilities
+        probs (Tensor): event probabilities
+        logits (Tensor): event log probabilities
     """
     params = {'probs': constraints.simplex}
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
@@ -49,8 +49,8 @@ class Categorical(Distribution):
             self.logits = logits - log_sum_exp(logits)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
-        batch_shape = self._param.size()[:-1]
-        super(Categorical, self).__init__(batch_shape)
+        batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
+        super(Categorical, self).__init__(batch_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
@@ -73,17 +73,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        if isinstance(self.probs, Variable):
-            return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
-        else:
-            return self.probs.new([float('nan')]).expand(self._extended_shape())
+        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
 
     @property
     def variance(self):
-        if isinstance(self.probs, Variable):
-            return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
-        else:
-            return self.probs.new([float('nan')]).expand(self._extended_shape())
+        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)
@@ -97,7 +91,8 @@ class Categorical(Distribution):
         return sample_2d.contiguous().view(sample_shape)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         value_shape = torch._C._infer_size(value.size(), self.batch_shape) if self.batch_shape else value.size()
         param_shape = value_shape + (self._num_events,)
         value = value.expand(value_shape)

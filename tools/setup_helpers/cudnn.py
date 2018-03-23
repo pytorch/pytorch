@@ -1,20 +1,9 @@
 import os
-import platform
-import sys
 import glob
-from itertools import chain
 
-from .env import check_env_flag
+from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_env_flag, gather_paths
 from .cuda import WITH_CUDA, CUDA_HOME
 
-
-def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
-
-
-IS_WINDOWS = (platform.system() == 'Windows')
-IS_CONDA = 'conda' in sys.version or 'Continuum' in sys.version
-CONDA_DIR = os.path.join(os.path.dirname(sys.executable), '..')
 
 WITH_CUDNN = False
 CUDNN_LIB_DIR = None
@@ -46,6 +35,24 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
     if IS_CONDA:
         lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
         include_paths.append(os.path.join(CONDA_DIR, 'include'))
+    for path in include_paths:
+        if path is None or not os.path.exists(path):
+            continue
+        include_file_path = os.path.join(path, 'cudnn.h')
+        CUDNN_INCLUDE_VERSION = None
+        if os.path.exists(include_file_path):
+            CUDNN_INCLUDE_DIR = path
+            with open(include_file_path) as f:
+                for line in f:
+                    if "#define CUDNN_MAJOR" in line:
+                        CUDNN_INCLUDE_VERSION = int(line.split()[-1])
+                        break
+            if CUDNN_INCLUDE_VERSION is None:
+                raise AssertionError("Could not find #define CUDNN_MAJOR in " + include_file_path)
+            break
+
+    if CUDNN_INCLUDE_VERSION is None:
+        pass
     for path in lib_paths:
         if path is None or not os.path.exists(path):
             continue
@@ -56,18 +63,11 @@ if WITH_CUDA and not check_env_flag('NO_CUDNN'):
                 CUDNN_LIB_DIR = path
                 break
         else:
-            libraries = sorted(glob.glob(os.path.join(path, 'libcudnn*')))
+            libraries = sorted(glob.glob(os.path.join(path, 'libcudnn*' + str(CUDNN_INCLUDE_VERSION) + "*")))
             if libraries:
                 CUDNN_LIBRARY = libraries[0]
                 CUDNN_LIB_DIR = path
                 break
-    for path in include_paths:
-        if path is None or not os.path.exists(path):
-            continue
-        if os.path.exists((os.path.join(path, 'cudnn.h'))):
-            CUDNN_INCLUDE_DIR = path
-            break
-
     # Specifying the library directly will overwrite the lib directory
     library = os.getenv('CUDNN_LIBRARY')
     if library is not None and os.path.exists(library):

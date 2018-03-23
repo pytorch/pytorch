@@ -12,7 +12,7 @@ class no_grad(object):
 
     Example::
 
-        >>> x = Variable(torch.Tensor([1]), requires_grad=True)
+        >>> x = torch.tensor([1], requires_grad=True)
         >>> with torch.no_grad():
         ...   y = x * 2
         >>> y.requires_grad
@@ -23,7 +23,7 @@ class no_grad(object):
         self.prev = torch.is_grad_enabled()
 
     def __enter__(self):
-        torch.set_grad_enabled(False)
+        torch._C.set_grad_enabled(False)
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)
@@ -39,7 +39,7 @@ class enable_grad(object):
 
     Example::
 
-        >>> x = Variable(torch.Tensor([1]), requires_grad=True)
+        >>> x = torch.tensor([1], requires_grad=True)
         >>> with torch.no_grad():
         ...   with torch.enable_grad():
         ...     y = x * 2
@@ -54,7 +54,50 @@ class enable_grad(object):
         self.prev = torch.is_grad_enabled()
 
     def __enter__(self):
-        torch.set_grad_enabled(True)
+        torch._C.set_grad_enabled(True)
+
+    def __exit__(self, *args):
+        torch.set_grad_enabled(self.prev)
+        return False
+
+
+class set_grad_enabled(object):
+    r"""Context-manager that sets gradient calculation to on or off.
+
+    `set_grad_enabled` will enable or disable grads based on its argument `mode`.
+    It can be used as a context-manager or as a function.
+
+    Arguments:
+        mode (bool): Flag whether to enable grad (True), or disable
+                     (False). This can be used to conditionally enable
+                     gradients.
+
+
+    Example::
+
+        >>> x = torch.tensor([1], requires_grad=True)
+        >>> is_train = False
+        >>> with torch.set_grad_enabled(is_train):
+        ...   y = x * 2
+        >>> y.requires_grad
+        False
+        >>> set_grad_enabled(True)
+        >>> y = x * 2
+        >>> y.requires_grad
+        True
+        >>> set_grad_enabled(False)
+        >>> y = x * 2
+        >>> y.requires_grad
+        True
+
+    """
+
+    def __init__(self, mode):
+        self.prev = torch.is_grad_enabled()
+        torch._C.set_grad_enabled(mode)
+
+    def __enter__(self):
+        pass
 
     def __exit__(self, *args):
         torch.set_grad_enabled(self.prev)

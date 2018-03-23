@@ -460,14 +460,14 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
 		   THTensor_(data)(rv__), ldvt,
 		   THTensor_(data)(work),lwork, &info);
 
-  THLapackCheckWithCleanup(" Lapack Error %s : %d superdiagonals failed to converge.",
+  THLapackCheckWithCleanup("Lapack Error %s : %d superdiagonals failed to converge.",
                            THCleanup(
                                THTensor_(free)(ru__);
                                THTensor_(free)(rs__);
                                THTensor_(free)(rv__);
                                THTensor_(free)(ra__);
                                THTensor_(free)(work);),
-                           "gesvd", info,"");
+                           "gesvd", info, "");
 
   if (*jobu == 'S')
     THTensor_(narrow)(rv__,NULL,1,0,k);

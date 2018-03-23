@@ -4,8 +4,10 @@
 #include <string>
 #include <memory>
 #include <vector>
-#include "torch/csrc/jit/interned_strings.h"
 #include <ATen/ATen.h>
+
+#include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/assertions.h"
 
 namespace torch { namespace jit {
 
@@ -90,14 +92,34 @@ struct Attributes {
     }
   }
   bool hasAttribute(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
     return find(name,false) != values_.end();
   }
+  // We want direct string accessors, as it is nicer to use than
+  // hasAttribute(Symbol::attr("blah"))
+  //
+  // For some reason, &Attributes<Node>::hasAttribute in pybind11 is able to
+  // give the pybind11 metaprogramming machinery "the right type", but
+  // the equivalent looking lambda [](Attributes<Node>& a, const std::string&)
+  // doesn't work!  So instead we define the methods on the class so we can
+  // continue using the old idiom.
+  bool hasAttributeS(const std::string& name) const {
+    return hasAttribute(Symbol::attr(name));
+  }
   AttributeKind kindOf(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
     return (*find(name,true))->kind();
   }
+  AttributeKind kindOfS(const std::string& name) const {
+    return kindOf(Symbol::attr(name));
+  }
   Derived* removeAttribute(Symbol name) {
+    JIT_ASSERT(name.is_attr());
     values_.erase(find(name,true));
     return This();
+  }
+  Derived* removeAttributeS(const std::string& name) {
+    return removeAttribute(Symbol::attr(name));
   }
   bool hasAttributes() const {
     return values_.size() > 0;
@@ -107,6 +129,12 @@ struct Attributes {
     std::vector<Symbol> names;
     for(auto & a : values_)
       names.push_back(a->name);
+    return names;
+  }
+  std::vector<const char*> attributeNamesS() const {
+    std::vector<const char*> names;
+    for(auto & a : values_)
+      names.push_back(a->name.toUnqualString());
     return names;
   }
 
@@ -136,6 +164,7 @@ private:
   }
   template<typename T>
   Derived* set(Symbol name, typename T::ConstructorType v) {
+    JIT_ASSERT(name.is_attr());
     auto it = find(name, false);
     auto nv = AVPtr(new T(name, std::forward<typename T::ConstructorType>(v)));
     if(it == values_.end()) {
@@ -147,6 +176,7 @@ private:
   }
   template<typename T>
   typename T::ValueType & get(Symbol name) const {
+    JIT_ASSERT(name.is_attr());
     auto it = find(name, true);
     T* child = dynamic_cast<T*>(it->get());
     JIT_ASSERT(child != nullptr);
@@ -159,6 +189,7 @@ private:
   std::vector<AVPtr> values_;
   using iterator = std::vector<AVPtr>::iterator;
   iterator find(Symbol name, bool required) {
+    JIT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
@@ -167,11 +198,12 @@ private:
   }
   using const_iterator = std::vector<AVPtr>::const_iterator;
   const_iterator find(Symbol name, bool required) const {
+    JIT_ASSERT(name.is_attr());
     auto it = std::find_if(values_.begin(), values_.end(),[&](const AVPtr & v) {
       return v->name == name;
     });
     if(required && it == values_.end()) {
-      ::torch::barf("%s:%u: %s: required undefined attribute '%s'", __FILE__, __LINE__, __func__, name.toString());
+      ::torch::barf("%s:%u: %s: required undefined %s", __FILE__, __LINE__, __func__, name.toDisplayString());
     }
     JIT_ASSERT(!required || it != values_.end());
     return it;

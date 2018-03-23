@@ -45,11 +45,6 @@ auto TupleParser::parse(double& x, const std::string& param_name) -> void {
   x = THPUtils_unpackDouble(obj);
 }
 
-auto TupleParser::parse(at::Tensor& x, const std::string& param_name) -> void {
-  PyObject* obj = next_arg();
-  x = torch::createTensor(obj);
-}
-
 auto TupleParser::parse(std::vector<int>& x, const std::string& param_name) -> void {
   PyObject* obj = next_arg();
   if (!PyTuple_Check(obj)) {

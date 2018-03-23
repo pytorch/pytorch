@@ -53,7 +53,7 @@ class BCECriterion(Criterion):
         if self.sizeAverage:
             output = output / input.nelement()
 
-        self.output = - output
+        self.output = - output.item()
 
         return self.output
 

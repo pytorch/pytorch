@@ -2,12 +2,14 @@
 
 #include <Python.h>
 
+#include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/THP.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tracer.h"
 
+#include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -15,62 +17,25 @@ namespace py = pybind11;
 
 namespace pybind11 { namespace detail {
 
-template<> struct type_caster<torch::jit::tracer::TraceInput> {
-public:
-  PYBIND11_TYPE_CASTER(torch::jit::tracer::TraceInput, _("torch::jit::tracer::TraceInput"));
-  bool load(handle src, bool) {
-    PyObject *source = src.ptr();
-    if (THPVariable_Check(source)) {
-      value = torch::jit::tracer::TraceInput(((THPVariable*)source)->cdata);
-      return true;
-    } else if (THPModule_isTensor(source)) {
-      value = torch::jit::tracer::TraceInput(torch::createTensor(source));
-      return true;
-    } else {
-      return false;
-    }
-  }
-  static handle cast(torch::jit::tracer::TraceInput src, return_value_policy /* policy */, handle /* parent */) {
-    if (src.variable.defined()) {
-      return handle(THPVariable_Wrap(src.variable));
-    } else {
-      return handle(torch::createPyObject(src.buffer));
-    }
-  }
-};
-
-template<> struct type_caster<torch::autograd::Variable> {
-public:
-  PYBIND11_TYPE_CASTER(torch::autograd::Variable, _("torch::autograd::Variable"));
-  bool load(handle src, bool) {
-    PyObject *source = src.ptr();
-    if (THPVariable_Check(source)) {
-      value = ((THPVariable*)source)->cdata;
-      return true;
-    } else {
-      return false;
-    }
-  }
-  static handle cast(torch::autograd::Variable src, return_value_policy /* policy */, handle /* parent */) {
-    return handle(THPVariable_Wrap(src));
-  }
-};
-
 template <> struct type_caster<torch::jit::Symbol> {
 public:
   PYBIND11_TYPE_CASTER(torch::jit::Symbol, _("Symbol"));
 
   bool load(handle src, bool) {
+    // TODO: Is there a way to py::cast that doesn't raise an exception on
+    // failure?  Can we catch pybind11::cast_error here instead?
+    std::string src_str;
     try {
-      value = torch::jit::Symbol(py::cast<std::string>(src));
+      src_str = py::cast<std::string>(src);
     } catch (std::exception& e) {
       return false;
     }
+    value = torch::jit::Symbol::fromQualString(src_str);
     return true;
   }
 
   static handle cast(torch::jit::Symbol src, return_value_policy /* policy */, handle /* parent */) {
-    return py::cast(std::string(src.toString()), return_value_policy::copy).release();
+    return py::cast(std::string(src.toQualString()), return_value_policy::copy).release();
   }
 };
 

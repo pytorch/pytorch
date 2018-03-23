@@ -1,27 +1,26 @@
 #include <torch/torch.h>
 
-using namespace at;
-
-Tensor sigmoid_add(Tensor x, Tensor y) {
+at::Tensor sigmoid_add(at::Tensor x, at::Tensor y) {
   return x.sigmoid() + y.sigmoid();
 }
 
 struct MatrixMultiplier {
   MatrixMultiplier(int A, int B) {
-     tensor_ = CPU(kDouble).ones({A, B});
+    tensor_ = at::ones(torch::CPU(at::kDouble), {A, B});
+    torch::set_requires_grad(tensor_, true);
   }
-  Tensor forward(Tensor weights) {
+  at::Tensor forward(at::Tensor weights) {
     return tensor_.mm(weights);
   }
-  Tensor get() const {
+  at::Tensor get() const {
     return tensor_;
   }
 
-private:
-  Tensor tensor_;
+ private:
+  at::Tensor tensor_;
 };
 
-PYBIND11_MODULE(torch_test_cpp_extensions, m) {
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("sigmoid_add", &sigmoid_add, "sigmoid(x) + sigmoid(y)");
   py::class_<MatrixMultiplier>(m, "MatrixMultiplier")
       .def(py::init<int, int>())

@@ -6,7 +6,6 @@
 #include "torch/csrc/THP.h"
 #include "Module.h"
 #include "Storage.h"
-#include "Tensor.h"
 #include "../PtrWrapper.h"
 #ifdef _THP_CORE
 #include "utils.h"
