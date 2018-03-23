@@ -1546,7 +1546,6 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(False, 'mean', True)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
-
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_embedding_bag_cuda(self, dtype=torch.FloatTensor):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
