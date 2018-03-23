@@ -295,7 +295,6 @@ class TestCheckpoint(TestCase):
         # we expect to see download result is the same as training result.
         with Job() as job:
             with Node("trainer:0"):
-                epoch_limiter(1)
                 with job.init_group:
                     Task(step=model.param_init_net)
                 with job.epoch_group:
@@ -304,6 +303,8 @@ class TestCheckpoint(TestCase):
                             ops.net(model.net)
                 with job.download_group:
                     Task(step=download_net)
+
+                epoch_limiter(job, 1)
 
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
