@@ -18,21 +18,6 @@ class GroupNorm2D(Module):
         >>> m = nn.GroupNorm2D(gamma=1, beta=0.5, group=32, eps=1e-5)
         >>> # Activating the module
         >>> output = m(input)
-    TF Code:
-        >>> def GroupNorm(x, gamma=1, beta=0.5, group=32, eps=1e-5):
-        >>>     # x: input features with shape [N,C,H,W]
-        >>>     # gamma, beta: scale and offset, with shape [1,C,1,1]
-        >>>     # G: number of groups for GN
-        >>>
-        >>>     N, C, H, W = x.shape
-        >>>     x = tf.reshape(x, [N, group, C // group, H, W])
-        >>>
-        >>>     mean, var = tf.nn.moments(x, [2, 3, 4], keep_dims=True)
-        >>>     x = (x - mean) / tf.sqrt(var + eps)
-        >>>
-        >>>     x = tf.reshape(x, [N, C, H, W])
-        >>>
-        >>>     return x * gamma + beta
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
 
