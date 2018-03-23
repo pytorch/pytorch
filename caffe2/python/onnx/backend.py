@@ -137,7 +137,7 @@ class Caffe2Backend(Backend):
     # If you increase this, make SURE you cross-reference all BC-breaking
     # changes from one version to the next, and any that you did not
     # implement, mark as broken in _broken_operators
-    _known_opset_version = 5
+    _known_opset_version = 6
 
     # This dictionary will record operators which are KNOWN to be
     # broken, so we give a good error message rather than do something
