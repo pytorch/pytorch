@@ -451,7 +451,22 @@ class TestOptim(TestCase):
             ignore_multidevice=True
         )
 
-    def test_invalid_param_type(self):
+    def test_nadam(self):
+        pydevd.settrace()
+        self._test_rosenbrock(
+            lambda params: optim.NAdam(params, lr=1e-2),
+            wrap_old_fn(examples.nadam, learningRate=1e-2)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+
+        def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
 
