@@ -4340,11 +4340,11 @@ class TestNN(NNTestCase):
                     input_shape.append(inp_size)
                     weight_shape.append(kern)
 
-                input = torch.autograd.Variable(torch.randn(input_shape), requires_grad=True)
-                weight = torch.autograd.Variable(torch.randn(weight_shape), requires_grad=True)
+                input = torch.randn(input_shape, requires_grad=True)
+                weight = torch.randn(weight_shape, requires_grad=True)
                 output = func_forward(input, weight, stride=stride, padding=padding, dilation=dilation)
 
-                gradient_o = torch.autograd.Variable(torch.randn(output.shape))
+                gradient_o = torch.randn(output.shape)
                 gradient_w = torch.autograd.grad(output, input if (gradient == 'input') else weight, gradient_o)
 
                 self.assertAlmostEqual(gradient_w[0],
