@@ -41,3 +41,37 @@ class PixelShuffle(Module):
 
     def __repr__(self):
         return self.__class__.__name__ + '(upscale_factor=' + str(self.upscale_factor) + ')'
+
+
+class PixelShuffle3D(Module):
+    r"""Rearranges elements in a Tensor of shape :math:`(*, C * r^3, H, W, D]` to a
+    tensor of shape :math:`(C, H * r, W * r, D * r)`.
+    This is useful for implementing efficient sub-pixel convolution
+    with a stride of :math:`1/r`.
+    Look at the paper:
+    `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
+    by Shi et. al (2016) for more details
+    Args:
+        upscale_factor (int): factor to increase spatial resolution by
+    Shape:
+        - Input: :math:`(N, C * {upscale\_factor}^3, H, W, D)`
+        - Output: :math:`(N, C, H * {upscale\_factor}, W * {upscale\_factor}, D * * {upscale\_factor})`
+    Examples::
+        >>> ps = nn.PixelShuffle(2)
+        >>> input = autograd.Variable(torch.Tensor(1, 8, 4, 4, 4))
+        >>> output = ps(input)
+        >>> print(output.size())
+        torch.Size([1, 1, 8, 8, 8])
+    .. _Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network:
+        https://arxiv.org/abs/1609.05158
+    """
+
+    def __init__(self, upscale_factor):
+        super(PixelShuffle3D, self).__init__()
+        self.upscale_factor = upscale_factor
+
+    def forward(self, input):
+        return F.pixel_shuffle_3d(input, self.upscale_factor)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(upscale_factor=' + str(self.upscale_factor) + ')'

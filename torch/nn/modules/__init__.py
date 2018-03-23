@@ -22,7 +22,7 @@ from .padding import ReflectionPad1d, ReflectionPad2d, ReplicationPad1d, Replica
 from .sparse import Embedding, EmbeddingBag
 from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
-from .pixelshuffle import PixelShuffle
+from .pixelshuffle import PixelShuffle, PixelShuffle3D
 from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample
 from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
