@@ -219,9 +219,8 @@ class TestTorch(TestCase):
             self.assertEqual(res1, res2)
 
     def test_linear_algebra_scalar_raises(self):
-        from torch.autograd import Variable
-        m = Variable(torch.randn(5, 5))
-        v = Variable(torch.randn(5))
+        m = torch.randn(5, 5)
+        v = torch.randn(5)
         s = torch.tensor(7)
         self.assertRaises(RuntimeError, lambda: torch.mv(m, s))
         self.assertRaises(RuntimeError, lambda: torch.addmv(v, m, s))
@@ -270,10 +269,8 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_polygamma(self):
         from scipy.special import polygamma
-        from torch.autograd import Variable
         for n in [0, 1]:
             self._testMath(lambda x: torch.polygamma(n, x), lambda x: polygamma(n, x)[()])
-            self._testMath(lambda x: torch.polygamma(n, Variable(x)).data, lambda x: polygamma(n, x)[()])
 
     def test_asin(self):
         self._testMath(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
@@ -359,8 +356,7 @@ class TestTorch(TestCase):
         self.assertIsNotNone(torch.Tensor([]).storage())
         self.assertIsNotNone(torch.Tensor().clone().storage())
         self.assertIsNotNone(torch.Tensor([0, 0, 0]).nonzero().storage())
-        from torch.autograd import Variable
-        self.assertIsNotNone(Variable(torch.Tensor()).new().storage())
+        self.assertIsNotNone(torch.Tensor().new().storage())
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_has_storage_numpy(self):
@@ -545,6 +541,37 @@ class TestTorch(TestCase):
 
     def test_dim_reduction(self):
         self._test_dim_reduction(self, lambda t: t)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_cpu_parallel(self):
+        # To use parallel branches we'll need to compare on tensors
+        # that are relatively large. Even if this is run on a single
+        # core machine these tests will still give you signal on
+        # the correctness
+
+        def _run_test(size):
+            for dim in range(len(size) + 1):
+                nv = np.round(np.random.rand(*size))  # 0s and 1s
+                tv = torch.from_numpy(nv)
+                # Parallelisim is only used if numel is
+                # larger than grainsize defined in Parallel.h
+                self.assertTrue(tv.numel() > 32768)
+                if dim == len(size):
+                    nvs = nv.sum()
+                    tvs = tv.sum()
+                else:
+                    nvs = nv.sum(dim)
+                    tvs = tv.sum(dim)
+                diff = np.abs(nvs - tvs.numpy()).sum()
+                self.assertEqual(diff, 0)
+
+        sizes = []
+        sizes += [[2, 3, 3, 3, 3, 2, 2, 3, 2, 3, 2, 3, 3]]
+        sizes += [[4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]
+        sizes += [[1, 32 * 8 * 32 * 8]]
+        sizes += [[1, 32770]]
+        for size in sizes:
+            _run_test(size)
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -783,6 +810,19 @@ class TestTorch(TestCase):
         # Divisor is a tensor case
         long_res1 = long_m1.clone()
         long_res1.remainder_(long_qs.unsqueeze(0).expand_as(long_res1))
+
+    @staticmethod
+    def _test_remainder_overflow(self, dtype=torch.int64):
+        # Check Integer Overflows
+        x = torch.tensor(23500, dtype=dtype)
+        q = 392486996410368
+        self.assertEqual(x % q, x)
+        self.assertEqual(-x % q, q - x)
+        self.assertEqual(x % -q, x - q)
+        self.assertEqual(-x % -q, -x)
+
+    def test_remainder_overflow(self):
+        self._test_remainder_overflow(self, dtype=torch.int64)
 
     def test_mm(self):
         # helper function
@@ -2309,7 +2349,31 @@ class TestTorch(TestCase):
     def test_cat_scalars(self):
         x = torch.tensor(0)
         y = torch.tensor(1)
-        self.assertRaises(RuntimeError, lambda: torch.cat([x, y]))
+        with self.assertRaisesRegexp(RuntimeError,
+                                     'zero-dimensional.*cannot be concatenated'):
+            torch.cat([x, y])
+
+    def test_cat_empty(self):
+        # FIXME: this is legacy behavior and should be removed
+        # when we support empty tensors with arbitrary sizes
+        x = torch.randn(4, 3, 32, 32)
+        empty = torch.randn(0)
+
+        res1 = torch.cat([x, empty], dim=1)
+        res2 = torch.cat([empty, x], dim=1)
+        self.assertEqual(res1, res2)
+
+        conv = torch.nn.Conv2d(3, 3, kernel_size=1)
+        res1 = torch.cat([conv(x), empty], dim=1)
+        res2 = torch.cat([empty, conv(x)], dim=1)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.cat([empty, empty], dim=1)
+        self.assertEqual(res1, empty)
+
+        with self.assertRaisesRegexp(RuntimeError,
+                                     'expected a non-empty list of Tensors'):
+            torch.cat([], dim=1)
 
     def test_stack(self):
         x = torch.rand(2, 3, 4)
@@ -2326,10 +2390,9 @@ class TestTorch(TestCase):
             self.assertEqual(res.select(dim, 2), z, 0)
 
     def test_stack_out(self):
-        from torch.autograd import Variable
-        x = Variable(torch.rand(2, 3, 4))
-        y = Variable(torch.rand(2, 3, 4))
-        z = Variable(torch.rand(2, 3, 4))
+        x = torch.rand(2, 3, 4)
+        y = torch.rand(2, 3, 4)
+        z = torch.rand(2, 3, 4)
         for dim in range(4):
             expected_size = x.size()[:dim] + (3,) + x.size()[dim:]
             res_out = x.new(expected_size)
@@ -2918,7 +2981,7 @@ class TestTorch(TestCase):
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
     @staticmethod
-    def _test_det(self, conv_fn):
+    def _test_det_logdet_slogdet(self, conv_fn):
         def reference_det(M):
             # naive row reduction
             M = M.clone()
@@ -2939,16 +3002,37 @@ class TestTorch(TestCase):
                 M[i] = row
             return M.diag().prod() * multiplier
 
-        eye_det = conv_fn(torch.eye(5)).det()
-        self.assertEqual(eye_det, eye_det.clone().fill_(1), 1e-8, 'determinant of identity')
+        def test_single_det(M, target, desc):
+            det = M.det()
+            logdet = M.logdet()
+            sdet, logabsdet = M.slogdet()
+            self.assertEqual(det, target, 1e-7, '{} (det)'.format(desc))
+            if det.item() < 0:
+                self.assertTrue(logdet.item() != logdet.item(), '{} (logdet negative case)'.format(desc))
+                self.assertTrue(sdet.item() == -1, '{} (slogdet sign negative case)'.format(desc))
+                self.assertEqual(logabsdet.exp(), det.abs(), 1e-7, '{} (slogdet logabsdet negative case)'.format(desc))
+            elif det.item() == 0:
+                self.assertEqual(logdet.exp().item(), 0, 1e-7, '{} (logdet zero case)'.format(desc))
+                self.assertTrue(sdet.item() == 0, '{} (slogdet sign zero case)'.format(desc))
+                self.assertEqual(logabsdet.exp().item(), 0, 1e-7, '{} (slogdet logabsdet zero case)'.format(desc))
+            else:
+                self.assertEqual(logdet.exp(), det, 1e-7, '{} (logdet positive case)'.format(desc))
+                self.assertTrue(sdet.item() == 1, '{} (slogdet sign  positive case)'.format(desc))
+                self.assertEqual(logabsdet.exp(), det, 1e-7, '{} (slogdet logabsdet positive case)'.format(desc))
+
+        eye = conv_fn(torch.eye(5))
+        test_single_det(eye, torch.tensor(1, dtype=eye.dtype), 'identity')
 
         def test(M):
+            assert M.size(0) >= 5, 'this helper fn assumes M to be at least 5x5'
             M = conv_fn(M)
-            M_det = M.det().data
+            M_det = M.det()
+            ref_M_det = reference_det(M)
 
-            self.assertEqual(M_det, M_det.clone().fill_(reference_det(M)), 1e-8, 'determinant')
-            self.assertEqual(M_det, M.inverse().det().data.pow_(-1), 1e-8, 'determinant after transpose')
-            self.assertEqual(M_det, M.transpose(0, 1).det().data, 1e-8, 'determinant after transpose')
+            test_single_det(M, ref_M_det, 'basic')
+            if abs(ref_M_det.item()) >= 1e-10:  # skip singular
+                test_single_det(M, M.inverse().det().pow_(-1), 'inverse')
+            test_single_det(M, M.t().det(), 'transpose')
 
             for x in [0, 2, 4]:
                 for scale in [-2, -0.1, 0, 10]:
@@ -2956,13 +3040,11 @@ class TestTorch(TestCase):
                     # dim 0
                     M_clone = M.clone()
                     M_clone[:, x] *= scale
-                    det = M_clone.det()
-                    self.assertEqual(target, det, 1e-8, 'determinant after scaling a row')
+                    test_single_det(M_clone, target, 'scale a row')
                     # dim 1
                     M_clone = M.clone()
                     M_clone[x, :] *= scale
-                    det = M_clone.det()
-                    self.assertEqual(target, det, 1e-8, 'determinant after scaling a column')
+                    test_single_det(M_clone, target, 'scale a column')
 
             for x1, x2 in [(0, 3), (4, 1), (3, 2)]:
                 assert x1 != x2, 'x1 and x2 needs to be different for this test'
@@ -2970,13 +3052,11 @@ class TestTorch(TestCase):
                 # dim 0
                 M_clone = M.clone()
                 M_clone[:, x2] = M_clone[:, x1]
-                det = M_clone.det()
-                self.assertEqual(target, det, 1e-8, 'determinant when two rows are same')
+                test_single_det(M_clone, target, 'two rows are same')
                 # dim 1
                 M_clone = M.clone()
                 M_clone[x2, :] = M_clone[x1, :]
-                det = M_clone.det()
-                self.assertEqual(target, det, 1e-8, 'determinant when two columns are same')
+                test_single_det(M_clone, target, 'two columns are same')
 
                 for scale1, scale2 in [(0.3, -1), (0, 2), (10, 0.1)]:
                     target = -M_det * scale1 * scale2
@@ -2985,24 +3065,63 @@ class TestTorch(TestCase):
                     t = M_clone[:, x1] * scale1
                     M_clone[:, x1] += M_clone[:, x2] * scale2
                     M_clone[:, x2] = t
-                    det = M_clone.det()
-                    self.assertEqual(target, det, 1e-8, 'determinant after exchanging rows')
+                    test_single_det(M_clone, target, 'exchanging rows')
                     # dim 1
                     M_clone = M.clone()
                     t = M_clone[x1, :] * scale1
                     M_clone[x1, :] += M_clone[x2, :] * scale2
                     M_clone[x2, :] = t
-                    det = M_clone.det()
-                    self.assertEqual(target, det, 1e-8, 'determinant after exchanging columns')
+                    test_single_det(M_clone, target, 'exchanging columns')
 
-        test(torch.randn(5, 5))
-        r = torch.randn(5, 5)
-        test(r.mm(r.transpose(0, 1)))  # symmetric
-        test(torch.randn(5, 5, 5)[:, 2, :])  # non-contiguous
+        def get_random_mat_scale(n):
+            # For matrices with values i.i.d. with 0 mean, unit variance, and
+            # subexponential tail, we have:
+            #   E[log det(A^2)] \approx log((n-1)!)
+            #
+            # Notice:
+            #   log Var[det(A)] = log E[det(A^2)] >= E[log det(A^2)]
+            #
+            # So:
+            #   stddev[det(A)] >= sqrt( (n-1)! )
+            #
+            # We use this as an intuitive guideline to scale random generated
+            # matrices so our closeness tests can work more robustly:
+            #   scale by sqrt( (n-1)! )^(-1/n) = ( (n-1)! )^(-1/(2n))
+            #
+            # source: https://arxiv.org/pdf/1112.0752.pdf
+            return math.factorial(n - 1) ** (-1.0 / (2 * n))
+
+        for n in [5, 10, 25]:
+            scale = get_random_mat_scale(n)
+            test(torch.randn(n, n) * scale)
+            r = torch.randn(n, n) * scale
+            # symmetric psd
+            test(r.mm(r.t()))
+            # symmetric pd
+            r = torch.randn(n, n) * scale
+            test(r.mm(r.t()) + torch.eye(n) * 1e-6)
+            # symmetric
+            r = torch.randn(n, n) * scale
+            for i in range(n):
+                for j in range(i):
+                    r[i, j] = r[j, i]
+            test(r)
+            # non-contiguous
+            test((torch.randn(n, n, n + 1) * scale)[:, 2, 1:])
+            # det = 0
+            r = torch.randn(n, n) * scale
+            u, s, v = r.svd()
+            if reference_det(u) < 0:
+                u = -u
+            if reference_det(v) < 0:
+                v = -v
+            s[0] *= -1
+            s[-1] = 0
+            test(u.mm(s.diag()).mm(v))
 
     @skipIfNoLapack
-    def test_det(self):
-        self._test_det(self, lambda x: x)
+    def test_det_logdet_slogdet(self):
+        self._test_det_logdet_slogdet(self, lambda x: x)
 
     @staticmethod
     def _test_stft(self, conv_fn):
@@ -4730,8 +4849,7 @@ class TestTorch(TestCase):
         self.assertEqual(x.size(), orig)
 
     def test_storage(self):
-        from torch.autograd import Variable
-        v = Variable(torch.randn(3, 5))
+        v = torch.randn(3, 5)
         self.assertEqual(v.storage()[0], v.data[0][0])
         self.assertEqual(v.storage()[14], v.data[2][4])
 

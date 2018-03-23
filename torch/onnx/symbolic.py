@@ -9,6 +9,9 @@ from functools import partial
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
+# - This file is ONLY for ATen operators (e.g., operators that show up in the
+#   trace as aten::blah).  If you need to special case a primitive operator,
+#   look at _run_symbolic_function
 # - Parameter ordering does NOT necessarily match what is in VariableType.cpp;
 #   tensors are always first, then non-tensor arguments.
 # - Parameter names must *exactly* match the names in VariableType.cpp, because
@@ -76,7 +79,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 2
+_onnx_opset_version = 5
 
 
 # ---------------------------------------------------------------------
@@ -118,11 +121,7 @@ _onnx_opset_version = 2
 
 # used to represent "missing" optional inputs
 def unused(g):
-    return g.op("Undefined")
-
-
-def Constant(g, value):
-    return g.op("Constant", value_t=value)
+    return g.op("prim::Undefined")
 
 
 def add(g, self, other, alpha):
@@ -227,9 +226,9 @@ def t(g, self):
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
+# There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size):
-    # TODO: This is not a real ONNX operator at the moment
-    return g.op("Expand", self, shape_i=size)
+    return None
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
@@ -248,6 +247,7 @@ def embedding_bag(g,
                 indices,
                 offsets,
                 operator_s="embedding_bag",
+                outputs=3,
                 scale_grad_by_freq_i=scale_grad_by_freq,
                 mode_i=mode,
                 sparse_i=sparse)
@@ -270,9 +270,11 @@ def permute(g, self, dims):
 
 
 def view(g, self, size):
-    if self.type().sizes()[0] == size[0] and len(size) == 2:
+    self_sizes = self.type().sizes()
+    if self_sizes and len(size) == 2 and self_sizes[0] == size[0]:
         return g.op("Flatten", self, axis_i=1)
-    return g.op("Reshape", self, shape_i=size)
+    shape = g.op("Constant", value_t=torch.LongTensor(size))
+    return g.op("Reshape", self, shape)
 
 
 def split(g, self, split_size, dim):
@@ -356,6 +358,8 @@ def softmax(g, input, dim=None):
     #           [0.167, 0.167, 0.167]]
     # So only when dim and axis both equal to ndim - 1 (the last dimension),
     # their semantics are equivalent.
+    if dim < 0:
+        dim = len(input.type().sizes()) + dim
     if len(input.type().sizes()) != dim + 1:
         return _unimplemented("dim", "ONNX and PyTorch use different strategies to split the input.")
     return g.op('Softmax', input, axis_i=dim)
@@ -446,6 +450,21 @@ def upsample_nearest2d(g, input, scale_factor):
                 height_scale_f=scale_factor, mode_s="nearest")
 
 
+def upsample_bilinear2d(g, input, output_size):
+    w_scale = float(output_size[-1]) / input.type().sizes()[-1]
+    h_scale = float(output_size[-2]) / input.type().sizes()[-2]
+    return g.op("Upsample", input, width_scale_f=w_scale,
+                height_scale_f=h_scale, mode_s="bilinear")
+
+
+def gt(g, input, other):
+    return g.op("Greater", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
+def lt(g, input, other):
+    return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+
+
 def log_softmax(g, input, dim=None):
     return g.op("LogSoftmax", input, axis_i=dim)
 
@@ -456,7 +475,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     args = [input, weight]
     # ONNX only supports 1D bias
-    if bias.node().kind() != "Undefined" and len(bias.type().sizes()) == 1:
+    if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) == 1:
         args.append(bias)
 
     kwargs = {"kernel_shape_i": weight_size[2:],
@@ -477,7 +496,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
-    if bias.node().kind() != "Undefined" and len(bias.type().sizes()) != 1:
+    if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) != 1:
         return g.op("Add", n, bias, broadcast_i=1, axis_i=1)
     else:
         return n
@@ -562,6 +581,11 @@ def exp(g, self):
 
 def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
+
+
+def _unique(g, input, sorted, return_inverse):
+    return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
+                return_inverse_i=return_inverse, outputs=2)
 
 
 # Metaprogram symbolics for each ATen native specialized cast operator.

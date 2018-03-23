@@ -23,6 +23,7 @@ namespace script {
 // Def   = Def(Ident name, List<Param> params, List<Stmt> body)         TK_DEF
 //
 // Stmt  = If(Expr cond, List<Stmt> true_body, List<Stmt> false_body)   TK_IF
+//       | For(List<Ident> targets, List<Expr> iters, List<Stmt> body)  TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
 //       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
@@ -54,6 +55,7 @@ namespace script {
 //       | Slice(Expr value, Maybe<Expr> first, Maybe<Expr> second)     TK_SLICE
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
+//       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
 //
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
@@ -169,6 +171,12 @@ struct Maybe : public TreeView {
   TreeRef map(std::function<TreeRef(const T&)> fn) {
     return tree_->map([&](TreeRef v) { return fn(T(v)); });
   }
+  static Maybe<T> create(const SourceRange& range) {
+    return Maybe<T>(Compound::create(TK_OPTION, range, {}));
+  }
+  static Maybe<T> create(const SourceRange& range, const T& value) {
+    return Maybe<T>(Compound::create(TK_OPTION, range, {value}));
+  }
 };
 
 struct Ident : public TreeView {
@@ -202,6 +210,7 @@ struct Stmt : public TreeView {
   explicit Stmt(const TreeRef& tree) : TreeView(tree) {
     switch (tree->kind()) {
       case TK_IF:
+      case TK_FOR:
       case TK_WHILE:
       case TK_GLOBAL:
       case TK_ASSIGN:
@@ -233,6 +242,8 @@ struct Expr : public TreeView {
       case TK_NOT:
       /* case '-': - unary minus */
       case TK_CONST:
+      case TK_TRUE:
+      case TK_FALSE:
       case TK_CAST:
       case TK_APPLY:
       case '.':
@@ -380,6 +391,28 @@ struct While : public Stmt {
   }
   static While create(const SourceRange& range, const Expr& cond, const List<Stmt>& body) {
     return While(Compound::create(TK_WHILE, range, {cond, body}));
+  }
+};
+
+struct For : public Stmt {
+  explicit For(const TreeRef& tree) : Stmt(tree) {
+    tree->match(TK_FOR);
+  }
+  List<Ident> targets() const {
+    return List<Ident>(subtree(0));
+  }
+  List<Expr> itrs() const {
+    return List<Expr>(subtree(1));
+  }
+  List<Stmt> body() const {
+    return List<Stmt>(subtree(2));
+  }
+  static For create(
+      const SourceRange& range,
+      const List<Ident>& targets,
+      const List<Expr>& itrs,
+      const List<Stmt>& body) {
+    return For(Compound::create(TK_FOR, range, {targets, itrs, body}));
   }
 };
 
@@ -667,8 +700,8 @@ struct TernaryIf : public Expr {
 };
 
 
-struct ListLiteral : public TreeView {
-  explicit ListLiteral(const TreeRef& tree) : TreeView(tree) {
+struct ListLiteral : public Expr {
+  explicit ListLiteral(const TreeRef& tree) : Expr(tree) {
     tree_->match(TK_LIST_LITERAL);
   }
   List<Expr> inputs() const {

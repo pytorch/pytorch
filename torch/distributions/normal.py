@@ -41,13 +41,13 @@ class Normal(ExponentialFamily):
     def variance(self):
         return self.stddev.pow(2)
 
-    def __init__(self, loc, scale):
+    def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Normal, self).__init__(batch_shape)
+        super(Normal, self).__init__(batch_shape, validate_args=validate_args)
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -60,18 +60,21 @@ class Normal(ExponentialFamily):
         return self.loc + eps * self.scale
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         # compute the variance
         var = (self.scale ** 2)
         log_scale = math.log(self.scale) if isinstance(self.scale, Number) else self.scale.log()
         return -((value - self.loc) ** 2) / (2 * var) - log_scale - math.log(math.sqrt(2 * math.pi))
 
     def cdf(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return 0.5 * (1 + torch.erf((value - self.loc) * self.scale.reciprocal() / math.sqrt(2)))
 
     def icdf(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return self.loc + self.scale * torch.erfinv(2 * value - 1) * math.sqrt(2)
 
     def entropy(self):

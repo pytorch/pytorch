@@ -85,7 +85,7 @@ private:
   std::vector<std::unique_ptr<Scope> > children_;
 public:
   Scope() {
-    name_ = Symbol("");
+    name_ = Symbol::scope("");
     parent_ = NULL;
   }
   Scope(Scope* parent, Symbol name) {
@@ -116,13 +116,14 @@ public:
     return name_;
   }
   std::string namesFromRoot(const std::string& separator="/") {
-    std::string out = this->name_.toString();
+    // TODO: I think the answer is we shouldn't have used Symbol here
+    std::string out = this->name_.toUnqualString();
     if (this->isRoot()) {
       return out;
     }
     Scope* parent = this->parent_;
     while (!parent->isRoot()) {
-      out = std::string(parent->name_.toString()) + separator + out;
+      out = std::string(parent->name_.toUnqualString()) + separator + out;
       parent = parent->parent_;
     }
     return out;
@@ -192,6 +193,9 @@ public:
   }
   size_t offset() const {
     return offset_;
+  }
+  void setOffset(size_t offset) {
+    offset_ = offset;
   }
   const Node * node() const {
     return node_;
@@ -393,6 +397,23 @@ public:
     return node;
   }
 
+  // Add 'node' as an input to 'this' at the specified position in the
+  // arguments. Returns the added node for ease of chaining.
+  Value* insertInput(size_t i, Value* node) {
+    JIT_ASSERT(graph_ == node->owningGraph());
+    node->uses_.emplace_back(this, i);
+    inputs_.insert(inputs_.begin() + i, node);
+    for (size_t use_itr = i + 1; use_itr < inputs_.size(); ++use_itr) {
+      for (auto& use : inputs_[use_itr]->uses_) {
+        if (use.user == this) {
+          use.offset += 1;
+          break;
+        }
+      }
+    }
+    return node;
+  }
+
   // Replace the input of 'this' at position 'i' with
   // 'newValue', returning the old node.
   //
@@ -428,6 +449,15 @@ public:
     outputs_.push_back(new Value(this, outputs_.size()));
     return outputs_.back();
   }
+
+  Value* insertOutput(size_t i) {
+    outputs_.insert(outputs_.begin() + i, new Value(this, i));
+    for (size_t itr = i + 1; itr < outputs_.size(); ++itr) {
+      outputs_[itr]->setOffset(outputs_[itr]->offset() + 1);
+    }
+    return outputs_.at(i);
+  }
+
   void eraseOutput(size_t i);
 
   Block * addBlock();
@@ -582,7 +612,7 @@ public:
   }
   template<typename T>
   T* expect() {
-    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", Symbol(T::Kind).toString(), kind().toString());
+    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", T::Kind.toDisplayString(), kind().toDisplayString());
     return static_cast<T*>(this);
   }
 
@@ -681,12 +711,22 @@ struct Block {
     if (name != "") v->setUniqueName(name);
     return v;
   }
+  Value* insertInput(size_t i, std::string name = "") {
+    Value* v = input_->insertOutput(i);
+    if (name != "")
+      v->setUniqueName(name);
+    return v;
+  }
   void eraseInput(size_t i) {
     input_->eraseOutput(i);
   }
   size_t registerOutput(Value * n) {
     output_->addInput(n);
     return outputs().size() - 1;
+  }
+  size_t insertOutput(size_t i, Value* n) {
+    output_->insertInput(i, n);
+    return i;
   }
   void eraseOutput(size_t i) {
     output_->removeInput(i);
@@ -806,7 +846,7 @@ public:
     return block_->return_node();
   }
   void push_scope(const std::string& scope_name) {
-    current_scope_ = current_scope_->push(Symbol(scope_name));
+    current_scope_ = current_scope_->push(Symbol::scope(scope_name));
   }
   void pop_scope() {
     current_scope_ = current_scope_->parent();
@@ -825,6 +865,9 @@ public:
   }
   Value * addInput(std::string name="") {
     return block_->addInput(std::move(name));
+  }
+  Value* insertInput(size_t i, std::string name = "") {
+    return block_->insertInput(i, std::move(name));
   }
   void eraseInput(size_t i) {
     block_->eraseInput(i);
@@ -867,19 +910,19 @@ public:
   }
 
   Node * createUndefined() {
-    return create(kUndefined);
+    return create(prim::Undefined);
   }
   Node * createConstant(const at::Tensor& ref) {
     JIT_ASSERT(ref.defined());
     AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
-    auto n = create(kConstant);
-    n->t_(kvalue, ref.clone());
+    auto n = create(prim::Constant);
+    n->t_(attr::value, ref.clone());
     return n;
   }
   Node * createFusionGroup(int device) {
-    auto n = create(kFusionGroup, 0);
-    n->g_(kSubgraph,std::make_shared<Graph>(scope_root_));
-    n->i_(kdevice, device);
+    auto n = create(prim::FusionGroup, 0);
+    n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
+    n->i_(attr::device, device);
     return n;
   }
   Node* createPythonOp(
@@ -1121,8 +1164,8 @@ inline Value* Value::setUniqueName(const std::string & orig_name) {
 
 inline Block::Block(Graph * graph_, Node * node_)
 : graph_(graph_)
-, output_(initOutput(graph_->create(kReturn, 0)))
-, input_(graph_->create(kParam,0))
+, output_(initOutput(graph_->create(prim::Return, 0)))
+, input_(graph_->create(prim::Param,0))
 , owning_node_(node_) {
   graph_->all_blocks.emplace(this);
   output_->owning_block_ = this;
@@ -1151,20 +1194,20 @@ inline void Block::destroy() {
 // Mutable case
 // The IFM/ELSEIFM indicate that subclass *refinement* occurs.
 // This is only valid for node types for which we have subclasses.
-#define IR_IFM(x,Kind) GENERIC_IF(,k##Kind,x,Kind)
-#define IR_ELSEIFM(Kind) GENERIC_ELSEIF(,k##Kind,Kind)
+#define IR_IFM(x,Kind) GENERIC_IF(,prim::Kind,x,Kind)
+#define IR_ELSEIFM(Kind) GENERIC_ELSEIF(,prim::Kind,Kind)
 
-#define IR_IFM_CONST(x,Kind) GENERIC_IF(const,k##Kind,x,Kind)
-#define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,k##Kind,Kind)
+#define IR_IFM_CONST(x,Kind) GENERIC_IF(const,prim::Kind,x,Kind)
+#define IR_ELSEIFM_CONST(Kind) GENERIC_ELSEIF(const,prim::Kind,Kind)
 
 #define IR_IF(x, Kind) \
   auto && __match_key = x; \
   switch(__match_key->kind()) { \
-    case ::torch::jit::k##Kind: { \
+    case ::torch::jit::prim::Kind: { \
       auto * value = __match_key; (void) value;
 #define IR_ELSEIF(Kind) \
     } break; \
-    case ::torch::jit::k##Kind: { \
+    case ::torch::jit::prim::Kind: { \
       auto * value = __match_key; (void) value;
 
 #define IR_ELSE() GENERIC_ELSE()
@@ -1187,9 +1230,9 @@ inline void Block::destroy() {
 
  // execute a Python function, used for Ops we can't optimize but that we want to optimize around
 struct PythonOp : public Node {
-  static const BuiltinSymbol Kind = kPythonOp;
+  static constexpr Symbol Kind = prim::PythonOp;
   PythonOp(Graph * graph)
-  : Node(graph,kPythonOp) {}
+  : Node(graph,prim::PythonOp) {}
   PythonOp* init(
       THPObjectPtr&& pyobj,
       const std::string& cconv,
@@ -1248,9 +1291,9 @@ inline Node* Graph::createPythonOp(
 // A Cpp operator is an operator which dispatches directly to an autograd function.
 // TODO: These are not executable without reentrant engine.
 struct CppOp : public Node {
-  static const BuiltinSymbol Kind = kCppOp;
+  static constexpr Symbol Kind = prim::CppOp;
   CppOp(Graph * g)
-  : Node(g,kCppOp) {}
+  : Node(g,prim::CppOp) {}
   std::shared_ptr<torch::autograd::Function> fn;
   std::vector<VariableFlags> var_flags;
   std::string name() const;

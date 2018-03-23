@@ -28,6 +28,11 @@ static inline __host__ __device__ scalar_t powi(scalar_t a, scalar_t b) {
   return result;
 }
 
+template <typename scalar_t>
+static inline __host__ __device__ bool has_different_sign(scalar_t a, scalar_t b) {
+  return (a < 0) != (b < 0);
+}
+
 template <>
 struct THCNumerics<uint8_t> {
   static inline __host__ __device__ uint8_t min() { return 0; }

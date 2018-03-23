@@ -5,6 +5,8 @@
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
 
+#include "ATen/optional.h"
+
 #include <climits>
 
 namespace torch {
@@ -102,7 +104,7 @@ struct Environment {
   }
   void setSugaredVar(const std::string& name, SugaredValuePtr value) {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
-        getBlockOwningKind() == kLoop)
+        getBlockOwningKind() == prim::Loop)
       createCapturedInput(name);
     value_table[name] = std::move(value);
   }
@@ -118,7 +120,7 @@ struct Environment {
     auto retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == kLoop) {
+        getBlockOwningKind() == prim::Loop) {
       retval = createCapturedInput(ident);
     }
 
@@ -182,13 +184,13 @@ Node* emitBuiltinCall(
   List<Attribute> attributes,
   size_t n_outputs) {
 
-  NodeKind kind(name);
+  NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
   auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (const auto& attr : attributes) {
-    const auto& name = Symbol(attr.name().name());
+    const auto& name = Symbol::attr(attr.name().name());
     const Expr& value_expr = attr.value();
     switch (value_expr.kind()) {
       case TK_CONST: {
@@ -314,6 +316,9 @@ private:
         case TK_WHILE:
           emitWhile(While(stmt));
           break;
+        case TK_FOR:
+          emitFor(For(stmt));
+          break;
         case TK_ASSIGN:
           emitAssignment(Assign(stmt));
           break;
@@ -359,7 +364,7 @@ private:
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
     Value* cond_value = emitExpr(expr.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kIf, expr.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -384,7 +389,7 @@ private:
   void emitIf(const If& stmt) {
     Value* cond_value = emitExpr(stmt.cond(), 1)[0];
 
-    Node* n = graph->insertNode(create(kIf, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -414,45 +419,67 @@ private:
     }
   }
 
-  void emitWhile(const While& stmt) {
-    // Emits a loop operators conforming to the semantics specified at
-    // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
-    // TODO: implement scan_outputs
+  // *********************** Loop Operators ************************************
+  // Emits a loop operators conforming to the semantics specified at
+  // https://github.com/onnx/onnx/blob/master/docs/Operators.md#experimental-loop
+  // TODO: implement scan_outputs
 
-    // the format of the Loop instruction is:
-    // loop_carried_outputs* = Loop(max_trip_count, start_condition, loop_carried_inputs*)
-    //                          block0(loop_counter, loop_carried_block*) {
-    //                             <body>
-    //                             -> (continue_condition, loop_carried_block_outputs*)
-    //                          }
-    // all loop_carried_... lists are the same length and represent the value of
-    // loop-carried variables whose definitions are updated as the loop executes
-    // in a way that ensure single static assignment.
+  // the format of the Loop instruction is:
+  // loop_carried_outputs* = Loop(max_trip_count, start_condition,
+  // loop_carried_inputs*)
+  //                          block0(loop_counter, loop_carried_block*) {
+  //                             <body>
+  //                             -> (continue_condition,
+  //                             loop_carried_block_outputs*)
+  //                          }
+  // all loop_carried_... lists are the same length and represent the value of
+  // loop-carried variables whose definitions are updated as the loop executes
+  // in a way that ensure single static assignment.
 
-    // TODO: clarify that this is an optional input that isn't needed here
-    Value* max_trip_count_dummy = emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
-    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
-
-    Node* n = graph->insertNode(create(kLoop, stmt.range(), 0));
-    n->addInput(max_trip_count_dummy);
-    n->addInput(cond_value);
+  void emitLoopCommon(
+      at::optional<Expr> max_trip_count,
+      at::optional<Expr> cond,
+      const List<Stmt>& body,
+      const Stmt& stmt,
+      at::optional<Ident> itr_ident) {
+    Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
+    Value *max_trip_count_val, *cond_val;
+    {
+      WithInsertPoint guard(n);
+      if (max_trip_count) {
+        max_trip_count_val = emitExpr(max_trip_count.value(), 1)[0];
+      } else {
+        max_trip_count_val =
+            emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
+      }
+      if (cond) {
+        cond_val = emitExpr(cond.value(), 1)[0];
+      } else {
+        cond_val = emitBooleanConst(stmt, true)[0];
+      }
+    }
+    n->addInput(max_trip_count_val);
+    n->addInput(cond_val);
     auto* body_block = n->addBlock();
-    // Trip count required by spec. Since this is a while loop, we do not
-    // provide access to this from user code
-    // TODO: it seems like we should implement a `for` loop as well, otherwise
-    // we'll probably have to pattern match iteration number machinery in user
-    // code to conform to the spec
-    body_block->addInput(); // Iteration num
+    Value* trip_count = body_block->addInput(); // Iteration num
     size_t skip_inputs_num = 1;
 
     {
       pushFrame(body_block);
+      if (itr_ident) {
+        environment_stack->setVar(itr_ident.value().name(), trip_count);
+      }
       WithInsertPoint guard(body_block);
-      emitStatements(stmt.body());
+      emitStatements(body);
 
       // Also emit the conditional
-      Value *body_cond_value = emitExpr(stmt.cond(), 1)[0];
-      body_block->registerOutput(body_cond_value);
+      if (cond) {
+        Value* body_cond_value = emitExpr(cond.value(), 1)[0];
+        body_block->registerOutput(body_cond_value);
+      } else {
+        Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
+        body_block->registerOutput(cond_value_dummy);
+      }
 
       auto body_frame = popFrame();
       auto outer_frame = environment_stack;
@@ -468,6 +495,59 @@ private:
       }
 
     }
+  }
+
+  void emitFor(const For& stmt) {
+    // For now, we only support range loops. e.g. for i in range(3): ...
+
+    auto targets = stmt.targets();
+    auto itrs = stmt.itrs();
+    auto body = stmt.body();
+
+    // itrs must consist of a single Apply node
+    if (stmt.itrs().size() != 1) {
+      throw ErrorReport(stmt)
+          << "List of iterables is not supported currently.";
+    }
+    if (itrs[0].kind() != TK_APPLY) {
+      throw ErrorReport(stmt)
+          << "Non-range for loops are currently not supported.";
+    }
+
+    Apply range_iterator = Apply(itrs[0]);
+    if (range_iterator.callee().kind() != TK_VAR) {
+      throw ErrorReport(stmt)
+          << "Non-range for loops are currently not supported.";
+    }
+
+    {
+      Var var = Var(range_iterator.callee());
+      if (var.name().name() != "range") {
+        throw ErrorReport(stmt)
+            << "Non-range for loops are currently not supported.";
+      }
+    }
+
+    List<Expr> args = range_iterator.inputs();
+    // TODO: start, stop, step loop
+    if (args.size() != 1) {
+      throw ErrorReport(stmt)
+          << "range() expects one argument but got" << args.size();
+    }
+
+    auto target_list = List<Ident>(targets);
+    if (target_list.size() != 1) {
+      throw ErrorReport(stmt)
+          << "Iteration variable unpacking is not supported";
+    }
+    at::optional<Ident> target_ident{target_list[0]};
+
+    emitLoopCommon({args[0]}, {}, stmt.body(), stmt, target_ident);
+  }
+
+  void emitWhile(const While& stmt) {
+    auto cond = stmt.cond();
+    emitLoopCommon({}, {cond}, stmt.body(), stmt, {});
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -496,34 +576,34 @@ private:
   NodeKind getNodeKind(int kind, int ninputs) {
     switch (kind) {
       case '+':
-        return kadd;
+        return aten::add;
       case '-':
         if (ninputs == 1)
-          return kneg;
+          return aten::neg;
         else
-          return ksub;
+          return aten::sub;
       case '*':
-        return kmul;
+        return aten::mul;
       case '/':
-        return kdiv;
+        return aten::div;
       case TK_NE:
-        return kne;
+        return aten::ne;
       case TK_EQ:
-        return keq;
+        return aten::eq;
       case '<':
-        return klt;
+        return aten::lt;
       case '>':
-        return kgt;
+        return aten::gt;
       case TK_LE:
-        return kle;
+        return aten::le;
       case TK_GE:
-        return kge;
+        return aten::ge;
       case TK_AND:
-        return k__and__;
+        return aten::__and__;
       case TK_OR:
-        return k__or__;
+        return aten::__or__;
       case TK_NOT:
-        return k__not__;
+        return aten::__not__;
       default:
         throw std::runtime_error("unknown kind " + std::to_string(kind));
     }
@@ -562,7 +642,7 @@ private:
       expectOutputs(ident, output_size, 0);
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
-      return emitNode(kPrint, ident.range(), inputs, 0 )->outputs();
+      return emitNode(prim::Print, ident.range(), inputs, 0 )->outputs();
     }
     Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, output_size);
     if (hasTensorOp(builtin)) {
@@ -579,7 +659,7 @@ private:
     return sv->call(callee.range(), method, inputs, attributes, output_size);
   }
 
-  // any expression that can produce a SugaredValue are handled here
+  // any expression that can produce a SugaredValue is handled here
   // with emitExpr falling back to this function to handle them
   // the kinds handled here should be kept in sync with [SUGARED VALUES]
   // in emitExpr
@@ -629,8 +709,8 @@ private:
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
-        if (kind != kneg)
-          node->t_(Symbol("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        if (kind != aten::neg)
+          node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_APPLY: {
@@ -650,6 +730,12 @@ private:
       case TK_CONST: {
         expectOutputs(tree, output_size, 1);
         return emitConst(Const(tree));
+      } break;
+      case TK_TRUE: {
+        return emitBooleanConst(tree, true);
+      } break;
+      case TK_FALSE: {
+        return emitBooleanConst(tree, false);
       } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
@@ -694,11 +780,20 @@ private:
         throw ErrorReport(input) << "Unrecognized type: " << type;
     }
     return emitNode(
-               Symbol("type_as"),
+               Symbol::aten("type_as"),
                input->range(),
                {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
                1)
         ->outputs();
+  }
+
+  std::vector<Value*> emitBooleanConst(const TreeRef& tree, bool val) {
+    return {createConstant(tree->range(), at::CPU(at::kByte).scalarTensor(val))};
+  }
+
+  std::vector<Value*> emitBooleanConst(const TreeRef& tree) {
+    bool val = tree->kind() == TK_TRUE;
+    return emitBooleanConst(tree, val);
   }
 
   std::vector<Value*> emitConst(const Const& c) {
@@ -731,17 +826,17 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& begin = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
-    const auto& end = at::Scalar(input_values[2]->node()->t(kvalue)).toInt();
+    const auto& begin = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
+    const auto& end = at::Scalar(input_values[2]->node()->t(attr::value)).toInt();
     return emitNode(
-               Symbol("slice"),
+               Symbol::aten("slice"),
                loc,
                {tensor},
                output_size)
-               ->i_(kdim, 0)
-               ->i_(kstep, 1)
-               ->i_(kstart, begin)
-               ->i_(kend, end)->outputs();
+               ->i_(attr::dim, 0)
+               ->i_(attr::step, 1)
+               ->i_(attr::start, begin)
+               ->i_(attr::end, end)->outputs();
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -753,14 +848,14 @@ private:
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
     Value* tensor = input_values[0];
-    const auto& idx = at::Scalar(input_values[1]->node()->t(kvalue)).toInt();
+    const auto& idx = at::Scalar(input_values[1]->node()->t(attr::value)).toInt();
     return emitNode(
-               Symbol("select"),
+               Symbol::aten("select"),
                loc,
                {tensor},
                output_size)
-               ->i_(kdim, 0)
-               ->i_(kindex, idx)
+               ->i_(attr::dim, 0)
+               ->i_(attr::index, idx)
                ->outputs();
   }
 
@@ -801,7 +896,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
 }
 
 std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
-  Module m(/*optimize=*/false); //note: we don't use 'm' to execute so this setting is unused
+  Module m; //note: we don't use 'm' to execute so this setting is unused
   defineMethodsInModule(m, {def}, resolver, nullptr);
   return m.get_method(def.name().name()).graph();
 }

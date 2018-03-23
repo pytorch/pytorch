@@ -2018,3 +2018,17 @@ where(condition, y) -> Tensor
 ``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
 See :func:`torch.where`
 """)
+
+add_docstr_all('logdet',
+               r"""
+logdet() -> Tensor
+
+See :func:`torch.logdet`
+""")
+
+add_docstr_all('slogdet',
+               r"""
+slogdet() -> (Tensor, Tensor)
+
+See :func:`torch.slogdet`
+""")

@@ -71,6 +71,9 @@
 
 - func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
 
+- func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
+  variants: function
+
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
@@ -193,7 +196,6 @@
   variants: function
 
 - func: det(Tensor self) -> Tensor
-- func: _det_with_svd(Tensor self) -> (Tensor, Tensor, Tensor, Tensor)
 
 - func: diagflat(Tensor self, int64_t offset=0) -> Tensor
   variants: function
@@ -292,6 +294,9 @@
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
+- func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
+  variants: method
+
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
@@ -314,10 +319,15 @@
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
+- func: logdet(Tensor self) -> Tensor
+
 - func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
 
 - func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
@@ -361,6 +371,9 @@
   variants: function
 
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
+  variants: function
+
+- func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
 
 - func: permute(Tensor self, IntList dims) -> Tensor
@@ -443,6 +456,8 @@
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
+- func: slogdet(Tensor self) -> (Tensor, Tensor)
+
 - func: smm(Tensor self, Tensor mat2) -> Tensor
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
@@ -509,6 +524,9 @@
 
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
+  variants: function
 
 - func: t_(Tensor self) -> Tensor
   variants: method

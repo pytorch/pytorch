@@ -118,6 +118,7 @@ struct Tensor : public detail::TensorBase {
   Tensor& operator/=(Scalar other);
   Tensor operator[](Scalar index) const;
   Tensor operator[](Tensor index) const;
+  Tensor operator[](int64_t index) const;
 
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.

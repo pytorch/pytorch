@@ -1,7 +1,7 @@
 import os
 import argparse
 from itertools import count
-from ..autograd.utils import CodeTemplate, write
+from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
 
 template_path = os.path.join(os.path.dirname(__file__), 'templates')
@@ -30,7 +30,7 @@ TYPE_CASTS = {
 }
 
 KW_ASSIGNMENT = CodeTemplate("""\
-auto ${name} = ${type_cast}(node->${method}(Symbol("${name}")));\
+auto ${name} = ${type_cast}(node->${method}(Symbol::attr("${name}")));\
 """)
 
 POS_ASSIGNMENT = CodeTemplate("""\
@@ -203,8 +203,22 @@ def gen_jit_dispatch(declarations, out):
     write(out, 'aten_dispatch.h', ATEN_DISPATCH_H, env)
     write(out, 'aten_dispatch.cpp', ATEN_DISPATCH_CPP, env)
 
-    names = set(decl['name'] for decl in jit_decls)
-    strings_env = {'aten_symbols': ["_({}) \\".format(n) for n in sorted(names)]}
+    # NB: Operate on aten_decls, not jit_decls, because VariableType is
+    # a client for these symbols as well
+    # NB: This means we DON'T generate interned strings for inplace ops.
+    # Change this when you do!
+    # NB: Keep this code synchronized with the code in
+    # tool/autograd/gen_variable_type.py
+    # NB: Some operations have inplace versions, but NOT non-inplace
+    # versions! Thus uninplace_api_name() is mandatory (if you remove
+    # it, you will get missing symbols.)
+    names = set(uninplace_api_name(decl['api_name']) for decl in aten_decls)
+    # NB: This grabs non keyword arguments too, but it's harmless
+    attrs = set(arg['name'] for decl in aten_decls for arg in decl['arguments'])
+    strings_env = {
+        'aten_symbols': ["_(aten, {}) \\".format(n) for n in sorted(names)],
+        'attr_symbols': ["_(attr, {}) \\".format(n) for n in sorted(attrs)]
+    }
 
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 

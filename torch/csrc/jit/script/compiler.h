@@ -17,14 +17,14 @@ namespace script {
 // will be desugared based on how they are used in the AST.
 
 // SugaredValue is used to temporarily represent these values in a way
-// that separates their behavior from AST -> IR converter itself.
+// that separates their behavior from the AST -> IR converter itself.
 // This allows us to keep dependencies on python minimal.
 
 struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
-  // what is this node? for error report (e.g. Module, python function)
+  // what is this node? for error reporting (e.g. Module, python function)
   virtual std::string kind() const = 0;
-  // what can we do with this thing?
 
+  // what can we do with this thing?
   // use it as a value e.g.  `this + 4`
   virtual Value * asValue(SourceRange loc, Method & m) {
     throw ErrorReport(loc) << kind() << " cannot be used as a value";

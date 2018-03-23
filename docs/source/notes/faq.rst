@@ -93,7 +93,7 @@ memory management.
 
 If your GPU memory isn't freed even after Python quits, it is very likely that
 some Python subprocesses are still alive. You may find them via
-``ps -elfx | grep python`` and manually kill them with ``kill -9 [pid]``.
+``ps -elf | grep python`` and manually kill them with ``kill -9 [pid]``.
 
 My data loader workers return identical random numbers
 -------------------------------------------------------

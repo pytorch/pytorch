@@ -19,5 +19,9 @@ class Chi2(Gamma):
     """
     params = {'df': constraints.positive}
 
-    def __init__(self, df):
-        super(Chi2, self).__init__(0.5 * df, 0.5)
+    def __init__(self, df, validate_args=None):
+        super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)
+
+    @property
+    def df(self):
+        return self.concentration * 2

@@ -97,7 +97,7 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
     # There currently is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
-    return g.op("PackPadded", input, lengths, outputs=2)
+    return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
 @torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)
@@ -138,7 +138,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
 def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
     # See comment on _symbolic_pack_padded_sequence
-    data, lengths = g.op("PadPacked", input.data, input.batch_sizes, outputs=2)
+    data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
     if batch_first:
         data = g.op('Transpose', data, perm_i=[1, 0, 2])
     return data, lengths

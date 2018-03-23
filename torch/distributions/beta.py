@@ -28,14 +28,14 @@ class Beta(ExponentialFamily):
     support = constraints.unit_interval
     has_rsample = True
 
-    def __init__(self, concentration1, concentration0):
+    def __init__(self, concentration1, concentration0, validate_args=None):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
             concentration1_concentration0 = torch.tensor([concentration1, concentration0])
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)
         self._dirichlet = Dirichlet(concentration1_concentration0)
-        super(Beta, self).__init__(self._dirichlet._batch_shape)
+        super(Beta, self).__init__(self._dirichlet._batch_shape, validate_args=validate_args)
 
     @property
     def mean(self):
@@ -54,7 +54,8 @@ class Beta(ExponentialFamily):
         return value
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         heads_tails = torch.stack([value, 1.0 - value], -1)
         return self._dirichlet.log_prob(heads_tails)
 

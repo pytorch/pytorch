@@ -5,8 +5,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 cd .jenkins/perf_test
 
-export PATH=/opt/conda/bin:$PATH
-
 echo "Running CPU perf test for PyTorch..."
 
 # Get last master commit hash
