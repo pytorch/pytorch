@@ -812,82 +812,6 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
 //==============================================
 // Rest of the member funtions for Caffe2Backend
 //==============================================
-void Caffe2Backend::InplaceRewrite(GraphProto* graph) {
-  auto* nodes = graph->mutable_node();
-  auto renamed = InplaceRewrite(nodes);
-  for (int i = 0; i < graph->output_size(); ++i) {
-    graph->mutable_output(i)->set_name(LookUpWithDefault(
-        renamed, graph->output(i).name(), graph->output(i).name()));
-  }
-}
-
-//  \brief currently we use this to translate ONNX-style
-//  consumed_input annotations to Caffe2-style in place
-//  updates (use same input and output names).
-std::unordered_map<std::string, std::string> Caffe2Backend::InplaceRewrite(
-    ::google::protobuf::RepeatedPtrField<NodeProto>* nodes) {
-  std::unordered_map<std::string, std::string> renamed;
-  for (auto& node : *nodes) {
-    for (auto& input : *node.mutable_input()) {
-      input = LookUpWithDefault(renamed, input, input);
-    }
-
-    // Get `consumed_inputs` attribute and remove it from node attributes
-    ::google::protobuf::RepeatedField<::google::protobuf::int64>
-        consumed_inputs;
-    int found_idx = -1;
-    for (int i = 0; i < node.attribute_size(); ++i) {
-      const auto& attr = node.attribute(i);
-      if (attr.name() == "consumed_inputs") {
-        consumed_inputs.CopyFrom(attr.ints());
-        found_idx = i;
-        break;
-      }
-    }
-    if (found_idx >= 0 && found_idx < node.attribute_size()) {
-      if (found_idx != node.attribute_size() - 1) {
-        node.mutable_attribute(found_idx)->CopyFrom(
-            node.attribute(node.attribute_size() - 1));
-      }
-      node.mutable_attribute()->RemoveLast();
-    }
-
-    std::set<int> output_indexes;
-    for (int i = 0; i < node.output_size(); ++i) {
-      output_indexes.insert(i);
-    }
-    const auto& schema = GetOnnxSchema(node.op_type());
-
-    int i = 0;
-    for (const auto& consumed : consumed_inputs) {
-      if (!consumed) {
-        ++i;
-        continue;
-      }
-
-      auto output_idx = schema.consumed(i).second;
-      // consumed outputs are not always present
-      // for instance batch norm in test mode
-      // does not return the consumed inputs
-      if (output_idx < node.output_size()) {
-        output_indexes.erase(output_idx);
-        auto old_val = node.output(output_idx);
-        auto new_val = node.input(i);
-        node.set_output(output_idx, new_val);
-        renamed[old_val] = new_val;
-      }
-      ++i;
-    }
-
-    for (auto idx : output_indexes) {
-      auto name = node.output(idx);
-      node.set_output(idx, LookUpWithDefault(renamed, name, name));
-    }
-  }
-
-  return renamed;
-}
-
 std::unordered_set<std::string> Caffe2Backend::AllNamesInGraph(
     const GraphProto& graph) {
   std::unordered_set<std::string> names;
@@ -976,7 +900,6 @@ Caffe2Ops Caffe2Backend::ConvertNode(
   ::google::protobuf::RepeatedPtrField<NodeProto> nodes;
   auto* n = nodes.Add();
   ParseProtobufFromLargeString(node_str, n);
-  InplaceRewrite(&nodes);
   ModelProto init_model;
   ModelProto pred_model;
   OnnxNode onnx_node = OnnxNode(nodes.Get(0));
@@ -1007,10 +930,8 @@ void Caffe2Backend::OnnxToCaffe2(
   auto device_option = GetDeviceOption(Device(device));
 
   ModelProto init_model = OptimizeOnnx(onnx_model, true);
-  InplaceRewrite(init_model.mutable_graph());
 
   ModelProto pred_model = OptimizeOnnx(onnx_model, false);
-  InplaceRewrite(pred_model.mutable_graph());
 
   init_net->set_name(onnx_model.graph().name() + "_init");
   pred_net->set_name(onnx_model.graph().name() + "_predict");

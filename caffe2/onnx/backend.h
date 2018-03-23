@@ -132,11 +132,6 @@ class Caffe2Backend {
 
   std::unordered_set<std::string> AllNamesInGraph(const GraphProto& graph);
 
-  void InplaceRewrite(GraphProto* graph);
-
-  std::unordered_map<std::string, std::string> InplaceRewrite(
-      ::google::protobuf::RepeatedPtrField<NodeProto>* nodes);
-
   void BuildTensorFillingOp(
       caffe2::OperatorDef* c2_op,
       const TensorProto& onnx_tensor,

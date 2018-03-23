@@ -49,27 +49,6 @@ class TestCaffe2Basic(TestCase):
         n2 = dummy_name()
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
-    def test_relu_node_inplace(self):
-        X = np.random.randn(3, 2).astype(np.float32)
-        Y_ref = np.clip(X, 0, np.inf)
-
-        node_def = make_node(
-            "Relu", ["X"], ["Y"], consumed_inputs=[1])
-        output = c2.run_node(
-            node_def, {"X": X})
-        np.testing.assert_almost_equal(output.X, Y_ref)
-
-        node_def = make_node(
-            "Relu", ["X"], ["Y"], consumed_inputs=[1])
-        graph_def = make_graph(
-            [node_def],
-            name="test",
-            inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [3, 2])],
-            outputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [3, 2])])
-        c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
-        output = c2_rep.run({"X": X})
-        np.testing.assert_almost_equal(output.X, Y_ref)
-
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
         Y_ref = np.clip(X, 0, np.inf)

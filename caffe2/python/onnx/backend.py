@@ -121,7 +121,6 @@ class OnnxNode(object):
         self.name = str(node.name)
         self.op_type = str(node.op_type)
         self.attrs = OnnxAttributes.from_onnx(node.attribute)
-        self.consumed_inputs = self.attrs.pop("consumed_inputs", None)
         self.inputs = list(node.input)
         self.outputs = list(node.output)
 
@@ -214,7 +213,6 @@ class Caffe2Backend(Backend):
                 op.ParseFromString(s)
                 op.device_option.CopyFrom(device_option)
                 ops.append(op)
-            cls._inplace_rewrite([node])
             # For testing
             if "ONNX_CAFFE2_DEBUG" in os.environ:
                 init_ops, ops2, _ = cls._onnx_node_to_caffe2_op(
@@ -717,7 +715,6 @@ class Caffe2Backend(Backend):
         # Check whether we have RNN related ops
         pred_model = ModelProto()
         pred_model.ParseFromString(cls.optimize_onnx(model.SerializeToString(), predict=True))
-        cls._inplace_rewrite(pred_model.graph)
         rnn_nodes = []
         for node in pred_model.graph.node:
             if node.op_type in {'LSTM', 'GRU', 'RNN'}:
@@ -731,7 +728,6 @@ class Caffe2Backend(Backend):
             if rnn_nodes:
                 init_model = ModelProto()
                 init_model.ParseFromString(cls.optimize_onnx(model.SerializeToString(), init=True))
-                cls._inplace_rewrite(init_model.graph)
                 for node in rnn_nodes:
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
@@ -857,48 +853,6 @@ class Caffe2Backend(Backend):
 
         return c2_op
 
-
-    @classmethod
-    def _inplace_rewrite(cls, graph_or_nodes):
-        '''
-        currently we use this to translate ONNX-style
-        consumed_input annotations to Caffe2-style in place
-        updates (use same input and output names).
-        '''
-        is_graph = isinstance(graph_or_nodes, GraphProto)
-        if is_graph:
-            nodes = graph_or_nodes.node
-        else:
-            nodes = graph_or_nodes
-
-        renamed = {}
-
-        for node in nodes:
-            node.input[:] = [renamed.get(input_name, input_name)
-                             for input_name in node.input]
-            consumed_inputs = OnnxNode(node).consumed_inputs or []
-            output_idxes = set(range(len(node.output)))
-            schema = onnx.defs.get_schema(node.op_type)
-            for i, consumed in enumerate(consumed_inputs):
-                if not consumed:
-                    continue
-                _, output_idx = schema.consumed(i)
-                # consumed outputs are not always present
-                # for instance batch norm in test mode
-                # does not return the consumed inputs
-                if output_idx < len(node.output):
-                    output_idxes.remove(output_idx)
-                    old_val = node.output[output_idx]
-                    new_val = node.input[i]
-                    node.output[output_idx] = new_val
-                    renamed[old_val] = new_val
-            for idx in output_idxes:
-                name = node.output[idx]
-                node.output[idx] = renamed.get(name, name)
-        if is_graph:
-            for output in graph_or_nodes.output:
-                output.name = renamed.get(output.name, output.name)
-
     @staticmethod
     def _all_names_in_graph(graph):
         if graph is None:
@@ -918,11 +872,9 @@ class Caffe2Backend(Backend):
 
         init_model = ModelProto()
         init_model.ParseFromString(cls.optimize_onnx(onnx_model.SerializeToString(), init=True))
-        cls._inplace_rewrite(init_model.graph)
 
         pred_model = ModelProto()
         pred_model.ParseFromString(cls.optimize_onnx(onnx_model.SerializeToString(), predict=True))
-        cls._inplace_rewrite(pred_model.graph)
 
         init_net = caffe2_pb2.NetDef()
         pred_net = caffe2_pb2.NetDef()
