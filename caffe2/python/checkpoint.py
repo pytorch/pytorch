@@ -736,18 +736,18 @@ class JobRunner(object):
                             format(epoch, ex))
 
 
-def epoch_limiter(num_epochs):
+def epoch_limiter(job, num_epochs):
     """
     Creates a task that will output True when a given
     number of epochs has finished.
     """
-    with Job.current().init_group:
+    with job.init_group:
         init_net = core.Net('epoch_counter_init')
         counter = init_net.CreateCounter([], init_count=num_epochs - 1)
         Task(step=init_net)
 
-    with Job.current().epoch_group:
+    with job.epoch_group:
         epoch_net = core.Net('epoch_countdown')
         finished = epoch_net.CountDown(counter)
         output = Task(step=epoch_net, outputs=finished).outputs()[0]
-    Job.current().add_stop_signal(output)
+    job.add_stop_signal(output)
