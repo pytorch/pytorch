@@ -4,9 +4,8 @@
 
 #include <ATen/ATen.h>
 #include <pybind11/pybind11.h>
+#include <torch/csrc/THP_export.h>
 #include <torch/csrc/utils/pybind.h>
-
-#include "THP_export.h"
 
 namespace torch {
 
