@@ -4,9 +4,9 @@ import torch
 from .modules.utils import _single, _pair, _triple
 
 
-def input_grad_padding(out_backprop, input_size, stride, padding, kernel_size):
+def _grad_input_padding(grad_output, input_size, stride, padding, kernel_size):
     input_size = list(input_size)
-    k = out_backprop.dim() - 2
+    k = grad_output.dim() - 2
 
     if len(input_size) == k + 2:
         input_size = input_size[-k:]
@@ -15,7 +15,7 @@ def input_grad_padding(out_backprop, input_size, stride, padding, kernel_size):
                          .format(k + 2, len(input_size)))
 
     def dim_size(d):
-        return ((out_backprop.size(d + 2) - 1) * stride[d] - 2 * padding[d] +
+        return ((grad_output.size(d + 2) - 1) * stride[d] - 2 * padding[d] +
                 kernel_size[d])
 
     min_sizes = [dim_size(d) for d in range(k)]
@@ -24,14 +24,14 @@ def input_grad_padding(out_backprop, input_size, stride, padding, kernel_size):
         if size < min_size or size > max_size:
             raise ValueError(
                 ("requested an input grad size of {}, but valid sizes range "
-                 "from {} to {} (for an out_backprop of {})").format(
+                 "from {} to {} (for a grad_output of {})").format(
                      input_size, min_sizes, max_sizes,
-                     out_backprop.size()[2:]))
+                     grad_output.size()[2:]))
 
     return tuple(input_size[d] - min_sizes[d] for d in range(k))
 
 
-def conv1d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv1d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
     r"""
     Computes the gradient of conv1d with respect to the input of the convolution.
     This is same as the 1D transposed convolution operator under the hood but requires
@@ -40,7 +40,7 @@ def conv1d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
     Args:
         input_size : Shape of the input gradient tensor
         weight: weight tensor (out_channels x in_channels/groups x kW)
-        out_backprop : output gradient tensor (minibatch x out_channels x oW)
+        grad_output : output gradient tensor (minibatch x out_channels x oW)
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -49,12 +49,12 @@ def conv1d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
 
     Examples::
 
-        >>> input = torch.autograd.Variable(torch.randn(1,1,3), requires_grad=True)
-        >>> weight = torch.autograd.Variable(torch.randn(1,1,1), requires_grad=True)
+        >>> input = torch.randn(1,1,3, requires_grad=True)
+        >>> weight = torch.randn(1,1,1, requires_grad=True)
         >>> output = F.conv1d(input, weight)
-        >>> gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-        >>> gradient_i = torch.autograd.grad(output, input, gradient_o)
-        >>> F.grad.conv1d_input(input.shape, weight, gradient_o)
+        >>> grad_output = torch.randn(output.shape)
+        >>> grad_input = torch.autograd.grad(output, input, grad_output)
+        >>> F.grad.conv1d_input(input.shape, weight, grad_output)
 
     """
     stride = _single(stride)
@@ -65,22 +65,22 @@ def conv1d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
     if input_size is None:
         raise ValueError("grad.conv1d_input requires specifying an input_size")
 
-    grad_i_padding = input_grad_padding(out_backprop, input_size, stride,
-                                        padding, kernel_size)
+    grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
+                                             padding, kernel_size)
 
     return torch._C._VariableFunctions.conv_transpose1d(
-        out_backprop, weight, bias, stride, padding, grad_i_padding, groups,
+        grad_output, weight, bias, stride, padding, grad_input_padding, groups,
         dilation)
 
 
-def conv1d_weight(input, weight_size, out_backprop, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv1d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
     r"""
     Computes the gradient of conv1d with respect to the weight of the convolution.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iW)
         weight_size : Shape of the weight gradient tensor
-        out_backprop : output gradient tensor (minibatch x out_channels x oW)
+        grad_output : output gradient tensor (minibatch x out_channels x oW)
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -89,43 +89,41 @@ def conv1d_weight(input, weight_size, out_backprop, stride=1, padding=0, dilatio
 
     Examples::
 
-        >>> input = torch.autograd.Variable(torch.randn(1,1,3), requires_grad=True)
-        >>> weight = torch.autograd.Variable(torch.randn(1,1,1), requires_grad=True)
+        >>> input = torch.randn(1,1,3, requires_grad=True)
+        >>> weight = torch.randn(1,1,1, requires_grad=True)
         >>> output = F.conv1d(input, weight)
-        >>> gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-        >>> gradient_w = torch.autograd.grad(output, filter, gradient_o)
-        >>> F.grad.conv1d_weight(input, weight.shape, gradient_o)
+        >>> grad_output = torch.randn(output.shape)
+        >>> grad_weight = torch.autograd.grad(output, filter, grad_output)
+        >>> F.grad.conv1d_weight(input, weight.shape, grad_output)
 
     """
     stride = _single(stride)
     padding = _single(padding)
     dilation = _single(dilation)
     in_channels = input.shape[1]
-    out_channels = out_backprop.shape[1]
+    out_channels = grad_output.shape[1]
     min_batch = input.shape[0]
 
-    out_backprop_ = out_backprop.contiguous().repeat(1, in_channels // groups,
-                                                     1)
-    out_backprop_ = out_backprop_.contiguous().view(
-        out_backprop_.shape[0] * out_backprop_.shape[1], 1,
-        out_backprop_.shape[2])
+    grad_output = grad_output.contiguous().repeat(1, in_channels // groups, 1)
+    grad_output = grad_output.contiguous().view(
+        grad_output.shape[0] * grad_output.shape[1], 1, grad_output.shape[2])
 
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2])
 
-    grad_w = torch._C._VariableFunctions.conv1d(input, out_backprop_, bias,
-                                                dilation, padding, stride,
-                                                in_channels * min_batch)
+    grad_weight = torch._C._VariableFunctions.conv1d(input, grad_output, bias,
+                                                     dilation, padding, stride,
+                                                     in_channels * min_batch)
 
-    grad_w = grad_w.contiguous().view(min_batch, grad_w.shape[1] // min_batch,
-                                      grad_w.shape[2])
+    grad_weight = grad_weight.contiguous().view(
+        min_batch, grad_weight.shape[1] // min_batch, grad_weight.shape[2])
 
-    return grad_w.sum(dim=0).view(in_channels // groups, out_channels,
-                                  grad_w.shape[2]).transpose(0, 1).narrow(
-                                      2, 0, weight_size[2])
+    return grad_weight.sum(dim=0).view(
+        in_channels // groups, out_channels, grad_weight.shape[2]).transpose(
+            0, 1).narrow(2, 0, weight_size[2])
 
 
-def conv2d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv2d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
     r"""
     Computes the gradient of conv2d with respect to the input of the convolution.
     This is same as the 2D transposed convolution operator under the hood but requires
@@ -134,7 +132,7 @@ def conv2d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
     Args:
         input_size : Shape of the input gradient tensor
         weight: weight tensor (out_channels x in_channels/groups x kH x kW)
-        out_backprop : output gradient tensor (minibatch x out_channels x oH x oW)
+        grad_output : output gradient tensor (minibatch x out_channels x oH x oW)
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -143,12 +141,12 @@ def conv2d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
 
     Examples::
 
-        >>> input = torch.autograd.Variable(torch.randn(1,1,3,3), requires_grad=True)
-        >>> weight = torch.autograd.Variable(torch.randn(1,1,1,2), requires_grad=True)
+        >>> input = torch.randn(1,1,3,3, requires_grad=True)
+        >>> weight = torch.randn(1,1,1,2, requires_grad=True)
         >>> output = F.conv2d(input, weight)
-        >>> gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-        >>> gradient_i = torch.autograd.grad(output, input, gradient_o)
-        >>> F.grad.conv2d_input(input.shape, weight, gradient_o)
+        >>> grad_output = torch.randn(output.shape)
+        >>> grad_input = torch.autograd.grad(output, input, grad_output)
+        >>> F.grad.conv2d_input(input.shape, weight, grad_output)
 
     """
     stride = _pair(stride)
@@ -159,22 +157,22 @@ def conv2d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
     if input_size is None:
         raise ValueError("grad.conv2d_input requires specifying an input_size")
 
-    grad_i_padding = input_grad_padding(out_backprop, input_size, stride,
-                                        padding, kernel_size)
+    grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
+                                             padding, kernel_size)
 
     return torch._C._VariableFunctions.conv_transpose2d(
-        out_backprop, weight, bias, stride, padding, grad_i_padding, groups,
+        grad_output, weight, bias, stride, padding, grad_input_padding, groups,
         dilation)
 
 
-def conv2d_weight(input, weight_size, out_backprop, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv2d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
     r"""
     Computes the gradient of conv2d with respect to the weight of the convolution.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iH x iW)
         weight_size : Shape of the weight gradient tensor
-        out_backprop : output gradient tensor (minibatch x out_channels x oH x oW)
+        grad_output : output gradient tensor (minibatch x out_channels x oH x oW)
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -183,45 +181,45 @@ def conv2d_weight(input, weight_size, out_backprop, stride=1, padding=0, dilatio
 
     Examples::
 
-        >>> input = torch.autograd.Variable(torch.randn(1,1,3,3), requires_grad=True)
-        >>> weight = torch.autograd.Variable(torch.randn(1,1,1,2), requires_grad=True)
+        >>> input = torch.randn(1,1,3,3, requires_grad=True)
+        >>> weight = torch.randn(1,1,1,2, requires_grad=True)
         >>> output = F.conv2d(input, weight)
-        >>> gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-        >>> gradient_w = torch.autograd.grad(output, filter, gradient_o)
-        >>> F.grad.conv2d_weight(input, weight.shape, gradient_o)
+        >>> grad_output = torch.randn(output.shape)
+        >>> grad_weight = torch.autograd.grad(output, filter, grad_output)
+        >>> F.grad.conv2d_weight(input, weight.shape, grad_output)
 
     """
     stride = _pair(stride)
     padding = _pair(padding)
     dilation = _pair(dilation)
     in_channels = input.shape[1]
-    out_channels = out_backprop.shape[1]
+    out_channels = grad_output.shape[1]
     min_batch = input.shape[0]
 
-    out_backprop_ = out_backprop.contiguous().repeat(1, in_channels // groups,
-                                                     1, 1)
-    out_backprop_ = out_backprop_.contiguous().view(
-        out_backprop_.shape[0] * out_backprop_.shape[1], 1,
-        out_backprop_.shape[2], out_backprop_.shape[3])
+    grad_output = grad_output.contiguous().repeat(1, in_channels // groups, 1,
+                                                  1)
+    grad_output = grad_output.contiguous().view(
+        grad_output.shape[0] * grad_output.shape[1], 1, grad_output.shape[2],
+        grad_output.shape[3])
 
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2], input.shape[3])
 
-    grad_w = torch._C._VariableFunctions.conv2d(input, out_backprop_, bias,
-                                                dilation, padding, stride,
-                                                in_channels * min_batch)
+    grad_weight = torch._C._VariableFunctions.conv2d(input, grad_output, bias,
+                                                     dilation, padding, stride,
+                                                     in_channels * min_batch)
 
-    grad_w = grad_w.contiguous().view(min_batch, grad_w.shape[1] // min_batch,
-                                      grad_w.shape[2], grad_w.shape[3])
+    grad_weight = grad_weight.contiguous().view(
+        min_batch, grad_weight.shape[1] // min_batch, grad_weight.shape[2],
+        grad_weight.shape[3])
 
-    return grad_w.sum(dim=0).view(in_channels // groups, out_channels,
-                                  grad_w.shape[2], grad_w.shape[3]).transpose(
-                                      0, 1).narrow(2, 0,
-                                                   weight_size[2]).narrow(
-                                                       3, 0, weight_size[3])
+    return grad_weight.sum(dim=0).view(
+        in_channels // groups, out_channels,
+        grad_weight.shape[2], grad_weight.shape[3]).transpose(0, 1).narrow(
+            2, 0, weight_size[2]).narrow(3, 0, weight_size[3])
 
 
-def conv3d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv3d_input(input_size, weight, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
     r"""
     Computes the gradient of conv3d with respect to the input of the convolution.
     This is same as the 3D transposed convolution operator under the hood but requires
@@ -230,7 +228,7 @@ def conv3d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
     Args:
         input_size : Shape of the input gradient tensor
         weight: weights tensor (out_channels x in_channels/groups x kT x kH x kW)
-        out_backprop : output gradient tensor (minibatch x out_channels x oT x oH x oW)
+        grad_output : output gradient tensor (minibatch x out_channels x oT x oH x oW)
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -239,12 +237,12 @@ def conv3d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
 
     Examples::
 
-        >>> input = torch.autograd.Variable(torch.randn(2, 8, 10, 10, 20), requires_grad=True)
-        >>> weight = torch.autograd.Variable(torch.randn(4, 8, 2, 3, 3), requires_grad=True)
+        >>> input = torch.randn(2, 8, 10, 10, 20, requires_grad=True)
+        >>> weight = torch.randn(4, 8, 2, 3, 3, requires_grad=True)
         >>> output = F.conv3d(input, weight)
-        >>> gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-        >>> gradient_i = torch.autograd.grad(output, input, gradient_o)
-        >>> F.grad.conv3d_input(input.shape, weight, gradient_o)
+        >>> grad_output = torch.randn(output.shape)
+        >>> grad_input = torch.autograd.grad(output, input, grad_output)
+        >>> F.grad.conv3d_input(input.shape, weight, grad_output)
 
     """
     stride = _triple(stride)
@@ -255,22 +253,22 @@ def conv3d_input(input_size, weight, out_backprop, stride=1, padding=0, dilation
     if input_size is None:
         raise ValueError("grad.conv3d_input requires specifying an input_size")
 
-    grad_i_padding = input_grad_padding(out_backprop, input_size, stride,
-                                        padding, kernel_size)
+    grad_input_padding = _grad_input_padding(grad_output, input_size, stride,
+                                             padding, kernel_size)
 
     return torch._C._VariableFunctions.conv_transpose3d(
-        out_backprop, weight, bias, stride, padding, grad_i_padding, groups,
+        grad_output, weight, bias, stride, padding, grad_input_padding, groups,
         dilation)
 
 
-def conv3d_weight(input, weight_size, out_backprop, stride=1, padding=0, dilation=1, groups=1, bias=None):
+def conv3d_weight(input, weight_size, grad_output, stride=1, padding=0, dilation=1, groups=1, bias=None):
     r"""
     Computes the gradient of conv3d with respect to the weight of the convolution.
 
     Args:
         input: input tensor of shape (minibatch x in_channels x iT x iH x iW)
         weight_size : Shape of the weight gradient tensor
-        out_backprop : output gradient tensor (minibatch x out_channels x oT x oH x oW)
+        grad_output : output gradient tensor (minibatch x out_channels x oT x oH x oW)
         stride (int or tuple, optional): Stride of the convolution. Default: 1
         padding (int or tuple, optional): Zero-padding added to both sides of the input. Default: 0
         dilation (int or tuple, optional): Spacing between kernel elements. Default: 1
@@ -279,39 +277,40 @@ def conv3d_weight(input, weight_size, out_backprop, stride=1, padding=0, dilatio
 
     Examples::
 
-        >>> input = torch.autograd.Variable(torch.randn(2, 8, 10, 10, 20), requires_grad=True)
-        >>> weight = torch.autograd.Variable(torch.randn(4, 8, 2, 3, 3), requires_grad=True)
+        >>> input = torch.randn(2, 8, 10, 10, 20, requires_grad=True)
+        >>> weight = torch.randn(4, 8, 2, 3, 3, requires_grad=True)
         >>> output = F.conv3d(input, weight)
-        >>> gradient_o = torch.autograd.Variable(torch.randn(output.shape))
-        >>> gradient_w = torch.autograd.grad(output, weight, gradient_o)
-        >>> F.grad.conv3d_weight(input, weight.shape, gradient_o)
+        >>> grad_output = torch.randn(output.shape)
+        >>> grad_weight = torch.autograd.grad(output, weight, grad_output)
+        >>> F.grad.conv3d_weight(input, weight.shape, grad_output)
 
     """
     stride = _triple(stride)
     padding = _triple(padding)
     dilation = _triple(dilation)
     in_channels = input.shape[1]
-    out_channels = out_backprop.shape[1]
+    out_channels = grad_output.shape[1]
     min_batch = input.shape[0]
 
-    out_backprop_ = out_backprop.repeat(1, in_channels // groups, 1, 1, 1)
-    out_backprop_ = out_backprop_.contiguous().view(
-        out_backprop_.shape[0] * out_backprop_.shape[1], 1,
-        out_backprop_.shape[2], out_backprop_.shape[3], out_backprop_.shape[4])
+    grad_output = grad_output.repeat(1, in_channels // groups, 1, 1, 1)
+    grad_output = grad_output.contiguous().view(
+        grad_output.shape[0] * grad_output.shape[1], 1, grad_output.shape[2],
+        grad_output.shape[3], grad_output.shape[4])
 
     input = input.contiguous().view(1, input.shape[0] * input.shape[1],
                                     input.shape[2], input.shape[3],
                                     input.shape[4])
 
-    grad_w = torch._C._VariableFunctions.conv3d(input, out_backprop_, bias,
-                                                dilation, padding, stride,
-                                                in_channels * min_batch)
+    grad_weight = torch._C._VariableFunctions.conv3d(input, grad_output, bias,
+                                                     dilation, padding, stride,
+                                                     in_channels * min_batch)
 
-    grad_w = grad_w.contiguous().view(min_batch, grad_w.shape[1] // min_batch,
-                                      grad_w.shape[2], grad_w.shape[3],
-                                      grad_w.shape[4])
+    grad_weight = grad_weight.contiguous().view(
+        min_batch, grad_weight.shape[1] // min_batch, grad_weight.shape[2],
+        grad_weight.shape[3], grad_weight.shape[4])
 
-    return grad_w.sum(dim=0).view(
-        in_channels // groups, out_channels, grad_w.shape[2], grad_w.shape[3],
-        grad_w.shape[4]).transpose(0, 1).narrow(2, 0, weight_size[2]).narrow(
-            3, 0, weight_size[3]).narrow(4, 0, weight_size[4])
+    return grad_weight.sum(dim=0).view(
+        in_channels // groups, out_channels, grad_weight.shape[2],
+        grad_weight.shape[3], grad_weight.shape[4]).transpose(0, 1).narrow(
+            2, 0, weight_size[2]).narrow(3, 0, weight_size[3]).narrow(
+                4, 0, weight_size[4])
