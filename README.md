@@ -171,6 +171,7 @@ On Linux
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
+# Replace `cmake` with `cmake3` on Ubuntu 14.04 Trusty
 conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 
 # Add LAPACK support for the GPU
