@@ -63,7 +63,7 @@ class IndexHashOp : public Operator<Context> {
 
  protected:
   template <typename T>
-  T hash(T id) CAFFE2_NO_SANITIZE("signed-integer-overflow") {
+  CAFFE2_NO_SANITIZE("signed-integer-overflow") T hash(T id) {
     int8_t* bytes = (int8_t*)&id;
     T hashed = seed_ * 0xDEADBEEF;
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
