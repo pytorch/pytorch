@@ -161,8 +161,11 @@ Probability distributions - torch.distributions
 :hidden:`MultivariateNormal`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. currentmodule:: torch.distributions.multivariate_normal
 .. autoclass:: MultivariateNormal
     :members:
+    :undoc-members:
+    :show-inheritance:
 
 :hidden:`Normal`
 ~~~~~~~~~~~~~~~~~~~~~~~
