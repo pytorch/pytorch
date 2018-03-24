@@ -13,6 +13,7 @@ __all__ = [
     'ComposeTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
+    'PowerTransform',
     'SigmoidTransform',
     'SoftmaxTransform',
     'StickBreakingTransform',
@@ -277,8 +278,8 @@ identity_transform = ComposeTransform([])
 
 
 class ExpTransform(Transform):
-    """
-    Transform via the mapping `y = exp(x)`.
+    r"""
+    Transform via the mapping :math:`y = \exp(x)`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -298,9 +299,37 @@ class ExpTransform(Transform):
         return x
 
 
-class SigmoidTransform(Transform):
+class PowerTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = x^{\text{exponent}}`.
     """
-    Transform via the mapping `y = sigmoid(x)` and `x = logit(y)`.
+    domain = constraints.positive
+    codomain = constraints.positive
+    bijective = True
+    sign = +1
+
+    def __init__(self, exponent, cache_size=0):
+        super(PowerTransform, self).__init__(cache_size=cache_size)
+        self.exponent, = broadcast_all(exponent)
+
+    def __eq__(self, other):
+        if not isinstance(other, PowerTransform):
+            return False
+        return self.exponent.eq(other.exponent).all().item()
+
+    def _call(self, x):
+        return x.pow(self.exponent)
+
+    def _inverse(self, y):
+        return y.pow(1 / self.exponent)
+
+    def log_abs_det_jacobian(self, x, y):
+        return (self.exponent * y / x).abs().log()
+
+
+class SigmoidTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = \frac{1}{1 + \exp(-x)}` and :math:`x = \text{logit}(y)`.
     """
     domain = constraints.real
     codomain = constraints.unit_interval
@@ -321,8 +350,8 @@ class SigmoidTransform(Transform):
 
 
 class AbsTransform(Transform):
-    """
-    Transform via the mapping `y = abs(x)`.
+    r"""
+    Transform via the mapping :math:`y = |x|`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -338,8 +367,8 @@ class AbsTransform(Transform):
 
 
 class AffineTransform(Transform):
-    """
-    Transform via the pointwise affine mapping `y = loc + scale * x`.
+    r"""
+    Transform via the pointwise affine mapping :math:`y = \text{loc} + \text{scale} \times x`.
 
     Args:
         loc (Tensor): Location parameter.
@@ -386,8 +415,8 @@ class AffineTransform(Transform):
 
 
 class SoftmaxTransform(Transform):
-    """
-    Transform from unconstrained space to the simplex via `y = exp(x)` then
+    r"""
+    Transform from unconstrained space to the simplex via :math:`y = \exp(x)` then
     normalizing.
 
     This is not bijective and cannot be used for HMC. However this acts mostly
