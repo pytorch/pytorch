@@ -267,6 +267,18 @@ static FunctionDescription THVector_(sigmoid_DISPATCHTABLE)[] = {
 void THVector_(sigmoid)(real *y, const real *x, const ptrdiff_t n) {
   THVector_(sigmoid_DISPATCHPTR)(y, x, n);
 }
+
+static void (*THVector_(tanh_DISPATCHPTR))(real *, const real *, const ptrdiff_t) = &THVector_(tanh_DEFAULT);
+static FunctionDescription THVector_(tanh_DISPATCHTABLE)[] = {
+  #if defined(TH_REAL_IS_FLOAT) && defined(USE_AVX2)
+      FUNCTION_IMPL(THVector_(tanh_AVX2), SIMDExtension_AVX2),
+  #endif
+
+  FUNCTION_IMPL(THVector_(tanh_DEFAULT), SIMDExtension_DEFAULT)
+};
+void THVector_(tanh)(real *y, const real *x, const ptrdiff_t n) {
+  THVector_(tanh_DISPATCHPTR)(y, x, n);
+}
 #endif
 
 /*
@@ -292,6 +304,7 @@ struct THVector_(startup) {
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
     INIT_DISPATCH_PTR(sigmoid);
+    INIT_DISPATCH_PTR(tanh);
 #endif
   }
 };
