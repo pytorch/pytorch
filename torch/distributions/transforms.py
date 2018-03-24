@@ -497,12 +497,16 @@ class LowerCholeskyTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
 
-    def _call(self, x):
-        if x.dim() != 2:
-            raise NotImplementedError
+    def _call_on_event(self, x):
         return x.tril(-1) + x.diag().exp().diag()
 
-    def _inverse(self, y):
-        if y.dim() != 2:
-            raise NotImplementedError
+    def _inverse_on_event(self, y):
         return y.tril(-1) + y.diag().log().diag()
+
+    def _call(self, x):
+        flat_x = x.contiguous().view((-1,) + x.shape[-2:])
+        return torch.stack([self._call_on_event(z) for z in flat_x]).view(x.shape)
+
+    def _inverse(self, y):
+        flat_y = y.contiguous().view((-1,) + y.shape[-2:])
+        return torch.stack([self._inverse_on_event(z) for z in flat_y]).view(y.shape)

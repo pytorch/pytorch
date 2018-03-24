@@ -3025,23 +3025,23 @@ class TestTransforms(TestCase):
                 PowerTransform(exponent=torch.tensor(5).normal_(),
                                cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
-                AffineTransform(variable(torch.Tensor(5).normal_()),
-                                variable(torch.Tensor(5).normal_()),
+                AffineTransform(torch.Tensor(5).normal_(),
+                                torch.Tensor(5).normal_(),
                                 cache_size=cache_size),
-                AffineTransform(variable(torch.Tensor(4, 5).normal_()),
-                                variable(torch.Tensor(4, 5).normal_()),
+                AffineTransform(torch.Tensor(4, 5).normal_(),
+                                torch.Tensor(4, 5).normal_(),
                                 cache_size=cache_size),
                 SoftmaxTransform(cache_size=cache_size),
                 StickBreakingTransform(cache_size=cache_size),
                 LowerCholeskyTransform(cache_size=cache_size),
                 ComposeTransform([
-                    AffineTransform(variable(torch.Tensor(4, 5).normal_()),
-                                    variable(torch.Tensor(4, 5).normal_()),
+                    AffineTransform(torch.Tensor(4, 5).normal_(),
+                                    torch.Tensor(4, 5).normal_(),
                                     cache_size=cache_size),
                 ]),
                 ComposeTransform([
-                    AffineTransform(variable(torch.Tensor(4, 5).normal_()),
-                                    variable(torch.Tensor(4, 5).normal_()),
+                    AffineTransform(torch.Tensor(4, 5).normal_(),
+                                    torch.Tensor(4, 5).normal_(),
                                     cache_size=cache_size),
                     ExpTransform(cache_size=cache_size),
                 ]),
@@ -3092,7 +3092,7 @@ class TestTransforms(TestCase):
 
     def test_forward_inverse_cache(self):
         for transform in self.transforms:
-            x = variable(self._generate_data(transform), requires_grad=True)
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
             except NotImplementedError:
@@ -3119,7 +3119,7 @@ class TestTransforms(TestCase):
 
     def test_forward_inverse_no_cache(self):
         for transform in self.transforms:
-            x = variable(self._generate_data(transform), requires_grad=True)
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
                 x2 = transform.inv(y.clone())  # bypass cache
@@ -3148,7 +3148,7 @@ class TestTransforms(TestCase):
         for transform in self.transforms:
             if transform.event_dim > 0:
                 continue
-            x = variable(self._generate_data(transform), requires_grad=True)
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
                 actual = transform.log_abs_det_jacobian(x, y)
@@ -3165,7 +3165,7 @@ class TestTransforms(TestCase):
         for transform in self.transforms:
             if transform.event_dim > 0:
                 continue
-            y = variable(self._generate_data(transform.inv), requires_grad=True)
+            y = torch.tensor(self._generate_data(transform.inv), requires_grad=True)
             try:
                 x = transform.inv(y)
                 actual = transform.log_abs_det_jacobian(x, y)
@@ -3194,8 +3194,9 @@ class TestTransforms(TestCase):
         transform0 = ExpTransform()
         transform1 = SoftmaxTransform()
         transform2 = LowerCholeskyTransform()
-        base_dist0 = Normal(variable(torch.zeros(4, 4)), variable(torch.ones(4, 4)))
-        base_dist1 = Dirichlet(variable(torch.ones(4, 4)))
+        base_dist0 = Normal(torch.zeros(4, 4), torch.ones(4, 4))
+        base_dist1 = Dirichlet(torch.ones(4, 4))
+        base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
         examples = [
             ((4, 4), (), base_dist0),
             ((4,), (4,), base_dist1),
@@ -3216,6 +3217,12 @@ class TestTransforms(TestCase):
             ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
             ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
             ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
+            ((3, 4, 4), (), base_dist2),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform0, transform2])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform1, transform2])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform0])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform1])),
         ]
         for batch_shape, event_shape, dist in examples:
             self.assertEqual(dist.batch_shape, batch_shape)
