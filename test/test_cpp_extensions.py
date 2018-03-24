@@ -6,7 +6,7 @@ try:
     import torch_test_cpp_extension as cpp_extension
 except ModuleNotFoundError:
     print("\'test_cpp_extensions.py\' cannot be invoked directly. " +
-          "Running \'python run_test.py\' will include \'test_cpp_extensions.py\' tests.")
+          "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
     raise
 
 import common
