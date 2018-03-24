@@ -66,7 +66,7 @@ endif()
 # Flags
 # When using MSVC
 
-# Detect CUDA architecture and get best NVCC flags
+# Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
 IF(NOT CUDA_FOUND)
   FIND_PACKAGE(CUDA 5.5)
@@ -386,9 +386,11 @@ IF(BLAS_FOUND)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
     IF(NOT BLAS_INCLUDE_DIR)
-      MESSAGE(FATAL_ERROR "MKL header files not found. If using conda, please run \
-        `conda install mkl-include`. Otherwise, please make sure that CMake will \
-        search the directory containing the header files, e.g., by setting CMAKE_INCLUDE_PATH.")
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda, and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
     ENDIF()
     INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
     SET(AT_MKL_ENABLED 1)
