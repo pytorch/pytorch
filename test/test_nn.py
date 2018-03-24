@@ -1732,7 +1732,7 @@ class TestNN(NNTestCase):
     def _test_LayerNorm_general(self, type):
         for i in range(2, 6):
             shape = torch.LongTensor(i).random_(3, 6).tolist()
-            x = Variable(type(*shape).uniform_(0, 10))
+            x = type(*shape).uniform_(0, 10)
             normalized_ndim = random.randint(1, i - 1)  # inclusive
             normalized_shape = shape[-normalized_ndim:]
             unnormalized_shape = shape[:-normalized_ndim]
@@ -1779,8 +1779,7 @@ class TestNN(NNTestCase):
             self.assertEqual(old_running_var, ln.running_var)
 
     def _test_LayerNorm_cuda_half(self):
-        # just THNN, LayerNorm has no cuDNN path
-        input = Variable(torch.rand(2, 3, 3, 2).cuda().half().random_(1, 10), requires_grad=True)
+        input = torch.zeros(2, 3, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
         m = nn.LayerNorm([3, 2]).cuda().half()
         output = m(input)
         output.sum().backward()
@@ -1793,6 +1792,69 @@ class TestNN(NNTestCase):
     def test_LayerNorm_general_cuda(self):
         self._test_LayerNorm_general(torch.cuda.FloatTensor)
         self._test_LayerNorm_cuda_half()
+
+    def _test_GroupNorm_general(self, type):
+        good_shape_g = {
+            (1, 2, 3, 4): 2,
+            (2, 3, 10): 3,
+            (3, 1, 1, 1, 2): 1,
+            (2, 6, 4, 2, 2): 3,
+        }
+        for shape, g in good_shape_g.items():
+            x = type(*shape).uniform_(0, 10)
+            b = shape[0]
+            c = shape[1]
+
+            # test that GN normalizes to mean 0 and stddev 1
+            gn = nn.GroupNorm(g, c, eps=0).type(type)
+            gn.weight.data.fill_(1)
+            gn.bias.data.fill_(0)
+            output = gn(x)
+            out_reshaped = output.view(b, g, -1)
+            mean = out_reshaped.mean(-1)
+            var = out_reshaped.var(-1, unbiased=False)
+            self.assertAlmostEqual(torch.abs(mean).mean(), 0, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var).mean(), 1, delta=1e-5)
+
+            # test that GN applies weight and bias correctly
+            scale = type(c).uniform_(0.2, 2)
+            bias = type(c).uniform_(0.2, 2)
+            gn.weight.data.copy_(scale)
+            gn.bias.data.copy_(bias)
+            output = gn(x)
+            out_reshaped = output.view(b, c, -1)
+            out_normed = (out_reshaped - bias.view(c, 1)) / scale.view(c, 1)
+            out_normed_reshaped = out_normed.view(b, g, -1)
+            mean = out_normed_reshaped.mean(-1)
+            var = out_normed_reshaped.var(-1, unbiased=False)
+            self.assertAlmostEqual(torch.abs(mean).mean(), 0, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var).mean(), 1, delta=1e-5)
+
+        bad_shape_g = {
+            (1, 2, 3, 4): 3,
+            (2, 3, 10): 2,
+            (3, 1, 1, 1, 2): 10,
+            (2, 6, 4, 2, 2): 4,
+        }
+        for shape, g in bad_shape_g.items():
+            gn = nn.GroupNorm(g, shape[1])
+            input = type(*shape).uniform_(0, 10)
+            self.assertRaises(RuntimeError, lambda: gn(input))
+
+    def _test_GroupNorm_cuda_half(self):
+        input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
+        m = nn.GroupNorm(2, 4).cuda().half()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqual(output.type(), input.type())
+
+    def test_GroupNorm_general(self):
+        self._test_GroupNorm_general(torch.FloatTensor)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_GroupNorm_general_cuda(self):
+        self._test_GroupNorm_general(torch.cuda.FloatTensor)
+        self._test_GroupNorm_cuda_half()
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
@@ -5879,6 +5941,54 @@ new_module_tests = [
         cudnn=True,
         check_eval=True,
         desc='3d_elementwise_affine_tracking_stats',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 6, 1e-3),
+        input_size=(4, 6, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(5, 5, 1e-3, False),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(1, 5, 1e-3, False),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 6, 1e-3),
+        input_size=(4, 6, 2, 3),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 3, 1e-3, False),
+        input_size=(4, 3, 2, 3),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(1, 3, 1e-3, False),
+        input_size=(4, 3, 2, 3),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
     ),
     dict(
         module_name='Conv1d',
