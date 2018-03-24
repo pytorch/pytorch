@@ -17,13 +17,12 @@ template<typename Acctype>
 __device__ __forceinline__
 static Acctype linear_upsampling_compute_source_index(
                           Acctype scale, int dst_index, bool align_corners) {
-	if (dst_index == 0) {
-		return Acctype(0);
-	} else if (align_corners) {
-		return scale * dst_index;
-	} else {
-		return scale * (dst_index + Acctype(0.5)) - Acctype(0.5);
-	}
+  if (align_corners) {
+    return scale * dst_index;
+  } else {
+    Acctype src_idx = scale * (dst_index + Acctype(0.5)) - Acctype(0.5);
+    return src_idx < Acctype(0) ? Acctype(0) : src_idx;
+  }
 }
 
 

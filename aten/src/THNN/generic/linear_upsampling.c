@@ -14,12 +14,11 @@ static inline float THNN_(linear_upsampling_compute_scale)(
 
 static inline float THNN_(linear_upsampling_compute_source_index)(
                           float scale, int dst_index, bool align_corners) {
-  if (dst_index == 0) {
-    return 0.f;
-  } else if (align_corners) {
+  if (align_corners) {
     return scale * dst_index;
   } else {
-    return scale * (dst_index + 0.5) - 0.5;
+    float src_idx = scale * (dst_index + 0.5) - 0.5;
+    return src_idx < 0 ? 0.f : src_idx;
   }
 }
 
