@@ -473,6 +473,7 @@ class TestBottleneck(TestCase):
         self._check_cprof_summary(out)
         self._check_cuda(out)
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     @unittest.skipIf(not torch.cuda.is_available(), 'No CUDA')
     def test_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
