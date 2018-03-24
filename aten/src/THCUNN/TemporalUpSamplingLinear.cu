@@ -2,6 +2,7 @@
 // Originally developed by George Papandreou
 #include "THCUNN.h"
 #include "common.h"
+#include "linear_upsampling.h"
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
@@ -11,7 +12,7 @@
 
 template<typename Dtype, typename Acctype>
 __global__ void caffe_gpu_interp2_kernel(const int n,
-    const Acctype rwidth,
+    const Acctype rwidth, const bool align_corners,
     const THCDeviceTensor<Dtype, 3> data1, THCDeviceTensor<Dtype, 3> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   const int batchsize = data1.getSize(0);
@@ -33,7 +34,7 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
       return;
     }
     //
-    const Acctype w1r = rwidth * w2;
+    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -52,7 +53,7 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
 // Backward (adjoint) operation 1 <- 2 (accumulates)
 template <typename Dtype, typename Acctype>
 __global__ void caffe_gpu_interp2_kernel_backward(const int n,
-    const Acctype rwidth,
+    const Acctype rwidth, const bool align_corners,
     THCDeviceTensor<Dtype, 3> data1, const THCDeviceTensor<Dtype, 3> data2){
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   const int batchsize = data1.getSize(0);
@@ -73,7 +74,7 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
       return;
     }
     //
-    const Acctype w1r = rwidth * w2;
+    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
