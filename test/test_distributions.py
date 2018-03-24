@@ -49,6 +49,7 @@ from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
+                                            PowerTransform,
                                             SigmoidTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
@@ -3019,6 +3020,10 @@ class TestTransforms(TestCase):
             transforms = [
                 AbsTransform(cache_size=cache_size),
                 ExpTransform(cache_size=cache_size),
+                PowerTransform(exponent=2,
+                               cache_size=cache_size),
+                PowerTransform(exponent=torch.tensor(5).normal_(),
+                               cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
                 AffineTransform(variable(torch.Tensor(5).normal_()),
                                 variable(torch.Tensor(5).normal_()),
