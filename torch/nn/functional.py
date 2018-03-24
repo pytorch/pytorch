@@ -1257,66 +1257,12 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
                           eps=eps)
 
 
-def layer_norm(input, normalized_shape, running_mean=None, running_var=None,
-               weight=None, bias=None, use_input_stats=True,
-               momentum=0.1, eps=1e-5):
+def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    if not use_input_stats and (running_mean is None or running_var is None):
-        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
-
-    if weight is not None and weight.size() != normalized_shape:
-        raise ValueError('Expected weight to be of same shape as '
-                         'normalized_shape, but got {} weight and '
-                         'normalized_shape={}'.format(weight.size(), normalized_shape))
-
-    if bias is not None and bias.size() != normalized_shape:
-        raise ValueError('Expected bias to be of same shape as '
-                         'normalized_shape, but got {} bias and '
-                         'normalized_shape={}'.format(bias.size(), normalized_shape))
-
-    normalized_ndim = len(normalized_shape)
-    input_shape = input.size()
-
-    if input_shape[-normalized_ndim:] != torch.Size(normalized_shape):
-        raise ValueError('Expected input with shape [*, {}], but got {} input'
-                         .format(', '.join(normalized_shape), list(input_shape)))
-
-    n = reduce(mul, input_shape[:-normalized_ndim], 1)
-
-    # Repeat stored stats if necessary
-    if running_mean is not None:
-        running_mean_orig = running_mean
-        running_mean = running_mean_orig.repeat(n)
-    if running_var is not None:
-        running_var_orig = running_var
-        running_var = running_var_orig.repeat(n)
-
-    # Apply layer norm
-    input_reshaped = input.contiguous().view(1, n, -1)
-
-    out = batch_norm(
-        input_reshaped, running_mean, running_var, None, None,
-        use_input_stats, momentum, eps)
-
-    # Copy back
-    if running_mean is not None:
-        running_mean_orig.fill_(running_mean.mean())
-    if running_var is not None:
-        running_var_orig.fill_(running_var.mean())
-
-    out = out.view(*input_shape)
-
-    if weight is not None and bias is not None:
-        return torch.addcmul(bias, 1, out, weight)
-    elif weight is not None:
-        return torch.mul(out, weight)
-    elif bias is not None:
-        return torch.add(out, bias)
-    else:
-        return out
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps)
 
 
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
