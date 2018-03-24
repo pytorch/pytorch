@@ -1042,7 +1042,8 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
                   THCTensor *input,
                   THCTensor *output,
                   int outputHeight,
-                  int outputWidth);
+                  int outputWidth,
+                  bool align_corners);
 
 TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
                   THCState *state,
@@ -1053,7 +1054,8 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
                   int inputHeight,
                   int inputWidth,
                   int outputHeight,
-                  int outputWidth);
+                  int outputWidth,
+                  bool align_corners);
 
 TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
                   THCState *state,
@@ -1336,7 +1338,8 @@ TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  int outputWidth);
+                  int outputWidth,
+                  bool align_corners);
 
 TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
                   THCState *state,
@@ -1345,7 +1348,8 @@ TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
                   int nbatch,
                   int nchannels,
                   int inputWidth,
-                  int outputWidth);
+                  int outputWidth,
+                  bool align_corners);
 
 TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
                   THCState *state,
@@ -1701,7 +1705,8 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
                   THCTensor *output,
                   int outputDepth,
                   int outputHeight,
-                  int outputWidth);
+                  int outputWidth,
+                  bool align_corners);
 
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
                   THCState *state,
@@ -1714,6 +1719,7 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
                   int inputWidth,
                   int outputDepth,
                   int outputHeight,
-                  int outputWidth);
+                  int outputWidth,
+                  bool align_corners);
 
 #endif

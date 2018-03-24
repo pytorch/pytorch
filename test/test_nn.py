@@ -4311,6 +4311,14 @@ class TestNN(NNTestCase):
         input = Variable(torch.randn(1, 1, 2), requires_grad=True)
         gradcheck(lambda x: F.upsample(x, 4, mode='linear'), (input,))
 
+    def test_upsamplingLinear1d_spatial_invariance(self):
+        m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
+        in_t_9 = torch.zeros(1, 1, 9)
+        in_t_9[:, :, :4].normal_()
+        out_t_9 = m(in_t_9)
+        out_t_5 = m(in_t_9[:, :, :5])
+        self.assertEqual(out_t_9[:, :, :15], out_t_5)
+
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
@@ -4333,6 +4341,14 @@ class TestNN(NNTestCase):
         input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
         gradcheck(lambda x: F.upsample(x, 4, mode='bilinear'), [input])
 
+    def test_upsamplingBilinear2d_spatial_invariance(self):
+        m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
+        in_t_9 = torch.zeros(1, 1, 9, 9)
+        in_t_9[:, :, :4, :4].normal_()
+        out_t_9 = m(in_t_9)
+        out_t_5 = m(in_t_9[:, :, :5, :5])
+        self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
+
     def test_upsamplingNearest3d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2, 2)
@@ -4354,6 +4370,14 @@ class TestNN(NNTestCase):
             F.upsample(input, scale_factor=2, mode='trilinear'))
         gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
         gradgradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
+
+    def test_upsamplingTrilinear3d_spatial_invariance(self):
+        m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
+        in_t_9 = torch.zeros(1, 1, 9, 9, 9)
+        in_t_9[:, :, :4, :4, :4].normal_()
+        out_t_9 = m(in_t_9)
+        out_t_5 = m(in_t_9[:, :, :5, :5, :5])
+        self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
@@ -6485,21 +6509,33 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(12, None, 'linear'),
+        constructor_args=(12, None, 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_1d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=((4, ), None, 'linear'),
+        constructor_args=((4, ), None, 'linear', False),
         input_size=(1, 2, 3),
         desc='linear_tuple_1d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'linear'),
+        constructor_args=(None, 4, 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_scale_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'linear', True),
+        input_size=(1, 2, 4),
+        desc='linear_1d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'linear', True),
+        input_size=(1, 2, 4),
+        desc='linear_scale_1d_align_corners',
     ),
     dict(
         module_name='Upsample',
@@ -6521,33 +6557,45 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(12, None, 'bilinear'),
+        constructor_args=(12, None, 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=((4, 6), None, 'bilinear'),
+        constructor_args=((4, 6), None, 'bilinear', False),
         input_size=(1, 2, 2, 3),
         desc='bilinear_tuple_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'bilinear'),
+        constructor_args=(None, 4, 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 2), 'bilinear'),
+        constructor_args=(None, (2, 2), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_shared_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bilinear'),
+        constructor_args=(None, (2, 1), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bilinear', True),
+        input_size=(1, 2, 4, 4),
+        desc='bilinear_tuple_2d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2, 1), 'bilinear', True),
+        input_size=(1, 2, 4, 4),
+        desc='bilinear_scale_tuple_skewed_2d_align_corners',
     ),
     dict(
         module_name='Upsample',
@@ -6569,21 +6617,35 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(12, None, 'trilinear'),
+        constructor_args=(12, None, 'trilinear', False),
         input_size=(1, 2, 4, 4, 4),
         desc='trilinear_3d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=((4, 6, 6), None, 'trilinear'),
+        constructor_args=((4, 6, 6), None, 'trilinear', False),
         input_size=(1, 2, 2, 3, 3),
         desc='trilinear_tuple_3d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'trilinear'),
-        input_size=(1, 2, 4, 4, 4),
+        constructor_args=(None, 3, 'trilinear', False),
+        input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d',
+        # See https://github.com/pytorch/pytorch/issues/5006
+        precision=3e-4,
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6, 6), None, 'trilinear', True),
+        input_size=(1, 2, 2, 3, 3),
+        desc='trilinear_tuple_3d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 3, 'trilinear', True),
+        input_size=(1, 2, 3, 4, 4),
+        desc='trilinear_scale_3d_align_corners',
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
     ),
