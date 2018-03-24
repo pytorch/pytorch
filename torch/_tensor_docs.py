@@ -429,11 +429,13 @@ element_size() -> int
 
 Returns the size in bytes of an individual element.
 
-Example:
+Example::
+
     >>> torch.FloatTensor().element_size()
     4
     >>> torch.ByteTensor().element_size()
     1
+
 """)
 
 add_docstr_all('eq',
@@ -670,7 +672,8 @@ Args:
     index (LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to add
 
-Example:
+Example::
+
     >>> x = torch.Tensor(5, 3).fill_(1)
     >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> index = torch.LongTensor([0, 4, 2])
@@ -683,6 +686,7 @@ Example:
       1   1   1
       5   6   7
     [torch.FloatTensor of size (5,3)]
+
 """)
 
 add_docstr_all('index_copy_',
@@ -703,7 +707,8 @@ Args:
     index (LongTensor): indices of :attr:`tensor` to select from
     tensor (Tensor): the tensor containing values to copy
 
-Example:
+Example::
+
     >>> x = torch.zeros(5, 3)
     >>> t = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> index = torch.LongTensor([0, 4, 2])
@@ -716,6 +721,7 @@ Example:
      0  0  0
      4  5  6
     [torch.FloatTensor of size (5,3)]
+
 """)
 
 add_docstr_all('index_fill_',
@@ -730,7 +736,7 @@ Args:
     index (LongTensor): indices of :attr:`self` tensor to fill in
     val (float): the value to fill with
 
-Example:
+Example::
     >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> index = torch.LongTensor([0, 2])
     >>> x.index_fill_(1, index, -1)
@@ -740,6 +746,7 @@ Example:
     -1  5 -1
     -1  8 -1
     [torch.FloatTensor of size (3,3)]
+
 """)
 
 add_docstr_all('index_select',
@@ -779,10 +786,12 @@ for tensors with one element.
 
 This operation is not differentiable.
 
-Example:
+Example::
+
     >>> x = torch.Tensor([1.0])
     >>> x.item()
     1.0
+
 """)
 
 add_docstr_all('kthvalue',
@@ -1521,9 +1530,11 @@ size() -> torch.Size
 Returns the size of the :attr:`self` tensor. The returned value is a subclass of
 :class:`tuple`.
 
-Example:
+Example::
+
     >>> torch.Tensor(3, 4, 5).size()
     torch.Size([3, 4, 5])
+
 """)
 
 add_docstr_all('sort',
@@ -1582,12 +1593,14 @@ storage_offset() -> int
 Returns :attr:`self` tensor's offset in the underlying storage in terms of
 number of storage elements (not bytes).
 
-Example:
+Example::
+
     >>> x = torch.Tensor([1, 2, 3, 4, 5])
     >>> x.storage_offset()
     0
     >>> x[3:].storage_offset()
     3
+
 """)
 
 add_docstr_all('stride',
@@ -1604,7 +1617,8 @@ the particular dimension :attr:`dim`.
 Args:
     dim (int, optional): the desired dimension in which stride is required
 
-Example:
+Example::
+
     >>> x = torch.Tensor([[1, 2, 3, 4, 5], [6, 7, 8, 9, 10]])
     >>> x.stride()
     (5, 1)
@@ -1612,6 +1626,7 @@ Example:
     5
     >>> x.stride(-1)
     1
+
 """)
 
 add_docstr_all('sub',

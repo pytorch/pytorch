@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/VolumetricUpSamplingTrilinear.cu"
 #else
 
+#include "../linear_upsampling.h"
+
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
                         (THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
@@ -33,7 +35,8 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
            THCTensor *output,
            int outputDepth,
            int outputHeight,
-           int outputWidth)
+           int outputWidth,
+           bool align_corners)
 {
   int nbatch = THCTensor_(size)(state, input, 0);
   int channels = THCTensor_(size)(state, input, 1);
@@ -55,15 +58,15 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
   THCDeviceTensor<real, 5> idata = toDeviceTensor<real, 5>(state, input);
   THCDeviceTensor<real, 5> odata = toDeviceTensor<real, 5>(state, output);
   THAssert(inputDepth > 0 && inputHeight > 0 && inputWidth > 0 && outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
-  const accreal rdepth= (outputDepth > 1) ? (accreal)(inputDepth - 1)/(outputDepth - 1) : accreal(0);
-  const accreal rheight= (outputHeight > 1) ? (accreal)(inputHeight - 1)/(outputHeight - 1) : accreal(0);
-  const accreal rwidth = (outputWidth > 1) ? (accreal)(inputWidth - 1)/(outputWidth - 1) : accreal(0);
+  const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
   const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
-   0 , stream>>>(num_kernels, rdepth, rheight, rwidth, idata, odata);
+   0 , stream>>>(num_kernels, rdepth, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, input);
 }
@@ -80,7 +83,8 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
            int inputWidth,
            int outputDepth,
            int outputHeight,
-           int outputWidth)
+           int outputWidth,
+           bool align_corners)
 {
   THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
        (state, NULL, gradOutput,
@@ -94,22 +98,15 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 5> data1 = toDeviceTensor<real, 5>(state, gradInput);
   THCDeviceTensor<real, 5> data2 = toDeviceTensor<real, 5>(state, gradOutput);
-  int depth1 = data1.getSize(2);
-  int height1 = data1.getSize(3);
-  int width1 = data1.getSize(4);
-  int depth2 = data2.getSize(2);
-  int height2 = data2.getSize(3);
-  int width2 = data2.getSize(4);
-  assert(depth1 > 0 && height1 > 0 && width1 > 0 && depth2 > 0 && height2 > 0 && width2 > 0);
-  const accreal rdepth= (depth2 > 1) ? (accreal)(depth1 - 1)/(depth2 - 1) : accreal(0);
-  const accreal rheight= (height2 > 1) ? (accreal)(height1 - 1)/(height2 - 1) : accreal(0);
-  const accreal rwidth = (width2 > 1) ? (accreal)(width1 - 1) / (width2 - 1) : accreal(0);
-  const int num_kernels = depth2 * height2 * width2;
+  const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
+  const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
+  const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
+  const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
-  num_threads, 0, stream>>>(num_kernels, rdepth, rheight, rwidth, data1, data2);
+  num_threads, 0, stream>>>(num_kernels, rdepth, rheight, rwidth, align_corners, data1, data2);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);

@@ -366,7 +366,7 @@ Tensor unsqueeze_to(const Tensor & self, int64_t dim, IntList sizes) {
 }
 
 std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<std::vector<int64_t>> &sizes, int64_t dim) {
-  dim = at::maybe_wrap_dim(dim, sizes);
+  dim = at::legacy_cat_wrap_dim(dim, sizes);
   std::vector<Tensor> grad_inputs(sizes.size());
   int64_t accumulate = 0;
   for (size_t i = 0; i < sizes.size(); ++i) {

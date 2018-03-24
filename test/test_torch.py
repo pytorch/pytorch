@@ -2353,6 +2353,39 @@ class TestTorch(TestCase):
                                      'zero-dimensional.*cannot be concatenated'):
             torch.cat([x, y])
 
+    @staticmethod
+    def _test_cat_empty(self, use_cuda=False):
+        # FIXME: this is legacy behavior and should be removed
+        # when we support empty tensors with arbitrary sizes
+        if use_cuda:
+            dtype = torch.cuda.float32
+        else:
+            dtype = torch.float32
+
+        x = torch.randn((4, 3, 32, 32), dtype=dtype)
+        empty = torch.randn((0,), dtype=dtype)
+
+        res1 = torch.cat([x, empty], dim=1)
+        res2 = torch.cat([empty, x], dim=1)
+        self.assertEqual(res1, res2)
+
+        conv = torch.nn.Conv2d(3, 3, kernel_size=1).float()
+        if use_cuda:
+            conv = conv.cuda()
+        res1 = torch.cat([conv(x), empty], dim=1)
+        res2 = torch.cat([empty, conv(x)], dim=1)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.cat([empty, empty], dim=1)
+        self.assertEqual(res1, empty)
+
+        with self.assertRaisesRegexp(RuntimeError,
+                                     'expected a non-empty list of Tensors'):
+            torch.cat([], dim=1)
+
+    def test_cat_empty(self):
+        self._test_cat_empty(self)
+
     def test_stack(self):
         x = torch.rand(2, 3, 4)
         y = torch.rand(2, 3, 4)

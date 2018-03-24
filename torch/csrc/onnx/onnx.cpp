@@ -25,7 +25,7 @@ bool micropb_encode<double, nullptr>(pb_ostream_t *stream, double* arg) {
 
 template <>
 bool micropb_encode<Dimension, nullptr>(pb_ostream_t *stream, Dimension* arg) {
-  return pb_encode_submessage(stream, onnx_TypeProto_TensorShapeProto_Dimension_fields,
+  return pb_encode_submessage(stream, onnx_TensorShapeProto_Dimension_fields,
                               static_cast<void*>(arg));
 }
 

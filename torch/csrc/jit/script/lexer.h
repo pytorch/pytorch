@@ -79,7 +79,9 @@ namespace script {
   _(TK_VAR, "variable", "")                      \
   _(TK_GATHER, "gather", "")                     \
   _(TK_NOTHING, "nothing", "")                   \
-  _(TK_LIST_LITERAL, "list-literal", "")
+  _(TK_LIST_LITERAL, "list-literal", "")         \
+  _(TK_FOR, "for", "for")                        \
+  _(TK_IN, "in", "in")
 
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 

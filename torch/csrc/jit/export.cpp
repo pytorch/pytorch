@@ -128,8 +128,8 @@ void addAttribute(onnx::NodeProto * n_p, jit::Node * n, jit::Symbol name) {
   }
 }
 
-void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Value* n) {
-  onnx::TypeProtoTensorShapeProto* shape = tensor_type->mutable_shape();
+void encodeTypeProtoTensorType(onnx::TypeProtoTensor* tensor_type, Value* n) {
+  onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
   TensorType* node_type = n->type()->expect<TensorType>();
   const std::vector<std::int64_t>& sizes = node_type->sizes();
   for (std::int64_t s : sizes) {
@@ -169,7 +169,7 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensorTypeProto* tensor_type, Valu
 void encodeValueInfo(onnx::ValueInfoProto* v, Value* n) {
   v->set_name(value_name(n));
   onnx::TypeProto* t = v->mutable_type();
-  onnx::TypeProtoTensorTypeProto* tensor_type = t->mutable_tensor_type();
+  onnx::TypeProtoTensor* tensor_type = t->mutable_tensor_type();
   encodeTypeProtoTensorType(tensor_type, n);
 }
 

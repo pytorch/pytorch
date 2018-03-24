@@ -19,13 +19,18 @@ if 'cpu' in test_name:
 elif 'gpu' in test_name:
     backend = 'gpu'
 
-data_file_path = '../perf_test_numbers_{}.json'.format(backend)
+data_file_path = '../{}_runtime.json'.format(backend)
 
 with open(data_file_path) as data_file:
     data = json.load(data_file)
 
-mean = float(data[test_name]['mean'])
-sigma = float(data[test_name]['sigma'])
+if test_name in data:
+    mean = float(data[test_name]['mean'])
+    sigma = float(data[test_name]['sigma'])
+else:
+    # Let the test pass if baseline number doesn't exist
+    mean = sys.maxsize
+    sigma = 0.001
 
 print("population mean: ", mean)
 print("population sigma: ", sigma)
@@ -51,9 +56,10 @@ else:
     print("z-value < 2, no perf regression detected.")
     if args.update:
         print("We will use these numbers as new baseline.")
-        new_data_file_path = '../new_perf_test_numbers_{}.json'.format(backend)
+        new_data_file_path = '../new_{}_runtime.json'.format(backend)
         with open(new_data_file_path) as new_data_file:
             new_data = json.load(new_data_file)
+        new_data[test_name] = {}
         new_data[test_name]['mean'] = sample_mean
         new_data[test_name]['sigma'] = max(sample_sigma, sample_mean * 0.01)
         with open(new_data_file_path, 'w') as new_data_file:
