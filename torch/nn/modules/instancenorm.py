@@ -64,7 +64,8 @@ class InstanceNorm1d(_InstanceNorm):
         - Input: :math:`(N, C, L)`
         - Output: :math:`(N, C, L)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
@@ -127,7 +128,8 @@ class InstanceNorm2d(_InstanceNorm):
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm2d(100)
         >>> # With Learnable Parameters
@@ -190,7 +192,8 @@ class InstanceNorm3d(_InstanceNorm):
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm3d(100)
         >>> # With Learnable Parameters

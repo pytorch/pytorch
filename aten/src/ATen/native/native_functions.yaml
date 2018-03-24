@@ -291,6 +291,9 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
+- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
+  variants: function
+
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 

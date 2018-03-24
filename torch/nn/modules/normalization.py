@@ -25,12 +25,14 @@ class LocalResponseNorm(Module):
         - Input: :math:`(N, C, ...)`
         - Output: :math:`(N, C, ...)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> lrn = nn.LocalResponseNorm(2)
         >>> signal_2d = torch.randn(32, 5, 24, 24)
         >>> signal_4d = torch.randn(16, 5, 7, 7, 7, 7)
         >>> output_2d = lrn(signal_2d)
         >>> output_4d = lrn(signal_4d)
+
     """
 
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
@@ -82,8 +84,8 @@ class LayerNorm(Module):
 
     The mean and standard-deviation are calculated separately over the last
     certain number dimensions with shape specified by :attr:`normalized_shape`.
-    :math:`\gamma` and :math:`\beta` are learnable parameters of :attr:`normalized_shape` if
-    :attr:`elementwise_affine` is ``True``.
+    :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
+    :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -129,7 +131,8 @@ class LayerNorm(Module):
         - Input: :math:`(N, *)`
         - Output: :math:`(N, *)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> input = torch.randn(20, 5, 10, 10)
         >>> # With Learnable Parameters
         >>> m = nn.LayerNorm(input.size()[1:])
@@ -141,6 +144,7 @@ class LayerNorm(Module):
         >>> m = nn.LayerNorm(10)
         >>> # Activating the module
         >>> output = m(input)
+
     .. _`Layer Normalization`: https://arxiv.org/abs/1607.06450
     """
     def __init__(self, normalized_shape, eps=1e-5, momentum=0.1,
@@ -185,6 +189,76 @@ class LayerNorm(Module):
         return ('{name}({normalized_shape}, eps={eps}, momentum={momentum},'
                 ' elementwise_affine={elementwise_affine},'
                 ' track_running_stats={track_running_stats})'
+                .format(name=self.__class__.__name__, **self.__dict__))
+
+
+class GroupNorm(Module):
+    r"""Applies Group Normalization over a mini-batch of inputs as described in
+    the paper `Group Normalization`_ .
+
+    .. math::
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
+
+    The input channels are separated into :attr:`num_groups` groups, each containing
+    ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
+    separately over the each group. :math:`\gamma` and :math:`\beta` are learnable
+    per-channel affine transform parameter vectorss of size :attr:`num_channels` if
+    :attr:`affine` is ``True``.
+
+    This layer uses statistics computed from input data in both training and
+    evaluation modes.
+
+    Args:
+        num_groups (int): number of groups to separate the channels into
+        num_channels (int): number of channels expected in input
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        affine: a boolean value that when set to ``True``, this module
+            has learnable per-channel affine parameters. Default: ``True``
+
+    Shape:
+        - Input: :math:`(N, num\_channels, *)`
+        - Output: :math:`(N, num\_channels, *)` (same shape as input)
+
+    Examples::
+
+        >>> input = torch.randn(20, 6, 10, 10)
+        >>> # Separate 6 channels into 3 groups
+        >>> m = nn.GroupNorm(3, 6)
+        >>> # Separate 6 channels into 6 groups (equivalent with InstanceNorm)
+        >>> m = nn.GroupNorm(6, 6)
+        >>> # Put all 6 channels into a single group (equivalent with LayerNorm)
+        >>> m = nn.GroupNorm(1, 6)
+        >>> # Activating the module
+        >>> output = m(input)
+
+    .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
+    """
+    def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
+        super(GroupNorm, self).__init__()
+        self.num_groups = num_groups
+        self.num_channels = num_channels
+        self.eps = eps
+        self.affine = affine
+        if self.affine:
+            self.weight = Parameter(torch.Tensor(num_channels))
+            self.bias = Parameter(torch.Tensor(num_channels))
+        else:
+            self.register_parameter('weight', None)
+            self.register_parameter('bias', None)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        if self.affine:
+            self.weight.data.fill_(1)
+            self.bias.data.zero_()
+
+    def forward(self, input):
+        return F.group_norm(
+            input, self.num_groups, self.weight, self.bias, self.eps)
+
+    def __repr__(self):
+        return ('{name}({num_groups}, {num_channels}, eps={eps}, '
+                'affine={affine},'
                 .format(name=self.__class__.__name__, **self.__dict__))
 
 
