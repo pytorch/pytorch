@@ -212,8 +212,9 @@ xcopy /Y aten\src\ATen\common_with_cwrap.py tools\shared\cwrap_common.py
 
 set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
 set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
+set DISTUTILS_USE_SDK=1
 
-call "%VS150COMNTOOLS%\vcvarsx86_amd64.bat"
+call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
 python setup.py install
 ```
 
