@@ -59,7 +59,8 @@ def check_compiler_abi_compatibility(compiler):
         else True.
     '''
     try:
-        info = subprocess.check_output('{} --version'.format(compiler).split())
+        check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
+        info = subprocess.check_output(check_cmd.format(compiler).split())
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn('Error checking compiler version: {}'.format(error))
