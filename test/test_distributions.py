@@ -2834,6 +2834,8 @@ class TestTransforms(TestCase):
                 ExpTransform(cache_size=cache_size),
                 PowerTransform(exponent=2,
                                cache_size=cache_size),
+                PowerTransform(exponent=torch.tensor(5).normal_(),
+                               cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
                 AffineTransform(variable(torch.Tensor(5).normal_()),
                                 variable(torch.Tensor(5).normal_()),

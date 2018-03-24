@@ -315,10 +315,7 @@ class PowerTransform(Transform):
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):
             return False
-        result = self.exponent.eq(other.exponent).all()
-        if isinstance(result, Variable):
-            result = result.data.view(-1)[0]
-        return result
+        return self.exponent.eq(other.exponent).all().item()
 
     def _call(self, x):
         return x.pow(self.exponent)
@@ -327,7 +324,7 @@ class PowerTransform(Transform):
         return y.pow(1 / self.exponent)
 
     def log_abs_det_jacobian(self, x, y):
-        return self.exponent * y / x
+        return (self.exponent * y / x).abs().log()
 
 
 class SigmoidTransform(Transform):
