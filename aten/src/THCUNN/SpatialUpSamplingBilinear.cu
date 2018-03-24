@@ -37,13 +37,13 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
       return;
     }
     //
-    const Acctype h1r = rheight * h2;
+    const Acctype h1r = (h2 > 0) ? rheight * (h2 - Acctype(0.5)) : Acctype(0);
     const int h1 = h1r;
     const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const Acctype h1lambda = h1r - h1;
     const Acctype h0lambda = Acctype(1) - h1lambda;
     //
-    const Acctype w1r = rwidth * w2;
+    const Acctype w1r = (w2 > 0) ? rwidth * (w2 - Acctype(0.5)) : Acctype(0);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -89,13 +89,13 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
       return;
     }
     //
-    const Acctype h1r = rheight * h2;
+    const Acctype h1r = (h2 > 0) ? rheight * (h2 - Acctype(0.5)) : Acctype(0);
     const int h1 = h1r;
     const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const Acctype h1lambda = h1r - h1;
     const Acctype h0lambda = Acctype(1) - h1lambda;
     //
-    const Acctype w1r = rwidth * w2;
+    const Acctype w1r = (w2 > 0) ? rwidth * (w2 - Acctype(0.5)) : Acctype(0);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
