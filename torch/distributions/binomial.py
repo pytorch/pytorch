@@ -31,7 +31,7 @@ class Binomial(Distribution):
         probs (Tensor): Event probabilities
         logits (Tensor): Event log-odds
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     has_enumerate_support = True
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):

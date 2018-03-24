@@ -16,13 +16,13 @@ bijectivity.
 
 The ``transform_to()`` registry is useful for performing unconstrained
 optimization on constrained parameters of probability distributions, which are
-indicated by each distribution's ``.params`` dict. These transforms often
+indicated by each distribution's ``.arg_constraints`` dict. These transforms often
 overparameterize a space in order to avoid rotation; they are thus more
 suitable for coordinate-wise optimization algorithms like Adam::
 
     loc = Variable(torch.zeros(100), requires_grad=True)
     unconstrained = Variable(torch.zeros(100), requires_grad=True)
-    scale = transform_to(Normal.params['scale'])(unconstrained)
+    scale = transform_to(Normal.arg_constraints['scale'])(unconstrained)
     loss = -Normal(loc, scale).log_prob(data).sum()
 
 The ``biject_to()`` registry is useful for Hamiltonian Monte Carlo, where
@@ -92,7 +92,7 @@ class ConstraintRegistry(object):
             @my_registry.register(MyConstraintClass)
             def construct_transform(constraint):
                 assert isinstance(constraint, MyConstraint)
-                return MyTransform(constraint.params)
+                return MyTransform(constraint.arg_constraints)
 
         Args:
             constraint (subclass of :class:`~torch.distributions.constraints.Constraint`):
@@ -121,7 +121,7 @@ class ConstraintRegistry(object):
         Looks up a transform to constrained space, given a constraint object.
         Usage::
 
-            constraint = Normal.params['scale']
+            constraint = Normal.arg_constraints['scale']
             scale = transform_to(constraint)(torch.zeros(1))  # constrained
             u = transform_to(constraint).inv(scale)           # unconstrained
 
