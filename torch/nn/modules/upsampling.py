@@ -21,40 +21,35 @@ class Upsample(Module):
         size (tuple, optional): a tuple of ints `([D_out], [H_out], W_out)` output sizes
         scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
         mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear` and `trilinear`.
-                                    Default: nearest
+                                    Default: `nearest`
+        align_corners (bool, optional): if True, the corner pixels of the input
+            and output tensors are aligned, and thus preserving the values at
+            those pixels. This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, or `trilinear`. Default: False
 
     Shape:
         - Input: :math:`(N, C, W_{in})`, :math:`(N, C, H_{in}, W_{in})` or :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, W_{out})`, :math:`(N, C, H_{out}, W_{out})`
-          or :math:`(N, C, D_{out}, H_{out}, W_{out})` where
+          or :math:`(N, C, D_{out}, H_{out}, W_{out})`, where
 
           .. math::
-              D_{out} = \left\lfloor D_{in} * scale\_factor \right\rfloor or \text{size}[-3]
+              D_{out} = \left\lfloor D_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-3]
 
-              H_{out} = \left\lfloor H_{in} * scale\_factor \right\rfloor or \text{size}[-2]
+              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-2]
 
-              W_{out} = \left\lfloor W_{in} * scale\_factor \right\rfloor or \text{size}[-1]
+              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor \text{ or size}[-1]
+
+    .. warning::
+        With ``align_corners = True``, the linearly interpolating modes
+        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
+        output and input pixels, and thus the output values can depend on the
+        input size. This was the default behavior for these modes up to version
+        0.3.1. Since then, the default behavior is ``align_corners = False``.
+        See below for concrete examples on how this affects the outputs.
 
     Examples::
 
         >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
-        >>> input
-
-        (0 ,0 ,.,.) =
-          1  2
-          3  4
-        [torch.FloatTensor of size (1,1,2,2)]
-
-        >>> m = nn.Upsample(scale_factor=2, mode='bilinear')
-        >>> m(input)
-
-        (0 ,0 ,.,.) =
-          1.0000  1.3333  1.6667  2.0000
-          1.6667  2.0000  2.3333  2.6667
-          2.3333  2.6667  3.0000  3.3333
-          3.0000  3.3333  3.6667  4.0000
-        [torch.FloatTensor of size (1,1,4,4)]
-
         >>> input
 
         (0 ,0 ,.,.) =
@@ -72,16 +67,75 @@ class Upsample(Module):
           3  3  4  4
         [torch.FloatTensor of size (1,1,4,4)]
 
+        >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
+        >>> m(input)
+
+        (0 ,0 ,.,.) =
+          1.0000  1.2500  1.7500  2.0000
+          1.5000  1.7500  2.2500  2.5000
+          2.5000  2.7500  3.2500  3.5000
+          3.0000  3.2500  3.7500  4.0000
+        [torch.FloatTensor of size (1,1,4,4)]
+
+        >>> m = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        >>> m(input)
+
+        (0 ,0 ,.,.) =
+          1.0000  1.3333  1.6667  2.0000
+          1.6667  2.0000  2.3333  2.6667
+          2.3333  2.6667  3.0000  3.3333
+          3.0000  3.3333  3.6667  4.0000
+        [torch.FloatTensor of size (1,1,4,4)]
+
+        >>> # Try scaling the same data in a larger tensor
+        >>>
+        >>> input_3x3 = torch.zeros(3, 3).view(1, 1, 3, 3)
+        >>> input_3x3[:, :, :2, :2].copy_(input)
+        >>> input_3x3
+
+        (0 ,0 ,.,.) =
+          1  2  0
+          3  4  0
+          0  0  0
+        [torch.FloatTensor of size (1,1,3,3)]
+
+        >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
+        >>> # Notice that values in top left corner are the same with the small input (except at boundary)
+        >>> m(input_3x3)
+
+        (0 ,0 ,.,.) =
+          1.0000  1.2500  1.7500  1.5000  0.5000  0.0000
+          1.5000  1.7500  2.2500  1.8750  0.6250  0.0000
+          2.5000  2.7500  3.2500  2.6250  0.8750  0.0000
+          2.2500  2.4375  2.8125  2.2500  0.7500  0.0000
+          0.7500  0.8125  0.9375  0.7500  0.2500  0.0000
+          0.0000  0.0000  0.0000  0.0000  0.0000  0.0000
+        [torch.FloatTensor of size (1,1,6,6)]
+
+        >>> m = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        >>> # Notice that values in top left corner are now changed
+        >>> m(input_3x3)
+
+        (0 ,0 ,.,.) =
+          1.0000  1.4000  1.8000  1.6000  0.8000  0.0000
+          1.8000  2.2000  2.6000  2.2400  1.1200  0.0000
+          2.6000  3.0000  3.4000  2.8800  1.4400  0.0000
+          2.4000  2.7200  3.0400  2.5600  1.2800  0.0000
+          1.2000  1.3600  1.5200  1.2800  0.6400  0.0000
+          0.0000  0.0000  0.0000  0.0000  0.0000  0.0000
+        [torch.FloatTensor of size (1,1,6,6)]
+
     """
 
-    def __init__(self, size=None, scale_factor=None, mode='nearest'):
+    def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
         super(Upsample, self).__init__()
         self.size = size
         self.scale_factor = scale_factor
         self.mode = mode
+        self.align_corners = align_corners
 
     def forward(self, input):
-        return F.upsample(input, self.size, self.scale_factor, self.mode)
+        return F.upsample(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def __repr__(self):
         if self.scale_factor is not None:
@@ -105,14 +159,17 @@ class UpsamplingNearest2d(Upsample):
         size (tuple, optional): a tuple of ints `(H_out, W_out)` output sizes
         scale_factor (int, optional): the multiplier for the image height or width
 
+    .. warning::
+        This class is deprecated in favor of :class:`~nn.Upsample`.
+
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \left\lfloor H_{in} * scale\_factor \right\rfloor
+              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
 
-              W_{out} = \left\lfloor W_{in} * scale\_factor \right\rfloor
+              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
 
     Examples::
 
@@ -156,14 +213,18 @@ class UpsamplingBilinear2d(Upsample):
         size (tuple, optional): a tuple of ints `(H_out, W_out)` output sizes
         scale_factor (int, optional): the multiplier for the image height or width
 
+    .. warning::
+        This class is deprecated in favor of :class:`~nn.Upsample`. It is
+        equivalent to ``nn.Upsample(..., mode='bilinear', align_corners=True)``.
+
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \left\lfloor H_{in} * scale\_factor \right\rfloor
+              H_{out} = \left\lfloor H_{in} \times \text{scale_factor} \right\rfloor
 
-              W_{out} = \left\lfloor W_{in} * scale\_factor \right\rfloor
+              W_{out} = \left\lfloor W_{in} \times \text{scale_factor} \right\rfloor
 
     Examples::
 
@@ -187,7 +248,7 @@ class UpsamplingBilinear2d(Upsample):
 
     """
     def __init__(self, size=None, scale_factor=None):
-        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear')
+        super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
 
     def forward(self, input):
         warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.Upsample instead.")

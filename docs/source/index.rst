@@ -39,6 +39,7 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
    data
    model_zoo
    onnx
+   bottleneck
 
 .. toctree::
    :glob:

@@ -8,14 +8,32 @@
 namespace at {
 namespace native {
 
-// For backward, we save svd.
-// http://www.ics.forth.gr/cvrl/publications/conferences/2000_eccv_SVD_jacobian.pdf
-// But instead of gesvd SVD A = U(A) Sig(A) V(A)^T, which doesn't specify signs
-// of determinants of U and V, we consider det(A) = \prod Sig_(A), where
-//   1. A = U_(A) Sig_(A) V(A)^T
-//   2. Sig_(A) and U_(A) can be different in signs in first row/col from
-//      their counterparts so that U_(A) * V_(A) have +1 determinant
-std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
+// Helper function for det methods.
+// For pivoted LU factorization A = P * L * U. Since we always have det(L) = 1,
+// det(P) = \pm 1, this method returns a 3-tuple:
+//   (det(P), diag(U), info),
+// where info helps us identify singular matrices.
+static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor& self) {
+  Tensor p, lu, info;
+  std::tie(lu, p, info) = self.unsqueeze(0).btrifact_with_info();
+  p.squeeze_(0);
+  lu.squeeze_(0);
+  int int_info = info.squeeze_().toCInt();
+  if (int_info < 0) {
+    std::ostringstream ss;
+    ss << "LU factorization (getrf) failed with info = " << int_info;
+    throw std::runtime_error(ss.str());
+  }
+  auto n = self.size(0);
+  auto num_exchanges = (p.type().arange(1, n + 1) != p).nonzero().size(0);
+  if (num_exchanges % 2 == 1) {
+    return std::make_tuple(-1., lu.diag(), int_info);
+  } else {
+    return std::make_tuple(1., lu.diag(), int_info);
+  }
+}
+
+Tensor det(const Tensor& self) {
   if (!at::isFloatingType(self.type().scalarType()) ||
       self.dim() != 2 || self.size(0) != self.size(1)) {
     std::ostringstream ss;
@@ -23,35 +41,59 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _det_with_svd(const Tensor& self) {
        << "square tensor of floating types";
     throw std::runtime_error(ss.str());
   }
-  // check symmetric
-  bool symmetric = self.equal(self.transpose(0, 1));
-
-  auto svd = self.svd(true);
-  auto sigma = std::get<1>(svd);
-  auto u = std::get<0>(svd);
-  auto v = std::get<2>(svd);
-  auto det = sigma.prod();
-  if (!symmetric) {
-    auto qr = self.geqrf();
-    auto a = std::get<0>(qr);
-    auto tau = std::get<1>(qr);
-    // non-zero values in tau represent Householder reflectors, which has -1 det
-    int64_t num_reflectors = tau.nonzero().size(0);
-    auto qr_det = a.diag().prod();
-    if (num_reflectors % 2 == 1) {
-      qr_det = -qr_det;
-    }
-    det = qr_det;  // QR is more stable than svd, so use it anyways
-    if ((qr_det < 0).any().toCByte() ^ (det < 0).any().toCByte()) {  // if different sign
-      u.narrow(1, 0, 1).mul_(-1);
-      sigma.narrow(0, 0, 1).mul_(-1);
-    }
+  double det_P;
+  Tensor diag_U;
+  int info;
+  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
+  if (info > 0) {
+    return at::zeros(self.type(), {});
+  } else {
+    return diag_U.prod().mul_(det_P);
   }
-  return std::make_tuple(det, u, sigma, v);
 }
 
-Tensor det(const Tensor& self) {
-  return std::get<0>(self._det_with_svd());
+Tensor logdet(const Tensor& self) {
+  if (!at::isFloatingType(self.type().scalarType()) ||
+      self.dim() != 2 || self.size(0) != self.size(1)) {
+    std::ostringstream ss;
+    ss << "logdet(" << self.type() << "{" << self.sizes() << "}): expected a "
+       << "2D square tensor of floating types";
+    throw std::runtime_error(ss.str());
+  }
+  double det_P;
+  Tensor diag_U, det;
+  int info;
+  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
+  if (info > 0) {
+    det = at::zeros(self.type(), {});
+  } else {
+    det = diag_U.prod().mul_(det_P);
+  }
+  if (det.sign().toCDouble() <= 0) {
+    return det.log_();  // in order to get proper -inf (det=0) or nan (det<0)
+  } else {
+    return diag_U.abs().log().sum();
+  }
+}
+
+std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
+  if (!at::isFloatingType(self.type().scalarType()) ||
+      self.dim() != 2 || self.size(0) != self.size(1)) {
+    std::ostringstream ss;
+    ss << "slogdet(" << self.type() << "{" << self.sizes() << "}): expected a "
+       << "2D square tensor of floating types";
+    throw std::runtime_error(ss.str());
+  }
+  double det_P;
+  Tensor diag_U, det;
+  int info;
+  std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
+  if (info > 0) {
+    det = at::zeros(self.type(), {});
+  } else {
+    det = diag_U.prod().mul_(det_P);
+  }
+  return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {

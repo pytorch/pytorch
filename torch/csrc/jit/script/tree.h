@@ -16,7 +16,7 @@ namespace script {
 // for instance the expression a*b+1 is represented as:
 // (+ (* (ident a) (ident b)) (const 1))
 // Atoms like 'a', 'b', and '1' are represented by subclasses of Tree which
-// define stringValue() and doubleValue().
+// define stringValue().
 // Everything else is a Compound object, which has a 'kind' that is a token from
 // Lexer.h's TokenKind enum, and contains a list of subtrees.
 // Like TokenKind single-character operators like '+' are representing using the
@@ -43,14 +43,8 @@ struct Tree : std::enable_shared_from_this<Tree> {
   virtual const SourceRange& range() const {
     throw std::runtime_error("is an Atom");
   }
-  virtual double doubleValue() const {
-    throw std::runtime_error("not a TK_NUMBER");
-  }
   virtual const std::string& stringValue() const {
-    throw std::runtime_error("not a TK_STRING");
-  }
-  virtual bool boolValue() const {
-    throw std::runtime_error("not a TK_BOOL");
+    throw std::runtime_error("stringValue can only be called on TK_STRING");
   }
   virtual const TreeList& trees() const {
     return empty_trees;
@@ -114,32 +108,6 @@ struct String : public Tree {
  private:
   std::string value_;
 };
-struct Number : public Tree {
-  Number(double value_) : Tree(TK_NUMBER), value_(value_) {}
-  virtual double doubleValue() const override {
-    return value_;
-  }
-  template <typename... Args>
-  static TreeRef create(Args&&... args) {
-    return std::make_shared<Number>(std::forward<Args>(args)...);
-  }
-
- private:
-  double value_;
-};
-struct Bool : public Tree {
-  Bool(bool value_) : Tree(TK_BOOL), value_(value_) {}
-  virtual double doubleValue() const override {
-    return value_;
-  }
-  template <typename... Args>
-  static TreeRef create(Args&&... args) {
-    return std::make_shared<Bool>(std::forward<Args>(args)...);
-  }
-
- private:
-  bool value_;
-};
 
 static SourceRange mergeRanges(SourceRange c, const TreeList& others) {
   for (auto t : others) {
@@ -197,9 +165,6 @@ struct pretty_tree {
 
     std::stringstream out;
     switch (t->kind()) {
-      case TK_NUMBER:
-        out << t->doubleValue();
-        break;
       case TK_STRING:
         out << t->stringValue();
         break;

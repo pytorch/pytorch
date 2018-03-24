@@ -204,7 +204,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
   auto lambda_ = lambda.toType(ScalarType::Double);
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
-    CPU_tensor_apply2<scalar_t, double>(ret, lambda,
+    CPU_tensor_apply2<scalar_t, double>(ret, lambda_,
       [generator](scalar_t& ret_val, const double& lambda){
         ret_val = sample_poisson(lambda, generator);
       }

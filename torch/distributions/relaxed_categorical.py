@@ -32,12 +32,12 @@ class ExpRelaxedCategorical(Distribution):
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape)
+        super(ExpRelaxedCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
@@ -63,7 +63,8 @@ class ExpRelaxedCategorical(Distribution):
 
     def log_prob(self, value):
         K = self._categorical._num_events
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
         log_scale = (self.temperature.new(self.temperature.shape).fill_(K).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
@@ -98,9 +99,9 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     support = constraints.simplex
     has_rsample = True
 
-    def __init__(self, temperature, probs=None, logits=None):
+    def __init__(self, temperature, probs=None, logits=None, validate_args=None):
         super(RelaxedOneHotCategorical, self).__init__(ExpRelaxedCategorical(temperature, probs, logits),
-                                                       ExpTransform())
+                                                       ExpTransform(), validate_args=validate_args)
 
     @property
     def temperature(self):

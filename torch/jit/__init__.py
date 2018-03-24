@@ -462,148 +462,16 @@ def trace(*args, **kwargs):
         executor_options = {'optimize': True}
         for name in executor_options:
             executor_options[name] = kwargs.pop(name, executor_options[name])
+        if len(kwargs) != 0:
+            raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
+
         if isinstance(func, torch.nn.Module):
-            captures = list(func.state_dict(keep_vars=True).values())
-            # TODO: support shared parameters
-            if len(set(map(id, captures))) != len(list(map(id, captures))):
-                raise ValueError("TracedModules don't support parameter sharing between modules")
-            executor = torch._C.GraphExecutor(func, args, captures=captures, **executor_options)
-            return TracedModule(func, executor)
+            module = TopLevelTracedModule(func, **executor_options)
+            module._create_method_from_trace('forward', func, args)
+            return module
         else:
             return torch._C.GraphExecutor(func, args, **executor_options)
     return wrapper
-
-
-class TracedModuleBase(torch.nn.Module):
-    __frozen = False
-
-    def __init__(self, orig):
-        super(TracedModuleBase, self).__init__()
-
-        self.training = orig.training
-        for name, param in orig._parameters.items():
-            if param is not None:
-                self._parameters[name] = param
-        for name, buf in orig._buffers.items():
-            if param is not None:
-                self._buffers[name] = buf
-        self._orig_class = type(orig)
-
-        if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
-            raise ValueError("Modules that have hooks assigned can't be compiled")
-
-        # XXX: submodules can't be initialized here, because we don't know what the root is
-
-    def _freeze(self):
-        self.__frozen = True
-
-    def __setattr__(self, name, value):
-        if not self.__frozen:
-            return super(TracedModuleBase, self).__setattr__(name, value)
-        if name in self._parameters or name in self._buffers:
-            result = super(TracedModuleBase, self).__setattr__(name, value)
-            self._recompute_captures()
-            return result
-        raise RuntimeError("Only parameters and buffers of compiled modules can be re-assigned.")
-
-    def __delattr__(self, name):
-        raise RuntimeError("Deleting attributes of TracedModules isn't supported")
-
-    def __getstate__(self):
-        raise RuntimeError("TracedModules aren't picklable")
-
-    def _recompute_captures(self):
-        raise NotImplementedError()
-
-    def register_parameter(self, name, param):
-        if name not in self._parameters:
-            raise RuntimeError("Can't add new parameters to TracedModules")
-        if param is None:
-            raise RuntimeError("Can't set parameters to None in TracedModules")
-        super(TracedModuleBase, self).register_parameter(name, param)
-
-    def load_state_dict(self, state):
-        super(TracedModuleBase, self).load_state_dict(state)
-        # NB: this is not strictly necessary, because load_state_dict is copying, but
-        # that's an implementation detail that I don't want to depend on
-        self._recompute_captures()
-
-    def _get_name(self):
-        return 'TracedModule[' + self._orig_class.__name__ + ']'
-
-
-class TracedSubmodule(TracedModuleBase):
-
-    def __init__(self, orig, root):
-        super(TracedSubmodule, self).__init__(orig)
-        for name, submodule in orig._modules.items():
-            self._modules[name] = TracedSubmodule(submodule, root)
-        self._root = weakref.ref(root)
-        self._freeze()
-
-    def _recompute_captures(self):
-        root = self._root()
-        if root is None:
-            raise RuntimeError("Submodules of TracedModule can't work without keeping "
-                               "the main one in scope")
-        root._recompute_captures()
-
-    def __call__(self, *args, **kwargs):
-        raise RuntimeError("Only the top-level compiled module can be called")
-
-
-class TracedModule(TracedModuleBase):
-
-    def __init__(self, orig, executor):
-        super(TracedModule, self).__init__(orig)
-
-        for name, submodule in orig._modules.items():
-            self._modules[name] = TracedSubmodule(submodule, root=self)
-
-        self._executor = executor
-        self._recompute_captures()
-        self._freeze()
-
-    def __call__(self, *args):
-        return self._executor(*args)
-
-    def _recompute_captures(self):
-        self._executor.set_captures(*self.state_dict().values())
-
-    def _apply(self, fn):
-        for module in itertools.chain((self,), self.modules()):
-            for param in module._parameters.values():
-                param.data = fn(param.data)
-                if param._grad is not None:
-                    param._grad.data = fn(param._grad.data)
-
-            for key, buf in module._buffers.items():
-                module._buffers[key] = fn(buf)
-        self._recompute_captures()
-        return self
-
-
-def _get_methods(cls):
-    import inspect
-    # In Python 3 unbound methods are functions, but in Python 2 they are methods
-    return inspect.getmembers(cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x))
-
-_compiled_methods_whitelist = {
-    'cpu', 'cuda', 'double', 'float', 'half', 'modules', 'named_children',
-    'named_modules', 'named_parameters', 'parameters', 'state_dict', 'type',
-    'zero_grad',
-}
-
-
-def _make_fail(name):
-    def fail(self, *args, **kwargs):
-        raise RuntimeError(name + " is not supported on TracedModules")
-    return fail
-for name, method in _get_methods(torch.nn.Module):
-    if name.startswith('__'):
-        continue
-    if name not in TracedModuleBase.__dict__ and name not in _compiled_methods_whitelist:
-        setattr(TracedModuleBase, method.__name__, _make_fail(name))
 
 
 def createResolutionCallback(frame_id=2):
@@ -641,7 +509,8 @@ def createResolutionCallback(frame_id=2):
 
 class CompilationUnit(object):
     def __init__(self, lang=None, optimize=True):
-        self.module = torch._C.ScriptModule(optimize)
+        self.module = torch._C.ScriptModule()
+        self.module._set_optimized(optimize)
         if lang is not None:
             self.define(lang, frame_id=3)
         self.optimize = optimize
@@ -669,6 +538,125 @@ def script_method(fn):
     return ScriptMethodStub(createResolutionCallback(), get_jit_ast(fn))
 
 
+# These OrderedDictWrapper classes replace the actual OrderedDicts in
+# module with versions that get/set properties inside of script::Module.
+# This allows us to reuse most of nn.Module while still storing the
+# data in C++.
+# Each OrderedDict needs to support:
+#  x not in view
+#  x in view
+#  view[name] = ...
+#  view.values()
+#  del view[name]
+#  view.items()
+#  view.keys()
+
+class OrderedDictWrapper(object):
+    def __init__(self, module):
+        self.module_ref = weakref.ref(module)
+
+    @property
+    def module(self):
+        r = self.module_ref()
+        if r is None:
+            raise RuntimeError("_parameters or _modules alive after module is dead")
+        return r
+
+    def keys(self):
+        return [k for k, v in self.items()]
+
+    def values(self):
+        return [v for k, v in self.items()]
+
+    def __delitem__(self, k):
+        raise RuntimeError("cannot delete methods or parameters of a script module")
+
+    def items(self):
+        raise NotImplementedError
+
+    def __contains__(self, k):
+        raise NotImplementedError
+
+    def __getitem__(self, k):
+        raise NotImplementedError
+
+    def __setitem__(self, k, v):
+        raise NotImplementedError
+
+
+class OrderedModuleDict(OrderedDictWrapper):
+    def __init__(self, module):
+        super(OrderedModuleDict, self).__init__(module)
+        # contains _both_ script modules and non-script python-only modules
+
+        # because script modules are subclassed in python and the
+        # C++ script::Module class will not hold references to them,
+        # to ensure that you always get the same python value here
+        # we store it in the python dict as well
+        self._python_modules = OrderedDict()
+
+    def items(self):
+        r = self._python_modules.items()
+        return r
+
+    def __contains__(self, k):
+        return k in self._python_modules
+
+    def __setitem__(self, k, v):
+        if k in self._python_modules:
+            raise RuntimeError("cannot re-assign modules in a ScriptModule")
+
+        if isinstance(v, ScriptModule):
+            self.module._register_module(k, v)
+
+        self._python_modules[k] = v
+
+    def __getitem__(self, k):
+        return self._python_modules[k]
+
+
+class OrderedParameterDict(OrderedDictWrapper):
+    def __init__(self, module):
+        super(OrderedParameterDict, self).__init__(module)
+
+    def items(self):
+        return [(name, param) for name, param, is_buffer
+                in self.module._get_parameters()
+                if not is_buffer]
+
+    def __setitem__(self, k, v):
+        self.module._register_parameter(k, v, False)
+
+    def __contains__(self, k):
+        return self.module._has_parameter(k)
+
+    def __getitem__(self, k):
+        if k not in self:
+            raise KeyError(k)
+        return self.module._get_parameter(k)
+
+
+class OrderedBufferDict(OrderedDictWrapper):
+    def __init__(self, module):
+        super(OrderedBufferDict, self).__init__(module)
+
+    def items(self):
+        return [(name, param) for name, param, is_buffer
+                in self.module._get_parameters()
+                if is_buffer]
+
+    def __setitem__(self, k, v):
+        self.module._register_parameter(k, v, True)
+
+    def __contains__(self, k):
+        return self.module._has_buffer(k)
+
+    def __getitem__(self, k):
+        if k not in self:
+            raise KeyError(k)
+        return self.module._get_parameter(k)
+
+
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
 # in a ScriptModule and removes them from the class attributes, and
@@ -677,6 +665,7 @@ def script_method(fn):
 # has run. This has to occur after the user-defined __init__ so that
 # submodules and parameters are initialized _before_ the script compiler
 # resolve references to `self.param` or `self.module`.
+
 class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
@@ -688,45 +677,129 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
-        if len(methods) > 0:
-            # after the user's __init__ register all the script methods
-            # with the module
-            original_init = getattr(cls, '__init__', lambda self: None)
+        # after the user's __init__ register all the script methods
+        # with the module
+        original_init = getattr(cls, '__init__', lambda self: None)
 
-            def init_then_register(self, *args, **kwargs):
-                original_init(self, *args, **kwargs)
-                for m in methods:
-                    self._create_method(m.ast, m.resolution_callback)
+        def init_then_register(self, *args, **kwargs):
+            # ensure even if the user forgets to call super that
+            # the pybind object is initialized so it will not segfault
+            # run this once, before the most-derived __init__ is called
+            if cls is type(self):
+                torch._C.ScriptModule.__init__(self)
+            original_init(self, *args, **kwargs)
+            for m in methods:
+                self._create_method(m.ast, m.resolution_callback)
 
-            cls.__init__ = init_then_register
+        cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule)):
-
-    def __setattr__(self, name, value):
-        if isinstance(value, Parameter):
-            self._register_or_set_parameter(name, value)
-        elif isinstance(value, ScriptModule):
-            self._register_module(name, value)
-            # note: script modules are subclassed in python and the
-            # C++ script::Module class will not hold references to them
-            # to ensure that you always get the same python value here
-            # we store it as a native attribute _in addition to_
-            # registering it with the C++ script::Module
-            object.__setattr__(self, name, value)
-        else:
-            object.__setattr__(self, name, value)
+class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
+    def __init__(self, optimize=True):
+        Module.__init__(self)
+        self._set_optimized(optimize)
+        self._parameters = OrderedParameterDict(self)
+        self._buffers = OrderedBufferDict(self)
+        self._modules = OrderedModuleDict(self)
 
     def __getattr__(self, attr):
-        r = self._get_attribute(attr)
-        if r is None:
-            raise AttributeError("'{}' object has no attribute '{}'".format(self.__class__.__name__, attr))
-        return r
+        if self._has_method(attr):
+            return self._get_method(attr)
+        return Module.__getattr__(self, attr)
+
+    def __dir__(self):
+        return sorted(Module.__dir__(self) + self._method_names())
+
+    # Module already has this method defined, so we
+    # need to override it and send it through the ScriptModule lookup
+    def forward(self, *args, **kwargs):
+        return self.__getattr__('forward')(*args, **kwargs)
 
     def define(self, lang):
         rcb = createResolutionCallback()
         self._define(lang, rcb, True)
+
+
+def _get_methods(cls):
+    import inspect
+    # In Python 3 unbound methods are functions, but in Python 2 they are methods
+    return inspect.getmembers(cls, predicate=lambda x: inspect.isfunction(x) or inspect.ismethod(x))
+
+
+_compiled_methods_whitelist = {
+    'forward', 'register_buffer', 'register_parameter', 'add_module',
+    '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
+    'state_dict', 'load_state_dict', 'parameters', 'named_parameters',
+    '_all_buffers', 'children', 'named_children', 'modules', 'named_modules',
+    'zero_grad', 'share_memory', '_get_name'
+}
+
+
+def _make_fail(name):
+    def fail(self, *args, **kwargs):
+        raise RuntimeError(name + " is not supported on TracedModules")
+    return fail
+
+
+for name, method in _get_methods(torch.nn.Module):
+    if name.startswith('__'):
+        continue
+    if name not in ScriptModule.__dict__ and name not in _compiled_methods_whitelist:
+        setattr(ScriptModule, method.__name__, _make_fail(name))
+
+
+class TracedModule(ScriptModule):
+    __frozen = False
+
+    def __init__(self, orig, id_set=None, optimize=True):
+        super(TracedModule, self).__init__(optimize=True)
+        if id_set is None:
+            id_set = set()
+
+        def check_unique(param):
+            if param in id_set:
+                raise ValueError("TracedModules don't support parameter sharing between modules")
+            id_set.add(param)
+
+        self.training = orig.training
+
+        for name, param in orig._parameters.items():
+            if param is not None:
+                self._parameters[name] = param
+                check_unique(param)
+        for name, buf in orig._buffers.items():
+            if param is not None:
+                self._buffers[name] = buf
+                check_unique(param)
+        self._orig_class = type(orig)
+
+        if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
+            raise ValueError("Modules that have hooks assigned can't be compiled")
+
+        for name, submodule in orig._modules.items():
+            self._modules[name] = TracedModule(submodule, id_set, optimize=optimize)
+
+        self._freeze()
+
+    def forward(self, *args, **kwargs):
+        raise RuntimeError('Trace submodules cannot be called.')
+
+    def _freeze(self):
+        self.__frozen = True
+
+    def _get_name(self):
+        return 'TracedModule[' + self._orig_class.__name__ + ']'
+
+    def __setattr__(self, attr, value):
+        if not self.__frozen or hasattr(self, attr):
+            return super(TracedModule, self).__setattr__(attr, value)
+        raise RuntimeError("Cannot set new properties on a traced module.")
+
+
+class TopLevelTracedModule(TracedModule):
+    def forward(self, *args, **kwargs):
+        return self._get_method('forward')(*args, **kwargs)
 
 
 if not torch._C._jit_init():

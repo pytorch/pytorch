@@ -35,11 +35,11 @@ class OneHotCategorical(Distribution):
     support = constraints.simplex
     has_enumerate_support = True
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         self._categorical = Categorical(probs, logits)
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
-        super(OneHotCategorical, self).__init__(batch_shape, event_shape)
+        super(OneHotCategorical, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
         return self._categorical._new(*args, **kwargs)
@@ -74,7 +74,8 @@ class OneHotCategorical(Distribution):
         return one_hot.scatter_(-1, indices, 1)
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         indices = value.max(-1)[1]
         return self._categorical.log_prob(indices)
 

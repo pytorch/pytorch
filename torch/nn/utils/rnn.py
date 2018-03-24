@@ -93,12 +93,11 @@ class PackedSequence(PackedSequence_):
 
 def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
     if batch_first:
-        from torch.onnx import symbolic
-        input = symbolic.t(g, input)
+        input = g.op('Transpose', input, perm_i=[1, 0, 2])
     # There currently is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
-    return g.op("PackPadded", input, lengths, outputs=2)
+    return g.op("prim::PackPadded", input, lengths, outputs=2)
 
 
 @torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)
@@ -123,7 +122,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     Arguments:
         input (Variable): padded batch of variable length sequences.
         lengths (Variable): list of sequences lengths of each batch element.
-        batch_first (bool, optional): if ``True``, the input is expected in BxTx*
+        batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
 
     Returns:
@@ -139,10 +138,9 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
 def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
     # See comment on _symbolic_pack_padded_sequence
-    data, lengths = g.op("PadPacked", input.data, input.batch_sizes, outputs=2)
+    data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
     if batch_first:
-        from torch.onnx import symbolic
-        data = symbolic.t(g, data)
+        data = g.op('Transpose', data, perm_i=[1, 0, 2])
     return data, lengths
 
 
@@ -211,7 +209,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     decreasing length.
 
     `B` is batch size. It's equal to the number of elements in ``sequences``.
-    `T` is length longest sequence.
+    `T` is length of the longest sequence.
     `L` is length of the sequence.
     `*` is any number of trailing dimensions, including none.
 
@@ -269,7 +267,7 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
 def pack_sequence(sequences):
     r"""Packs a list of variable length Variables
 
-    ``sequences`` should be a list of Variables of size ``Lx*``, where `L` is
+    ``sequences`` should be a list of Variables of size ``L x *``, where `L` is
     the length of a sequence and `*` is any number of trailing dimensions,
     including zero. They should be sorted in the order of decreasing length.
 

@@ -155,7 +155,7 @@
   self: not_implemented("btrisolve")
 
 - name: cat(TensorList tensors, int64_t dim)
-  tensors: cat_tensors_backward(grad, to_arg_sizes(tensors, dim), dim)
+  tensors: cat_tensors_backward(grad, to_args_sizes(tensors), dim)
 
 - name: cauchy_(Tensor self, double median, double sigma, Generator generator)
   self: zeros_like(grad)
@@ -194,8 +194,8 @@
 - name: conv_tbc(Tensor self, Tensor weight, Tensor bias, int64_t pad)
   self, weight, bias: conv_tbc_backward(grad, self, weight, bias, pad)
 
-- name: _det_with_svd(Tensor self)
-  self: _det_with_svd_backward(grads, self, result0, result1, result2, result3)
+- name: det(Tensor self)
+  self: det_backward(grad, self, result)
 
 - name: diag(Tensor self, int64_t diagonal)
   self: diag_backward(grad, self.sizes(), diagonal)
@@ -350,6 +350,9 @@
 
 - name: log1p(Tensor self)
   self: grad / (self + 1)
+
+- name: logdet(Tensor self)
+  self: logdet_backward(grad, self, result)
 
 - name: log_normal_(Tensor self, double mean, double std, Generator generator)
   self: zeros_like(grad)
@@ -558,6 +561,9 @@
 - name: sinh(Tensor self)
   self: grad * self.cosh()
 
+- name: slogdet(Tensor self)
+  self: slogdet_backward(grads, self, result0, result1)
+
 - name: sort(Tensor self, int64_t dim, bool descending)
   self: select_backward(grad, dim, indices, self.sizes(), true)
 
@@ -596,7 +602,7 @@
   self: sum_backward(grad, self.sizes(), dim, keepdim)
 
 - name: svd(Tensor self, bool some)
-  self: svd_backward(grads, self, some, res1, res2, res3)
+  self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
   self: not_implemented("symeig")
@@ -716,6 +722,9 @@
 - name: soft_margin_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: soft_margin_loss_backward(grad, self, target, size_average, reduce)
 
+- name: relu(Tensor self)
+  self: threshold_backward(grad, self, 0, 0)
+
 - name: elu_forward(Tensor self, Scalar alpha, Scalar scale)
   self: elu_backward(grad, alpha, scale, output)
 
@@ -782,14 +791,14 @@
 - name: replication_pad3d_forward(Tensor self, IntList padding)
   self: replication_pad3d_backward(grad, self, padding)
 
-- name: upsample_linear1d_forward(Tensor self, IntList output_size)
-  self: upsample_linear1d_backward(grad, output_size, self.sizes())
+- name: upsample_linear1d_forward(Tensor self, IntList output_size, bool align_corners)
+  self: upsample_linear1d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_bilinear2d_forward(Tensor self, IntList output_size)
-  self: upsample_bilinear2d_backward(grad, output_size, self.sizes())
+- name: upsample_bilinear2d_forward(Tensor self, IntList output_size, bool align_corners)
+  self: upsample_bilinear2d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_trilinear3d_forward(Tensor self, IntList output_size)
-  self: upsample_trilinear3d_backward(grad, output_size, self.sizes())
+- name: upsample_trilinear3d_forward(Tensor self, IntList output_size, bool align_corners)
+  self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
 - name: upsample_nearest1d_forward(Tensor self, int64_t scale_factor)
   self: upsample_nearest1d_backward(grad, self, scale_factor)
@@ -1025,14 +1034,14 @@
   grad_output: threshold_backward(grad, self, threshold, value)
   self: zeros_like(grad)
 
-- name: upsample_linear1d_backward(Tensor grad_output, IntList output_size, IntList input_size)
-  grad_output: upsample_linear1d(grad, output_size)
+- name: upsample_linear1d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
+  grad_output: upsample_linear1d(grad, output_size, align_corners)
 
-- name: upsample_bilinear2d_backward(Tensor grad_output, IntList output_size, IntList input_size)
-  grad_output: upsample_bilinear2d(grad, output_size)
+- name: upsample_bilinear2d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
+  grad_output: upsample_bilinear2d(grad, output_size, align_corners)
 
-- name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size)
-  grad_output: upsample_trilinear3d(grad, output_size)
+- name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
+  grad_output: upsample_trilinear3d(grad, output_size, align_corners)
 
 - name: upsample_nearest1d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
   grad_output: upsample_nearest1d(grad, scale_factor)

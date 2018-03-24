@@ -427,6 +427,7 @@ class TestMultiprocessing(TestCase):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
 
+    @unittest.skip('this test occasionally fails and deadlocks; see https://github.com/pytorch/pytorch/issues/5834')
     def test_backwards_fork(self):
         r"backwards() should succeed when called before and after a fork"
         call_backward()

@@ -148,21 +148,21 @@
 
 static inline real THTensor_(powOne)(real x, real y) {
 #if defined(TH_REAL_IS_FLOAT)
-  return powf(x, y); 
+  return powf(x, y);
 #elif defined(TH_REAL_IS_DOUBLE)
   return pow(x, y);
 #else
   THArgCheck(y >= 0, 1,
       "Integers to negative integer powers are not allowed");
-  real result = 1;  
-  while (y) {       
-    if (y & 1) {    
-       result *= x; 
-    }               
-    y /= 2;         
-    x *= x;         
-  }                 
-  return result;    
+  real result = 1;
+  while (y) {
+    if (y & 1) {
+       result *= x;
+    }
+    y /= 2;
+    x *= x;
+  }
+  return result;
 #endif
 }
 
@@ -382,10 +382,9 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   THTensor *tSlice, *sSlice;
   int64_t *index_data;
 
+  // Error checking for this function has moved to ATen!!
+
   numel = THLongTensor_nElement(index);
-  THArgCheck(index->nDimension == 1, 3, "Index is supposed to be a vector");
-  THArgCheck(dim < src->nDimension, 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
-  THArgCheck(numel == src->size[dim],4,"Number of indices should be equal to source:size(dim)");
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
@@ -695,7 +694,7 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 #undef th_isnan
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 #define th_isnan(val) \
-(isnan(val))
+(std::isnan(val))
 #else
 #define th_isnan(val) (0)
 #endif
@@ -703,7 +702,7 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
 #undef th_isnan_break
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 #define th_isnan_break(val) \
-if (isnan(val)) break;
+if (std::isnan(val)) break;
 #else
 #define th_isnan_break(val)
 #endif
@@ -1052,6 +1051,10 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
   }
 }
 
+static inline bool has_different_sign(real a, real b) {
+  return (a < 0) != (b < 0);
+}
+
 void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
@@ -1070,7 +1073,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       rp[i] = tp[i] % value;
-      if (rp[i] * value < 0)
+      if (has_different_sign(rp[i], value))
         rp[i] += value;
 #endif
     }
@@ -1085,7 +1088,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
       // There is no NAN for integers
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data % value;
-                                        if (*r__data * value < 0) *r__data += value;);
+                                        if (has_different_sign(*r__data, value)) *r__data += value;);
 #endif
     }
 #else
@@ -1098,7 +1101,7 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 #else
     // There is no NAN for integers
     TH_TENSOR_APPLY2(real, r_, real, t, *r__data = *t_data % value;
-                                          if (*r__data * value < 0) *r__data += value;);
+                                          if (has_different_sign(*r__data, value)) *r__data += value;);
 #endif
   }
 }
@@ -1106,6 +1109,9 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
 void THTensor_(bitand)(THTensor *r_, THTensor *t, real value)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)value;
   return THError("bitand is only supported for integer type tensors");
 #else
   THTensor_(resizeAs)(r_, t);
@@ -1142,7 +1148,10 @@ void THTensor_(bitand)(THTensor *r_, THTensor *t, real value)
 void THTensor_(bitor)(THTensor *r_, THTensor *t, real value)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
-  return THError("bitxor is only supported for integer type tensors");
+  (void)r_;
+  (void)t;
+  (void)value;
+  return THError("bitor is only supported for integer type tensors");
 #else
   THTensor_(resizeAs)(r_, t);
   int64_t r_Size = THTensor_(nElement)(r_);
@@ -1178,6 +1187,9 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, real value)
 void THTensor_(bitxor)(THTensor *r_, THTensor *t, real value)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)value;
   return THError("bitxor is only supported for integer type tensors");
 #else
   THTensor_(resizeAs)(r_, t);
@@ -1671,6 +1683,9 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
 void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)src;
   return THError("cbitand is only supported for integer type tensors");
 #else
   THTensor_(resizeAs)(r_, t);
@@ -1714,6 +1729,9 @@ void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
 void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)src;
   return THError("cbitor is only supported for integer type tensors");
 #else
   THTensor_(resizeAs)(r_, t);
@@ -1757,6 +1775,9 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
 void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
 {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE) || defined(TH_REAL_IS_HALF)
+  (void)r_;
+  (void)t;
+  (void)src;
   return THError("cbitxor is only supported for integer type tensors");
 #else
   THTensor_(resizeAs)(r_, t);
@@ -3736,6 +3757,27 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                       \
     }                                                                                                        \
   }
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION(NAME, CFUNC)             \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
+  {                                                           \
+    THTensor_(resizeAs)(r_, t);                               \
+    ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
+    int r_Contig = THTensor_(isContiguous)(r_);               \
+    int tContig = THTensor_(isContiguous)(t);                 \
+    if (r_Contig && tContig) {                                \
+      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););                   \
+    } else {                                                                                                   \
+      int inOMP = omp_in_parallel();                            \
+      if( (r_Size > TH_OMP_OVERHEAD_THRESHOLD) && (!inOMP) ){   \
+        TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = CFUNC(*t_data););        \
+      }                                                                                                        \
+      else {                                                                                                   \
+        TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                       \
+      }                                                                                                        \
+    }                                                                                                          \
+  }
+
 #else
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC)             \
@@ -3744,6 +3786,19 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
     THTensor_(resizeAs)(r_, t);                               \
     TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
   }                                                           \
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION(NAME, CFUNC)             \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
+  {                                                           \
+    THTensor_(resizeAs)(r_, t);                               \
+    int r_Contig = THTensor_(isContiguous)(r_);               \
+    int tContig = THTensor_(isContiguous)(t);                 \
+    if (r_Contig && tContig) {                                \
+      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len);); \
+    } else {                                                           \
+      TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
+    }                                                           \
+  }                                                             \
 
 #endif
 
@@ -3786,7 +3841,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
-LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
 LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
 LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))
@@ -3809,6 +3863,8 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
+
+LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
 
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
@@ -3987,7 +4043,7 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
     TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += z*z;);
     return sqrt(sum);
   } else if(value == 3) {
-    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += TH_MATH_NAME(fabs)(z*z*z););
+    TH_TENSOR_APPLY(real, tensor, accreal z = *tensor_data; sum += std::abs(z*z*z););
     return TH_MATH_NAME(pow)(sum, 1.0/3);
   } else {
     TH_TENSOR_APPLY(real, tensor, sum += TH_MATH_NAME(pow)(TH_MATH_NAME(fabs)(*tensor_data), value););
@@ -4207,7 +4263,7 @@ static inline real THTensor_(beta_grad_alpha_small)(real x, real alpha, real bet
     series += numer / denom * (factor + 1 / denom);
   }
   const real result = x * TH_MATH_NAME(pow)(1 - x, -beta) * series;
-  return isnan(result) ? 0.0 : result;
+  return th_isnan(result) ? 0.0 : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt beta.
@@ -4225,7 +4281,7 @@ static inline real THTensor_(beta_grad_beta_small)(real x, real alpha, real beta
     series += numer / (alpha + i) * (dbetas + factor * betas);
   }
   const real result = -TH_MATH_NAME(pow)(1 - x, 1 - beta) * series;
-  return isnan(result) ? 0.0 : result;
+  return th_isnan(result) ? 0.0 : result;
 }
 
 // Approximate reparameterized gradient of Beta(x,alpha,beta) wrt alpha.

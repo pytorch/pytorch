@@ -79,7 +79,9 @@ namespace script {
   _(TK_VAR, "variable", "")                      \
   _(TK_GATHER, "gather", "")                     \
   _(TK_NOTHING, "nothing", "")                   \
-  _(TK_LIST_LITERAL, "list-literal", "")
+  _(TK_LIST_LITERAL, "list-literal", "")         \
+  _(TK_FOR, "for", "for")                        \
+  _(TK_IN, "in", "in")
 
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 
@@ -362,13 +364,6 @@ struct Token {
   int kind;
   SourceRange range;
   Token(int kind, const SourceRange& range) : kind(kind), range(range) {}
-  double doubleValue() {
-    assert(TK_NUMBER == kind);
-    size_t idx;
-    double r = stod(text(), &idx);
-    assert(idx == range.size());
-    return r;
-  }
   std::string text() {
     return range.text();
   }

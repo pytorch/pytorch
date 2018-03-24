@@ -18,7 +18,7 @@ def _type(self, dtype=None, non_blocking=False, **kwargs):
             asynchronously with respect to the host. Otherwise, the argument
             has no effect.
         **kwargs: For compatibility, may contain the key ``async`` in place of
-            the ``non_blocking`` argument.
+            the ``non_blocking`` argument. The ``async`` arg is deprecated.
     """
     non_blocking = _get_async_or_non_blocking('type', non_blocking, kwargs)
     if dtype is None:

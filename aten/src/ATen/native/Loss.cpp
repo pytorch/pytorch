@@ -43,4 +43,32 @@ Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double mar
   return output;
 }
 
+Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const Tensor& negative, double margin,
+                           double p, double eps, bool swap, bool size_average, bool reduce) {
+  auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
+  auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
+  if (swap) {
+    auto dist_swap = at::pairwise_distance(positive, negative, p, eps);
+    dist_neg = at::min(dist_neg, dist_swap);
+  }
+  auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
+
+  if (reduce && size_average) {
+    return output.sum() / output.numel();
+  } else if (reduce) {
+    return output.sum();
+  }
+  return output;
+}
+
+Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, bool size_average, bool reduce) {
+  auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
+
+  if (reduce && size_average) {
+    return output.sum() / output.numel();
+  } else if (reduce) {
+    return output.sum();
+  }
+  return output;
+}
 }}  // namespace at::native

@@ -29,7 +29,7 @@ class Geometric(Distribution):
     params = {'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer
 
-    def __init__(self, probs=None, logits=None):
+    def __init__(self, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
@@ -43,7 +43,7 @@ class Geometric(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = probs_or_logits.size()
-        super(Geometric, self).__init__(batch_shape)
+        super(Geometric, self).__init__(batch_shape, validate_args=validate_args)
 
     @property
     def mean(self):
@@ -68,7 +68,8 @@ class Geometric(Distribution):
             return (u.log() / (-self.probs).log1p()).floor()
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         value, probs = broadcast_all(value, self.probs.clone())
         probs[(probs == 1) & (value == 0)] = 0
         return value * (-probs).log1p() + self.probs.log()

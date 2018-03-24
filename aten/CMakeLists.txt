@@ -380,10 +380,18 @@ MACRO(Install_Required_Library ln)
 ENDMACRO(Install_Required_Library libname)
 
 FIND_PACKAGE(BLAS)
+SET(AT_MKL_ENABLED 0)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    IF(NOT BLAS_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL header files not found. If using conda, please run \
+        `conda install mkl-include`. Otherwise, please make sure that CMake will \
+        search the directory containing the header files, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
+    INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
+    SET(AT_MKL_ENABLED 1)
   ENDIF()
 ENDIF(BLAS_FOUND)
 
@@ -401,7 +409,6 @@ set(ATen_CUDA_INCLUDE)
 SET(ATEN_INSTALL_BIN_SUBDIR "bin" CACHE PATH "ATen install binary subdirectory")
 SET(ATEN_INSTALL_LIB_SUBDIR "lib" CACHE PATH "ATen install library subdirectory")
 SET(ATEN_INSTALL_INCLUDE_SUBDIR "include" CACHE PATH "ATen install include subdirectory")
-
 
 add_definitions(-DTH_INDEX_BASE=0)
 set(TH_LINK_STYLE STATIC)
@@ -451,7 +458,7 @@ if(NO_NNPACK)
 else()
   find_package(NNPACK)
   if(NOT NNPACK_FOUND)
-    MESSAGE(STATUS "NNPACK not found. Compiling without nNPACK support")
+    MESSAGE(STATUS "NNPACK not found. Compiling without NNPACK support")
     set(AT_NNPACK_ENABLED 0)
   ELSE()
     INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
@@ -474,6 +481,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
 add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
+${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/utils/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})

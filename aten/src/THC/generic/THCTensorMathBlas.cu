@@ -533,7 +533,12 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   else
   {
     transpose_batch1 = transpose_result ? 'n' : 't';
-    batch1_ = THCTensor_(newContiguous)(state, batch1);
+    // batch1_ is later freed if batch1_ != batch1
+    if (THCTensor_(isContiguous)(state, batch1)) {
+      batch1_ = batch1;
+    } else {
+      batch1_ = THCTensor_(newContiguous)(state, batch1);
+    }
     lda = batch1_->stride[1];
   }
 
@@ -554,7 +559,12 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   else
   {
     transpose_batch2 = transpose_result ? 'n' : 't';
-    batch2_ = THCTensor_(newContiguous)(state, batch2);
+    // batch2_ is later freed if batch2_ != batch2
+    if (THCTensor_(isContiguous)(state, batch2)) {
+      batch2_ = batch2;
+    } else {
+      batch2_ = THCTensor_(newContiguous)(state, batch2);
+    }
     ldb = batch2_->stride[1];
   }
   int64_t num_batches = result_->size[0];

@@ -164,6 +164,8 @@ If you want to compile with CUDA support, install
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
+If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
+
 #### Install optional dependencies
 
 On Linux
@@ -171,7 +173,7 @@ On Linux
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
-conda install numpy pyyaml mkl setuptools cmake cffi typing
+conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 
 # Add LAPACK support for the GPU
 conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
@@ -180,6 +182,11 @@ conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
+conda install numpy pyyaml setuptools cmake cffi typing
+```
+
+On Windows
+```cmd
 conda install numpy pyyaml setuptools cmake cffi typing
 ```
 #### Get the PyTorch source
@@ -197,6 +204,18 @@ python setup.py install
 On macOS
 ```bash
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
+```
+
+On Windows
+```cmd
+xcopy /Y aten\src\ATen\common_with_cwrap.py tools\shared\cwrap_common.py
+
+set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
+set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
+set DISTUTILS_USE_SDK=1
+
+call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
+python setup.py install
 ```
 
 ### Docker image

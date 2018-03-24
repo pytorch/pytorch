@@ -14,11 +14,13 @@ class PairwiseDistance(Module):
         p (real): the norm degree. Default: 2
         eps (float, optional): Small value to avoid division by zero.
             Default: 1e-6
+        keepdim (bool, optional): Determines whether or not to keep the batch dimension.
+            Default: False
 
     Shape:
         - Input1: :math:`(N, D)` where `D = vector dimension`
         - Input2: :math:`(N, D)`, same shape as the Input1
-        - Output: :math:`(N, 1)`
+        - Output: :math:`(N)`. If :attr:`keepdim` is ``False``, then :math:`(N, 1)`.
 
     Examples::
 
@@ -27,13 +29,14 @@ class PairwiseDistance(Module):
         >>> input2 = torch.randn(100, 128)
         >>> output = pdist(input1, input2)
     """
-    def __init__(self, p=2, eps=1e-6):
+    def __init__(self, p=2, eps=1e-6, keepdim=False):
         super(PairwiseDistance, self).__init__()
         self.norm = p
         self.eps = eps
+        self.keepdim = keepdim
 
     def forward(self, x1, x2):
-        return F.pairwise_distance(x1, x2, self.norm, self.eps)
+        return F.pairwise_distance(x1, x2, self.norm, self.eps, self.keepdim)
 
 
 class CosineSimilarity(Module):

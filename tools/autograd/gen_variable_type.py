@@ -25,7 +25,7 @@
 from __future__ import print_function
 import os
 import sys
-from .utils import CodeTemplate, nested_dict, write
+from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
 from .gen_autograd import VIEW_FUNCTIONS, template_path, \
     HARDCODED_DIFFERENTIABLE_OUTPUTS
 from .gen_autograd_functions import uses_single_grad
@@ -119,7 +119,7 @@ profiler::RecordFunction profiler("${name}");""")
 PRE_RECORD_TRACE = CodeTemplate("""\
 jit::tracer::PreTraceInfo trace_info;
 if (jit::tracer::isTracing( ${tensor_args} )) {
-  trace_info = jit::tracer::preRecordTrace( "${trace_name}", ${trace_inputs} );
+  trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
   ${record_attributes}
 }
 """)
@@ -131,7 +131,7 @@ if (trace_info.state != nullptr) {
 """)
 
 RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::Symbol("${name}"), ${name});""")
+        setattr(trace_info.n, jit::attr::${name}, ${name});""")
 
 
 def gen_variable_type(out, aten_declarations):
@@ -367,9 +367,11 @@ def emit_body(declaration):
                 continue
             local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
 
-        local['trace_name'] = declaration['api_name']
-        if local['trace_name'].endswith('_'):
-            local['trace_name'] = local['trace_name'][:-1]
+        # Record inplace operations as out-of-place operations (e.g.,
+        # not add_ but add)
+        # TODO: Add a proper concept of side effects to the IR, and
+        # properly record inplace operations.
+        local['trace_name'] = uninplace_api_name(declaration['api_name'])
 
         local['trace_outputs'] = get_trace_outputs(declaration)
 

@@ -61,6 +61,25 @@ declare -f -t trap_add
 
 trap_add cleanup EXIT
 
+if which sccache > /dev/null; then
+  # Report sccache stats for easier debugging
+  sccache --show-stats
+  function sccache_epilogue() {
+     sccache --show-stats
+  }
+  trap_add sccache_epilogue EXIT
+fi
+
+if which ccache > /dev/null; then
+  # Report ccache stats for easier debugging
+  ccache --zero-stats
+  ccache --show-stats
+  function ccache_epilogue() {
+    ccache --show-stats
+  }
+  trap_add ccache_epilogue EXIT
+fi
+
 # It's called a COMPACT_JOB_NAME because it's distinct from the
 # Jenkin's provided JOB_NAME, which also includes a prefix folder
 # e.g. pytorch-builds/
@@ -82,4 +101,11 @@ if grep --line-regexp -q "$COMPACT_JOB_NAME" "$(dirname "${BASH_SOURCE[0]}")/ena
 else
   echo "Job is not enabled, FAILING now (revert changes to enabled-configs.txt to fix this)"
   exit 1
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7.2 ]]; then
+  BUILD_TEST_LIBTORCH=1
+else
+  BUILD_TEST_LIBTORCH=0
 fi

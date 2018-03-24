@@ -423,6 +423,31 @@ def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average
     return output
 
 
+def tripletmarginloss_reference(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False,
+                                size_average=True, reduce=True):
+    d_p = torch.pairwise_distance(anchor, positive, p, eps)
+    d_n = torch.pairwise_distance(anchor, negative, p, eps)
+    if swap:
+        d_s = torch.pairwise_distance(positive, negative, p, eps)
+        d_n = torch.min(d_n, d_s)
+
+    output = torch.clamp(margin + d_p - d_n, min=0.0)
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
+def marginrankingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+    output = (-target * (input1 - input2) + margin).clamp(min=0)
+    if reduce and size_average:
+        return output.mean()
+    elif reduce:
+        return output.sum()
+    return output
+
+
 loss_reference_fns = {
     'KLDivLoss': kldivloss_reference,
     'NLLLoss': nllloss_reference,
@@ -433,6 +458,8 @@ loss_reference_fns = {
     'SoftMarginLoss': softmarginloss_reference,
     'MultiMarginLoss': multimarginloss_reference,
     'CosineEmbeddingLoss': cosineembeddingloss_reference,
+    'TripletMarginLoss': tripletmarginloss_reference,
+    'MarginRankingLoss': marginrankingloss_reference,
 }
 
 
@@ -668,13 +695,17 @@ criterion_tests = [
         module_name='MarginRankingLoss',
         input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target_fn=lambda: torch.randn(50).sign(),
+        reference_fn=lambda i, t, m:
+            marginrankingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
         check_no_size_average=True,
     ),
     dict(
         module_name='MarginRankingLoss',
-        constructor_args=(2,),
+        constructor_args=(0.5,),
         input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target_fn=lambda: torch.randn(50).sign(),
+        reference_fn=lambda i, t, m:
+            marginrankingloss_reference(i[0], i[1], t, margin=0.5, size_average=get_size_average(m)),
         desc='margin',
         check_no_size_average=True,
     ),
@@ -1115,8 +1146,9 @@ class CriterionTest(TestBase):
             gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
             test_case.assertEqual(cpu_output, gpu_output, 4e-4)
 
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target)
+            gradOutput = torch.randn(())
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, gradOutput)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, gradOutput)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 4e-4)
         except NotImplementedError:
             pass

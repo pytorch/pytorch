@@ -5,16 +5,17 @@ from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
-from torch.nn.functional import sigmoid
+from torch.nn.functional import pad, sigmoid
 
 __all__ = [
     'AbsTransform',
     'AffineTransform',
-    'BoltzmannTransform',
     'ComposeTransform',
     'ExpTransform',
     'LowerCholeskyTransform',
+    'PowerTransform',
     'SigmoidTransform',
+    'SoftmaxTransform',
     'StickBreakingTransform',
     'Transform',
     'identity_transform',
@@ -277,8 +278,8 @@ identity_transform = ComposeTransform([])
 
 
 class ExpTransform(Transform):
-    """
-    Transform via the mapping `y = exp(x)`.
+    r"""
+    Transform via the mapping :math:`y = \exp(x)`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -298,9 +299,37 @@ class ExpTransform(Transform):
         return x
 
 
-class SigmoidTransform(Transform):
+class PowerTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = x^{\text{exponent}}`.
     """
-    Transform via the mapping `y = sigmoid(x)` and `x = logit(y)`.
+    domain = constraints.positive
+    codomain = constraints.positive
+    bijective = True
+    sign = +1
+
+    def __init__(self, exponent, cache_size=0):
+        super(PowerTransform, self).__init__(cache_size=cache_size)
+        self.exponent, = broadcast_all(exponent)
+
+    def __eq__(self, other):
+        if not isinstance(other, PowerTransform):
+            return False
+        return self.exponent.eq(other.exponent).all().item()
+
+    def _call(self, x):
+        return x.pow(self.exponent)
+
+    def _inverse(self, y):
+        return y.pow(1 / self.exponent)
+
+    def log_abs_det_jacobian(self, x, y):
+        return (self.exponent * y / x).abs().log()
+
+
+class SigmoidTransform(Transform):
+    r"""
+    Transform via the mapping :math:`y = \frac{1}{1 + \exp(-x)}` and :math:`x = \text{logit}(y)`.
     """
     domain = constraints.real
     codomain = constraints.unit_interval
@@ -321,8 +350,8 @@ class SigmoidTransform(Transform):
 
 
 class AbsTransform(Transform):
-    """
-    Transform via the mapping `y = abs(x)`.
+    r"""
+    Transform via the mapping :math:`y = |x|`.
     """
     domain = constraints.real
     codomain = constraints.positive
@@ -338,8 +367,8 @@ class AbsTransform(Transform):
 
 
 class AffineTransform(Transform):
-    """
-    Transform via the pointwise affine mapping `y = loc + scale * x`.
+    r"""
+    Transform via the pointwise affine mapping :math:`y = \text{loc} + \text{scale} \times x`.
 
     Args:
         loc (Tensor): Location parameter.
@@ -385,9 +414,9 @@ class AffineTransform(Transform):
         return result.expand(shape)
 
 
-class BoltzmannTransform(Transform):
-    """
-    Transform from unconstrained space to the simplex via `y = exp(x)` then
+class SoftmaxTransform(Transform):
+    r"""
+    Transform from unconstrained space to the simplex via :math:`y = \exp(x)` then
     normalizing.
 
     This is not bijective and cannot be used for HMC. However this acts mostly
@@ -399,13 +428,12 @@ class BoltzmannTransform(Transform):
     event_dim = 1
 
     def __eq__(self, other):
-        return isinstance(other, BoltzmannTransform)
+        return isinstance(other, SoftmaxTransform)
 
     def _call(self, x):
         logprobs = x
         probs = (logprobs - logprobs.max(-1, True)[0]).exp()
-        probs /= probs.sum(-1, True)
-        return probs
+        return probs / probs.sum(-1, True)
 
     def _inverse(self, y):
         probs = y
@@ -434,21 +462,24 @@ class StickBreakingTransform(Transform):
         return isinstance(other, StickBreakingTransform)
 
     def _call(self, x):
-        shape = x.shape[:-1] + (1 + x.shape[-1],)
-        one = x.new([1]).expand(x.shape[:-1] + (1,))
-        numer = sigmoid(x)
-        denom = (1 - numer).cumprod(-1)
-        probs = torch.cat([numer, one], -1) * torch.cat([one, denom], -1)
-        return probs
+        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+        z = sigmoid(x - offset.log())
+        z_cumprod = (1 - z).cumprod(-1)
+        y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
+        return y
 
     def _inverse(self, y):
-        pmf = y
-        cmf = pmf.cumsum(-1)
-        sf = 1 - cmf
-        units = y[..., :-1] / sf[..., :-1]
-        return units.log()
+        shape = y.shape[:-1] + (y.shape[-1] - 1,)
+        offset = (shape[-1] + 1) - y.new([1]).expand(shape).cumsum(-1)
+        sf = (1 - y.cumsum(-1))[..., :-1]
+        x = y[..., :-1].log() - sf.log() + offset.log()
+        return x
 
-    # TODO implement .log_abs_det_jacobian()
+    def log_abs_det_jacobian(self, x, y):
+        offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
+        z = sigmoid(x - offset.log())
+        detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
+        return detJ
 
 
 class LowerCholeskyTransform(Transform):
@@ -466,12 +497,16 @@ class LowerCholeskyTransform(Transform):
     def __eq__(self, other):
         return isinstance(other, LowerCholeskyTransform)
 
-    def _call(self, x):
-        if x.dim() != 2:
-            raise NotImplementedError
+    def _call_on_event(self, x):
         return x.tril(-1) + x.diag().exp().diag()
 
-    def _inverse(self, y):
-        if y.dim() != 2:
-            raise NotImplementedError
+    def _inverse_on_event(self, y):
         return y.tril(-1) + y.diag().log().diag()
+
+    def _call(self, x):
+        flat_x = x.contiguous().view((-1,) + x.shape[-2:])
+        return torch.stack([self._call_on_event(z) for z in flat_x]).view(x.shape)
+
+    def _inverse(self, y):
+        flat_y = y.contiguous().view((-1,) + y.shape[-2:])
+        return torch.stack([self._inverse_on_event(z) for z in flat_y]).view(y.shape)

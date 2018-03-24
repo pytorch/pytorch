@@ -80,12 +80,12 @@ class BatchNorm1d(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, L)` slices, it's common terminology to call this Temporal BatchNorm.
+    Because the Batch Normalization is done over the `C` dimension, computing statistics
+    on `(N, L)` slices, it's common terminology to call this Temporal Batch Normalization.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -105,7 +105,8 @@ class BatchNorm1d(_BatchNorm):
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
         - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm1d(100)
         >>> # Without Learnable Parameters
@@ -149,12 +150,12 @@ class BatchNorm2d(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, H, W)` slices, it's common terminology to call this Spatial BatchNorm.
+    Because the Batch Normalization is done over the `C` dimension, computing statistics
+    on `(N, H, W)` slices, it's common terminology to call this Spatial Batch Normalization.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -174,7 +175,8 @@ class BatchNorm2d(_BatchNorm):
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm2d(100)
         >>> # Without Learnable Parameters
@@ -218,13 +220,13 @@ class BatchNorm3d(_BatchNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
-    Because the BatchNorm is done over the `C` dimension, computing statistics
-    on `(N, D, H, W)` slices, it's common terminology to call this Volumetric BatchNorm
-    or Spatio-temporal BatchNorm.
+    Because the Batch Normalization is done over the `C` dimension, computing statistics
+    on `(N, D, H, W)` slices, it's common terminology to call this Volumetric Batch Normalization
+    or Spatio-temporal Batch Normalization.
 
     Args:
         num_features: :math:`C` from an expected input of size
@@ -244,7 +246,8 @@ class BatchNorm3d(_BatchNorm):
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm3d(100)
         >>> # Without Learnable Parameters

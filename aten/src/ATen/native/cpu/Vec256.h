@@ -3,6 +3,9 @@
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
+#if _MSC_VER <= 1900
+#define _mm256_extract_epi64(X, Y) (((uint64_t*)&X)[Y])
+#endif
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 /* GCC-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>
@@ -27,10 +30,10 @@
 #include <cstring>
 #include <iostream>
 
+
 // NOTE:
 // If you specialize on a type, you must define all operations!
 // C arrays and intrinsic types don't mix
-
 namespace at {
 namespace native {
 namespace vec256 {
@@ -38,8 +41,8 @@ namespace vec256 {
 template <class T> class Vec256 {
 public:
   T values[32 / sizeof(T)]; // Mimics AVX behavior
-  inline void load(const T *ptr) {
-    std::memcpy(values, ptr, 32);
+  inline void load(const T *ptr) { 
+    std::memcpy(values, ptr, 32); 
   };
   inline void store(T *ptr) { std::memcpy(ptr, values, 32); }
   inline size_t size() { return 32 / sizeof(T); }

@@ -44,7 +44,7 @@ class InstanceNorm1d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -64,7 +64,8 @@ class InstanceNorm1d(_InstanceNorm):
         - Input: :math:`(N, C, L)`
         - Output: :math:`(N, C, L)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
@@ -107,7 +108,7 @@ class InstanceNorm2d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -127,7 +128,8 @@ class InstanceNorm2d(_InstanceNorm):
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm2d(100)
         >>> # With Learnable Parameters
@@ -170,7 +172,7 @@ class InstanceNorm3d(_InstanceNorm):
         This :attr:`momentum` argument is different from one used in optimizer
         classes and the conventional notion of momentum. Mathematically, the
         update rule for running statistics here is
-        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \hat{x} + \text{momemtum} x_t`,
+        :math:`\hat{x}_\text{new} = (1 - \text{momentum}) \times \hat{x} + \text{momemtum} \times x_t`,
         where :math:`\hat{x}` is the estimated statistic and :math:`x_t` is the
         new observed value.
 
@@ -190,7 +192,8 @@ class InstanceNorm3d(_InstanceNorm):
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm3d(100)
         >>> # With Learnable Parameters

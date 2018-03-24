@@ -13,16 +13,24 @@ namespace native{
 
 namespace {
 
-template <template <class...> class set_type, typename scalar_t>
+template <typename scalar_t>
 std::tuple<Tensor, Tensor> _unique_cpu_template(
     const Tensor& self,
+    const bool sorted,
     const bool return_inverse) {
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data<scalar_t>();
-  set_type<scalar_t> set(input_data, input_data + input.numel());
+  std::unordered_set<scalar_t> set(input_data, input_data + input.numel());
   Tensor output = input.type().tensor({static_cast<int64_t>(set.size())});
   scalar_t* output_data = output.data<scalar_t>();
-  std::copy(set.begin(), set.end(), output_data);
+
+  if (sorted) {
+    std::vector<scalar_t> vec(set.begin(), set.end());
+    std::sort(vec.begin(), vec.end());
+    std::copy(vec.begin(), vec.end(), output_data);
+  } else {
+    std::copy(set.begin(), set.end(), output_data);
+  }
 
   Tensor inverse_indices = self.type().toScalarType(kLong).tensor({0});
   if (return_inverse) {
@@ -43,16 +51,9 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
 
 std::tuple<Tensor, Tensor>
 _unique_cpu(const Tensor& self, const bool sorted, const bool return_inverse) {
-  if (sorted) {
-    return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
-      return _unique_cpu_template<std::set, scalar_t>(self, return_inverse);
-    });
-  } else {
-    return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
-      return _unique_cpu_template<std::unordered_set, scalar_t>(
-          self, return_inverse);
-    });
-  }
+  return AT_DISPATCH_ALL_TYPES(self.type(), "unique", [&] {
+    return _unique_cpu_template<scalar_t>(self, sorted, return_inverse);
+  });
 }
 
 }  // namespace native

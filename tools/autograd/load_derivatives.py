@@ -289,10 +289,15 @@ def saved_variables(formula, args):
             'suffix': lambda m: '_argsize_{}'.format(*m.groups()),
             'type': 'int64_t',
         }),
-        # replace to_arg_sizes(self, 2) with self_argsizes_2
-        (r'to_arg_sizes\({}, (\w+)\)', {
-            'suffix': lambda m: '_sizes_{}'.format(*m.groups()),
-            'type': 'IntList',
+        # replace self.numel() with self_numel
+        (r'{}.numel\(\)', {
+            'suffix': '_numel',
+            'type': 'int64_t',
+        }),
+        # replace to_args_sizes(self) with self_args_sizes
+        (r'to_args_sizes\({}\)', {
+            'suffix': '_args_sizes',
+            'type': 'std::vector<std::vector<int64_t>>',
         }),
         # replace TensorGeometry(self) with self_geometry
         (r'TensorGeometry\({}\)', {

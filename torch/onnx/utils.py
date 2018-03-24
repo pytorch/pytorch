@@ -222,8 +222,14 @@ def _scalar(x):
 
 
 def _newNode(g, opname, outputs, *args, **kwargs):
-    aten = kwargs.pop("aten", False)
-    n = g.create(opname, args, outputs)
+    if "::" in opname:
+        aten = False
+        ns_opname = opname
+    else:
+        aten = kwargs.pop("aten", False)
+        ns = "aten" if aten else "onnx"
+        ns_opname = ns + "::" + opname
+    n = g.create(ns_opname, args, outputs)
     for k, v in sorted(kwargs.items()):
         # TODO: enable inplace in aten exporting mode.
         if k == "inplace":
@@ -291,29 +297,58 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 
 
 def _run_symbolic_function(g, n, inputs, aten=False):
-    import torch.onnx.symbolic
-
+    # NB: Returning None means the node gets cloned as is into
+    # the new graph
     try:
-        # See Note [Export inplace]
-        if n.kind().endswith('_'):
-            op_name = n.kind()[:-1]
-        else:
-            op_name = n.kind()
-        # Export ops in aten mode.
-        if aten:
-            attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
-            outputs = n.outputsSize()
-            attrs["outputs"] = outputs
-            return _graph_at(g, op_name, *inputs, aten=True, **attrs)
+        import torch.onnx.symbolic
 
-        # Export ONNX regular ops.
-        attrs = {k: n[k] for k in n.attributeNames()}
-        if not hasattr(torch.onnx.symbolic, op_name):
-            warnings.warn("ONNX export failed on {} because torch.onnx.symbolic.{} does not exist"
-                          .format(op_name, op_name))
+        # See Note [Export inplace]
+        # TODO: I think this is not necessary anymore
+        if n.kind().endswith('_'):
+            ns_op_name = n.kind()[:-1]
+        else:
+            ns_op_name = n.kind()
+        ns, op_name = ns_op_name.split("::")
+
+        if ns == "onnx":
+            # Use the original node directly
             return None
-        fn = getattr(torch.onnx.symbolic, op_name)
-        return fn(g, *inputs, **attrs)
+
+        elif ns == "aten":
+            if aten:
+                # Direct ATen export requested
+                attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
+                outputs = n.outputsSize()
+                attrs["outputs"] = outputs
+                return _graph_at(g, op_name, *inputs, aten=True, **attrs)
+
+            else:
+                # Export it regularly
+                attrs = {k: n[k] for k in n.attributeNames()}
+                if not hasattr(torch.onnx.symbolic, op_name):
+                    warnings.warn("ONNX export failed on ATen operator {} because torch.onnx.symbolic.{} does not exist"
+                                  .format(op_name, op_name))
+                    return None
+                fn = getattr(torch.onnx.symbolic, op_name)
+                return fn(g, *inputs, **attrs)
+
+        elif ns == "prim":
+            if op_name == "Constant":
+                return g.op("Constant", value_t=n["value"])
+
+            elif op_name == "Undefined":
+                # Undefined is not an ONNX operator; keep it as prim::Undefined
+                # and let the exporter handle finally eliminating these
+                return None
+
+            else:
+                warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
+                return None
+
+        else:
+            warnings.warn("ONNX export failed on an operator with unrecognized namespace {}::{}; "
+                          "please report a bug".format(ns, op_name))
+            return None
 
     except TypeError as e:
         # Handle the specific case where we didn't successfully dispatch.
