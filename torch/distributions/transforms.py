@@ -310,7 +310,7 @@ class PowerTransform(Transform):
 
     def __init__(self, exponent, cache_size=0):
         super(PowerTransform, self).__init__(cache_size=cache_size)
-        self.exponent = broadcast_all(exponent)[0]
+        self.exponent, = broadcast_all(exponent)
 
     def __eq__(self, other):
         if not isinstance(other, PowerTransform):
