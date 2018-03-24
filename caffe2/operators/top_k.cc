@@ -16,157 +16,201 @@
 
 #include "caffe2/operators/top_k.h"
 
+#include <algorithm>
+#include <functional>
+#include <queue>
+#include <utility>
+#include <vector>
+
 #include "caffe2/proto/caffe2.pb.h"
+#include "caffe2/utils/math.h"
 
 namespace caffe2 {
 
 namespace {
 
 template <typename T>
-struct ValueCmp {
+struct ValueComp {
   bool operator()(
       const std::pair<T, TIndex>& lhs,
-      const std::pair<T, TIndex>& rhs) {
-    return (
-        lhs.first > rhs.first ||
-        (lhs.first == rhs.first && lhs.second < rhs.second));
+      const std::pair<T, TIndex>& rhs) const {
+    return lhs.first > rhs.first ||
+        (lhs.first == rhs.first && lhs.second < rhs.second);
   }
 };
 
-// Define these two names to allow lookup into the 2d tensors like
-// mytensor(i, j)
 template <typename T>
-using EigenMatrixMapRowMajor = Eigen::Map<
-    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
+void GetTopK(
+    const T* input,
+    const TIndex n,
+    const TIndex k,
+    const TIndex src_offset,
+    const TIndex dst_offset,
+    const TIndex stride,
+    T* values,
+    TIndex* indices,
+    TIndex* flatten_indices) {
+  const T* src_ptr = input + src_offset;
+  std::vector<std::pair<T, TIndex>> heap_data;
+  heap_data.reserve(k);
+  for (TIndex i = 0; i < k; ++i) {
+    heap_data.emplace_back(*src_ptr, i);
+    src_ptr += stride;
+  }
+  std::priority_queue<
+      std::pair<T, TIndex>,
+      std::vector<std::pair<T, TIndex>>,
+      ValueComp<T>>
+      pq(ValueComp<T>(), std::move(heap_data));
+  for (TIndex i = k; i < n; ++i) {
+    if (pq.top().first < *src_ptr) {
+      pq.pop();
+      pq.emplace(*src_ptr, i);
+    }
+    src_ptr += stride;
+  }
+  TIndex dst_pos = dst_offset + (k - 1) * stride;
+  while (!pq.empty()) {
+    const auto& item = pq.top();
+    values[dst_pos] = item.first;
+    indices[dst_pos] = item.second;
+    if (flatten_indices != nullptr) {
+      flatten_indices[dst_pos] = src_offset + item.second * stride;
+    }
+    pq.pop();
+    dst_pos -= stride;
+  }
+}
 
 template <typename T>
-using ConstEigenMatrixMapRowMajor = Eigen::Map<
-    const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>>;
+void SetTopKGradient(
+    const T* values,
+    const TIndex* indices,
+    const int k,
+    const TIndex src_offset,
+    const TIndex dst_offset,
+    const TIndex stride,
+    T* gradient) {
+  TIndex src_pos = src_offset;
+  for (int i = 0; i < k; ++i) {
+    gradient[dst_offset + indices[src_pos] * stride] = values[src_pos];
+    src_pos += stride;
+  }
+}
 
 } // namespace
 
 template <typename T, class Context>
 bool TopKOp<T, Context>::RunOnDevice() {
-  auto& input = Input(0);
+  const auto& input = Input(0);
   auto* values = Output(0);
   auto* indices = Output(1);
   auto* flatten_indices = OutputSize() > 2 ? Output(2) : nullptr;
 
-  vector<TIndex> in_dims = input.dims();
-  // Linearize input tensor except for last dimension
-  // e.g. [3, 4, 5] -> [12, 5]
-  // [5] -> [5]
-  CAFFE_ENFORCE(
-      in_dims.back() >= k_, "k argment should not be greater than last dim");
-  vector<TIndex> linear_shape = {size_to_dim_(in_dims.size() - 1, in_dims),
-                                 in_dims[in_dims.size() - 1]};
-  auto input_map = ConstEigenMatrixMapRowMajor<T>(
-      static_cast<const T*>(input.raw_data()),
-      linear_shape[0],
-      linear_shape[1]);
-
-  // Resize output tensors to be the same shape as the linearized input except
-  // for the last dimension, which will be of size k. E.x. for an input tensor
-  // of shape [3, 4, 5] and k=2, both of these will be shape [3, 4, 2]
-  vector<TIndex> output_linear_shape = {linear_shape[0], k_};
-  values->Resize(output_linear_shape);
-  indices->Resize(output_linear_shape);
-  if (flatten_indices) {
-    flatten_indices->Resize(linear_shape[0] * k_);
+  const std::vector<TIndex>& input_dims = input.dims();
+  if (axis_ == -1) {
+    axis_ = input_dims.size() - 1;
   }
+  CAFFE_ENFORCE_GE(axis_, 0);
+  CAFFE_ENFORCE_LT(axis_, input_dims.size());
+  CAFFE_ENFORCE_LE(
+      k_,
+      input_dims[axis_],
+      "k argument should not be greater than the axis dim.");
 
-  // Use Eigen maps to allow indexing into the 2d tensors like values_map(i,j)
-  auto values_map = EigenMatrixMapRowMajor<T>(
-      values->template mutable_data<T>(), linear_shape[0], k_);
-  auto indices_map = EigenMatrixMapRowMajor<TIndex>(
-      indices->template mutable_data<TIndex>(), linear_shape[0], k_);
-  auto* flatten_indices_data = flatten_indices
-      ? flatten_indices->template mutable_data<TIndex>()
-      : nullptr;
-
-  TIndex flatten_offset = 0;
-  // Sort preserving indices
-  for (TIndex i = 0; i < linear_shape[0]; ++i) {
-    // Build a min-heap, the heap element is pair of (value, idx)
-    // the top of the heap is the smallest value
-    std::priority_queue<
-        std::pair<T, TIndex>,
-        std::vector<std::pair<T, TIndex>>,
-        ValueCmp<T>>
-        PQ;
-
-    // Maintain the size of heap to be less or equal to k_, so the
-    // heap will hold the k_ largest values
-    for (TIndex j = 0; j < linear_shape[1]; ++j) {
-      const auto value = input_map(i, j);
-      if (PQ.size() < k_ || value > PQ.top().first) {
-        PQ.push(std::make_pair(value, j));
-      }
-      if (PQ.size() > k_) {
-        PQ.pop();
-      }
-    }
-    for (TIndex j = 0; j < k_; ++j) {
-      auto& pqElem = PQ.top();
-      values_map(i, k_ - j - 1) = pqElem.first;
-      indices_map(i, k_ - j - 1) = pqElem.second;
-      if (flatten_indices_data) {
-        flatten_indices_data[k_ - j - 1] = pqElem.second + flatten_offset;
-      }
-      PQ.pop();
-    }
-    if (flatten_indices_data) {
-      flatten_indices_data += k_;
-    }
-    flatten_offset += linear_shape[1];
+  std::vector<TIndex> output_dims = input_dims;
+  output_dims[axis_] = k_;
+  values->Resize(output_dims);
+  indices->Resize(output_dims);
+  if (flatten_indices != nullptr) {
+    flatten_indices->Resize(indices->size());
   }
+  const T* input_data = input.template data<T>();
+  T* values_data = values->template mutable_data<T>();
+  TIndex* indices_data = indices->template mutable_data<TIndex>();
+  TIndex* flatten_indices_data = flatten_indices == nullptr
+      ? nullptr
+      : flatten_indices->template mutable_data<TIndex>();
 
-  // Reshape output tensors to [a_1, a_2, ..., a_n, k]
-  auto out_dims = in_dims;
-  out_dims[out_dims.size() - 1] = k_;
-  values->Reshape(out_dims);
-  indices->Reshape(out_dims);
+  const TIndex prev_size = std::accumulate(
+      input_dims.cbegin(),
+      input_dims.cbegin() + axis_,
+      TIndex(1),
+      std::multiplies<TIndex>());
+  const TIndex next_size = std::accumulate(
+      input_dims.cbegin() + axis_ + 1,
+      input_dims.cend(),
+      TIndex(1),
+      std::multiplies<TIndex>());
+  const TIndex src_offset_stride = input_dims[axis_] * next_size;
+  const TIndex dst_offset_stride = k_ * next_size;
+  TIndex src_offset = 0;
+  TIndex dst_offset = 0;
+  for (TIndex i = 0; i < prev_size; ++i) {
+    for (TIndex j = 0; j < next_size; ++j) {
+      GetTopK(
+          input_data,
+          input_dims[axis_],
+          k_,
+          src_offset + j,
+          dst_offset + j,
+          next_size,
+          values_data,
+          indices_data,
+          flatten_indices_data);
+    }
+    src_offset += src_offset_stride;
+    dst_offset += dst_offset_stride;
+  }
   return true;
 }
 
 template <typename T, class Context>
 bool TopKGradientOp<T, Context>::RunOnDevice() {
-  auto& values = Input(0);
-  auto& indices = Input(1);
-  auto& original_input = Input(2);
+  const auto& values = Input(0);
+  const auto& indices = Input(1);
+  const auto& original_input = Input(2);
   auto* output = Output(0);
-
-  vector<TIndex> in_dims = values.dims();
-  // Linearize input tensor except for last dimension
-  // e.g. [3, 4, 5] -> [12, 5]
-  // [5] -> [5]
-  vector<TIndex> linear_shape = {size_to_dim_(in_dims.size() - 1, in_dims),
-                                 in_dims[in_dims.size() - 1]};
-  auto values_map = ConstEigenMatrixMapRowMajor<T>(
-      static_cast<const T*>(values.raw_data()),
-      linear_shape[0],
-      linear_shape[1]);
-  auto indices_map = ConstEigenMatrixMapRowMajor<TIndex>(
-      static_cast<const TIndex*>(indices.raw_data()),
-      linear_shape[0],
-      linear_shape[1]);
-
-  // Resize output tensors to be as orignial_input size and initialized with 0
-  vector<TIndex> original_dims = original_input.dims();
-  output->Resize(original_dims);
+  const std::vector<TIndex>& values_dims = values.dims();
+  const std::vector<TIndex>& origin_dims = original_input.dims();
+  CAFFE_ENFORCE_EQ(values_dims.size(), origin_dims.size());
+  output->Resize(origin_dims);
+  const T* values_data = values.template data<T>();
+  const TIndex* indices_data = indices.template data<TIndex>();
   T* output_data = output->template mutable_data<T>();
-  memset(output_data, 0, output->nbytes());
-
-  // Use Eigen maps to allow indexing into the 2d tensors
-  auto output_map = EigenMatrixMapRowMajor<T>(
-      output_data, linear_shape[0], original_dims.back());
-
-  for (TIndex i = 0; i < linear_shape[0]; ++i) {
-    for (TIndex j = 0; j < linear_shape[1]; ++j) {
-      output_map(i, indices_map(i, j)) = values_map(i, j);
-    }
+  if (axis_ == -1) {
+    axis_ = values_dims.size() - 1;
   }
-
+  const int k = values_dims[axis_];
+  math::Set<T, Context>(output->size(), T(0), output_data, &context_);
+  const TIndex prev_size = std::accumulate(
+      values_dims.cbegin(),
+      values_dims.cbegin() + axis_,
+      TIndex(1),
+      std::multiplies<TIndex>());
+  const TIndex next_size = std::accumulate(
+      values_dims.cbegin() + axis_ + 1,
+      values_dims.cend(),
+      TIndex(1),
+      std::multiplies<TIndex>());
+  const TIndex src_offset_stride = k * next_size;
+  const TIndex dst_offset_stride = origin_dims[axis_] * next_size;
+  TIndex src_offset = 0;
+  TIndex dst_offset = 0;
+  for (TIndex i = 0; i < prev_size; ++i) {
+    for (TIndex j = 0; j < next_size; ++j) {
+      SetTopKGradient(
+          values_data,
+          indices_data,
+          k,
+          src_offset + j,
+          dst_offset + j,
+          next_size,
+          output_data);
+    }
+    src_offset += src_offset_stride;
+    dst_offset += dst_offset_stride;
+  }
   return true;
 }
 
