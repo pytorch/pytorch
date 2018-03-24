@@ -56,7 +56,6 @@ class Module(object):
         self._forward_pre_hooks = OrderedDict()
         self._modules = OrderedDict()
         self.training = True
-        self.extra_repr = ''
 
     def forward(self, *input):
         r"""Defines the computation performed at every call.
@@ -766,15 +765,47 @@ class Module(object):
 
     def _get_name(self):
         return self.__class__.__name__
+    
+    def get_extra_repr(self):
+        r"""Get the extra representation of the module
+        
+        To print customized extra information, you should reimplement
+        this method in your own modules. Each item in the returned list will
+        be printed in separate line.
+        """
+        return []
+
+    def _get_extra_lines(self):
+        r"""Helper method to process extra representation"""
+        extra_repr = self.get_extra_repr()
+        if isinstance(extra_repr, str):
+            return extra_repr.split('\n')
+        else:
+            return extra_repr
+    
+    def _get_child_lines(self):
+        child_lines = []
+        for key, module in self._modules.items():
+            mod_str = module.__repr__()
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        return child_lines
 
     def __repr__(self):
-        tmpstr = self._get_name() + '(' + self.extra_repr + '\n'
-        for key, module in self._modules.items():
-            modstr = module.__repr__()
-            modstr = _addindent(modstr, 2)
-            tmpstr = tmpstr + '  (' + key + '): ' + modstr + '\n'
-        tmpstr = tmpstr + ')'
-        return tmpstr
+        main_str = self._get_name() + '('
+        # We treat the extra repr like the sub-module, one item per line
+        # TODO:the api is to be discussed later
+        extra_lines = self._get_extra_lines()
+        child_lines = self._get_child_lines()
+        # simple one-liner info, most builtin Moudules will use
+        if len(extra_lines) == 1 and not child_lines:
+            main_str += lines[0]
+        else:
+            lines = extra_lines + child_lines
+            main_str += '\n' + ''.join(['  ' + line + '\n' for line in lines])
+
+        main_str += ')'
+        return main_str
 
     def __dir__(self):
         module_attrs = dir(self.__class__)
