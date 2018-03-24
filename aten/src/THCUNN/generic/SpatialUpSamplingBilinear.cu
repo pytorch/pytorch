@@ -92,14 +92,9 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 4> data1 = toDeviceTensor<real, 4>(state, gradInput);
   THCDeviceTensor<real, 4> data2 = toDeviceTensor<real, 4>(state, gradOutput);
-  int height1 = data1.getSize(2);
-  int width1 = data1.getSize(3);
-  int height2 = data2.getSize(2);
-  int width2 = data2.getSize(3);
-  assert(height1 > 0 && width1 > 0 && height2 > 0 && width2 > 0);
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  const int num_kernels = height2 * width2;
+  const int num_kernels = outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);

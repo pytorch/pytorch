@@ -98,17 +98,10 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 5> data1 = toDeviceTensor<real, 5>(state, gradInput);
   THCDeviceTensor<real, 5> data2 = toDeviceTensor<real, 5>(state, gradOutput);
-  int depth1 = data1.getSize(2);
-  int height1 = data1.getSize(3);
-  int width1 = data1.getSize(4);
-  int depth2 = data2.getSize(2);
-  int height2 = data2.getSize(3);
-  int width2 = data2.getSize(4);
-  assert(depth1 > 0 && height1 > 0 && width1 > 0 && depth2 > 0 && height2 > 0 && width2 > 0);
   const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  const int num_kernels = depth2 * height2 * width2;
+  const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
