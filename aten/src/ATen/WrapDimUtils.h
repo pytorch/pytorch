@@ -39,4 +39,12 @@ static inline int64_t maybe_wrap_dim(int64_t dim, TensorList tensors) {
   return maybe_wrap_dim(dim, tensors[0].dim());
 }
 
+static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<int64_t>> & tensor_sizes) {
+  if (tensor_sizes.size() == 0) {
+    // can't wrap empty list; rely on underlying implementation to throw error if necessary
+    return dim;
+  }
+  return maybe_wrap_dim(dim, tensor_sizes[0].size());
+}
+
 }

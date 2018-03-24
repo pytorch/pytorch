@@ -1527,6 +1527,23 @@ class TestAutograd(TestCase):
         self.assertRaisesRegex(RuntimeError, 'modified by an inplace operation',
                                lambda: z.backward())
 
+    def test_no_grad_input(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(self, x):
+                return x
+
+            @staticmethod
+            def backward(self, grad_output):
+                return grad_output
+
+        x = torch.randn(5, requires_grad=True)
+        with torch.no_grad():
+            y = MyFunction.apply(x)
+
+        self.assertTrue(x.requires_grad)
+        self.assertIsNone(y.grad_fn)
+
     def test_backward_copy(self):
         # This tests checks backward engine for a very subtle bug that appreared
         # in one of the initial versions of autograd. Gradients tensors were

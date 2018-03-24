@@ -19,6 +19,7 @@ import torch.cuda
 from torch.autograd import Variable
 from torch._six import string_classes
 import torch.backends.cudnn
+import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -39,6 +40,7 @@ def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
 PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -53,6 +55,8 @@ try:
     import scipy
 except ImportError:
     TEST_SCIPY = False
+
+TEST_MKL = torch.backends.mkl.is_available()
 
 
 def skipIfNoLapack(fn):

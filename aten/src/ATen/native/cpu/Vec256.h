@@ -3,6 +3,9 @@
 #if defined(_MSC_VER)
 /* Microsoft C/C++-compatible compiler */
 #include <intrin.h>
+#if _MSC_VER <= 1900
+#define _mm256_extract_epi64(X, Y) (((uint64_t*)&X)[Y])
+#endif
 #elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
 /* GCC-compatible compiler, targeting x86/x86-64 */
 #include <x86intrin.h>

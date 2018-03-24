@@ -373,15 +373,22 @@ static void _wrap_outputs(THPFunction *self,
   auto set_history = [&](Variable& var, uint32_t output_nr, bool is_input, bool is_modified,
                          bool is_differentiable) {
     if (!is_differentiable) {
-      if (!var.requires_grad()) return;
+      if (!var.requires_grad()) {
+        return;
+      }
       // NB: we don't support returning non-differentiable views that could require grad
-      // (this could happen if someone were to return an input to the function).
       if (var.is_view()) {
         throw std::runtime_error("Returning Variables sharing storage with other Variables "
                                  "that require grad is not supported in Python functions. "
                                  "Please submit a feature request if you hit this error.");
       }
-      var.detach_();
+      // Return detached aliases of inputs, instead of changing their requires_grad
+      // property.
+      if (is_input) {
+        var = var.detach();
+      } else {
+        var.detach_();
+      }
     } else if (is_modified) {
       if (var.is_leaf() && var.requires_grad()) {
         throw std::runtime_error("a leaf Variable that requires grad has been used in an in-place operation.");

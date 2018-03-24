@@ -87,6 +87,7 @@ from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .multinomial import Multinomial
+from .multivariate_normal import MultivariateNormal
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -115,6 +116,7 @@ __all__ = [
     'Laplace',
     'LogNormal',
     'Multinomial',
+    'MultivariateNormal',
     'Normal',
     'OneHotCategorical',
     'Pareto',

@@ -1434,6 +1434,9 @@ class TestCuda(TestCase):
     def test_int_pow(self):
         TestTorch._test_int_pow(self, lambda x: x.cuda())
 
+    def test_remainder_overflow(self):
+        TestTorch._test_remainder_overflow(self, dtype=torch.cuda.int64)
+
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
         gpu_tensor = cpu_tensor.cuda()

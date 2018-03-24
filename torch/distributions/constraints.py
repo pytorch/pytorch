@@ -8,17 +8,18 @@ The following constraints are implemented:
 - ``constraints.interval(lower_bound, upper_bound)``
 - ``constraints.lower_cholesky``
 - ``constraints.lower_triangular``
-- ``constraints.lower_triangular``
 - ``constraints.nonnegative_integer``
 - ``constraints.positive``
+- ``constraints.positive_definite``
 - ``constraints.positive_integer``
 - ``constraints.real``
+- ``constraints.real_vector``
 - ``constraints.simplex``
 - ``constraints.unit_interval``
 """
 
 import torch
-
+from torch.distributions.utils import batch_tril
 
 __all__ = [
     'Constraint',
@@ -34,8 +35,10 @@ __all__ = [
     'lower_triangular',
     'nonnegative_integer',
     'positive',
+    'positive_definite',
     'positive_integer',
     'real',
+    'real_vector',
     'simplex',
     'unit_interval',
 ]
@@ -185,7 +188,8 @@ class _LowerTriangular(Constraint):
     Constrain to lower-triangular square matrices.
     """
     def check(self, value):
-        return (torch.tril(value) == value).min(-1)[0].min(-1)[0]
+        value_tril = batch_tril(value)
+        return (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
 
 
 class _LowerCholesky(Constraint):
@@ -193,11 +197,35 @@ class _LowerCholesky(Constraint):
     Constrain to lower-triangular square matrices with positive diagonals.
     """
     def check(self, value):
+        value_tril = batch_tril(value)
+        lower_triangular = (value_tril == value).view(value.shape[:-2] + (-1,)).min(-1)[0]
+
         n = value.size(-1)
         diag_mask = torch.eye(n, n, out=value.new(n, n))
-        lower_triangular = (torch.tril(value) == value).min(-1)[0].min(-1)[0]
         positive_diagonal = (value * diag_mask > (diag_mask - 1)).min(-1)[0].min(-1)[0]
         return lower_triangular & positive_diagonal
+
+
+class _PositiveDefinite(Constraint):
+    """
+    Constrain to positive-definite matrices.
+    """
+    def check(self, value):
+        matrix_shape = value.shape[-2:]
+        batch_shape = value.unsqueeze(0).shape[:-2]
+        # TODO: replace with batched linear algebra routine when one becomes available
+        # note that `symeig()` returns eigenvalues in ascending order
+        flattened_value = value.contiguous().view((-1,) + matrix_shape)
+        return torch.stack([v.symeig()[0][:1] > 0.0 for v in flattened_value]).view(batch_shape)
+
+
+class _RealVector(Constraint):
+    """
+    Constrain to real-valued vectors. This is the same as `constraints.real`,
+    but additionally reduces across the `event_shape` dimension.
+    """
+    def check(self, value):
+        return (value == value).all()  # False for NANs.
 
 
 # Public interface.
@@ -208,6 +236,7 @@ nonnegative_integer = _IntegerGreaterThan(0)
 positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
 real = _Real()
+real_vector = _RealVector()
 positive = _GreaterThan(0)
 greater_than = _GreaterThan
 less_than = _LessThan
@@ -216,3 +245,4 @@ interval = _Interval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
+positive_definite = _PositiveDefinite()
