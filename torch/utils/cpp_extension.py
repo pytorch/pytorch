@@ -60,7 +60,7 @@ def check_compiler_abi_compatibility(compiler):
     '''
     try:
         check_cmd = '{}' if sys.platform == 'win32' else '{} --version'
-        info = subprocess.check_output(check_cmd.format(compiler).split())
+        info = subprocess.check_output(check_cmd.format(compiler).split(), stderr=subprocess.STDOUT)
     except Exception:
         _, error, _ = sys.exc_info()
         warnings.warn('Error checking compiler version: {}'.format(error))
@@ -82,7 +82,7 @@ def check_compiler_abi_compatibility(compiler):
             version = re.search(r'(\d+)\.(\d+)\.(\d+)', info)
             if version is not None:
                 major, minor, revision = version.groups()
-                if (int(major), minor) >= MINIMUM_MSVC_VERSION:
+                if (int(major), int(minor), int(revision)) >= MINIMUM_MSVC_VERSION:
                     return True
                 else:
                     # Append the detected version for the warning.
