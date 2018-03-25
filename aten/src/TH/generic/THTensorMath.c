@@ -3814,44 +3814,44 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 
 #if defined(TH_REAL_IS_BYTE)
 
-accreal THTensor_(logicalAndAll)(THTensor *tensor)
+int THTensor_(logicalAndAll)(THTensor *tensor)
 {
-  accreal prod = 1;
+  real prod = 1;
   int serial_path = 0;
 #ifdef _OPENMP
   int inOMP = omp_in_parallel();
   if(inOMP) {
     serial_path = 1;
   } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, &&:prod, prod &&= *tensor_data;);
+    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, &&:prod, prod = prod && *tensor_data;);
   }
 #else
     serial_path = 1;
 #endif
   if (serial_path) {
-    TH_TENSOR_APPLY(real, tensor, prod &&= *tensor_data;);
+    TH_TENSOR_APPLY(real, tensor, prod = prod && *tensor_data;);
   }
   return prod;
 }
 
-accreal THTensor_(logicalAnyAll)(THTensor *tensor)
+int THTensor_(logicalAnyAll)(THTensor *tensor)
 {
-  accreal sum = 0;
+  real sum = 0;
   int serial_path = 0;
 #ifdef _OPENMP
   int inOMP = omp_in_parallel();
   if(inOMP) {
     serial_path = 1;
   } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, ||:sum, sum ||= *tensor_data;);
+    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, ||:sum, sum = sum || *tensor_data;);
   }
 #else
     serial_path = 1;
 #endif
   if (serial_path) {
-    TH_TENSOR_APPLY(real, tensor, sum ||= *tensor_data;);
+    TH_TENSOR_APPLY(real, tensor, sum = sum || *tensor_data;);
   }
-  return sum;
+  return (bool)sum;
 }
 
 void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim)
@@ -3898,7 +3898,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
         real *r__data = rp+iter;
         *r__data = 1;
         for(j=0; j < t->size[dimension]; ++j) {
-          *r__data &&= *(t_data + j*t->stride[dimension]);
+          *r__data = *r__data && *(t_data + j*t->stride[dimension]);
         }
       }
     } else {
@@ -3916,7 +3916,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
                            accreal prod = 1;
                            int64_t i;
                            for(i = 0; i < t_size; i++)
-                             prod *= t_data[i*t_stride];
+                             prod = prod && t_data[i*t_stride];
                            *r__data = (real)prod;);
     } else {
       THTensor_(fill)(r_, 1);
@@ -3978,7 +3978,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
         real *r__data = rp+iter;
         *r__data = 0;
         for(j=0; j < t->size[dimension]; ++j) {
-          *r__data ||= *(t_data + j*t->stride[dimension]);
+          *r__data = *r__data || *(t_data + j*t->stride[dimension]);
         }
       }
     } else {
@@ -3995,7 +3995,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
                            accreal sum = 0;
                            int64_t i;
                            for(i = 0; i < t_size; i++)
-                             sum ||= t_data[i*t_stride];
+                             sum = sum || t_data[i*t_stride];
                            *r__data = (real)sum;);
     } else {
       THTensor_(zero)(r_);
