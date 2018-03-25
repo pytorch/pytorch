@@ -2951,6 +2951,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.multinomial(10, simplex_tensor)
             ),
             (
+                MultivariateNormal(random_var, torch.diag(positive_var2)),
+                scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
+            ),
+            (
                 Normal(random_var, positive_var2),
                 scipy.stats.norm(random_var, positive_var2)
             ),
@@ -2980,15 +2984,21 @@ class TestAgainstScipy(TestCase):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Cauchy):  # Cauchy distribution's mean is nan, skipping check
                 continue
-            self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
+            elif isinstance(pytorch_dist, MultivariateNormal):
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean, allow_inf=True, message=pytorch_dist)
+            else:
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Cauchy):  # Cauchy distribution's standard deviation is nan, skipping check
                 continue
-            if isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
+            elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
+            elif isinstance(pytorch_dist, MultivariateNormal):
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), message=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, message=pytorch_dist)
             else:
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)

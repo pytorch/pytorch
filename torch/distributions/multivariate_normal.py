@@ -133,6 +133,16 @@ class MultivariateNormal(Distribution):
         flat_scale_tril = self.scale_tril.unsqueeze(0).contiguous().view((-1,) + self._event_shape * 2)
         return torch.bmm(flat_scale_tril, flat_scale_tril.transpose(-1, -2)).view(self.scale_tril.shape)
 
+    @property
+    def mean(self):
+        return self.loc
+
+    @property
+    def variance(self):
+        n = self.covariance_matrix.size(-1)
+        var = torch.stack([cov.diag() for cov in self.covariance_matrix.view(-1, n, n)])
+        return var.view(self.covariance_matrix.size()[:-1])
+
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(*shape).normal_()
