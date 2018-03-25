@@ -1890,13 +1890,13 @@ class TestNN(NNTestCase):
             [0, 0, 1, 0, 0],
             [0, 0, 0, 1, 0]
         ])
-        self.assertTrue((y_onehot.data == reference).all())
+        self.assertTrue((y_onehot.data.numpy() == reference.numpy()).all())
         y = torch.LongTensor([
             [1, 2, 3, 2, 1, 2],
             [4, 3, 2, 2, 1, 0]
         ])
         y_onehot = F.to_one_hot(y)
-        self.assertTrue((torch.max(y_onehot, -1)[1] == y).all())
+        self.assertTrue((torch.max(y_onehot, -1)[1].numpy() == y.numpy()).all())
 
     def _test_maxpool_indices(self, num_dim, adaptive=False, dtype=torch.FloatTensor):
         def expected_indices(dim):
