@@ -101,8 +101,8 @@ class MultivariateNormal(Distribution):
         matrices using a Cholesky decomposition.
     """
     arg_constraints = {'loc': constraints.real_vector,
-              'covariance_matrix': constraints.positive_definite,
-              'scale_tril': constraints.lower_cholesky}
+                       'covariance_matrix': constraints.positive_definite,
+                       'scale_tril': constraints.lower_cholesky}
     support = constraints.real
     has_rsample = True
 
