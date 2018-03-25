@@ -2,7 +2,7 @@ import os
 import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
-from ..cwrap.plugins import StandaloneExtension, NullableArguments, AutoGPU
+from ..cwrap.plugins import NNExtension, NullableArguments, AutoGPU
 from ..shared import import_module
 
 BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
@@ -109,7 +109,7 @@ def wrap_nn():
     with open('torch/csrc/nn/THNN.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap('torch/csrc/nn/THNN.cwrap', plugins=[
-        StandaloneExtension('torch._thnn._THNN'),
+        NNExtension('torch._C._THNN'),
         NullableArguments(),
     ])
 
@@ -124,7 +124,7 @@ def wrap_cunn():
     with open('torch/csrc/nn/THCUNN.cwrap', 'w') as f:
         f.write(wrapper)
     cwrap('torch/csrc/nn/THCUNN.cwrap', plugins=[
-        StandaloneExtension('torch._thnn._THCUNN'),
+        NNExtension('torch._C._THCUNN'),
         NullableArguments(),
         AutoGPU(has_self=False),
     ])

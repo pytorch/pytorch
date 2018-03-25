@@ -66,21 +66,30 @@ __global__ void indexCopySmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexCopySmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexCopyLargeIndex(TensorInfo<T, IndexType> dst,
                                     TensorInfo<T, IndexType> src,
                                     TensorInfo<int64_t, IndexType> indices,
                                     int dstCopyDim,
                                     int srcCopyDim,
+                                    IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstCopyDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < innerSize * indices.sizes[0];
+       linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType srcIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType dstIndex =
@@ -148,21 +157,30 @@ __global__ void indexAddSmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexAddSmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexAddLargeIndex(TensorInfo<T, IndexType> dst,
                                    TensorInfo<T, IndexType> src,
                                    TensorInfo<int64_t, IndexType> indices,
                                    int dstAddDim,
                                    int srcAddDim,
+                                   IndexType totalSize,
                                    IndexType innerSize,
                                    int64_t dstAddDimSize) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < innerSize * indices.sizes[0];
+       linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType srcIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType srcIndex, elementInSlice;
+    if (IndexIsMajor) {
+      srcIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      srcIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType dstIndex =
@@ -225,20 +243,29 @@ __global__ void indexFillSmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexFillSmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexFillLargeIndex(TensorInfo<T, IndexType> dst,
                                     TensorInfo<int64_t, IndexType> indices,
                                     int dstFillDim,
+                                    IndexType totalSize,
                                     IndexType innerSize,
                                     int64_t dstFillDimSize,
                                     T val) {
   // We stride over the output including the indexed dimension
   // (totalSize), and calculate the destination index point based on that
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
-       linearIndex < innerSize * indices.sizes[0];
+       linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType dstIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType dstIndex, elementInSlice;
+    if (IndexIsMajor) {
+      dstIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      dstIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType dstIndex_ =
@@ -302,7 +329,8 @@ __global__ void indexSelectSmallIndex(TensorInfo<T, IndexType> dst,
 // the number of indices chosen is small, then the
 // indexSelectSmallIndex kernel is a better choice to reduce memory
 // accesses.
-template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim>
+template <typename T, typename IndexType, int DstDim, int SrcDim, int IdxDim,
+          bool IndexIsMajor>
 __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
                                       TensorInfo<T, IndexType> src,
                                       TensorInfo<int64_t, IndexType> indices,
@@ -316,8 +344,15 @@ __global__ void indexSelectLargeIndex(TensorInfo<T, IndexType> dst,
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
        linearIndex < totalSize;
        linearIndex += gridDim.x * blockDim.x) {
-    IndexType dstIndex = linearIndex / innerSize;
-    IndexType elementInSlice = linearIndex % innerSize;
+    IndexType dstIndex, elementInSlice;
+    if (IndexIsMajor) {
+      dstIndex = linearIndex / innerSize;
+      elementInSlice = linearIndex % innerSize;
+    }
+    else {
+      elementInSlice = linearIndex / innerSize;
+      dstIndex = linearIndex % innerSize;
+    }
 
     // Lua indices begin at 1
     IndexType srcIndex =

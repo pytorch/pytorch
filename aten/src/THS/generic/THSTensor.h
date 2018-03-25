@@ -36,7 +36,8 @@ TH_API THSTensor *THSTensor_(new)(void);
 TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values);
 TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes);
 
-TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size_);
+// Note the second argument is ignored. It exists only to match the signature of THTensor_(new).
+TH_API THSTensor *THSTensor_(newWithSize)(THLongStorage *size_, THLongStorage *_ignored);
 TH_API THSTensor *THSTensor_(newWithSize1d)(int64_t size0_);
 TH_API THSTensor *THSTensor_(newWithSize2d)(int64_t size0_, int64_t size1_);
 TH_API THSTensor *THSTensor_(newWithSize3d)(int64_t size0_, int64_t size1_, int64_t size2_);
@@ -75,6 +76,7 @@ TH_API void THSTensor_(select)(THSTensor *self, THSTensor *src, int dimension_, 
 */
 
 // internal methods
+TH_API THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size);
 THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *values);
 THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *values);
 

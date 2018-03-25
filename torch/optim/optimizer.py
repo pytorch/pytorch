@@ -113,8 +113,8 @@ class Optimizer(object):
             if torch.is_tensor(value):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                if any(tp in type(param.data).__name__ for tp in {'Half', 'Float', 'Double'}):
-                    value = value.type_as(param.data)
+                if param.is_floating_point():
+                    value = value.type_as(param)
                 value = value.cuda(param.get_device()) if param.is_cuda else value.cpu()
                 return value
             elif isinstance(value, dict):

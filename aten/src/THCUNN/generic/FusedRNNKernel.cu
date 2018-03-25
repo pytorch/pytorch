@@ -5,7 +5,7 @@
 
 #include "../common.h"
 
-#define DATATYPE TensorUtils<THCTensor>::DataType
+#define TINFO TensorInfo<real, INDTYPE>
 
 //factor will be 3 for GRU and 4 for LSTM
 void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count, ...)
@@ -77,8 +77,8 @@ bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
 #define DEVICE_LINEAR_GET(D_TENSOR, INDEX)                              \
   D_TENSOR.data[IndexToOffset<T, IndexType, Dims>::get(INDEX, D_TENSOR)]
 
-#define H2F(input) __half2float(input)
-#define F2H(input) __float2half(input)
+#define H2F(input) ScalarConvert<real, accreal>::to(input)
+#define F2H(input) ScalarConvert<accreal, real>::to(input)
 
 template <typename T, typename IndexType, int Dims>
 #if __CUDA_ARCH__ >= 350
@@ -136,37 +136,16 @@ THNN_(GRUForward)(TensorInfo<T, IndexType> Input,
 
 
       offset = (linearIndex/hsz)*5*hsz+linearIndex%hsz;
-#ifndef THC_REAL_IS_HALF
 
-      T rg, ig, ng;
-
-      rg = ir + hr + b1r + b2r;
-      ig = ii + hi + b1i + b2i;
-
-      TensorSigmoidOp<real>()(&rg, &rg);
-      TensorSigmoidOp<real>()(&ig, &ig);
-      ng = in + b1n + rg * (hn + b2n);
-      ng = THCNumerics<T>::tanh(ng);
-      *hy = ng + ig * (hx - ng);
-
-      //SAVE FOR BACKWARDS
-      DEVICE_LINEAR_GET(storage, offset+0*hsz) = rg;
-      DEVICE_LINEAR_GET(storage, offset+1*hsz) = ig;
-      DEVICE_LINEAR_GET(storage, offset+2*hsz) = ng;
-      DEVICE_LINEAR_GET(storage, offset+3*hsz) = hx;
-      DEVICE_LINEAR_GET(storage, offset+4*hsz) = hn + b2n;
-
-#else
-
-      float rg, ig, ng;
+      accreal rg, ig, ng;
 
       rg = H2F(ir) + H2F(hr) + H2F(b1r) + H2F(b2r);
       ig = H2F(ii) + H2F(hi) + H2F(b1i) + H2F(b2i);
 
-      TensorSigmoidOp<float>()(&rg, &rg);
-      TensorSigmoidOp<float>()(&ig, &ig);
+      TensorSigmoidOp<accreal>()(&rg, &rg);
+      TensorSigmoidOp<accreal>()(&ig, &ig);
       ng = H2F(in) + H2F(b1n) + rg*( H2F(hn)+H2F(b2n) );
-      ng = THCNumerics<float>::tanh(ng);
+      ng = THCNumerics<accreal>::tanh(ng);
       *hy = F2H( ng + ig * ( H2F(hx)-ng ) );
 
       //SAVE FOR BACKWARDS
@@ -175,7 +154,7 @@ THNN_(GRUForward)(TensorInfo<T, IndexType> Input,
       DEVICE_LINEAR_GET(storage, offset+2*hsz) = F2H(ng);
       DEVICE_LINEAR_GET(storage, offset+3*hsz) = hx;
       DEVICE_LINEAR_GET(storage, offset+4*hsz) = F2H(H2F(hn) + H2F(b2n));
-#endif
+
     }
 }
 
@@ -207,28 +186,11 @@ THNN_(GRUBackward)(TensorInfo<T, IndexType> gradInInput,
 
     offset = (linearIndex/hsz)*3*hsz+linearIndex%hsz;
 
-#ifndef THC_REAL_IS_HALF
-    T gig = go*(hx-ng)*(1-ig)*(ig);
-    T ghx = go*(ig);
-    T gin = go*(1-ig)*(1-ng*ng);
-    T ghn = gin *rg;
-    T grg = gin*hn*(1-rg)*rg;
-
-    DEVICE_LINEAR_GET(gradInputHx, linearIndex) = ghx;
-
-    DEVICE_LINEAR_GET(gradInInput, offset+0*hsz) = grg;
-    DEVICE_LINEAR_GET(gradInInput, offset+1*hsz) = gig;
-    DEVICE_LINEAR_GET(gradInInput, offset+2*hsz) = gin;
-
-    DEVICE_LINEAR_GET(gradInHidden, offset+0*hsz) = grg;
-    DEVICE_LINEAR_GET(gradInHidden, offset+1*hsz) = gig;
-    DEVICE_LINEAR_GET(gradInHidden, offset+2*hsz) = ghn;
-#else
-    float gig = H2F(go)*( H2F(hx)-H2F(ng) )*( 1-H2F(ig) )*H2F(ig);
-    float ghx = H2F(go)*H2F(ig);
-    float gin = H2F(go)*( 1-H2F(ig) )*( 1-H2F(ng)*H2F(ng) );
-    float ghn = H2F(gin) * H2F(rg);
-    float grg = H2F(gin)*H2F(hn)*( 1-H2F(rg) )*H2F(rg);
+    accreal gig = H2F(go)*( H2F(hx)-H2F(ng) )*( 1-H2F(ig) )*H2F(ig);
+    accreal ghx = H2F(go)*H2F(ig);
+    accreal gin = H2F(go)*( 1-H2F(ig) )*( 1-H2F(ng)*H2F(ng) );
+    accreal ghn = gin * H2F(rg);
+    accreal grg = gin *H2F(hn)*( 1-H2F(rg) )*H2F(rg);
 
     DEVICE_LINEAR_GET(gradInInput, offset+0*hsz) = F2H(grg);
     DEVICE_LINEAR_GET(gradInInput, offset+1*hsz) = F2H(gig);
@@ -239,7 +201,6 @@ THNN_(GRUBackward)(TensorInfo<T, IndexType> gradInInput,
     DEVICE_LINEAR_GET(gradInHidden, offset+2*hsz) = F2H(ghn);
     DEVICE_LINEAR_GET(gradInputHx, linearIndex) = F2H(ghx);
 
-#endif
   }
 }
 
@@ -307,42 +268,21 @@ __global__ void
 #endif
       }
 
-#ifndef THC_REAL_IS_HALF
-      T ig, fg, cg, og;
-
-      ig = *iig + hig + b1i + b2i;
-      fg = *ifg + hfg + b1f + b2f;
-      cg = *icg + hcg + b1c + b2c;
-      og = *iog + hog + b1o + b2o;
-
-      TensorSigmoidOp<real>()(&ig, &ig);
-      TensorSigmoidOp<real>()(&fg, &fg);
-      cg = THCNumerics<T>::tanh(cg);
-      TensorSigmoidOp<real>()(&og, &og);
-
-      *cy = (fg * cx) + (ig * cg);
-      *hy = og * THCNumerics<T>::tanh(*cy);
-
-      *iig = ig;
-      *ifg = fg;
-      *icg = cg;
-      *iog = og;
-#else
-      float ig, fg, cg, og;
-      float f_hy, f_cy;
+      accreal ig, fg, cg, og;
+      accreal f_hy, f_cy;
 
       ig = H2F(*iig) + H2F(hig) + H2F(b1i) + H2F(b2i);
       fg = H2F(*ifg) + H2F(hfg) + H2F(b1f) + H2F(b2f);
       cg = H2F(*icg) + H2F(hcg) + H2F(b1c) + H2F(b2c);
       og = H2F(*iog) + H2F(hog) + H2F(b1o) + H2F(b2o);
 
-      TensorSigmoidOp<float>()(&ig, &ig);
-      TensorSigmoidOp<float>()(&fg, &fg);
-      cg = THCNumerics<float>::tanh(cg);
-      TensorSigmoidOp<float>()(&og, &og);
+      TensorSigmoidOp<accreal>()(&ig, &ig);
+      TensorSigmoidOp<accreal>()(&fg, &fg);
+      cg = THCNumerics<accreal>::tanh(cg);
+      TensorSigmoidOp<accreal>()(&og, &og);
 
       f_cy = (fg * H2F(cx) ) + (ig * cg);
-      f_hy = og * THCNumerics<float>::tanh(f_cy);
+      f_hy = og * THCNumerics<accreal>::tanh(f_cy);
 
       *hy = F2H(f_hy);
       *cy = F2H(f_cy);
@@ -353,7 +293,7 @@ __global__ void
       *ifg = F2H(fg);
       *icg = F2H(cg);
       *iog = F2H(og);
-#endif
+
     }
 }
 
@@ -395,38 +335,16 @@ __global__ void
 
     T go = DEVICE_LINEAR_GET(gradoutput, linearIndex);
     T goc= DEVICE_LINEAR_GET(gradoutputcell, linearIndex);
-#ifndef THC_REAL_IS_HALF
-    T gcx = THCNumerics<T>::tanh(cy);
 
-    T gog = go * gcx;
-    gcx = go * og * ( 1 - gcx*gcx) + goc;
+    accreal gcx = THCNumerics<accreal>::tanh(H2F(cy));
 
-    T gig = gcx * cg;
-    T gfg = gcx * cx;
-    T gcg = gcx * ig;
 
-    gcx = gcx * fg;
-
-    gig = gig * (1-ig) * ig;
-    gfg = gfg * (1-fg) * fg;
-    gcg = gcg * (1-cg*cg);
-    gog = gog * (1-og) * og;
-
-    *ih = gig;
-    *fh = gfg;
-    *ch = gcg;
-    *oh = gog;
-
-    *gi = gcx;
-#else
-    float gcx = THCNumerics<float>::tanh(H2F(cy));
-
-    float gog = H2F(go) * gcx;
+    accreal gog = H2F(go) * gcx;
     gcx = H2F(go) * H2F(og) * ( 1 - gcx*gcx) + H2F(goc);
 
-    float gig = gcx * H2F(cg);
-    float gfg = gcx * H2F(cx);
-    float gcg = gcx * H2F(ig);
+    accreal gig = gcx * H2F(cg);
+    accreal gfg = gcx * H2F(cx);
+    accreal gcg = gcx * H2F(ig);
 
     gcx = gcx * H2F(fg);
 
@@ -441,7 +359,6 @@ __global__ void
     *oh = F2H(gog);
 
     *gi = F2H(gcx);
-#endif
 
   }
 }
@@ -467,26 +384,26 @@ __global__ void
   }
 
 #define LSTM_FORWARD(ITYPE, DIM) THNN_(LSTMForward)             \
-  <DATATYPE, ITYPE, DIM>                                        \
+  <real, ITYPE, DIM>                                            \
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>        \
   (inputI, hiddenI,                                             \
    bias1I, bias2I, cxI, hyI, cyI,                               \
    hid_size, totalElements);
 
 #define LSTM_BACKWARD(ITYPE, DIM) THNN_(LSTMBackward)           \
-  <DATATYPE, ITYPE, DIM>                                        \
+  <real, ITYPE, DIM>                                            \
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>        \
   (storageI, gradingatesI, cxI, cyI,                            \
    gradoutI, gradoutcI, gradincxI,                              \
    hid_size, totalElements);
 
-#define GRU_FORWARD(ITYPE, DIM) THNN_(GRUForward)<DATATYPE, ITYPE, DIM> \
-  <<<grid, block, 0, THCState_getCurrentStream(state)>>>                \
-  (inputI, hiddenI, bias1I, bias2I, hxI, hyI, storageI,                 \
+#define GRU_FORWARD(ITYPE, DIM) THNN_(GRUForward)<real, ITYPE, DIM> \
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>            \
+  (inputI, hiddenI, bias1I, bias2I, hxI, hyI, storageI,             \
    hid_size, totalElements);
 
 #define GRU_BACKWARD(ITYPE, DIM) THNN_(GRUBackward)                     \
-  <DATATYPE, ITYPE, DIM>                                                \
+  <real, ITYPE, DIM>                                                    \
   <<<grid, block, 0, THCState_getCurrentStream(state)>>>                \
   (gradininputI, gradinhiddenI, gradoutI, gradinhxI, storageI,                        \
    hid_size, totalElements);
@@ -524,16 +441,11 @@ void THNN_(LSTM_forw_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
           "Could not get grid size for pointwise apply.");
 
-  TensorInfo<DATATYPE, INDTYPE> inputI =
-    getTensorInfo<THCTensor, INDTYPE>(state, input);
-  TensorInfo<DATATYPE, INDTYPE> hiddenI =
-    getTensorInfo<THCTensor, INDTYPE>(state, hidden);
-  TensorInfo<DATATYPE, INDTYPE> cxI =
-    getTensorInfo<THCTensor, INDTYPE>(state, cx);
-  TensorInfo<DATATYPE, INDTYPE> hyI =
-    getTensorInfo<THCTensor, INDTYPE>(state, hy);
-  TensorInfo<DATATYPE, INDTYPE> cyI =
-    getTensorInfo<THCTensor, INDTYPE>(state, cy);
+  TINFO inputI = getTensorInfo<THCTensor, INDTYPE>(state, input);
+  TINFO hiddenI = getTensorInfo<THCTensor, INDTYPE>(state, hidden);
+  TINFO cxI = getTensorInfo<THCTensor, INDTYPE>(state, cx);
+  TINFO hyI = getTensorInfo<THCTensor, INDTYPE>(state, hy);
+  TINFO cyI = getTensorInfo<THCTensor, INDTYPE>(state, cy);
 
   INDTYPE hid_size = cxI.sizes[cxI.dims-1];
   if(has_bias){
@@ -551,10 +463,9 @@ void THNN_(LSTM_forw_ind_wrap)(
   }
 
   INDTYPE zero[1] = {0};
-  TensorInfo<DATATYPE, INDTYPE> nullinfo =
-    TensorInfo<DATATYPE, INDTYPE>(NULL, 1, zero, zero);
-  TensorInfo<DATATYPE, INDTYPE> bias1I = nullinfo;
-  TensorInfo<DATATYPE, INDTYPE> bias2I = nullinfo;
+  TINFO nullinfo = TINFO(NULL, 1, zero, zero);
+  TINFO bias1I = nullinfo;
+  TINFO bias2I = nullinfo;
 
   if(has_bias){
     bias1I = getTensorInfo<THCTensor, INDTYPE>(state, bias1);
@@ -623,20 +534,13 @@ void THNN_(LSTM_back_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
               "Could not get grid size for pointwise apply");
 
-  TensorInfo<DATATYPE, INDTYPE> storageI =
-    getTensorInfo<THCTensor, INDTYPE>(state, storage);
-  TensorInfo<DATATYPE, INDTYPE> gradingatesI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradInGates);
-  TensorInfo<DATATYPE, INDTYPE> cxI =
-    getTensorInfo<THCTensor, INDTYPE>(state, cx);
-  TensorInfo<DATATYPE, INDTYPE> cyI =
-    getTensorInfo<THCTensor, INDTYPE>(state, cy);
-  TensorInfo<DATATYPE, INDTYPE> gradoutI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
-  TensorInfo<DATATYPE, INDTYPE> gradoutcI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradOutputCell);
-  TensorInfo<DATATYPE, INDTYPE> gradincxI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradInputCx);
+  TINFO storageI = getTensorInfo<THCTensor, INDTYPE>(state, storage);
+  TINFO gradingatesI = getTensorInfo<THCTensor, INDTYPE>(state, gradInGates);
+  TINFO cxI = getTensorInfo<THCTensor, INDTYPE>(state, cx);
+  TINFO cyI = getTensorInfo<THCTensor, INDTYPE>(state, cy);
+  TINFO gradoutI = getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
+  TINFO gradoutcI = getTensorInfo<THCTensor, INDTYPE>(state, gradOutputCell);
+  TINFO gradincxI = getTensorInfo<THCTensor, INDTYPE>(state, gradInputCx);
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 
@@ -719,16 +623,11 @@ void THNN_(GRU_forw_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
               "Could not get grid size for pointwise apply.");
 
-  TensorInfo<DATATYPE, INDTYPE> inputI =
-    getTensorInfo<THCTensor, INDTYPE>(state, input);
-  TensorInfo<DATATYPE, INDTYPE> hiddenI =
-    getTensorInfo<THCTensor, INDTYPE>(state, hidden);
-  TensorInfo<DATATYPE, INDTYPE> hxI =
-    getTensorInfo<THCTensor, INDTYPE>(state, hx);
-  TensorInfo<DATATYPE, INDTYPE> hyI =
-    getTensorInfo<THCTensor, INDTYPE>(state, hy);
-  TensorInfo<DATATYPE, INDTYPE> storageI =
-    getTensorInfo<THCTensor, INDTYPE>(state, storage);
+  TINFO inputI = getTensorInfo<THCTensor, INDTYPE>(state, input);
+  TINFO hiddenI = getTensorInfo<THCTensor, INDTYPE>(state, hidden);
+  TINFO hxI = getTensorInfo<THCTensor, INDTYPE>(state, hx);
+  TINFO hyI = getTensorInfo<THCTensor, INDTYPE>(state, hy);
+  TINFO storageI = getTensorInfo<THCTensor, INDTYPE>(state, storage);
 
   INDTYPE hid_size = hxI.sizes[hxI.dims-1];
   if(has_bias){
@@ -746,10 +645,9 @@ void THNN_(GRU_forw_ind_wrap)(
   }
 
   INDTYPE zero[1] = {0};
-  TensorInfo<DATATYPE, INDTYPE> nullinfo =
-    TensorInfo<DATATYPE, INDTYPE>(NULL, 1, zero, zero);
-  TensorInfo<DATATYPE, INDTYPE> bias1I = nullinfo;
-  TensorInfo<DATATYPE, INDTYPE> bias2I = nullinfo;
+  TINFO nullinfo = TINFO(NULL, 1, zero, zero);
+  TINFO bias1I = nullinfo;
+  TINFO bias2I = nullinfo;
 
   if(has_bias){
     bias1I = getTensorInfo<THCTensor, INDTYPE>(state, bias1);
@@ -822,16 +720,11 @@ void THNN_(GRU_back_ind_wrap)(
   THAssertMsg(getApplyGrid(state, totalElements, grid),
           "Could not get grid size for pointwise apply");
 
-  TensorInfo<DATATYPE, INDTYPE> gradininputI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradInInput);
-  TensorInfo<DATATYPE, INDTYPE> gradinhiddenI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradInHidden);
-  TensorInfo<DATATYPE, INDTYPE> gradoutI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
-  TensorInfo<DATATYPE, INDTYPE> gradinhxI =
-    getTensorInfo<THCTensor, INDTYPE>(state, gradInputHx);
-  TensorInfo<DATATYPE, INDTYPE> storageI =
-    getTensorInfo<THCTensor, INDTYPE>(state, storage);
+  TINFO gradininputI = getTensorInfo<THCTensor, INDTYPE>(state, gradInInput);
+  TINFO gradinhiddenI = getTensorInfo<THCTensor, INDTYPE>(state, gradInHidden);
+  TINFO gradoutI = getTensorInfo<THCTensor, INDTYPE>(state, gradOutput);
+  TINFO gradinhxI = getTensorInfo<THCTensor, INDTYPE>(state, gradInputHx);
+  TINFO storageI = getTensorInfo<THCTensor, INDTYPE>(state, storage);
 
   INDTYPE hid_size = gradoutI.sizes[gradoutI.dims-1];
 

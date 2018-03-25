@@ -5,12 +5,19 @@
 #include <thread>
 #include <mutex>
 #include <sstream>
+#include <string>
+#include <stdexcept>
 
 #if AT_CUDA_ENABLED()
+#include <cuda.h>
 #include "THC/THC.h"
 #include "ATen/CUDAGenerator.h"
 #endif
 #include "ATen/CPUGenerator.h"
+
+#ifdef USE_SSE3
+#include <pmmintrin.h>
+#endif
 
 namespace at {
 
@@ -82,6 +89,14 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
+bool Context::hasMKL() const {
+#if AT_MKL_ENABLED()
+  return true;
+#else
+  return false;
+#endif
+}
+
 bool Context::hasCUDA() const {
 #if AT_CUDA_ENABLED()
   int count;
@@ -102,6 +117,9 @@ cudaStream_t Context::getCurrentCUDAStream() const {
 struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
   return THCState_getCurrentDeviceProperties(thc_state);
 }
+struct cudaDeviceProp* Context::getDeviceProperties(int device) const {
+  return THCState_getDeviceProperties(thc_state, device);
+}
 #endif
 
 int64_t Context::current_device() const {
@@ -113,6 +131,21 @@ int64_t Context::current_device() const {
   }
 #endif
   return -1;
+}
+
+bool Context::setFlushDenormal(bool on) {
+#ifdef USE_SSE3
+  // Setting flush-to-zero (FTZ) flag
+  _MM_SET_FLUSH_ZERO_MODE(on ? _MM_FLUSH_ZERO_ON
+                             : _MM_FLUSH_ZERO_OFF);
+
+  // Setting denormals-are-zero (DAZ) flag
+  _MM_SET_DENORMALS_ZERO_MODE(on ? _MM_DENORMALS_ZERO_ON
+                                 : _MM_DENORMALS_ZERO_OFF);
+  return true;
+#else
+  return false;
+#endif
 }
 
 }

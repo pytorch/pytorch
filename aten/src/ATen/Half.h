@@ -1,16 +1,13 @@
 #pragma once
 
-#include "ATen/Config.h"
+#include "ATen/ATenGeneral.h"
 
 #include <limits>
 #include <string>
-#include <stdint.h>
+#include <cstdint>
+#include <stdexcept>
+#include <utility>
 #include <cmath>
-#if AT_CUDA_ENABLED()
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuda_fp16.h>
-#endif
 
 namespace at {
 
@@ -48,65 +45,27 @@ template<typename To, typename From> To checked_convert(From f, const char* name
   return convert<To, From>(f);
 }
 
-#if defined(__GNUC__)
-#define AT_ALIGN(n) __attribute__((aligned(n)))
-#elif defined(_WIN32)
-#define AT_ALIGN(n) __declspec(align(n))
-#else
-#define AT_ALIGN(n)
-#endif
-
-
-typedef struct  AT_ALIGN(2) {
+struct alignas(2) Half {
   unsigned short x;
-#if AT_CUDA_ENABLED()
-#if CUDA_VERSION < 9000
-  operator half() { return half{ x }; }
-#else
-  operator half() {
-    __half_raw x_raw;
-    x_raw.x = x;
-    return half(x_raw);
-  }
-#endif
-#endif
   operator double();
-} Half;
+};
 
+template<> AT_API Half convert(float f);
+template<> AT_API float convert(Half f);
 template<> AT_API Half convert(double f);
 template<> AT_API double convert(Half f);
 template<> AT_API Half convert(int64_t f);
 template<> AT_API int64_t convert(Half f);
 
+inline Half::operator double() {
+  return convert<double, Half>(*this);
+}
+
 template<> bool overflows<Half, double>(double f);
 template<> bool overflows<Half, int64_t>(int64_t f);
 
-inline Half::operator double() {
-  return convert<double,Half>(*this);
-}
-#if AT_CUDA_ENABLED()
-template<> half convert(double d);
-#endif
-
 template<typename To, typename From>
-static inline To HalfFix(From h) {
+To HalfFix(From h) {
   return To { h.x };
 }
-
-#if AT_CUDA_ENABLED()
-#if CUDA_VERSION >= 9000
-template<>
-  inline __half HalfFix<__half, Half>(Half h) {
-  __half_raw raw;
-  raw.x = h.x;
-  return __half { raw };
-}
-
-template<>
-  inline Half HalfFix<Half, __half>(__half h) {
-  __half_raw raw(h);
-  return Half { raw.x };
-}
-#endif
-#endif
-}
+} // namespace at

@@ -2,6 +2,7 @@
 // Originally developed by George Papandreou
 #include "THCUNN.h"
 #include "common.h"
+#include "linear_upsampling.h"
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
@@ -12,7 +13,7 @@
 template<typename Dtype, typename Acctype>
 __launch_bounds__(1024)
 __global__ void caffe_gpu_interp2_kernel(const int n,
-    const Acctype rdepth, const Acctype rheight, const Acctype rwidth,
+    const Acctype rdepth, const Acctype rheight, const Acctype rwidth, const bool align_corners,
     const THCDeviceTensor<Dtype, 5> data1, THCDeviceTensor<Dtype, 5> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   const int batchsize = data1.getSize(0);
@@ -42,19 +43,19 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
       return;
     }
     //
-    const Acctype t1r = rdepth * t2;
+    const Acctype t1r = linear_upsampling_compute_source_index<Acctype>(rdepth, t2, align_corners);
     const int t1 = t1r;
     const int t1p = (t1 < depth1 - 1) ? 1 : 0;
     const Acctype t1lambda = t1r - t1;
     const Acctype t0lambda = Acctype(1) - t1lambda;
     //
-    const Acctype h1r = rheight * h2;
+    const Acctype h1r = linear_upsampling_compute_source_index<Acctype>(rheight, h2, align_corners);
     const int h1 = h1r;
     const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const Acctype h1lambda = h1r - h1;
     const Acctype h0lambda = Acctype(1) - h1lambda;
     //
-    const Acctype w1r = rwidth * w2;
+    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;
@@ -62,11 +63,11 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
     //
     for (int n = 0; n < batchsize ; n++){
         for (int c = 0; c < channels; ++c) {
-        const Acctype val = t0lambda * (h0lambda * (w0lambda * data1[n][c][t1][h1][w1] 
+        const Acctype val = t0lambda * (h0lambda * (w0lambda * data1[n][c][t1][h1][w1]
                                                   + w1lambda * data1[n][c][t1][h1][w1+w1p])
                                       + h1lambda * (w0lambda * data1[n][c][t1][h1+h1p][w1]
                                                   + w1lambda * data1[n][c][t1][h1+h1p][w1+w1p]))
-                          + t1lambda * (h0lambda * (w0lambda * data1[n][c][t1+t1p][h1][w1] 
+                          + t1lambda * (h0lambda * (w0lambda * data1[n][c][t1+t1p][h1][w1]
                                                   + w1lambda * data1[n][c][t1+t1p][h1][w1+w1p])
                                       + h1lambda * (w0lambda * data1[n][c][t1+t1p][h1+h1p][w1]
                                                   + w1lambda * data1[n][c][t1+t1p][h1+h1p][w1+w1p]));
@@ -80,7 +81,7 @@ __global__ void caffe_gpu_interp2_kernel(const int n,
 template <typename Dtype, typename Acctype>
 __launch_bounds__(1024)
 __global__ void caffe_gpu_interp2_kernel_backward(const int n,
-    const Acctype rdepth, const Acctype rheight, const Acctype rwidth,
+    const Acctype rdepth, const Acctype rheight, const Acctype rwidth, const bool align_corners,
     THCDeviceTensor<Dtype, 5> data1, const THCDeviceTensor<Dtype, 5> data2){
   int index = threadIdx.x + blockIdx.x * blockDim.x;
   const int batchsize = data1.getSize(0);
@@ -109,19 +110,19 @@ __global__ void caffe_gpu_interp2_kernel_backward(const int n,
       return;
     }
     //
-    const Acctype t1r = rdepth * t2;
+    const Acctype t1r = linear_upsampling_compute_source_index<Acctype>(rdepth, t2, align_corners);
     const int t1 = t1r;
     const int t1p = (t1 < depth1 - 1) ? 1 : 0;
     const Acctype t1lambda = t1r - t1;
     const Acctype t0lambda = Acctype(1) - t1lambda;
     //
-    const Acctype h1r = rheight * h2;
+    const Acctype h1r = linear_upsampling_compute_source_index<Acctype>(rheight, h2, align_corners);
     const int h1 = h1r;
     const int h1p = (h1 < height1 - 1) ? 1 : 0;
     const Acctype h1lambda = h1r - h1;
     const Acctype h0lambda = Acctype(1) - h1lambda;
     //
-    const Acctype w1r = rwidth * w2;
+    const Acctype w1r = linear_upsampling_compute_source_index<Acctype>(rwidth, w2, align_corners);
     const int w1 = w1r;
     const int w1p = (w1 < width1 - 1) ? 1 : 0;
     const Acctype w1lambda = w1r - w1;

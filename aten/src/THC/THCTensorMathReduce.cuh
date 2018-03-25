@@ -6,6 +6,7 @@
 #include "THCNumerics.cuh"
 #include "THCReduce.cuh"
 #include "THCReduceAll.cuh"
+#include "THCTensorCopy.h"
 #include "THCThrustAllocator.cuh"
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
@@ -703,6 +704,15 @@ THC_reduceDimIndex(THCState *state,
   THArgCheck(dimension >= 0 &&
              dimension < TensorUtils<TensorTypeK>::getDims(state, src),
              3, "dimension out of range");
+
+
+  // Unsqueeze tgt1_/tgt_2 if necessary so that their contiguity traits
+  // are preserved if they are the same size as the correct reduction output.
+  int src_dims = TensorUtils<TensorTypeK>::getDims(state, src);
+  TensorUtils<TensorTypeK>::preserveReduceDimSemantics(
+      state, tgt1_, src_dims, dimension, keepdim);
+  TensorUtils<TensorTypeIndex>::preserveReduceDimSemantics(
+      state, tgt2_, src_dims, dimension, keepdim);
 
   THLongStorage *dim = TensorUtils<TensorTypeK>::newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);

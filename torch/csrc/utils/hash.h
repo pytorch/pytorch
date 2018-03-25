@@ -2,7 +2,6 @@
 
 #include <functional>
 #include <vector>
-#include <ATen/ATen.h>
 
 namespace torch {
 

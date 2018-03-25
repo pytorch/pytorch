@@ -10,14 +10,14 @@ inline Tensor & Tensor::operator=(Tensor const & rhs) && {
   return copy_(rhs);
 }
 
-inline Tensor Tensor::toType(const Type & t) const {
+inline Tensor Tensor::toType(const Type & t, bool non_blocking) const {
   if(type() == t)
     return *this;
-  return t.copy(*this);
+  return t.copy(*this, non_blocking);
 }
 
-inline Tensor & Tensor::copy_(const Tensor & src, bool async) {
-  return type().copy_(*this, src, async);
+inline Tensor & Tensor::copy_(const Tensor & src, bool non_blocking) {
+  return type().copy_(*this, src, non_blocking);
 }
 
 inline Tensor Tensor::toType(ScalarType t) const {
@@ -32,10 +32,6 @@ inline Tensor Tensor::toBackend(Backend b) const {
 // all static inline to allow for inlining of the non-dynamic part of dispatch
 ${tensor_method_definitions}
 
-template<typename T>
-inline T* Tensor::data() const {
-  runtime_error("data() cast to unexpected type.");
-}
 #define DEFINE_CAST(T,name,_) \
 template<> \
 inline T* Tensor::data() const { \

@@ -8,6 +8,7 @@
 #include "THP.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/invalid_arguments.h"
+#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/DynamicTypes.h"
 
 #include "generic/utils.cpp"
@@ -55,6 +56,26 @@ bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result) {
     return true;
   }
   return false;
+}
+
+std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg) {
+  bool tuple = PyTuple_Check(arg);
+  bool list = PyList_Check(arg);
+  if (tuple || list) {
+    int nDim = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
+    std::vector<int64_t> sizes(nDim);
+    for (int i = 0; i != nDim; ++i) {
+      PyObject* item = tuple ? PyTuple_GET_ITEM(arg, i) : PyList_GET_ITEM(arg, i);
+      if (!THPUtils_checkLong(item)) {
+        std::ostringstream oss;
+        oss << "expected int at position " << i << ", but got: " << THPUtils_typename(item);
+        throw std::runtime_error(oss.str());
+      }
+      sizes[i] = THPUtils_unpackLong(item);
+    }
+    return sizes;
+  }
+  throw std::runtime_error("Expected tuple or list");
 }
 
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result) {
@@ -209,24 +230,6 @@ bool maybeThrowBackCompatKeepdimWarn(char *func) {
     PyErr_WarnEx(PyExc_UserWarning, ss.str().c_str(), 1);
   }
   return true;
-}
-
-std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj) {
-  if (!PySequence_Check(obj)) {
-    throw std::runtime_error("Expected a sequence in THPUtils_PySequence_to_TensorList");
-  }
-  THPObjectPtr seq = THPObjectPtr(PySequence_Fast(obj, NULL));
-  if (seq.get() == NULL) {
-    throw std::runtime_error("expected PySequence, but got " + std::string(THPUtils_typename(obj)));
-  }
-
-  std::vector<at::Tensor> list;
-  Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
-  for (Py_ssize_t i = 0; i < length; i++) {
-    at::Tensor tensor = torch::createTensor(PySequence_Fast_GET_ITEM(seq.get(), i));
-    list.push_back(tensor);
-  }
-  return list;
 }
 
 #ifdef WITH_CUDA

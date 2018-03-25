@@ -30,8 +30,10 @@ TH_API void THSTensor_(sspaddmm)(THSTensor *r_, real beta, THSTensor *t, real al
 TH_API void THSTensor_(hspmm)(THSTensor *r_, real alpha, THSTensor *sparse, THTensor *dense);
 TH_API void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sparse);
 
-#if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
 TH_API void THSTensor_(pow)(THSTensor *r_, THSTensor *t, real value);
+
+#if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
+TH_API accreal THSTensor_(normall)(THSTensor *self, real value);
 #endif
 
 #endif

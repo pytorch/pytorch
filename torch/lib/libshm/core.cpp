@@ -28,7 +28,7 @@ libshm_context * libshm_context_new(const char *manager_handle, const char *file
 }
 
 void libshm_context_free(libshm_context *ctx) {
-  delete ctx->manager_handle;
+  delete[] ctx->manager_handle;
   delete ctx;
 }
 

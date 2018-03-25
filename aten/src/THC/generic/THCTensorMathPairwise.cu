@@ -193,30 +193,26 @@ void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   THArgCheck(src_->nDimension == 2, 1, "expected a matrix");
 
-  THCTensor *src = src_;
-  if (self_ == src_)
-    src = THCTensor_(newContiguous)(state, src_);
+  if (self_ != src_)
+    THCTensor_(resizeAs)(state, self_, src_);
 
-  int64_t stride0 = src->stride[0];
-  int64_t stride1 = src->stride[1];
-  real *start = THCTensor_(data)(state, src);
+  int64_t stride0 = self_->stride[0];
+  int64_t stride1 = self_->stride[1];
+  real *start = THCTensor_(data)(state, self_);
 
   TensorTriOp<real, 0> op(start, stride0, stride1, k);
 
   if (self_ == src_) {
-    if (!THC_pointwiseApply1(state, src, op)) {
+    if (!THC_pointwiseApply1(state, src_, op)) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
-    THCTensor_(resizeAs)(state, self_, src);
+    THCTensor_(resizeAs)(state, self_, src_);
 
-    if (!THC_pointwiseApply2(state, self_, src, op)) {
+    if (!THC_pointwiseApply2(state, self_, src_, op)) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
-
-  if (self_ == src_)
-    THCTensor_(freeCopyTo)(state, src, src_);
 
   THCudaCheck(cudaGetLastError());
 }
@@ -226,30 +222,25 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
   THArgCheck(src_->nDimension == 2, 1, "expected a matrix");
 
-  THCTensor *src = src_;
-  if (self_ == src_)
-    src = THCTensor_(newContiguous)(state, src_);
+  if (self_ != src_)
+    THCTensor_(resizeAs)(state, self_, src_);
 
-  int64_t stride0 = src->stride[0];
-  int64_t stride1 = src->stride[1];
-  real *start = THCTensor_(data)(state, src);
+  int64_t stride0 = self_->stride[0];
+  int64_t stride1 = self_->stride[1];
+  real *start = THCTensor_(data)(state, self_);
 
   TensorTriOp<real, 1> op(start, stride0, stride1, k);
 
   if (self_ == src_) {
-    if (!THC_pointwiseApply1(state, src, op)) {
+    if (!THC_pointwiseApply1(state, src_, op)) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   } else {
-    THCTensor_(resizeAs)(state, self_, src);
 
-    if (!THC_pointwiseApply2(state, self_, src, op)) {
+    if (!THC_pointwiseApply2(state, self_, src_, op)) {
       THArgCheck(false, 2, CUTORCH_DIM_WARNING);
     }
   }
-
-  if (self_ == src_)
-    THCTensor_(freeCopyTo)(state, src, src_);
 
   THCudaCheck(cudaGetLastError());
 }

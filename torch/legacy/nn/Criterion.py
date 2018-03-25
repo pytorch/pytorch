@@ -9,7 +9,7 @@ class Criterion(object):
     def __init__(self):
         self.gradInput = torch.Tensor()
         self.output = 0
-        self._backend = torch._thnn.type2backend[type(self.gradInput)]
+        self._backend = torch._thnn.type2backend[self.gradInput.type()]
 
     def updateOutput(self, input, target):
         raise NotImplementedError

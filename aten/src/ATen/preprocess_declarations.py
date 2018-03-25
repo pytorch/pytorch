@@ -89,7 +89,7 @@ def handle_outputs_taken_as_arguments(options):
                 arg.get('default', '') in {None, 'NULL', 'nullptr'})
 
     def should_generate_out_variant(option):
-        if 'function' in option['variants']:
+        if 'function' in option['variants'] and option['mode'] != 'native':
             # don't generate _out variants for in-place functions
             return re.search('(^__i|[^_]_$)', option['api_name']) is None
         return False
@@ -192,8 +192,11 @@ def discover_sparse_tensor_operations(declaration):
                     if not exclude(arg)]
         return '#'.join(elements)
 
-    name = declaration['name']
-    if name == 'add' or name == 'add_':
+    # Determine if any options have the 'aten_dense_sparse' flag
+    dense_sparse_options = [option
+                            for option in declaration['options']
+                            if option.get('aten_dense_sparse', False)]
+    if len(dense_sparse_options) > 0:
         signature_to_option = {signature(option): option
                                for option in declaration['options']}
 

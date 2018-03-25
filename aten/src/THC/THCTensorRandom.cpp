@@ -4,12 +4,12 @@
 #include <curand.h>
 
 
-void initializeGenerator(THCState *state, Generator* gen);
-void createGeneratorState(Generator* gen, uint64_t seed);
+void initializeGenerator(THCState *state, THCGenerator* gen);
+void createGeneratorState(THCGenerator* gen, uint64_t seed);
 
 
 /* Frees memory allocated during setup. */
-void destroyGenerator(THCState *state, Generator* gen)
+void destroyGenerator(THCState *state, THCGenerator* gen)
 {
   if (gen->gen_states)
   {
@@ -35,12 +35,13 @@ void THCRandom_init(THCState* state, int devices, int current_device)
 {
   THCRNGState* rng_state = THCState_getRngState(state);
   rng_state->num_devices = devices;
-  rng_state->gen = (Generator*)malloc(rng_state->num_devices * sizeof(Generator));
+  rng_state->gen = (THCGenerator*)malloc(rng_state->num_devices * sizeof(THCGenerator));
   std::random_device rd;
   for (int i = 0; i < rng_state->num_devices; ++i)
   {
     rng_state->gen[i].initf = 0;
     rng_state->gen[i].initial_seed = createSeed(rd);
+    rng_state->gen[i].philox_seed_offset = 0;
     rng_state->gen[i].gen_states = NULL;
     rng_state->gen[i].kernel_params = NULL;
   }
@@ -60,7 +61,7 @@ void THCRandom_shutdown(THCState* state)
 }
 
 /* Get the generator for the current device, but does not initialize the state */
-static Generator* THCRandom_rawGenerator(THCState* state)
+static THCGenerator* THCRandom_rawGenerator(THCState* state)
 {
   THCRNGState* rng_state = THCState_getRngState(state);
   int device;
@@ -70,9 +71,9 @@ static Generator* THCRandom_rawGenerator(THCState* state)
 }
 
 /* Get the generator for the current device and initializes it if necessary */
-Generator* THCRandom_getGenerator(THCState* state)
+THCGenerator* THCRandom_getGenerator(THCState* state)
 {
-  Generator* gen = THCRandom_rawGenerator(state);
+  THCGenerator* gen = THCRandom_rawGenerator(state);
   if (gen->initf == 0)
   {
     initializeGenerator(state, gen);
@@ -107,7 +108,7 @@ uint64_t THCRandom_seedAll(THCState* state)
 /* Manually set the seed */
 void THCRandom_manualSeed(THCState* state, uint64_t seed)
 {
-  Generator* gen = THCRandom_rawGenerator(state);
+  THCGenerator* gen = THCRandom_rawGenerator(state);
   gen->initial_seed = seed;
   if (gen->initf) {
     createGeneratorState(gen, seed);

@@ -48,7 +48,6 @@ static void THNN_(SpatialAdaptiveMaxPooling_updateOutput_frame)(
         /* compute local max: */
         int64_t maxindex = -1;
         real maxval = -FLT_MAX;
-        int64_t tcntr = 0;
         int ih, iw;
         for(ih = 0; ih < kH; ih++)
         {

@@ -18,20 +18,11 @@ def broadcast(tensor, devices):
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    tensors = [tensor]
-    if nccl.is_available(tensors) and len(set(devices)) == len(devices):
-        for device in devices[1:]:
-            with torch.cuda.device(device):
-                tensors.append(type(tensor)(tensor.size()))
-        nccl.broadcast(tensors)
-        return tuple(tensors)
-
-    return tuple(tensor.cuda(gpu, async=True) for gpu in devices)
+    return torch._C._broadcast(tensor, devices)
 
 
 def broadcast_coalesced(tensors, devices, buffer_size=10485760):
     """Broadcasts a sequence tensors to the specified GPUs.
-
     Small tensors are first coalesced into a buffer to reduce the number
     of synchronizations.
 
@@ -46,28 +37,7 @@ def broadcast_coalesced(tensors, devices, buffer_size=10485760):
         A tuple containing copies of the ``tensor``, placed on devices
         corresponding to indices from ``devices``.
     """
-    for tensor in tensors:
-        if tensor.get_device() != devices[0]:
-            raise RuntimeError('all tensors must be on devices[0]')
-    outputs = [[] for _ in devices]
-    # use the original tensors for the first device
-    outputs[0].extend(tensors)
-    for chunk in _take_tensors(tensors, buffer_size):
-        if chunk[0].is_sparse:
-            flat_indices, flat_values = _flatten_sparse_tensors(chunk)
-            result_indices = broadcast(flat_indices, devices)
-            result_values = broadcast(flat_values, devices)
-            unflat_results = tuple(_unflatten_sparse_tensors(iv, chunk) for iv in zip(result_indices, result_values))
-        else:
-            flat = _flatten_dense_tensors(chunk)
-            results = broadcast(flat, devices)
-            unflat_results = tuple(_unflatten_dense_tensors(tensor, chunk) for tensor in results)
-        # use the broadcasted tensors for the remaining devices
-        for dst, unflat_res in zip(outputs[1:], unflat_results[1:]):
-            dst.extend(unflat_res)
-    for i, output in enumerate(outputs):
-        outputs[i] = _reorder_tensors_as(output, tensors)
-    return tuple(outputs)
+    return torch._C._broadcast_coalesced(tensors, devices, buffer_size)
 
 
 def reduce_add(inputs, destination=None):
@@ -89,7 +59,6 @@ def reduce_add(inputs, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     input_size = inputs[0].size()
-    is_sparse = inputs[0].is_sparse
     nccl_root = None
     for i, inp in enumerate(inputs):
         assert inp.is_cuda, "reduce_add expects all inputs to be on GPUs"
@@ -100,9 +69,9 @@ def reduce_add(inputs, destination=None):
             expected = 'x'.join(str(x) for x in input_size)
             raise ValueError("input {} has invalid size: got {}, but expected "
                              "{}".format(i, got, expected))
-    assert nccl_root is not None, "reduce_add expects destination to be on the same GPU with one of the tensors"
-    with torch.cuda.device(destination):
-        result = type(inp)().resize_as_(inp).zero_()
+    if nccl_root is None:
+        raise RuntimeError("reduce_add expects destination to be on the same GPU with one of the tensors")
+    result = inp.new(device=destination).resize_as_(inp).zero_()
 
     if nccl.is_available(inputs) and inputs[0].get_device() == destination:
         outputs = [result] + [t.new(t.size()) for t in inputs[1:]]
@@ -186,7 +155,7 @@ def scatter(tensor, devices, chunk_sizes=None, dim=0, streams=None):
     outputs = []
     for device, chunk, stream in zip(devices, chunks, streams):
         with torch.cuda.device(device), torch.cuda.stream(stream):
-            outputs.append(chunk.cuda(device, async=True))
+            outputs.append(chunk.cuda(device, non_blocking=True))
     return tuple(outputs)
 
 
@@ -221,10 +190,9 @@ def gather(tensors, dim=0, destination=None):
     if destination is None:
         destination = torch.cuda.current_device()
     if destination == -1:
-        result = getattr(torch, type(tensors[0]).__name__)(expected_size)
+        result = tensors[0].new().cpu().resize_(expected_size)
     else:
-        with torch.cuda.device(destination):
-            result = type(tensors[0])(expected_size)
+        result = tensors[0].new(expected_size, device=destination)
 
     chunk_start = 0
     # TODO: if copying to CPU, allocate a pinned buffer, do async copies to it,

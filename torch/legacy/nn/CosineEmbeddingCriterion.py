@@ -61,7 +61,7 @@ class CosineEmbeddingCriterion(Criterion):
         torch.eq(y, 1, out=self._idx)
         self._outputs[self._idx] = self._outputs[self._idx].mul_(-1).add_(1)
 
-        self.output = self._outputs.sum()
+        self.output = self._outputs.sum().item()
 
         if self.sizeAverage:
             self.output = self.output / y.size(0)

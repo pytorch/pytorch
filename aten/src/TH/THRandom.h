@@ -3,24 +3,16 @@
 
 #include "THGeneral.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
-/* A THGenerator contains all the state required for a single random number stream */
-typedef struct THGenerator {
-  /* The initial seed. */
-  uint64_t the_initial_seed;
-  int left;  /* = 1; */
-  int seeded; /* = 0; */
-  uint64_t next;
-  uint64_t state[_MERSENNE_STATE_N]; /* the array for the state vector  */
-  /********************************/
 
-  /* For normal distribution */
-  double normal_x;
-  double normal_y;
-  double normal_rho;
-  int normal_is_valid; /* = 0; */
-} THGenerator;
+/* Struct definition is moved to THGenerator.h, because THRandom.h
+needs to be C-compatible in order to be included in C FFI extensions. */
+typedef struct THGenerator THGenerator;
+typedef struct THGeneratorState THGeneratorState;
 
 #define torch_Generator "torch.Generator"
 
@@ -29,8 +21,11 @@ TH_API THGenerator * THGenerator_new(void);
 TH_API THGenerator * THGenerator_copy(THGenerator *self, THGenerator *from);
 TH_API void THGenerator_free(THGenerator *gen);
 
-/* Checks if given generator is valid */
-TH_API int THGenerator_isValid(THGenerator *_generator);
+/* Checks if given generator state is valid */
+TH_API int THGeneratorState_isValid(THGeneratorState *_gen_state);
+
+/* Manipulate THGeneratorState objects */
+TH_API THGeneratorState * THGeneratorState_copy(THGeneratorState *self, THGeneratorState *from);
 
 /* Initializes the random number generator from /dev/urandom (or on Windows
 platforms with the current time (granularity: seconds)) and returns the seed. */
@@ -49,6 +44,9 @@ TH_API uint64_t THRandom_random(THGenerator *_generator);
 TH_API uint64_t THRandom_random64(THGenerator *_generator);
 
 /* Generates a uniform random double on [0,1). */
+TH_API double THRandom_standard_uniform(THGenerator *_generator);
+
+/* Generates a uniform random double on [a, b). */
 TH_API double THRandom_uniform(THGenerator *_generator, double a, double b);
 
 /* Generates a uniform random float on [0,1). */
@@ -90,4 +88,7 @@ TH_API int THRandom_geometric(THGenerator *_generator, double p);
 
 /* Returns true with probability $p$ and false with probability $1-p$ (p > 0). */
 TH_API int THRandom_bernoulli(THGenerator *_generator, double p);
+#ifdef __cplusplus
+}
+#endif
 #endif

@@ -1,28 +1,23 @@
 #include <Python.h>
+
+#include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/pybind.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/profiler.h"
-
-#include "THP.h"
-
-#ifdef _MSC_VER
-#define ENSURE_UNREACHABLE __assume(0);
-#else
-#define ENSURE_UNREACHABLE __builtin_unreachable();
-#endif
+#include "torch/csrc/autograd/python_function.h"
 
 PyObject * THPAutograd_initExtension(PyObject *_unused)
 {
-  THPUtils_assert_PyImport("torch.autograd", autograd_module);
-  PyObject *autograd_dict = PyModule_GetDict(autograd_module);
+  auto autograd_module = THPObjectPtr(PyImport_ImportModule("torch.autograd"));
+  if (!autograd_module) throw python_error();
 
-  THPVariableClass      = PyMapping_GetItemString(autograd_dict,(char*)"Variable");
-  THPFunctionClass      = PyMapping_GetItemString(autograd_dict,(char*)"Function");
+  // NOTE: "leaks" Variable
+  THPVariableClass = PyObject_GetAttrString(autograd_module, "Variable");
+  if (!THPVariableClass) throw python_error();
 
-  THPUtils_assert(THPVariableClass, "couldn't find Variable class in "
-          "torch.autograd module");
-  THPUtils_assert(THPFunctionClass, "couldn't find Function class in "
-          "torch.autograd module");
+  // NOTE: "leaks" Function
+  THPFunctionClass = PyObject_GetAttrString(autograd_module, "Function");
+  if (!THPFunctionClass) throw python_error();
 
   auto m = py::handle(autograd_module).cast<py::module>();
 
@@ -62,7 +57,7 @@ namespace torch { namespace autograd {
 static PyObject * set_grad_enabled(PyObject* _unused, PyObject *arg) {
   HANDLE_TH_ERRORS
   if (!PyBool_Check(arg)) {
-    at::runtime_error("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
   }
   GradMode::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
@@ -81,9 +76,9 @@ static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
 
 // autograd methods on torch._C
 static PyMethodDef methods[] = {
-  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, NULL},
-  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, NULL},
-  {NULL, NULL, 0, NULL}
+  {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
+  {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
+  {nullptr, nullptr, 0, nullptr}
 };
 
 PyMethodDef* python_functions() {

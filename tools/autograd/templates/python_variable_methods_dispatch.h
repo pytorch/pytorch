@@ -6,7 +6,7 @@
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 
-// Contains inline wrappers around ATen functions which release the GIL and
+// Contains inline wrappers around ATen functions that release the GIL and
 // switch to the correct CUDA device.
 
 namespace torch { namespace autograd {

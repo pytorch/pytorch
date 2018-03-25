@@ -15,6 +15,7 @@
 #include "ATen/${DenseBackend}LongTensor.h"
 #include "ATen/Allocator.h"
 #include "ATen/Utils.h"
+#include "ATen/Half.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/THLongStorageView.h"
 #include "ATen/UndefinedTensor.h"
@@ -22,10 +23,15 @@
 #include <iostream>
 #include <sstream>
 
+#include "ATen/Config.h"
+#if AT_CUDA_ENABLED()
+$extra_cuda_headers
+#endif
+
 namespace at {
 
 ${Type}::${Type}(Context* context)
-: Type(context) {}
+: Type(context, /*is_variable_or_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }

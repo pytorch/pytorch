@@ -1,6 +1,7 @@
 import torch
 from torch.autograd import Variable
 import warnings
+from torch.distributions import constraints
 
 
 class Distribution(object):
@@ -10,10 +11,27 @@ class Distribution(object):
 
     has_rsample = False
     has_enumerate_support = False
+    _validate_args = False
+    support = None
+    params = {}
 
-    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size()):
+    @staticmethod
+    def set_default_validate_args(value):
+        if value not in [True, False]:
+            raise ValueError
+        Distribution._validate_args = value
+
+    def __init__(self, batch_shape=torch.Size(), event_shape=torch.Size(), validate_args=None):
         self._batch_shape = batch_shape
         self._event_shape = event_shape
+        if validate_args is not None:
+            self._validate_args = validate_args
+        if self._validate_args:
+            if not constraints.is_dependent(self.params):
+                for param, constraint in self.params.items():
+                    if not constraints.is_dependent(constraint):
+                        if not constraint.check(self.__getattribute__(param)).all():
+                            raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
@@ -46,13 +64,34 @@ class Distribution(object):
         """
         raise NotImplementedError
 
+    @property
+    def mean(self):
+        """
+        Returns the mean of the distribution.
+        """
+        raise NotImplementedError
+
+    @property
+    def variance(self):
+        """
+        Returns the variance of the distribution.
+        """
+        raise NotImplementedError
+
+    @property
+    def stddev(self):
+        """
+        Returns the standard deviation of the distribution.
+        """
+        return self.variance.sqrt()
+
     def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
         samples if the distribution parameters are batched.
         """
-        z = self.rsample(sample_shape)
-        return z.detach() if hasattr(z, 'detach') else z
+        with torch.no_grad():
+            return self.rsample(sample_shape)
 
     def rsample(self, sample_shape=torch.Size()):
         """
@@ -76,7 +115,27 @@ class Distribution(object):
         `value`.
 
         Args:
-            value (Tensor or Variable):
+            value (Tensor):
+        """
+        raise NotImplementedError
+
+    def cdf(self, value):
+        """
+        Returns the cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor):
+        """
+        raise NotImplementedError
+
+    def icdf(self, value):
+        """
+        Returns the inverse cumulative density/mass function evaluated at
+        `value`.
+
+        Args:
+            value (Tensor):
         """
         raise NotImplementedError
 
@@ -92,7 +151,7 @@ class Distribution(object):
         use `itertools.product(m.enumerate_support())`.
 
         Returns:
-            Variable or Tensor iterating over dimension 0.
+            Tensor iterating over dimension 0.
         """
         raise NotImplementedError
 
@@ -101,7 +160,7 @@ class Distribution(object):
         Returns entropy of distribution, batched over batch_shape.
 
         Returns:
-            Tensor or Variable of shape batch_shape.
+            Tensor of shape batch_shape.
         """
         raise NotImplementedError
 
@@ -115,26 +174,24 @@ class Distribution(object):
         Args:
             sample_shape (torch.Size): the size of the sample to be drawn.
         """
-        shape = torch.Size(sample_shape + self._batch_shape + self._event_shape)
-        if not shape:
-            shape = torch.Size((1,))
-        return shape
+        return torch.Size(sample_shape + self._batch_shape + self._event_shape)
 
-    def _validate_log_prob_arg(self, value):
+    def _validate_sample(self, value):
         """
-        Argument validation for `log_prob` methods. The rightmost dimensions
-        of a value to be scored via `log_prob` must agree with the distribution's
-        batch and event shapes.
+        Argument validation for distribution methods such as `log_prob`,
+        `cdf` and `icdf`. The rightmost dimensions of a value to be
+        scored via these methods must agree with the distribution's batch
+        and event shapes.
 
         Args:
-            value (Tensor or Variable): the tensor whose log probability is to be
+            value (Tensor): the tensor whose log probability is to be
                 computed by the `log_prob` method.
         Raises
             ValueError: when the rightmost dimensions of `value` do not match the
                 distribution's batch and event shapes.
         """
-        if not (torch.is_tensor(value) or isinstance(value, Variable)):
-            raise ValueError('The value argument to log_prob must be a Tensor or Variable instance.')
+        if not isinstance(value, torch.Tensor):
+            raise ValueError('The value argument to log_prob must be a Tensor')
 
         event_dim_start = len(value.size()) - len(self._event_shape)
         if value.size()[event_dim_start:] != self._event_shape:
@@ -147,3 +204,9 @@ class Distribution(object):
             if i != 1 and j != 1 and i != j:
                 raise ValueError('Value is not broadcastable with batch_shape+event_shape: {} vs {}.'.
                                  format(actual_shape, expected_shape))
+
+        if not self.support.check(value).all():
+            raise ValueError('The value argument must be within the support')
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'

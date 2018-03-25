@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/variable_flags.h"
+
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/tracer_state.h"
 
 using torch::autograd::Variable;
 

@@ -50,12 +50,10 @@ void THNN_(TemporalConvolution_updateOutput)(
   int64_t k, i;
 
   int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
 
   if (input->nDimension == 3)
   {
     dimS = 1;
-    dimF = 2;
   }
 
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
@@ -181,12 +179,10 @@ void THNN_(TemporalConvolution_updateGradInput)(
   int64_t k, i;
 
   int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
 
   if (gradOutput->nDimension == 3)
   {
     dimS = 1;
-    dimF = 2;
   }
 
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
@@ -290,12 +286,10 @@ void THNN_(TemporalConvolution_accGradParameters)(
   int64_t k, i;
 
   int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
 
   if (gradOutput->nDimension == 3)
   {
     dimS = 1;
-    dimF = 2;
   }
 
   THNN_(TemporalConvolution_shapeCheck)(

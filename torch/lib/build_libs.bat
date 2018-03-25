@@ -38,6 +38,10 @@ IF "%DEBUG%"=="1" (
   set BUILD_TYPE=Release 
 )
 
+IF NOT DEFINED MAX_JOBS (
+  set MAX_JOBS=%NUMBER_OF_PROCESSORS%
+)
+
 IF "%CMAKE_GENERATOR%"=="" (
   set CMAKE_GENERATOR_COMMAND=
   set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=Release
@@ -46,7 +50,7 @@ IF "%CMAKE_GENERATOR%"=="" (
   IF "%CMAKE_GENERATOR%"=="Ninja" (
     IF "%CC%"== "" set CC=cl.exe
     IF "%CXX%"== "" set CXX=cl.exe
-    set MAKE_COMMAND=cmake --build . --target install --config %BUILD_TYPE% -- -j%NUMBER_OF_PROCESSORS% || exit /b 1
+    set MAKE_COMMAND=cmake --build . --target install --config %BUILD_TYPE% -- -j%MAX_JOBS%
   ) ELSE (
     set MAKE_COMMAND=msbuild INSTALL.vcxproj /p:Configuration=%BUILD_TYPE%
   )
@@ -108,6 +112,7 @@ goto:eof
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
+  IF NOT %ERRORLEVEL%==0 exit 1
   cd ../..
   @endlocal
 
@@ -128,6 +133,7 @@ goto:eof
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
+  IF NOT %ERRORLEVEL%==0 exit 1
   cd ../..
   @endlocal
 

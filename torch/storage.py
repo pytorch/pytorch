@@ -1,5 +1,5 @@
 import torch
-from ._utils import _type, _cuda, _range
+from ._utils import _type, _cuda
 
 
 class _StorageBase(object):
@@ -7,14 +7,14 @@ class _StorageBase(object):
     is_sparse = False
 
     def __str__(self):
-        content = ' ' + '\n '.join(str(self[i]) for i in _range(len(self)))
+        content = ' ' + '\n '.join(str(self[i]) for i in range(len(self)))
         return content + '\n[{} of size {}]'.format(torch.typename(self), len(self))
 
     def __repr__(self):
         return str(self)
 
     def __iter__(self):
-        return iter(map(lambda i: self[i], _range(self.size())))
+        return iter(map(lambda i: self[i], range(self.size())))
 
     def __copy__(self):
         return self.clone()

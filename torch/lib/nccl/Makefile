@@ -27,7 +27,7 @@ NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_50,code=sm_50 \
                 -gencode=arch=compute_52,code=sm_52 \
                 -gencode=arch=compute_52,code=compute_52
-else
+else ifeq ($(CUDA_MAJOR), 8)
 NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_35,code=sm_35 \
                 -gencode=arch=compute_50,code=sm_50 \
@@ -35,12 +35,27 @@ NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_60,code=sm_60\
                 -gencode=arch=compute_61,code=sm_61 \
                 -gencode=arch=compute_60,code=compute_60
+else
+NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
+                -gencode=arch=compute_35,code=sm_35 \
+                -gencode=arch=compute_50,code=sm_50 \
+                -gencode=arch=compute_52,code=sm_52 \
+                -gencode=arch=compute_60,code=sm_60\
+                -gencode=arch=compute_61,code=sm_61 \
+                -gencode=arch=compute_60,code=compute_60 \
+                -gencode=arch=compute_70,code=compute_70
 endif
 
 CXXFLAGS   := -I$(CUDA_INC) -fPIC -fvisibility=hidden
-NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -lineinfo -std=c++11 -maxrregcount 96
+NVCUFLAGS  := -ccbin $(CXX) $(NVCC_GENCODE) -lineinfo -std=c++11 -maxrregcount 96 -Xfatbin -compress-all
 # Use addprefix so that we can specify more than one path
 LDFLAGS    := $(addprefix -L,${CUDA_LIB}) -lcudart -lrt
+
+# If CUDA < 8.0, add workaround C++ flags
+CUDA_MAJOR_LT_8 := $(shell [ $(CUDA_MAJOR) -lt 8 ] && echo true)
+ifeq ($(CUDA_MAJOR_LT_8), true)
+CXXFLAGS += -D_FORCE_INLINES -D_MWAITXINTRIN_H_INCLUDED -D__STRICT_ANSI__
+endif
 
 ifeq ($(DEBUG), 0)
 NVCUFLAGS += -O3
@@ -243,4 +258,3 @@ fortest : forlib
 	$(MAKE) -C fortran test
 forclean :
 	$(MAKE) -C fortran clean
-

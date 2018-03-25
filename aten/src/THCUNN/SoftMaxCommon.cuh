@@ -57,6 +57,15 @@ void SpatialSoftMax_getLaunchSizes(
   grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, dim_size, inner_size);
 }
 
+inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
+  uint64_t block_size = 1;
+  uint64_t max_block_size = std::min(dim_size / ILP, static_cast<uint64_t>(1024));
+  while (block_size < max_block_size) block_size *= 2;
+  // Launch at least a single warp - the kernel assumes that.
+  block_size = std::max(block_size, static_cast<uint64_t>(32));
+  return dim3(block_size);
+}
+
 template<typename T>
 struct Add {
   __device__ __forceinline__ T operator()(T a, T b) const {
@@ -392,13 +401,14 @@ void HostSoftMaxForward(
           uint64_t outer_size, uint64_t dim_size, uint64_t inner_size,
           int dim)
 {
-  // This kernel spawns a block of 1024 threads per each element in the batch.
+  // This kernel spawns a block per each element in the batch.
   // XXX: it assumes that inner_size == 1
-  if (inner_size == 1 && dim_size >= 64) {
+  if (inner_size == 1) {
+    const int ILP = 2;
     dim3 grid(outer_size);
-    dim3 block(1024);
+    dim3 block = SoftMax_getBlockSize(ILP, dim_size);
 
-    cunn_SoftMaxForward<2, T, AccumT, Epilogue>
+    cunn_SoftMaxForward<ILP, T, AccumT, Epilogue>
       <<<grid, block, block.x * sizeof(AccumT), THCState_getCurrentStream(state)>>>(
         output, input, dim_size
     );
@@ -429,11 +439,12 @@ void HostSoftMaxBackward(
           int dim)
 {
   // See descriptions of kernels above.
-  if (inner_size == 1 && dim_size >= 64) {
+  if (inner_size == 1) {
+    const int ILP = 2;
     dim3 grid(outer_size);
-    dim3 block(1024);
+    dim3 block = SoftMax_getBlockSize(ILP, dim_size);
 
-    cunn_SoftMaxBackward<2, T, AccumT, Epilogue>
+    cunn_SoftMaxBackward<ILP, T, AccumT, Epilogue>
       <<<grid, block, block.x * sizeof(AccumT), THCState_getCurrentStream(state)>>>(
         gradInput, output, gradOutput, dim_size
     );

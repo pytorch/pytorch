@@ -124,16 +124,6 @@ THP_API void THPUtils_invalidArguments(
         PyObject *given_args, PyObject *given_kwargs,
         const char *function_name, size_t num_options, ...);
 
-#define THPUtils_assert_PyImport(name, module)                          \
-  PyObject* module = PyImport_ImportModule(name);                       \
-  if (!module) {                                                        \
-    if (PyErr_Occurred()) {                                             \
-      PyErr_Print();                                                    \
-    }                                                                   \
-    THPUtils_setError("class loader couldn't access %s", name);         \
-    return NULL;                                                        \
-  }
-
 #ifdef _THP_CORE
 
 bool THPUtils_checkIntTuple(PyObject *arg);
@@ -163,6 +153,7 @@ struct THPUtils_typeTraits {};
 
 THLongStoragePtr THPUtils_unpackSize(PyObject *arg);
 bool THPUtils_tryUnpackLongs(PyObject *arg, THLongStoragePtr& result);
+std::vector<int64_t> THPUtils_unpackLongs(PyObject *arg);
 bool THPUtils_tryUnpackLongVarArgs(PyObject *args, int ignore_first, THLongStoragePtr& result);
 PyObject * THPUtils_dispatchStateless(PyObject *tensor, const char *name, PyObject *args, PyObject *kwargs);
 
@@ -185,8 +176,6 @@ bool getBackCompatBroadcastWarn();
 void setBackCompatKeepdimWarn(bool warn);
 bool getBackCompatKeepdimWarn();
 bool maybeThrowBackCompatKeepdimWarn(char *func);
-
-std::vector<at::Tensor> THPUtils_PySequence_to_TensorList(PyObject *obj);
 
 #ifdef WITH_CUDA
 std::vector <THCStream*> THPUtils_PySequence_to_THCStreamList(PyObject *obj);

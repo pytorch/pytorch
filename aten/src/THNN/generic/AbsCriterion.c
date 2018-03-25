@@ -10,7 +10,7 @@ void THNN_(AbsCriterion_updateOutput)(
           bool sizeAverage,
           bool reduce)
 {
-  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_SHAPE(input, target);
 
   if (!reduce) {
     THTensor_(resizeAs)(output, input);
@@ -41,11 +41,11 @@ void THNN_(AbsCriterion_updateGradInput)(
           bool sizeAverage,
           bool reduce)
 {
-  THNN_CHECK_NELEMENT(input, target);
+  THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
   if (!reduce) {
-    THNN_CHECK_NELEMENT(gradOutput, input);
+    THNN_CHECK_SHAPE(gradOutput, input);
     TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
       *gradInput_data = ((*input_data - *target_data) >= 0 ? 1 : -1);
     );

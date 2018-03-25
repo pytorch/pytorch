@@ -26,17 +26,47 @@ if("${isSystemDir}" STREQUAL "-1")
 endif()
 
 IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
+  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
   set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
 ENDIF(NOT MSVC)
 
+INCLUDE(CheckCXXSourceCompiles)
+
+# windef.h will define max/min macros if NOMINMAX is not defined
+IF(MSVC)
+  add_definitions(/DNOMINMAX)
+ENDIF(MSVC)
+
+#Check if certain std functions are supported. Sometimes
+#_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
+CHECK_CXX_SOURCE_COMPILES("
+#include <cmath>
+#include <string>
+
+int main() {
+  int a = std::isinf(3.0);
+  int b = std::isnan(0.0);
+  std::string s = std::to_string(1);
+
+  return 0;
+  }" SUPPORT_GLIBCXX_USE_C99)
+
+if(NOT SUPPORT_GLIBCXX_USE_C99)
+  message(FATAL_ERROR
+          "The C++ compiler does not support required functions. "
+          "This is very likely due to a known bug in GCC 5 "
+          "(and maybe other versions) on Ubuntu 17.10 and newer. "
+          "For more information, see: "
+          "https://github.com/pytorch/pytorch/issues/5229"
+         )
+endif()
 
 # Top-level build config
 ############################################
 # Flags
 # When using MSVC
 
-# Detect CUDA architecture and get best NVCC flags
+# Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
 IF(NOT CUDA_FOUND)
   FIND_PACKAGE(CUDA 5.5)
@@ -127,7 +157,7 @@ ENDIF ()
 IF (WITH_OPENMP AND NOT CHECKED_OPENMP)
   FIND_PACKAGE(OpenMP)
   SET(CHECKED_OPENMP ON CACHE BOOL "already checked for OpenMP")
-  
+
   # OPENMP_FOUND is not cached in FindOpenMP.cmake (all other variables are cached)
   # see https://github.com/Kitware/CMake/blob/master/Modules/FindOpenMP.cmake
   SET(OPENMP_FOUND ${OPENMP_FOUND} CACHE BOOL "OpenMP Support found")
@@ -190,6 +220,26 @@ ENDIF(UNIX)
 
 INCLUDE (CheckIncludeFile)
 INCLUDE (CheckCSourceCompiles)
+INCLUDE (CheckCSourceRuns)
+
+# Check that our programs run.  This is different from the native CMake compiler
+# check, which just tests if the program compiles and links.  This is important
+# because with ASAN you might need to help the compiled library find some
+# dynamic libraries.
+CHECK_C_SOURCE_RUNS("
+int main() { return 0; }
+" COMPILER_WORKS)
+IF(NOT COMPILER_WORKS)
+  # Force cmake to retest next time around
+  unset(COMPILER_WORKS CACHE)
+  MESSAGE(FATAL_ERROR
+      "Could not run a simple program built with your compiler. "
+      "If you are trying to use -fsanitize=address, make sure "
+      "libasan is properly installed on your system (you can confirm "
+      "if the problem is this by attempting to build and run a "
+      "small program.)")
+ENDIF()
+
 CHECK_INCLUDE_FILE(cpuid.h HAVE_CPUID_H)
 # Check for a cpuid intrinsic
 IF(HAVE_CPUID_H)
@@ -233,6 +283,7 @@ ENDIF()
 IF(C_SSE3_FOUND)
   MESSAGE(STATUS "SSE3 Found")
   SET(CMAKE_C_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "${C_SSE3_FLAGS} -DUSE_SSE3 ${CMAKE_CXX_FLAGS}")
 ENDIF(C_SSE3_FOUND)
 
 # we don't set -mavx and -mavx2 flags globally, but only for specific files
@@ -245,6 +296,7 @@ ENDIF(C_AVX_FOUND)
 IF(C_AVX2_FOUND)
   MESSAGE(STATUS "AVX2 Found")
   SET(CMAKE_C_FLAGS "-DUSE_AVX2 ${CMAKE_C_FLAGS}")
+  SET(CMAKE_CXX_FLAGS "-DUSE_AVX2 ${CMAKE_CXX_FLAGS}")
 ENDIF(C_AVX2_FOUND)
 
 CHECK_C_SOURCE_RUNS("
@@ -328,10 +380,20 @@ MACRO(Install_Required_Library ln)
 ENDMACRO(Install_Required_Library libname)
 
 FIND_PACKAGE(BLAS)
+SET(AT_MKL_ENABLED 0)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    IF(NOT BLAS_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda, and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
+    INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
+    SET(AT_MKL_ENABLED 1)
   ENDIF()
 ENDIF(BLAS_FOUND)
 
@@ -388,7 +450,7 @@ IF(NOT AT_CUDA_ENABLED OR NOT CUDNN_FOUND)
   MESSAGE(STATUS "CuDNN not found. Compiling without CuDNN support")
   set(AT_CUDNN_ENABLED 0)
 ELSE()
-  INCLUDE_DIRECTORIES(${CUDNN_INCLUDE_DIRS})
+  INCLUDE_DIRECTORIES(BEFORE ${CUDNN_INCLUDE_DIRS})
   set(AT_CUDNN_ENABLED 1)
 ENDIF()
 
@@ -398,7 +460,7 @@ if(NO_NNPACK)
 else()
   find_package(NNPACK)
   if(NOT NNPACK_FOUND)
-    MESSAGE(STATUS "NNPACK not found. Compiling without nNPACK support")
+    MESSAGE(STATUS "NNPACK not found. Compiling without NNPACK support")
     set(AT_NNPACK_ENABLED 0)
   ELSE()
     INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
@@ -421,6 +483,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
 add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
+${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/utils/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})

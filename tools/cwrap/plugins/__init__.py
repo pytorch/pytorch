@@ -420,7 +420,7 @@ class CWrapPlugin(object):
         return template
 
 
-from .StandaloneExtension import StandaloneExtension
+from .NNExtension import NNExtension
 from .NullableArguments import NullableArguments
 from .OptionalArguments import OptionalArguments
 from .ArgcountChecker import ArgcountChecker

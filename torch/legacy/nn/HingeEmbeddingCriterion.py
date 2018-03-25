@@ -15,12 +15,12 @@ class HingeEmbeddingCriterion(Criterion):
             self.buffer = input.new()
         self.buffer.resize_as_(input).copy_(input)
         self.buffer[torch.eq(y, -1.)] = 0
-        self.output = self.buffer.sum()
+        self.output = self.buffer.sum().item()
 
         self.buffer.fill_(self.margin).add_(-1, input)
         self.buffer.clamp_(min=0)
         self.buffer[torch.eq(y, 1.)] = 0
-        self.output = self.output + self.buffer.sum()
+        self.output = self.output + self.buffer.sum().item()
 
         if self.sizeAverage:
             self.output = self.output / input.nelement()

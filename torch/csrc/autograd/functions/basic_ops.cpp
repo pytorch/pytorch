@@ -1,8 +1,14 @@
-#include "basic_ops.h"
+#include "torch/csrc/autograd/functions/basic_ops.h"
 
+#include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/utils/auto_gpu.h"
+
+#include <ATen/ATen.h>
+
+#include <memory>
+#include <utility>
 
 namespace torch { namespace autograd {
 
@@ -15,10 +21,10 @@ auto DelayedError::apply(const variable_list& inputs) -> variable_list {
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {
     // FIXME: share version counters
-    outputs.emplace_back(var.defined() ? var.data() : Tensor());
+    outputs.emplace_back(var.defined() ? var.data() : at::Tensor());
   }
-  return wrap_outputs(inputs, std::move(outputs), [&](FunctionFlags f) {
-    return std::make_shared<Error>(msg, std::move(f));
+  return wrap_outputs(inputs, std::move(outputs), [&](edge_list&& next_edges) {
+    return std::make_shared<Error>(msg, std::move(next_edges));
   });
 };
 

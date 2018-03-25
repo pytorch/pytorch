@@ -40,7 +40,7 @@ def _make_function_class_criterion(class_name, update_output, update_grad_input,
 
     @staticmethod
     def forward(ctx, input, target, *args):
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
         ctx.save_for_backward(input, target)
         if weight_arg_idx >= 0:
             ctx.weight = args[0]
@@ -146,7 +146,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
     @staticmethod
     def forward(ctx, input, *params):
-        ctx._backend = type2backend[type(input)]
+        ctx._backend = type2backend[input.type()]
 
         ctx.additional_args = []
         tensor_param_list = []

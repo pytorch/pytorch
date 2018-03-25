@@ -22,4 +22,4 @@ class Parameter(Variable):
         return super(Parameter, cls).__new__(cls, data, requires_grad=requires_grad)
 
     def __repr__(self):
-        return 'Parameter containing:' + self.data.__repr__()
+        return super(Parameter, self).__repr__().replace('Variable', 'Parameter')

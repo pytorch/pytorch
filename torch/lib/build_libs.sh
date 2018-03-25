@@ -6,7 +6,7 @@
 # called standalone to compile the libraries outside of the overall PyTorch
 # build process.
 
-set -e
+set -ex
 
 # Options for building only a subset of the libraries
 WITH_CUDA=0
@@ -19,6 +19,30 @@ WITH_NNPACK=0
 if [[ "$1" == "--with-nnpack" ]]; then
   WITH_NNPACK=1
   shift
+fi
+
+WITH_GLOO_IBVERBS=0
+if [[ "$1" == "--with-gloo-ibverbs" ]]; then
+  WITH_GLOO_IBVERBS=1
+  shift
+fi
+
+# Save user specified env vars, we will manually propagate them
+# to cmake.  We copy distutils semantics, referring to
+# cpython/Lib/distutils/sysconfig.py as the source of truth
+USER_CFLAGS=""
+USER_LDFLAGS=""
+if [[ -n "$LDFLAGS" ]]; then
+  USER_LDFLAGS="$USER_LDFLAGS $LDFLAGS"
+fi
+if [[ -n "$CFLAGS" ]]; then
+  USER_CFLAGS="$USER_CFLAGS $CFLAGS"
+  USER_LDFLAGS="$USER_LDFLAGS $CFLAGS"
+fi
+if [[ -n "$CPPFLAGS" ]]; then
+  # Unlike distutils, NOT modifying CXX
+  USER_C_CFLAGS="$USER_CFLAGS $CPPFLAGS"
+  USER_LDFLAGS="$USER_LDFLAGS $CPPFLAGS"
 fi
 
 cd "$(dirname "$0")/../.."
@@ -47,9 +71,15 @@ else
 fi
 CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
+THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
 if [[ $WITH_CUDA -eq 1 ]]; then
     GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
+fi
+# Gloo infiniband support
+if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
+    GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
+    THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -59,6 +89,9 @@ $BASE_DIR/torch/lib/ATen/nn.yaml"
 CUDA_NVCC_FLAGS=$C_FLAGS
 if [[ $CUDA_DEBUG -eq 1 ]]; then
   CUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS -g -G"
+fi
+if [ -z "$NUM_JOBS" ]; then
+  NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
 # Used to build an individual library, e.g. build TH
@@ -77,10 +110,10 @@ function build() {
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-              -DCMAKE_C_FLAGS="$BUILD_C_FLAGS" \
-              -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS" \
-              -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS" \
-              -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS" \
+              -DCMAKE_C_FLAGS="$BUILD_C_FLAGS $USER_CFLAGS" \
+              -DCMAKE_CXX_FLAGS="$BUILD_C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
+              -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+              -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
               -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
               -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
               -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
@@ -107,7 +140,7 @@ function build() {
               -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
               ${@:2} \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
-  ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   cd ../..
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
@@ -132,8 +165,9 @@ function build_nccl() {
                ${CMAKE_GENERATOR} \
                -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-               -DCMAKE_C_FLAGS="$C_FLAGS" \
-               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS"
+               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
+               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
+               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
   ${CMAKE_INSTALL}
    mkdir -p ${INSTALL_DIR}/lib
    cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
@@ -156,17 +190,23 @@ function build_aten() {
   cd  build/aten
   ${CMAKE_VERSION} ../../../../aten \
   ${CMAKE_GENERATOR} \
-  -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
-  -DNO_CUDA=$((1-$WITH_CUDA)) \
-  -DNO_NNPACK=$((1-$WITH_NNPACK)) \
-  -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
-  -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
-  -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-  -DATEN_NO_CONTRIB=1 \
-  -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=1
-  # purpusefully not passing C_FLAGS for the same reason as above
-  ${CMAKE_INSTALL} -j$(getconf _NPROCESSORS_ONLN)
+      -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
+      -DNO_CUDA=$((1-$WITH_CUDA)) \
+      -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+      -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
+      -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
+      -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
+      -DATEN_NO_CONTRIB=1 \
+      -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+      -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+      -DCMAKE_C_FLAGS="$USER_CFLAGS" \
+      -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
+      -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+      # STOP!!! Are you trying to add a C or CXX flag?  Add it
+      # to aten/CMakeLists.txt, not here.  We need the vanilla
+      # cmake build to work.
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   cd ../..
 }
 
@@ -181,6 +221,8 @@ for arg in "$@"; do
         build gloo $GLOO_FLAGS
     elif [[ "$arg" == "ATen" ]]; then
         build_aten
+    elif [[ "$arg" == "THD" ]]; then
+        build THD $THD_FLAGS
     else
         build $arg
     fi

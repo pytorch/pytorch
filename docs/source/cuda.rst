@@ -22,6 +22,8 @@ Communication collectives
 
 .. autofunction:: torch.cuda.comm.broadcast
 
+.. autofunction:: torch.cuda.comm.broadcast_coalesced
+
 .. autofunction:: torch.cuda.comm.reduce_add
 
 .. autofunction:: torch.cuda.comm.scatter

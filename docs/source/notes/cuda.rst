@@ -42,19 +42,72 @@ Below you can find a small example showcasing this::
         d = torch.randn(2).cuda(2)
         # d.get_device() == 2
 
+Asynchronous execution
+----------------------
+
+By default, GPU operations are asynchronous.  When you call a function that
+uses the GPU, the operations are *enqueued* to the particular device, but not
+necessarily executed until later.  This allows us to execute more computations
+in parallel, including operations on CPU or other GPUs.
+
+In general, the effect of asynchronous computation is invisible to the caller,
+because (1) each device executes operations in the order they are queued, and
+(2) PyTorch automatically performs necessary synchronization when copying data
+between CPU and GPU or between two GPUs.  Hence, computation will proceed as if
+every operation was executed synchronously.
+
+You can force synchronous computation by setting environment variable
+`CUDA_LAUNCH_BLOCKING=1`.  This can be handy when an error occurs on the GPU.
+(With asynchronous execution, such an error isn't reported until after the
+operation is actually executed, so the stack trace does not show where it was
+requested.)
+
+As an exception, several functions such as :meth:`~torch.Tensor.copy_` admit
+an explicit :attr:`async` argument, which lets the caller bypass synchronization
+when it is unnecessary.  Another exception is CUDA streams, explained below.
+
+CUDA streams
+^^^^^^^^^^^^
+
+A `CUDA stream`_ is a linear sequence of execution that belongs to a specific
+device.  You normally do not need to create one explicitly: by default, each
+device uses its own "default" stream.
+
+Operations inside each stream are serialized in the order they are created,
+but operations from different streams can execute concurrently in any
+relative order, unless explicit synchronization functions (such as
+:meth:`~torch.cuda.synchronize` or :meth:`~torch.cuda.Stream.wait_stream`) are
+used.  For example, the following code is incorrect::
+
+    s = torch.cuda.stream()  # Create a new stream.
+    A = torch.cuda.FloatTensor(100, 100).normal_(0.0, 1.0)
+    with torch.cuda.stream(s):
+        # sum() may start execution before normal_() finishes!
+        B = torch.sum(A)
+
+When the "current stream" is the default stream, PyTorch automatically performs
+necessary synchronization when data is moved around, as explained above.
+However, when using non-default streams, it is the user's responsibility to
+ensure proper synchronization.
+
+.. _CUDA stream: http://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#streams
+
+.. _cuda-memory-management:
+
 Memory management
 -----------------
 
 PyTorch use a caching memory allocator to speed up memory allocations. This
 allows fast memory deallocation without device synchronizations. However, the
 unused memory managed by the allocator will still show as if used in
-`nvidia-smi`. You can use :meth:`~torch.cuda.memory_allocated` and
+``nvidia-smi``. You can use :meth:`~torch.cuda.memory_allocated` and
 :meth:`~torch.cuda.max_memory_allocated` to monitor memory occupied by
 tensors, and use :meth:`~torch.cuda.memory_cached` and
 :meth:`~torch.cuda.max_memory_cached` to monitor memory managed by the caching
-allocator. Calling :meth:`~torch.cuda.empty_cache` can release all unused cached
-memory from PyTorch so that those can be used by other GPU applications.
-
+allocator. Calling :meth:`~torch.cuda.empty_cache` can release all **unused**
+cached memory from PyTorch so that those can be used by other GPU applications.
+However, the occupied GPU memory by tensors will not be freed so it can not
+increase the amount of GPU memory available for PyTorch.
 
 Best practices
 --------------

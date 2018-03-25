@@ -221,7 +221,7 @@ def _load_backend(obj):
         attr = getattr(obj, key)
         if torch.is_tensor(attr):
             try:
-                obj._backend = type2backend[type(attr)]
+                obj._backend = type2backend[attr.type()]
             except KeyError:
                 pass
     # Monkey patch the forward to capture the type of input
@@ -231,7 +231,7 @@ def _load_backend(obj):
         input = args[0]
         while not torch.is_tensor(input):
             input = input[0]
-        obj._backend = type2backend[type(input)]
+        obj._backend = type2backend[input.type()]
         obj.updateOutput = updateOutput_orig
         return obj.updateOutput(*args)
     obj.updateOutput = updateOutput_patch

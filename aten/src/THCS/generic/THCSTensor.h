@@ -34,7 +34,7 @@ TH_API THCSTensor *THCSTensor_(new)(THCState *state);
 TH_API THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *indices, THCTensor *values, THLongStorage *sizes);
 
-TH_API THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size_);
+TH_API THCSTensor *THCSTensor_(newWithSize)(THCState *state, THLongStorage *size_, THLongStorage *_ignored);
 TH_API THCSTensor *THCSTensor_(newWithSize1d)(THCState *state, int64_t size0_);
 TH_API THCSTensor *THCSTensor_(newWithSize2d)(THCState *state, int64_t size0_, int64_t size1_);
 TH_API THCSTensor *THCSTensor_(newWithSize3d)(THCState *state, int64_t size0_, int64_t size1_, int64_t size2_);
@@ -72,7 +72,7 @@ TH_API int THCSTensor_(getDevice)(THCState *state, const THCSTensor *self);
 TH_API int THCSTensor_(checkGPU)(THCState *state, unsigned int nSparseTensors, unsigned int nTensors, ...);
 
 /* internal methods */
-TH_API void THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size);
+TH_API THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size);
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, int64_t nnz);
 TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);

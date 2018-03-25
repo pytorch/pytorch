@@ -48,7 +48,7 @@ void THNN_(SparseLinear_updateOutput)(
           THTensor *weight,
           THTensor *bias)
 {
-  int64_t h, i, j, hp0, hp1;
+  int64_t h, i, hp0, hp1;
   int64_t outDim = THTensor_(size)(weight, 0);
   int64_t inDim = THTensor_(size)(weight, 1);
   int64_t batchSize = THTensor_(size)(output, 0);
@@ -323,7 +323,7 @@ void THNN_(SparseLinear_updateParameters)(
           accreal learningRate_)
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
-  int64_t h, i;
+  int64_t i;
   int64_t outDim = weight->size[0];
   int64_t inDim = weight->size[1];
 
@@ -469,7 +469,7 @@ void THNN_(SparseLinear_zeroGradParameters)(
           THTensor *gradBias,
           THTensor *lastInput)
 {
-  int64_t h, i, j;
+  int64_t i, j;
 
   int64_t outDim = gradWeight->size[0];
   int64_t inDim = gradWeight->size[1];

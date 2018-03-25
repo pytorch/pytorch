@@ -44,6 +44,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
     THCDeviceTensor<THCIndex_t, 1> target,
     THCDeviceTensor<Dtype, 1> output,
     Dtype *weights,
+    int n_classes,
     int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
@@ -52,6 +53,7 @@ __global__ void ClassNLLCriterion_updateOutput_no_reduce_kernel(
       output[index] = ScalarConvert<int, Dtype>::to(0);
       continue;
     }
+    assert(cur_target  >= 0 && cur_target  < n_classes);
     Dtype weight =
        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
     output[index] = -weight * input[index][cur_target];
@@ -65,6 +67,7 @@ __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
     THCDeviceTensor<Dtype, 1> gradOutput,
     THCDeviceTensor<Dtype, 2> gradInput,
     Dtype *weights,
+    int n_classes,
     int ignore_index) {
 
   CUDA_KERNEL_LOOP(index, batch_size) {
@@ -72,6 +75,7 @@ __global__ void ClassNLLCriterion_updateGradInput_no_reduce_kernel(
     if (cur_target == ignore_index) {
       continue;
     }
+    assert(cur_target  >= 0 && cur_target  < n_classes);
     Dtype weight =
        weights ? weights[cur_target] : ScalarConvert<int, Dtype>::to(1);
     gradInput[index][cur_target] = -weight * gradOutput[index];

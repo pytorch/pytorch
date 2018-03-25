@@ -164,6 +164,8 @@ If you want to compile with CUDA support, install
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
 
+If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
+
 #### Install optional dependencies
 
 On Linux
@@ -171,20 +173,26 @@ On Linux
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
-conda install numpy pyyaml mkl setuptools cmake cffi
+conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 
 # Add LAPACK support for the GPU
-conda install -c soumith magma-cuda80 # or magma-cuda75 if CUDA 7.5
+conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 ```
 
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml setuptools cmake cffi
+conda install numpy pyyaml setuptools cmake cffi typing
+```
+
+On Windows
+```cmd
+conda install numpy pyyaml setuptools cmake cffi typing
 ```
 #### Get the PyTorch source
 ```bash
 git clone --recursive https://github.com/pytorch/pytorch
+cd pytorch
 ```
 
 #### Install PyTorch
@@ -198,18 +206,25 @@ On macOS
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py install
 ```
 
+On Windows
+```cmd
+xcopy /Y aten\src\ATen\common_with_cwrap.py tools\shared\cwrap_common.py
+
+set "VS150COMNTOOLS=C:\Program Files (x86)\Microsoft Visual Studio\2017\Enterprise\VC\Auxiliary\Build"
+set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
+set DISTUTILS_USE_SDK=1
+
+call "%VS150COMNTOOLS%\vcvarsall.bat" x64 -vcvars_ver=14.11
+python setup.py install
+```
+
 ### Docker image
 
-Dockerfile is supplied to build images with cuda support and cudnn v6. Build as usual
+Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
 ```
 docker build -t pytorch .
 ```
 
-Dockerfile to build with cuda 9 and cudnn v7 (with Volta support) is in tools/docker, the build command is
-
-```
-docker build -t pytorch_cuda9 -f tools/docker/Dockerfile9 .
-```
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
 ```
 nvidia-docker run --rm -ti --ipc=host pytorch/pytorch:latest

@@ -1,11 +1,14 @@
 #include "tuple_parser.h"
 
-#include <string>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "python_strings.h"
 #include "python_numbers.h"
+
+#include <string>
+#include <stdexcept>
+#include <vector>
 
 namespace torch {
 
@@ -40,11 +43,6 @@ auto TupleParser::parse(double& x, const std::string& param_name) -> void {
     throw invalid_type("float", param_name);
   }
   x = THPUtils_unpackDouble(obj);
-}
-
-auto TupleParser::parse(at::Tensor& x, const std::string& param_name) -> void {
-  PyObject* obj = next_arg();
-  x = torch::createTensor(obj);
 }
 
 auto TupleParser::parse(std::vector<int>& x, const std::string& param_name) -> void {

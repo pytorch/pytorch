@@ -115,7 +115,7 @@ def lbfgs(opfunc, x, config, state=None):
             # do lbfgs update (update memory)
             y = state['dir_bufs'].pop()
             s = state['stp_bufs'].pop()
-            torch.add(g, -1, g_old, out=y)
+            torch.add(g, g_old, alpha=-1, out=y)
             torch.mul(d, t, out=s)
             ys = y.dot(s)  # y*s
             if ys > 1e-10:

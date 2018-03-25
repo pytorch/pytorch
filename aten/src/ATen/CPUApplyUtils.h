@@ -1,7 +1,7 @@
 #pragma once
 
 #include <sstream>
-#include "ATen/Check.h"
+#include "ATen/TensorUtils.h"
 
 namespace at {
 

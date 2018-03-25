@@ -1,9 +1,11 @@
 import sys
 import os
 import re
+import inspect
 import argparse
 import unittest
 import warnings
+import random
 import contextlib
 from functools import wraps
 from itertools import product
@@ -18,6 +20,7 @@ import torch.cuda
 from torch.autograd import Variable
 from torch._six import string_classes
 import torch.backends.cudnn
+import torch.backends.mkl
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -37,6 +40,9 @@ torch.manual_seed(SEED)
 def run_tests():
     unittest.main(argv=UNITTEST_ARGS)
 
+PY3 = sys.version_info > (3, 0)
+PY34 = sys.version_info >= (3, 4)
+
 IS_WINDOWS = sys.platform == "win32"
 
 TEST_NUMPY = True
@@ -50,6 +56,8 @@ try:
     import scipy
 except ImportError:
     TEST_SCIPY = False
+
+TEST_MKL = torch.backends.mkl.is_available()
 
 
 def skipIfNoLapack(fn):
@@ -72,26 +80,30 @@ def suppress_warnings(fn):
     return wrapper
 
 
-def get_cpu_type(t):
-    assert t.__module__ == 'torch.cuda'
-    return getattr(torch, t.__class__.__name__)
+def get_cpu_type(type_name):
+    module, name = type_name.rsplit('.', 1)
+    assert module == 'torch.cuda'
+    return getattr(torch, name)
 
 
-def get_gpu_type(t):
-    assert t.__module__ == 'torch'
-    return getattr(torch.cuda, t.__name__)
+def get_gpu_type(type_name):
+    if isinstance(type_name, type):
+        type_name = '{}.{}'.format(type_name.__module__, type_name.__name__)
+    module, name = type_name.rsplit('.', 1)
+    assert module == 'torch'
+    return getattr(torch.cuda, name)
 
 
 def to_gpu(obj, type_map={}):
-    if torch.is_tensor(obj):
-        t = type_map.get(type(obj), get_gpu_type(type(obj)))
-        return obj.clone().type(t)
+    if isinstance(obj, torch.Tensor):
+        assert obj.is_leaf
+        t = type_map.get(obj.type(), get_gpu_type(obj.type()))
+        with torch.no_grad():
+            res = obj.clone().type(t)
+            res.requires_grad = obj.requires_grad
+        return res
     elif torch.is_storage(obj):
         return obj.new().resize_(obj.size()).copy_(obj)
-    elif isinstance(obj, Variable):
-        assert obj.is_leaf
-        t = type_map.get(type(obj.data), get_gpu_type(type(obj.data)))
-        return Variable(obj.data.clone().type(t), requires_grad=obj.requires_grad)
     elif isinstance(obj, list):
         return [to_gpu(o, type_map) for o in obj]
     elif isinstance(obj, tuple):
@@ -100,8 +112,13 @@ def to_gpu(obj, type_map={}):
         return deepcopy(obj)
 
 
+def get_function_arglist(func):
+    return inspect.getargspec(func).args
+
+
 def set_rng_seed(seed):
     torch.manual_seed(seed)
+    random.seed(seed)
     if TEST_NUMPY:
         numpy.random.seed(seed)
 
@@ -165,7 +182,7 @@ class TestCase(unittest.TestCase):
 
         value_map = {}
         for idx, val in zip(t._indices().t(), t._values()):
-            idx_tup = tuple(idx)
+            idx_tup = tuple(idx.tolist())
             if idx_tup in value_map:
                 value_map[idx_tup] += val
             else:
@@ -191,10 +208,10 @@ class TestCase(unittest.TestCase):
         return tg
 
     def unwrapVariables(self, x, y):
-        if isinstance(x, Variable) and isinstance(y, Variable):
-            return x.data, y.data
-        elif isinstance(x, Variable) or isinstance(y, Variable):
-            raise AssertionError("cannot compare {} and {}".format(type(x), type(y)))
+        if isinstance(x, Variable):
+            x = x.data
+        if isinstance(y, Variable):
+            y = y.data
         return x, y
 
     def assertEqual(self, x, y, prec=None, message='', allow_inf=False):
@@ -206,7 +223,11 @@ class TestCase(unittest.TestCase):
 
         x, y = self.unwrapVariables(x, y)
 
-        if torch.is_tensor(x) and torch.is_tensor(y):
+        if isinstance(x, torch.Tensor) and isinstance(y, Number):
+            self.assertEqual(x.item(), y, prec, message, allow_inf)
+        elif isinstance(y, torch.Tensor) and isinstance(x, Number):
+            self.assertEqual(x, y.item(), prec, message, allow_inf)
+        elif torch.is_tensor(x) and torch.is_tensor(y):
             def assertTensorsEqual(a, b):
                 super(TestCase, self).assertEqual(a.size(), b.size(), message)
                 if a.numel() > 0:
@@ -214,10 +235,11 @@ class TestCase(unittest.TestCase):
                     b = b.cuda(device=a.get_device()) if a.is_cuda else b.cpu()
                     # check that NaNs are in the same locations
                     nan_mask = a != a
-                    self.assertTrue(torch.equal(nan_mask, b != b))
+                    self.assertTrue(torch.equal(nan_mask, b != b), message)
                     diff = a - b
                     diff[nan_mask] = 0
-                    if diff.is_signed():
+                    # TODO: implement abs on CharTensor
+                    if diff.is_signed() and 'CharTensor' not in diff.type():
                         diff = diff.abs()
                     max_err = diff.max()
                     self.assertLessEqual(max_err, prec, message)
@@ -237,6 +259,8 @@ class TestCase(unittest.TestCase):
             super(TestCase, self).assertEqual(len(x), len(y), message)
             for x_, y_ in zip(x, y):
                 self.assertEqual(x_, y_, prec, message)
+        elif isinstance(x, bool) and isinstance(y, bool):
+            super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
             if abs(x) == float('inf') or abs(y) == float('inf'):
                 if allow_inf:
@@ -255,6 +279,9 @@ class TestCase(unittest.TestCase):
         self.assertEqual(x, y, prec, msg, allow_inf)
 
     def assertNotEqual(self, x, y, prec=None, message=''):
+        if isinstance(prec, str) and message == '':
+            message = prec
+            prec = None
         if prec is None:
             prec = self.precision
 
@@ -378,6 +405,8 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
+        # assertRegexpMatches renamed assertRegex in 3.2
+        assertRegex = unittest.TestCase.assertRegexpMatches
         # assertRaisesRegexp renamed assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 

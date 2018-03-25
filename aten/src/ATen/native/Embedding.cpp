@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
-#include "ATen/Check.h"
+#include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
 #include <cstring>
@@ -66,11 +66,14 @@ Tensor embedding_sparse_backward(
     grad = grad.index(c);
   }
 
+  int64_t num_features = grad.size(-1);
+  auto weight_size = std::array<int64_t, 2>{{ num_weights, num_features }};
+
   auto index = indices.view({1, -1});
-  auto values = grad.contiguous().view({-1, grad.size(1)});
+  auto values = grad.contiguous().view({-1, num_features});
 
   auto& sparse_type = grad.type().toBackend(grad.is_cuda() ? kSparseCUDA : kSparseCPU);
-  return sparse_type.sparse_coo_tensor(index, values);
+  return sparse_type.sparse_coo_tensor(index, values, weight_size);
 }
 
 Tensor embedding_backward_cpu(
@@ -96,7 +99,7 @@ Tensor embedding_backward_cpu(
   }
 
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
-  auto grad_weight = grad_.type().zeros({num_weights, grad_.size(-1)});
+  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad_.size(-1)});
 
 #ifdef _OPENMP
   if (numel > 1000) {
@@ -112,7 +115,7 @@ Tensor embedding_backward_cpu(
       int64_t end = start + (num_weights/nthreads + 1);
       for (int64_t i = 0; i < numel; i++) {
         if (indices_data[i] != padding_idx) {
-          int64_t k = indices_data[i] - TH_INDEX_BASE;
+          int64_t k = indices_data[i];
           if (k >= start && k < end) {
             double scale = 1.0;
             if (scale_grad_by_freq) {

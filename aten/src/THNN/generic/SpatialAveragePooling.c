@@ -223,7 +223,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int64_t nInputPlane; // number of channels (or colors)
 
   real *gradOutput_data;
-  real *input_data, *gradInput_data;
+  real *gradInput_data;
 
   int64_t k;
 

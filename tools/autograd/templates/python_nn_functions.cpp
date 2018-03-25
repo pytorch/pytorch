@@ -15,10 +15,10 @@ using namespace torch::autograd::utils;
 
 namespace torch { namespace autograd {
 
-${py_nn_functions}
+${py_methods}
 
 static PyMethodDef nn_functions[] = {
-  ${py_nn_function_defs}
+  ${py_method_defs}
   {NULL}
 };
 

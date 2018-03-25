@@ -1,5 +1,5 @@
 #include "ATen/ATen.h"
-#include "ATen/Check.h"
+#include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
 #include <sstream>

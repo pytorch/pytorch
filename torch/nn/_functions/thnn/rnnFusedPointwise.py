@@ -6,7 +6,7 @@ from torch._thnn import type2backend
 class GRUFused(Function):
     @staticmethod
     def forward(ctx, input_gate, hidden_gate, hx, ibias=None, hbias=None):
-        ctx.backend = type2backend[type(input_gate)]
+        ctx.backend = type2backend[input_gate.type()]
 
         hy = input_gate.new()
         workspace = input_gate.new(hx.numel() * 5)
@@ -32,7 +32,7 @@ class GRUFused(Function):
     @staticmethod
     @once_differentiable
     def backward(ctx, gradOutput):
-        ctx.backend = type2backend[type(gradOutput)]
+        ctx.backend = type2backend[gradOutput.type()]
 
         gradInputHx = gradOutput.new()
         gradInInput = gradOutput.new(*ctx.igate_size)
@@ -52,7 +52,7 @@ class GRUFused(Function):
 class LSTMFused(Function):
     @staticmethod
     def forward(ctx, input_gate, hidden_gate, cx, ibias=None, hbias=None):
-        ctx.backend = type2backend[type(input_gate)]
+        ctx.backend = type2backend[input_gate.type()]
         hy = input_gate.new()
         cy = input_gate.new()
 
@@ -79,7 +79,7 @@ class LSTMFused(Function):
     @staticmethod
     @once_differentiable
     def backward(ctx, *gradOutput):
-        ctx.backend = type2backend[type(gradOutput[0])]
+        ctx.backend = type2backend[gradOutput[0].type()]
         gradInputCx = gradOutput[0].new()
         gradInGates = gradOutput[0].new(*ctx.hgate_size)
 

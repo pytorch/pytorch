@@ -3,6 +3,9 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+
+#ifndef NO_PYTHON
+
 #include "THP_export.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -118,7 +121,7 @@ struct TypeError : public PyTorchError {
   }
 };
 
-// Translates to Python TypeError
+// Translates to Python ValueError
 struct ValueError : public PyTorchError {
   ValueError(const char *format, ...);
   virtual PyObject* python_type() override {
@@ -127,3 +130,22 @@ struct ValueError : public PyTorchError {
 };
 
 } // namespace torch
+
+#else
+
+namespace torch {
+
+struct PyTorchError : public std::exception {
+  virtual const char* what() const noexcept override {
+    return msg.c_str();
+  }
+  std::string msg;
+};
+
+struct ValueError : public PyTorchError {
+  ValueError(const char *format, ...);
+};
+
+} // namespace torch
+
+#endif
