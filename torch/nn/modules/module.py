@@ -765,10 +765,10 @@ class Module(object):
 
     def _get_name(self):
         return self.__class__.__name__
-    
+
     def get_extra_repr(self):
         r"""Get the extra representation of the module
-        
+
         To print customized extra information, you should reimplement
         this method in your own modules. Each item in the returned list will
         be printed in separate line.
@@ -782,7 +782,7 @@ class Module(object):
             return extra_repr.split('\n')
         else:
             return extra_repr
-    
+
     def _get_child_lines(self):
         child_lines = []
         for key, module in self._modules.items():
