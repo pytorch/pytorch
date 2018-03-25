@@ -130,17 +130,20 @@ void THFloatVector_sigmoid_AVX2(float *y, const float *x, const ptrdiff_t n) {
 void THFloatVector_tanh_AVX2(float* y, const float* x, const ptrdiff_t n) {
   ptrdiff_t i;
   const __m256 one = _mm256_set1_ps(1.0f);
-  __m256 YMM0, YMM1, YMM2, YMM3;
-  for (i = 0; i <= ((n)-16); i += 16) {
+  for (i=0; i<=((n)-16); i+=16) {
+    __m256 YMM0, YMM1, YMM2, YMM3;
     YMM0 = _mm256_loadu_ps(x + i);
     YMM1 = _mm256_loadu_ps(x + i + 8);
 
+    // for e^x using exp256_ps from avx_mathfun.h
     YMM0 = exp256_ps(YMM0);
     YMM1 = exp256_ps(YMM1);
 
+    // e^-x = 1 / e^x
     YMM2 = _mm256_div_ps(one, YMM0);
     YMM3 = _mm256_div_ps(one, YMM1);
 
+    // tanh(x) = (e^x - e^-x)/(e^x + e^-x)
     _mm256_storeu_ps(
         y + i,
         _mm256_div_ps(_mm256_sub_ps(YMM0, YMM2), _mm256_add_ps(YMM0, YMM2)));
@@ -148,7 +151,7 @@ void THFloatVector_tanh_AVX2(float* y, const float* x, const ptrdiff_t n) {
         y + i + 8,
         _mm256_div_ps(_mm256_sub_ps(YMM1, YMM3), _mm256_add_ps(YMM1, YMM3)));
   }
-  for (; i < (n); i++) {
+  for (; i<(n); i++) {
     y[i] = tanh(x[i]);
   }
 }
