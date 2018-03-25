@@ -1,6 +1,5 @@
 #pragma once
 
-#include <Python.h>
 #include <ATen/ATen.h>
 #include <utility>
 #include <vector>

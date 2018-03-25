@@ -3,7 +3,6 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
-#include <Python.h>
 #include <deque>
 #include <memory>
 #include <unordered_map>
@@ -39,6 +38,8 @@ struct Engine {
       const edge_list& outputs = {});
 
   void queue_callback(std::function<void()> callback);
+
+  static Engine& getDefaultEngine();
 
 protected:
   void compute_dependencies(Function* root, GraphTask& task);

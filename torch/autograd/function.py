@@ -267,7 +267,7 @@ def _nested_map(condition, fn, condition_msg=None):
     return _map
 
 
-def _iter_filter(condition, skip_unknown=False, condition_msg=None):
+def _iter_filter(condition, allow_unknown=False, condition_msg=None):
     def _iter(obj):
         if condition(obj):
             yield obj
@@ -277,7 +277,9 @@ def _iter_filter(condition, skip_unknown=False, condition_msg=None):
             for o in obj:
                 for var in _iter(o):
                     yield var
-        elif not skip_unknown:
+        elif allow_unknown:
+            yield obj
+        else:
             raise ValueError("Auto nesting doesn't know how to process "
                              "an input object of type " + torch.typename(obj) +
                              (". Accepted types: " + condition_msg +
@@ -306,7 +308,7 @@ def _unflatten(input, proto):
 
 
 _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), condition_msg="Variables")
-_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), skip_unknown=True)
+_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), allow_unknown=True)
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
 _iter_tensors = _iter_filter(torch.is_tensor, condition_msg="Tensors")

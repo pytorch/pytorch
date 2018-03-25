@@ -32,6 +32,11 @@ ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
 
+# windef.h will define max/min macros if NOMINMAX is not defined
+IF(MSVC)
+  add_definitions(/DNOMINMAX)
+ENDIF(MSVC)
+
 #Check if certain std functions are supported. Sometimes
 #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
 CHECK_CXX_SOURCE_COMPILES("
@@ -61,7 +66,7 @@ endif()
 # Flags
 # When using MSVC
 
-# Detect CUDA architecture and get best NVCC flags
+# Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
 IF(NOT CUDA_FOUND)
   FIND_PACKAGE(CUDA 5.5)
@@ -375,10 +380,20 @@ MACRO(Install_Required_Library ln)
 ENDMACRO(Install_Required_Library libname)
 
 FIND_PACKAGE(BLAS)
+SET(AT_MKL_ENABLED 0)
 IF(BLAS_FOUND)
   SET(USE_BLAS 1)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
+    IF(NOT BLAS_INCLUDE_DIR)
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda, and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
+    ENDIF()
+    INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
+    SET(AT_MKL_ENABLED 1)
   ENDIF()
 ENDIF(BLAS_FOUND)
 
@@ -445,7 +460,7 @@ if(NO_NNPACK)
 else()
   find_package(NNPACK)
   if(NOT NNPACK_FOUND)
-    MESSAGE(STATUS "NNPACK not found. Compiling without nNPACK support")
+    MESSAGE(STATUS "NNPACK not found. Compiling without NNPACK support")
     set(AT_NNPACK_ENABLED 0)
   ELSE()
     INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
@@ -468,6 +483,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/src/THCUNN)
 add_subdirectory(src/ATen)
 include_directories(
 ${CMAKE_CURRENT_SOURCE_DIR}/src
+${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/utils/catch/single_include
 ${CMAKE_CURRENT_BINARY_DIR}/src/ATen)
 if(NOT NO_CUDA)
   include_directories(${CUDA_INCLUDE_DIRS})

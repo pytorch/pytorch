@@ -23,20 +23,20 @@ def set_printoptions(
         linewidth=None,
         profile=None,
 ):
-    """Set options for printing. Items shamelessly taken from Numpy
+    r"""Set options for printing. Items shamelessly taken from NumPy
 
     Args:
         precision: Number of digits of precision for floating point output
-            (default 8).
+            (default = 8).
         threshold: Total number of array elements which trigger summarization
-            rather than full repr (default 1000).
+            rather than full `repr` (default = 1000).
         edgeitems: Number of array items in summary at beginning and end of
-            each dimension (default 3).
+            each dimension (default = 3).
         linewidth: The number of characters per line for the purpose of
-            inserting line breaks (default 80). Thresholded matricies will
+            inserting line breaks (default = 80). Thresholded matricies will
             ignore this parameter.
         profile: Sane defaults for pretty printing. Can override with any of
-            the above options. (default, short, full)
+            the above options. (any one of `default`, `short`, `full`)
     """
     if profile is not None:
         if profile == "default":

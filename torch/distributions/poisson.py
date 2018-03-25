@@ -7,12 +7,6 @@ from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
 
 
-def _poisson(rate):
-    if not isinstance(rate, Variable):
-        return torch._C._VariableFunctions.poisson(Variable(rate)).data
-    return torch._C._VariableFunctions.poisson(rate)
-
-
 class Poisson(ExponentialFamily):
     r"""
     Creates a Poisson distribution parameterized by `rate`, the rate parameter.
@@ -28,7 +22,7 @@ class Poisson(ExponentialFamily):
         [torch.LongTensor of size 1]
 
     Args:
-        rate (Number, Tensor or Variable): the rate parameter
+        rate (Number, Tensor): the rate parameter
     """
     params = {'rate': constraints.positive}
     support = constraints.nonnegative_integer
@@ -41,21 +35,22 @@ class Poisson(ExponentialFamily):
     def variance(self):
         return self.rate
 
-    def __init__(self, rate):
+    def __init__(self, rate, validate_args=None):
         self.rate, = broadcast_all(rate)
         if isinstance(rate, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.rate.size()
-        super(Poisson, self).__init__(batch_shape)
+        super(Poisson, self).__init__(batch_shape, validate_args=validate_args)
 
     def sample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         with torch.no_grad():
-            return _poisson(self.rate.expand(shape))
+            return torch.poisson(self.rate.expand(shape))
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         rate, value = broadcast_all(self.rate, value)
         return (rate.log() * value) - rate - (value + 1).lgamma()
 

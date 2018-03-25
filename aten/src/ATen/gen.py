@@ -1,4 +1,6 @@
-from optparse import OptionParser
+import argparse
+import os
+
 import yaml
 from collections import OrderedDict
 
@@ -19,15 +21,29 @@ from code_template import CodeTemplate
 # is written.) It is invoked from cmake; look for the 'cwrap_files'
 # variable for an up-to-date list of files which are passed.
 
+parser = argparse.ArgumentParser(description='Generate ATen source files')
+parser.add_argument('files', help='cwrap files', nargs='+')
+parser.add_argument(
+    '-s',
+    '--source-path',
+    help='path to source directory for ATen',
+    default='.')
+parser.add_argument(
+    '-o',
+    '--output-dependencies',
+    help='output a list of dependencies into the given file and exit')
+parser.add_argument(
+    '-n',
+    '--no-cuda',
+    action='store_true',
+    help='disable generation of cuda files')
+parser.add_argument(
+    '-d', '--output-dir', help='output directory', default='ATen')
+options = parser.parse_args()
 
-parser = OptionParser()
-parser.add_option('-s', '--source-path', help='path to source directory for ATen',
-                  action='store', default='.')
-parser.add_option('-o', '--output-dependencies',
-                  help='only output a list of dependencies', action='store')
-parser.add_option('-n', '--no-cuda', action='store_true')
 
-options, files = parser.parse_args()
+if options.output_dir is not None and not os.path.exists(options.output_dir):
+    os.makedirs(options.output_dir)
 
 
 class FileManager(object):
@@ -37,7 +53,7 @@ class FileManager(object):
         self.undeclared_files = []
 
     def will_write(self, filename):
-        filename = "ATen/" + filename
+        filename = '{}/{}'.format(options.output_dir, filename)
         if self.outputs_written:
             raise Exception("'will_write' can only be called before " +
                             "the call to write_outputs, refactor so outputs are registered " +
@@ -63,7 +79,7 @@ class FileManager(object):
         self.outputs_written = True
 
     def write(self, filename, s):
-        filename = "ATen/" + filename
+        filename = '{}/{}'.format(options.output_dir, filename)
         self._write_if_changed(filename, s)
         if filename not in self.filenames:
             self.undeclared_files.append(filename)
@@ -331,7 +347,8 @@ def declare_outputs():
     for f in files:
         file_manager.will_write(f)
     for fname in sorted(generators.keys()):
-        file_manager.will_write(fname)
+        if generators[fname]['name'] in backends:
+            file_manager.will_write(fname)
     for backend, density, scalar_types in iterate_types():
         scalar_name = scalar_types[0]
         full_backend = "Sparse" + backend if density == "Sparse" else backend
@@ -342,10 +359,19 @@ def declare_outputs():
             file_manager.will_write("{}{}{}.cpp".format(full_backend, scalar_name, kind))
 
 
+def filter_by_extension(files, *extensions):
+    filtered_files = []
+    for file in files:
+        for extension in extensions:
+            if file.endswith(extension):
+                filtered_files.append(file)
+    return filtered_files
+
+
 def generate_outputs():
-    cwrap_files = [f for f in files if f.endswith('.cwrap')]
-    nn_files = [f for f in files if f.endswith('nn.yaml') or f.endswith('.h')]
-    native_files = [f for f in files if f.endswith('native_functions.yaml')]
+    cwrap_files = filter_by_extension(options.files, '.cwrap')
+    nn_files = filter_by_extension(options.files, 'nn.yaml', '.h')
+    native_files = filter_by_extension(options.files, 'native_functions.yaml')
 
     declarations = [d
                     for file in cwrap_files
@@ -355,7 +381,8 @@ def generate_outputs():
     declarations += native_parse.run(native_files)
     declarations = preprocess_declarations.run(declarations)
     for fname, env in generators.items():
-        file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
+        if env['name'] in backends:
+            file_manager.write(fname, GENERATOR_DERIVED.substitute(env))
 
     # note: this will fill in top_env['type/tensor_method_declarations/definitions']
     # and modify the declarations to include any information that will all_backends

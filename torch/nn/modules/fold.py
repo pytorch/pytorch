@@ -48,7 +48,7 @@ class Fold(Module):
 
         >>> # output_size (3, 3) kernel_size (2, 2), dilation (1, 1), padding (0, 0), stride (1, 1)
         >>> fold = nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1))
-        >>> input = autograd.Variable(torch.randn(1, 36, 1))
+        >>> input = torch.randn(1, 36, 1)
         >>> output = unfold(input)
 
     .. _link:
@@ -121,7 +121,7 @@ class Unfold(Module):
 
         >>> # kernel_size (2, 2), dilation (1, 1), padding (0, 0), stride (1, 1)
         >>> unfold = nn.Unfold((3, 3), (1, 1), (0, 0), (1, 1))
-        >>> input = autograd.Variable(torch.randn(2, 4, 3, 3))
+        >>> input = torch.randn(2, 4, 3, 3)
         >>> output = unfold(input)
 
     .. _link:

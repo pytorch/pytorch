@@ -44,6 +44,10 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   throw std::runtime_error("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
+Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
+  throw std::runtime_error("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
+}
+
 }} // namespace at::native
 
 #else // AT_CUDNN_ENABLED()
@@ -443,11 +447,10 @@ namespace {
           // (same for the hh weights, and the ih and hh biases).
           // Since we're storing all the weights in a single tensor anyway,
           // might as well merge the CUDNN ones into a single tensor as well
+	  int mat_numel = *filter_dim_a.prod().data<int>();
           if (linear_id == 0 || linear_id == num_linear_layers / 2) {
-            AT_ASSERT(*filter_dim_a.prod().data<int>() == *filter_dim_a[0].data<int>(), "filter_dim_a.prod() == filter_dim_a[0]");
             std::initializer_list<int64_t> size = {
-              *filter_dim_a[0].data<int>() * num_linear_layers / 2,
-              *filter_dim_a[2].data<int>()};
+              mat_numel * num_linear_layers / 2, 1};
             // Generate a new parameter tensor which is a view into the
             // weight_buf.
             Tensor param = weight_buf.type().tensor().set_(*weight_buf.storage(), offset, size);
@@ -456,7 +459,7 @@ namespace {
           } else {
             AT_ASSERT(cur_offset == offset, "cur_offset == offset");
           }
-          cur_offset = offset + *filter_dim_a[0].data<int>();
+          cur_offset = offset + mat_numel;
         }
       } // for cudnn_method
       if (layer == 0) {
@@ -982,6 +985,16 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
     dw = at::native::_cudnn_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve);
   }
   return std::tuple<Tensor, Tensor, Tensor, TensorList>{dx, dhx, dcx, dw};
+}
+
+// TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
+// to initialize just the state tensor
+Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
+  auto handle = getCudnnHandle();
+  DropoutDescriptor dropout_desc;
+  auto dropout_p = train ? dropout : 0;
+  dropout_desc.initialize_rng(ty, handle, dropout_p, dropout_seed);
+  return dropout_desc.state;
 }
 
 }} // namespace at::native

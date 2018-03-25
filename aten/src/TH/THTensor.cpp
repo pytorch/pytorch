@@ -1,3 +1,6 @@
+#include <cmath>
+#include <float.h>
+
 #include "THAtomic.h"
 #include "THTensor.h"
 #include "THVector.h"

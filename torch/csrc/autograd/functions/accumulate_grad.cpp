@@ -1,5 +1,3 @@
-#include <Python.h>
-
 #include "torch/csrc/autograd/functions/accumulate_grad.h"
 
 #include "torch/csrc/autograd/grad_mode.h"

@@ -22,16 +22,16 @@ class Pareto(TransformedDistribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        scale (float or Tensor or Variable): Scale parameter of the distribution
-        alpha (float or Tensor or Variable): Shape parameter of the distribution
+        scale (float or Tensor): Scale parameter of the distribution
+        alpha (float or Tensor): Shape parameter of the distribution
     """
     params = {'alpha': constraints.positive, 'scale': constraints.positive}
 
-    def __init__(self, scale, alpha):
+    def __init__(self, scale, alpha, validate_args=None):
         self.scale, self.alpha = broadcast_all(scale, alpha)
         base_dist = Exponential(self.alpha)
         transforms = [ExpTransform(), AffineTransform(loc=0, scale=self.scale)]
-        super(Pareto, self).__init__(base_dist, transforms)
+        super(Pareto, self).__init__(base_dist, transforms, validate_args=validate_args)
 
     @property
     def mean(self):

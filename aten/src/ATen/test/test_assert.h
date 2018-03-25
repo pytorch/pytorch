@@ -11,6 +11,10 @@ static inline void barf(const char *fmt, ...) {
   throw std::runtime_error(msg);
 }
 
+#if defined(_MSC_VER) && CUDA_VERSION < 9000
+#define __func__ __FUNCTION__
+#endif
+
 #if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
 #define AT_EXPECT(x, y) (__builtin_expect((x),(y)))
 #else

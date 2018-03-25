@@ -33,18 +33,17 @@ class Embedding(Module):
 
     Notes:
         Keep in mind that only a limited number of optimizers support
-        sparse gradients: currently it's `optim.SGD` (`cuda` and `cpu`),
-        `optim.SparseAdam` (`cuda` and `cpu`) and `optim.Adagrad` (`cpu`)
+        sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`),
+        :class:`optim.SparseAdam` (`CUDA` and `CPU`) and :class:`optim.Adagrad` (`CPU`)
 
     Examples::
 
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding = nn.Embedding(10, 3)
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = Variable(torch.LongTensor([[1,2,4,5],[4,3,2,9]]))
+        >>> input = torch.LongTensor([[1,2,4,5],[4,3,2,9]])
         >>> embedding(input)
 
-        Variable containing:
         (0 ,.,.) =
          -1.0822  1.2522  0.2434
           0.8393 -0.6062 -0.3348
@@ -56,20 +55,19 @@ class Embedding(Module):
          -0.1527  0.0877  0.4260
           0.8393 -0.6062 -0.3348
          -0.8738 -0.9054  0.4281
-        [torch.FloatTensor of size 2x4x3]
+        [torch.FloatTensor of size (2,4,3)]
 
         >>> # example with padding_idx
         >>> embedding = nn.Embedding(10, 3, padding_idx=0)
-        >>> input = Variable(torch.LongTensor([[0,2,0,5]]))
+        >>> input = torch.LongTensor([[0,2,0,5]])
         >>> embedding(input)
 
-        Variable containing:
         (0 ,.,.) =
           0.0000  0.0000  0.0000
           0.3452  0.4937 -0.9361
           0.0000  0.0000  0.0000
           0.0706 -2.1962 -0.6276
-        [torch.FloatTensor of size 1x4x3]
+        [torch.FloatTensor of size (1,4,3)]
 
     """
 
@@ -139,10 +137,9 @@ class Embedding(Module):
             >> weight = torch.FloatTensor([[1, 2.3, 3], [4, 5.1, 6.3]])
             >> embedding = nn.Embedding.from_pretrained(weight)
             >> # Get embeddings for index 1
-            >> input = Variable(torch.LongTensor([1]))
+            >> input = torch.LongTensor([1])
             >> embedding(input)
 
-            Variable containing:
              4.0000  5.1000  6.3000
             [torch.FloatTensor of size (1,3)]
         """
@@ -180,14 +177,14 @@ class EmbeddingBag(Module):
         weight (Tensor): the learnable weights of the module of shape (num_embeddings, embedding_dim)
 
     Inputs: input, offsets
-        - **input** (N or BxN): LongTensor containing the indices of the embeddings
+        - **input** (``N`` or ``B x N``): LongTensor containing the indices of the embeddings
                                 to extract. When `input` is 1D Tensor of shape `N`,
                                 an `offsets` Tensor is given, that contains the
                                 starting position of each new sequence in the
                                 mini-batch.
-        - **offsets** (B or None): LongTensor containing the starting positions of
+        - **offsets** (``B`` or ``None``): LongTensor containing the starting positions of
                                    each sample in a mini-batch of variable length
-                                   sequences. If `input` is 2D (BxN), then offsets
+                                   sequences. If `input` is 2D (``B x N``), then offsets
                                    does not need to be given, as the `input` is
                                    treated as a mini-batch of fixed length sequences
                                    of length `N` each.
@@ -195,11 +192,11 @@ class EmbeddingBag(Module):
 
     Shape:
         - Input: LongTensor `N`, N = number of embeddings to extract
-                 (or) LongTensor `BxN`, B = number of sequences in mini-batch,
+                 (or) LongTensor ``B x N``, B = number of sequences in mini-batch,
                                         N = number of embeddings per sequence
         - Offsets: LongTensor `B`, B = number of bags. The values are the
                    offsets in `input` for each bag, i.e. the cumsum of lengths.
-                   Offsets is not given if Input is 2D `BxN` Tensor,
+                   Offsets is not given if Input is 2D ``B x N`` Tensor,
                    the input is considered to be of fixed-length sequences
         - Output: `(B, embedding_dim)`
 
@@ -208,14 +205,13 @@ class EmbeddingBag(Module):
         >>> # an Embedding module containing 10 tensors of size 3
         >>> embedding_sum = nn.EmbeddingBag(10, 3, mode='sum')
         >>> # a batch of 2 samples of 4 indices each
-        >>> input = Variable(torch.LongTensor([1,2,4,5,4,3,2,9]))
-        >>> offsets = Variable(torch.LongTensor([0,4]))
+        >>> input = torch.LongTensor([1,2,4,5,4,3,2,9])
+        >>> offsets = torch.LongTensor([0,4])
         >>> embedding_sum(input, offsets)
 
-        Variable containing:
         -0.7296 -4.6926  0.3295
         -0.5186 -0.5631 -0.2792
-        [torch.FloatTensor of size 2x3]
+        [torch.FloatTensor of size (2,3)]
 
     """
 

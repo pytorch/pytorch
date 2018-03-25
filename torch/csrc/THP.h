@@ -28,7 +28,6 @@
 #include "Exceptions.h"
 #include "Generator.h"
 #include "Storage.h"
-#include "Tensor.h"
 #include "Size.h"
 #include "Module.h"
 #include "Types.h"
@@ -37,7 +36,6 @@
 
 #ifdef _THP_CORE
 #include "serialization.h"
-#include "allocators.h"
 
 #include "autograd/autograd.h"
 #endif

@@ -14,11 +14,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN curl -o ~/miniconda.sh -O  https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh  && \
      chmod +x ~/miniconda.sh && \
-     ~/miniconda.sh -b -p /opt/conda && \     
+     ~/miniconda.sh -b -p /opt/conda && \
      rm ~/miniconda.sh && \
-     /opt/conda/bin/conda install numpy pyyaml scipy ipython mkl && \
+     /opt/conda/bin/conda install numpy pyyaml scipy ipython mkl mkl-include && \
      /opt/conda/bin/conda install -c soumith magma-cuda90 && \
-     /opt/conda/bin/conda clean -ya 
+     /opt/conda/bin/conda clean -ya
 ENV PATH /opt/conda/bin:$PATH
 # This must be done before pip so that requirements.txt is available
 WORKDIR /opt/pytorch

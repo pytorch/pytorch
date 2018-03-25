@@ -2,7 +2,7 @@ from common import TestCase, run_tests
 import unittest
 import torch
 import warnings
-from torch.autograd import Variable, variable
+from torch.autograd import Variable
 
 
 class TestIndexing(TestCase):
@@ -95,24 +95,24 @@ class TestIndexing(TestCase):
         self.assertEqual(x, y)
 
     def test_index_getitem_copy_bools_slices(self):
-        true = variable(1).byte()
-        false = variable(0).byte()
+        true = torch.tensor(1, dtype=torch.uint8)
+        false = torch.tensor(0, dtype=torch.uint8)
 
-        tensors = [Variable(torch.randn(2, 3)), variable(3)]
+        tensors = [Variable(torch.randn(2, 3)), torch.tensor(3)]
 
         for a in tensors:
             self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
-            self.assertEqual(variable([]), a[False])
+            self.assertEqual(torch.tensor([]), a[False])
             self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
-            self.assertEqual(variable([]), a[false])
+            self.assertEqual(torch.tensor([]), a[false])
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
     def test_index_setitem_bools_slices(self):
-        true = variable(1).byte()
-        false = variable(0).byte()
+        true = torch.tensor(1, dtype=torch.uint8)
+        false = torch.tensor(0, dtype=torch.uint8)
 
-        tensors = [Variable(torch.randn(2, 3)), variable(3)]
+        tensors = [Variable(torch.randn(2, 3)), torch.tensor(3)]
 
         for a in tensors:
             # prefix with a 1,1, to ensure we are compatible with numpy which cuts off prefix 1s
@@ -136,7 +136,7 @@ class TestIndexing(TestCase):
                     a[:] = neg_ones_expanded * 5
 
     def test_setitem_expansion_error(self):
-        true = variable(1).byte()
+        true = torch.tensor(1, dtype=torch.uint8)
         a = Variable(torch.randn(2, 3))
         # check prefix with  non-1s doesn't work
         a_expanded = a.expand(torch.Size([5, 1]) + a.size())
@@ -146,8 +146,8 @@ class TestIndexing(TestCase):
             a[true] = torch.autograd.Variable(a_expanded)
 
     def test_getitem_scalars(self):
-        zero = variable(0).long()
-        one = variable(1).long()
+        zero = torch.tensor(0, dtype=torch.int64)
+        one = torch.tensor(1, dtype=torch.int64)
 
         # non-scalar indexed with scalars
         a = Variable(torch.randn(2, 3))
@@ -157,7 +157,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[0, one], a[zero, 1])
 
         # scalar indexed with scalar
-        r = variable(0).normal_()
+        r = torch.tensor(0).normal_()
         with self.assertRaises(RuntimeError):
             r[:]
         with self.assertRaises(IndexError):
@@ -165,7 +165,7 @@ class TestIndexing(TestCase):
         self.assertEqual(r, r[...])
 
     def test_setitem_scalars(self):
-        zero = variable(0).long()
+        zero = torch.tensor(0, dtype=torch.int64)
 
         # non-scalar indexed with scalars
         a = Variable(torch.randn(2, 3))
@@ -180,7 +180,7 @@ class TestIndexing(TestCase):
         self.assertEqual(7.7, a[1, 0])
 
         # scalar indexed with scalars
-        r = variable(0).normal_()
+        r = torch.tensor(0).normal_()
         with self.assertRaises(RuntimeError):
             r[:] = 8.8
         with self.assertRaises(IndexError):
@@ -245,7 +245,7 @@ class TestIndexing(TestCase):
     def test_zero_dim_index(self):
         # We temporarily support indexing a zero-dim tensor as if it were
         # a one-dim tensor to better maintain backwards compatibility.
-        x = variable(10)
+        x = torch.tensor(10)
         with warnings.catch_warnings(record=True) as w:
             self.assertEqual(x, x[0])
             self.assertEqual(len(w), 1)

@@ -25,14 +25,21 @@ using Operation = std::function<int(Stack&)>;
 // pc += 1 + offset
 // so a return value of 0 goes to the next instruction
 
-static inline at::Tensor & fromLast(Stack & stack, size_t n) {
-  return *(stack.end() - n);
+// treat the last N elements of the stack as a list, looking up
+// element i
+static inline at::Tensor & peek(Stack & stack, size_t i, size_t N) {
+  return *(stack.end() - N + i);
+}
+// treat the last N elements of the stack as a list, looking up the
+// slice starting at index i and having length len
+static inline ArrayRef<at::Tensor> peekSlice(Stack & stack, size_t i, size_t len, size_t N) {
+  return ArrayRef<at::Tensor>(stack).slice(stack.size() - N + i, len);
+}
+static inline ArrayRef<at::Tensor> last(Stack & stack, size_t N) {
+  return peekSlice(stack, 0, N, N);
 }
 static inline void drop(Stack & stack, size_t n) {
   stack.erase(stack.end() - n, stack.end());
-}
-static inline ArrayRef<at::Tensor> last(Stack & stack, size_t N) {
-  return ArrayRef<at::Tensor>(stack).slice(stack.size() - N, N);
 }
 static inline at::Tensor pop(Stack & stack) {
   auto r = std::move(stack.back());

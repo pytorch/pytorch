@@ -1,4 +1,3 @@
-#include <Python.h>
 #include <iostream>
 #include <vector>
 #include "torch/csrc/autograd/variable.h"

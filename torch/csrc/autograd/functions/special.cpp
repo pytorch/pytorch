@@ -1,10 +1,9 @@
 #include "torch/csrc/autograd/functions/special.h"
 
 #include "torch/csrc/assertions.h"
-#include "torch/csrc/autograd/python_engine.h"
+#include "torch/csrc/autograd/engine.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/edge.h"
 
 #include <cstdint>
 #include <memory>
@@ -289,7 +288,7 @@ variable_list Eval::apply(const variable_list& inputs) {
   if (simple_graph) {
     outputs = (*simple_graph)(inputs);
   } else {
-    auto& engine = python::PythonEngine::getDefaultEngine();
+    auto& engine = Engine::getDefaultEngine();
     auto exec_data = filterRoots(inputs);
     auto next_edges = fmap(
         placeholders,

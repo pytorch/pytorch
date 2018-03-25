@@ -123,13 +123,10 @@ static void tensorNewClone(rpc::RPCMessage& raw_message) {
 static void tensorResize(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
-  THLongStorage *stride = unpackTHLongStorage(raw_message);
   finalize(raw_message);
   at::ArrayRef<int64_t> sizeRef(size->data, size->size);
-  at::ArrayRef<int64_t> strideRef(stride->data, stride->size);
-  tensor.reshape_(sizeRef, strideRef);
+  tensor.resize_(sizeRef);
   THLongStorage_free(size);
-  THLongStorage_free(stride);
 }
 
 static void tensorResizeAs(rpc::RPCMessage& raw_message) {

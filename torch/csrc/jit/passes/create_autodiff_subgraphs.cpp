@@ -23,7 +23,7 @@ void mergeNodes(Block * block, Symbol group_node_kind, ArrayRef<Node*> nodes) {
 
   auto new_graph = std::make_shared<Graph>();
   Node * group_node = graph->create(group_node_kind, 0);
-  group_node->g_(kSubgraph, new_graph);
+  group_node->g_(attr::Subgraph, new_graph);
 
   auto getOrCreateInput = [&](Value * v) {
     if(value_map.count(v) > 0) {
@@ -95,7 +95,7 @@ void CreateAutodiffSubgraphs(Block * block, size_t threshold) {
       groupable.push_back(node);
     } else {
       if(groupable.size() >= threshold) {
-        mergeNodes(block, kGraphExecutor, groupable);
+        mergeNodes(block, prim::GraphExecutor, groupable);
       }
       groupable.clear();
       for (Block * sub_block : node->blocks()) {
@@ -104,7 +104,7 @@ void CreateAutodiffSubgraphs(Block * block, size_t threshold) {
     }
   }
   if(groupable.size() >= threshold) {
-    mergeNodes(block, kGraphExecutor, groupable);
+    mergeNodes(block, prim::GraphExecutor, groupable);
   }
 }
 

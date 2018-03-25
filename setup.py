@@ -91,6 +91,7 @@ import sys
 import os
 import json
 import glob
+import importlib
 
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
@@ -220,6 +221,18 @@ def build_libs(libs):
     if subprocess.call(build_libs_cmd + libs, env=my_env) != 0:
         sys.exit(1)
 
+missing_pydep = '''
+Missing build dependency: Unable to `import {importname}`.
+Please install it via `conda install {module}` or `pip install {module}`
+'''.strip()
+
+
+def check_pydep(importname, module):
+    try:
+        importlib.import_module(importname)
+    except ImportError:
+        raise RuntimeError(missing_pydep.format(importname=importname, module=module))
+
 
 class build_deps(Command):
     user_options = []
@@ -240,6 +253,12 @@ class build_deps(Command):
         check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'cpuinfo', 'CMakeLists.txt'))
+        check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'tbb', 'tbb_remote', 'Makefile'))
+        check_file(os.path.join('aten', 'src', 'ATen', 'utils', 'catch', 'CMakeLists.txt'))
+
+        check_pydep('yaml', 'pyyaml')
+        check_pydep('typing', 'typing')
 
         libs = []
         if WITH_NCCL and not WITH_SYSTEM_NCCL:
@@ -254,6 +273,19 @@ class build_deps(Command):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
+
+        # Copy headers necessary to compile C++ extensions.
+        #
+        # This is not perfect solution as build does not depend on any of
+        # the auto-generated code and auto-generated files will not be
+        # included in this copy. If we want to use auto-generated files,
+        # we need to find a batter way to do this.
+        # More information can be found in conversation thread of PR #5772
+
+        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
+        self.copy_tree('torch/lib/pybind11/include/pybind11/',
+                       'torch/lib/include/pybind11')
+        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
 
 
 build_dep_cmds = {}
@@ -401,12 +433,6 @@ class install(setuptools.command.install.install):
         if not self.skip_build:
             self.run_command('build_deps')
 
-        # Copy headers necessary to compile C++ extensions.
-        self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
-        self.copy_tree('torch/lib/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
-        self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
-
         setuptools.command.install.install.run(self)
 
 
@@ -487,7 +513,10 @@ if IS_DARWIN:
 
 if IS_WINDOWS:
     ATEN_LIB = os.path.join(lib_path, 'ATen.lib')
-    NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
+    if DEBUG:
+        NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopbd.lib')
+    else:
+        NANOPB_STATIC_LIB = os.path.join(lib_path, 'protobuf-nanopb.lib')
 
 main_compile_args = ['-D_THP_CORE']
 main_libraries = ['shm']
@@ -500,9 +529,11 @@ main_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Storage.cpp",
+    "torch/csrc/DataLoader.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/assertions.cpp",
     "torch/csrc/byte_order.cpp",
+    "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
@@ -515,6 +546,7 @@ main_sources = [
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
+    "torch/csrc/utils/tensor_conversion_dispatch.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
     "torch/csrc/allocators.cpp",
@@ -551,6 +583,7 @@ main_sources = [
     "torch/csrc/jit/generated/aten_dispatch.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/compiler.cpp",
+    "torch/csrc/jit/script/module.cpp",
     "torch/csrc/jit/script/init.cpp",
     "torch/csrc/jit/script/python_tree_views.cpp",
     "torch/csrc/autograd/init.cpp",
@@ -808,5 +841,4 @@ if __name__ == '__main__':
                 'lib/include/torch/csrc/utils/*.h',
                 'lib/include/torch/torch.h',
             ]
-        },
-        install_requires=['pyyaml', 'numpy'], )
+        })
