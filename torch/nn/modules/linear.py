@@ -54,11 +54,10 @@ class Linear(Module):
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'in_features=' + str(self.in_features) \
+    def get_extra_repr(self):
+        return 'in_features=' + str(self.in_features) \
             + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None) + ')'
+            + ', bias=' + str(self.bias is not None)
 
 
 class Bilinear(Module):
