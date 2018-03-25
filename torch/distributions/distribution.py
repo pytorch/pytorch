@@ -13,7 +13,7 @@ class Distribution(object):
     has_enumerate_support = False
     _validate_args = False
     support = None
-    params = {}
+    arg_constraints = {}
 
     @staticmethod
     def set_default_validate_args(value):
@@ -27,11 +27,10 @@ class Distribution(object):
         if validate_args is not None:
             self._validate_args = validate_args
         if self._validate_args:
-            if not constraints.is_dependent(self.params):
-                for param, constraint in self.params.items():
-                    if not constraints.is_dependent(constraint):
-                        if not constraint.check(self.__getattribute__(param)).all():
-                            raise ValueError("The parameter {} has invalid values".format(param))
+            for param, constraint in self.arg_constraints.items():
+                if not constraints.is_dependent(constraint):
+                    if not constraint.check(self.__getattribute__(param)).all():
+                        raise ValueError("The parameter {} has invalid values".format(param))
 
     @property
     def batch_shape(self):
@@ -48,19 +47,20 @@ class Distribution(object):
         return self._event_shape
 
     @property
-    def params(self):
+    def arg_constraints(self):
         """
-        Returns a dictionary from param names to `Constraint` objects that
-        should be satisfied by each parameter of this distribution. For
-        distributions with multiple parameterization, only one complete
-        set of parameters should be specified in `.params`.
+        Returns a dictionary from argument names to
+        :class:`~torch.distributions.constraints.Constraint` objects that
+        should be satisfied by each argument of this distribution. Args that
+        are not tensors need not appear in this dict.
         """
         raise NotImplementedError
 
     @property
     def support(self):
         """
-        Returns a `Constraint` object representing this distribution's support.
+        Returns a :class:`~torch.distributions.constraints.Constraint` object
+        representing this distribution's support.
         """
         raise NotImplementedError
 

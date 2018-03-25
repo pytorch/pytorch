@@ -26,7 +26,7 @@ class Bernoulli(ExponentialFamily):
         probs (Number, Tensor): the probabilty of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """
-    params = {'probs': constraints.unit_interval}
+    arg_constraints = {'probs': constraints.unit_interval}
     support = constraints.boolean
     has_enumerate_support = True
     _mean_carrier_measure = 0

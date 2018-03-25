@@ -20,7 +20,7 @@ class Exponential(ExponentialFamily):
     Args:
         rate (float or Tensor): rate = 1 / scale of the distribution
     """
-    params = {'rate': constraints.positive}
+    arg_constraints = {'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
     _mean_carrier_measure = 0

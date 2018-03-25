@@ -52,7 +52,7 @@ class Dirichlet(ExponentialFamily):
         concentration (Tensor): concentration parameter of the distribution
             (often referred to as alpha)
     """
-    params = {'concentration': constraints.positive}
+    arg_constraints = {'concentration': constraints.positive}
     support = constraints.simplex
     has_rsample = True
 
