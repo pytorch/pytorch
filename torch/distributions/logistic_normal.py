@@ -29,7 +29,7 @@ class LogisticNormal(TransformedDistribution):
         loc (float or Tensor): mean of the base distribution
         scale (float or Tensor): standard deviation of the base distribution
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.simplex
     has_rsample = True
 

@@ -507,20 +507,12 @@ BAD_EXAMPLES = [
     ]),
     Example(TransformedDistribution, [
         {
-            'base_distribution': Normal(variable([1, 1], requires_grad=True),
-                                        variable([0, 1], requires_grad=True)),
-            'transforms': [],
+            'base_distribution': Normal(0, 1),
+            'transforms': lambda x: x,
         },
         {
-            'base_distribution': Normal(variable([1, 1], requires_grad=True),
-                                        variable([-1, -1], requires_grad=True)),
-            'transforms': ExpTransform(),
-        },
-        {
-            'base_distribution': Normal(variable([1, 1, 0], requires_grad=True),
-                                        variable([-1, -2, 3], requires_grad=True)),
-            'transforms': [AffineTransform(variable(torch.randn(3, 5)), variable(torch.randn(3, 5))),
-                           ExpTransform()],
+            'base_distribution': Normal(0, 1),
+            'transforms': [lambda x: x],
         },
     ]),
     Example(Uniform, [
@@ -2710,7 +2702,7 @@ class TestConstraints(TestCase):
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
                     try:
-                        constraint = dist.params[name]
+                        constraint = dist.arg_constraints[name]
                     except KeyError:
                         continue  # ignore optional parameters
 
@@ -3331,15 +3323,11 @@ class TestValidation(TestCase):
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
-            if constraints.is_dependent(Dist.params):  # skipping transformed dist
-                continue
             for i, param in enumerate(params):
                 Dist(validate_args=True, **param)
 
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
-            if constraints.is_dependent(Dist.params):  # skipping transformed dist
-                continue
             for i, param in enumerate(params):
                 try:
                     with self.assertRaises(ValueError):

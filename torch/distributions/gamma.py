@@ -29,7 +29,7 @@ class Gamma(ExponentialFamily):
         rate (float or Tensor): rate = 1 / scale of the distribution
             (often referred to as beta)
     """
-    params = {'concentration': constraints.positive, 'rate': constraints.positive}
+    arg_constraints = {'concentration': constraints.positive, 'rate': constraints.positive}
     support = constraints.positive
     has_rsample = True
     _mean_carrier_measure = 0

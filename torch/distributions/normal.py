@@ -24,7 +24,7 @@ class Normal(ExponentialFamily):
         scale (float or Tensor): standard deviation of the distribution
             (often referred to as sigma)
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
     _mean_carrier_measure = 0
