@@ -1,3 +1,5 @@
+import math
+import numbers
 import weakref
 
 import torch
@@ -264,12 +266,12 @@ class ComposeTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         if not self.parts:
-            return x.new([0]).expand_as(x)
+            return torch.zeros_like(x)
         result = 0
         for part in self.parts:
             y = part(x)
-            result += _sum_rightmost(part.log_abs_det_jacobian(x, y),
-                                     self.event_dim - part.event_dim)
+            result = result + _sum_rightmost(part.log_abs_det_jacobian(x, y),
+                                             self.event_dim - part.event_dim)
             x = y
         return result
 
@@ -389,10 +391,11 @@ class AffineTransform(Transform):
     def __eq__(self, other):
         if not isinstance(other, AffineTransform):
             return False
-        result = self.loc.eq(other.loc).all() and self.scale.eq(other.scale).all()
-        if isinstance(result, Variable):
-            result = result.data.view(-1)[0]
-        return result
+        if not (self.loc == other.loc).all().item():
+            return False
+        if not (self.scale == other.scale).all().item():
+            return False
+        return True
 
     @property
     def sign(self):
