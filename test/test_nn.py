@@ -4428,6 +4428,21 @@ class TestNN(NNTestCase):
         expected = m(input1.view(6, 5), input2.view(6, 6)).view(2, 3, 8)
         self.assertEqual(expected, m(input1, input2))
 
+    def test_bilinear_without_bias(self):
+        module = nn.Bilinear(10, 10, 8, bias=False)
+        module2 = nn.Bilinear(10, 10, 8)
+        with torch.no_grad():
+            module2.weight.copy_(module.weight.data)
+            module2.bias.zero_()
+
+        input1 = torch.randn(4, 10)
+        input2 = torch.randn(4, 10)
+
+        output = module(input1, input2)
+        output2 = module2(input1, input2)
+
+        self.assertEqual(output, output2)
+
     def test_conv_tbc(self):
         inp = Variable(torch.randn(9, 4, 5), requires_grad=True)
         weight = Variable(torch.randn(3, 5, 6), requires_grad=True)
