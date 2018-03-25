@@ -58,7 +58,7 @@ deterministic function of a parameter-free random variable. The reparameterized
 sample therefore becomes differentiable. The code for implementing the pathwise
 derivative would be as follows::
 
-    arg_constraints = policy_network(state)
+    params = policy_network(state)
     m = Normal(*params)
     # Any distribution with .has_rsample == True could work based on the application
     action = m.rsample()
