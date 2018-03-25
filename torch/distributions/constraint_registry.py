@@ -68,7 +68,6 @@ object.
 import numbers
 
 from torch.distributions import constraints, transforms
-from torch.distributions.utils import broadcast_all
 
 __all__ = [
     'ConstraintRegistry',
@@ -167,17 +166,15 @@ def _transform_to_positive(constraint):
 @biject_to.register(constraints.greater_than)
 @transform_to.register(constraints.greater_than)
 def _transform_to_greater_than(constraint):
-    loc, scale = broadcast_all(constraint.lower_bound, 1)
     return transforms.ComposeTransform([transforms.ExpTransform(),
-                                        transforms.AffineTransform(loc, scale)])
+                                        transforms.AffineTransform(constraint.lower_bound, 1)])
 
 
 @biject_to.register(constraints.less_than)
 @transform_to.register(constraints.less_than)
 def _transform_to_less_than(constraint):
-    loc, scale = broadcast_all(constraint.upper_bound, -1)
     return transforms.ComposeTransform([transforms.ExpTransform(),
-                                        transforms.AffineTransform(loc, scale)])
+                                        transforms.AffineTransform(constraint.upper_bound, -1)])
 
 
 @biject_to.register(constraints.interval)
