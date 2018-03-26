@@ -223,21 +223,6 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
-vector<TensorShape> TensorInferenceForDotProduct(
-    const OperatorDef& /* def */,
-    const vector<TensorShape>& in) {
-  vector<TIndex> dims(in[0].dims().begin(), in[0].dims().end());
-  return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
-}
-
-OpSchema::Cost CostInferenceForDotProduct(
-    const OperatorDef& def,
-    const vector<TensorShape>& in) {
-  struct OpSchema::Cost c = PointwiseCostInference<1>(def, in);
-  c.params_bytes = 0;
-  return c;
-}
-
 template <>
 bool DotProductGradientOp<float, CPUContext>::RunOnDevice() {
   auto& X = Input(X_IN);
@@ -427,10 +412,7 @@ of the dot product between X and Y.
 )DOC")
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
-    .Output(0, "Z", "1D output tensor")
-    .TensorInferenceFunction(TensorInferenceForDotProduct)
-    .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct));
+    .Output(0, "Z", "1D output tensor");
 
 OPERATOR_SCHEMA(DotProductGradient).NumInputs(3).NumOutputs(2);
 
