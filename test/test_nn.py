@@ -4421,6 +4421,22 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
 
+    def test_bilinear_no_bias(self):
+        module = nn.Bilinear(10, 10, 8)
+        module_no_bias = nn.Bilinear(10, 10, 8, False)
+
+        module.bias.data.zero_()
+        module.weight.data.copy_(module_no_bias.weight)
+
+        input1 = torch.randn(4, 10, requires_grad=True)
+        input2 = torch.randn(4, 10, requires_grad=True)
+
+        output = module(input1, input2)
+        output_no_bias = module_no_bias(input1, input2)
+
+        self.assertEqual(output, output_no_bias)
+        output_no_bias.sum().backward()
+
     def test_bilinear_broadcasting(self):
         m = nn.Bilinear(5, 6, 8)
         input1 = torch.randn(2, 3, 5)
