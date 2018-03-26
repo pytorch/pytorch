@@ -697,11 +697,12 @@ barrier_instance = 0
 
 
 def Synchronize(model, timeout_sec=_DEFAULT_TIMEOUT_SEC):
+    if model._rendezvous is None or model._rendezvous['num_shards'] <= 1:
+        # Single host case
+        return
+
     log.info("Creating synchronization barrier net")
-    assert model._rendezvous is not None, "Missing rendezvous"
     assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
-    assert model._rendezvous['num_shards'] > 1, \
-        "synchronization barrier requires multiple shards"
     global barrier_instance
     instance = barrier_instance
     barrier_instance += 1
