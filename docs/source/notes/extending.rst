@@ -60,7 +60,7 @@ additional comments::
             # None. Thanks to the fact that additional trailing Nones are
             # ignored, the return statement is simple even when the function has
             # optional inputs.
-            input, weight, bias = ctx.saved_variables
+            input, weight, bias = ctx.saved_tensors
             grad_input = grad_weight = grad_bias = None
 
             # These needs_input_grad checks are optional and there only to
