@@ -439,6 +439,24 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._trainer_extra_schema += trainer_extra_record
 
     def __getattr__(self, layer):
+        def is_functional_layer(layer):
+            if core.IsOperator(layer):
+                return True
+            elif layer.startswith('FunctionalLayer'):
+                return True
+            else:
+                return False
+
+        def resolve_functional_layer(layer):
+            if core.IsOperator(layer):
+                return layer
+            elif layer.startswith('FunctionalLayer'):
+                return layer[len('FunctionalLayer'):]
+            else:
+                raise ValueError(
+                    '%s cannot be resolved as functional layer' % layer
+                )
+
         if layer.startswith('__'):
             raise AttributeError(layer)
 
@@ -452,7 +470,11 @@ class LayerModelHelper(model_helper.ModelHelper):
                     new_layer.export_params_for_metrics()
                 return self.add_layer(new_layer)
             return wrapper
-        elif core.IsOperator(layer):
+        elif is_functional_layer(layer):
+            # TODO(xlwang): Desginated layer shadows the usage of an op as a
+            # single layer. To enforce using an op (e.g. Split) as functional
+            # layer, one can call 'model.FunctionalLayerSplit'
+            layer = resolve_functional_layer(layer)
             def wrapper(*args, **kwargs):
                 def apply_operator(net, in_record, out_record, **kwargs):
                     # TODO(amalevich): Switch to net.operator as soon as it gets
