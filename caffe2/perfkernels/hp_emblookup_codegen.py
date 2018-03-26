@@ -57,13 +57,15 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
                 " start = dataInd; dataInd < start + lengths[rangeIndex]; ++dataInd) {")
     code.append("const  " + IndexType + " idx = indices[dataInd];")
     code.append(
-        'CAFFE_ENFORCE(idx >=0 && idx < data_size, "Index ", dataInd, " is out of bounds: ", idx, ", range 0 to ", data_size);')
+        'CAFFE_ENFORCE(idx >=0 && idx < data_size, "Index ", dataInd, "'
+        ' is out of bounds: ", idx, ", range 0 to ", data_size);')
 
     if InType == "uint8_t":
         code.append(OutType + " wgt = 1.f;")
         code.append(OutType + " bio;")
         code.append("if (weights) {")
-        code.append("wgt = weights[dataInd];")
+        code.append(
+            "wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];")
         code.append("}")
         if fused:
             code.append(
@@ -79,7 +81,8 @@ def unroll(uf, IndexType, InType, OutType, use_weights, isa, fused):
     else:
         code.append(OutType + " wgt = 1.f;")
         code.append("if (weights) {")
-        code.append("wgt = weights[dataInd];")
+        code.append(
+            "wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];")
         code.append("}")
     code.append("__m256 vwgt = _mm256_set1_ps(wgt);")
 
@@ -152,7 +155,6 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
         else:
             assert False
 
-
         code.append("_mm_prefetch((&ip_next_T0[j]), _MM_HINT_T0);")
 
         return code
@@ -177,13 +179,15 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
                 " start = dataInd; dataInd < start + lengths[rangeIndex]; ++dataInd) {")
     code.append("const  " + IndexType + " idx = indices[dataInd];")
     code.append(
-        'CAFFE_ENFORCE(idx >=0 && idx < data_size, "Index ", dataInd, " is out of bounds: ", idx, ", range 0 to ", data_size);')
+        'CAFFE_ENFORCE(idx >=0 && idx < data_size, "Index ", dataInd, "' +
+        ' is out of bounds: ", idx, ", range 0 to ", data_size);')
 
     if InType == "uint8_t":
         code.append(OutType + " wgt = 1.f;")
         code.append(OutType + " bio;")
         code.append("if (weights) {")
-        code.append("wgt = weights[dataInd];")
+        code.append(
+            "wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];")
         code.append("}")
         if fused:
             code.append(
@@ -200,7 +204,8 @@ def generic(IndexType, InType, OutType, use_weights, isa, fused):
     else:
         code.append(OutType + " wgt = 1.f;")
         code.append("if (weights) {")
-        code.append("wgt = weights[dataInd];")
+        code.append(
+            "wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];")
         code.append("}")
     code.append("__m256 vwgt = _mm256_set1_ps(wgt);")
 
@@ -272,13 +277,12 @@ else:
     filename = "embedding_lookup_avx2.cc"
 fout = open(filename, 'w')
 
-options = [["int32_t", "float",   "float"],
-           ["int64_t", "float",   "float"],
+options = [["int32_t", "float", "float"],
+           ["int64_t", "float", "float"],
            ["int32_t", "float16", "float"],
            ["int64_t", "float16", "float"],
-           ["int32_t", "uint8_t",  "float"],
-           ["int64_t", "uint8_t",  "float"],
-          ]
+           ["int32_t", "uint8_t", "float"],
+           ["int64_t", "uint8_t", "float"]]
 
 code = []
 # includes
@@ -299,22 +303,28 @@ for o in options:
     [IndexType, InType, OutType] = o
 
     prefix = 'Fused8BitRowwise' if opts.fused else ''
-    fn = 'void {}EmbeddingLookup_{}_{}_{}__avx2_fma('.format(
+    code.append('template <bool IS_WEIGHT_POSITIONAL>')
+    fn_base = '{}EmbeddingLookup_{}_{}_{}'.format(
         prefix, IndexType, InType, OutType
     )
-    code.append(fn)
-    code.append("const TIndex block_size,")
-    code.append("const TIndex output_size,")
-    code.append("const TIndex index_size,")
-    code.append("const TIndex data_size,")
-    code.append("const " + InType + "* input,")
-    code.append("const " + IndexType + "* indices,")
-    code.append("const int* lengths,")
-    code.append("const float* weights,")
+    suffix = '__avx2_fma'
+    fn = "static void " + fn_base + suffix
+    code.append(fn + "(")
+
+    args = []
+    args.append("const TIndex block_size,")
+    args.append("const TIndex output_size,")
+    args.append("const TIndex index_size,")
+    args.append("const TIndex data_size,")
+    args.append("const " + InType + "* input,")
+    args.append("const " + IndexType + "* indices,")
+    args.append("const int* lengths,")
+    args.append("const float* weights,")
     if not opts.fused:
-        code.append("const float* scale_bias,")
-    code.append("bool normalize_by_lengths,")
-    code.append(OutType + "* out)")
+        args.append("const float* scale_bias,")
+    args.append("bool normalize_by_lengths,")
+    args.append(OutType + "* out)")
+    code += args
 
     code.append("{")
     code.append("const " + IndexType + " prefdist_T0 = 16;")
@@ -352,10 +362,30 @@ for o in options:
     code += generic(IndexType, InType, OutType, True, "AVX2", opts.fused)
     code.append("}")
 
-
     code.append("}")
 
+    for is_weight_positional in ['false', 'true']:
+        code.append(
+            "void " + fn_base + "_" + is_weight_positional + suffix + "(")
+        code += args
+        code.append("{")
+        code.append(fn_base + suffix + "<" + is_weight_positional + ">(")
+        code.append("block_size,")
+        code.append("output_size,")
+        code.append("index_size,")
+        code.append("data_size,")
+        code.append("input,")
+        code.append("indices,")
+        code.append("lengths,")
+        code.append("weights,")
+        if not opts.fused:
+            code.append("scale_bias,")
+        code.append("normalize_by_lengths,")
+        code.append("out);")
+        code.append("}")
+
     code.append("\n")
+
 code.append("} // namespace caffe2")
 
 for c in code:

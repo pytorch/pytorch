@@ -28,7 +28,7 @@ namespace caffe2 {
  *   for (j = 0..lengths[i]-1)
  *     for (k = 0..block_size-1)
  *       out[i*block_size + k] += input[indices[pos]*(fused_block_size) + k] *
- *                                (weights ? weights[pos] : 1.0)
+ *           (weights ? weights[IS_WEIGHT_POSITIONAL ? j : pos] : 1.0)
  *     pos += 1
  *   if (normalize_weights && lengths[i] > 0)
  *     for (k = 0..block_size-1)
@@ -36,7 +36,11 @@ namespace caffe2 {
  *
  */
 
-template <typename IndexType, typename InType, typename OutType>
+template <
+    typename IndexType,
+    typename InType,
+    typename OutType,
+    bool IS_WEIGHT_POSITIONAL = false>
 void Fused8BitRowwiseEmbeddingLookup(
     const TIndex block_size,
     const TIndex output_size,

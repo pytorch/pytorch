@@ -5,13 +5,14 @@
 //// DO NOT MODIFY!!!
 //// --------------------------
 
+#include <caffe2/core/common.h>
+#include <caffe2/core/types.h>
 #include <immintrin.h>
-#include "caffe2/core/common.h"
-#include "caffe2/core/types.h"
 
 namespace caffe2 {
 
-void EmbeddingLookup_int32_t_float_float__avx2_fma(
+template <bool IS_WEIGHT_POSITIONAL>
+static void EmbeddingLookup_int32_t_float_float__avx2_fma(
     const TIndex block_size,
     const TIndex output_size,
     const TIndex index_size,
@@ -24,6 +25,7 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int32_t prefdist_T0 = 16;
+  const int32_t fused_block_size = block_size + 0;
   CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");
   if (block_size == 128) {
     // unrolling 16 times
@@ -59,48 +61,48 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (64)), vop64);
         _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (72)), vop72);
-        // skip unecassery prefetch of (&ip_next_T0[72])
+        // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (80)), vop80);
         _mm_prefetch((&ip_next_T0[80]), _MM_HINT_T0);
         vop88 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (88)), vop88);
-        // skip unecassery prefetch of (&ip_next_T0[88])
+        // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (96)), vop96);
         _mm_prefetch((&ip_next_T0[96]), _MM_HINT_T0);
         vop104 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (104)), vop104);
-        // skip unecassery prefetch of (&ip_next_T0[104])
+        // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (112)), vop112);
         _mm_prefetch((&ip_next_T0[112]), _MM_HINT_T0);
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
-        // skip unecassery prefetch of (&ip_next_T0[120])
+        // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -165,32 +167,32 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -235,24 +237,24 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -287,20 +289,20 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -336,16 +338,16 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -373,8 +375,59 @@ void EmbeddingLookup_int32_t_float_float__avx2_fma(
     }
   }
 }
+void EmbeddingLookup_int32_t_float_float_false__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float* input,
+    const int32_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int32_t_float_float__avx2_fma<false>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
+void EmbeddingLookup_int32_t_float_float_true__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float* input,
+    const int32_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int32_t_float_float__avx2_fma<true>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
 
-void EmbeddingLookup_int64_t_float_float__avx2_fma(
+template <bool IS_WEIGHT_POSITIONAL>
+static void EmbeddingLookup_int64_t_float_float__avx2_fma(
     const TIndex block_size,
     const TIndex output_size,
     const TIndex index_size,
@@ -387,6 +440,7 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int64_t prefdist_T0 = 16;
+  const int64_t fused_block_size = block_size + 0;
   CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");
   if (block_size == 128) {
     // unrolling 16 times
@@ -422,48 +476,48 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (64)), vop64);
         _mm_prefetch((&ip_next_T0[64]), _MM_HINT_T0);
         vop72 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (72)), vop72);
-        // skip unecassery prefetch of (&ip_next_T0[72])
+        // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (80)), vop80);
         _mm_prefetch((&ip_next_T0[80]), _MM_HINT_T0);
         vop88 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (88)), vop88);
-        // skip unecassery prefetch of (&ip_next_T0[88])
+        // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (96)), vop96);
         _mm_prefetch((&ip_next_T0[96]), _MM_HINT_T0);
         vop104 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (104)), vop104);
-        // skip unecassery prefetch of (&ip_next_T0[104])
+        // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (112)), vop112);
         _mm_prefetch((&ip_next_T0[112]), _MM_HINT_T0);
         vop120 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (120)), vop120);
-        // skip unecassery prefetch of (&ip_next_T0[120])
+        // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -528,32 +582,32 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (32)), vop32);
         _mm_prefetch((&ip_next_T0[32]), _MM_HINT_T0);
         vop40 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (40)), vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (48)), vop48);
         _mm_prefetch((&ip_next_T0[48]), _MM_HINT_T0);
         vop56 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (56)), vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -598,24 +652,24 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (16)), vop16);
         _mm_prefetch((&ip_next_T0[16]), _MM_HINT_T0);
         vop24 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (24)), vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -650,20 +704,20 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (0)), vop0);
         _mm_prefetch((&ip_next_T0[0]), _MM_HINT_T0);
         vop8 = _mm256_fmadd_ps(vwgt, _mm256_loadu_ps(ip + (8)), vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -699,16 +753,16 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float* ip = &input[idx * block_size];
+        const float* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -736,8 +790,59 @@ void EmbeddingLookup_int64_t_float_float__avx2_fma(
     }
   }
 }
+void EmbeddingLookup_int64_t_float_float_false__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float* input,
+    const int64_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int64_t_float_float__avx2_fma<false>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
+void EmbeddingLookup_int64_t_float_float_true__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float* input,
+    const int64_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int64_t_float_float__avx2_fma<true>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
 
-void EmbeddingLookup_int32_t_float16_float__avx2_fma(
+template <bool IS_WEIGHT_POSITIONAL>
+static void EmbeddingLookup_int32_t_float16_float__avx2_fma(
     const TIndex block_size,
     const TIndex output_size,
     const TIndex index_size,
@@ -750,6 +855,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int32_t prefdist_T0 = 16;
+  const int32_t fused_block_size = block_size + 0;
   CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");
   if (block_size == 128) {
     // unrolling 16 times
@@ -785,16 +891,16 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -806,19 +912,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -830,19 +936,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -854,19 +960,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (72)))),
             vop72);
-        // skip unecassery prefetch of (&ip_next_T0[72])
+        // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (80)))),
             vop80);
-        // skip unecassery prefetch of (&ip_next_T0[80])
+        // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (88)))),
             vop88);
-        // skip unecassery prefetch of (&ip_next_T0[88])
+        // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -878,19 +984,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (104)))),
             vop104);
-        // skip unecassery prefetch of (&ip_next_T0[104])
+        // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (112)))),
             vop112);
-        // skip unecassery prefetch of (&ip_next_T0[112])
+        // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (120)))),
             vop120);
-        // skip unecassery prefetch of (&ip_next_T0[120])
+        // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -955,16 +1061,16 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -976,19 +1082,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1000,19 +1106,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1057,16 +1163,16 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1078,19 +1184,19 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1125,16 +1231,16 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1146,7 +1252,7 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1182,16 +1288,16 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -1225,8 +1331,59 @@ void EmbeddingLookup_int32_t_float16_float__avx2_fma(
     }
   }
 }
+void EmbeddingLookup_int32_t_float16_float_false__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float16* input,
+    const int32_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int32_t_float16_float__avx2_fma<false>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
+void EmbeddingLookup_int32_t_float16_float_true__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float16* input,
+    const int32_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int32_t_float16_float__avx2_fma<true>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
 
-void EmbeddingLookup_int64_t_float16_float__avx2_fma(
+template <bool IS_WEIGHT_POSITIONAL>
+static void EmbeddingLookup_int64_t_float16_float__avx2_fma(
     const TIndex block_size,
     const TIndex output_size,
     const TIndex index_size,
@@ -1239,6 +1396,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int64_t prefdist_T0 = 16;
+  const int64_t fused_block_size = block_size + 0;
   CAFFE_ENFORCE(scale_bias == nullptr, "scale_bias must be nullptr");
   if (block_size == 128) {
     // unrolling 16 times
@@ -1274,16 +1432,16 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1295,19 +1453,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1319,19 +1477,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1343,19 +1501,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (72)))),
             vop72);
-        // skip unecassery prefetch of (&ip_next_T0[72])
+        // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (80)))),
             vop80);
-        // skip unecassery prefetch of (&ip_next_T0[80])
+        // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (88)))),
             vop88);
-        // skip unecassery prefetch of (&ip_next_T0[88])
+        // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1367,19 +1525,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (104)))),
             vop104);
-        // skip unecassery prefetch of (&ip_next_T0[104])
+        // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (112)))),
             vop112);
-        // skip unecassery prefetch of (&ip_next_T0[112])
+        // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (120)))),
             vop120);
-        // skip unecassery prefetch of (&ip_next_T0[120])
+        // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1444,16 +1602,16 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1465,19 +1623,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1489,19 +1647,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (40)))),
             vop40);
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (48)))),
             vop48);
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (56)))),
             vop56);
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1546,16 +1704,16 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1567,19 +1725,19 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (16)))),
             vop16);
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (24)))),
             vop24);
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1614,16 +1772,16 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtph_ps(
@@ -1635,7 +1793,7 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             _mm256_cvtph_ps(
                 _mm_loadu_si128(reinterpret_cast<const __m128i*>(ip + (8)))),
             vop8);
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1671,16 +1829,16 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
             data_size);
         float wgt = 1.f;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const float16* ip = &input[idx * block_size];
+        const float16* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const float16* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const float16* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -1714,8 +1872,59 @@ void EmbeddingLookup_int64_t_float16_float__avx2_fma(
     }
   }
 }
+void EmbeddingLookup_int64_t_float16_float_false__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float16* input,
+    const int64_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int64_t_float16_float__avx2_fma<false>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
+void EmbeddingLookup_int64_t_float16_float_true__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const float16* input,
+    const int64_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int64_t_float16_float__avx2_fma<true>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
 
-void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
+template <bool IS_WEIGHT_POSITIONAL>
+static void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     const TIndex block_size,
     const TIndex output_size,
     const TIndex index_size,
@@ -1728,6 +1937,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int32_t prefdist_T0 = 16;
+  const int32_t fused_block_size = block_size + 0;
   CAFFE_ENFORCE(scale_bias != nullptr, "scale_bias must not be nullptr");
   if (block_size == 128) {
     // unrolling 16 times
@@ -1764,19 +1974,19 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -1788,43 +1998,43 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[32])
+        // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -1836,43 +2046,43 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (72))))),
             _mm256_add_ps(vop72, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[72])
+        // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (80))))),
             _mm256_add_ps(vop80, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[80])
+        // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (88))))),
             _mm256_add_ps(vop88, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[88])
+        // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (96))))),
             _mm256_add_ps(vop96, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[96])
+        // skip unnecessary prefetch of (&ip_next_T0[96])
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (104))))),
             _mm256_add_ps(vop104, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[104])
+        // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (112))))),
             _mm256_add_ps(vop112, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[112])
+        // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (120))))),
             _mm256_add_ps(vop120, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[120])
+        // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -1938,19 +2148,19 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -1962,43 +2172,43 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[32])
+        // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2044,19 +2254,19 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2068,19 +2278,19 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2116,19 +2326,19 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2140,7 +2350,7 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2177,20 +2387,20 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         assert(scale_bias);
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int32_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int32_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -2221,8 +2431,59 @@ void EmbeddingLookup_int32_t_uint8_t_float__avx2_fma(
     }
   }
 }
+void EmbeddingLookup_int32_t_uint8_t_float_false__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const uint8_t* input,
+    const int32_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int32_t_uint8_t_float__avx2_fma<false>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
+void EmbeddingLookup_int32_t_uint8_t_float_true__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const uint8_t* input,
+    const int32_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int32_t_uint8_t_float__avx2_fma<true>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
 
-void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
+template <bool IS_WEIGHT_POSITIONAL>
+static void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
     const TIndex block_size,
     const TIndex output_size,
     const TIndex index_size,
@@ -2235,6 +2496,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
     bool normalize_by_lengths,
     float* out) {
   const int64_t prefdist_T0 = 16;
+  const int64_t fused_block_size = block_size + 0;
   CAFFE_ENFORCE(scale_bias != nullptr, "scale_bias must not be nullptr");
   if (block_size == 128) {
     // unrolling 16 times
@@ -2271,19 +2533,19 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2295,43 +2557,43 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[32])
+        // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
         vop64 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2343,43 +2605,43 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (72))))),
             _mm256_add_ps(vop72, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[72])
+        // skip unnecessary prefetch of (&ip_next_T0[72])
         vop80 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (80))))),
             _mm256_add_ps(vop80, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[80])
+        // skip unnecessary prefetch of (&ip_next_T0[80])
         vop88 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (88))))),
             _mm256_add_ps(vop88, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[88])
+        // skip unnecessary prefetch of (&ip_next_T0[88])
         vop96 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (96))))),
             _mm256_add_ps(vop96, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[96])
+        // skip unnecessary prefetch of (&ip_next_T0[96])
         vop104 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (104))))),
             _mm256_add_ps(vop104, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[104])
+        // skip unnecessary prefetch of (&ip_next_T0[104])
         vop112 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (112))))),
             _mm256_add_ps(vop112, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[112])
+        // skip unnecessary prefetch of (&ip_next_T0[112])
         vop120 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (120))))),
             _mm256_add_ps(vop120, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[120])
+        // skip unnecessary prefetch of (&ip_next_T0[120])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2445,19 +2707,19 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2469,43 +2731,43 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
         vop32 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (32))))),
             _mm256_add_ps(vop32, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[32])
+        // skip unnecessary prefetch of (&ip_next_T0[32])
         vop40 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (40))))),
             _mm256_add_ps(vop40, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[40])
+        // skip unnecessary prefetch of (&ip_next_T0[40])
         vop48 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (48))))),
             _mm256_add_ps(vop48, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[48])
+        // skip unnecessary prefetch of (&ip_next_T0[48])
         vop56 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (56))))),
             _mm256_add_ps(vop56, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[56])
+        // skip unnecessary prefetch of (&ip_next_T0[56])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2551,19 +2813,19 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2575,19 +2837,19 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
         vop16 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (16))))),
             _mm256_add_ps(vop16, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[16])
+        // skip unnecessary prefetch of (&ip_next_T0[16])
         vop24 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (24))))),
             _mm256_add_ps(vop24, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[24])
+        // skip unnecessary prefetch of (&ip_next_T0[24])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2623,19 +2885,19 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         vop0 = _mm256_fmadd_ps(
             vwgt,
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
@@ -2647,7 +2909,7 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
             _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(
                 _mm_loadl_epi64(reinterpret_cast<const __m128i*>(ip + (8))))),
             _mm256_add_ps(vop8, vbio));
-        // skip unecassery prefetch of (&ip_next_T0[8])
+        // skip unnecessary prefetch of (&ip_next_T0[8])
       }
       if (normalize_by_lengths == false) {
         _mm256_storeu_ps(&op[0], vop0);
@@ -2684,20 +2946,20 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
         float wgt = 1.f;
         float bio;
         if (weights) {
-          wgt = weights[dataInd];
+          wgt = weights[IS_WEIGHT_POSITIONAL ? (dataInd - start) : dataInd];
         }
         assert(scale_bias);
         bio = wgt * scale_bias[2 * idx + 1];
         wgt = wgt * scale_bias[2 * idx];
         __m256 vbio = _mm256_set1_ps(bio);
         __m256 vwgt = _mm256_set1_ps(wgt);
-        const uint8_t* ip = &input[idx * block_size];
+        const uint8_t* ip = &input[idx * fused_block_size];
         const int64_t next_T0 = (dataInd < index_size - prefdist_T0)
             ? (dataInd + prefdist_T0)
             : dataInd;
         const int64_t idx_pref_T0 = indices[next_T0];
         CAFFE_ENFORCE(idx_pref_T0 >= 0 && idx_pref_T0 < data_size);
-        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * block_size];
+        const uint8_t* ip_next_T0 = &input[idx_pref_T0 * fused_block_size];
         j = 0;
         for (; j + 8 <= block_size; j += 8) {
           _mm256_storeu_ps(
@@ -2727,6 +2989,56 @@ void EmbeddingLookup_int64_t_uint8_t_float__avx2_fma(
       }
     }
   }
+}
+void EmbeddingLookup_int64_t_uint8_t_float_false__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const uint8_t* input,
+    const int64_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int64_t_uint8_t_float__avx2_fma<false>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
+}
+void EmbeddingLookup_int64_t_uint8_t_float_true__avx2_fma(
+    const TIndex block_size,
+    const TIndex output_size,
+    const TIndex index_size,
+    const TIndex data_size,
+    const uint8_t* input,
+    const int64_t* indices,
+    const int* lengths,
+    const float* weights,
+    const float* scale_bias,
+    bool normalize_by_lengths,
+    float* out) {
+  EmbeddingLookup_int64_t_uint8_t_float__avx2_fma<true>(
+      block_size,
+      output_size,
+      index_size,
+      data_size,
+      input,
+      indices,
+      lengths,
+      weights,
+      scale_bias,
+      normalize_by_lengths,
+      out);
 }
 
 } // namespace caffe2
