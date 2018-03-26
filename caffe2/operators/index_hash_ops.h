@@ -53,8 +53,10 @@ class IndexHashOp : public Operator<Context> {
     for (int i = 0; i < sizeof(T) / sizeof(int8_t); i++) {
       hashed = hashed * 65537 + bytes[i];
     }
-    hashed = static_cast<T>((modulo_ + hashed % modulo_) % modulo_);
-    return hashed;
+    // We want the result of the modulo to be positive. This works under the
+    // assumption that modulo_ > 0 which is enforced in the constructor.
+    auto modHashed = hashed % modulo_;
+    return modHashed >= 0 ? modHashed : modHashed + modulo_;
   }
 
  private:
