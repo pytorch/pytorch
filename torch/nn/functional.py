@@ -1734,7 +1734,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     expected inputs are 3-D, 4-D or 5-D in shape.
 
     The input dimensions are interpreted in the form:
-    `mini-batch x channels x [depth] x [height] x width`
+    `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
     `bilinear` (4D-only), `trilinear` (5D-only)
@@ -1757,8 +1757,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         output and input pixels, and thus the output values can depend on the
         input size. This was the default behavior for these modes up to version
         0.3.1. Since then, the default behavior is ``align_corners = False``.
-        See :class:`nn.Upsample` for concrete examples on how this affects the
-        outputs.
+        See :class:`~torch.nn.Upsample` for concrete examples on how this
+        affects the outputs.
 
     """
     from numbers import Integral
@@ -1844,7 +1844,7 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :meth:`nn.functional.upsample`.
+        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -1864,7 +1864,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :meth:`nn.functional.upsample`.
+        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
         This is equivalent with
         ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
 
@@ -1900,8 +1900,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     :attr:`grid` has values in the range of `[-1, 1]`. This is because the
     pixel locations are normalized by the input height and width.
 
-    For example, values: x: -1, y: -1 is the left-top pixel of the input
-                 values: x: 1, y: 1 is the right-bottom pixel of the input
+    For example, values: x: -1, y: -1 is the left-top pixel of the input, and
+    values: x: 1, y: 1 is the right-bottom pixel of the input.
 
     If :attr:`grid` has values outside the range of `[-1, 1]`, those locations
     are handled as defined by `padding_mode`. Options are `zeros` or `border`,
@@ -2046,7 +2046,7 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=True,
                         reduce=True):
     r"""
-    See :class:`torch.nn.TripletMarginLoss` for details
+    See :class:`~torch.nn.TripletMarginLoss` for details
     """
     return torch._C._VariableFunctions.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap,
                                                            size_average, reduce)
