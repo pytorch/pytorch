@@ -102,7 +102,9 @@ static std::vector<int64_t> compute_sizes(PyObject* seq) {
 
 static ScalarType infer_scalar_type(PyObject *obj) {
   if (PyFloat_Check(obj)) {
-    return ScalarType::Double;
+    // this is always guaranteed to be a floating-point type, and makes it more
+    // convenient to write e.g. torch.tensor(0.) than torch.tensor(0., dtype=torch.Tensor.dtype).
+    return torch::tensor::get_default_tensor_type().scalarType();
   }
   if (THPUtils_checkLong(obj)) {
     return ScalarType::Long;
