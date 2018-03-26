@@ -254,7 +254,6 @@
 #define PRAGMA(P) __pragma(P)
 #endif
 
-#define TH_OMP_OVERHEAD_THRESHOLD_OMP 5000
 #include <omp.h>
 
 /*
