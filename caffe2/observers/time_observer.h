@@ -36,12 +36,6 @@ class TimeOperatorObserver final : public TimeCounter,
       TimeObserver* /* unused */)
       : ObserverBase<OperatorBase>(subject) {}
 
-  std::unique_ptr<ObserverBase<OperatorBase>> copy(
-      OperatorBase* subject) override {
-    return std::unique_ptr<ObserverBase<OperatorBase>>(
-        new TimeOperatorObserver(subject, nullptr));
-  }
-
  private:
   void Start() override;
   void Stop() override;

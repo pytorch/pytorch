@@ -1,4 +1,4 @@
-#include "caffe2/operators/recurrent_network_executor.h"
+#include "caffe2/operators/rnn/recurrent_network_executor.h"
 
 #include "caffe2/core/timer.h"
 
