@@ -70,7 +70,7 @@ class ComputeHistogramForBlobsTest(unittest.TestCase):
         self.assertEqual(fc1_w_curr_normalized_hist.size, num_buckets + 2)
         self.assertAlmostEqual(np.linalg.norm(
             fc1_w_curr_normalized_hist - cur_hist), 0.0, delta=1e-5)
-        self.assertEqual(len(model.net.Proto().op), 10)
+        self.assertEqual(len(model.net.Proto().op), 12)
 
         assert 'fc1_w' + net_modifier.field_name_suffix() in\
             model.net.output_record().field_blobs(),\
