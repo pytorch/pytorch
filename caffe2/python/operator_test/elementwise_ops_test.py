@@ -12,7 +12,7 @@ import numpy as np
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
-    @given(n=st.integers(2, 10), m=st.integers(4, 6),
+    @given(n=st.integers(0, 10), m=st.integers(4, 6),
            d=st.integers(2, 3), seed=st.integers(0, 1000), **hu.gcs)
     def test_div(self, n, m, d, gc, dc, seed):
         np.random.seed(seed)
@@ -38,7 +38,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X, Y], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), seed=st.integers(0, 1000), **hu.gcs)
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
     def test_log(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32) + 1.0
@@ -62,7 +63,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(2, 10), m=st.integers(4, 6),
+    @given(n=st.integers(0, 10), m=st.integers(4, 6),
            d=st.integers(2, 3), seed=st.integers(0, 1000), **hu.gcs)
     def test_powt(self, n, m, d, gc, dc, seed):
         np.random.seed(seed)
@@ -91,8 +92,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
                                    output_to_grad="Z",
                                    grad_reference=powt_grad)
 
-
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), seed=st.integers(0, 1000), **hu.gcs)
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
     def test_sqr(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)
@@ -116,7 +117,13 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(X=hu.tensor(elements=st.floats(0.02, 1)), **hu.gcs)
+    @given(
+        X=hu.tensor(
+            elements=st.floats(0.02, 1),
+            # allow empty tensor
+            min_value=0),
+        **hu.gcs
+    )
     def test_sqrt(self, X, gc, dc):
         def sqrt_op(X):
             return [np.sqrt(X)]
@@ -137,7 +144,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(X=hu.tensor(elements=st.floats(0.05,1)), **hu.gcs)
+    @given(X=hu.tensor(elements=st.floats(0.05, 1)), **hu.gcs)
     def test_sqrt_inplace(self, X, gc, dc):
 
         def sqrt_op(X):
@@ -159,7 +166,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), seed=st.integers(0, 1000), **hu.gcs)
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
     def test_swish(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)
@@ -183,9 +191,11 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), seed=st.integers(0, 1000), **hu.gcs)
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
     def test_swish_gradient_inplace(self, n, m, gc, dc, seed):
         np.random.seed(seed)
+
         def swish(X):
             return [np.divide(X, (1. + np.exp(-X)))]
 
@@ -208,7 +218,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
-    @given(n=st.integers(5, 6), m=st.integers(4, 6), seed=st.integers(0, 1000), **hu.gcs)
+    @given(n=st.integers(0, 6), m=st.integers(4, 6),
+           seed=st.integers(0, 1000), **hu.gcs)
     def test_sigmoid(self, n, m, gc, dc, seed):
         np.random.seed(seed)
         X = np.random.rand(n, m).astype(np.float32)

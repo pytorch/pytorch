@@ -267,8 +267,12 @@ constexpr int CAFFE_MAXIMUM_NUM_BLOCKS = 4096;
  * @brief Compute the number of blocks needed to run N threads.
  */
 inline int CAFFE_GET_BLOCKS(const int N) {
-  return std::min((N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS,
-                  CAFFE_MAXIMUM_NUM_BLOCKS);
+  return std::max(
+      std::min(
+          (N + CAFFE_CUDA_NUM_THREADS - 1) / CAFFE_CUDA_NUM_THREADS,
+          CAFFE_MAXIMUM_NUM_BLOCKS),
+      // Use at least 1 block, since CUDA does not allow empty block
+      1);
 }
 
 class DeviceGuard {
