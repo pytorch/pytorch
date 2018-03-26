@@ -34,7 +34,7 @@ INCLUDE(CheckCXXSourceCompiles)
 
 # disable some verbose warnings
 IF (MSVC)
-  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 ${CMAKE_CXX_FALGS}")
+  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FALGS}")
 ENDIF(MSVC)
 
 # windef.h will define max/min macros if NOMINMAX is not defined
