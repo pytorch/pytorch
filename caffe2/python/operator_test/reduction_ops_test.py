@@ -41,6 +41,26 @@ class TestReductionOps(hu.HypothesisTestCase):
             outputs_with_grads=[0],
         )
 
+    @given(n=st.integers(5, 8), **hu.gcs)
+    def test_elementwise_int_sum(self, n, gc, dc):
+        X = np.random.rand(n).astype(np.int32)
+
+        def sum_op(X):
+            return [np.sum(X)]
+
+        op = core.CreateOperator(
+            "SumElementsInt",
+            ["X"],
+            ["y"]
+        )
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=sum_op,
+        )
+
     @given(n=st.integers(1, 65536),
            dtype=st.sampled_from([np.float32, np.float16]),
            **hu.gcs)
