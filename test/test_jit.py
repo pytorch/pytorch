@@ -445,7 +445,7 @@ class TestJit(TestCase):
 
             @staticmethod
             def backward(ctx, grad_a):
-                a, = ctx.saved_variables
+                a, = ctx.saved_tensors
                 return a * grad_a
 
         x = Variable(torch.randn(10, 10), requires_grad=True)
