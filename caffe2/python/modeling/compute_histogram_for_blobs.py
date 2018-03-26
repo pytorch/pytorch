@@ -33,9 +33,11 @@ class ComputeHistogramForBlobs(NetModifier):
         else:
             self._field_name_suffix = '_curr_normalized_hist'
 
-        self._num_buckets = num_buckets
-        self._lower_bound = lower_bound
-        self._upper_bound = upper_bound
+        self._num_buckets = int(num_buckets)
+        assert self._num_buckets > 0, (
+            "num_buckets need to be greater than 0, got {}".format(num_buckets))
+        self._lower_bound = float(lower_bound)
+        self._upper_bound = float(upper_bound)
 
     def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
         for blob_name in self._blobs:
@@ -44,8 +46,10 @@ class ComputeHistogramForBlobs(NetModifier):
                 raise Exception('blob {0} is not defined in net {1}'.format(
                     blob, net.Name()))
 
+            blob_float = net.Cast(blob, net.NextScopedBlob(prefix=blob +
+                '_float'), to=core.DataType.FLOAT)
             curr_hist, acc_hist = net.AccumulateHistogram(
-                [blob],
+                [blob_float],
                 [net.NextScopedBlob(prefix=blob + '_curr_hist'),
                  net.NextScopedBlob(prefix=blob + '_acc_hist')],
                 num_buckets=self._num_buckets,
