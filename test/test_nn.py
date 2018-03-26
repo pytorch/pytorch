@@ -4428,8 +4428,8 @@ class TestNN(NNTestCase):
         module.bias.data.zero_()
         module.weight.data.copy_(module_no_bias.weight)
 
-        input1 = torch.randn(4, 10, requires_grad=True)
-        input2 = torch.randn(4, 10, requires_grad=True)
+        input1 = torch.randn(4, 10)
+        input2 = torch.randn(4, 10)
 
         output = module(input1, input2)
         output_no_bias = module_no_bias(input1, input2)
