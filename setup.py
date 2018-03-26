@@ -462,11 +462,14 @@ library_dirs = []
 extra_link_args = []
 
 if IS_WINDOWS:
-    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX'
+    extra_compile_args = ['/Z7', '/EHa', '/DNOMINMAX', '/wd4267', '/wd4251', '/wd4522',
+                          '/wd4522', '/wd4838', '/wd4305', '/wd4244', '/wd4190',
+                          '/wd4101', '/wd4996'
                           # /Z7 turns on symbolic debugging information in .obj files
                           # /EHa is about native C++ catch support for asynchronous
                           # structured exception handling (SEH)
                           # /DNOMINMAX removes builtin min/max functions
+                          # /wdXXXX disables warning no. XXXX
                           ]
     if sys.version_info[0] == 2:
         # /bigobj increases number of sections in .obj file, which is needed to link
