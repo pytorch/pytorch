@@ -642,11 +642,11 @@ def instance_norm(g, input, **kwargs):
     weight = kwargs.get("weight", None)
     bias = kwargs.get("bias", None)
     eps = kwargs.get("eps", 1e-5)
-    if not weight:
+    if weight is None:
         weight = g.constant(1.0, [input.type().sizes()[1]], input_type)
     else:
         weight = g.op('Constant', value_t=weight)
-    if not bias:
+    if bias is None:
         bias = g.constant(0.0, [input.type().sizes()[1]], input_type)
     else:
         bias = g.op('Constant', value_t=bias)
