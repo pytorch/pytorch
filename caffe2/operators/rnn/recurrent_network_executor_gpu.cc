@@ -1,4 +1,4 @@
-#include "caffe2/operators/recurrent_network_executor_gpu.h"
+#include "caffe2/operators/rnn/recurrent_network_executor_gpu.h"
 
 #include "caffe2/core/context_gpu.h"
 

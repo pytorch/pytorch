@@ -2,7 +2,7 @@
 #define CAFFE2_OPERATORS_RECURRENT_NETWORK_GPU_EXECUTOR_H_
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/recurrent_network_executor.h"
+#include "caffe2/operators/rnn/recurrent_network_executor.h"
 
 
 #include <map>

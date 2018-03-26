@@ -18,11 +18,6 @@ class ObserverBase {
   virtual void Start() {}
   virtual void Stop() {}
 
-  virtual std::unique_ptr<ObserverBase<T>> copy(T* subject) {
-    LOG(WARNING) << "copy() is not implemented and nullptr will be returned.";
-    return nullptr;
-  }
-
   virtual std::string debugInfo() {
     return "Not implemented.";
   }

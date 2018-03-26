@@ -1,4 +1,4 @@
-#include "caffe2/operators/recurrent_network_blob_fetcher_op.h"
+#include "caffe2/operators/rnn/recurrent_network_blob_fetcher_op.h"
 
 namespace caffe2 {
 

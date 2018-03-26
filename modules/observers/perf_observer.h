@@ -42,8 +42,6 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   PerfOperatorObserver(OperatorBase* op, PerfNetObserver* netObserver);
   virtual ~PerfOperatorObserver();
 
-  std::unique_ptr<ObserverBase<OperatorBase>> copy(
-      OperatorBase* subject) override;
   double getMilliseconds() const;
 
  private:
@@ -60,4 +58,4 @@ class PerfOperatorObserver : public ObserverBase<OperatorBase> {
   PerfNetObserver* netObserver_;
   double milliseconds_;
 };
-}
+} // namespace caffe2

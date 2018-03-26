@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/recurrent_network_op.h"
+#include "caffe2/operators/rnn/recurrent_network_op.h"
 
 namespace caffe2 {
 

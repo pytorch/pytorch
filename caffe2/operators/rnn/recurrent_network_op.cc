@@ -1,4 +1,4 @@
-#include "caffe2/operators/recurrent_network_op.h"
+#include "caffe2/operators/rnn/recurrent_network_op.h"
 #include "caffe2/core/workspace.h"
 #include "caffe2/utils/proto_utils.h"
 

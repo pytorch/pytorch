@@ -5,7 +5,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/operators/recurrent_network_executor.h"
+#include "caffe2/operators/rnn/recurrent_network_executor.h"
 #include "caffe2/utils/conversions.h"
 #include "caffe2/utils/math.h"
 
