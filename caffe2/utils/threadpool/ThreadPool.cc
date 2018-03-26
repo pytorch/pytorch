@@ -41,6 +41,7 @@ constexpr size_t kDefaultMinWorkSize = 80;
 #endif
 
 std::unique_ptr<ThreadPool> ThreadPool::defaultThreadPool() {
+  CAFFE_ENFORCE(cpuinfo_initialize(), "cpuinfo initialization failed");
   int numThreads = cpuinfo_get_processors_count();
 
   bool applyCap = false;

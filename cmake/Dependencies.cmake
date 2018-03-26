@@ -97,6 +97,13 @@ if (NOT TARGET cpuinfo)
   set(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
   set(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
   set(CPUINFO_LIBRARY_TYPE "static" CACHE STRING "")
+  if(MSVC)
+    if (CAFFE2_USE_MSVC_STATIC_RUNTIME)
+      set(CPUINFO_RUNTIME_TYPE "static" CACHE STRING "")
+    else()
+      set(CPUINFO_RUNTIME_TYPE "shared" CACHE STRING "")
+    endif()
+  endif()
   add_subdirectory(
     "${CPUINFO_SOURCE_DIR}"
     "${CONFU_DEPENDENCIES_BINARY_DIR}/cpuinfo")
