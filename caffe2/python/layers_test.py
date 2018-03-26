@@ -1731,8 +1731,9 @@ class TestLayers(LayersTestCase):
         schema.FeedRecord(
             input_record, [np.array(x).astype(np.float32) for x in data]
         )
-        half_life = int(np.random.random() * 1e2)
-        quad_life = int(np.random.random() * 1e3 + 2 * half_life)
+        # ensure: quad_life > 2 * half_life
+        half_life = int(np.random.random() * 1e2 + 1)
+        quad_life = int(np.random.random() * 1e3 + 2 * half_life + 1)
         result = self.model.HomotopyWeight(
             input_record,
             min_weight=0.,

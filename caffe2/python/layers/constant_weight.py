@@ -12,7 +12,12 @@ import numpy as np
 
 class ConstantWeight(ModelLayer):
     def __init__(
-        self, model, input_record, weights, name='constant_weight', **kwargs
+        self,
+        model,
+        input_record,
+        weights=None,
+        name='constant_weight',
+        **kwargs
     ):
         super(ConstantWeight,
               self).__init__(model, name, input_record, **kwargs)
@@ -21,6 +26,10 @@ class ConstantWeight(ModelLayer):
         )
         self.data = self.input_record.field_blobs()
         self.num = len(self.data)
+        weights = (
+            weights if weights is not None else
+            [1. / self.num for _ in range(self.num)]
+        )
         assert len(weights) == self.num
         self.weights = [
             self.model.add_global_constant(
