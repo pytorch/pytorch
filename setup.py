@@ -35,7 +35,7 @@
 #
 #   NO_SYSTEM_NCCL
 #     disables use of system-wide nccl (we will use our submoduled
-#     copy in torch/lib/nccl)
+#     copy in third_party/nccl)
 #
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
@@ -190,9 +190,9 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     if IS_WINDOWS:
-        build_libs_cmd = ['torch\\lib\\build_libs.bat']
+        build_libs_cmd = ['build_pytorch_libs.bat']
     else:
-        build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
+        build_libs_cmd = ['bash', 'build_pytorch_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["NUM_JOBS"] = str(NUM_JOBS)
@@ -283,8 +283,8 @@ class build_deps(Command):
         # More information can be found in conversation thread of PR #5772
 
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
-        self.copy_tree('torch/lib/pybind11/include/pybind11/',
-                       'torch/lib/include/pybind11')
+        self.copy_tree('third_party/pybind11/include/pybind11/',
+                       'third_party/include/pybind11')
         self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
 
 

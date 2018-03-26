@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 
-# Shell script used to build the torch/lib/* dependencies prior to
+# Shell script used to build the aten/* and third_party/* dependencies prior to
 # linking the libraries and passing the headers to the Python extension
 # compilation stage. This file is used from setup.py, but can also be
 # called standalone to compile the libraries outside of the overall PyTorch
 # build process.
+#
+# TODO: Replace this with a CMakeLists.txt
 
 set -ex
 
@@ -27,6 +29,8 @@ if [[ "$1" == "--with-gloo-ibverbs" ]]; then
   shift
 fi
 
+CMAKE_INSTALL=${CMAKE_INSTALL-make install}
+
 # Save user specified env vars, we will manually propagate them
 # to cmake.  We copy distutils semantics, referring to
 # cpython/Lib/distutils/sysconfig.py as the source of truth
@@ -45,11 +49,12 @@ if [[ -n "$CPPFLAGS" ]]; then
   USER_LDFLAGS="$USER_LDFLAGS $CPPFLAGS"
 fi
 
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")"
 PWD=`printf "%q\n" "$(pwd)"`
 BASE_DIR="$PWD"
-cd torch/lib
-INSTALL_DIR="$PWD/tmp_install"
+INSTALL_DIR="$BASE_DIR/torch/lib/tmp_install"
+THIRD_PARTY_DIR="$BASE_DIR/third_party"
+
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
 C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
@@ -96,10 +101,12 @@ fi
 
 # Used to build an individual library, e.g. build TH
 function build() {
+  pushd $THIRD_PARTY_DIR
+
   # We create a build directory for the library, which will
   # contain the cmake output
   mkdir -p build/$1
-  cd build/$1
+  pushd build/$1
   BUILD_C_FLAGS=''
   case $1 in
       THCS | THCUNN ) BUILD_C_FLAGS=$C_FLAGS;;
@@ -141,7 +148,7 @@ function build() {
               ${@:2} \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
-  cd ../..
+  popd
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
   if [ -f "$lib_prefix$LD_POSTFIX" ]; then
@@ -149,32 +156,38 @@ function build() {
   fi
 
   if [[ $(uname) == 'Darwin' ]]; then
-    cd tmp_install/lib
+    pushd "$INSTALL_DIR/lib"
     for lib in *.dylib; do
       echo "Updating install_name for $lib"
       install_name_tool -id @rpath/$lib $lib
     done
-    cd ../..
+    popd
   fi
+
+  popd
 }
 
 function build_nccl() {
-   mkdir -p build/nccl
-   cd build/nccl
-   ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
-               ${CMAKE_GENERATOR} \
-               -DCMAKE_BUILD_TYPE=Release \
-               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
-               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
-               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+  pushd "$THIRD_PARTY_DIR"
+
+  mkdir -p build/nccl
+  pushd build/nccl
+  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+              ${CMAKE_GENERATOR} \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
+              -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
+              -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
+              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
   ${CMAKE_INSTALL}
-   mkdir -p ${INSTALL_DIR}/lib
-   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
-   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
-     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
-   fi
-   cd ../..
+  mkdir -p ${INSTALL_DIR}/lib
+  cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
+  if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
+    ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
+  fi
+  popd
+
+  popd
 }
 
 # purpusefully not using build() because we need ATen to build the same
@@ -186,9 +199,13 @@ function build_nccl() {
 # detected them (to ensure that we have a consistent view between the
 # PyTorch and ATen builds.)
 function build_aten() {
+  # TODO: This is goofy (it comes from the time when aten lived
+  # in torch/lib) but I don't feel like fixing it right now
+  pushd $THIRD_PARTY_DIR
+
   mkdir -p build/aten
-  cd  build/aten
-  ${CMAKE_VERSION} ../../../../aten \
+  pushd build/aten
+  ${CMAKE_VERSION} ../../../aten \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
       -DNO_CUDA=$((1-$WITH_CUDA)) \
@@ -207,11 +224,13 @@ function build_aten() {
       # to aten/CMakeLists.txt, not here.  We need the vanilla
       # cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
-  cd ../..
+  popd
+
+  popd
 }
 
 # In the torch/lib directory, create an installation directory
-mkdir -p tmp_install
+mkdir -p torch/lib/tmp_install
 
 # Build
 for arg in "$@"; do
@@ -227,6 +246,8 @@ for arg in "$@"; do
         build $arg
     fi
 done
+
+pushd torch/lib
 
 # If all the builds succeed we copy the libraries, headers,
 # binaries to torch/lib
@@ -250,3 +271,5 @@ then
     # copy over dependency libraries into the current dir
     cp "$PYTORCH_SO_DEPS" .
 fi
+
+popd

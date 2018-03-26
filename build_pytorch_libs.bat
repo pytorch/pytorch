@@ -1,11 +1,9 @@
 @echo off
 cd "%~dp0"
-cd "../.."
 
 set BASE_DIR=%cd:\=/%
-cd torch/lib
-
-set INSTALL_DIR=%cd:\=/%/tmp_install
+set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
+set THIRD_PARTY_DIR=%cd:\=/%/third_party
 set PATH=%INSTALL_DIR%/bin;%PATH%
 set BASIC_C_FLAGS= /DTH_INDEX_BASE=0 /I%INSTALL_DIR%/include /I%INSTALL_DIR%/include/TH /I%INSTALL_DIR%/include/THC /I%INSTALL_DIR%/include/THS /I%INSTALLDIR%/include/THCS /I%INSTALLDIR%/include/THPP /I%INSTALLDIR%/include/THNN /I%INSTALLDIR%/include/THCUNN
 set BASIC_CUDA_FLAGS= -DTH_INDEX_BASE=0 -I%INSTALL_DIR%/include -I%INSTALL_DIR%/include/TH -I%INSTALL_DIR%/include/THC -I%INSTALL_DIR%/include/THS -I%INSTALLDIR%/include/THCS -I%INSTALLDIR%/include/THPP -I%INSTALLDIR%/include/THNN -I%INSTALLDIR%/include/THCUNN
@@ -69,6 +67,8 @@ goto read_loop
 
 :after_loop
 
+cd torch\lib
+
 copy /Y tmp_install\lib\* .
 IF EXIST ".\tmp_install\bin" (
   copy /Y tmp_install\bin\* .
@@ -77,11 +77,14 @@ xcopy /Y /E tmp_install\include\*.* include\*.*
 xcopy /Y ..\..\aten\src\THNN\generic\THNN.h  .
 xcopy /Y ..\..\aten\src\THCUNN\generic\THCUNN.h .
 
+cd ..\..
+
 goto:eof
 
 :build
   @setlocal
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
+  cd third_party
   mkdir build\%~1
   cd build/%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -114,6 +117,7 @@ goto:eof
   %MAKE_COMMAND%
   IF NOT %ERRORLEVEL%==0 exit 1
   cd ../..
+  cd ..
   @endlocal
 
 goto:eof
@@ -121,9 +125,10 @@ goto:eof
 :build_aten
   @setlocal
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
+  cd third_party
   mkdir build\%~1
   cd build/%~1
-  cmake ../../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
+  cmake ../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DNO_CUDA=%NO_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
@@ -135,6 +140,7 @@ goto:eof
   %MAKE_COMMAND%
   IF NOT %ERRORLEVEL%==0 exit 1
   cd ../..
+  cd ..
   @endlocal
 
 goto:eof
