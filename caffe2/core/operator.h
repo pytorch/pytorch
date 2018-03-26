@@ -460,6 +460,10 @@ class Operator : public OperatorBase {
     return HasAsyncPart() && context_.SupportsAsyncScheduling();
   }
 
+  const Context* getContext() const {
+    return &context_;
+  }
+
  protected:
   void RecordEvent(const char* err_msg = nullptr) final {
     if (event_) {
