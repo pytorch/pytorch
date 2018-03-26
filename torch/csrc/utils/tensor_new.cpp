@@ -127,7 +127,8 @@ static ScalarType infer_scalar_type(PyObject *obj) {
     ScalarType scalarType = ScalarType::NumOptions;
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
-    if (length == 0) return ScalarType::Double;  // match NumPy semantics.
+    // match NumPy semantics, except use default tensor type instead of double.
+    if (length == 0) return torch::tensor::get_default_tensor_type().scalarType();
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
       ScalarType item_scalarType = infer_scalar_type(handle.get());
