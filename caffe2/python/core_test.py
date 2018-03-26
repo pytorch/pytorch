@@ -919,6 +919,83 @@ op {
 external_input: "data"
 """
 
+    def test_inject_copy_placeholder_ops(self):
+        '''
+        Test inject cross device copies with placeholder ops. Placeholder ops
+        are decorator/fake ops that don't have operator schema.
+        '''
+        # Create CPU and GPU devices on 2 nodes.
+        cpu_device = []
+        gpu_device = []
+        for i in range(0, 2):
+            cpu_device.append(caffe2_pb2.DeviceOption())
+            cpu_device[i].node_name = 'node:' + str(i)
+            gpu_device.append(caffe2_pb2.DeviceOption())
+            gpu_device[i].device_type = caffe2_pb2.CUDA
+            gpu_device[i].cuda_gpu_id = 0
+            gpu_device[i].node_name = 'node:' + str(i)
+        send_node = 'node:0'
+        recv_node = 'node:1'
+        placeholder_send = 'Placeholder:Dummy:Send'
+        placeholder_recv = 'Placeholder:Dummy:Recv'
+
+        # init_net.
+        init_net = core.Net("init_net")
+        with core.DeviceScope(gpu_device[0]):
+            weight = init_net.XavierFill([], 'fc_w', shape=[10, 100])
+            bias = init_net.ConstantFill([], 'fc_b', shape=[10, ])
+        with core.DeviceScope(cpu_device[0]):
+            op = core.CreateOperator(
+                placeholder_send, [weight, bias], [],
+                dst_node=recv_node, callsite_id=0)
+            init_net._net.op.extend([op])
+
+        # train_net
+        train_net = core.Net("train_net")
+        with core.DeviceScope(cpu_device[1]):
+            # XXX. replace hardcoded op name. Move test to net_transforms.
+            op = core.CreateOperator(
+                placeholder_recv, [], [weight, bias],
+                src_node=send_node, callsite_id=0)
+            train_net._net.op.extend([op])
+            train_net.FC(["data", weight, bias], "fc1")
+
+        # Inject cross device copies.
+        init_net, x_dev_state = core.InjectCrossDeviceCopies(
+            init_net,
+            placeHolderOps=[placeholder_send, placeholder_recv])
+        train_net, x_dev_state = core.InjectCrossDeviceCopies(
+            train_net, x_dev_state,
+            placeHolderOps=[placeholder_send, placeholder_recv])
+
+        # Verify (init_net)
+        op = init_net._net.op[2]
+        self.assertEqual(op.type, "CopyGPUToCPU")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.output[0], "fc_w_cpu")
+        op = init_net._net.op[3]
+        self.assertEqual(op.type, "CopyGPUToCPU")
+        self.assertEqual(op.device_option.device_type, 1)
+        self.assertEqual(op.device_option.cuda_gpu_id, 0)
+        self.assertEqual(op.output[0], "fc_b_cpu")
+        op = init_net._net.op[4]
+        self.assertEqual(op.type, placeholder_send)
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.input[0], "fc_w_cpu")
+        self.assertEqual(op.input[1], "fc_b_cpu")
+        # Verify (train_net)
+        op = train_net._net.op[0]
+        self.assertEqual(op.type, placeholder_recv)
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.output[0], "fc_w_cpu")
+        self.assertEqual(op.output[1], "fc_b_cpu")
+        op = train_net._net.op[3]
+        self.assertEqual(op.type, "FC")
+        self.assertEqual(op.device_option.device_type, 0)
+        self.assertEqual(op.input[1], "fc_w_cpu")
+        self.assertEqual(op.input[2], "fc_b_cpu")
+
     def test_blob_inplace(self):
         net = core.Net("test")
         device_option = caffe2_pb2.DeviceOption()
