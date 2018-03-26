@@ -32,6 +32,11 @@ ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
 
+# disable some verbose warnings
+IF (MSVC)
+  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
+ENDIF(MSVC)
+
 # windef.h will define max/min macros if NOMINMAX is not defined
 IF(MSVC)
   add_definitions(/DNOMINMAX)
@@ -75,7 +80,7 @@ ENDIF()
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503")
+  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ADD_DEFINITIONS(-DTH_EXPORTS)
   IF (NOT NO_CUDA)
     ADD_DEFINITIONS(-DTHC_EXPORTS)
