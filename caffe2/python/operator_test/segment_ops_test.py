@@ -522,6 +522,41 @@ class TestSegmentOps(hu.HypothesisTestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
+    @given(**hu.gcs)
+    def test_sparse_lengths_positional_weighted_sum(
+            self, gc, dc):
+        D = np.random.rand(50, 3, 4, 5).astype(np.float32)
+        W = np.random.rand(50).astype(np.float32)
+        indices = np.random.randint(0, 50, size=10).astype(np.int64)
+        L = np.asarray([4, 4, 2]).astype(np.int32)
+        op = core.CreateOperator(
+            "SparseLengthsPositionalWeightedSum",
+            ["D", "W", "indices", "L"],
+            "out")
+
+        def ref_sparse(D, W, indices, L):
+            workspace.FeedBlob("L", L)
+            lengths_range_fill_op = core.CreateOperator(
+                "LengthsRangeFill", ["L"], ["L_pos_seq"])
+            workspace.RunOperatorOnce(lengths_range_fill_op)
+
+            workspace.FeedBlob("W", W)
+            gather_op = core.CreateOperator(
+                "Gather", ["W", "L_pos_seq"], ["W_gathered"])
+            workspace.RunOperatorOnce(gather_op)
+
+            workspace.FeedBlob("D", D)
+            workspace.FeedBlob("indices", indices)
+            sparse_op = core.CreateOperator(
+                "SparseLengthsWeightedSum",
+                ["D", "W_gathered", "indices", "L"],
+                "out_ref")
+            workspace.RunOperatorOnce(sparse_op)
+
+            return (workspace.FetchBlob("out_ref"),)
+
+        self.assertReferenceChecks(
+            gc, op, [D, W, indices, L], ref_sparse)
 
 if __name__ == "__main__":
     import unittest
