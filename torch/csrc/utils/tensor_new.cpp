@@ -169,19 +169,17 @@ static void recursive_store(char* data, IntList sizes, IntList strides, int64_t 
 }
 
 static Tensor internal_new_from_data(const Type & type, int device, PyObject* data,
-                                     bool allow_variables, bool copy_variables, bool copy_numpy,
+                                     bool copy_variables, bool copy_numpy,
                                      bool type_inference) {
   if (THPUtils_checkString(data)) {
     throw TypeError("new(): invalid data type '%s'", Py_TYPE(data)->tp_name);
   }
 
-  if (allow_variables) {
-    if (THPVariable_Check(data)) {
+  if (THPVariable_Check(data)) {
       auto var = reinterpret_cast<THPVariable*>(data)->cdata;
       const auto& type_to_use = type_inference ? var.type() : type;
         return copy_variables ? new_with_tensor_copy(type_to_use, var, device) :
                                 new_with_type_conversion(type_to_use, var, device);
-    }
   }
 
 #ifdef WITH_NUMPY
@@ -204,11 +202,11 @@ static Tensor internal_new_from_data(const Type & type, int device, PyObject* da
 }
 
 Tensor legacy_new_from_data(const Type & type, int device, PyObject *data) {
-  return internal_new_from_data(type, device, data, false, false, false, false);
+  return internal_new_from_data(type, device, data, false, false, false);
 }
 
 static Tensor new_from_data_copy(const Type & type, int device, PyObject *data) {
-  return internal_new_from_data(type, device, data, true, true, true, false);
+  return internal_new_from_data(type, device, data, true, true, false);
 }
 
 static Tensor legacy_new_from_sequence(const Type & type, int device, PyObject* data) {
@@ -424,8 +422,8 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.toInt64(3));
     // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, false);
-    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, type_inference);
+    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), false, true, false);
+    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), false, true, type_inference);
     const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? kSparseCUDA : kSparseCPU);
     return set_requires_grad(sparse_type_to_use.sparse_coo_tensor(indices, values), r.toBool(4));
   } else if (r.idx == 1) {
@@ -436,8 +434,8 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.toInt64(4));
     // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, false);
-    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, type_inference);
+    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), false, true, false);
+    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), false, true, type_inference);
     const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? kSparseCUDA : kSparseCPU);
     return set_requires_grad(sparse_type_to_use.sparse_coo_tensor(indices, values, r.intlist(2)), r.toBool(5));
   }
@@ -453,7 +451,7 @@ Tensor tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs) {
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     bool type_inference = r.isNone(1);
-    return set_requires_grad(internal_new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0), true, true, true, type_inference), r.toBool(3));
+    return set_requires_grad(internal_new_from_data(r.typeWithDefault(1, type), r.toInt64(2), r.pyobject(0), true, true, type_inference), r.toBool(3));
   }
   throw std::runtime_error("tensor(): invalid arguments");
 }
