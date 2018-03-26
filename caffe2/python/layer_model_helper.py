@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, model_helper, schema, scope
+from caffe2.python import core, model_helper, schema, scope, utils
 from caffe2.python.modeling.parameter_info import (
     ParameterInfo,
 )
@@ -164,17 +164,6 @@ class LayerModelHelper(model_helper.ModelHelper):
         # if the name was already registered in global_constants, it will not be
         # added even if the intended value is different from its original value
 
-        def op_equal(operator1, operator2):
-            o1 = copy.deepcopy(operator1)
-            o2 = copy.deepcopy(operator2)
-            # debug_info is supposed to be different, and we don't need to
-            # compare debug_info
-            if hasattr(o1, 'debug_info'):
-                o1.debug_info = ''
-            if hasattr(o2, 'debug_info'):
-                o2.debug_info = ''
-            return o1 == o2
-
         if name in self.global_constants:
             blob_name = self.global_constants[name]
             initializer_op = \
@@ -183,8 +172,11 @@ class LayerModelHelper(model_helper.ModelHelper):
                 )
             # check if the original initializer is the same as the one intended
             # now
-            assert op_equal(initializer_op,
-                            self.global_constant_initializers[blob_name]), \
+            assert utils.OpAlmostEqual(
+                initializer_op,
+                self.global_constant_initializers[blob_name],
+                'debug_info'
+            ), \
                 "conflict initializers for global constant %s, " \
                 "previous %s, now %s" % (
                     blob_name, str(initializer_op),

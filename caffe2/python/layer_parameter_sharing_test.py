@@ -3,7 +3,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import scope
+from caffe2.python import core, scope
 from caffe2.python.modeling.parameter_sharing import (
     ParameterSharing,
 )
@@ -119,3 +119,32 @@ class ParameterSharingTest(LayersTestCase):
                         self.model.input_feature_schema.float_features,
                         output_dims + 1
                     )
+
+    def test_layer_duplicated_parameter_init(self):
+        output_dims = 2
+        with scope.NameScope('global_scope'):
+            with ParameterSharing({'new_fc': 'shared_fc'}):
+                self.model.FC(
+                    self.model.input_feature_schema.float_features,
+                    output_dims,
+                    name='shared_fc'
+                )
+                self.model.FC(
+                    self.model.input_feature_schema.float_features,
+                    output_dims,
+                    name='new_fc'
+                )
+
+        train_init_net = core.Net('train_init_net')
+        train_net = core.Net('train_net')
+        for layer in self.model.layers:
+            layer.add_operators(train_net, train_init_net)
+        op_outputs = []
+        for op in train_init_net._net.op:
+            op_outputs.extend(op.output)
+
+        # only fill these parameter blobs once
+        self.assertEquals(
+            sorted(op_outputs),
+            ['global_scope/shared_fc/b', 'global_scope/shared_fc/w']
+        )
