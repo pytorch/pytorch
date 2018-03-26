@@ -8,7 +8,8 @@ from .. import functional as F
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
-    The input data is assumed to be of the form `minibatch x channels x [depth] x [height] x width`.
+    The input data is assumed to be of the form
+    `minibatch x channels x [optional depth] x [optional height] x width`.
     Hence, for spatial inputs, we expect a 4D Tensor and for volumetric inputs, we expect a 5D Tensor.
 
     The algorithms available for upsampling are nearest neighbor and linear, bilinear and trilinear
@@ -18,7 +19,7 @@ class Upsample(Module):
     calculate the output size. (You cannot give both, as it is ambiguous)
 
     Args:
-        size (tuple, optional): a tuple of ints `([D_out], [H_out], W_out)` output sizes
+        size (tuple, optional): a tuple of ints `([optional D_out], [optional H_out], W_out)` output sizes
         scale_factor (int / tuple of ints, optional): the multiplier for the image height / width / depth
         mode (string, optional): the upsampling algorithm: one of `nearest`, `linear`, `bilinear` and `trilinear`.
                                     Default: `nearest`
