@@ -867,7 +867,6 @@ class TestSparse(TestCase):
                                                                     device=device, requires_grad=True)
                         self.assertEqual(indices, sparse_tensor._indices())
                         self.assertEqual(values, sparse_tensor._values())
-                        self.assertEqual(torch.tensor(values).dtype, sparse_tensor.dtype)
                         self.assertEqual(size if include_size else default_size, sparse_tensor.size())
                         self.assertEqual(sparse_dtype, sparse_tensor.dtype)
                         if use_cuda:
