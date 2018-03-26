@@ -52,7 +52,7 @@ class SGD(Optimizer):
                  weight_decay=0, nesterov=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
-        if not 0.0 <= momentum <= 1.0:
+        if not 0.0 <= momentum:
             raise ValueError("Invalid momentum value: {}".format(momentum))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
