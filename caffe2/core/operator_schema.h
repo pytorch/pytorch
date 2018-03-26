@@ -490,7 +490,7 @@ OpSchema::Cost PointwiseCostInference(
   }
 
   c.flops = size * OpsPerPoint;
-  c.bytes_moved = size * sizeof(X.data_type());
+  c.bytes_moved = size;
   return c;
 }
 
