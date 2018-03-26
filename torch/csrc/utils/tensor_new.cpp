@@ -417,25 +417,29 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
   ParsedArgs<6> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
+    bool type_inference = r.isNone(2);
     const auto& sparse_type = r.typeWithDefault(2, default_sparse_type);
     check_is_sparse(sparse_type);
     const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? kCUDA : kCPU);
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.toInt64(3));
     // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, true);
-    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, true);
-    return set_requires_grad(sparse_type.sparse_coo_tensor(indices, values), r.toBool(4));
+    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, false);
+    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, type_inference);
+    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? kSparseCUDA : kSparseCPU);
+    return set_requires_grad(sparse_type_to_use.sparse_coo_tensor(indices, values), r.toBool(4));
   } else if (r.idx == 1) {
+    bool type_inference = r.isNone(3);
     const auto& sparse_type = r.typeWithDefault(3, default_sparse_type);
     check_is_sparse(sparse_type);
     const auto& dense_type = sparse_type.toBackend(sparse_type.is_cuda() ? kCUDA : kCPU);
     const auto& index_type = dense_type.toScalarType(kLong);
     AutoGPU autogpu(r.toInt64(4));
     // explanation of booleans: allow variables, do type conversion of them, copy numpy data
-    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, true);
-    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, true);
-    return set_requires_grad(sparse_type.sparse_coo_tensor(indices, values, r.intlist(2)), r.toBool(5));
+    Tensor indices = internal_new_from_data(index_type, -1, r.pyobject(0), true, false, true, false);
+    Tensor values = internal_new_from_data(dense_type, -1, r.pyobject(1), true, false, true, type_inference);
+    const auto& sparse_type_to_use = values.type().toBackend(values.type().is_cuda() ? kSparseCUDA : kSparseCPU);
+    return set_requires_grad(sparse_type_to_use.sparse_coo_tensor(indices, values, r.intlist(2)), r.toBool(5));
   }
   throw std::runtime_error("sparse_coo_tensor(): invalid arguments");
 }
