@@ -234,6 +234,7 @@ ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
 set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
+set(TBB_INSTALL_INCLUDE_DIR ${AT_INSTALL_INCLUDE_DIR})
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
 set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
@@ -241,8 +242,9 @@ set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
 set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
-target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
-target_link_libraries(ATen PRIVATE tbb_static)
+target_include_directories(tbb_static PUBLIC "$<BUILD_INTERFACE:${TBB_ROOT_DIR}/include>"
+                                             "$<INSTALL_INTERFACE:${AT_INSTALL_INCLUDE_DIR}>")
+target_link_libraries(ATen tbb_static)
 
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
