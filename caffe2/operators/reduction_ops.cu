@@ -7,6 +7,7 @@
 namespace caffe2 {
 
 REGISTER_CUDA_OPERATOR(SumElements, SumElementsOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(SumElementsInt, SumElementsIntOp<int, CUDAContext>);
 REGISTER_CUDA_OPERATOR(SumSqrElements, SumSqrElementsOp<CUDAContext>);
 REGISTER_CUDA_OPERATOR(RowwiseMax, MaxReductionOp<float, CUDAContext, true>);
 REGISTER_CUDA_OPERATOR(ColwiseMax, MaxReductionOp<float, CUDAContext, false>);

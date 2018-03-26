@@ -52,6 +52,29 @@ class SumElementsOp : public Operator<Context> {
 };
 
 template <typename T, class Context>
+class SumElementsIntOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
+  SumElementsIntOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws) {}
+  ~SumElementsIntOp() {}
+
+  bool RunOnDevice() override {
+    auto& X = Input(0);
+    auto* sum = Output(0);
+    sum->Resize(vector<TIndex>());
+    T* data = sum->template mutable_data<T>();
+    math::Sum<T, Context>(
+        X.size(), X.template data<T>(), data, &context_, &scratch_);
+    return true;
+  }
+
+ private:
+  Tensor<Context> scratch_;
+};
+
+template <typename T, class Context>
 class SumElementsGradientOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;

@@ -3,6 +3,7 @@
 namespace caffe2 {
 
 REGISTER_CPU_OPERATOR(SumElements, SumElementsOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(SumElementsInt, SumElementsIntOp<int, CPUContext>);
 REGISTER_CPU_OPERATOR(SumSqrElements, SumSqrElementsOp<CPUContext>);
 
 REGISTER_CPU_OPERATOR(
@@ -26,6 +27,15 @@ OPERATOR_SCHEMA(SumElements)
     .Arg("average", "whether to average or not")
     .Input(0, "X", "Tensor to sum up")
     .Output(0, "sum", "Scalar sum");
+
+OPERATOR_SCHEMA(SumElementsInt)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .ScalarType(TensorProto::INT32)
+    .SetDoc("Sums the integer elements of the input tensor.")
+    .Input(0, "X", "Tensor to sum up")
+    .Output(0, "sum", "Scalar sum");
+SHOULD_NOT_DO_GRADIENT(SumElementsInt);
 
 OPERATOR_SCHEMA(SumSqrElements)
     .NumInputs(1)
