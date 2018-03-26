@@ -576,7 +576,13 @@ set(ONNX_USE_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/onnx)
 include_directories(${ONNX_INCLUDE_DIRS})
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DONNX_NAMESPACE=${ONNX_NAMESPACE}")
-caffe2_interface_library(onnx onnx_library)
+# In mobile build we care about code size, and so we need drop
+# everything (e.g. checker, optimizer) in onnx but the pb definition.
+if (ANDROID OR IOS)
+  caffe2_interface_library(onnx_proto onnx_library)
+else()
+  caffe2_interface_library(onnx onnx_library)
+endif()
 list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
 # Recover the build shared libs option.
 set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
