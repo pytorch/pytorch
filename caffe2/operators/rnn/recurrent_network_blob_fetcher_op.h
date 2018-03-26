@@ -5,7 +5,6 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/operators/recurrent_network_op.h"
 #include "caffe2/operators/rnn/recurrent_network_op.h"
 #include "google/protobuf/text_format.h"
 
