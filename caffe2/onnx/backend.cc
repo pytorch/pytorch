@@ -19,9 +19,11 @@
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
+
+#if !CAFFE2_MOBILE
 #include "onnx/checker.h"
-#include "onnx/defs/schema.h"
 #include "onnx/optimizer/optimize.h"
+#endif
 
 #include "google/protobuf/io/coded_stream.h"
 #include "google/protobuf/io/zero_copy_stream_impl_lite.h"
@@ -94,6 +96,7 @@ caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
   return d;
 }
 
+#if !CAFFE2_MOBILE
 ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
   std::vector<std::string> passes{"fuse_consecutive_transposes",
                                   "eliminate_nop_transpose",
@@ -106,6 +109,7 @@ ModelProto OptimizeOnnx(const ModelProto& input, bool init) {
   }
   return ::ONNX_NAMESPACE::optimization::Optimize(input, passes);
 }
+#endif
 
 template <class T, class U>
 U LookUpWithDefault(
@@ -118,12 +122,6 @@ U LookUpWithDefault(
   } else {
     return it->second;
   }
-}
-
-const ::ONNX_NAMESPACE::OpSchema& GetOnnxSchema(const std::string& key) {
-  const auto* schema = ::ONNX_NAMESPACE::OpSchemaRegistry::Schema(key);
-  CAFFE_ENFORCE(schema, "No ONNX schema registered for '" + key + "'!");
-  return *schema;
 }
 
 void UpdateNames(const caffe2::OperatorDef& op) {
@@ -941,9 +939,14 @@ void Caffe2Backend::OnnxToCaffe2(
     const std::vector<Caffe2Ops>& extras) {
   auto device_option = GetDeviceOption(Device(device));
 
+#if !CAFFE2_MOBILE
   ModelProto init_model = OptimizeOnnx(onnx_model, true);
-
   ModelProto pred_model = OptimizeOnnx(onnx_model, false);
+#else
+  ModelProto init_model = ModelProto();
+  ModelProto pred_model = onnx_model;
+  pred_model.mutable_graph()->mutable_initializer()->Clear();
+#endif
 
   init_net->set_name(onnx_model.graph().name() + "_init");
   pred_net->set_name(onnx_model.graph().name() + "_predict");
@@ -1021,7 +1024,10 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
   Caffe2BackendRep* rep = new Caffe2BackendRep();
   ModelProto onnx_model;
   ParseProtobufFromLargeString(onnx_model_str, &onnx_model);
+
+#if !CAFFE2_MOBILE
   ::ONNX_NAMESPACE::checker::check_model(onnx_model);
+#endif
 
   int opset_version = -1;
   for (const auto& imp : onnx_model.opset_import()) {
