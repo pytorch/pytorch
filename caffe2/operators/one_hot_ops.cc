@@ -47,6 +47,28 @@ bool BatchOneHotOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
+vector<TensorShape> TensorInferenceForBatchOneHot(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  std::vector<TIndex> output_dims(2);
+  output_dims[0] = in[0].dims(0); // N
+  output_dims[1] = in[2].dims(0); // vals.size()
+  return vector<TensorShape>{
+      CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+}
+
+OpSchema::Cost CostInferenceForBatchOneHot(
+    const OperatorDef& def,
+    const vector<TensorShape>& in) {
+  struct OpSchema::Cost c;
+  const TensorShape output = TensorInferenceForBatchOneHot(def, in)[0];
+
+  c.flops = 0;
+  c.bytes_moved = output.dims(0) * output.dims(1) * sizeof(bool);
+  c.params_bytes = 0;
+  return c;
+}
+
 template <>
 void OneHotOp<CPUContext>::DoOneHotOp(
     TIndex batch_size,
@@ -209,7 +231,10 @@ of one-hot encoding for each column. For example
     .Output(
         0,
         "output",
-        "output matrix that expands each input column with one hot encoding");
+        "output matrix that expands each input column with one hot encoding")
+    .TensorInferenceFunction(TensorInferenceForBatchOneHot)
+    .CostInferenceFunction(
+        OpSchema::CostInferenceFunctionType(CostInferenceForBatchOneHot));
 
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
