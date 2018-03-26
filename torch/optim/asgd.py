@@ -70,12 +70,12 @@ class ASGD(Optimizer):
                 # decay term
                 p.data.mul_(1 - group['lambd'] * state['eta'])
 
-                # update parameter
-                p.data.add_(-state['eta'], grad)
-
                 # weight decay
                 if group['weight_decay'] != 0:
                     p.data.add_(-group['weight_decay'], xold)
+
+                # update parameter
+                p.data.add_(-state['eta'], grad)
 
                 # averaging
                 if state['mu'] != 1:
