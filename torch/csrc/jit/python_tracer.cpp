@@ -40,9 +40,19 @@ void initPythonTracerBindings(PyObject* module_) {
       ASSERT_UNEXPIRED("pop_scope");
       s.pop_scope();
     })
-    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers, int64_t onnx_opset_version) {
+    .def("export", [](TracingState& s, const std::vector<at::Tensor>& initializers,
+                      int64_t onnx_opset_version, bool defer_weight_export=false) {
       ASSERT_UNEXPIRED("export");
-      return py::bytes(ExportGraph(s.graph, initializers, onnx_opset_version));
+      std::string graph;
+      RawDataExportMap export_map;
+      std::tie(graph, export_map) = ExportGraph(
+        s.graph, initializers, onnx_opset_version, defer_weight_export);
+      std::unordered_map<std::string, py::bytes> python_serialized_export_map;
+      for (auto& kv : export_map) {
+        python_serialized_export_map[kv.first] = py::bytes(kv.second);
+      }
+      return std::make_tuple(
+          py::bytes(graph), python_serialized_export_map);
     })
     .def("graph", [](TracingState& s) {
       return s.graph;

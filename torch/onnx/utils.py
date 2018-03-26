@@ -18,6 +18,7 @@ import types
 from torch._six import string_classes
 from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes
 
 
 @contextlib.contextmanager
@@ -114,7 +115,7 @@ def _trace(func, args, return_outs=False, aten=False):
 
 
 def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, aten=False):
+            input_names=None, output_names=None, aten=False, export_type=ExportTypes.PROTOBUF_FILE):
     # Special case for common case of passing a single Variable
     if isinstance(args, torch.autograd.Variable):
         args = (args, )
@@ -144,14 +145,44 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
 
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
+    defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
         # NB: OrderedDict values is not actually a list, but trace.export is
         # not duck-typed and expects an actual list.
-        proto = trace.export(list(_unique_state_dict(model).values()), _onnx_opset_version)
+        proto, export_map = trace.export(list(_unique_state_dict(model).values()),
+                                         _onnx_opset_version, defer_weight_export)
     else:
-        proto = trace.export([], _onnx_opset_version)
+        proto, export_map = trace.export([], _onnx_opset_version)
 
-    torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+    if export_type == ExportTypes.PROTOBUF_FILE:
+        assert(len(export_map) == 0)
+        torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+    elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
+        import zipfile
+        compression = zipfile.ZIP_DEFLATED \
+            if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE \
+            else zipfile.ZIP_STORED
+        with zipfile.ZipFile(f, 'w', compression=compression) as z:
+            z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+            for k, v in export_map.items():
+                z.writestr(k, v)
+    elif export_type == ExportTypes.DIRECTORY:
+        import os
+        if os.path.exists(f):
+            assert(os.path.isdir(f))
+        else:
+            os.makedirs(f)
+
+        model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
+        torch.serialization._with_file_like(
+            model_proto_file, "wb", lambda f: f.write(proto))
+
+        for k, v in export_map.items():
+            weight_proto_file = os.path.join(f, k)
+            torch.serialization._with_file_like(
+                weight_proto_file, "wb", lambda f: f.write(v))
+    else:
+        raise RuntimeError('Unknown export type')
     return torch_out
 
 
