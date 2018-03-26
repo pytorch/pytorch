@@ -797,12 +797,13 @@ class Module(object):
         # TODO:the api is to be discussed later
         extra_lines = self._get_extra_lines()
         child_lines = self._get_child_lines()
-        # simple one-liner info, most builtin Moudules will use
-        if len(extra_lines) == 1 and not child_lines:
-            main_str += lines[0]
-        else:
-            lines = extra_lines + child_lines
-            main_str += '\n' + ''.join(['  ' + line + '\n' for line in lines])
+        lines = extra_lines + child_lines
+        if lines:
+            # simple one-liner info, which most builtin Moudules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n' + ''.join(['  ' + line + '\n' for line in lines])
 
         main_str += ')'
         return main_str
