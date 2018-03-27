@@ -1993,5 +1993,23 @@ class TestScript(TestCase):
         o = m(input)
         self.assertEqual(o, input + torch.ones(2, 2))
 
+    def test_script_module_nochange_submodule(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.sub = nn.Linear(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.sub(input)
+
+        m = M()
+        input = torch.randn(1, 5, 5)
+        o = m(input)
+        self.assertEqual(o, m.sub(input))
+        with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
+            m.sub = nn.Linear(5, 5)
+
+
 if __name__ == '__main__':
     run_tests()
