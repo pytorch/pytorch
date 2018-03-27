@@ -3,7 +3,7 @@
 set -ex
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT_DIR=$(cd "$LOCAL_DIR"/.. && pwd)
+ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 
 # Figure out which Python to use
 PYTHON="python"
