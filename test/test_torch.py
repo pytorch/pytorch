@@ -1410,6 +1410,8 @@ class TestTorch(TestCase):
             if TEST_NUMPY:
                 self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
                 self.assertIs(torch.float64, torch.tensor(np.array(5.)).dtype)
+                import numpy.distutils.system_info as sysinfo
+                self.assertEqual(64, sysinfo.platform_bits)
                 self.assertIs(torch.int64, torch.tensor(np.array(5)).dtype)
                 self.assertIs(torch.uint8, torch.tensor(np.array(3, dtype=np.uint8)).dtype)
                 self.assertIs(default_dtype, torch.tensor(((7, np.array(5)), (np.array(9), 5.))).dtype)
