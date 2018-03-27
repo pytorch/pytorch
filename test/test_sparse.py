@@ -874,6 +874,15 @@ class TestSparse(TestCase):
                         self.assertEqual(True, sparse_tensor.requires_grad)
 
     @cpu_only
+    def test_factory_type_inference(self):
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float32))
+        self.assertEqual(torch.sparse.float32, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float64))
+        self.assertEqual(torch.sparse.float64, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
+        self.assertEqual(torch.sparse.int64, t.dtype)
+
+    @cpu_only
     def test_factory_copy(self):
         # both correct
         indices = torch.tensor(([0], [2]), dtype=torch.int64)

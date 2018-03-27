@@ -1394,6 +1394,46 @@ class TestTorch(TestCase):
             a[0] = 7.
             self.assertEqual(5., res1[0].item())
 
+    def test_tensor_factory_type_inference(self):
+        def test_inference(default_dtype):
+            saved_dtype = torch.Tensor.dtype
+            torch.set_default_tensor_type(default_dtype)
+            self.assertIs(default_dtype, torch.tensor(()).dtype)
+            self.assertIs(default_dtype, torch.tensor(5.).dtype)
+            self.assertIs(torch.int64, torch.tensor(5).dtype)
+            self.assertIs(torch.uint8, torch.tensor(True).dtype)
+            self.assertIs(torch.int32, torch.tensor(5, dtype=torch.int32).dtype)
+            self.assertIs(default_dtype, torch.tensor(((7, 5), (9, 5.))).dtype)
+            self.assertIs(default_dtype, torch.tensor(((5., 5), (3, 5))).dtype)
+            self.assertIs(torch.int64, torch.tensor(((5, 3), (3, 5))).dtype)
+
+            if TEST_NUMPY:
+                self.assertIs(torch.float64, torch.tensor(np.array(())).dtype)
+                self.assertIs(torch.float64, torch.tensor(np.array(5.)).dtype)
+                import numpy.distutils.system_info as sysinfo
+                self.assertEqual(64, sysinfo.platform_bits)
+                print("sysinfo.platformbits", sysinfo.platform_bits)
+                print("default numpy float dtype", np.array(5.).dtype, np.array(5).dtype)
+                self.assertEqual(np.int64, np.array(5).dtype)
+                self.assertIs(torch.int64, torch.tensor(np.array(5)).dtype)
+                self.assertIs(torch.uint8, torch.tensor(np.array(3, dtype=np.uint8)).dtype)
+                self.assertIs(default_dtype, torch.tensor(((7, np.array(5)), (np.array(9), 5.))).dtype)
+                self.assertIs(torch.float64, torch.tensor(((7, 5), (9, np.array(5.)))).dtype)
+                self.assertIs(torch.int64, torch.tensor(((5, np.array(3)), (np.array(3), 5))).dtype)
+            torch.set_default_tensor_type(saved_dtype)
+
+        test_inference(torch.float64)
+        test_inference(torch.float32)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_tensor_factory_cuda_type_inference(self):
+        saved_dtype = torch.Tensor.dtype
+        torch.set_default_tensor_type(torch.float32)
+        self.assertIs(torch.float32, torch.tensor(0.).dtype)
+        torch.set_default_tensor_type(torch.cuda.float64)
+        self.assertIs(torch.cuda.float64, torch.tensor(0.).dtype)
+        torch.set_default_tensor_type(saved_dtype)
+
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
         # test data
