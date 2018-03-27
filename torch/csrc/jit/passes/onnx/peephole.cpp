@@ -210,6 +210,21 @@ void fuseTransposeIntoGemm(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void eliminateSequenceLengthsOfPackedSequence(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != prim::SequenceLengthsOfPackedSequence) {
+      continue;
+    }
+    if (n->inputs()[0]->node()->kind() != prim::PackPadded) {
+      continue;
+    }
+    n->outputs()[0]->replaceAllUsesWith(n->inputs()[0]->node()->inputs()[1]);
+    it.destroyCurrent();
+  }
+}
+
 // Why this is here:
 //
 //   Pytorch has a "packed" representation of sequences, as well as a
@@ -316,6 +331,7 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   fuseConsecutiveTransposes(graph);
   eliminateNopTranspose(graph);
   fuseTransposeIntoGemm(graph);
+  eliminateSequenceLengthsOfPackedSequence(graph);
   pushPackingPastRnn(graph);
   removeNopPacking(graph);
 }
