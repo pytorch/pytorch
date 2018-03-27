@@ -14,7 +14,10 @@ void PeepholeOptimize(Block * block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++it) {
     auto* n = *it;
 
-    bool destroyed = false;
+    for (Block * sub_block : n->blocks()) {
+        PeepholeOptimize(sub_block);
+    }
+
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
     // into a different one, then you need to check that they all belong to the given block
     switch (n->kind()) {
@@ -24,7 +27,6 @@ void PeepholeOptimize(Block * block) {
         if (n->is(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());
           it.destroyCurrent();
-          destroyed = true;
         }
         break;
       case aten::t:
@@ -41,15 +43,8 @@ void PeepholeOptimize(Block * block) {
               input_node->destroy();
             }
           }
-          destroyed = true;
         }
         break;
-    }
-
-    if (!destroyed) {
-        for (Block * sub_block : n->blocks()) {
-            PeepholeOptimize(sub_block);
-        }
     }
   }
 }
