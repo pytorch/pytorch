@@ -1,4 +1,4 @@
-@echo off
+:: @echo off
 cd "%~dp0"
 
 set BASE_DIR=%cd:\=/%
@@ -67,9 +67,9 @@ if "%1"=="ATen" (
   IF "%1"=="THD" set IS_OURS=1
   IF "%1"=="libshm_windows" set IS_OURS=1
   if defined IS_OURS (
-    cd torch/lib
+    cd torch\lib
     call:build %~1
-    cd ..
+    cd ..\..
   ) ELSE (
     cd third_party
     call:build %~1
