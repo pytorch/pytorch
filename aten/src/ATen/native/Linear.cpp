@@ -22,11 +22,23 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
             "bilinear(): bias size does not match weight size: got %lld but expected %lld",
             (long long)bias.size(0), (long long)weight.size(0));
 
-  auto b_input1 = input1.unsqueeze(-2).unsqueeze(-2);
-  auto b_input2 = input2.unsqueeze(-2).unsqueeze(-1);
+  std::vector<int64_t> output_size;
+  auto size1 = input1.sizes();
+  output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
+  output_size.push_back(weight.size(0));
 
-  auto output = at::matmul(at::matmul(b_input1, weight), b_input2);
-  output = output.squeeze(-1).squeeze(-1);
+  auto output = input1.type().tensor(output_size);
+  auto buf = input1.type().tensor(input2.sizes());
+
+  size_t output_features = weight.size(0);
+  auto input1_flattened = input1.view({-1, input1.size(-1)});
+  auto buf_flattened = buf.view({-1, buf.size(-1)});
+  for (size_t i = 0; i < output_features; i++) {
+    at::mm_out(buf_flattened, input1_flattened, weight[i]);
+    buf.mul_(input2);
+    auto output_col = output.narrow(-1, i, 1);
+    sum_out(output_col, buf, -1, true);
+  }
   if (bias.defined()) {
     output = output + bias;
   }
