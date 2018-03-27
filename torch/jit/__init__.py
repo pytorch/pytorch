@@ -15,6 +15,7 @@ import os
 import functools
 import inspect
 import copy
+import numbers
 
 
 _flatten = torch._C._jit_flatten
@@ -605,7 +606,6 @@ class OrderedModuleDict(OrderedDictWrapper):
     def __setitem__(self, k, v):
         if k in self._python_modules:
             raise RuntimeError("cannot re-assign modules in a ScriptModule")
-
         if isinstance(v, ScriptModule):
             self.module._register_module(k, v)
 
@@ -656,6 +656,25 @@ class OrderedBufferDict(OrderedDictWrapper):
             raise KeyError(k)
         return self.module._get_parameter(k)
 
+# types that can be constants. If you edit this list,
+# then you also need to edit the handlers in ConstantValue in jit/script/init.cpp
+_constant_types = [bool, float, int, Module, types.FunctionType]
+
+
+def _get_valid_constant(v):
+    if any(isinstance(v, typ) for typ in _constant_types):
+        return v
+    elif isinstance(v, tuple) or isinstance(v, list):
+        return tuple(_get_valid_constant(x) for x in v)
+    constants = ", ".join(typ.__name__ for typ in _constant_types)
+    raise TypeError(
+        "'{}' object is not a valid constant or a list/tuple of valid constants. ".format(type(v).__name__) +
+        "Valid constants are {{{}}}".format(constants))
+
+
+class Const(object):
+    def __init__(self, v):
+        self._value = _get_valid_constant(v)
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -665,6 +684,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # has run. This has to occur after the user-defined __init__ so that
 # submodules and parameters are initialized _before_ the script compiler
 # resolve references to `self.param` or `self.module`.
+
 
 class ScriptMeta(type(torch._C.ScriptModule)):
     # this has to inherit from pybind11's metaclass otherwise we get
@@ -697,16 +717,34 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __init__(self, optimize=True):
+        # must be before Module.init since the field is used in __getattr__
+        self._constants = OrderedDict()
         Module.__init__(self)
         self._set_optimized(optimize)
         self._parameters = OrderedParameterDict(self)
         self._buffers = OrderedBufferDict(self)
         self._modules = OrderedModuleDict(self)
+        # to accelerate _is_script_submodule
+        self._all_script_modules = set()
 
     def __getattr__(self, attr):
         if self._has_method(attr):
             return self._get_method(attr)
+        elif attr in self._constants:
+            # note: we return the _value_ of the constant so that in
+            # non-script mode you can use it directly
+            # we ensure that all values have the same (non-)mutability
+            # in the script as their python equivalents
+            return self._constants[attr]._value
         return Module.__getattr__(self, attr)
+
+    def __setattr__(self, attr, value):
+        if not isinstance(value, Const):
+            return super(ScriptModule, self).__setattr__(attr, value)
+        if attr in self._constants:
+            raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
+        self._check_modules_are_owned(value._value)
+        self._constants[attr] = value
 
     def __dir__(self):
         return sorted(Module.__dir__(self) + self._method_names())
@@ -719,6 +757,29 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def define(self, lang):
         rcb = createResolutionCallback()
         self._define(lang, rcb, True)
+
+    def _check_modules_are_owned(self, v):
+        if isinstance(v, ScriptModule) and not self._is_script_submodule(v):
+            raise RuntimeError("torch.jit.Const includes a module '{}'".format(type(v).__name__) +
+                               " which is not a submodule of this module")
+        if isinstance(v, tuple):
+            for e in v:
+                self._check_modules_are_owned(e)
+
+    def _is_script_submodule(self, m):
+        # fast check, we already know about this module
+        # and do not need to recalculate it
+        if id(m) in self._all_script_modules:
+            return True
+        # slow check, recalculate all submodules (more may have been added)
+        return id(m) in self._calc_all_script_modules()
+
+    def _calc_all_script_modules(self):
+        for m in self._modules.values():
+            if(isinstance(m, ScriptModule)):
+                self._all_script_modules.add(id(m))
+                self._all_script_modules.update(m._calc_all_script_modules())
+        return self._all_script_modules
 
 
 def _get_methods(cls):

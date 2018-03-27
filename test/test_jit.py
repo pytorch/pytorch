@@ -2061,6 +2061,132 @@ class TestScript(TestCase):
         m2 = M2()
         m2(torch.zeros(4, 3))
 
+    def test_script_module_const(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.b = torch.jit.Const(False)
+                self.i = torch.jit.Const(1)
+                self.c = torch.jit.Const(3.5)
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.b, self.i, self.c
+
+        m = M()
+        o0, o1, o2 = m()
+        self.assertEqual(o0, 0)
+        self.assertEqual(o1, 1)
+        self.assertEqual(o2, 3.5)
+
+    def test_script_module_fail_const(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.b = False
+
+            @torch.jit.script_method
+            def forward(self):
+                return self.b
+        with self.assertRaisesRegex(RuntimeError, "is not usable in a script method"):
+            M()
+
+    def test_script_module_valid_consts(self):
+        torch.jit.Const(1)
+        torch.jit.Const(1.2)
+        torch.jit.Const(False)
+        torch.jit.Const(nn.Linear(3, 4))
+        torch.jit.Const(lambda x: x)
+        self.assertTrue(type(torch.jit.Const([3, 4, 5])._value) is tuple)
+        torch.jit.Const([3, (3, 4), 5])
+        with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+            torch.jit.Const(type(1))
+        with self.assertRaisesRegex(TypeError, "is not a valid constant"):
+            torch.jit.Const((3, 4, {}))
+
+    def test_script_module_for(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.b = torch.jit.Const([1, 2, 3, 4])
+
+            @torch.jit.script_method
+            def forward(self):
+                sum = 0
+                for i in self.b:
+                    sum += i
+                return sum
+
+        m = M()
+        self.assertEqual(m(), 10)
+
+    def test_script_module_for2(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                mods = []
+                for i in range(10):
+                    m = Sub()
+                    self.add_module('m' + str(i), m)
+                    mods.append(m)
+
+                self.mods = torch.jit.Const(mods)
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    v = m(v)
+                return v
+
+        i = torch.Tensor(2)
+        m = M()
+        o = m(i)
+        v = i
+        for i in range(10):
+            v = getattr(m, "m" + str(i))(v)
+        self.assertEqual(o, v)
+
+    def test_script_module_const_submodule_fail(self):
+        class Sub(torch.jit.ScriptModule):
+            def __init__(self):
+                super(Sub, self).__init__(False)
+                self.weight = nn.Parameter(torch.randn(2))
+
+            @torch.jit.script_method
+            def forward(self, thing):
+                return self.weight + thing
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                mods = [Sub() for _ in range(10)]
+                self.mods = torch.jit.Const(mods)
+        with self.assertRaisesRegex(RuntimeError, "which is not a submodule"):
+            M()
+
+    def test_script_module_not_tuple(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.mods = torch.jit.Const(1)
+
+            @torch.jit.script_method
+            def forward(self, v):
+                for m in self.mods:
+                    print(m)
+                return v
+        with self.assertRaisesRegex(RuntimeError, "is not iterable"):
+            M()
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
