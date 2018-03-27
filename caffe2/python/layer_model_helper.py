@@ -530,8 +530,11 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
+        param_grad_map = {param: grad_map[param]
+            for param in self.param_to_optim.keys() if param in grad_map}
+
         for modifier in self._post_grad_net_modifiers:
-            modifier(trainer_net, trainer_init_net, grad_map,
+            modifier(trainer_net, trainer_init_net, param_grad_map,
                      blob_to_device=blob_to_device)
 
     def apply_final_net_modifiers(
