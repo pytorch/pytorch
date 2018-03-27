@@ -152,7 +152,7 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         proto, export_map = trace.export(list(_unique_state_dict(model).values()),
                                          _onnx_opset_version, defer_weight_export)
     else:
-        proto, export_map = trace.export([], _onnx_opset_version)
+        proto, export_map = trace.export([], _onnx_opset_version, False)
 
     if export_type == ExportTypes.PROTOBUF_FILE:
         assert(len(export_map) == 0)
