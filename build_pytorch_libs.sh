@@ -52,7 +52,8 @@ fi
 cd "$(dirname "$0")"
 PWD=`printf "%q\n" "$(pwd)"`
 BASE_DIR="$PWD"
-INSTALL_DIR="$BASE_DIR/torch/lib/tmp_install"
+TORCH_LIB_DIR="$BASE_DIR/torch/lib"
+INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
@@ -99,10 +100,8 @@ if [ -z "$NUM_JOBS" ]; then
   NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
-# Used to build an individual library, e.g. build TH
+# Used to build an individual library
 function build() {
-  pushd $THIRD_PARTY_DIR
-
   # We create a build directory for the library, which will
   # contain the cmake output
   mkdir -p build/$1
@@ -163,13 +162,9 @@ function build() {
     done
     popd
   fi
-
-  popd
 }
 
 function build_nccl() {
-  pushd "$THIRD_PARTY_DIR"
-
   mkdir -p build/nccl
   pushd build/nccl
   ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
@@ -186,8 +181,6 @@ function build_nccl() {
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
   popd
-
-  popd
 }
 
 # purpusefully not using build() because we need ATen to build the same
@@ -199,13 +192,9 @@ function build_nccl() {
 # detected them (to ensure that we have a consistent view between the
 # PyTorch and ATen builds.)
 function build_aten() {
-  # TODO: This is goofy (it comes from the time when aten lived
-  # in torch/lib) but I don't feel like fixing it right now
-  pushd $THIRD_PARTY_DIR
-
-  mkdir -p build/aten
-  pushd build/aten
-  ${CMAKE_VERSION} ../../../aten \
+  mkdir -p build
+  pushd build
+  ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
       -DNO_CUDA=$((1-$WITH_CUDA)) \
@@ -225,8 +214,6 @@ function build_aten() {
       # cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
   popd
-
-  popd
 }
 
 # In the torch/lib directory, create an installation directory
@@ -235,15 +222,29 @@ mkdir -p torch/lib/tmp_install
 # Build
 for arg in "$@"; do
     if [[ "$arg" == "nccl" ]]; then
+        pushd $THIRD_PARTY_DIR
         build_nccl
+        popd
     elif [[ "$arg" == "gloo" ]]; then
+        pushd "$THIRD_PARTY_DIR"
         build gloo $GLOO_FLAGS
+        popd
     elif [[ "$arg" == "ATen" ]]; then
+        pushd "$BASE_DIR/aten"
         build_aten
+        popd
     elif [[ "$arg" == "THD" ]]; then
+        pushd "$TORCH_LIB_DIR"
         build THD $THD_FLAGS
-    else
+        popd
+    elif [[ "$arg" == "libshm" ]] || [[ "$arg" == "libshm_windows" ]]; then
+        pushd "$TORCH_LIB_DIR"
         build $arg
+        popd
+    else
+        pushd "$THIRD_PARTY_DIR"
+        build $arg
+        popd
     fi
 done
 
