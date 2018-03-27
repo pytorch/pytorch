@@ -176,7 +176,8 @@ class Optimizer(object):
         if isinstance(params, Variable):
             param_group['params'] = [params]
         elif isinstance(params, set):
-            raise TypeError('using set as params may result in unexpected error')
+            raise TypeError('optimizer parameters need to be organized in ordered collections, but '
+                            'the ordering of tensors in sets will change between runs. Please use a list instead.')
         else:
             param_group['params'] = list(params)
 
