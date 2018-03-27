@@ -189,6 +189,7 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
     AbstractLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
 REGISTER_GRADIENT_WITH_MAIN_INPUT(
     AbstractSparseLengthsDef<float, int, CPUContext, WeightedSumReducerDef>);
+} // namespace
 
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT_AND_FORWARD_OUTPUT(...)           \
   REGISTER_CPU_OPERATOR_STR(                                                \
@@ -225,5 +226,4 @@ REGISTER_GRADIENT_WITH_MAIN_INPUT(
 
 REGISTER_LENGTHS_OPS_MAIN_INPUT_AND_FORWARD_OUTPUT_GRADIENT(
     AbstractLengthsDef<float, int, CPUContext, MaxReducerDef>);
-}
 }

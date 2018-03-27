@@ -124,6 +124,49 @@ __global__ void length_sum_gradient_kernel(
 }
 
 template <typename T, bool ExactBlock = false>
+__global__ void length_max_kernel(
+    const T* __restrict__ in,
+    T* __restrict__ out,
+    const int* __restrict__ prefix_sum_length_data,
+    int N,
+    int post,
+    int len_length,
+    const T numeric_min) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start <= N);
+  CUDA_KERNEL_ASSERT(end <= N);
+
+  if (ExactBlock) {
+    in += threadIdx.x;
+
+    T max = numeric_min;
+    for (int line = start; line < end; ++line) {
+      T in_data = in[line * post];
+      max = max > in_data ? max : in_data;
+    }
+
+    // setting output to 0 to not break gradient
+    max = max == numeric_min ? 0 : max;
+    out[group * post + threadIdx.x] = max;
+  } else {
+    for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      T max = numeric_min;
+      for (int line = start; line < end; ++line) {
+        T in_data = in[line * post + i];
+        max = max > in_data ? max : in_data;
+      }
+      // setting output to 0 to not break gradient
+      max = max == numeric_min ? 0 : max;
+      out[group * post + i] = max;
+    }
+  }
+}
+
+template <typename T, bool ExactBlock = false>
 __global__ void length_weighted_sum_gradient_kernel(
     const T* __restrict__ grad_in,
     const T* __restrict__ weights_in,
@@ -243,6 +286,64 @@ __global__ void sparse_length_sum_kernel(
         sum += in[indices[line] * post + i];
       }
       out[group * post + i] = sum;
+    }
+  }
+}
+
+template <typename T, typename IndexType, bool ExactBlock = false>
+__global__ void sparse_length_max_kernel(
+    const T* __restrict__ in,
+    T* __restrict__ out,
+    const int* __restrict__ prefix_sum_length_data,
+    const IndexType* __restrict__ indices,
+    int N,
+    int post,
+    int len_length,
+    int len_indices,
+    const T numeric_min) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start <= len_indices);
+  CUDA_KERNEL_ASSERT(end <= len_indices);
+
+  extern __shared__ T reduceVals[];
+
+  if (ExactBlock) {
+    T max = numeric_min;
+
+    in += threadIdx.x;
+    for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
+      T in_data = in[indices[line] * post];
+      max = max > in_data ? max : in_data;
+    }
+
+    reduceVals[threadIdx.y * blockDim.x + threadIdx.x] = max;
+    __syncthreads();
+
+    if (threadIdx.y == 0) {
+      max = numeric_min;
+      for (int i = 0; i < blockDim.y; ++i) {
+        T in_data = reduceVals[i * blockDim.x + threadIdx.x];
+        max = max > in_data ? max : in_data;
+      }
+
+      // setting output to 0 to not break gradient
+      max = max == numeric_min ? 0 : max;
+      out[group * post + threadIdx.x] = max;
+    }
+  } else {
+    for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      T max = numeric_min;
+      for (int line = start; line < end; ++line) {
+        T in_data = in[indices[line] * post + i];
+        max = max > in_data ? max : in_data;
+      }
+      // setting output to 0 to not break gradient
+      max = max == numeric_min ? 0 : max;
+      out[group * post + i] = max;
     }
   }
 }
@@ -401,6 +502,135 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
         length_sum_kernel<T, true>
             <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
                 in_data, out_data, prefix_sum_length_data, N, post, len_length);
+      }
+    }
+    return true;
+  }
+
+  enum { INDICES = 1, LENGTHS = 1 + (SparseFused ? 1 : 0) };
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+};
+
+template <typename T, class Context = CUDAContext, bool SparseFused = true>
+class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDASparseLengthsMaxOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDASparseLengthsMaxOp() {}
+
+  bool RunOnDevice() override {
+    if (SparseFused) {
+      return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+          this, Input(INDICES));
+    } else {
+      // type doesn't matter
+      return DoRunWithType<int32_t>();
+    }
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    auto& dataInput = Input(0);
+    auto& lengthsInput = Input(LENGTHS);
+    auto* output = Output(0);
+
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    const TIndex dataSize = dataInput.dim(0);
+    // Either first dim the data or how much we pull in indexies from it
+    TIndex dataToReduceSize;
+    const TIndex outputSize = lengthsInput.dim(0);
+    int len_length = outputSize;
+
+    const IndexType* indices;
+    if (SparseFused) { // static if
+      auto& indicesInput = Input(INDICES);
+      CAFFE_ENFORCE_EQ(1, indicesInput.ndim(), "INDICES must be a vector");
+      indices = indicesInput.template data<IndexType>();
+      dataToReduceSize = indicesInput.dim(0);
+    } else {
+      dataToReduceSize = dataSize;
+    }
+
+    auto shape = dataInput.dims();
+    shape[0] = outputSize;
+    output->Resize(shape);
+
+    // only compute this the first time
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    const T* in_data = dataInput.template data<T>();
+    T* out_data = output->template mutable_data<T>();
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+    int N = dataSize;
+    int post = dataInput.size_from_dim(1);
+
+    auto maxThreads =
+        GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
+    T numeric_min = std::numeric_limits<T>::min();
+    if (SparseFused) {
+      if (post <= maxThreads) {
+        int multiple = std::min(maxThreads / post, 16);
+        dim3 block(post, multiple);
+        size_t smem = sizeof(T) * post * multiple;
+
+        sparse_length_max_kernel<T, IndexType, true>
+            <<<len_length, block, smem, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                indices,
+                N,
+                post,
+                len_length,
+                dataToReduceSize,
+                numeric_min);
+      } else {
+        sparse_length_max_kernel<T, IndexType, false>
+            <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                indices,
+                N,
+                post,
+                len_length,
+                dataToReduceSize,
+                numeric_min);
+      }
+    } else {
+      if (post <= maxThreads) {
+        length_max_kernel<T, true>
+            <<<len_length, post, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                N,
+                post,
+                len_length,
+                numeric_min);
+      } else {
+        length_max_kernel<T, true>
+            <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
+                in_data,
+                out_data,
+                prefix_sum_length_data,
+                N,
+                post,
+                len_length,
+                numeric_min);
       }
     }
     return true;
@@ -877,6 +1107,12 @@ REGISTER_CUDA_OPERATOR_STR(
     "SparseLengthsSum",
     CUDASparseLengthsSumOp<float, CUDAContext, true>);
 REGISTER_CUDA_OPERATOR_STR(
+    "LengthsMax",
+    CUDASparseLengthsMaxOp<float, CUDAContext, false>);
+REGISTER_CUDA_OPERATOR_STR(
+    "SparseLengthsMax",
+    CUDASparseLengthsMaxOp<float, CUDAContext, true>);
+REGISTER_CUDA_OPERATOR_STR(
     "SparseLengthsWeightedSum",
     CUDASparseLengthsWeightedSumOp<float, CUDAContext, true>);
 REGISTER_CUDA_OPERATOR_STR(
@@ -1052,6 +1288,139 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
   Tensor<Context> inclusive_scan_length_buffer_;
 };
 
+template <typename T, bool ExactBlock = false>
+__global__ void length_max_gradient_kernel(
+    const T* __restrict__ grad_in,
+    T* __restrict__ grad_out,
+    const T* data_in,
+    const T* data_out,
+    const int* __restrict__ prefix_sum_length_data,
+    int N,
+    int post,
+    int len_length) {
+  // len_length blocks
+  int group = blockIdx.x;
+
+  int start = group == 0 ? 0 : prefix_sum_length_data[group - 1];
+  int end = prefix_sum_length_data[group];
+  CUDA_KERNEL_ASSERT(start <= N);
+  CUDA_KERNEL_ASSERT(end <= N);
+
+  if (ExactBlock) {
+    grad_out += threadIdx.x;
+    grad_in += threadIdx.x;
+    data_in += threadIdx.x;
+    data_out += threadIdx.x;
+
+    for (int line = start + threadIdx.y; line < end; line += blockDim.y) {
+      if (data_in[line * post] == data_out[group * post]) {
+        grad_out[line * post] = grad_in[group * post];
+      } else {
+        grad_out[line * post] = 0;
+      }
+    }
+  } else {
+    for (int i = threadIdx.x; i < post; i += blockDim.x) {
+      for (int line = start; line < end; ++line) {
+        if (data_in[line * post + i] == data_out[group * post + i]) {
+          grad_out[line * post + i] = grad_in[group * post + i];
+        } else {
+          grad_out[line * post + i] = 0;
+        }
+      }
+    }
+  }
+}
+
+template <typename T, class Context = CUDAContext>
+class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
+    : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  CUDALengthsMaxWithMainInputAndForwardOutputGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+
+  ~CUDALengthsMaxWithMainInputAndForwardOutputGradientOp() {}
+
+  bool RunOnDevice() override {
+    return DispatchHelper<TensorTypes<int32_t, float>>::call(this, Input(3));
+  }
+
+  template <typename IndexType>
+  bool DoRunWithType() {
+    auto& segmentGradsInput = Input(1);
+    auto& lengthsInput = Input(2);
+    auto& dataInput = Input(3);
+    auto& dataOutput = Input(0); // based on CPU version
+    auto* dataGradsOutput = Output(0);
+    CAFFE_ENFORCE_EQ(1, lengthsInput.ndim(), "LENGTHS must be a vector");
+    int len_length = lengthsInput.dim(0);
+    CAFFE_ENFORCE(segmentGradsInput.ndim() > 0);
+    CAFFE_ENFORCE(len_length == segmentGradsInput.dim(0));
+
+    inclusive_scan_length_buffer_.ResizeLike(lengthsInput);
+    inclusive_scan_wrapper(
+        lengthsInput.template data<int>(),
+        len_length,
+        &inclusive_scan_buffer_,
+        &inclusive_scan_length_buffer_,
+        &context_);
+
+    // compute output size using length
+    auto* prefix_sum_length_data =
+        inclusive_scan_length_buffer_.template data<int>();
+
+    auto shape = dataInput.dims();
+    dataGradsOutput->Resize(shape);
+
+    const T* in_data = segmentGradsInput.template data<T>();
+    T* out_data = dataGradsOutput->template mutable_data<T>();
+
+    int N = dataInput.dim(0);
+    int post = segmentGradsInput.size_from_dim(1);
+
+    auto maxThreads =
+        GetDeviceProperty(CaffeCudaGetDevice()).maxThreadsPerBlock;
+
+    if (post <= maxThreads) {
+      int multiple = std::min(maxThreads / post, 16);
+      dim3 block(post, multiple);
+
+      length_max_gradient_kernel<T, true>
+          <<<len_length, block, 0, context_.cuda_stream()>>>(
+
+              in_data,
+              out_data,
+              dataInput.template data<T>(),
+              dataOutput.template data<T>(),
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    } else {
+      length_max_gradient_kernel<T, false>
+          <<<len_length, maxThreads, 0, context_.cuda_stream()>>>(
+              in_data,
+              out_data,
+              dataInput.template data<T>(),
+              dataOutput.template data<T>(),
+              prefix_sum_length_data,
+              N,
+              post,
+              len_length);
+    }
+
+    return true;
+  }
+
+ private:
+  // menber field to manage memory
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
+};
+
 template <typename T, class Context = CUDAContext>
 class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
     : public Operator<CUDAContext> {
@@ -1173,6 +1542,10 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
   Tensor<Context> inclusive_scan_buffer_;
   Tensor<Context> inclusive_scan_length_buffer_;
 };
+
+REGISTER_CUDA_OPERATOR_STR(
+    "LengthsMaxWithMainInputAndForwardOutputGradient",
+    CUDALengthsMaxWithMainInputAndForwardOutputGradientOp<float, CUDAContext>);
 
 REGISTER_CUDA_OPERATOR(
     SparseLengthsIndicesInGradientWeightedSumGradient,
