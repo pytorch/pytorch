@@ -6,7 +6,9 @@ from torch import nn
 from torch.autograd import Variable
 import torch.nn.init as init
 import unittest
-import tempfile, shutil
+import tempfile
+import shutil
+
 
 class SuperResolutionNet(nn.Module):
     def __init__(self, upscale_factor, inplace=False):
