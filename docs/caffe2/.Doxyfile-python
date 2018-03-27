@@ -32,7 +32,7 @@ DOXYFILE_ENCODING      = UTF-8
 # title of most generated pages and in a few other places.
 # The default value is: My Project.
 
-PROJECT_NAME           = "Caffe2 - C++ API"
+PROJECT_NAME           = "Caffe2 - Python API"
 
 # The PROJECT_NUMBER tag can be used to enter a project or revision number. This
 # could be handy for archiving the generated documentation or if some version
@@ -51,14 +51,14 @@ PROJECT_BRIEF          = "A deep learning, cross platform ML framework"
 # pixels and the maximum width should not exceed 200 pixels. Doxygen will copy
 # the logo to the output directory.
 
-PROJECT_LOGO           = docs/Caffe2-with-name-55-tall.png
+PROJECT_LOGO           = docs/caffe2/Caffe2-with-name-55-tall.png
 
 # The OUTPUT_DIRECTORY tag is used to specify the (relative or absolute) path
 # into which the generated documentation will be written. If a relative path is
 # entered, it will be relative to the location where doxygen was started. If
 # left blank the current directory will be used.
 
-OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/docs/doxygen-c/
+OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/docs/doxygen-python/
 
 # If the CREATE_SUBDIRS tag is set to YES then doxygen will create 4096 sub-
 # directories (in 2 levels) under the output directory of each output format and
@@ -252,7 +252,7 @@ TCL_SUBST              =
 # members will be omitted, etc.
 # The default value is: NO.
 
-OPTIMIZE_OUTPUT_FOR_C  = YES
+OPTIMIZE_OUTPUT_FOR_C  = NO
 
 # Set the OPTIMIZE_OUTPUT_JAVA tag to YES if your project consists of Java or
 # Python sources only. Doxygen will then generate output that is more tailored
@@ -260,7 +260,7 @@ OPTIMIZE_OUTPUT_FOR_C  = YES
 # qualified scopes will look different, etc.
 # The default value is: NO.
 
-OPTIMIZE_OUTPUT_JAVA   = NO
+OPTIMIZE_OUTPUT_JAVA   = YES
 
 # Set the OPTIMIZE_FOR_FORTRAN tag to YES if your project consists of Fortran
 # sources. Doxygen will then generate output that is tailored for Fortran.
@@ -680,7 +680,7 @@ SHOW_FILES             = YES
 # Folder Tree View (if specified).
 # The default value is: YES.
 
-SHOW_NAMESPACES        = NO
+SHOW_NAMESPACES        = YES
 
 # The FILE_VERSION_FILTER tag can be used to specify a program or script that
 # doxygen should invoke to get the current version for each file (typically from
@@ -703,7 +703,7 @@ FILE_VERSION_FILTER    =
 # DoxygenLayout.xml, doxygen will parse it automatically even if the LAYOUT_FILE
 # tag is left empty.
 
-LAYOUT_FILE            = docs/DoxygenLayout-c.xml
+LAYOUT_FILE            = docs/caffe2/DoxygenLayout-python.xml
 
 # The CITE_BIB_FILES tag can be used to specify one or more bib files containing
 # the reference definitions. This must be a list of .bib files. The .bib
@@ -778,7 +778,7 @@ WARN_FORMAT            = "$file:$line: $text"
 # messages should be written. If left blank the output is written to standard
 # error (stderr).
 
-WARN_LOGFILE           = docs/warnings-c.log
+WARN_LOGFILE           = docs/caffe2/warnings-python.log
 
 #---------------------------------------------------------------------------
 # Configuration options related to the input files
@@ -815,14 +815,7 @@ INPUT_ENCODING         = UTF-8
 # *.m, *.markdown, *.md, *.mm, *.dox, *.py, *.pyw, *.f90, *.f95, *.f03, *.f08,
 # *.f, *.for, *.tcl, *.vhd, *.vhdl, *.ucf and *.qsf.
 
-FILE_PATTERNS          = *.c \
-                         *.cc \
-                         *.cxx \
-                         *.cpp \
-                         *.h \
-
-
-
+FILE_PATTERNS          =  *.py
 
 # The RECURSIVE tag can be used to specify whether or not subdirectories should
 # be searched for input files as well.
@@ -840,21 +833,29 @@ RECURSIVE              = YES
 EXCLUDE                = _site/ \
                          build/ \
                          caffe/ \
+                         caffe2/binaries/ \
                          caffe2/contrib/ \
-                         caffe2/experiments/python \
-                         caffe2/mkl/operators/ \
-                         caffe2/mkl/mkl_operator.cc \
-                         caffe2/mpi/mpi_ops_gpu.cc \
-                         caffe2/mpi/mpi_ops.cc \
-                         caffe2/mpi/mpi_ops.h \
-                         caffe2/python/ \
+                         caffe2/core/ \
+                         caffe2/cuda_rtc/ \
+                         caffe2/db/ \
+                         caffe2/experiments/operators/ \
+                         caffe2/image/ \
+                         caffe2/mkl/ \
+                         caffe2/mpi/ \
+                         caffe2/operators/ \
+                         caffe2/perfkernels/ \
+                         caffe2/proto/ \
+                         caffe2/queue/ \
+                         caffe2/sgd/ \
                          caffe2/test/ \
+                         caffe2/transforms/ \
+                         caffe2/utils/ \
+                         caffe2/videos/ \
                          cmake/ \
                          docker/ \
                          docs/ \
                          models/ \
                          third_party
-
 
 
 # The EXCLUDE_SYMLINKS tag can be used to select whether or not files or
@@ -871,10 +872,7 @@ EXCLUDE_SYMLINKS       = NO
 # Note that the wildcards are matched against the file with absolute path, so to
 # exclude all test directories for example use the pattern */test/*
 
-EXCLUDE_PATTERNS       = *_test.cc
-
-
-
+EXCLUDE_PATTERNS       =  *_test.py
 
 # The EXCLUDE_SYMBOLS tag can be used to specify one or more symbol names
 # (namespaces, classes, functions, etc.) that should be excluded from the
@@ -1123,7 +1121,7 @@ HTML_FILE_EXTENSION    = .html
 # of the possible markers and block names see the documentation.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_HEADER            = docs/header.html
+HTML_HEADER            = docs/caffe2/header.html
 
 # The HTML_FOOTER tag can be used to specify a user-defined HTML footer for each
 # generated HTML page. If the tag is left blank doxygen will generate a standard
@@ -1133,7 +1131,7 @@ HTML_HEADER            = docs/header.html
 # that doxygen normally uses.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_FOOTER            = docs/footer.html
+HTML_FOOTER            = docs/caffe2/footer.html
 
 # The HTML_STYLESHEET tag can be used to specify a user-defined cascading style
 # sheet that is used by each HTML page. It can be used to fine-tune the look of
@@ -1145,7 +1143,7 @@ HTML_FOOTER            = docs/footer.html
 # obsolete.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_STYLESHEET        = docs/stylesheet.css
+HTML_STYLESHEET        = docs/caffe2/stylesheet.css
 
 # The HTML_EXTRA_STYLESHEET tag can be used to specify additional user-defined
 # cascading style sheets that are included after the standard style sheets
@@ -1158,7 +1156,7 @@ HTML_STYLESHEET        = docs/stylesheet.css
 # list). For an example see the documentation.
 # This tag requires that the tag GENERATE_HTML is set to YES.
 
-HTML_EXTRA_STYLESHEET  = docs/main.css
+HTML_EXTRA_STYLESHEET  = docs/caffe2/main.css
 
 # The HTML_EXTRA_FILES tag can be used to specify one or more extra images or
 # other source files which should be copied to the HTML output directory. Note
