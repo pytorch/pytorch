@@ -306,9 +306,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
     vol2col(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradOutput_n),
-      nOutputPlane, outputDepth, outputHeight, outputWidth,
-      inputDepth, inputHeight, inputWidth,
-      kT, kH, kW, padT, padH, padW, dT, dH, dW,
+      nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
       dilationT, dilationH, dilationW,
       THCTensor_(data)(state, gradColumns)
     );
@@ -449,9 +447,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
       vol2col(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, gradOutput_n),
-        nOutputPlane, outputDepth, outputHeight, outputWidth,
-        inputDepth, inputHeight, inputWidth,
-        kT, kH, kW, padT, padH, padW, dT, dH, dW,
+        nOutputPlane, outputDepth, outputHeight, outputWidth, kT, kH, kW, padT, padH, padW, dT, dH, dW,
         dilationT, dilationH, dilationW,
         THCTensor_(data)(state, columns)
       );

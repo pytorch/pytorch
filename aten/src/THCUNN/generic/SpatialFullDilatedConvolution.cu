@@ -276,9 +276,7 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     im2col(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, gradOutput_n),
-      nOutputPlane, outputHeight, outputWidth,
-      inputHeight, inputWidth,
-      kH, kW, padH, padW, dH, dW,
+      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
       dilationH, dilationW, THCTensor_(data)(state, gradColumns)
     );
 
@@ -411,9 +409,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       im2col(
         THCState_getCurrentStream(state),
         THCTensor_(data)(state, gradOutput_n),
-        nOutputPlane, outputHeight, outputWidth,
-        inputHeight, inputWidth,
-        kH, kW, padH, padW, dH, dW,
+        nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
         dilationH, dilationW, THCTensor_(data)(state, columns)
       );
 
