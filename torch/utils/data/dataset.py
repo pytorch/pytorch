@@ -30,12 +30,12 @@ class TensorDataset(Dataset):
     dimension.
 
     Arguments:
-        *tensors (Tensor): tensors with the same first dimension.
         data_tensor (Tensor): contains sample data.
         target_tensor (Tensor): contains sample targets (labels).
+        *tensors (Tensor): tensors with the same first dimension.
     """
 
-    def __init__(self, *tensors, data_tensor=None, target_tensor=None):
+    def __init__(self, data_tensor=None, target_tensor=None, *tensors):
         def tensor_gen():
             if data_tensor is not None:
                 yield data_tensor
