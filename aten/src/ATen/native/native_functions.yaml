@@ -29,6 +29,18 @@
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
+- func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
+  variants: function
+
+- func: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
+  variants: function
+
+- func: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state, Tensor reserve, std::array<bool,4> output_mask) -> (Tensor, Tensor, Tensor, TensorList)
+  variants: function
+
+- func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
+  variants: function
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
@@ -79,6 +91,16 @@
 
 - func: cat_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
+
+- func: ceil(Tensor self) -> Tensor
+
+- func: ceil_(Tensor self) -> Tensor
+
+- func: ceil_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _ceil_out_cpu
+    CUDA: _ceil_out_cuda
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
@@ -271,6 +293,16 @@
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
 
+- func: floor(Tensor self) -> Tensor
+
+- func: floor_(Tensor self) -> Tensor
+
+- func: floor_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _floor_out_cpu
+    CUDA: _floor_out_cuda
+
 - func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
   variants: function
 
@@ -437,17 +469,27 @@
     CPU: RoiPooling2d_backward_cpu
     CUDA: RoiPooling2d_backward_cuda
 
+- func: round(Tensor self) -> Tensor
+
+- func: round_(Tensor self) -> Tensor
+
+- func: round_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _round_out_cpu
+    CUDA: _round_out_cuda
+
 - func: rrelu(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
   variants: function
 
 - func: rrelu_(Tensor self, Scalar lower=0.125, Scalar upper=0.3333333333333333, bool training=false, Generator* generator=nullptr) -> Tensor
   variants: function
 
-- func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
-
 - func: relu(Tensor self) -> Tensor
 
 - func: relu_(Tensor self) -> Tensor
+
+- func: select(Tensor self, int64_t dim, int64_t index) -> Tensor
 
 - func: selu(Tensor self) -> Tensor
   variants: function
@@ -512,6 +554,16 @@
     CPU: _sum_out_cpu
     CUDA: _sum_out_cuda
 
+- func: sqrt(Tensor self) -> Tensor
+
+- func: sqrt_(Tensor self) -> Tensor
+
+- func: sqrt_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sqrt_out_cpu
+    CUDA: _sqrt_out_cuda
+
 - func: prod(Tensor self) -> Tensor
   dispatch:
     CPU: _prod_cpu
@@ -525,14 +577,24 @@
     CPU: _prod_out_cpu
     CUDA: _prod_out_cuda
 
+- func: t_(Tensor self) -> Tensor
+  variants: method
+
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
 
 - func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
 
-- func: t_(Tensor self) -> Tensor
-  variants: method
+- func: trunc(Tensor self) -> Tensor
+
+- func: trunc_(Tensor self) -> Tensor
+
+- func: trunc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _trunc_out_cpu
+    CUDA: _trunc_out_cuda
 
 - func: type_as(Tensor self, Tensor other) -> Tensor
   variants: method
@@ -584,69 +646,3 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
-
-- func: _cudnn_rnn_flatten_weight(TensorList weight_arr, int64_t weight_stride0, int64_t input_size, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, bool bidirectional) -> Tensor
-  variants: function
-
-- func: _cudnn_rnn(Tensor input, TensorList weight, int64_t weight_stride0, Tensor? weight_buf, Tensor hx, Tensor? cx, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state) -> (Tensor, Tensor, Tensor, Tensor, Tensor)
-  variants: function
-
-- func: _cudnn_rnn_backward(Tensor input, TensorList weight, int64_t weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor grad_output, Tensor grad_hy, Tensor? grad_cy, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first, double dropout, bool train, bool bidirectional, IntList batch_sizes, BoolTensor? dropout_state, Tensor reserve, std::array<bool,4> output_mask) -> (Tensor, Tensor, Tensor, TensorList)
-  variants: function
-
-- func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
-  variants: function
-
-# Unary Ops #
-
-- func: ceil(Tensor self) -> Tensor
-
-- func: ceil_(Tensor self) -> Tensor
-
-- func: ceil_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _ceil_out_cpu
-    CUDA: _ceil_out_cuda
-
-- func: floor(Tensor self) -> Tensor
-
-- func: floor_(Tensor self) -> Tensor
-
-- func: floor_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _floor_out_cpu
-    CUDA: _floor_out_cuda
-
-- func: round(Tensor self) -> Tensor
-
-- func: round_(Tensor self) -> Tensor
-
-- func: round_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _round_out_cpu
-    CUDA: _round_out_cuda
-
-- func: trunc(Tensor self) -> Tensor
-
-- func: trunc_(Tensor self) -> Tensor
-
-- func: trunc_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _trunc_out_cpu
-    CUDA: _trunc_out_cuda
-
-- func: sqrt(Tensor self) -> Tensor
-
-- func: sqrt_(Tensor self) -> Tensor
-
-- func: sqrt_out(Tensor result, Tensor self) -> Tensor
-  variants: function
-  dispatch:
-    CPU: _sqrt_out_cpu
-    CUDA: _sqrt_out_cuda
-
-# \Unary Ops #
