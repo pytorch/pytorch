@@ -522,7 +522,7 @@ class TestSegmentOps(hu.HypothesisTestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    @given(**hu.gcs)
+    @given(**hu.gcs_cpu_only)
     def test_sparse_lengths_positional_weighted_sum(
             self, gc, dc):
         D = np.random.rand(50, 3, 4, 5).astype(np.float32)
