@@ -319,7 +319,7 @@ bool LRNGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
 REGISTER_CPU_OPERATOR(LRN, LRNOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LRNGradient, LRNGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(LRN).NumInputs(1).NumOutputs(1,2);
+OPERATOR_SCHEMA(LRN).NumInputs(1).NumOutputs(1, 2).InheritOnnxSchema("LRN");
 OPERATOR_SCHEMA(LRNGradient).NumInputs(3).NumOutputs(1);
 
 class GetLRNGradient : public GradientMakerBase {

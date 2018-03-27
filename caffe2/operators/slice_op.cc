@@ -89,7 +89,8 @@ Example:
       return vector<TensorShape>{
           CreateTensorShape(dst_sizes, data.data_type())};
     })
-    .Output(0, "output", "Sliced data tensor.");
+    .Output(0, "output", "Sliced data tensor.")
+    .InheritOnnxSchema("Slice");
 
 OPERATOR_SCHEMA(SliceGradient);
 

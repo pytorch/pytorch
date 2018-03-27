@@ -44,4 +44,26 @@ void DummyName::Reset(const std::unordered_set<std::string> &used_names) {
   counter_ = 0;
 }
 
+NodeProto MakeNode(
+    const std::string& type,
+    const std::vector<std::string>& inputs,
+    const std::vector<std::string>& outputs,
+    const std::vector<AttributeProto>& attributes,
+    const std::string& name) {
+  NodeProto node;
+  if (!name.empty()) {
+    node.set_name(name);
+  }
+  node.set_op_type(type);
+  for (const auto& input: inputs) {
+    node.add_input(input);
+  }
+  for (const auto& output: outputs) {
+    node.add_output(output);
+  }
+  for (const auto& attr: attributes) {
+    node.add_attribute()->CopyFrom(attr);
+  }
+  return node;
+}
 }}

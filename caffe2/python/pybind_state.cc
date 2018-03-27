@@ -30,8 +30,9 @@
 #include "caffe2/mkl/mkl_utils.h"
 #include "caffe2/observers/runcnt_observer.h"
 #include "caffe2/observers/time_observer.h"
-#include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/backend.h"
+#include "caffe2/onnx/helper.h"
+#include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -1392,6 +1393,46 @@ void addGlobalMethods(py::module& m) {
   m.def("new_dummy_name", []() -> std::string {
     return caffe2::onnx::DummyName::NewDummyName();
   });
+  m.def("support_onnx_export", [](const std::string& op) -> bool {
+    const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
+    if (!schema) {
+      return false;
+    }
+    return !schema->onnx_schema().empty();
+  });
+  m.def(
+      "export_to_onnx",
+      [](const py::bytes& c2op,
+         const std::unordered_map<std::string, std::vector<int>>& shapes)
+          -> std::pair<std::vector<py::bytes>, std::vector<py::bytes>> {
+        OperatorDef op;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(c2op.cast<std::string>(), &op));
+        const auto& type = op.type();
+        const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(type);
+        CAFFE_ENFORCE(schema);
+        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        for (const auto& it: shapes) {
+          tensor_shapes.emplace(
+              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+        }
+        auto results =
+            onnx::OnnxExporter().Caffe2OpToOnnxNodes(op, tensor_shapes);
+        std::pair<std::vector<py::bytes>, std::vector<py::bytes>> ret;
+        auto& nodes_str = ret.first;
+        auto& tensors_str = ret.second;
+        for (const auto& node: results.first) {
+          std::string out;
+          node.SerializeToString(&out);
+          nodes_str.emplace_back(py::bytes(out));
+        }
+        for (const auto& tensor: results.second) {
+          std::string out;
+          tensor.SerializeToString(&out);
+          tensors_str.emplace_back(py::bytes(out));
+        }
+        return ret;
+      });
 
 #define CAFFE2_CPU_FEATURE_SUPPORT(feature) \
   m.def("builtin_cpu_supports_" #feature, []() { return GetCpuId().feature(); })
