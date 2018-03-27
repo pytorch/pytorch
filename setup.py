@@ -250,9 +250,9 @@ class build_deps(Command):
                 print("Could not find {}".format(f))
                 print("Did you run 'git submodule update --init'?")
                 sys.exit(1)
-        check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
-        check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
-        check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+        check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
+        check_file(os.path.join(third_party_path, "nanopb", "CMakeLists.txt"))
+        check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'cpuinfo', 'CMakeLists.txt'))
         check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'tbb', 'tbb_remote', 'Makefile'))
         check_file(os.path.join('aten', 'src', 'ATen', 'utils', 'catch', 'CMakeLists.txt'))
@@ -487,6 +487,7 @@ else:
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
+third_party_path = os.path.join(cwd, "third_party")
 
 
 tmp_install_path = lib_path + "/tmp_install"
