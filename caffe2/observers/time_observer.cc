@@ -26,4 +26,11 @@ void TimeOperatorObserver::Stop() {
           << " ms to complete.\n";
 }
 
+std::unique_ptr<ObserverBase<OperatorBase>> TimeOperatorObserver::rnnCopy(
+    OperatorBase* subject,
+    int rnn_order) const {
+  return std::unique_ptr<ObserverBase<OperatorBase>>(
+      new TimeOperatorObserver(subject, nullptr));
+}
+
 } // namespace caffe2
