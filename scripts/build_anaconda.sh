@@ -77,7 +77,7 @@ fi
 #
 # Pick the correct conda-build folder
 #
-CAFFE2_CONDA_BUILD_DIR="${CAFFE2_ROOT}/conda"
+CAFFE2_CONDA_BUILD_DIR="${CAFFE2_ROOT}/conda/caffe2"
 if [[ "${BUILD_ENVIRONMENT}" == *full* ]]; then
   CAFFE2_CONDA_BUILD_DIR="${CAFFE2_CONDA_BUILD_DIR}/cuda_full"
 elif [[ "${BUILD_ENVIRONMENT}" == *cuda* ]]; then
