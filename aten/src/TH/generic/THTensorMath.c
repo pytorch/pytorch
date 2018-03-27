@@ -12,8 +12,8 @@
 
 #define TH_OMP_OVERHEAD_THRESHOLD 100000
 #define HYPER_TH_OMP_OVERHEAD_THRESHOLD 2000
-#define UNCER_TH_OMP_OVERHEAD_THRESHOLD 5000 
 #define ORDIN_TH_OMP_OVERHEAD_THRESHOLD 20000
+#define UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD 50000
 
 #ifdef _OPENMP
 
@@ -782,7 +782,7 @@ accreal THTensor_(sumall)(THTensor *tensor)
   if(inOMP) {
     serial_path = 1;
   } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, +:sum, sum += *tensor_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, +:sum, sum += *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 #else
     serial_path = 1;
@@ -802,7 +802,7 @@ accreal THTensor_(prodall)(THTensor *tensor)
   if(inOMP) {
     serial_path = 1;
   } else {
-    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, *:prod, prod *= *tensor_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+    TH_TENSOR_APPLY_REDUCTION_OMP(real, tensor, *:prod, prod *= *tensor_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
   }
 #else
     serial_path = 1;
@@ -939,9 +939,9 @@ void THTensor_(lshift)(THTensor *r_, THTensor *t, real value)
       serial_path = 1;
     } else {
 #if defined(TH_REAL_IS_BYTE)
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((real) *t_data) << value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((real) *t_data) << value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((ureal) *t_data) << value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((ureal) *t_data) << value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
 #else
@@ -991,9 +991,9 @@ void THTensor_(rshift)(THTensor *r_, THTensor *t, real value)
       serial_path = 1;
     } else {
 #if defined(TH_REAL_IS_BYTE)
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((real) *t_data) >> value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((real) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((ureal) *t_data) >> value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (((ureal) *t_data) >> value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
 #else
@@ -1036,9 +1036,9 @@ void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
       serial_path = 1;
     } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = fmod(*t_data, value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = fmod(*t_data, value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (*t_data % value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (*t_data % value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
 #else
@@ -1087,11 +1087,11 @@ void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
       serial_path = 1;
     } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
       // There is no NAN for integers
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data % value;
-                                        if (has_different_sign(*r__data, value)) *r__data += value;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+                                        if (has_different_sign(*r__data, value)) *r__data += value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
     }
 #else
@@ -1136,7 +1136,7 @@ void THTensor_(bitand)(THTensor *r_, THTensor *t, real value)
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data & value;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data & value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -1175,7 +1175,7 @@ void THTensor_(bitor)(THTensor *r_, THTensor *t, real value)
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data | value;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data | value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -1214,7 +1214,7 @@ void THTensor_(bitxor)(THTensor *r_, THTensor *t, real value)
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data ^ value;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = *t_data ^ value;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -1247,7 +1247,7 @@ void THTensor_(clamp)(THTensor *r_, THTensor *t, real min_value, real max_value)
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = (*t_data < min_value) ? min_value : (*t_data > max_value ? max_value : *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -1280,7 +1280,7 @@ void THTensor_(cadd)(THTensor *r_, THTensor *t, real value, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data + value * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1317,7 +1317,7 @@ void THTensor_(cmul)(THTensor *r_, THTensor *t, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data * *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data * *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1396,7 +1396,7 @@ void THTensor_(cpow)(THTensor *r_, THTensor *t, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = THTensor_(powOne)(*t_data, *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = THTensor_(powOne)(*t_data, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1428,7 +1428,7 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data / *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data / *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1479,13 +1479,13 @@ void THTensor_(clshift)(THTensor *r_, THTensor *t, THTensor *src)
         serial_path = 1;
       } else {
 #if defined(TH_REAL_IS_FLOAT)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data * powf(2, *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data * powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data * pow(2, *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data * pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_BYTE)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((real)*t_data) << *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((real)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((ureal)*t_data) << *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((ureal)*t_data) << *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
       }
 #else
@@ -1545,13 +1545,13 @@ void THTensor_(crshift)(THTensor *r_, THTensor *t, THTensor *src)
         serial_path = 1;
       } else {
 #if defined(TH_REAL_IS_FLOAT)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data / powf(2, *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data / powf(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data / pow(2, *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data / pow(2, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #elif defined(TH_REAL_IS_BYTE)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((real)*t_data) >> *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((real)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((ureal)*t_data) >> *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = ((ureal)*t_data) >> *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
       }
 #else
@@ -1604,9 +1604,9 @@ void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src)
         serial_path = 1;
       } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig,real, r_, real, t, real, src, *r__data = fmod(*t_data, *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig,real, r_, real, t, real, src, *r__data = fmod(*t_data, *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = (*t_data % *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = (*t_data % *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
       }
 #else
@@ -1658,10 +1658,10 @@ void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
         serial_path = 1;
       } else {
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #else
         TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data % *src_data;
-                                                     if (*r__data * *src_data < 0) *r__data += *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+                                                     if (*r__data * *src_data < 0) *r__data += *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
 #endif
       }
 #else
@@ -1714,7 +1714,7 @@ void THTensor_(cbitand)(THTensor *r_, THTensor *t, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data & *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data & *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1760,7 +1760,7 @@ void THTensor_(cbitor)(THTensor *r_, THTensor *t, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data | *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data | *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1806,7 +1806,7 @@ void THTensor_(cbitxor)(THTensor *r_, THTensor *t, THTensor *src)
       if (inOMP) {
         serial_path = 1;
       } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data ^ *src_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, srcContig, real, r_, real, t, real, src, *r__data = *t_data ^ *src_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
       }
 #else
       serial_path = 1;
@@ -1841,7 +1841,7 @@ void THTensor_(tpow)(THTensor *r_, real value, THTensor *t)
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = THTensor_(powOne)(value, *t_data);, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = THTensor_(powOne)(value, *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -1872,7 +1872,7 @@ void THTensor_(addcmul)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, src1Contig, src2Contig, real, r_, real, src1, real, src2, *r__data += value * *src1_data * *src2_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, src1Contig, src2Contig, real, r_, real, src1, real, src2, *r__data += value * *src1_data * *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -1905,7 +1905,7 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
     if (inOMP) {
       serial_path = 1;
     } else {
-      TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, src1Contig, src2Contig, real, r_, real, src1, real, src2, *r__data += value * *src1_data / *src2_data;, UNCER_TH_OMP_OVERHEAD_THRESHOLD);
+      TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, src1Contig, src2Contig, real, r_, real, src1, real, src2, *r__data += value * *src1_data / *src2_data;, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
     }
 #else
     serial_path = 1;
@@ -2523,7 +2523,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       ptrdiff_t iter = 0;
       ptrdiff_t r_Size = THTensor_(nElement)(r_);
       int r_Dim = r_->nDimension;
-      #pragma omp parallel for if ( r_Size > HYPER_TH_OMP_OVERHEAD_THRESHOLD) 
+      #pragma omp parallel for if ( r_Size > HYPER_TH_OMP_OVERHEAD_THRESHOLD)
       for (iter = 0; iter < r_Size; iter++) {
         int j;
         int64_t quot;
@@ -3745,7 +3745,7 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #ifdef _OPENMP
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC, OMP_THRESHOLD)             \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
@@ -3755,42 +3755,54 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
     int inOMP = omp_in_parallel();                            \
     if( !inOMP ){   \
       TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);        \
-    }                                                                                                        \
-    else {                                                                                                   \
+    } else {                                                                                                   \
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                       \
     }                                                                                                        \
   }
+
+#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)      \
+  LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD)
+
 #else
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC)             \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)             \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
     TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
   }                                                           \
 
+#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_OMP_THRESHOLD) \
+  LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)
+
 #endif
 
-#ifdef _OPENMP
-LAB_IMPLEMENT_BASIC_FUNCTION(neg,-,ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-#else
+#define GET_4TH_ARG(ARG0, ARG1, ARG2, ARG3, ...) ARG3
+
+#define LAB_IMPLEMENT_BASIC_FUNCTION_CHOOSE(...) \
+  GET_4TH_ARG(__VA_ARGS__, LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS, LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS, )
+
+#define LAB_IMPLEMENT_BASIC_FUNCTION(...) LAB_IMPLEMENT_BASIC_FUNCTION_CHOOSE(__VA_ARGS__)(__VA_ARGS__)
+
+/*
+ * LAB_IMPLEMENT_BASIC_FUNCTION is a macro with optional parameters, you can use it flexibly. The macro will discard the invalid
+ * openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one. In other word,
+ * (A), If openmp is UNavailable, the two usage below is both right.
+ *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
+ *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity)
+ * (B), If openmp is available, the two usage below is also both right.
+ *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD)
+ *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity) // pass the default openmp threshold
+*/
+
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
-#endif
 
 #if defined(TH_REAL_IS_LONG)
-#ifdef _OPENMP
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs,ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-#else
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
-#endif
 #endif /* int64_t only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
-#ifdef _OPENMP
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs,ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-#else
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
-#endif
 #endif /* int only part */
 
 #if defined(TH_REAL_IS_BYTE)
@@ -3817,12 +3829,11 @@ TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-#ifdef _OPENMP
-LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
+LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
 LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
@@ -3835,39 +3846,10 @@ LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),HYPER_TH_OMP_OVERHEAD_THRES
 LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv,ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac),ORDIN_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) /,ORDIN_TH_OMP_OVERHEAD_THRESHOLD )
-#else
-LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
-LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
-LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
-LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid))
-LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp))
-LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1))
-LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos))
-LAB_IMPLEMENT_BASIC_FUNCTION(acos,TH_MATH_NAME(acos))
-LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh))
-LAB_IMPLEMENT_BASIC_FUNCTION(sin,TH_MATH_NAME(sin))
-LAB_IMPLEMENT_BASIC_FUNCTION(asin,TH_MATH_NAME(asin))
-LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh))
-LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan))
-LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan))
-LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh))
 LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
-LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt))
-LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt))
+LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
 LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round))
@@ -3875,8 +3857,6 @@ LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
 LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
 LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
-#endif
-
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
