@@ -19,6 +19,7 @@
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
+#include "caffe2/utils/map_utils.h"
 
 #if !CAFFE2_MOBILE
 #include "onnx/checker.h"
@@ -866,7 +867,7 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
   c2_op->set_name(node.name());
 
   const auto onnx_op_type = node.op_type();
-  auto broken_version = LookUpWithDefault(
+  auto broken_version = caffe2::get_default(
       get_broken_operators(), onnx_op_type, std::numeric_limits<int>::max());
   if (broken_version <= opset_version) {
     CAFFE_THROW(
@@ -878,7 +879,7 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
         broken_version);
   }
   c2_op->set_type(
-      LookUpWithDefault(get_renamed_operators(), onnx_op_type, onnx_op_type));
+      caffe2::get_default(get_renamed_operators(), onnx_op_type, onnx_op_type));
   if (!IsOperator(c2_op->type())) {
     CAFFE_THROW(
         "Don't know how to translate op ", onnx_op_type);

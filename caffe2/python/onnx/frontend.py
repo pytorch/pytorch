@@ -42,6 +42,8 @@ import numpy as np
 from caffe2.python.onnx.helper import c2_native_run_net, dummy_name
 from caffe2.python.onnx.error import Unsupported
 
+import caffe2.python._import_c_extension as C
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -85,18 +87,7 @@ class Caffe2Frontend(object):
         'Transpose': {'axes': 'perm'},
     }
 
-    _special_operators = {
-        'Conv': '_create_conv_pool_op',
-        'ConvTranspose': '_create_conv_pool_op',
-        'ChannelShuffle': '_create_channel_shuffle',
-        'MaxPool': '_create_conv_pool_op',
-        'AveragePool': '_create_conv_pool_op',
-        'Concat': '_create_concat',
-        'FC': '_create_gemm',
-        'LRN': '_create_lrn',
-        'Slice': '_create_slice',
-        'Reshape': '_create_reshape',
-    }
+    _special_operators = {}
 
     @classmethod
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
@@ -151,259 +142,22 @@ class Caffe2Frontend(object):
         return node_def
 
     @classmethod
-    def _create_concat(cls, op_def, shapes):
-        node = cls._common_caffe2_op_to_onnx_node(op_def, shapes)
-        if len(node.output) == 2:
-            del node.output[1]
-        explicit_axis = any(arg.name == 'axis' for arg in op_def.arg)
-        if not explicit_axis:
-            node.attribute.extend([helper.make_attribute('axis', 1)])
-        return node
-
-    @classmethod
-    def _create_shape_tensor(cls, shape):
-        return make_tensor(name=dummy_name(),
-                           data_type=TensorProto.INT64,
-                           dims=[len(shape)],
-                           vals=np.asarray(shape, dtype=np.int64).tobytes(),
-                           raw=True)
-
-    @classmethod
-    def _create_reshape(cls, op_def, shapes):
-        node = cls._common_caffe2_op_to_onnx_node(op_def, shapes)
-        const_tensors = []
-
-        attrs = {attr.name: attr for attr in node.attribute}
-        if 'shape' in attrs:
-            shape = attrs.pop('shape').ints
-            shape_tensor = cls._create_shape_tensor(shape)
-            node.input.append(shape_tensor.name)
-            const_tensors.append(shape_tensor)
-        node.attribute[:] = attrs.values()
-
-        if len(node.output) == 2:
-            del node.output[1]
-        return node, const_tensors
-
-    @classmethod
-    def _create_conv_pool_op(cls, op_def, shapes):
-        node = cls._common_caffe2_op_to_onnx_node(op_def, shapes)
-
-        if node.op_type in ['MaxPool', 'AveragePool']:
-            for i, attr in enumerate(node.attribute):
-                if attr.name == 'global_pooling' and attr.i:
-                    node.op_type = 'Global{}'.format(node.op_type)
-                    del node.attribute[i]
-                    break
-
-        attrs = {attr.name: attr for attr in node.attribute}
-
-        def apply_trans(k, dim=2, ks=None):
-            ks = ks or (k + 's')
-            if dim == 2:
-                k_h, k_w = k + '_h', k + '_w'
-            else:
-                k_t, k_l, k_b, k_r = k + '_t', k + '_l', k + '_b', k + '_r'
-
-            vals = None
-            if (dim == 2 and k_h in attrs and k_w in attrs):
-                vals = [attrs[k_h].i, attrs[k_w].i]
-                del attrs[k_h]
-                del attrs[k_w]
-            elif (dim == 4 and
-                  k_t in attrs and k_l in attrs and k_b in attrs and k_r in attrs):
-                vals = [attrs[k_t].i,
-                        attrs[k_l].i,
-                        attrs[k_b].i,
-                        attrs[k_r].i]
-                del attrs[k_t]
-                del attrs[k_l]
-                del attrs[k_b]
-                del attrs[k_r]
-            elif k in attrs:
-                vals = [attrs[k].i] * dim
-                del attrs[k]
-
-            if vals and not node.op_type.startswith('Global'):
-                attrs[ks] = helper.make_attribute(ks, vals)
-
-        apply_trans('kernel', ks='kernel_shape')
-        apply_trans('stride')
-        apply_trans('dilation')
-        apply_trans('adj')
-        apply_trans('pad', dim=4)
-
-        legacy_pad_attr = attrs.pop('legacy_pad', None)
-        if legacy_pad_attr:
-            assert node.op_type.endswith('Pool')
-            input_size = shapes[node.input[0]]
-            output_size = shapes[node.output[0]]
-            assert len(output_size) == 4
-            if node.op_type.startswith('Global'):
-                pass
-            elif legacy_pad_attr.i == caffe2_legacy_pb2.NOTSET:
-                pass
-            elif legacy_pad_attr.i == caffe2_legacy_pb2.VALID:
-                assert not 'pads' in attrs
-                new_attr = make_attribute('auto_pad', 'VALID')
-                attrs[new_attr.name] = new_attr
-            elif legacy_pad_attr.i == caffe2_legacy_pb2.SAME:
-                assert not 'pads' in attrs
-                # default behavior in Caffe2 is SAME_UPPER
-                # https://github.com/caffe2/caffe2/blob/master/caffe2/operators/conv_pool_op_base.h#L39
-                new_attr = make_attribute('auto_pad', 'SAME_UPPER')
-                attrs[new_attr.name] = new_attr
-            elif legacy_pad_attr.i == caffe2_legacy_pb2.CAFFE_LEGACY_POOLING:
-                # The problem here is that, Pool op in Caffe may add an additional pixel, if the last part is smaller than stride.
-                # So we use the explicit padding to replace legacy_pad.
-                # pad[end] = output_size[start + 2] * stride[start] - pad[start] - 1 + kernel[start] - input[start + 2]
-                # end = start + len(pad) / 2
-                logger.warning('Converting legacy padding to explicit padding.')
-                for i in range(2):
-                    attrs['pads'].ints[i + 2] = (output_size[i + 2] * attrs['strides'].ints[i] - attrs['pads'].ints[i]
-                                                 - 1 + attrs['kernel_shape'].ints[i] - input_size[i + 2])
-            else:
-                logger.error('Don\'t know how to handle the legacy_pad, while processing operator:\n{}'.format(op_def))
-                raise
-
-        del node.attribute[:]
-        node.attribute.extend(attrs.values())
-        return node
-
-    @classmethod
-    def _create_gemm(cls, op_def, shapes):
-        x, w, b = op_def.input
-        args = {arg.name: arg for arg in op_def.arg}
-        y, = op_def.output
-        x_shape = list(shapes[x])
-
-        nodes = []
-        const_tensors = []
-        if 'axis' in args:
-            axis = args['axis'].i
-            outer = np.prod(x_shape[:axis]).astype(int)
-            inner = np.prod(x_shape[axis:]).astype(int)
-            reshaped_x = dummy_name()
-            shape_tensor = cls._create_shape_tensor([outer, inner])
-            const_tensors.append(shape_tensor)
-            nodes.append(helper.make_node(
-                'Reshape',
-                inputs=[x, shape_tensor.name],
-                outputs=[reshaped_x],
-            ))
-            x = reshaped_x
-
-        if 'axis_w' in args:
-            axis_w = args['axis_w'].i
-            w_shape = shapes[w]
-            outer = np.prod(w_shape[:axis_w]).astype(int).item()
-            inner = np.prod(w_shape[axis_w:]).astype(int).item()
-            reshaped_w = dummy_name()
-            shape_tensor = cls._create_shape_tensor([outer, inner])
-            const_tensors.append(shape_tensor)
-            nodes.append(helper.make_node(
-                'Reshape',
-                inputs=[w, shape_tensor.name],
-                outputs=[reshaped_w],
-            ))
-            w = reshaped_w
-
-        gemm_y_output = dummy_name() if 'axis' in args else y
-        nodes.append(helper.make_node(
-            'Gemm',
-            inputs=[x, w, b],
-            outputs=[gemm_y_output],
-            name=op_def.name,
-            transB=1,
-            broadcast=1,
-        ))
-
-        if 'axis' in args:
-            axis = args['axis'].i
-            shape_tensor = cls._create_shape_tensor(x_shape[:axis] + [-1])
-            const_tensors.append(shape_tensor)
-            nodes.append(helper.make_node(
-                'Reshape',
-                inputs=[gemm_y_output, shape_tensor.name],
-                outputs=[y],
-            ))
-
-        return nodes, const_tensors
-
-    @classmethod
-    def _create_lrn(cls, op_def, shapes):
-        node = cls._common_caffe2_op_to_onnx_node(op_def, shapes)
-        if len(node.output) == 2:
-            del node.output[1]
-        return node
-
-    @classmethod
-    def _create_slice(cls, op_def, shapes):
-        if len(op_def.input) > 1:
-            raise Unsupported(
-                'ONNX Slice operator does not support dynamic slice.')
-        node = cls._common_caffe2_op_to_onnx_node(op_def, shapes)
-        attrs = {attr.name: attr for attr in node.attribute}
-        ndims = len(attrs['starts'].ints)
-
-        node.attribute.extend([helper.make_attribute('axes', range(ndims))])
-
-        data, = node.input
-        shape = shapes[data]
-
-        ends = attrs['ends'].ints
-        for i, end in enumerate(ends):
-            if end >= 0:
-                continue
-            if end == -1:
-                end = shape[i]
-            else:
-                end = end + 1
-            ends[i] = end
-
-        return node
-
-    @classmethod
-    def _create_channel_shuffle(cls, op_def, shapes):
-        x, = op_def.input
-        y, = op_def.output
-        n, c, h, w = shapes[x]
-        args = {arg.name: arg for arg in op_def.arg}
-        g = args['group'].i
-        assert c % g == 0
-
-        nodes = []
-        const_tensors = []
-
-        tmp1 = dummy_name()
-        shape_tensor = cls._create_shape_tensor([n, g, c // g, h, w])
-        const_tensors.append(shape_tensor)
-        nodes.append(helper.make_node(
-            'Reshape',
-            inputs=[x, shape_tensor.name],
-            outputs=[tmp1],
-        ))
-
-        tmp2 = dummy_name()
-        nodes.append(helper.make_node(
-            'Transpose',
-            inputs=[tmp1],
-            outputs=[tmp2],
-            perm=[0, 2, 1, 3, 4],
-        ))
-
-        shape_tensor = cls._create_shape_tensor([n, c, h, w])
-        const_tensors.append(shape_tensor)
-        nodes.append(helper.make_node(
-            'Reshape',
-            inputs=[tmp2, shape_tensor.name],
-            outputs=[y],
-        ))
-        return nodes, const_tensors
-
-    @classmethod
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
-        if op_def.type in cls._special_operators:
+        if C.support_onnx_export(op_def.type):
+            shape_list = list(shapes.values())
+            node_strs, tensor_strs = C.export_to_onnx(op_def.SerializeToString(), shapes)
+            nodes = []
+            for s in node_strs:
+                node = NodeProto()
+                node.ParseFromString(s)
+                nodes.append(node)
+            const_tensors = []
+            for s in tensor_strs:
+                tensor = TensorProto()
+                tensor.ParseFromString(s)
+                const_tensors.append(tensor)
+            return nodes, const_tensors
+        elif op_def.type in cls._special_operators:
             translator = getattr(cls, cls._special_operators[op_def.type])
         else:
             translator = cls._common_caffe2_op_to_onnx_node

@@ -304,6 +304,13 @@ elseif (${CUDA_VERSION} LESS 9.0) # CUDA 8.x
   list(APPEND CUDA_NVCC_FLAGS "-Wno-deprecated-gpu-targets")
 endif()
 
+# Add onnx namepsace definition to nvcc
+if (ONNX_NAMESPACE)
+  list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=${ONNX_NAMESPACE}")
+else()
+  list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=onnx_c2")
+endif()
+
 # CUDA 9.x requires GCC version <= 6
 if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
     (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 10.0))

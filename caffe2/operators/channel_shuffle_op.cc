@@ -37,7 +37,8 @@ REGISTER_GRADIENT(ChannelShuffle, GetChannelShuffleGradient);
 OPERATOR_SCHEMA(ChannelShuffle)
     .IdenticalTypeAndShape()
     .NumInputs(1)
-    .NumOutputs(1);
+    .NumOutputs(1)
+    .InheritOnnxSchema("ChannelShuffle");
 OPERATOR_SCHEMA(ChannelShuffleGradient)
     .IdenticalTypeAndShape()
     .NumInputs(1)

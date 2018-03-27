@@ -185,7 +185,8 @@ OPERATOR_SCHEMA(Concat)
     .DeviceInferenceFunction(concatOpDevInfer)
     .SetDoc("Concatenate a list of tensors into a single tensor")
     .Output(0, "concat_result", "Concatenated tensor")
-    .Output(1, "split_info", "The dimensions of the inputs.");
+    .Output(1, "split_info", "The dimensions of the inputs.")
+    .InheritOnnxSchema("Concat");
 
 // Backward compatibility names.
 REGISTER_CPU_OPERATOR(DepthSplit, SplitOp<CPUContext>);

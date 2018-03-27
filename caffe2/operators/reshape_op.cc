@@ -136,7 +136,8 @@ from the input tensor.
     .Input(0, "data", "An input tensor.")
     .Input(1, "new_shape", "New shape.")
     .Output(0, "reshaped", "Reshaped data.")
-    .Output(1, "old_shape", "Original shape.");
+    .Output(1, "old_shape", "Original shape.")
+    .InheritOnnxSchema("Reshape");
 
 class GetReshapeGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
