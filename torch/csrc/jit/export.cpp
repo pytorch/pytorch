@@ -82,11 +82,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
     JIT_ASSERT(external_ref.value() == p->get_name());
     JIT_ASSERT(raw_data_export_map != nullptr);
     JIT_ASSERT(raw_data_export_map->count(external_ref.value()) == 0);
-    size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
-    (*raw_data_export_map)[external_ref.value()] =
-        std::string(copy_bytes, '\0');
-    void* raw_data_ptr = &(*raw_data_export_map)[external_ref.value()][0];
-    std::memcpy(raw_data_ptr, static_cast<char*>(t.data_ptr()), copy_bytes);
+    (*raw_data_export_map)[external_ref.value()] = t;
     p->set_external_data_present();
   } else {
     p->set_raw_data(t);

@@ -4,7 +4,7 @@
 
 namespace torch { namespace jit {
 
-using RawDataExportMap = std::unordered_map<std::string, std::string>;
+using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
 std::tuple<std::string, RawDataExportMap> ExportGraph(
     const std::shared_ptr<Graph>& graph,

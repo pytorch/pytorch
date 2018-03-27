@@ -49,7 +49,9 @@ void initPythonTracerBindings(PyObject* module_) {
         s.graph, initializers, onnx_opset_version, defer_weight_export);
       std::unordered_map<std::string, py::bytes> python_serialized_export_map;
       for (auto& kv : export_map) {
-        python_serialized_export_map[kv.first] = py::bytes(kv.second);
+        auto t = kv.second;
+        size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
+        python_serialized_export_map[kv.first] = py::bytes(static_cast<const char*>(t.data_ptr()), copy_bytes);
       }
       return std::make_tuple(
           py::bytes(graph), python_serialized_export_map);
