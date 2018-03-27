@@ -11,6 +11,9 @@ required = object()
 class Optimizer(object):
     """Base class for all optimizers.
 
+    .. warning::
+        Params (or params[i]['params']) needs to give a deterministically ordered iterator.
+
     Arguments:
         params (iterable): an iterable of :class:`Variable` s or
             :class:`dict` s. Specifies what Variables should be optimized.
