@@ -284,7 +284,7 @@ class build_deps(Command):
 
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
         self.copy_tree('third_party/pybind11/include/pybind11/',
-                       'third_party/include/pybind11')
+                       'torch/lib/include/pybind11')
         self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
 
 
