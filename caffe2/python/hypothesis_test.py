@@ -1686,6 +1686,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertEqual(iters.dtype, np.int64)
         self.assertEqual(iters[0], initial_iters + num_iters)
 
+
     @given(initial_iters=st.integers(0, 100),
            num_iters=st.integers(0, 100),
            num_nets=st.integers(0, 5))
@@ -1707,11 +1708,22 @@ class TestOperators(hu.HypothesisTestCase):
         plan = core.Plan("plan")
         plan.AddStep(concurrent_steps)
 
+        stats_net = core.Net("stats_net")
+        stats_net.StatRegistryExport([], ["stats_key", "stats_val", "stats_ts"])
+
         self.ws.run(init_net)
         self.ws.run(plan)
+        self.ws.run(stats_net)
         iters = self.ws.blobs[("iter")].fetch()
         self.assertEqual(iters.dtype, np.int64)
         self.assertEqual(iters[0], initial_iters + num_iters * num_nets)
+
+        if num_iters * num_nets > 0:
+            stats_key = self.ws.blobs[("stats_key")].fetch()
+            self.assertEqual(b'atomic_iter/stats/iter/num_iter', stats_key[0])
+            stat_val = self.ws.blobs[("stats_val")].fetch()
+            self.assertEqual(num_iters * num_nets, stat_val[0])
+
 
     @given(a=hu.tensor(),
            src=st.sampled_from(list(viewkeys(_NUMPY_TYPE_TO_ENUM))),
