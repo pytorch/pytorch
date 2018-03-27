@@ -4,7 +4,11 @@
 #include "ATen/NativeFunctions.h"
 
 
-template <template<typename> class, typename, typename, template<template<typename> class, typename, typename> class>
+template<
+  template<typename> class Comparator,
+  typename scalar_out,
+  typename scalar,
+  template<template<typename> class, typename, typename> class CmpOpImpl>
 struct CmpOpScalar {};
 
 // Comparators have special cases for integral tensors and floating scalars due to
