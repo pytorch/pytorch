@@ -33,6 +33,13 @@ class ClipTensorByScalingOp final : public Operator<Context> {
     clipped->ResizeLike(input_tensor);
     float* clipped_tensor_data = clipped->template mutable_data<float>();
 
+    if (InputSize() > 2) {
+      const auto& additional_threshold = Input(2);
+      CAFFE_ENFORCE_EQ(additional_threshold.size(), 1);
+
+      threshold_ *= *(additional_threshold.template data<float>());
+    }
+
     if (*val_data > threshold_) {
       float ratio = threshold_ / *val_data;
 
