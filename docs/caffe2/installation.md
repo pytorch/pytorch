@@ -62,7 +62,12 @@ To use Caffe2 in Python, you need two libraries, future and six.
 
     pip install future six
 
-To run the tutorials you'll need jupyter (formerly ipython) notebooks and matplotlib, which can be installed on MacOS X with
+To run the tutorials, download additional source from GitHub.
+
+    git clone --recursive https://github.com/caffe2/tutorials.git caffe2_tutorials
+    cd caffe2_tutorials
+
+You'll also need jupyter (formerly ipython) notebooks and matplotlib, which can be installed on MacOS X with
 
     brew install matplotlib --with-python3
     pip install jupyter
