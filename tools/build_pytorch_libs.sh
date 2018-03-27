@@ -49,7 +49,7 @@ if [[ -n "$CPPFLAGS" ]]; then
   USER_LDFLAGS="$USER_LDFLAGS $CPPFLAGS"
 fi
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 PWD=`printf "%q\n" "$(pwd)"`
 BASE_DIR="$PWD"
 TORCH_LIB_DIR="$BASE_DIR/torch/lib"

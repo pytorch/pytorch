@@ -190,9 +190,9 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     if IS_WINDOWS:
-        build_libs_cmd = ['build_pytorch_libs.bat']
+        build_libs_cmd = ['tools/build_pytorch_libs.bat']
     else:
-        build_libs_cmd = ['bash', 'build_pytorch_libs.sh']
+        build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["NUM_JOBS"] = str(NUM_JOBS)

@@ -1,5 +1,5 @@
 :: @echo off
-cd "%~dp0"
+cd "%~dp0/.."
 
 set BASE_DIR=%cd:\=/%
 set TORCH_LIB_DIR=%cd:\=/%/torch/lib
