@@ -3797,14 +3797,17 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 #define LAB_IMPLEMENT_BASIC_FUNCTION(...) LAB_IMPLEMENT_BASIC_FUNCTION_CHOOSE(__VA_ARGS__)(__VA_ARGS__)
 
 /*
- * LAB_IMPLEMENT_BASIC_FUNCTION is a macro with optional parameters, you can use it flexibly. The macro will discard the invalid
- * openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one. In other word,
+ * LAB_IMPLEMENT_BASIC_FUNCTION is a macro with optional parameters, you can use it flexibly. 
+ * Parameter VECTORIZE is to determine whether to use vector optimization or not. 1:vectorization, 2:non-vectorization
+ * The macro will discard the invalid openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one. 
+ * In other word,
  * (A), If openmp is UNavailable, the two usage below is both right.
- *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
- *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity)
+ *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, vectorize, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
+ *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, vectorize, func_entity)
  * (B), If openmp is available, the two usage below is also both right.
- *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD)
- *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity) // pass the default openmp threshold
+ *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, vectorize, OMP_OVERHEAD_THRESHOLD)
+ *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, vectorize) // pass the default openmp threshold
+ *
 */
 
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-,0)
