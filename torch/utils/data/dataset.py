@@ -30,20 +30,29 @@ class TensorDataset(Dataset):
     dimension.
 
     Arguments:
+        *tensors (Tensor): tensors with the same first dimension.
         data_tensor (Tensor): contains sample data.
         target_tensor (Tensor): contains sample targets (labels).
     """
 
-    def __init__(self, data_tensor, target_tensor):
-        assert data_tensor.size(0) == target_tensor.size(0)
-        self.data_tensor = data_tensor
-        self.target_tensor = target_tensor
+    def __init__(self, *tensors, data_tensor=None, target_tensor=None):
+        def tensor_gen():
+            if data_tensor is not None:
+                yield data_tensor
+            if target_tensor is not None:
+                yield target_tensor
+            for tensor in tensors:
+                yield tensor
+            pass
+
+        self.tensors = tuple(tensor_gen())
+        assert all(self.tensors[0].size(0) == tensor.size(0) for tensor in self.tensors)
 
     def __getitem__(self, index):
-        return self.data_tensor[index], self.target_tensor[index]
+        return tuple(tensor[index] for tensor in self.tensors)
 
     def __len__(self):
-        return self.data_tensor.size(0)
+        return self.tensors[0].size(0)
 
 
 class ConcatDataset(Dataset):
