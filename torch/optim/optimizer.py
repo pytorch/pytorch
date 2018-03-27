@@ -175,6 +175,8 @@ class Optimizer(object):
         params = param_group['params']
         if isinstance(params, Variable):
             param_group['params'] = [params]
+        elif isinstance(params, set):
+            raise TypeError('using set as params may result in unexpected error')
         else:
             param_group['params'] = list(params)
 
