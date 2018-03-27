@@ -3,7 +3,7 @@
 set -ex
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT_DIR=$(cd "$LOCAL_DIR"/.. && pwd)
+ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 
 # Setup sccache if SCCACHE_BUCKET is set
 if [ -n "${SCCACHE_BUCKET}" ]; then
