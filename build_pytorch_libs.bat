@@ -2,6 +2,7 @@
 cd "%~dp0"
 
 set BASE_DIR=%cd:\=/%
+set TORCH_LIB_DIR=%cd:\=/%/torch/lib
 set INSTALL_DIR=%cd:\=/%/torch/lib/tmp_install
 set THIRD_PARTY_DIR=%cd:\=/%/third_party
 set PATH=%INSTALL_DIR%/bin;%PATH%
@@ -58,9 +59,22 @@ IF "%CMAKE_GENERATOR%"=="" (
 :read_loop
 if "%1"=="" goto after_loop
 if "%1"=="ATen" (
+  cd aten
   call:build_aten %~1
+  cd ..
 ) ELSE (
-  call:build %~1
+  set "IS_OURS="
+  IF "%1"=="THD" set IS_OURS=1
+  IF "%1"=="libshm_windows" set IS_OURS=1
+  if defined IS_OURS (
+    cd torch/lib
+    call:build %~1
+    cd ..
+  ) ELSE (
+    cd third_party
+    call:build %~1
+    cd ..
+  )
 )
 shift
 goto read_loop
@@ -84,7 +98,6 @@ goto:eof
 :build
   @setlocal
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
-  cd third_party
   mkdir build\%~1
   cd build/%~1
   cmake ../../%~1 %CMAKE_GENERATOR_COMMAND% ^
@@ -117,7 +130,6 @@ goto:eof
   %MAKE_COMMAND%
   IF NOT %ERRORLEVEL%==0 exit 1
   cd ../..
-  cd ..
   @endlocal
 
 goto:eof
@@ -125,10 +137,9 @@ goto:eof
 :build_aten
   @setlocal
   IF NOT "%PREBUILD_COMMAND%"=="" call "%PREBUILD_COMMAND%" %PREBUILD_COMMAND_ARGS%
-  cd third_party
-  mkdir build\%~1
-  cd build/%~1
-  cmake ../../../%~1 %CMAKE_GENERATOR_COMMAND% ^
+  mkdir build
+  cd build
+  cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
                   -DNO_CUDA=%NO_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
@@ -139,7 +150,6 @@ goto:eof
 
   %MAKE_COMMAND%
   IF NOT %ERRORLEVEL%==0 exit 1
-  cd ../..
   cd ..
   @endlocal
 
