@@ -503,26 +503,6 @@ class TestSegmentOps(hu.HypothesisTestCase):
         with self.assertRaises(RuntimeError):
             workspace.RunOperatorOnce(op)
 
-    @unittest.skipIf(not workspace.has_gpu_support, "No gpu support")
-    @given(**hu.gcs)
-    def test_legnths_max_gpu(self, gc, dc):
-        lengths = np.random.randint(1, 20, size=20).astype(np.int32)
-        X = np.random.rand(lengths.sum(), 8).astype(np.float32)
-        op = core.CreateOperator("LengthsMax", ["X", "lengths"], "out")
-        self.assertDeviceChecks(dc, op, [X, lengths], [0])
-        workspace.FeedBlob("X", X)
-        workspace.FeedBlob("lengths", lengths)
-        workspace.RunOperatorOnce(op)
-        out = workspace.FetchBlob("out")
-        workspace.ResetWorkspace()
-        grad = np.random.rand(20, 8).astype(np.float32)
-        gop = core.CreateOperator(
-            "LengthsMaxWithMainInputAndForwardOutputGradient",
-            ["out", "grad", "lengths", "X"], "grad_out"
-        )
-        self.assertDeviceChecks(dc, gop, [out, grad, lengths, X], [0])
-
-
 if __name__ == "__main__":
     import unittest
     unittest.main()
