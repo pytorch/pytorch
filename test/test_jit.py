@@ -1972,6 +1972,26 @@ class TestScript(TestCase):
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_script_module_call_noscript(self):
+        test_self = self
+
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.value = "hi"
+
+            def foo(self):
+                test_self.assertEqual(self.value, "hi")
+                return torch.ones(2, 2)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + self.foo()
+
+        m = M()
+        input = torch.randn(2, 2)
+        o = m(input)
+        self.assertEqual(o, input + torch.ones(2, 2))
 
 if __name__ == '__main__':
     run_tests()
