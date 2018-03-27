@@ -7,6 +7,7 @@ from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
 
+import torch.onnx.operators
 
 class RNNBase(Module):
 
@@ -141,18 +142,16 @@ class RNNBase(Module):
     def forward(self, input, hx=None):
         is_packed = isinstance(input, PackedSequence)
         if is_packed:
+            max_batch_size = torch.onnx.operators.batch_size_from_packed_sequence(input)
             input, batch_sizes = input
-            max_batch_size = int(batch_sizes[0])
         else:
             batch_sizes = None
-            max_batch_size = input.size(0) if self.batch_first else input.size(1)
+            max_batch_size = torch.onnx.operators.shape_as_tensor(input)[0 if self.batch_first else 1]
 
         if hx is None:
             num_directions = 2 if self.bidirectional else 1
-            hx = torch.autograd.Variable(input.data.new(self.num_layers *
-                                                        num_directions,
-                                                        max_batch_size,
-                                                        self.hidden_size).zero_(), requires_grad=False)
+            hx = torch.onnx.operators.constant_tensor_from_tensor_shape(
+                input, 0.0, (self.num_layers * num_directions, max_batch_size, self.hidden_size))
             if self.mode == 'LSTM':
                 hx = (hx, hx)
 
