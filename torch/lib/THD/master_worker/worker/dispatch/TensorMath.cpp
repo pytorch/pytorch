@@ -611,7 +611,7 @@ static void tensorLogicalAnd(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::logicalAnd_out(tensor, src, dimension, keepdim);
+  at::all_out(tensor, src, dimension, keepdim);
 }
 
 static void tensorLogicalAny(rpc::RPCMessage& raw_message) {
@@ -620,5 +620,5 @@ static void tensorLogicalAny(rpc::RPCMessage& raw_message) {
   int dimension = unpackInteger(raw_message);
   int keepdim = unpackInteger(raw_message);
   finalize(raw_message);
-  at::logicalAny_out(tensor, src, dimension, keepdim);
+  at::any_out(tensor, src, dimension, keepdim);
 }

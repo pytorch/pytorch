@@ -1047,6 +1047,7 @@
     - Byte
   variants:
     - method
+    - function
   backends:
     - CPU
     - CUDA
@@ -1073,6 +1074,7 @@
     - Byte
   variants:
     - method
+    - function
   backends:
     - CPU
     - CUDA
