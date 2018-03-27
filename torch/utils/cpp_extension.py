@@ -113,11 +113,16 @@ class BuildExtension(build_ext):
             self._define_torch_extension_name(extension)
 
         # Register .cu and .cuh as valid source extensions.
-        self.compiler.src_extensions += ['.cu', '.cuh']
         # Save the original _compile method for later.
-        original_compile = self.compiler._compile
+        if self.compiler.compiler_type == 'msvc':
+            self.compiler._cpp_extensions += ['.cu', '.cuh']
+            original_compile = self.compiler.compile
+            original_spawn = self.compiler.spawn
+        else:
+            self.compiler.src_extensions += ['.cu', '.cuh']
+            original_compile = self.compiler._compile
 
-        def wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
+        def unix_wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
             # Copy before we make any modifications.
             cflags = copy.deepcopy(extra_postargs)
             try:
@@ -140,8 +145,55 @@ class BuildExtension(build_ext):
                 # Put the original compiler back in place.
                 self.compiler.set_executable('compiler_so', original_compiler)
 
+        def win_wrap_compile(self, sources,
+                             output_dir=None, macros=None, include_dirs=None, debug=0,
+                             extra_preargs=None, extra_postargs=None, depends=None):
+
+            cflags = copy.deepcopy(extra_postargs)
+
+            def spawn(cmd):
+                global cflags
+                # Using regex to match src, obj and include files
+
+                src_regex = re.compile('/T(p|c)(.*)')
+                src_list = [m.group(2) for m in (
+                    src_regex.match(elem) for elem in cmd) if m]
+
+                obj_regex = re.compile('/Fo(.*)')
+                obj_list = [m.group(1) for m in (
+                    obj_regex.match(elem) for elem in cmd) if m]
+
+                include_regex = re.compile(r'((\-|\/)I.*)')
+                include_list = [m.group(1) for m in (
+                    include_regex.match(elem) for elem in cmd) if m]
+
+                if len(src_list) >= 1 and len(obj_list) >= 1:
+                    src = src_list[0]
+                    obj = obj_list[0]
+                    if _is_cuda_file(src):
+                        nvcc = _join_cuda_home('bin', 'nvcc')
+                        if isinstance(cflags, dict):
+                            cflags = cflags['nvcc']
+                        cmd = spawn([nvcc, '-c', src, '-o', obj] + include_list + cflags)
+                    elif isinstance(cflags, dict):
+                        cflags = cflags['cxx']
+                        cmd += cflags
+
+                return original_spawn(cmd)
+
+            try:
+                setattr(self, 'spawn', spawn)
+                original_compile(self, sources,
+                                 output_dir, macros, include_dirs, debug,
+                                 extra_preargs, extra_postargs, depends)
+            finally:
+                setattr(self, 'spawn', original_spawn)
+
         # Monkey-patch the _compile method.
-        self.compiler._compile = wrap_compile
+        if self.compiler.compiler_type == 'msvc':
+            self.compiler.compile = win_wrap_compile
+        else:
+            self.compiler._compile = unix_wrap_compile
 
         build_ext.build_extensions(self)
 
@@ -285,10 +337,10 @@ def library_paths(cuda=False):
     Get the library paths required to build a C++ or CUDA extension.
 
     Args:
-        cuda: If `True`, includes CUDA-specific include paths.
+        cuda: If `True`, includes CUDA-specific library paths.
 
     Returns:
-        A list of include path strings.
+        A list of library path strings.
     '''
     paths = []
 
