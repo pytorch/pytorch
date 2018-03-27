@@ -140,7 +140,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>
         >>>     @staticmethod
         >>>     def backward(ctx, grad_output):
-        >>>         result, = ctx.saved_variables
+        >>>         result, = ctx.saved_tensors
         >>>         return grad_output * result
     """
 
@@ -197,7 +197,7 @@ def once_differentiable(fn):
         # to have requires_grad=True but point to a grad_fn which throws an
         # error message during (double) back-propagation.
         # XXX: this is only an approximation of requires_grad - there's no way
-        # to figure out if fn didn't use ctx.saved_variables and as a result
+        # to figure out if fn didn't use ctx.saved_tensors and as a result
         # some Variables might require grad, even if no args do.
         # Unfortunately, this leads to unexpected error messages ("no nodes
         # require computing gradients"), but I don't have a better idea.

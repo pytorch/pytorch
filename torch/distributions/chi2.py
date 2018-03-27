@@ -17,7 +17,7 @@ class Chi2(Gamma):
     Args:
         df (float or Tensor): shape parameter of the distribution
     """
-    params = {'df': constraints.positive}
+    arg_constraints = {'df': constraints.positive}
 
     def __init__(self, df, validate_args=None):
         super(Chi2, self).__init__(0.5 * df, 0.5, validate_args=validate_args)

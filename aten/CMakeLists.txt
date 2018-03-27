@@ -32,6 +32,11 @@ ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
 
+# disable some verbose warnings
+IF (MSVC)
+  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
+ENDIF(MSVC)
+
 # windef.h will define max/min macros if NOMINMAX is not defined
 IF(MSVC)
   add_definitions(/DNOMINMAX)
@@ -66,7 +71,7 @@ endif()
 # Flags
 # When using MSVC
 
-# Detect CUDA architecture and get best NVCC flags
+# Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
 IF(NOT CUDA_FOUND)
   FIND_PACKAGE(CUDA 5.5)
@@ -75,7 +80,7 @@ ENDIF()
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503")
+  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ADD_DEFINITIONS(-DTH_EXPORTS)
   IF (NOT NO_CUDA)
     ADD_DEFINITIONS(-DTHC_EXPORTS)
@@ -386,9 +391,12 @@ IF(BLAS_FOUND)
   IF(BLAS_INFO STREQUAL "mkl")
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
     IF(NOT BLAS_INCLUDE_DIR)
-      MESSAGE(FATAL_ERROR "MKL header files not found. If using conda, please run \
-        `conda install mkl-include`. Otherwise, please make sure that CMake will \
-        search the directory containing the header files, e.g., by setting CMAKE_INCLUDE_PATH.")
+      MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
+        You can get them by `conda install mkl-include` if using conda (if \
+        it is missing, run `conda upgrade -n root conda` first), and \
+        `pip install mkl-devel` if using pip. If build fails with header files \
+        available in the system, please make sure that CMake will search the \
+        directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
     ENDIF()
     INCLUDE_DIRECTORIES(${BLAS_INCLUDE_DIR})  # include MKL headers
     SET(AT_MKL_ENABLED 1)

@@ -2,7 +2,12 @@ import unittest
 
 import torch
 import torch.utils.cpp_extension
-import torch_test_cpp_extension as cpp_extension
+try:
+    import torch_test_cpp_extension as cpp_extension
+except ModuleNotFoundError:
+    print("\'test_cpp_extensions.py\' cannot be invoked directly. " +
+          "Run \'python run_test.py -i cpp_extensions\' for the \'test_cpp_extensions.py\' tests.")
+    raise
 
 import common
 

@@ -49,6 +49,7 @@ from torch.distributions.kl import _kl_expfamily_expfamily
 from torch.distributions.transforms import (AbsTransform, AffineTransform,
                                             ComposeTransform, ExpTransform,
                                             LowerCholeskyTransform,
+                                            PowerTransform,
                                             SigmoidTransform, SoftmaxTransform,
                                             StickBreakingTransform,
                                             identity_transform)
@@ -165,21 +166,21 @@ EXAMPLES = [
     ]),
     Example(Gumbel, [
         {
-            'loc': variable(torch.randn(5, 5), requires_grad=True),
+            'loc': torch.randn(5, 5, requires_grad=True),
             'scale': variable(torch.randn(5, 5).abs(), requires_grad=True),
         },
         {
-            'loc': variable(torch.randn(1), requires_grad=True),
+            'loc': torch.randn(1, requires_grad=True),
             'scale': variable(torch.randn(1).abs(), requires_grad=True),
         },
     ]),
     Example(Laplace, [
         {
-            'loc': variable(torch.randn(5, 5), requires_grad=True),
+            'loc': torch.randn(5, 5, requires_grad=True),
             'scale': variable(torch.randn(5, 5).abs(), requires_grad=True),
         },
         {
-            'loc': variable(torch.randn(1), requires_grad=True),
+            'loc': torch.randn(1, requires_grad=True),
             'scale': variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
@@ -189,11 +190,11 @@ EXAMPLES = [
     ]),
     Example(LogNormal, [
         {
-            'loc': variable(torch.randn(5, 5), requires_grad=True),
+            'loc': torch.randn(5, 5, requires_grad=True),
             'scale': variable(torch.randn(5, 5).abs(), requires_grad=True),
         },
         {
-            'loc': variable(torch.randn(1), requires_grad=True),
+            'loc': torch.randn(1, requires_grad=True),
             'scale': variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
@@ -217,11 +218,17 @@ EXAMPLES = [
     ]),
     Example(MultivariateNormal, [
         {
-            'loc': variable(torch.randn(5, 2), requires_grad=True),
+            'loc': torch.randn(5, 2, requires_grad=True),
             'covariance_matrix': variable(torch.Tensor([[2.0, 0.3], [0.3, 0.25]]), requires_grad=True),
         },
         {
-            'loc': variable(torch.randn(5, 3, 2), requires_grad=True),
+            'loc': torch.randn(2, 3, requires_grad=True),
+            'precision_matrix': variable(torch.Tensor([[2.0, 0.1, 0.0],
+                                                       [0.1, 0.25, 0.0],
+                                                       [0.0, 0.0, 0.3]]), requires_grad=True),
+        },
+        {
+            'loc': torch.randn(5, 3, 2, requires_grad=True),
             'scale_tril': variable(torch.Tensor([[[2.0, 0.0], [-0.5, 0.25]],
                                                  [[2.0, 0.0], [0.3, 0.25]],
                                                  [[5.0, 0.0], [-0.5, 1.5]]]), requires_grad=True),
@@ -233,11 +240,11 @@ EXAMPLES = [
     ]),
     Example(Normal, [
         {
-            'loc': variable(torch.randn(5, 5), requires_grad=True),
+            'loc': torch.randn(5, 5, requires_grad=True),
             'scale': variable(torch.randn(5, 5).abs(), requires_grad=True),
         },
         {
-            'loc': variable(torch.randn(1), requires_grad=True),
+            'loc': torch.randn(1, requires_grad=True),
             'scale': variable(torch.randn(1).abs(), requires_grad=True),
         },
         {
@@ -304,30 +311,35 @@ EXAMPLES = [
     ]),
     Example(TransformedDistribution, [
         {
-            'base_distribution': Normal(variable(torch.randn(2, 3), requires_grad=True),
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
                                         variable(torch.randn(2, 3).abs(), requires_grad=True)),
             'transforms': [],
         },
         {
-            'base_distribution': Normal(variable(torch.randn(2, 3), requires_grad=True),
+            'base_distribution': Normal(torch.randn(2, 3, requires_grad=True),
                                         variable(torch.randn(2, 3).abs(), requires_grad=True)),
             'transforms': ExpTransform(),
         },
         {
-            'base_distribution': Normal(variable(torch.randn(2, 3, 5), requires_grad=True),
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
                                         variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
-            'transforms': [AffineTransform(variable(torch.randn(3, 5)), variable(torch.randn(3, 5))),
+            'transforms': [AffineTransform(torch.randn(3, 5), torch.randn(3, 5)),
                            ExpTransform()],
+        },
+        {
+            'base_distribution': Normal(torch.randn(2, 3, 5, requires_grad=True),
+                                        variable(torch.randn(2, 3, 5).abs(), requires_grad=True)),
+            'transforms': AffineTransform(1, 2),
         },
     ]),
     Example(Uniform, [
         {
-            'low': variable(torch.zeros(5, 5), requires_grad=True),
-            'high': variable(torch.ones(5, 5), requires_grad=True),
+            'low': torch.zeros(5, 5, requires_grad=True),
+            'high': torch.ones(5, 5, requires_grad=True),
         },
         {
-            'low': variable(torch.zeros(1), requires_grad=True),
-            'high': variable(torch.ones(1), requires_grad=True),
+            'low': torch.zeros(1, requires_grad=True),
+            'high': torch.ones(1, requires_grad=True),
         },
         {
             'low': variable([1.0, 1.0], requires_grad=True),
@@ -501,20 +513,12 @@ BAD_EXAMPLES = [
     ]),
     Example(TransformedDistribution, [
         {
-            'base_distribution': Normal(variable([1, 1], requires_grad=True),
-                                        variable([0, 1], requires_grad=True)),
-            'transforms': [],
+            'base_distribution': Normal(0, 1),
+            'transforms': lambda x: x,
         },
         {
-            'base_distribution': Normal(variable([1, 1], requires_grad=True),
-                                        variable([-1, -1], requires_grad=True)),
-            'transforms': ExpTransform(),
-        },
-        {
-            'base_distribution': Normal(variable([1, 1, 0], requires_grad=True),
-                                        variable([-1, -2, 3], requires_grad=True)),
-            'transforms': [AffineTransform(variable(torch.randn(3, 5)), variable(torch.randn(3, 5))),
-                           ExpTransform()],
+            'base_distribution': Normal(0, 1),
+            'transforms': [lambda x: x],
         },
     ]),
     Example(Uniform, [
@@ -1043,9 +1047,9 @@ class TestDistributions(TestCase):
             self.assertEqual(equal_probs, s)
 
     def test_uniform(self):
-        low = variable(torch.zeros(5, 5), requires_grad=True)
+        low = torch.zeros(5, 5, requires_grad=True)
         high = variable(torch.ones(5, 5) * 3, requires_grad=True)
-        low_1d = variable(torch.zeros(1), requires_grad=True)
+        low_1d = torch.zeros(1, requires_grad=True)
         high_1d = variable(torch.ones(1) * 3, requires_grad=True)
         self.assertEqual(Uniform(low, high).sample().size(), (5, 5))
         self.assertEqual(Uniform(low, high).sample((7,)).size(), (7, 5, 5))
@@ -1076,10 +1080,10 @@ class TestDistributions(TestCase):
         high.grad.zero_()
 
     def test_cauchy(self):
-        loc = variable(torch.zeros(5, 5), requires_grad=True)
-        scale = variable(torch.ones(5, 5), requires_grad=True)
-        loc_1d = variable(torch.zeros(1), requires_grad=True)
-        scale_1d = variable(torch.ones(1), requires_grad=True)
+        loc = torch.zeros(5, 5, requires_grad=True)
+        scale = torch.ones(5, 5, requires_grad=True)
+        loc_1d = torch.zeros(1, requires_grad=True)
+        scale_1d = torch.ones(1, requires_grad=True)
         self.assertTrue(is_all_nan(Cauchy(loc_1d, scale_1d).mean))
         self.assertEqual(Cauchy(loc_1d, scale_1d).variance, float('inf'), allow_inf=True)
         self.assertEqual(Cauchy(loc, scale).sample().size(), (5, 5))
@@ -1104,10 +1108,10 @@ class TestDistributions(TestCase):
         scale.grad.zero_()
 
     def test_lognormal(self):
-        mean = variable(torch.randn(5, 5), requires_grad=True)
+        mean = torch.randn(5, 5, requires_grad=True)
         std = variable(torch.randn(5, 5).abs(), requires_grad=True)
-        mean_1d = variable(torch.randn(1), requires_grad=True)
-        std_1d = variable(torch.randn(1), requires_grad=True)
+        mean_1d = torch.randn(1, requires_grad=True)
+        std_1d = torch.randn(1, requires_grad=True)
         mean_delta = variable([1.0, 0.0])
         std_delta = variable([1e-5, 1e-5])
         self.assertEqual(LogNormal(mean, std).sample().size(), (5, 5))
@@ -1129,7 +1133,7 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lognormal_logprob(self):
-        mean = variable(torch.randn(5, 1), requires_grad=True)
+        mean = torch.randn(5, 1, requires_grad=True)
         std = variable(torch.randn(5, 1).abs(), requires_grad=True)
 
         def ref_log_prob(idx, x, log_prob):
@@ -1215,10 +1219,10 @@ class TestDistributions(TestCase):
                 multivariate=True)
 
     def test_normal(self):
-        loc = variable(torch.randn(5, 5), requires_grad=True)
+        loc = torch.randn(5, 5, requires_grad=True)
         scale = variable(torch.randn(5, 5).abs(), requires_grad=True)
-        loc_1d = variable(torch.randn(1), requires_grad=True)
-        scale_1d = variable(torch.randn(1), requires_grad=True)
+        loc_1d = torch.randn(1, requires_grad=True)
+        scale_1d = torch.randn(1, requires_grad=True)
         loc_delta = variable([1.0, 0.0])
         scale_delta = variable([1e-5, 1e-5])
         self.assertEqual(Normal(loc, scale).sample().size(), (5, 5))
@@ -1274,11 +1278,14 @@ class TestDistributions(TestCase):
         # construct PSD covariance
         tmp = torch.randn(3, 10)
         cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        prec = torch.tensor(cov.data.inverse(), requires_grad=True)
         scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
 
         # construct batch of PSD covariances
         tmp = torch.randn(6, 5, 3, 10)
         cov_batched = torch.tensor((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
+        prec_batched = [C.inverse() for C in cov_batched.data.view((-1, 3, 3))]
+        prec_batched = torch.stack(prec_batched).view(cov_batched.shape)
         scale_tril_batched = [torch.potrf(C, upper=False) for C in cov_batched.data.view((-1, 3, 3))]
         scale_tril_batched = torch.stack(scale_tril_batched).view(cov_batched.shape)
 
@@ -1295,6 +1302,8 @@ class TestDistributions(TestCase):
         self.assertEqual(MultivariateNormal(mean, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
         self.assertEqual(MultivariateNormal(mean_no_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
         self.assertEqual(MultivariateNormal(mean_multi_batch, cov_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, precision_matrix=prec).sample((2, 7)).size(), (2, 7, 5, 3))
+        self.assertEqual(MultivariateNormal(mean, precision_matrix=prec_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
         self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril).sample((2, 7)).size(), (2, 7, 5, 3))
         self.assertEqual(MultivariateNormal(mean, scale_tril=scale_tril_batched).sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
@@ -1302,20 +1311,24 @@ class TestDistributions(TestCase):
         self._gradcheck_log_prob(MultivariateNormal, (mean, cov))
         self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov))
         self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, cov_batched))
-        self._gradcheck_log_prob(MultivariateNormal, (mean, None, scale_tril))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, scale_tril_batched))
+        self._gradcheck_log_prob(MultivariateNormal, (mean, None, prec))
+        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, prec_batched))
+        self._gradcheck_log_prob(MultivariateNormal, (mean, None, None, scale_tril))
+        self._gradcheck_log_prob(MultivariateNormal, (mean_no_batch, None, None, scale_tril_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multivariate_normal_log_prob(self):
         mean = torch.tensor(torch.randn(3), requires_grad=True)
         tmp = torch.randn(3, 10)
         cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        prec = torch.tensor(cov.data.inverse(), requires_grad=True)
         scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
         dist1 = MultivariateNormal(mean, cov)
-        dist2 = MultivariateNormal(mean, scale_tril=scale_tril)
+        dist2 = MultivariateNormal(mean, precision_matrix=prec)
+        dist3 = MultivariateNormal(mean, scale_tril=scale_tril)
         ref_dist = scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy())
 
         x = dist1.sample((10,))
@@ -1323,6 +1336,7 @@ class TestDistributions(TestCase):
 
         self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).data.numpy() - expected)**2), places=3)
         self.assertAlmostEqual(0.0, np.mean((dist2.log_prob(x).data.numpy() - expected)**2), places=3)
+        self.assertAlmostEqual(0.0, np.mean((dist3.log_prob(x).data.numpy() - expected)**2), places=3)
 
         # Double-check that batched versions behave the same as unbatched
         mean = torch.tensor(torch.randn(5, 3), requires_grad=True)
@@ -1345,11 +1359,16 @@ class TestDistributions(TestCase):
         mean = torch.tensor(torch.randn(3), requires_grad=True)
         tmp = torch.randn(3, 10)
         cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
+        prec = torch.tensor(cov.data.inverse(), requires_grad=True)
         scale_tril = torch.tensor(torch.potrf(cov.data, upper=False), requires_grad=True)
 
         self._check_sampler_sampler(MultivariateNormal(mean, cov),
                                     scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
                                     'MultivariateNormal(loc={}, cov={})'.format(mean, cov),
+                                    multivariate=True)
+        self._check_sampler_sampler(MultivariateNormal(mean, precision_matrix=prec),
+                                    scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
+                                    'MultivariateNormal(loc={}, prec={})'.format(mean, prec),
                                     multivariate=True)
         self._check_sampler_sampler(MultivariateNormal(mean, scale_tril=scale_tril),
                                     scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
@@ -1392,10 +1411,10 @@ class TestDistributions(TestCase):
                                         'Exponential(rate={})'.format(rate))
 
     def test_laplace(self):
-        loc = variable(torch.randn(5, 5), requires_grad=True)
+        loc = torch.randn(5, 5, requires_grad=True)
         scale = variable(torch.randn(5, 5).abs(), requires_grad=True)
-        loc_1d = variable(torch.randn(1), requires_grad=True)
-        scale_1d = variable(torch.randn(1), requires_grad=True)
+        loc_1d = torch.randn(1, requires_grad=True)
+        scale_1d = torch.randn(1, requires_grad=True)
         loc_delta = torch.Tensor([1.0, 0.0])
         scale_delta = torch.Tensor([1e-5, 1e-5])
         self.assertEqual(Laplace(loc, scale).sample().size(), (5, 5))
@@ -1504,9 +1523,9 @@ class TestDistributions(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_gumbel(self):
-        loc = variable(torch.randn(2, 3), requires_grad=True)
+        loc = torch.randn(2, 3, requires_grad=True)
         scale = variable(torch.randn(2, 3).abs(), requires_grad=True)
-        loc_1d = variable(torch.randn(1), requires_grad=True)
+        loc_1d = torch.randn(1, requires_grad=True)
         scale_1d = variable(torch.randn(1).abs(), requires_grad=True)
         self.assertEqual(Gumbel(loc, scale).sample().size(), (2, 3))
         self.assertEqual(Gumbel(loc, scale).sample((5,)).size(), (5, 2, 3))
@@ -2704,7 +2723,7 @@ class TestConstraints(TestCase):
                         # use a stricter constraint to the simplex.
                         value = value / value.sum(-1, True)
                     try:
-                        constraint = dist.params[name]
+                        constraint = dist.arg_constraints[name]
                     except KeyError:
                         continue  # ignore optional parameters
 
@@ -2950,6 +2969,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.multinomial(10, simplex_tensor)
             ),
             (
+                MultivariateNormal(random_var, torch.diag(positive_var2)),
+                scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
+            ),
+            (
                 Normal(random_var, positive_var2),
                 scipy.stats.norm(random_var, positive_var2)
             ),
@@ -2979,15 +3002,21 @@ class TestAgainstScipy(TestCase):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Cauchy):  # Cauchy distribution's mean is nan, skipping check
                 continue
-            self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
+            elif isinstance(pytorch_dist, MultivariateNormal):
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean, allow_inf=True, message=pytorch_dist)
+            else:
+                self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
 
     def test_variance_stddev(self):
         for pytorch_dist, scipy_dist in self.distribution_pairs:
             if isinstance(pytorch_dist, Cauchy):  # Cauchy distribution's standard deviation is nan, skipping check
                 continue
-            if isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
+            elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
+            elif isinstance(pytorch_dist, MultivariateNormal):
+                self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), message=pytorch_dist)
+                self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, message=pytorch_dist)
             else:
                 self.assertEqual(pytorch_dist.variance, scipy_dist.var(), allow_inf=True, message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, scipy_dist.var() ** 0.5, message=pytorch_dist)
@@ -3019,26 +3048,42 @@ class TestTransforms(TestCase):
             transforms = [
                 AbsTransform(cache_size=cache_size),
                 ExpTransform(cache_size=cache_size),
+                PowerTransform(exponent=2,
+                               cache_size=cache_size),
+                PowerTransform(exponent=torch.tensor(5).normal_(),
+                               cache_size=cache_size),
                 SigmoidTransform(cache_size=cache_size),
-                AffineTransform(variable(torch.Tensor(5).normal_()),
-                                variable(torch.Tensor(5).normal_()),
+                AffineTransform(0, 1, cache_size=cache_size),
+                AffineTransform(1, -2, cache_size=cache_size),
+                AffineTransform(torch.Tensor(5).normal_(),
+                                torch.Tensor(5).normal_(),
                                 cache_size=cache_size),
-                AffineTransform(variable(torch.Tensor(4, 5).normal_()),
-                                variable(torch.Tensor(4, 5).normal_()),
+                AffineTransform(torch.Tensor(4, 5).normal_(),
+                                torch.Tensor(4, 5).normal_(),
                                 cache_size=cache_size),
                 SoftmaxTransform(cache_size=cache_size),
                 StickBreakingTransform(cache_size=cache_size),
                 LowerCholeskyTransform(cache_size=cache_size),
                 ComposeTransform([
-                    AffineTransform(variable(torch.Tensor(4, 5).normal_()),
-                                    variable(torch.Tensor(4, 5).normal_()),
+                    AffineTransform(torch.Tensor(4, 5).normal_(),
+                                    torch.Tensor(4, 5).normal_(),
                                     cache_size=cache_size),
                 ]),
                 ComposeTransform([
+                    AffineTransform(torch.Tensor(4, 5).normal_(),
+                                    torch.Tensor(4, 5).normal_(),
+                                    cache_size=cache_size),
+                    ExpTransform(cache_size=cache_size),
+                ]),
+                ComposeTransform([
+                    AffineTransform(0, 1, cache_size=cache_size),
                     AffineTransform(variable(torch.Tensor(4, 5).normal_()),
                                     variable(torch.Tensor(4, 5).normal_()),
                                     cache_size=cache_size),
-                    ExpTransform(cache_size=cache_size),
+                    AffineTransform(1, -2, cache_size=cache_size),
+                    AffineTransform(variable(torch.Tensor(4, 5).normal_()),
+                                    variable(torch.Tensor(4, 5).normal_()),
+                                    cache_size=cache_size),
                 ]),
             ]
             for t in transforms[:]:
@@ -3087,7 +3132,7 @@ class TestTransforms(TestCase):
 
     def test_forward_inverse_cache(self):
         for transform in self.transforms:
-            x = variable(self._generate_data(transform), requires_grad=True)
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
             except NotImplementedError:
@@ -3114,7 +3159,7 @@ class TestTransforms(TestCase):
 
     def test_forward_inverse_no_cache(self):
         for transform in self.transforms:
-            x = variable(self._generate_data(transform), requires_grad=True)
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
                 x2 = transform.inv(y.clone())  # bypass cache
@@ -3143,7 +3188,7 @@ class TestTransforms(TestCase):
         for transform in self.transforms:
             if transform.event_dim > 0:
                 continue
-            x = variable(self._generate_data(transform), requires_grad=True)
+            x = torch.tensor(self._generate_data(transform), requires_grad=True)
             try:
                 y = transform(x)
                 actual = transform.log_abs_det_jacobian(x, y)
@@ -3160,7 +3205,7 @@ class TestTransforms(TestCase):
         for transform in self.transforms:
             if transform.event_dim > 0:
                 continue
-            y = variable(self._generate_data(transform.inv), requires_grad=True)
+            y = torch.tensor(self._generate_data(transform.inv), requires_grad=True)
             try:
                 x = transform.inv(y)
                 actual = transform.log_abs_det_jacobian(x, y)
@@ -3172,6 +3217,16 @@ class TestTransforms(TestCase):
                 'Expected: {}'.format(expected),
                 'Actual: {}'.format(actual),
             ]))
+
+    def test_jacobian_shape(self):
+        for transform in self.transforms:
+            x = self._generate_data(transform)
+            try:
+                y = transform(x)
+                actual = transform.log_abs_det_jacobian(x, y)
+            except NotImplementedError:
+                continue
+            self.assertEqual(actual.shape, x.shape[:x.dim() - transform.event_dim])
 
     def test_transform_shapes(self):
         transform0 = ExpTransform()
@@ -3189,8 +3244,9 @@ class TestTransforms(TestCase):
         transform0 = ExpTransform()
         transform1 = SoftmaxTransform()
         transform2 = LowerCholeskyTransform()
-        base_dist0 = Normal(variable(torch.zeros(4, 4)), variable(torch.ones(4, 4)))
-        base_dist1 = Dirichlet(variable(torch.ones(4, 4)))
+        base_dist0 = Normal(torch.zeros(4, 4), torch.ones(4, 4))
+        base_dist1 = Dirichlet(torch.ones(4, 4))
+        base_dist2 = Normal(torch.zeros(3, 4, 4), torch.ones(3, 4, 4))
         examples = [
             ((4, 4), (), base_dist0),
             ((4,), (4,), base_dist1),
@@ -3211,6 +3267,12 @@ class TestTransforms(TestCase):
             ((), (4, 4), TransformedDistribution(base_dist1, [transform1, transform2])),
             ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform0])),
             ((), (4, 4), TransformedDistribution(base_dist1, [transform2, transform1])),
+            ((3, 4, 4), (), base_dist2),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform0, transform2])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform1, transform2])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform0])),
+            ((3,), (4, 4), TransformedDistribution(base_dist2, [transform2, transform1])),
         ]
         for batch_shape, event_shape, dist in examples:
             self.assertEqual(dist.batch_shape, batch_shape)
@@ -3228,10 +3290,18 @@ class TestConstraintRegistry(TestCase):
             constraints.real,
             constraints.positive,
             constraints.greater_than(torch.tensor([-10, -2, 0, 2, 10])),
+            constraints.greater_than(0),
+            constraints.greater_than(2),
+            constraints.greater_than(-2),
             constraints.less_than(torch.tensor([-10, -2, 0, 2, 10])),
+            constraints.less_than(0),
+            constraints.less_than(2),
+            constraints.less_than(-2),
             constraints.unit_interval,
             constraints.interval(torch.tensor([-4, -2, 0, 2, 4]),
                                  torch.tensor([-3, 3, 1, 5, 5])),
+            constraints.interval(-2, -1),
+            constraints.interval(1, 2),
             constraints.simplex,
             constraints.lower_cholesky,
         ]
@@ -3253,6 +3323,9 @@ class TestConstraintRegistry(TestCase):
             x2 = t.inv(y)
             self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
 
+            j = t.log_abs_det_jacobian(x, y)
+            self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
+
     def test_transform_to(self):
         for constraint in self.constraints:
             t = transform_to(constraint)
@@ -3271,15 +3344,11 @@ class TestValidation(TestCase):
 
     def test_valid(self):
         for Dist, params in EXAMPLES:
-            if constraints.is_dependent(Dist.params):  # skipping transformed dist
-                continue
             for i, param in enumerate(params):
                 Dist(validate_args=True, **param)
 
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
-            if constraints.is_dependent(Dist.params):  # skipping transformed dist
-                continue
             for i, param in enumerate(params):
                 try:
                     with self.assertRaises(ValueError):

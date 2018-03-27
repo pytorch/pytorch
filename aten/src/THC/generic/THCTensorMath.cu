@@ -139,6 +139,11 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     }
   }
 
+  // If all inputs are empty tensors, return an empty tensor
+  if (notEmptyTensor == NULL) {
+    return;
+  }
+
   // In the event that the user specified -1 as the concat dimension, then
   // we want to pick the nDims as dimension to cat along (and thus nDims - 1 as the
   // value due to 0-based indexing). If the nDims is // 0 (i.e. we are catting all

@@ -3752,7 +3752,7 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
     ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
     int r_Contig = THTensor_(isContiguous)(r_);               \
     int tContig = THTensor_(isContiguous)(t);                 \
-    if (r_Contig && tContig && VECTORIZE) {                   \
+    if (VECTORIZE && r_Contig && tContig) {                   \
       TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););                             \
     } else {                                                                                                             \
       int inOMP = omp_in_parallel();                                                                                     \

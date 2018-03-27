@@ -1,7 +1,5 @@
-#pragma once
+#include "tensor_conversion_dispatch.h"
 
-
-#include "torch/csrc/utils/tensor_conversion_dispatch.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"

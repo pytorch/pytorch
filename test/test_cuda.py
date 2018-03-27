@@ -1078,6 +1078,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    def test_cat_empty(self):
+        TestTorch._test_cat_empty(self, use_cuda=True)
+
     def test_bernoulli(self):
         x = torch.tensor([0, 1], dtype=torch.cuda.float32)
         self.assertEqual(x.bernoulli().tolist(), [0, 1])

@@ -23,7 +23,7 @@ class LogNormal(TransformedDistribution):
         loc (float or Tensor): mean of log of distribution
         scale (float or Tensor): standard deviation of log ofthe distribution
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.positive
     has_rsample = True
 
