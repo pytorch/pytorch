@@ -2,6 +2,7 @@
 #include "tensor_new.h"
 
 #include <ATen/ATen.h>
+#include <ATen/optional.h>
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -124,22 +125,23 @@ static ScalarType infer_scalar_type(PyObject *obj) {
   }
 #endif
   if (PySequence_Check(obj)) {
-    ScalarType scalarType = ScalarType::NumOptions;
+    at::optional<ScalarType> scalarType;
     auto length = PySequence_Length(obj);
     if (length < 0) throw python_error();
     // match NumPy semantics, except use default tensor type instead of double.
     if (length == 0) return torch::tensor::get_default_tensor_type().scalarType();
     for (int i = 0; i < length; ++i) {
       THPObjectPtr handle(PySequence_GetItem(obj, i));
+      if (!handle) throw python_error();
       ScalarType item_scalarType = infer_scalar_type(handle.get());
-      scalarType = (scalarType != ScalarType::NumOptions) ?
-          at::promoteTypes(scalarType, item_scalarType) : item_scalarType;
+      scalarType = (scalarType) ?
+          at::promoteTypes(*scalarType, item_scalarType) : item_scalarType;
       if (scalarType == ScalarType::Double) {
         // this won't change (unless we hit undefined, but that will fail later).
-        return scalarType;
+        return *scalarType;
       }
     }
-    return scalarType;
+    return *scalarType;
   }
   at::runtime_error("Could not infer dtype of %s", Py_TYPE(obj)->tp_name);
 }
@@ -178,8 +180,8 @@ static Tensor internal_new_from_data(const Type & type, int device, PyObject* da
   if (THPVariable_Check(data)) {
       auto var = reinterpret_cast<THPVariable*>(data)->cdata;
       const auto& type_to_use = type_inference ? var.type() : type;
-        return copy_variables ? new_with_tensor_copy(type_to_use, var, device) :
-                                new_with_type_conversion(type_to_use, var, device);
+      return copy_variables ? new_with_tensor_copy(type_to_use, var, device) :
+                              new_with_type_conversion(type_to_use, var, device);
   }
 
 #ifdef WITH_NUMPY
