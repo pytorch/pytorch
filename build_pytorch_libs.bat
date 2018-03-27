@@ -15,7 +15,7 @@ set CWRAP_FILES=%BASE_DIR%/torch/lib/ATen/Declarations.cwrap;%BASE_DIR%/torch/li
 set C_FLAGS=%BASIC_C_FLAGS% /D_WIN32 /Z7 /EHa /DNOMINMAX
 set LINK_FLAGS=/DEBUG:FULL
 
-mkdir tmp_install
+mkdir torch/lib/tmp_install
 
 IF "%~1"=="--with-cuda" (
   set /a NO_CUDA=0
@@ -81,7 +81,7 @@ goto read_loop
 
 :after_loop
 
-cd torch\lib
+cd torch/lib
 
 copy /Y tmp_install\lib\* .
 IF EXIST ".\tmp_install\bin" (
