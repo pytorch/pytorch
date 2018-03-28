@@ -290,6 +290,105 @@ void removeNopPacking(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void fixDefaultRNNState(std::shared_ptr<Graph>& graph, Node * n, int input_index) {
+  auto initial_state = n->inputs()[input_index];
+
+  // The RNN code in pytorch accepts an optional hidden state. When it
+  // is provided, everything works great. When it is not provided, it
+  // is default-initialized by constructing a new Variable, which gets
+  // traced as a Constant. Recognize that pattern here and replace it
+  // with something that doesn't fix the batch size.  Note that for
+  // multi-layer RNNs there will be a Slice operation between the
+  // Constant and the RNN.
+  bool needsFixing =
+    initial_state->node()->kind() == onnx::Constant ||
+    (initial_state->node()->kind() == onnx::Slice &&
+     initial_state->node()->inputs()[0]->node()->kind() == onnx::Constant);
+
+  if (!needsFixing) {
+    return;
+  }
+
+  Node * shape_of_input = graph->create(onnx::Shape, 1);
+  shape_of_input->insertBefore(n);
+  shape_of_input->addInput(n->inputs()[0]);
+
+  Node * gather_indices = graph->create(onnx::Constant, 1);
+  gather_indices->insertBefore(n);
+  gather_indices->t_(attr::value, at::Scalar(1).toTensor());
+
+  Node * batch_size = graph->create(onnx::Gather, 1);
+  batch_size->insertBefore(n);
+  batch_size->addInput(shape_of_input->outputs()[0]);
+  batch_size->addInput(gather_indices->outputs()[0]);
+
+  Node * unsqueezed_batch_size = graph->create(onnx::Unsqueeze, 1);
+  unsqueezed_batch_size->insertBefore(n);
+  unsqueezed_batch_size->addInput(batch_size->outputs()[0]);
+  unsqueezed_batch_size->is_(attr::axes, {0});
+
+  Node * hidden_size = graph->create(onnx::Constant, 1);
+  hidden_size->insertBefore(n);
+  hidden_size->t_(attr::value, at::CPU(at::kLong).tensor({1}).fill_(n->i(attr::hidden_size))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+
+  Node * num_directions = graph->create(onnx::Constant, 1);
+  num_directions->insertBefore(n);
+  num_directions->t_(attr::value, at::Scalar(n->hasAttribute(attr::direction) && n->s(attr::direction) == "bidirectional" ? 2 : 1).toTensor());
+
+  Node * unsqueezed_num_directions = graph->create(onnx::Unsqueeze, 1);
+  unsqueezed_num_directions->insertBefore(n);
+  unsqueezed_num_directions->addInput(num_directions->outputs()[0]);
+  unsqueezed_num_directions->is_(attr::axes, {0});
+
+  Node * concated_dims = graph->create(onnx::Concat, 1);
+  concated_dims->insertBefore(n);
+  concated_dims->i_(attr::axis, 0);
+  concated_dims->addInput(unsqueezed_num_directions->outputs()[0]);
+  concated_dims->addInput(unsqueezed_batch_size->outputs()[0]);
+  concated_dims->addInput(hidden_size->outputs()[0]);
+
+  Node * constant_fill = graph->create(onnx::ConstantFill, 1);
+  constant_fill->insertBefore(n);
+  constant_fill->i_(attr::input_as_shape, 1);
+  constant_fill->addInput(concated_dims->outputs()[0]);
+
+  n->replaceInput(input_index, constant_fill->outputs()[0]);
+  if (initial_state->uses().size() == 0) {
+    initial_state->node()->destroy();
+  }
+}
+
+void fixDefaultRnnHiddenState(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (!isRNN(n)) {
+      continue;
+    }
+    // Hidden state is the sixth input for RNN, LSTM, GRU.
+    // See http://pytorch.org/docs/master/nn.html#torch.nn.RNN
+    if (n->inputs().size() < 6) {
+      continue;
+    }
+    fixDefaultRNNState(graph, n, 5);
+  }
+}
+
+void fixDefaultLstmCellState(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != onnx::LSTM) {
+      continue;
+    }
+    // Cell state is the seventh input for LSTM.
+    // See http://pytorch.org/docs/master/nn.html#torch.nn.LSTM
+    if (n->inputs().size() < 7) {
+      continue;
+    }
+    fixDefaultRNNState(graph, n, 6);
+  }
+}
 
 // This optimization does ONNX-specific peephole optimizations.
 //
@@ -312,12 +411,14 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   // TODO: decide on fixpoint strategy
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
+  pushPackingPastRnn(graph);
+  removeNopPacking(graph);
+  fixDefaultRnnHiddenState(graph);
+  fixDefaultLstmCellState(graph);
   fuseBroadcast(graph);
   fuseConsecutiveTransposes(graph);
   eliminateNopTranspose(graph);
   fuseTransposeIntoGemm(graph);
-  pushPackingPastRnn(graph);
-  removeNopPacking(graph);
 }
 
 }}
