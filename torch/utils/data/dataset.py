@@ -29,7 +29,7 @@ class TensorDataset(Dataset):
     Each sample will be retrieved by indexing tensors along the first dimension.
 
     Arguments:
-        *tensors (Tensor): tensors with the same first dimension.
+        *tensors (Tensor): tensors that have the same size of the first dimension.
     """
 
     def __init__(self, *tensors):
