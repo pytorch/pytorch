@@ -48,7 +48,6 @@ cd %CAFFE2_ROOT%\build
 :: TODO: enable cuda support.
 cmake .. ^
   -G%CMAKE_GENERATOR% ^
-  -DCMAKE_VERBOSE_MAKEFILE=1 ^
   -DBUILD_TEST=OFF ^
   -DCMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE% ^
   -DUSE_CUDA=%USE_CUDA% ^
