@@ -1,9 +1,8 @@
-#include "ATen/cpu/cpuinfo/include/cpuinfo.h"
-#include <type_traits>
 #include <iostream>
+#include <type_traits>
+#include "ATen/cpu/cpuinfo/include/cpuinfo.h"
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 
 enum class CPUCapability { DEFAULT, AVX, AVX2 };
 
@@ -15,19 +14,19 @@ constexpr CPUCapability CURRENT_CAPABILITY = CPUCapability::AVX;
 constexpr CPUCapability CURRENT_CAPABILITY = CPUCapability::AVX2;
 #endif
 
-template <typename FnType> struct DispatchStub {};
+template <typename FnType>
+struct DispatchStub {};
 
 template <typename... ArgTypes>
 struct DispatchStub<void(ArgTypes...)> {
   using FnType = void(ArgTypes...);
 
-  template <template <CPUCapability> class allImpl,
-            FnType **dispatch_ptr>
+  template <template <CPUCapability> class allImpl, FnType** dispatch_ptr>
   static void init(ArgTypes... args) {
     *dispatch_ptr = allImpl<CPUCapability::DEFAULT>::function;
     // Check if platform is supported
     if (cpuinfo_initialize()) {
-      // Set function pointer to best implementation last
+    // Set function pointer to best implementation last
 #if defined(HAVE_AVX_CPU_DEFINITION)
       if (cpuinfo_has_x86_avx()) {
         *dispatch_ptr = allImpl<CPUCapability::AVX>::function;
@@ -43,5 +42,4 @@ struct DispatchStub<void(ArgTypes...)> {
   }
 };
 
-}
-}
+}} // namespace at::native
