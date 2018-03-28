@@ -255,8 +255,20 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
-        type_dispatched_args = [arg for arg in declaration['arguments'] if arg.get('is_type_dispatched')]
-        assert len(type_dispatched_args) <= 1
+
+        def get_type_dispatched(args):
+            return [arg for arg in args if arg.get('is_type_dispatched')]
+        type_dispatched_actual_args = get_type_dispatched(declaration['arguments'])
+        type_dispatched_bindings = get_type_dispatched(declaration['python_binding_arguments'])
+        assert len(type_dispatched_actual_args + type_dispatched_bindings) <= 1
+        if type_dispatched_bindings and len(outputs) == 0:
+            # out(s) determines the dtype if it is present, so only use this if there are no outputs.
+            type_dispatched_args = type_dispatched_bindings
+        else:
+            type_dispatched_args = type_dispatched_actual_args
+
+        if type_dispatched_args and len(outputs) > 1:
+                raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
         def parse_arg(arg, arg_index, unpack_args=False):
             name = arg['name']
@@ -324,23 +336,16 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             arg_idx += 1
 
         # check python_binding_arguments
-        has_dtype_bind = False
         has_device_bind = False
         requires_grad = None
         python_binding_arguments = declaration.get('python_binding_arguments', [])
         if 'dtype' in (a['name'] for a in python_binding_arguments):
-            dtype_idx, device_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
-        else:
-            device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
+            arg_idx += 1  # we already handled this in type_dispatched_args
+        device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
 
         for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
-                # out(s) determines the dtype if it is present, so don't pass the dtype to the dispatch.
-                if len(outputs) == 0:
-                    has_dtype_bind = True
-                    append_actuals_formals(*parse_arg(arg, dtype_idx))
-                elif len(outputs) > 1:
-                    raise RuntimeError("Not supported: dtype parameter with multiple outputs")
+                pass  # already handled by type_dispatched_args
             elif arg['name'] == 'device' and arg['simple_type'] == 'int64_t':
                 if len(outputs) == 0:
                     has_device_bind = True
@@ -354,7 +359,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
-        has_any_dtype = has_dtype_bind or any(a['name'] == 'dtype' and a['simple_type'] == 'Type' for a in inputs)
+        has_any_dtype = any(a['name'] == 'dtype' and a['simple_type'] == 'Type' for a in inputs)
         type_dispatched_name = type_dispatched_args[0]['name'] if len(type_dispatched_args) > 0 else None
         maybe_init_cuda = 'dtype' if has_any_dtype else type_dispatched_name
         env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(maybe_init_cuda) if maybe_init_cuda else []
