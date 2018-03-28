@@ -62,6 +62,35 @@ class TestTensorDataset(TestCase):
         for i in range(15):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
+    
+    def test_single_tensor(self):
+        t = torch.randn(5, 10)
+        source = TensorDataset(t)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t[i], source[i][0])
+    
+    def test_many_tensors(self):
+        t0 = torch.randn(5, 10, 2, 3, 4, 5)
+        t1 = torch.randn(5, 10)
+        t2 = torch.randn(5, 10, 2, 5)
+        t3 = torch.randn(5, 10, 3, 7)
+        source = TensorDataset(t0, t1, t2, t3)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t0[i], source[i][0])
+            self.assertEqual(t1[i], source[i][1])
+            self.assertEqual(t2[i], source[i][2])
+            self.assertEqual(t3[i], source[i][3])
+    
+    def test_tensor_by_kwargs(self):
+        t = torch.randn(5, 10, 2, 3, 4, 5)
+        l = torch.randn(5, 10)
+        source = TensorDataset(data_tensor=t, target_tensor=l)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t[i], source[i][0])
+            self.assertEqual(l[i], source[i][1])
 
 
 class TestConcatDataset(TestCase):
