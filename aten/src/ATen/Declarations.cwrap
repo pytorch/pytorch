@@ -3849,7 +3849,7 @@
         - THTensor* self
 ]]
 [[
-  name: sparse_coo_tensor_unsafe
+  name: _sparse_coo_tensor_unsafe
   return: THTensor*
   backends:
     - SparseCPU
