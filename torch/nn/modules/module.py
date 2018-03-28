@@ -766,44 +766,36 @@ class Module(object):
     def _get_name(self):
         return self.__class__.__name__
 
-    def get_extra_repr(self):
-        r"""Get the extra representation of the module
+    def extra_repr(self):
+        r"""Set the extra representation of the module
 
         To print customized extra information, you should reimplement
-        this method in your own modules. Each item in the returned list will
-        be printed in separate line.
+        this method in your own modules. Both single-line and multi-line
+        strings are acceptable.
         """
-        return []
-
-    def _get_extra_lines(self):
-        r"""Helper method to process extra representation"""
-        extra_repr = self.get_extra_repr()
-        if isinstance(extra_repr, str):
-            return extra_repr.split('\n')
-        else:
-            return extra_repr
-
-    def _get_child_lines(self):
-        child_lines = []
-        for key, module in self._modules.items():
-            mod_str = module.__repr__()
-            mod_str = _addindent(mod_str, 2)
-            child_lines.append('(' + key + '): ' + mod_str)
-        return child_lines
+        return ''
 
     def __repr__(self):
-        main_str = self._get_name() + '('
         # We treat the extra repr like the sub-module, one item per line
-        # TODO:the api is to be discussed later
-        extra_lines = self._get_extra_lines()
-        child_lines = self._get_child_lines()
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
+        for key, module in self._modules.items():
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
         lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
         if lines:
-            # simple one-liner info, which most builtin Moudules will use
+            # simple one-liner info, which most builtin Modules will use
             if len(extra_lines) == 1 and not child_lines:
                 main_str += extra_lines[0]
             else:
-                main_str += '\n' + ''.join(['  ' + line + '\n' for line in lines])
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
 
         main_str += ')'
         return main_str

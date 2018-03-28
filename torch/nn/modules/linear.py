@@ -54,11 +54,10 @@ class Linear(Module):
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
 
-    def get_extra_repr(self):
-        return 'in_features=' + str(self.in_features) \
-            + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None)
-
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
 
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data:
