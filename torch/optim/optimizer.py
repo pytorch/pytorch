@@ -12,7 +12,9 @@ class Optimizer(object):
     """Base class for all optimizers.
 
     .. warning::
-        Params (or params[i]['params']) needs to give a deterministically ordered iterator.
+        Parameters needs to be specified as collections that have a deterministic
+        ordering that is consistent between runs. Examples of objects that don't
+        satisfy those properties are sets and iterators over values of dictionaries.
 
     Arguments:
         params (iterable): an iterable of :class:`Variable` s or
