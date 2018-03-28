@@ -2,9 +2,10 @@ import platform
 import glob
 import os
 import sys
-from itertools import chain
 
+from itertools import chain
 from .env import check_env_flag
+
 
 def gather_paths(env_vars):
     return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
@@ -26,20 +27,20 @@ if IS_LINUX and not check_env_flag('NO_MKLDNN'):
         os.path.join(MKLDNN_HOME, 'lib64'),
         '/usr/lib/',
         '/usr/lib64/',
-        ] + gather_paths([
+    ] + gather_paths([
         'LIBRARY_PATH',
-        ]) + gather_paths([
+    ]) + gather_paths([
         'LD_LIBRARY_PATH',
-        ])))
+    ])))
     include_paths = list(filter(bool, [
         os.getenv('MKLDNN_INCLUDE_DIR'),
         os.path.join(MKLDNN_HOME, 'include'),
         '/usr/include/',
-        ] + gather_paths([
+    ] + gather_paths([
         'CPATH',
         'C_INCLUDE_PATH',
         'CPLUS_INCLUDE_PATH',
-        ])))
+    ])))
     if IS_CONDA:
         lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
         include_paths.append(os.path.join(CONDA_DIR, 'include'))
@@ -70,7 +71,7 @@ if IS_LINUX and not check_env_flag('NO_MKLDNN'):
         MKLDNN_LIBRARY = library
         MKLDNN_LIB_DIR = os.path.dirname(MKLDNN_LIBRARY)
 
-    if not all ([MKLDNN_LIBRARY, MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR]):
+    if not all([MKLDNN_LIBRARY, MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR]):
         MKLDNN_LIBRARY = MKLDNN_LIB_DIR = MKLDNN_INCLUDE_DIR = None
     else:
         real_mkldnn_library = os.path.realpath(MKLDNN_LIBRARY)
