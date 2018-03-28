@@ -840,9 +840,6 @@ class TestSparse(TestCase):
             self.assertEqual(x.new(indices, values), x)
         self.assertEqual(x.new(indices, values, x.size()), x)
 
-        self.assertIs(torch.sparse.uint8, x.new(dtype=torch.sparse.uint8).dtype)
-        self.assertIs(torch.sparse.uint8, x.new(1, 2, dtype=torch.sparse.uint8).dtype)
-
     @cpu_only  # not really, but we only really want to run this once
     def test_factory(self):
         default_size = torch.Size([1, 3])
