@@ -3745,79 +3745,110 @@ TENSOR_IMPLEMENT_LOGICAL(ne,!=)
 
 #ifdef _OPENMP
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_4_ARGS(NAME, CFUNC, VECTORIZE, OMP_THRESHOLD)             \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
     ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
     int r_Contig = THTensor_(isContiguous)(r_);               \
     int tContig = THTensor_(isContiguous)(t);                 \
-    if (VECTORIZE && r_Contig && tContig) {                   \
-      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););                             \
-    } else {                                                                                                             \
-      int inOMP = omp_in_parallel();                                                                                     \
-      if( !inOMP ){                                                                                                      \
-        TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);   \
-      } else {                                                                                                           \
-        TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                                 \
-      }                                                                                                                  \
-    }                                                                                                                    \
+    int inOMP = omp_in_parallel();                            \
+    if( !inOMP ){   \
+      TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);        \
+    } else {                                                                                                   \
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                       \
+    }                                                                                                        \
   }
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, VECTORIZE)      \
-  LAB_IMPLEMENT_BASIC_FUNCTION_4_ARGS(NAME, CFUNC, VECTORIZE, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD)
+#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)      \
+  LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD)
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, OMP_THRESHOLD)             \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t)             \
+  {                                                           \
+    THTensor_(resizeAs)(r_, t);                               \
+    ptrdiff_t r_Size = THTensor_(nElement)(r_);               \
+    int r_Contig = THTensor_(isContiguous)(r_);               \
+    int tContig = THTensor_(isContiguous)(t);                 \
+    if (r_Contig && tContig) {                                \
+      TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len););                   \
+    } else {                                                                                                   \
+      int inOMP = omp_in_parallel();                            \
+      if( !inOMP ){   \
+        TH_TENSOR_APPLY2_OMP(r_Size, r_Contig, tContig, real, r_, real, t, *r__data = CFUNC(*t_data);, OMP_THRESHOLD);        \
+      }                                                                                                        \
+      else {                                                                                                   \
+        TH_TENSOR_APPLY2(real, r_, real, t, *r__data = CFUNC(*t_data););                                       \
+      }                                                                                                        \
+    }                                                                                                          \
+  }
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC) \
+  LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD)
 
 #else
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, VECTORIZE)             \
+#define LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)             \
+  void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
+  {                                                           \
+    THTensor_(resizeAs)(r_, t);                               \
+    TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
+  }                                                           \
+
+#define LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_OMP_THRESHOLD) \
+  LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS(NAME, CFUNC)
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC)             \
   void THTensor_(NAME)(THTensor *r_, THTensor *t)                \
   {                                                           \
     THTensor_(resizeAs)(r_, t);                               \
     int r_Contig = THTensor_(isContiguous)(r_);               \
     int tContig = THTensor_(isContiguous)(t);                 \
-    if (r_Contig && tContig && VECTORIZE) {                   \
+    if (r_Contig && tContig) {                                \
       TH_TENSOR_APPLY2_CONTIG(real, r_, real, t, THVector_(NAME)(r__data, t_data, r__len);); \
     } else {                                                           \
       TH_TENSOR_APPLY2(real, t, real, r_, *r__data = CFUNC(*t_data);); \
     }                                                           \
   }                                                             \
 
-#define LAB_IMPLEMENT_BASIC_FUNCTION_4_ARGS(NAME, CFUNC, VECTORIZE, PSEUDO_OMP_THRESHOLD) \
-  LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS(NAME, CFUNC, VECTORIZE)
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS(NAME, CFUNC, PSEUDO_OMP_THRESHOLD) \
+  LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS(NAME, CFUNC)
 
 #endif
 
-#define GET_5TH_ARG(ARG0, ARG1, ARG2, ARG3, ARG4, ...) ARG4
+#define GET_4TH_ARG(ARG0, ARG1, ARG2, ARG3, ...) ARG3
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION_CHOOSE(...) \
-  GET_5TH_ARG(__VA_ARGS__, \
-    LAB_IMPLEMENT_BASIC_FUNCTION_4_ARGS, \
-    LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS, )
+  GET_4TH_ARG(__VA_ARGS__, LAB_IMPLEMENT_BASIC_FUNCTION_3_ARGS, LAB_IMPLEMENT_BASIC_FUNCTION_2_ARGS, )
+
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION_CHOOSE(...) \
+  GET_4TH_ARG(__VA_ARGS__, LAB_IMPLEMENT_VECTORIZED_FUNCTION_3_ARGS, LAB_IMPLEMENT_VECTORIZED_FUNCTION_2_ARGS, )
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(...) LAB_IMPLEMENT_BASIC_FUNCTION_CHOOSE(__VA_ARGS__)(__VA_ARGS__)
 
+#define LAB_IMPLEMENT_VECTORIZED_FUNCTION(...) LAB_IMPLEMENT_VECTORIZED_FUNCTION_CHOOSE(__VA_ARGS__)(__VA_ARGS__)
+
 /*
  * LAB_IMPLEMENT_BASIC_FUNCTION is a macro with optional parameters, you can use it flexibly. 
- * Parameter VECTORIZE is to determine whether to use vector optimization or not. 1:vectorization, 2:non-vectorization
  * The macro will discard the invalid openmp threshold if openmp is unavailable. The macro will give a default threshold even if you forget to pass one. 
  * In other word,
  * (A), If openmp is UNavailable, the two usage below is both right.
- *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, vectorize, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
- *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, vectorize, func_entity)
+ *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD) // discard the invalid openmp threshold
+ *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity)
  * (B), If openmp is available, the two usage below is also both right.
- *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, vectorize, OMP_OVERHEAD_THRESHOLD)
- *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, vectorize) // pass the default openmp threshold
- *
+ *      (1), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity, OMP_OVERHEAD_THRESHOLD)
+ *      (2), LAB_IMPLEMENT_BASIC_FUNCTION(type_func, func_entity) // pass the default openmp threshold
+ * So do LAB_IMPLEMENT_VECTORIZED_FUNCTION.
 */
 
-LAB_IMPLEMENT_BASIC_FUNCTION(neg,-,0)
+LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 
 #if defined(TH_REAL_IS_LONG)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs,0)
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,labs)
 #endif /* int64_t only part */
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs,0)
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,abs)
 #endif /* int only part */
 
 #if defined(TH_REAL_IS_BYTE)
@@ -3844,36 +3875,36 @@ TENSOR_IMPLEMENT_LOGICAL_SUM(logicalany, ||, 0)
 #define TH_MATH_NAME(fn) fn
 #endif
 
-LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv,0)
-LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac),0)
-LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) /,0)
+LAB_IMPLEMENT_BASIC_FUNCTION(log,TH_MATH_NAME(log))
+LAB_IMPLEMENT_BASIC_FUNCTION(lgamma,TH_MATH_NAME(lgamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(digamma,TH_MATH_NAME(TH_digamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(trigamma,TH_MATH_NAME(TH_trigamma))
+LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
+LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
+LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
+LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
+LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
+LAB_IMPLEMENT_BASIC_FUNCTION(round,TH_MATH_NAME(round))
+LAB_IMPLEMENT_BASIC_FUNCTION(abs,TH_MATH_NAME(fabs))
+LAB_IMPLEMENT_BASIC_FUNCTION(trunc,TH_MATH_NAME(trunc))
+LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_MATH_NAME(TH_frac))
+LAB_IMPLEMENT_BASIC_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
-LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(acos,TH_MATH_NAME(acos),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sin,TH_MATH_NAME(sin),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(asin,TH_MATH_NAME(asin),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
-LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),0,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(exp,TH_MATH_NAME(exp),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(expm1,TH_MATH_NAME(expm1),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(cos,TH_MATH_NAME(cos),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(acos,TH_MATH_NAME(acos),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(cosh,TH_MATH_NAME(cosh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(sin,TH_MATH_NAME(sin),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(asin,TH_MATH_NAME(asin),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(sinh,TH_MATH_NAME(sinh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(tan,TH_MATH_NAME(tan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(atan,TH_MATH_NAME(atan),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(tanh,TH_MATH_NAME(tanh),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,TH_MATH_NAME(sqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-LAB_IMPLEMENT_BASIC_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),1,HYPER_TH_OMP_OVERHEAD_THRESHOLD)
+LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
