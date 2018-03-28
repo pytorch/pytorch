@@ -1388,6 +1388,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     dim = input.dim()
     if torch.is_tensor(weight):
         weight = weight
+    if dim < 2:
+        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
+
+    if input.size(0) != target.size(0):
+        raise ValueError('Expected input batch_size ({}) to match target batch_size ({}).'
+                         .format(input.size(0), target.size(0)))
     if dim == 2:
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
@@ -1405,8 +1411,6 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         return out.view(out_size)
-    else:
-        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):

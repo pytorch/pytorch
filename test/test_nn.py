@@ -2935,6 +2935,13 @@ class TestNN(NNTestCase):
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
 
+    def test_NLLLoss_mismatched_batch(self):
+        x = torch.randn((10, 3), requires_grad=True)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
