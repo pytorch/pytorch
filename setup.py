@@ -279,7 +279,7 @@ class build_deps(Command):
         # This is not perfect solution as build does not depend on any of
         # the auto-generated code and auto-generated files will not be
         # included in this copy. If we want to use auto-generated files,
-        # we need to find a batter way to do this.
+        # we need to find a better way to do this.
         # More information can be found in conversation thread of PR #5772
 
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
