@@ -180,7 +180,7 @@ class BuildExtension(build_ext):
                         else:
                             cflags = []
                         cmd = [nvcc, '-c', src, '-o', obj, '-Xcompiler',
-                               '/wd4819'] + include_list + cflags
+                               '/wd4819', '-Xcompiler', '/MD'] + include_list + cflags
                     elif isinstance(self.cflags, dict):
                         cflags = self.cflags['cxx']
                         cmd += cflags
