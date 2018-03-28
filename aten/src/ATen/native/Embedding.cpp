@@ -35,7 +35,6 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
 Tensor embedding_backward(
     const Tensor & grad, const Tensor & indices, int64_t num_weights,
     int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-    AT_ERROR("BAD BAD %d", 5);
   if (sparse) {
     return at::embedding_sparse_backward(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);

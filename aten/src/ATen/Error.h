@@ -13,11 +13,9 @@ namespace detail {
 /// A printf wrapper that returns an std::string.
 template <typename... FormatArgs>
 std::string format(const char* format_string, FormatArgs&&... format_args) {
-  static constexpr size_t kMaximumErrorMessageLength = 4096;
-
-  char buffer[kMaximumErrorMessageLength];
+  static constexpr size_t kMaximumStringLength = 4096;
+  char buffer[kMaximumStringLength];
   snprintf(buffer, sizeof(buffer), format_string, format_args...);
-
   return buffer;
 }
 
@@ -35,8 +33,8 @@ struct SourceLocation {
 
 /// The primary ATen error class.
 /// Provides a complete error message with source location information via
-/// `what()`, and a more concise message via `what_without_location`. Should
-/// primarily be used with the AT_ERROR macro.
+/// `what()`, and a more concise message via `what_without_location()`. Should
+/// primarily be used with the `AT_ERROR` macro.
 struct Error : public std::exception {
   template <typename... FormatArgs>
   Error(
@@ -49,14 +47,12 @@ struct Error : public std::exception {
         what_(
             what_without_location_ + " (" + source_location.toString() + ")") {}
 
-  /// Returns the complete error message including the source location from
-  /// where the error was created (with AT_ERROR).
+  /// Returns the complete error message including the source location.
   const char* what() const noexcept override {
     return what_.c_str();
   }
 
-  /// Returns only the error message string, without additional source location
-  /// information.
+  /// Returns only the error message string, without source location.
   const char* what_without_location() const noexcept {
     return what_without_location_.c_str();
   }
