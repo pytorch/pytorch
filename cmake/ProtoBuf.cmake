@@ -4,6 +4,7 @@ macro(custom_protobuf_find)
   message(STATUS "Use custom protobuf build.")
   option(protobuf_BUILD_TESTS "" OFF)
   option(protobuf_BUILD_EXAMPLES "" OFF)
+  option(protobuf_WITH_ZLIB "" OFF)
   if (APPLE)
     # Protobuf generated files triggers a deprecated atomic operation warning
     # so we turn it off here.
@@ -26,14 +27,27 @@ macro(custom_protobuf_find)
 
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
     # We will need to build protobuf with -fPIC.
-    set(__caffe2_protobuf_cmake_fpic ${CMAKE_POSITION_INDEPENDENT_CODE})
+    set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
+    set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
+    set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+    set(BUILD_SHARED_LIBS OFF)
+    if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+    endif()
+    if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility-inlines-hidden")
+    endif()
   endif()
 
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
 
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
-    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_protobuf_cmake_fpic})
+    set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
+    set(BUILD_SHARED_LIBS ON)
+    set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
   endif()
 
   # Protobuf "namespaced" target is only added post protobuf 3.5.1. As a
@@ -94,7 +108,7 @@ endif()
 # convention we will use SYSTEM inclusion path.
 get_target_property(__tmp protobuf::libprotobuf INTERFACE_INCLUDE_DIRECTORIES)
 message(STATUS "Caffe2 protobuf include directory: " ${__tmp})
-include_directories(SYSTEM ${__tmp})
+include_directories(BEFORE SYSTEM ${__tmp})
 
 # If Protobuf_VERSION is known (true in most cases, false if we are building
 # local protobuf), then we will add a protobuf version check in
@@ -152,16 +166,38 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
     else()
       set(DLLEXPORT_STR "")
     endif()
-    add_custom_command(
-      OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc"
-             "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
-             "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
-      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
-      COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
-      COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
-      DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
-      COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )
+
+    if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+      # We need to rewrite the pb.h files to route GetEmptyStringAlreadyInited
+      # through our wrapper in proto_utils so the memory location test
+      # is correct.
+      add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc"
+               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
+               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
+        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
+
+        # If we remove all reference to these pb.h files from external
+        # libraries and binaries this rewrite can be removed.
+        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
+
+        DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
+        COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )
+    else()
+      add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.cc"
+               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h"
+               "${CMAKE_CURRENT_BINARY_DIR}/${fil_we}_pb2.py"
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}"
+        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --cpp_out=${DLLEXPORT_STR}${PROJECT_BINARY_DIR} ${abs_fil}
+        COMMAND ${CAFFE2_PROTOC_EXECUTABLE} -I${PROJECT_SOURCE_DIR} --python_out "${PROJECT_BINARY_DIR}" ${abs_fil}
+        DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
+        COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )
+    endif()
   endforeach()
 
   set_source_files_properties(${${srcs_var}} ${${hdrs_var}} ${${python_var}} PROPERTIES GENERATED TRUE)
@@ -169,5 +205,3 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
   set(${hdrs_var} ${${hdrs_var}} PARENT_SCOPE)
   set(${python_var} ${${python_var}} PARENT_SCOPE)
 endfunction()
-
-

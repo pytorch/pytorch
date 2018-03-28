@@ -26,7 +26,7 @@ set(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO ON)
 include(CMakeDependentOption)
 option(BUILD_BINARY "Build C++ binaries" ON)
 option(BUILD_DOCS "Build documentation" OFF)
-option(BUILD_CUSTOM_PROTOBUF "If set, build Caffe2's own protobuf under third_party" OFF)
+option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" OFF)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(

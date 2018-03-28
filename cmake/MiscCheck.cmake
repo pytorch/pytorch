@@ -142,6 +142,14 @@ if (CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 endif()
 cmake_pop_check_state()
 
+# ---[ Checks if compiler supports -fvisibility=hidden
+check_cxx_compiler_flag("-fvisibility=hidden" COMPILER_SUPPORTS_HIDDEN_VISIBILITY)
+check_cxx_compiler_flag("-fvisibility-inlines-hidden" COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY)
+if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
+  set(CAFFE2_VISIBILITY_FLAG "-fvisibility-inlines-hidden")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CAFFE2_VISIBILITY_FLAG}")
+endif()
+
 # ---[ If we are using msvc, set no warning flags
 # Note(jiayq): if you are going to add a warning flag, check if this is
 # totally necessary, and only add when you see fit. If it is needed due to
