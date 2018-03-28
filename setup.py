@@ -35,7 +35,7 @@
 #
 #   NO_SYSTEM_NCCL
 #     disables use of system-wide nccl (we will use our submoduled
-#     copy in torch/lib/nccl)
+#     copy in third_party/nccl)
 #
 #   WITH_GLOO_IBVERBS
 #     toggle features related to distributed support
@@ -190,9 +190,9 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     if IS_WINDOWS:
-        build_libs_cmd = ['torch\\lib\\build_libs.bat']
+        build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
-        build_libs_cmd = ['bash', 'torch/lib/build_libs.sh']
+        build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
     my_env["NUM_JOBS"] = str(NUM_JOBS)
@@ -250,9 +250,9 @@ class build_deps(Command):
                 print("Could not find {}".format(f))
                 print("Did you run 'git submodule update --init'?")
                 sys.exit(1)
-        check_file(os.path.join(lib_path, "gloo", "CMakeLists.txt"))
-        check_file(os.path.join(lib_path, "nanopb", "CMakeLists.txt"))
-        check_file(os.path.join(lib_path, "pybind11", "CMakeLists.txt"))
+        check_file(os.path.join(third_party_path, "gloo", "CMakeLists.txt"))
+        check_file(os.path.join(third_party_path, "nanopb", "CMakeLists.txt"))
+        check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'cpuinfo', 'CMakeLists.txt'))
         check_file(os.path.join('aten', 'src', 'ATen', 'cpu', 'tbb', 'tbb_remote', 'Makefile'))
         check_file(os.path.join('aten', 'src', 'ATen', 'utils', 'catch', 'CMakeLists.txt'))
@@ -283,7 +283,7 @@ class build_deps(Command):
         # More information can be found in conversation thread of PR #5772
 
         self.copy_tree('torch/csrc', 'torch/lib/include/torch/csrc/')
-        self.copy_tree('torch/lib/pybind11/include/pybind11/',
+        self.copy_tree('third_party/pybind11/include/pybind11/',
                        'torch/lib/include/pybind11')
         self.copy_file('torch/torch.h', 'torch/lib/include/torch/torch.h')
 
@@ -487,13 +487,14 @@ else:
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
+third_party_path = os.path.join(cwd, "third_party")
 
 
 tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
-    lib_path + "/pybind11/include",
+    third_party_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THNN",
