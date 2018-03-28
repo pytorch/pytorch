@@ -113,13 +113,13 @@ class BuildExtension(build_ext):
             self._define_torch_extension_name(extension)
 
         # Register .cu and .cuh as valid source extensions.
+        self.compiler.src_extensions += ['.cu', '.cuh']
         # Save the original _compile method for later.
         if self.compiler.compiler_type == 'msvc':
             self.compiler._cpp_extensions += ['.cu', '.cuh']
             original_compile = self.compiler.compile
             original_spawn = self.compiler.spawn
         else:
-            self.compiler.src_extensions += ['.cu', '.cuh']
             original_compile = self.compiler._compile
 
         def unix_wrap_compile(obj, src, ext, cc_args, extra_postargs, pp_opts):
@@ -149,10 +149,11 @@ class BuildExtension(build_ext):
                              include_dirs=None, debug=0, extra_preargs=None,
                              extra_postargs=None, depends=None):
 
-            cflags = copy.deepcopy(extra_postargs)
+            self.cflags = copy.deepcopy(extra_postargs)
+            extra_postargs = None
 
             def spawn(cmd):
-                global cflags
+                orig_cmd = cmd
                 # Using regex to match src, obj and include files
 
                 src_regex = re.compile('/T(p|c)(.*)')
@@ -172,22 +173,23 @@ class BuildExtension(build_ext):
                     obj = obj_list[0]
                     if _is_cuda_file(src):
                         nvcc = _join_cuda_home('bin', 'nvcc')
-                        if isinstance(cflags, dict):
-                            cflags = cflags['nvcc']
-                        cmd = spawn([nvcc, '-c', src, '-o', obj] + include_list + cflags)
-                    elif isinstance(cflags, dict):
-                        cflags = cflags['cxx']
+                        if isinstance(self.cflags, dict):
+                            cflags = self.cflags['nvcc']
+                        cmd = [nvcc, '-c', src, '-o', obj, '-Xcompiler',
+                               '/wd4819', '-Xcompiler', '/MD'] + include_list + cflags
+                    elif isinstance(self.cflags, dict):
+                        cflags = self.cflags['cxx']
                         cmd += cflags
 
                 return original_spawn(cmd)
 
             try:
-                setattr(self, 'spawn', spawn)
-                original_compile(self, sources,
-                                 output_dir, macros, include_dirs, debug,
-                                 extra_preargs, extra_postargs, depends)
+                self.compiler.spawn = spawn
+                return original_compile(sources,
+                                        output_dir, macros, include_dirs, debug,
+                                        extra_preargs, extra_postargs, depends)
             finally:
-                setattr(self, 'spawn', original_spawn)
+                self.compiler.spawn = original_spawn
 
         # Monkey-patch the _compile method.
         if self.compiler.compiler_type == 'msvc':
@@ -434,16 +436,28 @@ def load(name,
     if build_directory is None:
         build_directory = _get_build_directory(name, verbose)
 
+    extra_ldflags = extra_ldflags or []
+    if sys.platform == 'win32':
+        python_path = os.path.dirname(sys.executable)
+        python_lib_path = os.path.join(python_path, 'libs')
+
+        here = os.path.abspath(__file__)
+        torch_path = os.path.dirname(os.path.dirname(here))
+        lib_path = os.path.join(torch_path, 'lib')
+
+        extra_ldflags.append('ATen.lib')
+        extra_ldflags.append('_C.lib')
+        extra_ldflags.append('/LIBPATH:{}'.format(python_lib_path))
+        extra_ldflags.append('/LIBPATH:{}'.format(lib_path))
+
     with_cuda = any(map(_is_cuda_file, sources))
     if with_cuda:
         if verbose:
             print('Detected CUDA files, patching ldflags')
         if sys.platform == 'win32':
-            extra_ldflags = extra_ldflags or []
             extra_ldflags.append('/LIBPATH:{}'.format(_join_cuda_home('lib/x64')))
             extra_ldflags.append('cudart.lib')
         else:
-            extra_ldflags = extra_ldflags or []
             extra_ldflags.append('-L{}'.format(_join_cuda_home('lib64')))
             extra_ldflags.append('-lcudart')
 
@@ -552,27 +566,39 @@ def _write_ninja_file(path,
     common_cflags += ['-I{}'.format(include) for include in includes]
 
     cflags = common_cflags + ['-fPIC', '-std=c++11'] + extra_cflags
+    if sys.platform == 'win32':
+        from distutils.spawn import _nt_quote_args
+        cflags = _nt_quote_args(cflags)
     flags = ['cflags = {}'.format(' '.join(cflags))]
 
     if with_cuda:
         cuda_flags = common_cflags
-        cuda_flags += ['--compiler-options', "'-fPIC'"]
-        cuda_flags += extra_cuda_cflags
-        if not any(flag.startswith('-std=') for flag in cuda_flags):
-            cuda_flags.append('-std=c++11')
+        if sys.platform == 'win32':
+            cuda_flags = _nt_quote_args(cuda_flags)
+        else:
+            cuda_flags += ['--compiler-options', "'-fPIC'"]
+            cuda_flags += extra_cuda_cflags
+            if not any(flag.startswith('-std=') for flag in cuda_flags):
+                cuda_flags.append('-std=c++11')
+
         flags.append('cuda_flags = {}'.format(' '.join(cuda_flags)))
 
-    ldflags = ['-shared'] + extra_ldflags
+    if sys.platform == 'win32':
+        ldflags = ['/DLL'] + extra_ldflags
+    else:
+        ldflags = ['-shared'] + extra_ldflags
     # The darwin linker needs explicit consent to ignore unresolved symbols.
     if sys.platform == 'darwin':
         ldflags.append('-undefined dynamic_lookup')
+    elif sys.platform == 'win32':
+        ldflags = _nt_quote_args(ldflags)
     flags.append('ldflags = {}'.format(' '.join(ldflags)))
 
     # See https://ninja-build.org/build.ninja.html for reference.
     compile_rule = ['rule compile']
     if sys.platform == 'win32':
         compile_rule.append(
-            '  command = cl /showIncludes -c $in /Fo$out')
+            '  command = cl /showIncludes $cflags -c $in /Fo$out')
         compile_rule.append('  deps = msvc')
     else:
         compile_rule.append(
@@ -587,7 +613,12 @@ def _write_ninja_file(path,
 
     link_rule = ['rule link']
     if sys.platform == 'win32':
-        link_rule.append('  command = $cxx $in $libs /nologo /link $ldflags /out:$out')
+        cl_paths = subprocess.check_output(['where', 'cl']).decode().split('\r\n')
+        if len(cl_paths) >= 1:
+            cl_path = os.path.dirname(cl_paths[0]).replace(':', '$:')
+        else:
+            raise RuntimeError("MSVC is required to load C++ extensions")
+        link_rule.append('  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(cl_path))
     else:
         link_rule.append('  command = $cxx $ldflags $in -o $out')
 
@@ -606,9 +637,12 @@ def _write_ninja_file(path,
             rule = 'compile'
             target = '{}.o'.format(file_name)
         object_files.append(target)
+        if sys.platform == 'win32':
+            source_file = source_file.replace(':', '$:')
         build.append('build {}: {} {}'.format(target, rule, source_file))
 
-    library_target = '{}.so'.format(name)
+    ext = '.pyd' if sys.platform == 'win32' else '.so'
+    library_target = '{}{}'.format(name, ext)
     link = ['build {}: link {}'.format(library_target, ' '.join(object_files))]
 
     default = ['default {}'.format(library_target)]
