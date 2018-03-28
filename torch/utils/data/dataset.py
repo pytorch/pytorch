@@ -24,29 +24,17 @@ class Dataset(object):
 
 
 class TensorDataset(Dataset):
-    """Dataset wrapping data and target tensors.
+    """Dataset wrapping tensors.
 
-    Each sample will be retrieved by indexing both tensors along the first
-    dimension.
+    Each sample will be retrieved by indexing tensors along the first dimension.
 
     Arguments:
-        data_tensor (Tensor): contains sample data.
-        target_tensor (Tensor): contains sample targets (labels).
         *tensors (Tensor): tensors with the same first dimension.
     """
 
-    def __init__(self, data_tensor=None, target_tensor=None, *tensors):
-        def tensor_gen():
-            if data_tensor is not None:
-                yield data_tensor
-            if target_tensor is not None:
-                yield target_tensor
-            for tensor in tensors:
-                yield tensor
-            pass
-
-        self.tensors = tuple(tensor_gen())
-        assert all(self.tensors[0].size(0) == tensor.size(0) for tensor in self.tensors)
+    def __init__(self, *tensors):
+        assert all(tensors[0].size(0) == tensor.size(0) for tensor in tensors)
+        self.tensors = tensors
 
     def __getitem__(self, index):
         return tuple(tensor[index] for tensor in self.tensors)
