@@ -817,6 +817,9 @@ class TestCuda(TestCase):
     def test_neg(self):
         TestTorch._test_neg(self, lambda t: t.cuda())
 
+    def test_comparator_integral_tensor_floating_scalar(self):
+        TestTorch._test_comparator_integral_tensor_floating_scalar(self, lambda t: t.cuda())
+
     def _test_broadcast(self, input):
         if torch.cuda.device_count() < 2:
             raise unittest.SkipTest("only one GPU detected")

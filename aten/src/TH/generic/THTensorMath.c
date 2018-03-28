@@ -3705,41 +3705,6 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
   return equal;
 }
 
-#define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
-  void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
-  {									\
-    THByteTensor_resizeNd(r_, t->nDimension, t->size, NULL);		\
-    TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, real value)	\
-  {									\
-    THTensor_(resizeNd)(r_, t->nDimension, t->size, NULL);		\
-    TH_TENSOR_APPLY2(real, r_, real, t,					\
-		     *r__data = (*t_data OP value) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THByteTensor_resizeNd(r_, ta->nDimension, ta->size, NULL);		\
-    TH_TENSOR_APPLY3(unsigned char, r_, real, ta, real, tb,		\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
-  void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
-  {									\
-    THTensor_(resizeNd)(r_, ta->nDimension, ta->size, NULL);		\
-    TH_TENSOR_APPLY3(real, r_, real, ta, real, tb,			\
-		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
-  }									\
-
-
-TENSOR_IMPLEMENT_LOGICAL(lt,<)
-TENSOR_IMPLEMENT_LOGICAL(gt,>)
-TENSOR_IMPLEMENT_LOGICAL(le,<=)
-TENSOR_IMPLEMENT_LOGICAL(ge,>=)
-TENSOR_IMPLEMENT_LOGICAL(eq,==)
-TENSOR_IMPLEMENT_LOGICAL(ne,!=)
-
-
 #ifdef _OPENMP
 
 #define LAB_IMPLEMENT_BASIC_FUNCTION(NAME, CFUNC)             \
