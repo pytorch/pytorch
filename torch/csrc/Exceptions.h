@@ -14,7 +14,6 @@
 #define HANDLE_TH_ERRORS                                                       \
   try {
 
-
 #define END_HANDLE_TH_ERRORS_RET(retval)                                       \
   } catch (python_error &e) {                                                  \
     return retval;                                                             \

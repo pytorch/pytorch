@@ -35,7 +35,7 @@ struct SourceLocation {
 /// Provides a complete error message with source location information via
 /// `what()`, and a more concise message via `what_without_location()`. Should
 /// primarily be used with the `AT_ERROR` macro.
-struct Error : public std::exception {
+struct AT_API Error : public std::exception {
   template <typename... FormatArgs>
   Error(
       detail::SourceLocation source_location,
