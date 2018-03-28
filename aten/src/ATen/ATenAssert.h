@@ -1,10 +1,8 @@
-#include "ATenGeneral.h"
+#pragma once
 
-namespace at {
+#include <ATen/Error.h>
 
-#define AT_ASSERT(cond, ...) if (! (cond) ) { at::runtime_error(__VA_ARGS__); }
-
-[[noreturn]]
-AT_API void runtime_error(const char *format, ...);
-
-}
+#define AT_ASSERT(cond, ...) \
+  if (!(cond)) {             \
+    AT_ERROR(__VA_ARGS__);   \
+  }

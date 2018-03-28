@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Error.h"
 
 #include "ATen/cuda/AccumulateType.cuh"
 #include "ATen/cuda/CUDATensorMethods.cuh"

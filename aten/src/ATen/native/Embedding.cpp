@@ -55,7 +55,8 @@ Tensor embedding_sparse_backward(
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
-    runtime_error("embedding_backward: scale_grad_by_freq not supported with sparse gradients");
+    AT_ERROR(
+        "embedding_backward: scale_grad_by_freq not supported with sparse gradients");
   }
 
   Tensor indices = indices_;

@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 
@@ -37,7 +38,7 @@ bool allclose(const Tensor& self, const Tensor& other, double rtol, double atol)
 
 bool is_nonzero(const Tensor& self) {
   if (self.numel() != 1) {
-    runtime_error("bool value of Tensor with more than one value is ambiguous");
+    AT_ERROR("bool value of Tensor with more than one value is ambiguous");
   }
   Scalar localScalar = self.pImpl->localScalar();
   if (localScalar.isFloatingPoint()) {
@@ -45,12 +46,12 @@ bool is_nonzero(const Tensor& self) {
   } else if (localScalar.isIntegral()){
     return localScalar.to<int64_t>() != 0;
   }
-  runtime_error("expected non-Tensor backed scalar");
+  AT_ERROR("expected non-Tensor backed scalar");
 }
 
 Tensor where(const Tensor& condition, const Tensor& self, const Tensor& other) {
   if (condition.type().scalarType() != ScalarType::Byte) {
-    runtime_error("Expected condition to have ScalarType Byte, but got ScalarType %s",
+    AT_ERROR("Expected condition to have ScalarType Byte, but got ScalarType %s",
                   toString(condition.type().scalarType()));
   }
   Tensor b_condition, b_self, b_other;

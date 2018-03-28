@@ -150,7 +150,7 @@ static const char* get_module(Backend backend) {
     case kCUDA: return "torch.cuda";
     case kSparseCPU: return "torch.sparse";
     case kSparseCUDA: return "torch.cuda.sparse";
-    default: runtime_error("invalid backend: %s", toString(backend));
+    default: AT_ERROR("invalid backend: %s", toString(backend));
   }
 }
 
