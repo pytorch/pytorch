@@ -188,7 +188,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   bool need_contiguous = input.stride(signal_ndim) == 0;
   if (complex_input) {
     // Real/imag dimension must be like complex type. Need to make the input
-    // tensor conitugous if this dimension is not contiguous.
+    // tensor contiguous if this dimension is not contiguous.
     need_contiguous |= input.stride(-1) != 1;
   } else if (is_half) {
     // For half, base strides on the real part of real-to-complex and
