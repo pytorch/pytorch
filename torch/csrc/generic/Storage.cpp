@@ -2,28 +2,14 @@
 #define TH_GENERIC_FILE "generic/Storage.cpp"
 #else
 
-PyObject *THPStorageClass = NULL;
-
-PyObject * THPStorage_(New)(THStorage *ptr)
-{
-  TORCH_ASSERT(ptr);
-  PyTypeObject *type = (PyTypeObject *)THPStorageClass;
-  PyObject *obj = type->tp_alloc(type, 0);
-  if (obj) {
-    ((THPStorage *)obj)->cdata = ptr;
-  } else {
-    THStorage_(free)(LIBRARY_STATE ptr);
-  }
-  return obj;
-}
-
-static void THPStorage_(dealloc)(THPStorage* self)
+namespace {
+void THPStorage_(dealloc)(THPStorage* self)
 {
   THStorage_(free)(LIBRARY_STATE self->cdata);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static THStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
+THStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
 {
 #if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
@@ -33,7 +19,7 @@ static THStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* alloc
 #endif
 }
 
-static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
   Py_ssize_t num_args = args ? PyTuple_Size(args) : 0;
@@ -174,14 +160,14 @@ invalid_arguments:
   END_HANDLE_TH_ERRORS
 }
 
-static Py_ssize_t THPStorage_(length)(THPStorage *self)
+Py_ssize_t THPStorage_(length)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   return THStorage_(size)(LIBRARY_STATE self->cdata);
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
+PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
 {
   HANDLE_TH_ERRORS
   /* Integer index */
@@ -229,7 +215,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
   END_HANDLE_TH_ERRORS
 }
 
-static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
+int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
 {
   HANDLE_TH_ERRORS
   if (!THPUtils_(checkReal)(value)) {
@@ -266,11 +252,19 @@ static int THPStorage_(set)(THPStorage *self, PyObject *index, PyObject *value)
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
-static PyMappingMethods THPStorage_(mappingmethods) = {
+PyMappingMethods THPStorage_(mappingmethods) = {
   (lenfunc)THPStorage_(length),
   (binaryfunc)THPStorage_(get),
   (objobjargproc)THPStorage_(set)
 };
+
+struct PyMemberDef THPStorage_(members)[] = {
+  {(char*)"_cdata", T_ULONGLONG, offsetof(THPStorage, cdata), READONLY, NULL},
+  {NULL}
+};
+
+THPCopyList THStorage_(copy_functions);
+} // namespace
 
 // TODO: implement equality
 PyTypeObject THPStorageType = {
@@ -314,13 +308,20 @@ PyTypeObject THPStorageType = {
   THPStorage_(pynew),                    /* tp_new */
 };
 
-static struct PyMemberDef THPStorage_(members)[] = {
-  {(char*)"_cdata", T_ULONGLONG, offsetof(THPStorage, cdata), READONLY, NULL},
-  {NULL}
-};
+PyObject *THPStorageClass = NULL;
 
-extern THPCopyList THStorage_(copy_functions);
-THPCopyList THStorage_(copy_functions);
+PyObject * THPStorage_(New)(THStorage *ptr)
+{
+  TORCH_ASSERT(ptr);
+  PyTypeObject *type = (PyTypeObject *)THPStorageClass;
+  PyObject *obj = type->tp_alloc(type, 0);
+  if (obj) {
+    ((THPStorage *)obj)->cdata = ptr;
+  } else {
+    THStorage_(free)(LIBRARY_STATE ptr);
+  }
+  return obj;
+}
 
 void THPStorage_(initCopyMethods)()
 {
@@ -349,7 +350,7 @@ void THPStorage_(initCopyMethods)()
 #endif
   // add CPU <- GPU copies to base type
   #define THCpuStorage_(name) TH_CONCAT_4(TH, Real, Storage_, name)
-  extern THPCopyList THCpuStorage_(copy_functions);
+  THPCopyList THCpuStorage_(copy_functions);
   auto& b = THCpuStorage_(copy_functions);
   THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaByte));
   THPInsertStorageCopyFunction(b, &THCpuStorage_(copyCudaChar));
