@@ -63,6 +63,7 @@ _PI32AVX_CONST(4, 4);
 
 _PS256_CONST(1  , 1.0f);
 _PS256_CONST(0p5, 0.5f);
+_PS256_CONST(2, 2.0f);
 /* the smallest non denormalized float number */
 _PS256_CONST_TYPE(min_norm_pos, int, 0x00800000);
 _PS256_CONST_TYPE(mant_mask, int, 0x7f800000);
@@ -295,6 +296,89 @@ inline v8sf exp256_ps(v8sf x) {
   imm0 = _mm256_slli_epi32(imm0, 23);
   v8sf pow2n = _mm256_castsi256_ps(imm0);
   y = _mm256_mul_ps(y, pow2n);
+  return y;
+}
+
+_PS256_CONST(tanh_0p625, 0.625f);
+_PS256_CONST(tanh_p0, -5.70498872745E-3f);
+_PS256_CONST(tanh_p1, 2.06390887954E-2f);
+_PS256_CONST(tanh_p2, -5.37397155531E-2f);
+_PS256_CONST(tanh_p3, 1.33314422036E-1f);
+_PS256_CONST(tanh_p4, -3.33332819422E-1f);
+_PS256_CONST(tanh_half_max, 44.014845935754205f);
+
+/* Computation of 8 tanh values using AVX intrisics
+
+   The code is the exact reproduction of the cephes tanh function for single
+   precision.
+   http://www.netlib.org/cephes/
+*/
+v8sf tanh256_ps(v8sf x) {
+  v8sf y, z, s;
+  v8sf xmm0, xmm1, xmm2, xmm3;
+  v8sf one = *(v8sf*)_ps256_1;
+
+  /* take the absolute value */
+  z = _mm256_and_ps(x, *(v8sf*)_ps256_inv_sign_mask);
+  /* extract the sign bit (upper one) */
+  v8sf sign_bit = _mm256_and_ps(x, *(v8sf*)_ps256_sign_mask);
+
+  /*
+   * if (z >= 0.625)
+   * {
+   *  s = expf(z + z);
+   *  z =  1.0  - 2.0/(s + 1.0);
+   *  if (x < 0)
+   *    z = -z;
+   *  }
+   * }
+   */
+  xmm1 = _mm256_cmp_ps(z, *(v8sf*)_ps256_tanh_0p625, _CMP_LT_OS);
+
+  xmm2 = _mm256_add_ps(z, z);
+  /* using exp256_ps for e^(2x) */
+  s = exp256_ps(xmm2);
+  xmm2 = _mm256_sub_ps(
+      one, _mm256_div_ps(*(v8sf*)_ps256_2, _mm256_add_ps(one, s)));
+  xmm2 = _mm256_or_ps(sign_bit, xmm2);
+
+  /*
+   * z = x * x;
+   * z =
+   *  ((((-5.70498872745E-3 * z
+   *  + 2.06390887954E-2) * z
+   *  - 5.37397155531E-2) * z
+   *  + 1.33314422036E-1) * z
+   *  - 3.33332819422E-1) * z * x
+   *  + x;
+   */
+  s = _mm256_mul_ps(z, z);
+  y = _mm256_mul_ps(s, *(v8sf*)_ps256_tanh_p0);
+  y = _mm256_add_ps(y, *(v8sf*)_ps256_tanh_p1);
+  y = _mm256_mul_ps(y, s);
+  y = _mm256_add_ps(y, *(v8sf*)_ps256_tanh_p2);
+  y = _mm256_mul_ps(y, s);
+  y = _mm256_add_ps(y, *(v8sf*)_ps256_tanh_p3);
+  y = _mm256_mul_ps(y, s);
+  y = _mm256_add_ps(y, *(v8sf*)_ps256_tanh_p4);
+  y = _mm256_mul_ps(y, s);
+  y = _mm256_mul_ps(y, x);
+  xmm3 = _mm256_add_ps(y, x);
+
+  s = _mm256_add_ps(_mm256_and_ps(xmm1, xmm3), _mm256_andnot_ps(xmm1, xmm2));
+
+  /*
+   * if (z > 0.5 * MAXLOGF)
+   * {
+   *  if (x > 0)
+   *    return(1.0);
+   *  else
+   *    return(-1.0);
+   * }
+   */
+  xmm0 = _mm256_cmp_ps(z, *(v8sf*)_ps256_tanh_half_max, _CMP_LE_OS);
+  xmm2 = _mm256_xor_ps(sign_bit, one);
+  y = _mm256_add_ps(_mm256_and_ps(xmm0, s), _mm256_andnot_ps(xmm0, xmm2));
   return y;
 }
 

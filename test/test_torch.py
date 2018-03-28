@@ -299,6 +299,16 @@ class TestTorch(TestCase):
     def test_tanh(self):
         self._testMathByName('tanh')
 
+        # test with high values
+        x = np.linspace(-2000000000000.0, 2000000000000.0, 100)
+        y = torch.FloatTensor(x)
+        self.assertEqual(np.tanh(y), torch.tanh(y))
+
+        # test with fractional values
+        x = np.linspace(-1.0, 1.0, 100)
+        y = torch.FloatTensor(x)
+        self.assertEqual(np.tanh(y), torch.tanh(y))
+
     def test_atan(self):
         self._testMathByName('atan')
 
