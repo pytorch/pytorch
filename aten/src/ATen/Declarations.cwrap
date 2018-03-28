@@ -1141,20 +1141,8 @@
     - THTensor* self
 ]]
 [[
-  name: log_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _log
   cname: log
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: log
   types:
     - floating_point
   backends:
@@ -1288,20 +1276,8 @@
     - THTensor* self
 ]]
 [[
-  name: exp_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _exp
   cname: exp
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: exp
   types:
     - floating_point
   backends:
@@ -1346,20 +1322,8 @@
     - THTensor* self
 ]]
 [[
-  name: cos_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _cos
   cname: cos
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: cos
   types:
     - floating_point
   backends:
@@ -1433,20 +1397,8 @@
     - THTensor* self
 ]]
 [[
-  name: sin_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _sin
   cname: sin
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sin
   types:
     - floating_point
   backends:

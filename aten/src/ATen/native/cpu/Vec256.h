@@ -1,39 +1,30 @@
 #pragma once
 
-#if defined(_MSC_VER)
-/* Microsoft C/C++-compatible compiler */
-#include <intrin.h>
-#if _MSC_VER <= 1900
-#define _mm256_extract_epi64(X, Y) (((uint64_t*)&X)[Y])
-#endif
-#elif defined(__GNUC__) && (defined(__x86_64__) || defined(__i386__))
-/* GCC-compatible compiler, targeting x86/x86-64 */
-#include <x86intrin.h>
-#elif defined(__GNUC__) && defined(__ARM_NEON__)
-/* GCC-compatible compiler, targeting ARM with NEON */
-#include <arm_neon.h>
-#elif defined(__GNUC__) && defined(__IWMMXT__)
-/* GCC-compatible compiler, targeting ARM with WMMX */
-#include <mmintrin.h>
-#elif (defined(__GNUC__) || defined(__xlC__)) && \
-    (defined(__VEC__) || defined(__ALTIVEC__))
-/* XLC or GCC-compatible compiler, targeting PowerPC with VMX/VSX */
-#include <altivec.h>
-#elif defined(__GNUC__) && defined(__SPE__)
-/* GCC-compatible compiler, targeting PowerPC with SPE */
-#include <spe.h>
-#endif
-
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
+#include "Intrinsics.h"
+#ifdef __AVX2__
+#include "avx_mathfun.h"
+#endif
+
+#if defined(__GNUC__)
+# define ALIGN32_ __attribute__((aligned(32)))
+#elif defined(_WIN32)
+# define ALIGN32_ __declspec(align(32))
+#else
+# define ALIGN32_ 
+#endif
 
 // NOTE:
 // If you specialize on a type, you must define all operations!
 // C arrays and intrinsic types don't mix
+//
+// NOTE:
+// When testing make sure to test all capabilities (AVX, AVX2, DEFAULT, etc.)
+
 namespace at { namespace native { namespace vec256 {
 
 template <class T>
@@ -47,10 +38,12 @@ class Vec256 {
     std::memcpy(ptr, values, 32);
   }
   inline void load(const T* ptr, size_t count) {
-    std::memcpy(values, ptr, 32 / sizeof(T) * count);
+    size_t section = count * sizeof(T);
+    std::memcpy(values, ptr, section);
   };
   inline void store(T* ptr, size_t count) const {
-    std::memcpy(ptr, values, 32 / sizeof(T) * count);
+    size_t section = count * sizeof(T);
+    std::memcpy(ptr, values, section);
   }
   size_t size = 32 / sizeof(T);
   inline void operator=(const Vec256<T>& b) {
@@ -58,18 +51,31 @@ class Vec256 {
   }
   inline Vec256<T> map(T (*f)(T)) {
     Vec256<T> ret;
-    for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++) {
       ret.values[i] = f(values[i]);
+    }
     return ret;
+  }
+  inline Vec256<T> exp() {
+    return map(std::exp);
+  }
+  inline Vec256<T> log() {
+    return map(std::log);
   }
   inline Vec256<T> ceil() {
     return map(std::ceil);
+  }
+  inline Vec256<T> cos() {
+    return map(std::cos);
   }
   inline Vec256<T> floor() {
     return map(std::floor);
   }
   inline Vec256<T> round() {
     return map(std::round);
+  }
+  inline Vec256<T> sin() {
+    return map(std::sin);
   }
   inline Vec256<T> trunc() {
     return map(std::trunc);
@@ -121,6 +127,64 @@ class Vec256<float> {
   inline void operator=(const Vec256<float>& b) {
     values = b.values;
   }
+  inline Vec256<float> map(float (*f)(float)) {
+    float tmp[8];
+    store(tmp);
+    for (size_t i = 0; i < 8; i++)
+      tmp[i] = f(tmp[i]);
+    Vec256<float> ret;
+    ret.load(tmp);
+    return ret;
+  }
+
+#ifdef __AVX2__
+  inline Vec256<float> exp() {
+    Vec256<float> ret;
+    ret.values = exp256_ps(values);
+    return ret;
+  }
+#else
+  inline Vec256<float> exp() {
+    return map(std::exp);
+  }
+#endif
+
+#ifdef __AVX2__
+  inline Vec256<float> log() {
+    Vec256<float> ret;
+    ret.values = log256_ps(values);
+    return ret;
+  }
+#else
+  inline Vec256<float> log() {
+    return map(std::log);
+  }
+#endif
+
+#ifdef __AVX2__
+  inline Vec256<float> sin() {
+    Vec256<float> ret;
+    ret.values = sin256_ps(values);
+    return ret;
+  }
+#else
+  inline Vec256<float> sin() {
+    return map(std::sin);
+  }
+#endif
+
+#ifdef __AVX2__
+  inline Vec256<float> cos() {
+    Vec256<float> ret;
+    ret.values = cos256_ps(values);
+    return ret;
+  }
+#else
+  inline Vec256<float> cos() {
+    return map(std::cos);
+  }
+#endif
+
   inline Vec256<float> ceil() {
     Vec256<float> ret;
     ret.values = _mm256_ceil_ps(values);
@@ -175,6 +239,24 @@ class Vec256<double> {
   inline void operator=(const Vec256<double>& b) {
     values = b.values;
   }
+  inline Vec256<double> map(double (*f)(double)) {
+    ALIGN32_ double tmp[4];
+    store(tmp);
+    for (size_t i = 0; i < 4; i++)
+      tmp[i] = f(tmp[i]);
+    Vec256<double> ret;
+    ret.load(tmp);
+    return ret;
+  }
+  inline Vec256<double> exp() {
+    return map(std::exp);
+  }
+  inline Vec256<double> log() {
+    return map(std::log);
+  }
+  inline Vec256<double> cos() {
+    return map(std::cos);
+  }
   inline Vec256<double> ceil() {
     Vec256<double> ret;
     ret.values = _mm256_ceil_pd(values);
@@ -190,6 +272,9 @@ class Vec256<double> {
     ret.values = _mm256_round_pd(
         values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
     return ret;
+  }
+  inline Vec256<double> sin() {
+    return map(std::sin);
   }
   inline Vec256<double> trunc() {
     Vec256<double> ret;

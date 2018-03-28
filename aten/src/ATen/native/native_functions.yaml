@@ -144,6 +144,16 @@
 - func: conv_transpose3d(Tensor input, Tensor weight, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] output_padding=0, int64_t groups=1, IntList[3] dilation=1) -> Tensor
   variants: function
 
+- func: cos(Tensor self) -> Tensor
+
+- func: cos_(Tensor self) -> Tensor
+
+- func: cos_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _cos_out_cpu
+    CUDA: _cos_out_cuda
+
 - func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin, bool size_average, bool reduce) -> Tensor
   variants: function
 
@@ -278,6 +288,16 @@
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
+- func: exp(Tensor self) -> Tensor
+
+- func: exp_(Tensor self) -> Tensor
+
+- func: exp_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _exp_out_cpu
+    CUDA: _exp_out_cuda
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
@@ -353,6 +373,16 @@
 
 - func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
+
+- func: log(Tensor self) -> Tensor
+
+- func: log_(Tensor self) -> Tensor
+
+- func: log_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _log_out_cpu
+    CUDA: _log_out_cuda
 
 - func: logdet(Tensor self) -> Tensor
 
@@ -496,6 +526,16 @@
 
 - func: selu_(Tensor self) -> Tensor
   variants: function
+
+- func: sin(Tensor self) -> Tensor
+
+- func: sin_(Tensor self) -> Tensor
+
+- func: sin_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sin_out_cpu
+    CUDA: _sin_out_cuda
 
 - func: size(Tensor self, int64_t dim) -> int64_t
 

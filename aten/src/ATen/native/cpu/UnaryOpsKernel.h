@@ -6,26 +6,24 @@
 
 namespace at { namespace native {
 
-template <CPUCapability C>
-struct ceilImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct floorImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct roundImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct truncImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct sqrtImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
+#define FUNCImplC(NAME) \
+template <CPUCapability C>\
+struct NAME ## ImplC {\
+  static void function(Tensor& result, const Tensor& self);\
+};\
+
+#define UNARY_OPS_MACRO(MACRO) \
+  MACRO (ceil) \
+  MACRO (cos) \
+  MACRO (exp) \
+  MACRO (floor) \
+  MACRO (log) \
+  MACRO (round) \
+  MACRO (sin) \
+  MACRO (sqrt) \
+  MACRO (trunc) \
+
+UNARY_OPS_MACRO(FUNCImplC)
 
 // Missing unary functions
 // TODO: Add generic apply function for contiguous and non-contiguous tensors
@@ -34,20 +32,16 @@ struct sqrtImplC {
 // acos
 // asin
 // atan
-// cos
 // cosh
 // digamma
 // erf
 // erfinv
-// exp
 // expm1
 // frac
 // lgamma
 // log1p
-// log
 // rsqrt
 // sigmoid
-// sin
 // sinh
 // tan
 // tanh
