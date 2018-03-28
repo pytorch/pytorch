@@ -177,7 +177,9 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   // if we don't tell pybind these are variables it chokes on the
   // conversion.
   // TODO: fix conversions to be sane and make sure this works.
-  if(outputs.size() == 1) {
+  if (outputs.size() == 0) {
+    return py::none();
+  } else if (outputs.size() == 1) {
     return py::cast(static_cast<autograd::Variable&>(outputs[0]));
   } else {
     py::tuple tuple(outputs.size());

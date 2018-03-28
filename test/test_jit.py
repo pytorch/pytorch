@@ -1473,7 +1473,6 @@ class TestScript(TestCase):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize)
             ge = getattr(cu, name)
-            self.assertIsNotNone(outputs)
         else:
             if capture_output:
                 with self.capture_stdout() as captured:
@@ -1801,6 +1800,25 @@ class TestScript(TestCase):
 
         a = torch.randn(6)
         self.checkScript(func, [a], optimize=True)
+
+    def test_return(self):
+        def no_return(a):
+            a + 1
+
+        def void_return(a):
+            return
+
+        def one_return(a):
+            return a + 1.
+
+        def multiple_returns(a):
+            return a * 1., a * 2., a * 3.
+
+        a = torch.randn(1, dtype=torch.float)
+        # self.checkScript(no_return, [a], optimize=True)
+        self.checkScript(void_return, [a], optimize=True)
+        self.checkScript(one_return, [a], optimize=True)
+        self.checkScript(multiple_returns, [a], optimize=True)
 
     def test_error(self):
         @torch.jit.script
