@@ -1,16 +1,16 @@
 #include "ATen/native/cpu/ReduceOpsKernel.h"
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
+#include "ATen/native/cpu/Vec256.h"
 
-namespace at {
-namespace native {
+namespace at { namespace native {
 
 using namespace vec256;
 
 // This adds the content of arr to sum
 template <class scalar_t, template <class> class OP, CPUCapability C>
-inline scalar_t allreduce_kernel_(const scalar_t *arr, size_t start, size_t end,
-                                  scalar_t sum) {
+inline scalar_t
+allreduce_kernel_(const scalar_t* arr, size_t start, size_t end, scalar_t sum) {
   Vec256<scalar_t> part_sum;
   // Use all 16 registers.
   Vec256<scalar_t> tmp_sum[4], tmp_sum1, tmp_sum2, tmp_sum3;
@@ -38,7 +38,7 @@ inline scalar_t allreduce_kernel_(const scalar_t *arr, size_t start, size_t end,
   if (k > 0) {
     scalar_t sarr[32 / sizeof(scalar_t)];
     part_sum.store(sarr);
-    for (size_t i = 0; i < part_sum.size(); i++) {
+    for (size_t i = 0; i < part_sum.size; i++) {
       sum = OP<scalar_t>()(sum, sarr[i]);
     }
   }
@@ -51,8 +51,11 @@ inline scalar_t allreduce_kernel_(const scalar_t *arr, size_t start, size_t end,
 
 // This overwrites the content of outarr
 template <class scalar_t, template <class> class OP, CPUCapability C>
-inline void dimreduce_kernel_(const scalar_t *arr, scalar_t *outarr,
-                              size_t num_rows, size_t num_cols) {
+inline void dimreduce_kernel_(
+    const scalar_t* arr,
+    scalar_t* outarr,
+    size_t num_rows,
+    size_t num_cols) {
   size_t width =
       256 / (sizeof(scalar_t)); // primitives per 256 bytes (two cache lines)
   Vec256<scalar_t> a[8];
@@ -88,31 +91,49 @@ inline void dimreduce_kernel_(const scalar_t *arr, scalar_t *outarr,
 }
 
 template <template <class> class OP, CPUCapability C>
-inline void allImpl(Tensor & result, const Tensor & self, size_t dim, bool all, const char* name, int64_t init) {
+inline void allImpl(
+    Tensor& result,
+    const Tensor& self,
+    size_t dim,
+    bool all,
+    const char* name,
+    int64_t init) {
   AT_DISPATCH_ALL_TYPES(self.type(), name, [&] {
     if (all) {
       result.fill_(at::parallel_reduce<scalar_t, OP>(
-          &allreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>, self.data<scalar_t>(),
-          (size_t)0, (size_t)self.numel(), (scalar_t)init));
+          &allreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>,
+          self.data<scalar_t>(),
+          (size_t)0,
+          (size_t)self.numel(),
+          (scalar_t)init));
     } else {
       at::parallel_reduce_2d<scalar_t>(
           &dimreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>,
-          self.sizes()[dim], self.strides()[dim], self.numel(),
-          self.data<scalar_t>(), result.data<scalar_t>());
+          self.sizes()[dim],
+          self.strides()[dim],
+          self.numel(),
+          self.data<scalar_t>(),
+          result.data<scalar_t>());
     }
-    });
+  });
 }
 
 template <>
-void sumImplC<CURRENT_CAPABILITY>::function(Tensor &result, const Tensor &self,
-                                            size_t dim, bool all) {
+void sumImplC<CURRENT_CAPABILITY>::function(
+    Tensor& result,
+    const Tensor& self,
+    size_t dim,
+    bool all) {
   allImpl<std::plus, CURRENT_CAPABILITY>(result, self, dim, all, "sum", 0);
 }
 
 template <>
-void prodImplC<CURRENT_CAPABILITY>::function(Tensor &result, const Tensor &self,
-                                             size_t dim, bool all) {
-  allImpl<std::multiplies, CURRENT_CAPABILITY>(result, self, dim, all, "prod", 1);
+void prodImplC<CURRENT_CAPABILITY>::function(
+    Tensor& result,
+    const Tensor& self,
+    size_t dim,
+    bool all) {
+  allImpl<std::multiplies, CURRENT_CAPABILITY>(
+      result, self, dim, all, "prod", 1);
 }
-}
-}
+}} // namespace at::native

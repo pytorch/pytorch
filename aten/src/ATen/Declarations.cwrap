@@ -1665,20 +1665,8 @@
     - THTensor* self
 ]]
 [[
-  name: sqrt_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _sqrt
   cname: sqrt
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sqrt
   types:
     - floating_point
   backends:
@@ -1723,20 +1711,8 @@
     - THTensor* self
 ]]
 [[
-  name: ceil_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _ceil
   cname: ceil
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: ceil
   types:
     - floating_point
   backends:
@@ -1752,20 +1728,8 @@
     - THTensor* self
 ]]
 [[
-  name: floor_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _floor
   cname: floor
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: floor
   types:
     - floating_point
   backends:
@@ -1781,20 +1745,8 @@
     - THTensor* self
 ]]
 [[
-  name: round_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _round
   cname: round
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: round
   types:
     - floating_point
   backends:
@@ -1810,20 +1762,8 @@
     - THTensor* self
 ]]
 [[
-  name: trunc_
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
+  name: _trunc
   cname: trunc
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: trunc
   types:
     - floating_point
   backends:
