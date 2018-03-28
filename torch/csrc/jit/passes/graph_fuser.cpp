@@ -69,12 +69,31 @@ std::unordered_set<NodeKind> simple_mappable = {
 };
 
 bool isSimpleMap(Node *node) {
-  if(simple_mappable.count(node->kind())) {
-    if(node->kind() == aten::min || node->kind() == aten::max)
-      return node->inputs().size() == 2; // unary min/max is a reduction...
-    return true;
+  if(simple_mappable.count(node->kind()) == 0)
+    return false;
+  if((node->kind() == aten::min || node->kind() == aten::max) && node->inputs().size() == 1)
+    return false;
+  // Make sure that the node doesn't broadcast.
+  JIT_ASSERT(node->inputs().size() > 0);
+  TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
+  if (!expected_type)
+    return false;
+  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
+    TensorType* actual = _actual->cast<TensorType>();
+    return actual &&
+           expected->scalarType() == actual->scalarType() &&
+           expected->device() == actual->device() &&
+           expected->sizes() == actual->sizes();
+  };
+  for (Value * val : node->inputs()) {
+    if (!equal_modulo_strides(expected_type, val->type()))
+      return false;
   }
-  return false;
+  for (Value * val : node->outputs()) {
+    if (!equal_modulo_strides(expected_type, val->type()))
+      return false;
+  }
+  return true;
 }
 
 struct GraphFuser {
