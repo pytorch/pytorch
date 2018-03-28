@@ -1972,6 +1972,46 @@ class TestScript(TestCase):
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
 
+    def test_script_module_call_noscript(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.value = 1
+
+            def foo(self):
+                return torch.ones(2, 2) + self.value
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + self.foo()
+
+        m = M()
+        input = torch.randn(2, 2)
+        o = m(input)
+        self.assertEqual(o, input + torch.ones(2, 2) + 1)
+        # check that we can change python attributes
+        # and that those changes are picked up in script methods
+        m.value = 2
+        o = m(input)
+        self.assertEqual(o, input + torch.ones(2, 2) + 2)
+
+    def test_script_module_nochange_submodule(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.sub = nn.Linear(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.sub(input)
+
+        m = M()
+        input = torch.randn(1, 5, 5)
+        o = m(input)
+        self.assertEqual(o, m.sub(input))
+        with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
+            m.sub = nn.Linear(5, 5)
+
 
 if __name__ == '__main__':
     run_tests()
