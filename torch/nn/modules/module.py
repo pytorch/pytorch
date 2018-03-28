@@ -537,8 +537,7 @@ class Module(object):
         def submodule_key_mismatch(full_name, is_missing):
             module = self
             names = full_name.split(".")
-            for i, module_name in enumerate(names[:-1]):
-                children = module._modules
+            for module_name in names[:-1]:
                 if module_name in module._modules:
                     module = module._modules[module_name]
                 else:
@@ -569,17 +568,15 @@ class Module(object):
                 submodule_key_mismatch(name, False)
             for name in missing:
                 submodule_key_mismatch(name, True)
-            error = ''
+            error_msg = ''
             if len(unexpected) > 0:
-                error += ('Unexpected key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected)))
+                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
             if len(missing) > 0:
-                error += ('Missing key(s) in state_dict: {}. '.format(
-                    ', '.join('"{}"'.format(k) for k in unexpected)))
-            if len(error) > 0:
-                raise KeyError(error + 'If this is expected, set strict=False '
-                               'in load_state_dict to suppress the key '
-                               'mismatch checks.')
+                error_msg += 'Missing key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
+            if len(error_msg) > 0:
+                raise KeyError(error_msg)
 
     def parameters(self):
         r"""Returns an iterator over module parameters.
