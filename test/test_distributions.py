@@ -37,7 +37,8 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Exponential, ExponentialFamily,
                                  FisherSnedecor, Gamma, Geometric,
                                  Gumbel, Laplace, LogNormal, LogisticNormal,
-                                 Multinomial, MultivariateNormal, Normal,
+                                 Multinomial, MultivariateNormal,
+                                 DiagonalNormal, Normal,
                                  OneHotCategorical, Pareto, Poisson,
                                  RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
@@ -236,6 +237,16 @@ EXAMPLES = [
         {
             'loc': variable(torch.Tensor([1.0, -1.0])),
             'covariance_matrix': variable(torch.Tensor([[5.0, -0.5], [-0.5, 1.5]])),
+        },
+    ]),
+    Example(DiagonalNormal, [
+        {
+            'loc': torch.randn(3, 5, requires_grad=True),
+            'variance': variable(torch.randn(3, 5).abs(), requires_grad=True),
+        },
+        {
+            'loc': torch.randn(1, requires_grad=True),
+            'variance': variable(torch.randn(1).abs(), requires_grad=True),
         },
     ]),
     Example(Normal, [
@@ -1374,6 +1385,19 @@ class TestDistributions(TestCase):
                                     scipy.stats.multivariate_normal(mean.data.numpy(), cov.data.numpy()),
                                     'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
                                     multivariate=True)
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_diagonal_normal_log_prob(self):
+        mean = torch.tensor(torch.randn(3), requires_grad=True)
+        variance = torch.tensor(torch.randn(3), requires_grad=True)
+        variance = torch.abs(variance)
+        cov = variance.diag()
+        dist = DiagonalNormal(mean, variance)
+        ref_dist = MultivariateNormal(mean, cov)
+
+        x = dist.sample((10,))
+        self.assertAlmostEqual(dist.log_prob(x), ref_dist.log_prob(x))
+
 
     def test_exponential(self):
         rate = variable(torch.randn(5, 5).abs(), requires_grad=True)
