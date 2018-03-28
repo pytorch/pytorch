@@ -15,6 +15,8 @@ import inspect
 import textwrap
 import numpy as np
 
+from torch.jit.frontend import NotSupportedError
+
 try:
     import torchvision
     HAS_TORCHVISION = True
@@ -1817,6 +1819,13 @@ class TestScript(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
+
+    def test_binop_unsupported_error(self):
+        with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
+            @torch.jit.script
+            def binop(x, y):
+                # Replace this with another unsupported op when/if it gets supported
+                return x ** y
 
     def test_python_call(self):
         def pyfunc(a):
