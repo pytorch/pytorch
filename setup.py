@@ -190,7 +190,7 @@ def build_libs(libs):
     for lib in libs:
         assert lib in dep_libs, 'invalid lib: {}'.format(lib)
     if IS_WINDOWS:
-        build_libs_cmd = ['tools/build_pytorch_libs.bat']
+        build_libs_cmd = ['tools\\build_pytorch_libs.bat']
     else:
         build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
     my_env = os.environ.copy()
