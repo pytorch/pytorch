@@ -13,6 +13,7 @@ struct NAME ## ImplC {\
 };\
 
 #define UNARY_OPS_MACRO(MACRO) \
+  MACRO (abs) \
   MACRO (ceil) \
   MACRO (cos) \
   MACRO (exp) \

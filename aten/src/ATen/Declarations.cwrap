@@ -1076,8 +1076,8 @@
     - THTensor* self
 ]]
 [[
-  name: abs
-  return: argument 0
+  name: _abs
+  cname: abs
   types:
     - floating_point
     - Long
@@ -1089,25 +1089,10 @@
   variants:
     - method
     - function
+  return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
-    - THTensor* self
-]]
-[[
-  name: abs_
-  cname: abs
-  return: self
-  types:
-    - floating_point
-    - Long
-    - Int
-    - Short
-  backends:
-    - CPU
-    - CUDA
-  arguments:
-    - THTensor* self
     - THTensor* self
 ]]
 [[

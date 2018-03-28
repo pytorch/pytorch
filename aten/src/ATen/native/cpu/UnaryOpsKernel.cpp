@@ -25,6 +25,18 @@ kernel_(scalar_t* arr_out, const scalar_t* arr_in, size_t start, size_t end) {
   VOP<scalar_t>()(a).store(arr_out + k, leftover);
 }
 
+// Functions excluding one-offs
+#define GENERIC_UNARY_OPS_MACRO(MACRO) \
+  MACRO (ceil) \
+  MACRO (cos) \
+  MACRO (exp) \
+  MACRO (floor) \
+  MACRO (log) \
+  MACRO (round) \
+  MACRO (sin) \
+  MACRO (sqrt) \
+  MACRO (trunc) \
+
 namespace {
 
 #define FUNCVOP(NAME)                          \
@@ -49,6 +61,16 @@ UNARY_OPS_MACRO(FUNCVOP)
     });                                                                     \
   }
 
-UNARY_OPS_MACRO(FUNCImpl)
+GENERIC_UNARY_OPS_MACRO(FUNCImpl)
+
+template <>
+void absImplC<CURRENT_CAPABILITY>::function(
+    Tensor& result,
+    const Tensor& self) {
+  AT_DISPATCH_ALL_TYPES(self.type(), abs, [&] {
+    at::parallel_for_1d<scalar_t>(
+        &kernel_<scalar_t, absVOP, CURRENT_CAPABILITY>, result, self);
+  });
+}
 
 }} // namespace at::native

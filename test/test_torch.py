@@ -232,7 +232,7 @@ class TestTorch(TestCase):
     def _testMath(self, torchfn, mathfn, large=True, precs=(1e-8, 1e-4)):
         def _testMathSize(size, self, torchfn, mathfn, dtype, prec):
             # contiguous
-            m1 = torch.randn(*size).type(dtype)
+            m1 = torch.randn(*size, dtype=dtype)
             res1 = torchfn(m1[4])
             res2 = res1.clone().zero_()
             for i, v in enumerate(m1[4]):
@@ -240,22 +240,19 @@ class TestTorch(TestCase):
             self.assertEqual(res1, res2, prec)
 
             # non-contiguous
-            m1 = torch.randn(*size).type(dtype)
+            m1 = torch.randn(*size, dtype=dtype)
             res1 = torchfn(m1[:, 4])
             res2 = res1.clone().zero_()
             for i, v in enumerate(m1[:, 4]):
                 res2[i] = mathfn(v.item())
             self.assertEqual(res1, res2, prec)
 
-        types = [
-            ('torch.DoubleTensor', precs[0]),
-            ('torch.FloatTensor', precs[1]),
-        ]
-        for (dtype, prec) in types:
-            _testMathSize((10, 5), self, torchfn, mathfn, dtype, prec)
-            if large:
-                # Trigger parallelism
-                _testMathSize((10, 50000), self, torchfn, mathfn, dtype, prec)
+        _testMathSize((10, 5), self, torchfn, mathfn, torch.double, precs[0])
+        _testMathSize((10, 5), self, torchfn, mathfn, torch.float, precs[1])
+        if large:
+            # Trigger parallelism
+            _testMathSize((10, 50000), self, torchfn, mathfn, torch.double, precs[0])
+            _testMathSize((10, 50000), self, torchfn, mathfn, torch.float, precs[1])
 
     def _testMathByName(self, function_name):
         torchfn = getattr(torch, function_name)
@@ -274,7 +271,7 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_digamma(self):
         from scipy.special import digamma
-        self._testMath(torch.digamma, digamma, large=False, precs=(2e-8, 1e-4))
+        self._testMath(torch.digamma, digamma, large=False, precs=(2e-8, 3e-4))
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_polygamma(self):
@@ -4523,7 +4520,8 @@ class TestTorch(TestCase):
         # Tensor filled with values from {-1, 1}
         switch = torch.rand(size).mul(2).floor().mul(2).add(-1)
 
-        types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor', 'torch.IntTensor']
+        types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor',
+                 'torch.IntTensor', 'torch.ShortTensor']
         for t in types:
             data = original.type(t)
             switch = switch.type(t)

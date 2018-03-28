@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include "Intrinsics.h"
 #ifdef __AVX2__
@@ -11,11 +12,11 @@
 #endif
 
 #if defined(__GNUC__)
-# define ALIGN32_ __attribute__((aligned(32)))
+#define __at_align32__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
-# define ALIGN32_ __declspec(align(32))
+#define __at_align32__ __declspec(align(32))
 #else
-# define ALIGN32_ 
+#define __at_align32__
 #endif
 
 // NOTE:
@@ -30,7 +31,7 @@ namespace at { namespace native { namespace vec256 {
 template <class T>
 class Vec256 {
  public:
-  T values[32 / sizeof(T)]; // Mimics AVX behavior
+  __at_align32__ T values[32 / sizeof(T)]; // Mimics AVX behavior
   inline void load(const T* ptr) {
     std::memcpy(values, ptr, 32);
   };
@@ -54,6 +55,12 @@ class Vec256 {
     for (size_t i = 0; i < size; i++) {
       ret.values[i] = f(values[i]);
     }
+    return ret;
+  }
+  inline Vec256<T> abs() {
+    Vec256<T> ret;
+    for (size_t i = 0; i < size; i++)
+      ret.values[i] = values[i] < 0 ? -values[i] : values[i];
     return ret;
   }
   inline Vec256<T> exp() {
@@ -128,12 +135,18 @@ class Vec256<float> {
     values = b.values;
   }
   inline Vec256<float> map(float (*f)(float)) {
-    float tmp[8];
+    __at_align32__ float tmp[8];
     store(tmp);
     for (size_t i = 0; i < 8; i++)
       tmp[i] = f(tmp[i]);
     Vec256<float> ret;
     ret.load(tmp);
+    return ret;
+  }
+  inline Vec256<float> abs() {
+    Vec256<float> ret;
+    __m256 mask = _mm256_set1_ps(-0.f);
+    ret.values = _mm256_andnot_ps(mask, values);
     return ret;
   }
 
@@ -240,12 +253,18 @@ class Vec256<double> {
     values = b.values;
   }
   inline Vec256<double> map(double (*f)(double)) {
-    ALIGN32_ double tmp[4];
+    __at_align32__ double tmp[4];
     store(tmp);
     for (size_t i = 0; i < 4; i++)
       tmp[i] = f(tmp[i]);
     Vec256<double> ret;
     ret.load(tmp);
+    return ret;
+  }
+  inline Vec256<double> abs() {
+    Vec256<double> ret;
+    __m256d mask = _mm256_set1_pd(-0.);
+    ret.values = _mm256_andnot_pd(mask, values);
     return ret;
   }
   inline Vec256<double> exp() {
@@ -348,6 +367,14 @@ class Vec256<int64_t> {
   inline void operator=(const Vec256<int64_t>& b) {
     values = b.values;
   }
+  inline Vec256<int64_t> abs() {
+    __m256i zero = _mm256_set1_epi64x(0);
+    __m256i is_larger = _mm256_cmpgt_epi64(zero, values);
+    __m256i inverse = _mm256_xor_si256(values, is_larger);
+    Vec256<int64_t> ret;
+    ret.values = _mm256_sub_epi64(inverse, is_larger);
+    return ret;
+  }
 };
 
 template <>
@@ -375,6 +402,11 @@ class Vec256<int32_t> {
   inline void operator=(const Vec256<int32_t>& b) {
     values = b.values;
   }
+  inline Vec256<int32_t> abs() {
+    Vec256<int32_t> ret;
+    ret.values = _mm256_abs_epi32(values);
+    return ret;
+  }
 };
 
 template <>
@@ -401,6 +433,11 @@ class Vec256<int16_t> {
   size_t size = 16;
   inline void operator=(const Vec256<int16_t>& b) {
     values = b.values;
+  }
+  inline Vec256<int16_t> abs() {
+    Vec256<int16_t> ret;
+    ret.values = _mm256_abs_epi16(values);
+    return ret;
   }
 };
 

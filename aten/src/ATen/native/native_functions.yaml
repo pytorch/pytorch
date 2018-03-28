@@ -41,6 +41,16 @@
 - func: _cudnn_init_dropout_state(Type ty, double dropout, bool train, int64_t dropout_seed) -> Tensor
   variants: function
 
+- func: abs(Tensor self) -> Tensor
+
+- func: abs_(Tensor self) -> Tensor
+
+- func: abs_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _abs_out_cpu
+    CUDA: _abs_out_cuda
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
