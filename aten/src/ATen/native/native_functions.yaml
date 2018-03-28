@@ -73,7 +73,7 @@
 - func: arange(Type dtype, Scalar end) -> Tensor
   variants: function
 
-- func: arange_out(Tensor reuslt, Scalar end) -> Tensor
+- func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
