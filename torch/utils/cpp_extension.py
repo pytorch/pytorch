@@ -145,9 +145,9 @@ class BuildExtension(build_ext):
                 # Put the original compiler back in place.
                 self.compiler.set_executable('compiler_so', original_compiler)
 
-        def win_wrap_compile(self, sources,
-                             output_dir=None, macros=None, include_dirs=None, debug=0,
-                             extra_preargs=None, extra_postargs=None, depends=None):
+        def win_wrap_compile(sources, output_dir=None, macros=None,
+                             include_dirs=None, debug=0, extra_preargs=None,
+                             extra_postargs=None, depends=None):
 
             cflags = copy.deepcopy(extra_postargs)
 
