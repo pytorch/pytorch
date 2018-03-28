@@ -740,6 +740,23 @@ class TestTorch(TestCase):
     def test_neg(self):
         self._test_neg(self, lambda t: t)
 
+    @staticmethod
+    def _test_comparator_integral_tensor_floating_scalar(self, cast):
+        t = cast(torch.LongTensor([-2, -1, 0, 1, 2]))
+        self.assertEqual(t.lt(0.5), [1, 1, 1, 0, 0])
+        self.assertEqual(t.lt(-0.5), [1, 1, 0, 0, 0])
+        self.assertEqual(t.gt(0.5), [0, 0, 0, 1, 1])
+        self.assertEqual(t.gt(-0.5), [0, 0, 1, 1, 1])
+        self.assertEqual(t.ge(0.5), [0, 0, 0, 1, 1])
+        self.assertEqual(t.ge(-0.5), [0, 0, 1, 1, 1])
+        self.assertEqual(t.le(0.5), [1, 1, 1, 0, 0])
+        self.assertEqual(t.le(-0.5), [1, 1, 0, 0, 0])
+        self.assertEqual(t.eq(0.5), [0, 0, 0, 0, 0])
+        self.assertEqual(t.ne(0.5), [1, 1, 1, 1, 1])
+
+    def test_comparator_integral_tensor_floating_scalar(self):
+        self._test_comparator_integral_tensor_floating_scalar(self, lambda t: t)
+
     def test_reciprocal(self):
         a = torch.randn(100, 89)
         res_div = 1 / a
@@ -4785,33 +4802,6 @@ class TestTorch(TestCase):
         self.assertTrue(torch.equal(s1, s2))
         self.assertTrue(torch.equal(s1, s3))
         self.assertFalse(torch.equal(s1, s4))
-
-    def test_comparator_integral_tensor_floating_scalar(self):
-        t = torch.LongTensor([-2, -1, 0, 1, 2])
-        self.assertEqual(t.lt(0.5), [1, 1, 1, 0, 0])
-        self.assertEqual(t.lt(-0.5), [1, 1, 0, 0, 0])
-        self.assertEqual(t.gt(0.5), [0, 0, 0, 1, 1])
-        self.assertEqual(t.gt(-0.5), [0, 0, 1, 1, 1])
-        self.assertEqual(t.ge(0.5), [0, 0, 0, 1, 1])
-        self.assertEqual(t.ge(-0.5), [0, 0, 1, 1, 1])
-        self.assertEqual(t.le(0.5), [1, 1, 1, 0, 0])
-        self.assertEqual(t.le(-0.5), [1, 1, 0, 0, 0])
-        self.assertEqual(t.eq(0.5), [0, 0, 0, 0, 0])
-        self.assertEqual(t.ne(0.5), [1, 1, 1, 1, 1])
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_comparator_integral_tensor_floating_scalar_cuda(self):
-        t = torch.LongTensor([-2, -1, 0, 1, 2]).cuda()
-        self.assertEqual(t.lt(0.5), [1, 1, 1, 0, 0])
-        self.assertEqual(t.lt(-0.5), [1, 1, 0, 0, 0])
-        self.assertEqual(t.gt(0.5), [0, 0, 0, 1, 1])
-        self.assertEqual(t.gt(-0.5), [0, 0, 1, 1, 1])
-        self.assertEqual(t.ge(0.5), [0, 0, 0, 1, 1])
-        self.assertEqual(t.ge(-0.5), [0, 0, 1, 1, 1])
-        self.assertEqual(t.le(0.5), [1, 1, 1, 0, 0])
-        self.assertEqual(t.le(-0.5), [1, 1, 0, 0, 0])
-        self.assertEqual(t.eq(0.5), [0, 0, 0, 0, 0])
-        self.assertEqual(t.ne(0.5), [1, 1, 1, 1, 1])
 
     def test_element_size(self):
         byte = torch.ByteStorage().element_size()
