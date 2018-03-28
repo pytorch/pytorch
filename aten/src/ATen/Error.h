@@ -17,7 +17,7 @@ struct SourceLocation {
 } // namespace detail
 
 template <typename... FormatArgs>
-[[noreturn]] AT_API void runtime_error(
+[[noreturn]] AT_API void error(
     detail::SourceLocation source_location,
     const char* format_string,
     FormatArgs&&... format_args) {
@@ -40,5 +40,4 @@ template <typename... FormatArgs>
 }
 } // namespace at
 
-#define AT_ERROR(...) \
-  at::runtime_error({__func__, __FILE__, __LINE__}, __VA_ARGS__)
+#define AT_ERROR(...) at::error({__func__, __FILE__, __LINE__}, __VA_ARGS__)
