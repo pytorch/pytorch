@@ -162,10 +162,6 @@ static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
   if (lpParam) {
     ReleaseContext *ctx = (ReleaseContext *)lpParam;
 
-    HANDLE event = ctx->event;
-    HANDLE handle = ctx->handle;
-    HANDLE wait = ctx->wait;
-
     SetEvent(ctx->event);
     CloseHandle(ctx->event);
     CloseHandle(ctx->handle);
