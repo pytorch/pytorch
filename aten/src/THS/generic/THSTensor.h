@@ -34,6 +34,7 @@ TH_API THTensor *THSTensor_(newValues)(const THSTensor *self);
 /**** creation methods ****/
 TH_API THSTensor *THSTensor_(new)(void);
 TH_API THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values);
+TH_API THSTensor *THSTensor_(newWithTensorAndSizeUnsafe)(THLongTensor *indices, THTensor *values, THLongStorage *sizes);
 TH_API THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes);
 
 // Note the second argument is ignored. It exists only to match the signature of THTensor_(new).
