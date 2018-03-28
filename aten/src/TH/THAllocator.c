@@ -85,11 +85,11 @@ THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags
     ctx->filename = THAlloc(strlen(filename)+1);
     strcpy(ctx->filename, filename);
 #ifdef _WIN32
-  char *suffixname = "_event";
-  size_t namelen = strlen(filename)+1+strlen(suffixname);
-  ctx->eventname = THAlloc(namelen);
-  strcpy(ctx->eventname, ctx->filename);
-  strcat(ctx->eventname, suffixname);
+    char *suffixname = "_event";
+    size_t namelen = strlen(filename)+1+strlen(suffixname);
+    ctx->eventname = THAlloc(namelen);
+    strcpy(ctx->eventname, ctx->filename);
+    strcat(ctx->eventname, suffixname);
 #endif
   } else {
     ctx->filename = unknown_filename;
@@ -160,20 +160,19 @@ typedef struct{
 static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFired)
 {
   if (lpParam) {
-    ReleaseContext *cxt = (ReleaseContext *)lpParam;
+    ReleaseContext *ctx = (ReleaseContext *)lpParam;
 
-    HANDLE event = cxt->event;
-    HANDLE handle = cxt->handle;
-    HANDLE wait = cxt->wait;
+    HANDLE event = ctx->event;
+    HANDLE handle = ctx->handle;
+    HANDLE wait = ctx->wait;
 
-    SetEvent(event);
-    CloseHandle(event);
-    CloseHandle(handle);
+    SetEvent(ctx->event);
+    CloseHandle(ctx->event);
+    CloseHandle(ctx->handle);
 
-    if (wait)
-      UnregisterWait(wait);
+    UnregisterWait(ctx->wait);
 
-    THFree(cxt);
+    THFree(ctx);
   }
 }
 #endif
@@ -536,16 +535,14 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   THMapInfo *map_info = (THMapInfo*)ptr;
 
 #ifdef _WIN32
-  ReleaseContext* cxt = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
-  HANDLE wait;
-  cxt->handle = ctx->handle;
-  cxt->event = ctx->event;
-  cxt->wait = NULL;
-  BOOL can_wait = RegisterWaitForSingleObject(&wait, ctx->event, WaitForReleaseHandle, (PVOID)cxt, INFINITE, WT_EXECUTEONLYONCE);
+  ReleaseContext* r_ctx = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
+  r_ctx->handle = ctx->handle;
+  r_ctx->event = ctx->event;
+  r_ctx->wait = NULL;
+  BOOL can_wait = RegisterWaitForSingleObject(&r_ctx->wait, ctx->event, WaitForReleaseHandle, (PVOID)r_ctx, INFINITE, WT_EXECUTEONLYONCE);
   if (!can_wait) {
     THError("Couldn't register wait on event, error code: <%d>", GetLastError());
   }
-  cxt->wait = wait;
 #endif
 
   if (ctx->flags & TH_ALLOCATOR_MAPPED_EXCLUSIVE)
