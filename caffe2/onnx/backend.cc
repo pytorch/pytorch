@@ -4,6 +4,7 @@
 #include "caffe2/onnx/device.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/utils/map_utils.h"
+#include "caffe2/utils/proto_utils.h"
 
 #if !CAFFE2_MOBILE
 #include "onnx/checker.h"
@@ -57,18 +58,6 @@ bool IsOperator(const std::string& op_type) {
   static std::set<std::string>* ops_ =
       new std::set<std::string>(caffe2::GetRegisteredOperators());
   return ops_->count(caffe2::OpRegistryKey(op_type, "DEFAULT"));
-}
-
-// TODO We probably should have only one copy of this function (copied from
-// pybind_state.cc)
-bool ParseProtobufFromLargeString(
-    const std::string& str,
-    ::google::protobuf::Message* proto) {
-  ::google::protobuf::io::ArrayInputStream input_stream(str.data(), str.size());
-  ::google::protobuf::io::CodedInputStream coded_stream(&input_stream);
-  // Set PlanDef message size limit to 1G.
-  coded_stream.SetTotalBytesLimit(1024LL << 20, 512LL << 20);
-  return proto->ParseFromCodedStream(&coded_stream);
 }
 
 caffe2::DeviceOption GetDeviceOption(const Device& onnx_device) {
@@ -894,7 +883,7 @@ Caffe2Ops Caffe2Backend::ConvertNode(
     int opset_version) {
   ::google::protobuf::RepeatedPtrField<NodeProto> nodes;
   auto* n = nodes.Add();
-  ParseProtobufFromLargeString(node_str, n);
+  ParseProtoFromLargeString(node_str, n);
   ModelProto init_model;
   ModelProto pred_model;
   OnnxNode onnx_node = OnnxNode(nodes.Get(0));
@@ -1008,7 +997,7 @@ Caffe2BackendRep* Caffe2Backend::Prepare(
     const std::vector<Caffe2Ops>& extras) {
   Caffe2BackendRep* rep = new Caffe2BackendRep();
   ModelProto onnx_model;
-  ParseProtobufFromLargeString(onnx_model_str, &onnx_model);
+  ParseProtoFromLargeString(onnx_model_str, &onnx_model);
 
 #if !CAFFE2_MOBILE
   ::ONNX_NAMESPACE::checker::check_model(onnx_model);
