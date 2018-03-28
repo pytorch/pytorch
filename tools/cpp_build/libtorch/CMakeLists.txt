@@ -147,7 +147,7 @@ TARGET_INCLUDE_DIRECTORIES(torch
   "${ATEN_INCLUDE_DIR}/TH"
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${TORCH_SRC_DIR}/../"
-  "${TORCH_SRC_DIR}/lib/nanopb"
+  "${TORCH_SRC_DIR}/../third_party/nanopb"
   "${CUDA_INCLUDE_DIRS}"
   )
 

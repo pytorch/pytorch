@@ -264,6 +264,9 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.SGD([weight, bias], lr=1e-3, weight_decay=1e-2)
         )
 
+        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+            optim.SGD(None, lr=1e-2, momentum=-0.5)
+
     def test_sgd_sparse(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SGD(params, lr=5e-3)
@@ -306,6 +309,8 @@ class TestOptim(TestCase):
             lambda params: optim.SparseAdam(params, lr=4e-2),
             True
         )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 0: 1.0"):
+            optim.SparseAdam(None, lr=1e-2, betas=(1.0, 0.0))
 
     def test_adadelta(self):
         self._test_rosenbrock(
@@ -330,6 +335,8 @@ class TestOptim(TestCase):
         self._test_basic_cases(
             lambda weight, bias: optim.Adadelta([weight, bias], weight_decay=1e-2)
         )
+        with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
+            optim.Adadelta(None, lr=1e-2, rho=1.1)
 
     def test_adagrad(self):
         self._test_rosenbrock(
@@ -355,6 +362,8 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
         )
+        with self.assertRaisesRegex(ValueError, "Invalid lr_decay value: -0.5"):
+            optim.Adagrad(None, lr=1e-2, lr_decay=-0.5)
 
     def test_adagrad_sparse(self):
         self._test_rosenbrock_sparse(
@@ -388,6 +397,8 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
         )
+        with self.assertRaisesRegex(ValueError, "Invalid beta parameter at index 1: 1.0"):
+            optim.Adamax(None, lr=1e-2, betas=(0.0, 1.0))
 
     def test_rmsprop(self):
         self._test_rosenbrock(
@@ -413,6 +424,8 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-3),
                 lr=1e-2)
         )
+        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -1.0"):
+            optim.RMSprop(None, lr=1e-2, momentum=-1.0)
 
     def test_asgd(self):
         self._test_rosenbrock(
@@ -438,6 +451,8 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3, t0=100)
         )
+        with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
+            optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
     def test_rprop(self):
         self._test_rosenbrock(
@@ -460,6 +475,8 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
+        with self.assertRaisesRegex(ValueError, "Invalid eta values: 1.0, 0.5"):
+            optim.Rprop(None, lr=1e-2, etas=(1.0, 0.5))
 
     def test_lbfgs(self):
         self._test_rosenbrock(

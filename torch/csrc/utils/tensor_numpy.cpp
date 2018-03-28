@@ -47,7 +47,6 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
 }
 
 static int aten_to_dtype(const at::Type& type);
-static ScalarType dtype_to_aten(int dtype);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   auto dtype = aten_to_dtype(tensor.type());
@@ -112,7 +111,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   }
 
   void* data_ptr = PyArray_DATA(array);
-  auto& type = CPU(dtype_to_aten(PyArray_TYPE(array)));
+  auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
   Py_INCREF(obj);
   return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
     AutoGIL gil;
@@ -146,7 +145,7 @@ static int aten_to_dtype(const at::Type& type) {
   throw TypeError("NumPy conversion for %s is not supported", type.toString());
 }
 
-static ScalarType dtype_to_aten(int dtype) {
+ScalarType numpy_dtype_to_aten(int dtype) {
   switch (dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;

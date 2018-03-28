@@ -83,6 +83,9 @@ static void _maybe_reinitialize_engine_after_fork() {
 }
 
 // Implementation of torch._C._EngineBase.run_backward
+//
+// When inputs == nullptr, this is a torch.autograd.backward() call
+// When inputs != nullptr, this is a torch.autograd.grad() call
 PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS

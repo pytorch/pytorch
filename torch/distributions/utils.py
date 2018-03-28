@@ -93,7 +93,7 @@ def broadcast_all(*values):
             values[idx] = template.new(template.size()).fill_(values[idx])
     else:
         for idx in scalar_idxs:
-            values[idx] = torch.tensor(values[idx])
+            values[idx] = torch.tensor(float(values[idx]))
     return values
 
 

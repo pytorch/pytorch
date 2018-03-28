@@ -4,7 +4,8 @@ import torch._C
 from torch._C import _add_docstr as add_docstr
 
 add_docstr(torch.abs,
-           r"""abs(input, out=None) -> Tensor
+           r"""
+abs(input, out=None) -> Tensor
 
 Computes the element-wise absolute value of the given :attr:`input` tensor.
 
@@ -57,6 +58,7 @@ Example::
      1.1075
         nan
     [torch.FloatTensor of size (4,)]
+
 """)
 
 add_docstr(torch.add,
@@ -97,6 +99,7 @@ Example::
      21.8688
      19.5815
     [torch.FloatTensor of size (4,)]
+
 
 
 .. function:: add(input, value=1, other, out=None)
@@ -4860,10 +4863,13 @@ contain only :math:`min(n, m)` orthonormal columns.
 .. note:: Extra care needs to be taken when backward through `U` and `V`
           outputs. Such operation is really only stable when :attr:`input` is
           full rank with all distinct singular values. Otherwise, ``NaN`` can
-          appear as the gradients are not properly defined. Also, when
-          :attr:`some` = ``False``, the gradients on ``U[:, min(n, m):]`` and
-          ``V[:, min(n, m):]`` will be ignored as those vectors can be arbitrary
-          bases of the subspaces.
+          appear as the gradients are not properly defined. Also, notice that
+          double backward will usually do an additional backward through `U` and
+          `V` even if the original backward is only on `S`.
+
+.. note:: When :attr:`some` = ``False``, the gradients on ``U[:, min(n, m):]``
+          and ``V[:, min(n, m):]`` will be ignored in backward as those vectors
+          can be arbitrary bases of the subspaces.
 
 Args:
     input (Tensor): the input 2-D tensor
@@ -5086,6 +5092,7 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
+
     -0.6366
      0.2718
      0.4469
@@ -5093,11 +5100,13 @@ Example::
     [torch.FloatTensor of size (4,)]
 
     >>> torch.tanh(a)
+
     -0.5625
      0.2653
      0.4193
      0.8648
     [torch.FloatTensor of size (4,)]
+
 """)
 
 add_docstr(torch.topk,
@@ -5755,9 +5764,9 @@ det(A) -> Tensor
 Calculates determinant of a 2D square tensor.
 
 .. note::
-    Backward through :meth:`det` internally uses SVD results. So double
-    backward through :meth:`det` will need to backward through
-    :meth:`~Tensor.svd`. This can be unstable in certain cases. Please see
+    Backward through :meth:`det` internally uses SVD results when :attr:`A` is
+    not invertible. In this case, double backward through :meth:`det` will be
+    unstable in when :attr:`A` doesn't have distinct singular values. See
     :meth:`~torch.svd` for details.
 
 Arguments:
@@ -5829,9 +5838,9 @@ Calculates log determinant of a 2D square tensor.
     :attr:`A` has negative determinant.
 
 .. note::
-    Backward through :meth:`logdet` internally uses SVD results. So double
-    backward through :meth:`logdet` will need to backward through
-    :meth:`~Tensor.svd`. This can be unstable in certain cases. Please see
+    Backward through :meth:`logdet` internally uses SVD results when :attr:`A`
+    is not invertible. In this case, double backward through :meth:`logdet` will
+    be unstable in when :attr:`A` doesn't have distinct singular values. See
     :meth:`~torch.svd` for details.
 
 Arguments:
@@ -5862,10 +5871,10 @@ Calculates the sign and log value of a 2D square tensor's determinant.
     If ``A`` has zero determinant, this returns ``(0, -inf)``.
 
 .. note::
-    Backward through :meth:`slogdet` internally uses SVD results. So double
-    backward through :meth:`slogdet` will need to backward through
-    :meth:`~Tensor.svd`. This can be unstable in certain cases. Please see
-    :meth:`~torch.svd` for details.
+    Backward through :meth:`slogdet` internally uses SVD results when :attr:`A`
+    is not invertible. In this case, double backward through :meth:`slogdet`
+    will be unstable in when :attr:`A` doesn't have distinct singular values.
+    See :meth:`~torch.svd` for details.
 
 Arguments:
     A (Tensor): The input 2D square tensor

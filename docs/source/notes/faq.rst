@@ -30,13 +30,11 @@ occur.  Consider the following training loop (abridged from `source
         loss = criterion(output)
         loss.backward()
         optimizer.step()
-        total_loss += loss[0]
+        total_loss += loss
 
-Here, ``total_loss`` is accumulating history across your training loop.
-This code looks innocuous because ``loss[0]`` implies that you are
-converting the tensor to a scalar, but ``loss[0]`` is still a
-differentiable Variable!  You can fix this code by writing
-``loss.data[0]`` instead.
+Here, ``total_loss`` is accumulating history across your training loop, since
+``loss`` is a differentiable variable with autograd history. You can fix this by
+writing `total_loss += float(loss)` instead.
 
 Other instances of this problem:
 `1 <https://discuss.pytorch.org/t/resolved-gpu-out-of-memory-error-with-batch-size-1/3719>`_.

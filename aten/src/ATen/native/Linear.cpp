@@ -18,7 +18,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
   AT_ASSERT(input2.size(input2.dim() - 1) == weight.size(2),
             "bilinear(): input2 size does not match weight size: got %lld but expected %lld",
             (long long)input2.size(input2.dim() - 1), (long long)weight.size(2));
-  AT_ASSERT(bias.defined() && bias.size(0) == weight.size(0),
+  AT_ASSERT(!bias.defined() || bias.size(0) == weight.size(0),
             "bilinear(): bias size does not match weight size: got %lld but expected %lld",
             (long long)bias.size(0), (long long)weight.size(0));
 
