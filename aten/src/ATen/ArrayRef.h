@@ -14,10 +14,12 @@
 // removed a bunch of slice variants for simplicity...
 
 #pragma once
-#include <assert.h>
+
+#include <ATen/Error.h>
+
 #include <array>
+#include <iterator>
 #include <vector>
-#include "ATenAssert.h"
 
 namespace at {
   /// ArrayRef - Represent a constant reference to an array (0 or more elements

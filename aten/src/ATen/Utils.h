@@ -1,6 +1,5 @@
 #pragma once
 
-#include "ATen/ATenAssert.h"
 #include "ATen/ATenGeneral.h"
 #include "ATen/ArrayRef.h"
 #include "ATen/Error.h"

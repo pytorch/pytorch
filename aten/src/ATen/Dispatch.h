@@ -1,6 +1,5 @@
 #pragma once
 
-#include <ATen/ATenAssert.h>
 #include <ATen/Error.h>
 #include <ATen/Half.h>
 #include <ATen/Type.h>
