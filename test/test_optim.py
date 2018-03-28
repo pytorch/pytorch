@@ -368,6 +368,9 @@ class TestOptim(TestCase):
         self._test_rosenbrock_sparse(
             lambda params: optim.Adagrad(params, lr=1e-1)
         )
+        self._test_rosenbrock_sparse(
+            lambda params: optim.Adagrad(params, lr=1e-1, weight_decay=1e-4)
+        )
 
     def test_adamax(self):
         self._test_rosenbrock(
