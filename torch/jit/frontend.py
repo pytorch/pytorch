@@ -319,7 +319,7 @@ class ExprBuilder(Builder):
         op = type(expr.op)
         op_token = ExprBuilder.binop_map.get(op)
         if op_token is None:
-            err_range = ctx.make_range(lhs.range().end, rhs.range().start)
+            err_range = ctx.make_raw_range(lhs.range().end, rhs.range().start)
             raise NotSupportedError(err_range, "unsupported binary operator: " + op.__name__)
         return BinOp(op_token, lhs, rhs)
 
