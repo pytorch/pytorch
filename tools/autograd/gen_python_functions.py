@@ -72,7 +72,7 @@ if (r.isNone(${out_idx})) {
   ${call_dispatch}
 } else {
   if (!r.isNone(${type_idx})) {
-    check_out_type_matches(r.tensor(${out_idx}), r.type(${type_idx}));
+    check_out_type_matches(r.tensor(${out_idx}), r.dtype(${type_idx}), r.layout(${layout_idx}));
   }
   ${call_dispatch_out}
 }
@@ -102,7 +102,7 @@ PY_VARIABLE_METHOD_DEF = CodeTemplate("""\
 UNPACK_SELF = "auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;"
 
 PYTHON_FUNCTION_SIGNATURE = CodeTemplate("""\
-${name}(${typed_args})""")
+${name}(${py_formal_args})""")
 
 # XXX: if you got here because of an assertion failure, it doesn't mean
 # it's enough to just extend the list here. Before you do this, make sure
@@ -206,7 +206,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'Tensor &': 'tensor',
         'Generator *': 'generator',
         'Storage &': 'storage',
-        'const Type &': 'type',
+        'const Type &': 'dtype',
+        'const THPLayout &': 'layout',
         'int64_t': 'toInt64',
         'bool': 'toBool',
         'double': 'toDouble',
@@ -256,18 +257,18 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
 
-        def get_type_dispatched(args):
-            return [arg for arg in args if arg.get('is_type_dispatched')]
-        type_dispatched_actual_args = get_type_dispatched(declaration['arguments'])
-        type_dispatched_bindings = get_type_dispatched(declaration['python_binding_arguments'])
-        assert len(type_dispatched_actual_args + type_dispatched_bindings) <= 1
-        if type_dispatched_bindings and len(outputs) == 0:
+        def get_type_args(args):
+            return [arg for arg in args if arg['simple_type'] == 'Type']
+        type_actual_args = get_type_args(declaration['arguments'])
+        type_binding_args = get_type_args(declaration['python_binding_arguments'])
+        assert len(type_actual_args + type_binding_args) <= 1
+        if type_binding_args and len(outputs) == 0:
             # out(s) determines the dtype if it is present, so only use this if there are no outputs.
-            type_dispatched_args = type_dispatched_bindings
+            type_args = type_binding_args
         else:
-            type_dispatched_args = type_dispatched_actual_args
+            type_args = type_actual_args
 
-        if type_dispatched_args and len(outputs) > 1:
+        if type_args and len(outputs) > 1:
                 raise RuntimeError("Not supported: type dispatched parameter with multiple outputs")
 
         def parse_arg(arg, arg_index, unpack_args=False):
@@ -311,7 +312,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         unpack = any(arg.get('python_default_init') for arg in inputs)
         for arg in inputs:
-            if arg.get('is_type_dispatched'):
+            if arg['simple_type'] == 'Type':
                 continue
             if has_self and arg['name'] == 'self':
                 formal_args.append('Tensor & self')
@@ -329,10 +330,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 formal_args.append('Tensor & {}'.format(arg['name']))
                 actuals.append('results[{}]'.format(i))
 
-        # this goes after the outputs to match the signature generation.
+        layout = None
+        parsed_type_dispatch = None
+        # type args go after the outputs to match the signature generation.
         arg_idx = arg_idx if out_idx is None else out_idx + 1
-        for arg in type_dispatched_args:
-            append_actuals_formals(*parse_arg(arg, arg_idx, unpack))
+        for arg in type_args:
+            parsed_type_args = parse_arg(arg, arg_idx, unpack)
             arg_idx += 1
 
         # check python_binding_arguments
@@ -341,7 +344,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         python_binding_arguments = declaration.get('python_binding_arguments', [])
         if 'dtype' in (a['name'] for a in python_binding_arguments):
             arg_idx += 1  # we already handled this in type_dispatched_args
-        device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
+
+        if 'layout' in (a['name'] for a in python_binding_arguments):
+            layout_idx, device_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
+        else:
+            device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
 
         for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
@@ -352,16 +359,22 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                     append_actuals_formals(*parse_arg(arg, device_idx))
             elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
+            elif arg['name'] == 'layout' and arg['simple_type'] == 'Layout':
+                # out(s) determines the type and layout if it is present, so only use this if there are no outputs.
+                if len(outputs) == 0:
+                    layout = parse_arg(arg, layout_idx)[0]
+                    assert parsed_type_args
+                    actuals.append("torch::getType({}, {})".format(parsed_type_args[0], layout))
+                    formal_args.append(parsed_type_args[1])
             else:
                 raise RuntimeError(("found {} in python_binding_arguments but only "
-                                   " \"bool requires_grad\" and \"Type dtype\" are supported".format(arg)))
+                                    "\"bool requires_grad\", \"Dtype dtype\", and \"Layout layout\" "
+                                    "are supported".format(arg)))
 
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
-        has_any_dtype = any(a['name'] == 'dtype' and a['simple_type'] == 'Type' for a in inputs)
-        type_dispatched_name = type_dispatched_args[0]['name'] if len(type_dispatched_args) > 0 else None
-        maybe_init_cuda = 'dtype' if has_any_dtype else type_dispatched_name
+        maybe_init_cuda = type_args[0]['name'] if type_args else None
         env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(maybe_init_cuda) if maybe_init_cuda else []
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
@@ -396,7 +409,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
             has_dtype_bind = 'dtype' in [d['name'] for d in dictionary['out'].get('python_binding_arguments', [])]
             if has_dtype_bind:
-                body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1).split('\n')
+                body = PY_VARIABLE_OUT_CHECK_TYPE.substitute(env, out_idx=out_idx, type_idx=out_idx + 1,
+                                                             layout_idx=out_idx + 2).split('\n')
             else:
                 body = PY_VARIABLE_OUT.substitute(env, out_idx=out_idx).split('\n')
         else:
@@ -408,15 +422,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
     def get_python_binding_arguments(declaration):
         python_binding_arguments = []
         has_tensor_input_arg = False
-        has_type_dispatched = False
+        has_type_input_arg = False
         for arg in declaration['arguments']:
             if arg.get('output', False):
                 continue
             typename = arg['simple_type']
             if typename in ['Tensor', 'TensorList']:
                 has_tensor_input_arg = True
-            if arg.get('is_type_dispatched'):
-                has_type_dispatched = True
+            if arg['simple_type'] == 'Type':
+                has_type_input_arg = True
             if arg['name'] == 'requires_grad':
                 raise ValueError("argument named requires_grad not supported")
 
@@ -427,7 +441,12 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 # produce a compile-time error that is obvious
                 has_tensor_return = True
 
-        if has_tensor_return and not has_tensor_input_arg and not has_type_dispatched:
+        is_like_function = name.endswith('_like')
+        is_typed_like_function = is_like_function and has_type_input_arg
+        is_factory_function = has_tensor_return and not has_tensor_input_arg
+        is_factory_or_like_function = has_tensor_return and (not has_tensor_input_arg or is_like_function)
+
+        if is_factory_function and not has_type_input_arg:
             default_type = get_type_default(declaration)
             dtype_arg = {
                 'default': default_type,
@@ -439,7 +458,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'is_type_dispatched': True,
             }
             python_binding_arguments.append(dtype_arg)
-        if (not has_tensor_input_arg or name.endswith('_like')) and has_tensor_return:
+        if is_factory_function or is_typed_like_function:
+            layout_arg = {
+                'default': 'torch.strided',
+                'dynamic_type': 'Layout',
+                'kwarg_only': True,
+                'name': 'layout',
+                'type': 'const THPLayout &',
+                'simple_type': 'Layout',
+            }
+            python_binding_arguments.append(layout_arg)
+        if is_factory_or_like_function:
             device_arg = {
                 'default': -1,
                 'default_init': -1,
@@ -551,13 +580,13 @@ def group_declarations(declarations):
 
 def get_python_signature(declaration, include_out):
     # Compute the Python function signature for argument parsing
-    typed_args = []
+    py_formal_args = []
     output_args = []
-    type_dispatch_args = []
+    type_args = []
     positional = True
 
-    def get_typed_arg(arg):
-        typename = arg['simple_type']
+    def get_py_formal_arg(arg):
+        typename = arg['simple_type'] if arg['simple_type'] != 'Type' else 'Dtype'
         if arg.get('is_nullable'):
             typename = '{}?'.format(typename)
         if arg.get('size') is not None:
@@ -583,14 +612,14 @@ def get_python_signature(declaration, include_out):
         if arg.get('output', False):
             output_args.append(arg)
             continue
-        if arg.get('is_type_dispatched', False):
-            type_dispatch_args.append(arg)
+        if arg['simple_type'] == 'Type':
+            type_args.append(arg)
             continue
         if arg.get('kwarg_only', False) and positional:
-            typed_args.append('*')
+            py_formal_args.append('*')
             positional = False
-        param = get_typed_arg(arg)
-        typed_args.append(param)
+        param = get_py_formal_arg(arg)
+        py_formal_args.append(param)
 
     # add output arguments
     name = declaration['name']
@@ -600,35 +629,35 @@ def get_python_signature(declaration, include_out):
     if len(output_args) > 0 and include_out:
         assert declaration['name'].endswith('_out')
         if positional:
-            typed_args.append('*')
+            py_formal_args.append('*')
             positional = False
         typenames = [arg['simple_type'] for arg in output_args]
         if len(typenames) > 1:
             typename = 'TensorList[{}]'.format(len(typenames))
         else:
             typename = typenames[0]
-        typed_args.append(typename + ' out=None')
+        py_formal_args.append(typename + ' out=None')
 
     # we could put this in the loop above but we want to ensure both type dispatched args
     # and python binding arguments are after the out argument; this matches the case
     # where there is a python binding argument dtype, which is necessary to match
     # the function signatures between the out and non-out variant.
-    assert len(type_dispatch_args) <= 1
-    for arg in type_dispatch_args:
-        if positional:  # assume type_dispatch_args should be kwarg_only.
-            typed_args.append('*')
+    assert len(type_args) <= 1
+    for arg in type_args:
+        if positional:  # assume type_args should be kwarg_only.
+            py_formal_args.append('*')
             positional = False
-        typed_args.append(get_typed_arg(arg))
+        py_formal_args.append(get_py_formal_arg(arg))
 
     if len(declaration['python_binding_arguments']) > 0:
         for arg in declaration['python_binding_arguments']:
             if arg.get('kwarg_only', False) and positional:
-                typed_args.append('*')
+                py_formal_args.append('*')
                 positional = False
-            typed_args.append(get_typed_arg(arg))
+            py_formal_args.append(get_py_formal_arg(arg))
 
     # Python function signature.
     # This is the string that we give to FunctionParameter, which is
     # then parsed into the actual structure which we do parsing
     # with.
-    return PYTHON_FUNCTION_SIGNATURE.substitute(name=name, typed_args=typed_args)
+    return PYTHON_FUNCTION_SIGNATURE.substitute(name=name, py_formal_args=py_formal_args)

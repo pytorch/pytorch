@@ -8,6 +8,7 @@
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Layout.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
@@ -25,7 +26,8 @@ using namespace torch::autograd;
 struct PyTensorType {
   PyTypeObject py_type;
   at::Type* aten_type;
-  THPDtype *dtype;
+  THPDtype* dtype;
+  THPLayout* layout;
   // The base tensor type i.e. `torch.Tensor`. All tensors are pass isinstance
   // checks on the base type.
   bool is_base_type;
@@ -78,6 +80,10 @@ PyObject *Tensor_dtype(PyTensorType* self) {
   return torch::autograd::utils::wrap(self->dtype);
 }
 
+PyObject *Tensor_layout(PyTensorType* self) {
+  return torch::autograd::utils::wrap(self->layout);
+}
+
 PyObject *Tensor_is_cuda(PyTensorType* self) {
   if (self->dtype->is_cuda) {
     Py_RETURN_TRUE;
@@ -87,7 +93,7 @@ PyObject *Tensor_is_cuda(PyTensorType* self) {
 }
 
 PyObject *Tensor_is_sparse(PyTensorType *self) {
-  if (self->dtype->is_sparse) {
+  if (!self->layout->is_strided) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -103,6 +109,7 @@ typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef metaclass_properties[] = {
   {"dtype",        (getter)Tensor_dtype, nullptr, nullptr, nullptr},
+  {"layout",       (getter)Tensor_layout, nullptr, nullptr, nullptr},
   {"is_cuda",      (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
   {"is_sparse",    (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
   {nullptr}
@@ -179,7 +186,8 @@ static THPObjectPtr get_storage_obj(const PyTensorType& py_type) {
 static void set_type(PyTensorType& type_obj, Backend backend, ScalarType scalarType) {
   auto baseType = globalContext().type_registry[static_cast<int>(backend)][static_cast<int>(scalarType)].get();
   type_obj.aten_type = baseType ? torch::autograd::VariableType::getType(*baseType) : nullptr;
-  type_obj.dtype = torch::getDtype(backend, scalarType);
+  type_obj.layout = torch::getLayout(backend);
+  type_obj.dtype = torch::getDtype(scalarType, backend == kCUDA || backend == kSparseCUDA);
 }
 
 static void set_name(PyTensorType& type_obj, const std::string& name) {

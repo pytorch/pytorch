@@ -41,7 +41,7 @@ namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, TYPE
+  BOOL, STORAGE, PYOBJECT, DTYPE, LAYOUT
 };
 
 struct FunctionParameter;
@@ -90,8 +90,9 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
-  inline const at::Type& type(int i);
-  inline const at::Type& typeWithDefault(int i, const at::Type& default_type);
+  inline const THPDtype& dtype(int i);
+  inline const THPDtype& dtypeWithDefault(int i, const THPDtype& default_dtype);
+  inline const THPLayout& layout(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -139,7 +140,8 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
-    at::Type* default_type;
+    THPDtype* default_dtype;
+    THPLayout* default_layout;
   };
 };
 
@@ -248,26 +250,26 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
-inline const at::Type& PythonArgs::type(int i) {
-  if (!args[i]) {
-    auto type = signature.params[i].default_type;
-    return type ? *type : torch::tensor::get_default_tensor_type();
-  }
-  THPDtype* dtype = reinterpret_cast<THPDtype*>(args[i]);
-  if (dtype->cdata == nullptr) {
-    std::ostringstream oss;
-    oss << "Error attempting to use dtype " << dtype->name << ".";
-    if (dtype->is_cuda) {
-      oss << "  Torch not compiled with CUDA enabled." << std::endl;
-    }
-    throw std::runtime_error(oss.str());
-  }
-  return *(dtype->cdata);
+inline const THPDtype& PythonArgs::dtypeWithDefault(int i, const THPDtype& default_dtype) {
+  if (!args[i]) return default_dtype;
+  return dtype(i);
 }
 
-inline const at::Type& PythonArgs::typeWithDefault(int i, const at::Type& default_type) {
-  if (!args[i]) return default_type;
-  return type(i);
+inline const THPDtype& PythonArgs::dtype(int i) {
+  if (!args[i]) {
+    auto dtype = signature.params[i].default_dtype;
+    if (!dtype) {
+      const auto& type = torch::tensor::get_default_tensor_type();
+      dtype = torch::getDtype(type.scalarType(), type.is_cuda());
+    }
+    return *dtype;
+  }
+  return *reinterpret_cast<THPDtype*>(args[i]);
+}
+
+inline const THPLayout& PythonArgs::layout(int i) {
+  if (!args[i]) return *signature.params[i].default_layout;
+  return *reinterpret_cast<THPLayout*>(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
