@@ -782,7 +782,7 @@ class TestNN(NNTestCase):
         # sub-modules repr
         sequential = nn.Sequential(linear)
         expected_repr_sequential = 'Sequential(\n' \
-            '(0): Linear(in_features=1, out_features=1, bias=True)\n' \
+            '  (0): Linear(in_features=1, out_features=1, bias=True)\n' \
             ')'
         self.assertEqual(repr(sequential), expected_repr_sequential)
 
