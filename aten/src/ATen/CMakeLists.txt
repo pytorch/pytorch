@@ -220,7 +220,7 @@ IF(NOT NO_CUDA)
   ENDIF()
 endif()
 
-IF(NOT NO_MKLDNN)
+IF(AT_MKLDNN_ENABLED)
   SET(all_cpp ${all_cpp} ${mkldnn_cpp})
 ENDIF()
 
