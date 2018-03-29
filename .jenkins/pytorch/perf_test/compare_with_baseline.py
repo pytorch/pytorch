@@ -50,7 +50,7 @@ print("z-value: ", z_value)
 if z_value >= 2:
     raise Exception('''\n
 z-value >= 2, there is >97.7% chance of perf regression.\n
-To reproduce this regression, run `cd .jenkins/perf_test/ && bash ''' + test_name + '''.sh` on your local machine and compare the runtime before/after your code change.
+To reproduce this regression, run `cd .jenkins/pytorch/perf_test/ && bash ''' + test_name + '''.sh` on your local machine and compare the runtime before/after your code change.
 ''')
 else:
     print("z-value < 2, no perf regression detected.")
