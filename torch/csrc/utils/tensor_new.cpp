@@ -2,6 +2,7 @@
 #include "tensor_new.h"
 
 #include <ATen/ATen.h>
+#include <ATen/Error.h>
 #include <ATen/optional.h>
 
 #include "torch/csrc/DynamicTypes.h"
@@ -143,7 +144,7 @@ static ScalarType infer_scalar_type(PyObject *obj) {
     }
     return *scalarType;
   }
-  at::runtime_error("Could not infer dtype of %s", Py_TYPE(obj)->tp_name);
+  AT_ERROR("Could not infer dtype of %s", Py_TYPE(obj)->tp_name);
 }
 
 static void recursive_store(char* data, IntList sizes, IntList strides, int64_t dim,

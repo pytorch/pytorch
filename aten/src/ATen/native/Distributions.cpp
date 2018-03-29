@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 
@@ -196,7 +197,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
 }
 
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
-  runtime_error("_standard_gamma_grad is not implemented for CUDA types");
+  AT_ERROR("_standard_gamma_grad is not implemented for CUDA types");
 }
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {

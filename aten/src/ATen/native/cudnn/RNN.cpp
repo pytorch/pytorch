@@ -1,7 +1,8 @@
 #include <ATen/ATen.h>
-#include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
+#include <ATen/Error.h>
 #include <ATen/MatrixRef.h>
+#include <ATen/NativeFunctions.h>
 
 #if !AT_CUDNN_ENABLED()
 
@@ -364,7 +365,7 @@ namespace {
       case CUDNN_RNN_TANH:
         return 2;
       default:
-        at::runtime_error("unknown cuDNN RNN mode %d", mode);
+        AT_ERROR("unknown cuDNN RNN mode %d", mode);
     }
   }
 
