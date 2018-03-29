@@ -165,9 +165,15 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 IntList output_sizes) {
   int64_t batch = self.size(0);
   Tensor input = self;
-  // real/imag dimension must be like complex type
-  if (complex_input && input.stride(-1) != 1) {
-    input = input.contiguous();
+  // real/imag dimension must aligned when viewed as of complex type
+  if (complex_input) {
+    bool need_contiguous = input.stride(-1) != 1;
+    for (int64_t i = 0; !need_contiguous && i <= signal_ndim; i++) {
+      need_contiguous |= input.stride(i) % 2 != 0;
+    }
+    if (need_contiguous) {
+      input = input.contiguous();
+    }
   }
 
   // check if we can use MKL because MKL_LONG is 32bit on some OS, e.g. Windows
@@ -230,9 +236,6 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   }
   // create descriptor with signal size
   std::vector<MKL_LONG> mkl_signal_sizes(checked_signal_sizes.begin(), checked_signal_sizes.end());
-  for (int64_t i = 0; i < signal_ndim; i++) {
-    mkl_signal_sizes[i] = checked_signal_sizes[i];
-  }
   DftiDescriptor descriptor;
   descriptor.init(prec, signal_type, signal_ndim, mkl_signal_sizes.data());
   // out of place FFT

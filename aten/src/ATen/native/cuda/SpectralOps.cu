@@ -185,19 +185,26 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   std::vector<long long int> inembed(signal_ndim);
 
   // check the input sizes and strides to see if we need to make it contiguous
-  bool need_contiguous = input.stride(signal_ndim) == 0;
+  // cuFFT doesn't support batch dim with stride 0
+  bool need_contiguous = input.stride(0) == 0;
+
   if (complex_input) {
-    // Real/imag dimension must be like complex type. Need to make the input
-    // tensor contiguous if this dimension is not contiguous.
+    // Real/imag dimension must be like complex type.
     need_contiguous |= input.stride(-1) != 1;
+    // Strides of other dimensions needs to be aligned when viewed as of
+    // complex type, i.e., multiples of 2. The for-loop below checks signal
+    // dims, so we check the batch dim here.
+    need_contiguous |= input.stride(0) % 2 != 0;
   } else if (is_half) {
     // For half, base strides on the real part of real-to-complex and
     // complex-to-real transforms are not supported. Since our output is always
     // contiguous, only need to check real-to-complex case.
     need_contiguous |= input.stride(signal_ndim) != 1;
   }
-  // store last tensor stride to infer inembed array
-  // complex input's last dim is size 2 and contiguous
+  // store last dimension stride to infer inembed array
+  // This is used when `need_contiguous=False`, so we can assume that the last
+  // dimension is indeed aligned. Complex input's last signal dim can be viewed
+  // as having stride=2, where the unit is sizeof(real_type).
   long long int ilast_stride = complex_input ? 2 : 1;
    // for each signal dim from innermost to outermost
   for (int64_t i = signal_ndim - 1; i >= 0; i--) {
@@ -213,22 +220,14 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     signal_sizes[i] = signal_size;
     if (!need_contiguous) {
       // set the inembed for dim in last dimension
-      if (ilast_stride == 0) {
-        need_contiguous = istride != 0;
-        if (i < signal_ndim - 1) {
-          inembed[i + 1] = 0;
-        }
-      } else {
-        need_contiguous = istride % ilast_stride != 0;
-        if (i < signal_ndim - 1) {
-          inembed[i + 1] = istride / ilast_stride;
-        }
+      // ilast_stride is always positive in this block
+      need_contiguous = istride == 0 || istride % ilast_stride != 0;
+      if (i < signal_ndim - 1) {
+        inembed[i + 1] = istride / ilast_stride;
       }
       ilast_stride = istride;
     }
   }
-
-  need_contiguous |= (input.size(0) > 1 && input.stride(0) == 0);
   if (need_contiguous) {
     input = input.contiguous();
     auto input_size = input.sizes();
