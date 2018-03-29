@@ -335,8 +335,29 @@ class TestCase(unittest.TestCase):
         # Don't put this in the try block; the AssertionError will catch it
         self.fail(msg="Did not raise when expected to")
 
-    def assertExpected(self, s, subname=None):
+    def assertWarns(self, callable, msg=''):
+        r"""
+        Test if :attr:`callable` raises a warning.
         """
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            callable()
+            self.assertTrue(len(ws) > 0, msg)
+
+    def assertWarnsRegex(self, callable, regex, msg=''):
+        r"""
+        Test if :attr:`callable` raises any warning with message that contains
+        the regex pattern :attr:`regex`.
+        """
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")  # allow any warning to be raised
+            callable()
+            self.assertTrue(len(ws) > 0, msg)
+            found = any(re.search(regex, str(w.message)) is not None for w in ws)
+            self.assertTrue(found, msg)
+
+    def assertExpected(self, s, subname=None):
+        r"""
         Test that a string matches the recorded contents of a file
         derived from the name of this test and subname.  This file
         is placed in the 'expect' directory in the same directory
@@ -405,9 +426,9 @@ class TestCase(unittest.TestCase):
                 self.assertEqual(s, expected)
 
     if sys.version_info < (3, 2):
-        # assertRegexpMatches renamed assertRegex in 3.2
+        # assertRegexpMatches renamed to assertRegex in 3.2
         assertRegex = unittest.TestCase.assertRegexpMatches
-        # assertRaisesRegexp renamed assertRaisesRegex in 3.2
+        # assertRaisesRegexp renamed to assertRaisesRegex in 3.2
         assertRaisesRegex = unittest.TestCase.assertRaisesRegexp
 
 
