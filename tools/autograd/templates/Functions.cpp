@@ -346,22 +346,16 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
   return grad_input;
 }
 
-static inline Tensor transpose_last_two_dims(const Tensor & tensor) {
-  auto ndimension = tensor.ndimension();
-  TORCH_ASSERT(ndimension >= 2);
-  return tensor.transpose(ndimension - 2, ndimension - 1);
-}
-
 Tensor gesv_backward_self(const Tensor & grad, const Tensor & self, const Tensor & A) {
-  return std::get<0>(at::gesv(grad, transpose_last_two_dims(A)));
+  return std::get<0>(at::gesv(grad, A.transpose(-2, -1)));
 }
 
 Tensor gesv_backward_A(const Tensor & grad, const Tensor & self, const Tensor & A, const Tensor & solution) {
   Tensor grad_self = gesv_backward_self(grad, self, A);
   if (self.ndimension() == 2 && A.ndimension() == 2) {
-    return -at::mm(grad_self, transpose_last_two_dims(solution));
+    return -at::mm(grad_self, solution.transpose(-2, -1));
   }
-  return -at::matmul(grad_self, transpose_last_two_dims(solution));
+  return -at::matmul(grad_self, solution.transpose(-2, -1));
 }
 
 Tensor cumsum_backward(const Tensor & x, int64_t dim) {

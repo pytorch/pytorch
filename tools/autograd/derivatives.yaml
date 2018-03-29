@@ -294,8 +294,8 @@
   vec2: grad.t().mv(self)
 
 - name: _gesv(Tensor self, Tensor A)
-  self: std::get<0>(_gesv(grad, A.t()))
-  A: -at::mm(std::get<0>(_gesv(grad, A.t())), solution.t())
+  self: gesv_backward_self(grad, self, A)
+  A: gesv_backward_A(grad, self, A, solution)
 
 - name: _gesv_helper(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
