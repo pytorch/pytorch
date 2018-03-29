@@ -8,14 +8,20 @@
 #include <stdexcept>
 #include <string>
 
+#include <stdarg.h>
+
 namespace at {
 namespace detail {
 /// A printf wrapper that returns an std::string.
-template <typename... FormatArgs>
-std::string format(const char* format_string, FormatArgs&&... format_args) {
+inline std::string format(const char* format_string, ...) {
   static constexpr size_t kMaximumStringLength = 4096;
   char buffer[kMaximumStringLength];
-  snprintf(buffer, sizeof(buffer), format_string, format_args...);
+
+  va_list format_args;
+  va_start(format_args, format_string);
+  vsnprintf(buffer, sizeof(buffer), format_string, format_args);
+  va_end(format_args);
+
   return buffer;
 }
 
