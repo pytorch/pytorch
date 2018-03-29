@@ -27,6 +27,9 @@
 #   NO_CUDNN
 #     disables the cuDNN build
 #
+#   NO_MKLDNN
+#     disables the MKLDNN build
+#
 #   NO_NNPACK
 #     disables NNPACK build
 #
@@ -67,6 +70,11 @@
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
 #
+#   MKLDNN_LIB_DIR
+#   MKLDNN_LIBRARY
+#   MKLDNN_INCLUDE_DIR
+#     specify where MKLDNN is installed
+#
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
 #
@@ -99,6 +107,8 @@ from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
+from tools.setup_helpers.mkldnn import (WITH_MKLDNN, MKLDNN_LIBRARY,
+                                        MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
 from tools.setup_helpers.nnpack import WITH_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
@@ -214,6 +224,11 @@ def build_libs(libs):
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
+    if WITH_MKLDNN:
+        my_env["MKLDNN_LIB_DIR"] = MKLDNN_LIB_DIR
+        my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
+        my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
+        build_libs_cmd += ['--with-mkldnn']
 
     if WITH_GLOO_IBVERBS:
         build_libs_cmd += ['--with-gloo-ibverbs']
@@ -397,6 +412,10 @@ class build_ext(build_ext_parent):
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
             print('-- Not using CUDA')
+        if WITH_MKLDNN:
+            print('-- Detected MKLDNN at ' + MKLDNN_LIBRARY + ', ' + MKLDNN_INCLUDE_DIR)
+        else:
+            print('-- Not using MKLDNN')
         if WITH_NCCL and WITH_SYSTEM_NCCL:
             print('-- Using system provided NCCL library at ' +
                   NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)

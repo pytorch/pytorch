@@ -23,6 +23,12 @@ if [[ "$1" == "--with-nnpack" ]]; then
   shift
 fi
 
+WITH_MKLDNN=0
+if [[ "$1" == "--with-mkldnn" ]]; then
+  WITH_MKLDNN=1
+  shift
+fi
+
 WITH_GLOO_IBVERBS=0
 if [[ "$1" == "--with-gloo-ibverbs" ]]; then
   WITH_GLOO_IBVERBS=1
@@ -202,6 +208,10 @@ function build_aten() {
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
+      -DNO_MKLDNN=$((1-$WITH_MKLDNN)) \
+      -DMKLDNN_INCULDE_DIR=$MKLDNN_INCLUDE_DIR \
+      -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
+      -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
       -DATEN_NO_CONTRIB=1 \
       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
