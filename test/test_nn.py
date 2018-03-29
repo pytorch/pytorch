@@ -1472,7 +1472,10 @@ class TestNN(NNTestCase):
             es_weight_grad = es.weight.grad.data
             if sparse:
                 es_weight_grad = es.weight.grad.data.to_dense()
-            self.assertEqual(es_weight_grad, e.weight.grad, type2prec[dtype.__name__])
+
+            # We have more floating point error here because we are dealing with larger numbers
+            needed_prec = type2prec[dtype.__name__] * 2 
+            self.assertEqual(es_weight_grad, e.weight.grad, needed_prec)
 
         N, D, B, L = random.randint(1, 100), random.randint(1, 100), random.randint(1, 50), random.randint(1, 50)
         _test_vs_Embedding(N, D, B, L)
