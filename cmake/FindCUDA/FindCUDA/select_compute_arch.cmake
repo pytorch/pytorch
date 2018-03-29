@@ -30,12 +30,17 @@ endif ()
 
 if (CUDA_VERSION VERSION_GREATER "7.5")
   list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Pascal")
-  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.0" "6.1" "6.1+PTX")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.0" "6.1")
 else()
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "5.2+PTX")
 endif ()
 
-
+if (CUDA_VERSION VERSION_GREATER "8.5")
+  list(APPEND CUDA_KNOWN_GPU_ARCHITECTURES "Volta")
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "7.0" "7.0+PTX")
+else()
+  list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.1+PTX")
+endif()
 
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
@@ -44,9 +49,10 @@ endif ()
 #
 function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
   if(NOT CUDA_GPU_DETECT_OUTPUT)
-    set(cufile ${PROJECT_BINARY_DIR}/detect_cuda_archs.cu)
+    set(file ${PROJECT_BINARY_DIR}/detect_cuda_compute_capabilities.cpp)
 
-    file(WRITE ${cufile} ""
+    file(WRITE ${file} ""
+      "#include <cuda_runtime.h>\n"
       "#include <cstdio>\n"
       "int main()\n"
       "{\n"
@@ -62,26 +68,15 @@ function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
       "  return 0;\n"
       "}\n")
 
-    if(MSVC AND NOT "${CMAKE_C_COMPILER}" MATCHES "/cl.exe")
-      find_program(REAL_MSVC_COMPILER cl.exe)
-      set(CCBIN "${REAL_MSVC_COMPILER}")
-    else()
-      set(CCBIN "${CMAKE_C_COMPILER}")
-    endif()
+    try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
+            CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
+            LINK_LIBRARIES ${CUDA_LIBRARIES}
+            RUN_OUTPUT_VARIABLE compute_capabilities)
 
-    execute_process(COMMAND "${CUDA_NVCC_EXECUTABLE}" "--run" "${cufile}"
-                    "-ccbin" ${CCBIN}
-                    WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/CMakeFiles/"
-                    RESULT_VARIABLE nvcc_res OUTPUT_VARIABLE nvcc_out
-                    ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-    if(nvcc_res EQUAL 0)
-      # only keep the last line of nvcc_out
-      STRING(REGEX REPLACE ";" "\\\\;" nvcc_out "${nvcc_out}")
-      STRING(REGEX REPLACE "\n" ";" nvcc_out "${nvcc_out}")
-      list(GET nvcc_out -1 nvcc_out)
-      string(REPLACE "2.1" "2.1(2.0)" nvcc_out "${nvcc_out}")
-      set(CUDA_GPU_DETECT_OUTPUT ${nvcc_out} CACHE INTERNAL "Returned GPU architetures from detect_gpus tool" FORCE)
+    if(run_result EQUAL 0)
+      string(REPLACE "2.1" "2.1(2.0)" compute_capabilities "${compute_capabilities}")
+      set(CUDA_GPU_DETECT_OUTPUT ${compute_capabilities}
+        CACHE INTERNAL "Returned GPU architectures from detect_gpus tool" FORCE)
     endif()
   endif()
 
@@ -122,19 +117,20 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
   list(REMOVE_DUPLICATES CUDA_ARCH_LIST)
   foreach(arch_name ${CUDA_ARCH_LIST})
     set(arch_bin)
+    set(arch_ptx)
     set(add_ptx FALSE)
     # Check to see if we are compiling PTX
     if(arch_name MATCHES "(.*)\\+PTX$")
       set(add_ptx TRUE)
       set(arch_name ${CMAKE_MATCH_1})
     endif()
-    if(arch_name MATCHES "(^[0-9]\\.[0-9](\\([0-9]\\.[0-9]\\))?)$")
+    if(arch_name MATCHES "^([0-9]\\.[0-9](\\([0-9]\\.[0-9]\\))?)$")
       set(arch_bin ${CMAKE_MATCH_1})
       set(arch_ptx ${arch_bin})
     else()
       # Look for it in our list of known architectures
       if(${arch_name} STREQUAL "Fermi")
-        set(arch_bin "2.0 2.1(2.0)")
+        set(arch_bin 2.0 "2.1(2.0)")
       elseif(${arch_name} STREQUAL "Kepler+Tegra")
         set(arch_bin 3.2)
       elseif(${arch_name} STREQUAL "Kepler+Tesla")
@@ -150,6 +146,9 @@ function(CUDA_SELECT_NVCC_ARCH_FLAGS out_variable)
       elseif(${arch_name} STREQUAL "Pascal")
         set(arch_bin 6.0 6.1)
         set(arch_ptx 6.1)
+      elseif(${arch_name} STREQUAL "Volta")
+        set(arch_bin 7.0 7.0)
+        set(arch_ptx 7.0)
       else()
         message(SEND_ERROR "Unknown CUDA Architecture Name ${arch_name} in CUDA_SELECT_NVCC_ARCH_FLAGS")
       endif()
