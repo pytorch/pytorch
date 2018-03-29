@@ -98,7 +98,9 @@ class BuildExtension(build_ext):
     def build_extensions(self):
         self._check_abi()
         for extension in self.extensions:
-            self._define_torch_extension_name(extension)
+            define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+            self._add_compiler_flag(extension, define)
+            self._add_compiler_flag(extension, '-Wno-format-security')
 
         # Register .cu and .cuh as valid source extensions.
         self.compiler.src_extensions += ['.cu', '.cuh']
@@ -141,13 +143,12 @@ class BuildExtension(build_ext):
             compiler = os.environ.get('CXX', 'c++')
         check_compiler_abi_compatibility(compiler)
 
-    def _define_torch_extension_name(self, extension):
-        define = '-DTORCH_EXTENSION_NAME={}'.format(extension.name)
+    def _add_compiler_flag(self, extension, flag):
         if isinstance(extension.extra_compile_args, dict):
             for args in extension.extra_compile_args.values():
-                args.append(define)
+                args.append(flag)
         else:
-            extension.extra_compile_args.append(define)
+            extension.extra_compile_args.append(flag)
 
 
 def CppExtension(name, sources, *args, **kwargs):
