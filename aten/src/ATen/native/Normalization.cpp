@@ -72,7 +72,7 @@ Tensor batch_norm(
 
 Tensor layer_norm(const Tensor& input, IntList normalized_shape,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    double eps) {
+    double eps, bool cudnn_enabled) {
 
     int64_t normalized_ndim = normalized_shape.size();
 
@@ -111,8 +111,7 @@ Tensor layer_norm(const Tensor& input, IntList normalized_shape,
       for (auto size : normalized_shape) {
         ss << ", " << size;
       }
-      ss << "], but got input of size " << input_shape
-         << " and normalized_shape=" << normalized_shape;
+      ss << "], but got input of size" << input_shape;
       throw std::runtime_error(ss.str());
     }
 
@@ -124,7 +123,8 @@ Tensor layer_norm(const Tensor& input, IntList normalized_shape,
     // Apply layer norm
     auto input_reshaped = input.contiguous().view({1, n, -1});
 
-    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps, true);
+    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
+                              cudnn_enabled);
     out = out.view(input_shape);
 
     if (weight.defined() && bias.defined()) {
@@ -140,7 +140,7 @@ Tensor layer_norm(const Tensor& input, IntList normalized_shape,
 
 Tensor group_norm(const Tensor& input, int64_t num_groups,
     const Tensor& weight /* optional */, const Tensor& bias /* optional */,
-    double eps) {
+    double eps, bool cudnn_enabled) {
 
     auto input_shape = input.sizes();
     int64_t b = input.size(0);
@@ -173,7 +173,8 @@ Tensor group_norm(const Tensor& input, int64_t num_groups,
     // Apply group norm
     auto input_reshaped = input.contiguous().view({1, b * num_groups, -1});
 
-    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps, true);
+    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps,
+                              cudnn_enabled);
     out = out.view(input_shape);
 
     if (!weight.defined() && !bias.defined()) {

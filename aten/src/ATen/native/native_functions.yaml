@@ -323,7 +323,7 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
-- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
+- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
 
 # FFT
@@ -363,7 +363,7 @@
 
 - func: is_sparse(Tensor self) -> bool
 
-- func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
+- func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
 
 - func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
