@@ -1320,6 +1320,14 @@ class TestCuda(TestCase):
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_gesv_batched(self):
+        TestTorch._test_gesv_batched(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not HAS_MAGMA, "no MAGMA library detected")
+    def test_gesv_batched_dims(self):
+        TestTorch._test_gesv_batched_dims(self, lambda t: t.cuda())
+
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
