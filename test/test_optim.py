@@ -371,10 +371,10 @@ class TestOptim(TestCase):
             wrap_old_fn(old_optim.adamax, learningRate=1e-1, beta1=0.95, beta2=0.998)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
+            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
+            lambda weight, bias: optim.Adamax(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
         )
@@ -395,10 +395,10 @@ class TestOptim(TestCase):
             wrap_old_fn(old_optim.rmsprop, learningRate=1e-2, alpha=0.95)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-2)
+            lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
+            lambda weight, bias: optim.RMSprop(
                 self._build_params_dict(weight, bias, lr=1e-3),
                 lr=1e-2)
         )
