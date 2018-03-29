@@ -683,6 +683,12 @@
 
 # NN
 
+- name: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor bias)
+  input1, input2, weight, bias: bilinear_backward(grad, input1, input2, weight, grad_input_mask)
+
+- name: bilinear_backward(Tensor grad_out, Tensor self, Tensor input2, Tensor weight, std::array<bool,4> grad_mask)
+  grad_out, self, input2, weight: bilinear_double_backward(grads[0], grads[1], grads[2], grads[3], grad_out, self, input2, weight, grad_input_mask)
+
 - name: binary_cross_entropy_forward(Tensor self, Tensor target, Tensor weight, bool size_average, bool reduce)
   self: binary_cross_entropy_backward(grad, self, target, weight, size_average, reduce)
 
