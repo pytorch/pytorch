@@ -74,4 +74,6 @@ inline int64_t prod_intlist(ArrayRef<int64_t> list) {
   return std::accumulate(list.begin(), list.end(), 1, std::multiplies<int64_t>());
 }
 
+std::vector<int64_t> defaultStrides(IntList sizes);
+
 } // at

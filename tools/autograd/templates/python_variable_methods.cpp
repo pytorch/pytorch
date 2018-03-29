@@ -657,6 +657,7 @@ PyMethodDef variable_methods[] = {
   {"__invert__", (PyCFunction)THPVariable_invert, METH_NOARGS, NULL},
   {"__nonzero__", (PyCFunction)THPVariable_is_nonzero, METH_NOARGS, NULL},
   {"__matmul__", (PyCFunction)THPVariable_matmul, METH_VARARGS | METH_KEYWORDS, NULL},
+  {"gesv", (PyCFunction)THPVariable_gesv, METH_VARARGS | METH_KEYWORDS, NULL},
   {"apply_", (PyCFunction)THPVariable_apply_, METH_O, NULL},
   {"byte", (PyCFunction)THPVariable_byte, METH_NOARGS, NULL},
   {"char", (PyCFunction)THPVariable_char, METH_NOARGS, NULL},
