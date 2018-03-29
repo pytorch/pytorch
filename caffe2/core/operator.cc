@@ -73,7 +73,7 @@ GlobalEnginePrefType& g_global_engine_pref() {
 
 unique_ptr<OperatorBase> TryCreateOperator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
-  auto type = operator_def.device_option().device_type();
+  const auto& type = operator_def.device_option().device_type();
   CAFFE_ENFORCE(
       gDeviceTypeRegistry()->count(type),
       "Device type ",
@@ -96,8 +96,8 @@ unique_ptr<OperatorBase> _CreateOperator(
     const OperatorDef& operator_def,
     Workspace* ws) {
   static StaticLinkingProtector g_protector;
-  const auto op_type = operator_def.type();
-  const auto device_type = operator_def.device_option().device_type();
+  const auto& op_type = operator_def.type();
+  const auto& device_type = operator_def.device_option().device_type();
 
 #ifndef CAFFE2_NO_OPERATOR_SCHEMA
   // first, check with OpSchema if the operator is legal.
