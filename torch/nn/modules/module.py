@@ -507,6 +507,20 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
+    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
+        r"""This is called in :meth:`~torch.nn.Module.load_state_dict` when
+        there is state dict key mismatch in ``strict=True`` mode. This method
+        can be overridden by subclasses to raise class-specific errors.
+
+        When :attr:`is_missing` is ``True``, :attr:`full_name` can not be found in
+        the dict being loaded. When :attr:`is_missing` is ``False``,
+        :attr:`full_name` is unexpected in the dict being loaded.
+
+        :attr:`name` is the actual name of the parameter/buffer, i.e., the
+        substring after the last `dot` in :attr:`full_name`.
+        """
+        pass
+
     def load_state_dict(self, state_dict, strict=True):
         r"""Copies parameters and buffers from :attr:`state_dict` into
         this module and its descendants. If :attr:`strict` is ``True`` then
@@ -520,6 +534,17 @@ class Module(object):
                 match the keys returned by this module's `:func:`state_dict()`
                 function.
         """
+        def submodule_key_mismatch(full_name, is_missing):
+            module = self
+            names = full_name.split(".")
+            for module_name in names[:-1]:
+                if module_name in module._modules:
+                    module = module._modules[module_name]
+                else:
+                    return
+            module._load_state_dict_key_mismatch(full_name, names[-1], is_missing)
+
+        unexpected = []
         own_state = self.state_dict()
         for name, param in state_dict.items():
             if name in own_state:
@@ -534,12 +559,24 @@ class Module(object):
                                        'whose dimensions in the checkpoint are {}.'
                                        .format(name, own_state[name].size(), param.size()))
             elif strict:
-                raise KeyError('unexpected key "{}" in state_dict'
-                               .format(name))
+                unexpected.append(name)
         if strict:
             missing = set(own_state.keys()) - set(state_dict.keys())
+            # pass the mismatch info to submodules so that they have a chance to
+            # raise a custom class-specific error
+            for name in unexpected:
+                submodule_key_mismatch(name, False)
+            for name in missing:
+                submodule_key_mismatch(name, True)
+            error_msg = ''
+            if len(unexpected) > 0:
+                error_msg += 'Unexpected key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
             if len(missing) > 0:
-                raise KeyError('missing keys in state_dict: "{}"'.format(missing))
+                error_msg += 'Missing key(s) in state_dict: {}. '.format(
+                    ', '.join('"{}"'.format(k) for k in unexpected))
+            if len(error_msg) > 0:
+                raise KeyError(error_msg)
 
     def parameters(self):
         r"""Returns an iterator over module parameters.
