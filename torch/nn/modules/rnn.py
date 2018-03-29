@@ -26,7 +26,8 @@ class RNNBase(Module):
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
 
-        if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1:
+        if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
+                isinstance(dropout, bool):
             raise ValueError("dropout should be a number in range [0, 1] "
                              "representing the probablity of an element being "
                              "zeroed")
