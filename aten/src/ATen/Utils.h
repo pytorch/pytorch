@@ -66,4 +66,6 @@ std::array<int64_t, N> check_intlist(ArrayRef<int64_t> list, const char * name, 
   return res;
 }
 
+std::vector<int64_t> defaultStrides(IntList sizes);
+
 } // at

@@ -17,4 +17,14 @@ void runtime_error(const char *format, ...) {
   throw std::runtime_error(error_buf);
 }
 
+std::vector<int64_t> defaultStrides(IntList sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  int64_t stride = 1;
+  for(size_t i = sizes.size(); i > 0; --i) {
+    strides[i-1] = stride;
+    stride *= sizes[i-1];
+  }
+  return strides;
+}
+
 } // at
