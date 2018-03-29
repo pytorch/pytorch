@@ -17,7 +17,7 @@ using namespace at;
       fn;                                                       \
       _passed = true;                                           \
       els;                                                      \
-    } catch (std::runtime_error &e) {                           \
+    } catch (std::exception &e) {                               \
       REQUIRE(!_passed);                                        \
       catc;                                                     \
     }                                                           \
