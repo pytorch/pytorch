@@ -1171,14 +1171,14 @@ torch.nn.init
 
 .. currentmodule:: torch.nn.init
 .. autofunction:: calculate_gain
-.. autofunction:: uniform
-.. autofunction:: normal
-.. autofunction:: constant
-.. autofunction:: eye
-.. autofunction:: dirac
-.. autofunction:: xavier_uniform
-.. autofunction:: xavier_normal
-.. autofunction:: kaiming_uniform
-.. autofunction:: kaiming_normal
-.. autofunction:: orthogonal
-.. autofunction:: sparse
+.. autofunction:: uniform_
+.. autofunction:: normal_
+.. autofunction:: constant_
+.. autofunction:: eye_
+.. autofunction:: dirac_
+.. autofunction:: xavier_uniform_
+.. autofunction:: xavier_normal_
+.. autofunction:: kaiming_uniform_
+.. autofunction:: kaiming_normal_
+.. autofunction:: orthogonal_
+.. autofunction:: sparse_
