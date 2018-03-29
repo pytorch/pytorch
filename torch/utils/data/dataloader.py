@@ -376,6 +376,12 @@ class DataLoader(object):
             worker subprocess with the worker id (an int in ``[0, num_workers - 1]``) as
             input, after seeding and before data loading. (default: None)
 
+    .. warning:: If :attr:`batch_sampler` is given, setting :attr:`batch_size`,
+                 :attr:`shuffle`, :attr:`sampler`, or :attr:`drop_last` is
+                 invalid because such information is provided by
+                 :attr:`batch_sampler`. In this case, the data loader will have
+                 ``dataloader.batch_size == dataloader.drop_last == dataloader.sampler == None``.
+
     .. note:: By default, each worker will have its PyTorch seed set to
               ``base_seed + worker_id``, where ``base_seed`` is a long generated
               by main process using its RNG. You may use ``torch.initial_seed()`` to access
@@ -405,6 +411,8 @@ class DataLoader(object):
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
                 raise ValueError('batch_sampler is mutually exclusive with '
                                  'batch_size, shuffle, sampler, and drop_last')
+            self.batch_size = None
+            self.drop_last = None
 
         if sampler is not None and shuffle:
             raise ValueError('sampler is mutually exclusive with shuffle')
