@@ -78,7 +78,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
   }
 
   // XXX: this might get requires_grad wrong - there's no way to figure out
-  // if _do_backward didn't use ctx.saved_variables and as a result some
+  // if _do_backward didn't use ctx.saved_tensors and as a result some
   // Variables might require grad, even if no args do. Unfortunately, this
   // leads to unexpected error messages ("no nodes require computing gradients"),
   // but I don't have a better idea. These functions would raise an error
@@ -918,6 +918,9 @@ PyObject *THPFunction_saved_tensors(THPFunction *self, void *_unused)
 PyObject *THPFunction_saved_variables(THPFunction *self, void *_unused)
 {
   HANDLE_TH_ERRORS
+  auto r = PyErr_WarnEx(PyExc_DeprecationWarning,
+      "'saved_variables' is deprecated; use 'saved_tensors'", 0);
+  if (r != 0) throw python_error();
   return unpack_saved_variables(self, [](const Variable& var) {
     return THPVariable_Wrap(var);
   });

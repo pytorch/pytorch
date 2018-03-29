@@ -29,7 +29,7 @@ test_gpu_speed_word_language_model () {
   NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
-    runtime=$(get_runtime_of_command "python main.py --cuda --epochs 1")
+    runtime=$(get_runtime_of_command python main.py --cuda --epochs 1)
     echo $runtime
     SAMPLE_ARRAY+=(${runtime})
   done

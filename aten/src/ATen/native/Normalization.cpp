@@ -6,6 +6,7 @@
 #include "THC/THC.h"
 #include "ATen/cudnn/cudnn-wrapper.h"
 #endif
+#include <vector>
 
 namespace at { namespace native {
 
@@ -67,6 +68,60 @@ Tensor batch_norm(
   return at::thnn_batch_norm(
             input, weight, bias,
             running_mean, running_var, training, momentum, eps);
+}
+
+Tensor group_norm(const Tensor& input, int64_t num_groups,
+    const Tensor& weight /* optional */, const Tensor& bias /* optional */,
+    double eps) {
+
+    auto input_shape = input.sizes();
+    int64_t b = input.size(0);
+    int64_t c = input.size(1);
+
+    if (c % num_groups != 0) {
+      std::stringstream ss;
+      ss << "Expected number of channels in input to be divisible by "
+         << "num_groups, but got " << input.sizes() << " input and num_groups="
+         << num_groups;
+      throw std::runtime_error(ss.str());
+    }
+
+    if (weight.defined() && (weight.dim() != 1 || weight.numel() != c)) {
+      std::stringstream ss;
+      ss << "Expected weight to be a vector of size equal to the number of "
+         << "channels in input, but got " << weight.sizes() << " weight and "
+         <<  input.sizes() << " input";
+      throw std::runtime_error(ss.str());
+    }
+
+    if (bias.defined() && (bias.dim() != 1 || bias.numel() != c)) {
+      std::stringstream ss;
+      ss << "Expected bias to be a vector of size equal to the number of "
+         << "channels in input, but got " << bias.sizes() << " bias and "
+         <<  input.sizes() << " input";
+      throw std::runtime_error(ss.str());
+    }
+
+    // Apply group norm
+    auto input_reshaped = input.contiguous().view({1, b * num_groups, -1});
+
+    auto out = at::batch_norm(input_reshaped, {}, {}, {}, {}, true, 0, eps, true);
+    out = out.view(input_shape);
+
+    if (!weight.defined() && !bias.defined()) {
+      return out;
+    }
+
+    std::vector<int64_t> affine_param_shape(input.dim(), 1);
+    affine_param_shape[1] = c;
+
+    if (weight.defined() && bias.defined()) {
+      return bias.view(affine_param_shape).addcmul(out, weight.view(affine_param_shape), 1);
+    } else if (weight.defined()) {
+      return out.mul(weight.view(affine_param_shape));
+    } else {
+      return out.add(bias.view(affine_param_shape));
+    }
 }
 
 }} // at::native

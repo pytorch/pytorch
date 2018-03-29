@@ -14,6 +14,7 @@ from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
 from torch.autograd import Variable
 from .modules.utils import _single, _pair, _triple
+from . import grad
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
@@ -1216,8 +1217,8 @@ def batch_norm(input, running_mean, running_var, weight=None, bias=None,
     )
 
 
-def instance_norm(input, running_mean, running_var, weight=None, bias=None,
-                  use_input_stats=True, momentum=0.1, eps=1e-5):
+def instance_norm(input, running_mean=None, running_var=None, weight=None,
+                  bias=None, use_input_stats=True, momentum=0.1, eps=1e-5):
     r"""Applies Instance Normalization for each channel in each data sample in a
     batch.
 
@@ -1253,7 +1254,7 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
             input_reshaped, running_mean, running_var, weight=weight, bias=bias,
             training=use_input_stats, momentum=momentum, eps=eps)
 
-        # Reshape back
+        # Reshape and copy back
         if running_mean is not None:
             running_mean_orig.copy_(running_mean.view(b, c).mean(0, keepdim=False))
         if running_var is not None:
@@ -1266,7 +1267,7 @@ def instance_norm(input, running_mean, running_var, weight=None, bias=None,
                           eps=eps)
 
 
-def layer_norm(input, normalized_shape, running_mean, running_var,
+def layer_norm(input, normalized_shape, running_mean=None, running_var=None,
                weight=None, bias=None, use_input_stats=True,
                momentum=0.1, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
@@ -1275,6 +1276,16 @@ def layer_norm(input, normalized_shape, running_mean, running_var,
     """
     if not use_input_stats and (running_mean is None or running_var is None):
         raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
+
+    if weight is not None and weight.size() != normalized_shape:
+        raise ValueError('Expected weight to be of same shape as '
+                         'normalized_shape, but got {} weight and '
+                         'normalized_shape={}'.format(weight.size(), normalized_shape))
+
+    if bias is not None and bias.size() != normalized_shape:
+        raise ValueError('Expected bias to be of same shape as '
+                         'normalized_shape, but got {} bias and '
+                         'normalized_shape={}'.format(bias.size(), normalized_shape))
 
     normalized_ndim = len(normalized_shape)
     input_shape = input.size()
@@ -1318,6 +1329,14 @@ def layer_norm(input, normalized_shape, running_mean, running_var,
         return out
 
 
+def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+    r"""Applies Group Normalization for last certain number of dimensions.
+
+    See :class:`~torch.nn.GroupNorm` for details.
+    """
+    return torch.group_norm(input, num_groups, weight, bias, eps)
+
+
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
     r"""Applies local response normalization over an input signal composed of
     several input planes, where channels occupy the second dimension.
@@ -1356,7 +1375,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
-            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
+            or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
@@ -1379,6 +1398,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     dim = input.dim()
     if torch.is_tensor(weight):
         weight = weight
+    if dim < 2:
+        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
+
+    if input.size(0) != target.size(0):
+        raise ValueError('Expected input batch_size ({}) to match target batch_size ({}).'
+                         .format(input.size(0), target.size(0)))
     if dim == 2:
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
@@ -1396,8 +1421,6 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         return out.view(out_size)
-    else:
-        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
@@ -1715,7 +1738,7 @@ def pixel_shuffle(input, upscale_factor):
     return shuffle_out.view(batch_size, channels, out_height, out_width)
 
 
-def upsample(input, size=None, scale_factor=None, mode='nearest'):
+def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
     r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
@@ -1725,18 +1748,32 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     expected inputs are 3-D, 4-D or 5-D in shape.
 
     The input dimensions are interpreted in the form:
-    `mini-batch x channels x [depth] x [height] x width`
+    `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
     `bilinear` (4D-only), `trilinear` (5D-only)
 
     Args:
-        input (Variable): input
+        input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
+        align_corners (bool, optional): if True, the corner pixels of the input
+            and output tensors are aligned, and thus preserving the values at
+            those pixels. This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, or `trilinear`. Default: False
+
+    .. warning::
+        With ``align_corners = True``, the linearly interpolating modes
+        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
+        output and input pixels, and thus the output values can depend on the
+        input size. This was the default behavior for these modes up to version
+        0.3.1. Since then, the default behavior is ``align_corners = False``.
+        See :class:`~torch.nn.Upsample` for concrete examples on how this
+        affects the outputs.
+
     """
     from numbers import Integral
     from .modules.utils import _ntuple
@@ -1775,6 +1812,18 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
         scale_factors = _ntuple(dim)(scale_factor)
         return [input.size(i + 2) * scale_factors[i] for i in range(dim)]
 
+    if mode == 'nearest':
+        if align_corners is not None:
+            raise ValueError("align_corners option can only be set with the "
+                             "interpolating modes: linear | bilinear | trilinear")
+    else:
+        if align_corners is None:
+            warnings.warn("Default upsampling behavior when mode={} is changed "
+                          "to align_corners=False since 0.4.0. Please specify "
+                          "align_corners=True if the old behavior is desired. "
+                          "See the documentation of nn.Upsample for details.".format(mode))
+            align_corners = False
+
     if input.dim() == 3 and mode == 'nearest':
         return torch._C._nn.upsample_nearest1d(input, _scale_factor(1))
     elif input.dim() == 4 and mode == 'nearest':
@@ -1782,7 +1831,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 5 and mode == 'nearest':
         return torch._C._nn.upsample_nearest3d(input, _scale_factor(3))
     elif input.dim() == 3 and mode == 'linear':
-        return torch._C._nn.upsample_linear1d(input, _output_size(1))
+        return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners)
     elif input.dim() == 3 and mode == 'bilinear':
         raise NotImplementedError("Got 3D input, but bilinear mode needs 4D input")
     elif input.dim() == 3 and mode == 'trilinear':
@@ -1790,7 +1839,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 4 and mode == 'linear':
         raise NotImplementedError("Got 4D input, but linear mode needs 3D input")
     elif input.dim() == 4 and mode == 'bilinear':
-        return torch._C._nn.upsample_bilinear2d(input, _output_size(2))
+        return torch._C._nn.upsample_bilinear2d(input, _output_size(2), align_corners)
     elif input.dim() == 4 and mode == 'trilinear':
         raise NotImplementedError("Got 4D input, but trilinear mode needs 5D input")
     elif input.dim() == 5 and mode == 'linear':
@@ -1798,7 +1847,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
     elif input.dim() == 5 and mode == 'bilinear':
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
-        return torch._C._nn.upsample_trilinear3d(input, _output_size(3))
+        return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners)
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | trilinear"
@@ -1808,7 +1857,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest'):
 def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
-    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+    .. warning::
+        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -1825,9 +1875,12 @@ def upsample_nearest(input, size=None, scale_factor=None):
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
-    r"""Upscales the input, using bilinear upsampling.
+    r"""Upsamples the input, using bilinear upsampling.
 
-    **Note:: This function is deprecated. Use nn.functional.upsample instead**
+    .. warning::
+        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
+        This is equivalent with
+        ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
 
     Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
     volumetric (5 dimensional) inputs.
@@ -1839,7 +1892,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.upsample instead.")
-    return upsample(input, size, scale_factor, mode='bilinear')
+    return upsample(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
@@ -1861,8 +1914,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     :attr:`grid` has values in the range of `[-1, 1]`. This is because the
     pixel locations are normalized by the input height and width.
 
-    For example, values: x: -1, y: -1 is the left-top pixel of the input
-                 values: x: 1, y: 1 is the right-bottom pixel of the input
+    For example, values: x: -1, y: -1 is the left-top pixel of the input, and
+    values: x: 1, y: 1 is the right-bottom pixel of the input.
 
     If :attr:`grid` has values outside the range of `[-1, 1]`, those locations
     are handled as defined by `padding_mode`. Options are `zeros` or `border`,
@@ -2007,7 +2060,7 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=True,
                         reduce=True):
     r"""
-    See :class:`torch.nn.TripletMarginLoss` for details
+    See :class:`~torch.nn.TripletMarginLoss` for details
     """
     return torch._C._VariableFunctions.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap,
                                                            size_average, reduce)

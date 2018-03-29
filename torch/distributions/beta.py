@@ -24,13 +24,13 @@ class Beta(ExponentialFamily):
         concentration0 (float or Tensor): 2nd concentration parameter of the distribution
             (often referred to as beta)
     """
-    params = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
+    arg_constraints = {'concentration1': constraints.positive, 'concentration0': constraints.positive}
     support = constraints.unit_interval
     has_rsample = True
 
     def __init__(self, concentration1, concentration0, validate_args=None):
         if isinstance(concentration1, Number) and isinstance(concentration0, Number):
-            concentration1_concentration0 = torch.tensor([concentration1, concentration0])
+            concentration1_concentration0 = torch.tensor([float(concentration1), float(concentration0)])
         else:
             concentration1, concentration0 = broadcast_all(concentration1, concentration0)
             concentration1_concentration0 = torch.stack([concentration1, concentration0], -1)

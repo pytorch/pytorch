@@ -2,29 +2,31 @@
 
 . ./common.sh
 
-test_cpu_speed_mini_sequence_labeler () {
-  echo "Testing: mini sequence labeler, CPU"
+test_gpu_speed_mnist () {
+  echo "Testing: MNIST, GPU"
 
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
 
-  git clone https://github.com/pytorch/benchmark.git
+  git clone https://github.com/pytorch/examples.git -b perftests
 
-  cd benchmark/
+  cd examples/mnist
 
-  git checkout 726567a455edbfda6199445922a8cfee82535664
+  pip install -r requirements.txt
 
-  cd scripts/mini_sequence_labeler
+  # Download data
+  python main.py --epochs 0
 
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
-    runtime=$(get_runtime_of_command "python main.py")
+    runtime=$(get_runtime_of_command python main.py --epochs 1 --no-log)
+    echo $runtime
     SAMPLE_ARRAY+=(${runtime})
   done
 
-  cd ../../..
+  cd ../..
 
   stats=$(python ../get_stats.py ${SAMPLE_ARRAY[@]})
   echo "Runtime stats in seconds:"
@@ -38,5 +40,5 @@ test_cpu_speed_mini_sequence_labeler () {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  run_test test_cpu_speed_mini_sequence_labeler "$@"
+  run_test test_gpu_speed_mnist "$@"
 fi

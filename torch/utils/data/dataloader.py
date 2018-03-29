@@ -198,7 +198,8 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queue = multiprocessing.SimpleQueue()
+            self.index_queues = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
+            self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
@@ -211,8 +212,9 @@ class _DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
-                          base_seed + i, self.worker_init_fn, i))
+                    args=(self.dataset, self.index_queues[i],
+                          self.worker_result_queue, self.collate_fn, base_seed + i,
+                          self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
@@ -292,7 +294,8 @@ class _DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue.put((self.send_idx, indices))
+        self.index_queues[self.worker_queue_idx].put((self.send_idx, indices))
+        self.worker_queue_idx = (self.worker_queue_idx + 1) % self.num_workers
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -325,8 +328,8 @@ class _DataLoaderIter(object):
                     # fetched from the queue but the socket is already closed
                     # from the worker side (e.g. due to Python shutting down).
                     pass
-                for _ in self.workers:
-                    self.index_queue.put(None)
+                for q in self.index_queues:
+                    q.put(None)
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
@@ -409,9 +412,6 @@ class DataLoader(object):
         if self.num_workers < 0:
             raise ValueError('num_workers cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
-
-        if sys.platform == "win32" and self.num_workers > 0:
-            raise ValueError('num_workers > 0 is not supported on Windows')
 
         if batch_sampler is None:
             if sampler is None:

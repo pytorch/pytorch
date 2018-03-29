@@ -2,8 +2,8 @@
 
 . ./common.sh
 
-test_gpu_speed_lstm () {
-  echo "Testing: LSTM, GPU"
+test_gpu_speed_cudnn_lstm () {
+  echo "Testing: CuDNN LSTM, GPU"
 
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
@@ -16,7 +16,7 @@ test_gpu_speed_lstm () {
   NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
-    runtime=$(get_runtime_of_command "python lstm.py --skip-cpu-governor-check")
+    runtime=$(get_runtime_of_command python cudnn_lstm.py --skip-cpu-governor-check)
     echo $runtime
     SAMPLE_ARRAY+=(${runtime})
   done
@@ -35,5 +35,5 @@ test_gpu_speed_lstm () {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  run_test test_gpu_speed_lstm "$@"
+  run_test test_gpu_speed_cudnn_lstm "$@"
 fi

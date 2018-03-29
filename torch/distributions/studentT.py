@@ -21,7 +21,7 @@ class StudentT(Distribution):
     Args:
         df (float or Tensor): degrees of freedom
     """
-    params = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'df': constraints.positive, 'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
 

@@ -63,6 +63,26 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
 
+    def test_single_tensor(self):
+        t = torch.randn(5, 10)
+        source = TensorDataset(t)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t[i], source[i][0])
+
+    def test_many_tensors(self):
+        t0 = torch.randn(5, 10, 2, 3, 4, 5)
+        t1 = torch.randn(5, 10)
+        t2 = torch.randn(5, 10, 2, 5)
+        t3 = torch.randn(5, 10, 3, 7)
+        source = TensorDataset(t0, t1, t2, t3)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t0[i], source[i][0])
+            self.assertEqual(t1[i], source[i][1])
+            self.assertEqual(t2[i], source[i][2])
+            self.assertEqual(t3[i], source[i][3])
+
 
 class TestConcatDataset(TestCase):
 
@@ -580,6 +600,45 @@ class TestDictDataLoader(TestCase):
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
+
+class TestWorkerQueueDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+        self.worker_id = None
+
+    def worker_init_fn(self, worker_id):
+        self.worker_id = worker_id
+
+    def __getitem__(self, item):
+        return self.worker_id, self.data[item]
+
+    def __len__(self):
+        return len(self.data)
+
+
+class TestIndividualWorkerQueue(TestCase):
+    def setUp(self):
+        self.dataset = TestWorkerQueueDataset([i for i in range(128)])
+
+    def _run_ind_worker_queue_test(self, batch_size, num_workers):
+        loader = DataLoader(
+            self.dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            worker_init_fn=self.dataset.worker_init_fn
+        )
+        current_worker_idx = 0
+        for i, (worker_ids, sample) in enumerate(loader):
+            self.assertEqual(worker_ids.tolist(), [current_worker_idx] * batch_size)
+            self.assertEqual(sample.tolist(), [j for j in range(i * batch_size, (i + 1) * batch_size)])
+            current_worker_idx += 1
+            if current_worker_idx == num_workers:
+                current_worker_idx = 0
+
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
+    def test_ind_worker_queue(self):
+        for batch_size in (8, 16, 32, 64):
+            for num_workers in range(1, 6):
+                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
 
 if __name__ == '__main__':

@@ -801,7 +801,8 @@ TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int osizeW);
+          int osizeW,
+          bool align_corners);
 TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
@@ -809,7 +810,8 @@ TH_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
           int isizeB,
           int isizeC,
           int isizeW,
-          int osizeW);
+          int osizeW,
+          bool align_corners);
 
 TH_API void THNN_(BatchNormalization_updateOutput)(
           THNNState *state,
@@ -1260,7 +1262,8 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THTensor *input,
           THTensor *output,
           int osizeH,
-          int osizeW);
+          int osizeW,
+          bool align_corners);
 TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
@@ -1270,7 +1273,8 @@ TH_API void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
           int isizeH,
           int isizeW,
           int osizeH,
-          int osizeW);
+          int osizeW,
+          bool align_corners);
 
 TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
           THNNState *state,
@@ -1712,7 +1716,8 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
           THTensor *output,
           int osizeT,
           int osizeH,
-          int osizeW);
+          int osizeW,
+          bool align_corners);
 
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
           THNNState *state,
@@ -1725,7 +1730,8 @@ TH_API void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
           int isizeW,
           int osizeT,
           int osizeH,
-          int osizeW);
+          int osizeW,
+          bool align_corners);
 
 TH_API void THNN_(TemporalReflectionPadding_updateOutput)(
           THNNState *state,

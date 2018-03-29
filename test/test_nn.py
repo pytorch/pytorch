@@ -1750,7 +1750,7 @@ class TestNN(NNTestCase):
     def _test_LayerNorm_general(self, type):
         for i in range(2, 6):
             shape = torch.LongTensor(i).random_(3, 6).tolist()
-            x = Variable(type(*shape).uniform_(0, 10))
+            x = type(*shape).uniform_(0, 10)
             normalized_ndim = random.randint(1, i - 1)  # inclusive
             normalized_shape = shape[-normalized_ndim:]
             unnormalized_shape = shape[:-normalized_ndim]
@@ -1797,8 +1797,7 @@ class TestNN(NNTestCase):
             self.assertEqual(old_running_var, ln.running_var)
 
     def _test_LayerNorm_cuda_half(self):
-        # just THNN, LayerNorm has no cuDNN path
-        input = Variable(torch.rand(2, 3, 3, 2).cuda().half().random_(1, 10), requires_grad=True)
+        input = torch.zeros(2, 3, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
         m = nn.LayerNorm([3, 2]).cuda().half()
         output = m(input)
         output.sum().backward()
@@ -1811,6 +1810,69 @@ class TestNN(NNTestCase):
     def test_LayerNorm_general_cuda(self):
         self._test_LayerNorm_general(torch.cuda.FloatTensor)
         self._test_LayerNorm_cuda_half()
+
+    def _test_GroupNorm_general(self, type):
+        good_shape_g = {
+            (1, 2, 3, 4): 2,
+            (2, 3, 10): 3,
+            (3, 1, 1, 1, 2): 1,
+            (2, 6, 4, 2, 2): 3,
+        }
+        for shape, g in good_shape_g.items():
+            x = type(*shape).uniform_(0, 10)
+            b = shape[0]
+            c = shape[1]
+
+            # test that GN normalizes to mean 0 and stddev 1
+            gn = nn.GroupNorm(g, c, eps=0).type(type)
+            gn.weight.data.fill_(1)
+            gn.bias.data.fill_(0)
+            output = gn(x)
+            out_reshaped = output.view(b, g, -1)
+            mean = out_reshaped.mean(-1)
+            var = out_reshaped.var(-1, unbiased=False)
+            self.assertAlmostEqual(torch.abs(mean).mean(), 0, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var).mean(), 1, delta=1e-5)
+
+            # test that GN applies weight and bias correctly
+            scale = type(c).uniform_(0.2, 2)
+            bias = type(c).uniform_(0.2, 2)
+            gn.weight.data.copy_(scale)
+            gn.bias.data.copy_(bias)
+            output = gn(x)
+            out_reshaped = output.view(b, c, -1)
+            out_normed = (out_reshaped - bias.view(c, 1)) / scale.view(c, 1)
+            out_normed_reshaped = out_normed.view(b, g, -1)
+            mean = out_normed_reshaped.mean(-1)
+            var = out_normed_reshaped.var(-1, unbiased=False)
+            self.assertAlmostEqual(torch.abs(mean).mean(), 0, delta=1e-5)
+            self.assertAlmostEqual(torch.abs(var).mean(), 1, delta=1e-5)
+
+        bad_shape_g = {
+            (1, 2, 3, 4): 3,
+            (2, 3, 10): 2,
+            (3, 1, 1, 1, 2): 10,
+            (2, 6, 4, 2, 2): 4,
+        }
+        for shape, g in bad_shape_g.items():
+            gn = nn.GroupNorm(g, shape[1])
+            input = type(*shape).uniform_(0, 10)
+            self.assertRaises(RuntimeError, lambda: gn(input))
+
+    def _test_GroupNorm_cuda_half(self):
+        input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
+        m = nn.GroupNorm(2, 4).cuda().half()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqual(output.type(), input.type())
+
+    def test_GroupNorm_general(self):
+        self._test_GroupNorm_general(torch.FloatTensor)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_GroupNorm_general_cuda(self):
+        self._test_GroupNorm_general(torch.cuda.FloatTensor)
+        self._test_GroupNorm_cuda_half()
 
     def test_pad(self):
         inputs = Variable(torch.randn(1, 3, 4, 4), requires_grad=True)
@@ -2890,6 +2952,13 @@ class TestNN(NNTestCase):
 
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
+
+    def test_NLLLoss_mismatched_batch(self):
+        x = torch.randn((10, 3), requires_grad=True)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
@@ -4267,6 +4336,14 @@ class TestNN(NNTestCase):
         input = Variable(torch.randn(1, 1, 2), requires_grad=True)
         gradcheck(lambda x: F.upsample(x, 4, mode='linear'), (input,))
 
+    def test_upsamplingLinear1d_spatial_invariance(self):
+        m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
+        in_t_9 = torch.zeros(1, 1, 9)
+        in_t_9[:, :, :4].normal_()
+        out_t_9 = m(in_t_9)
+        out_t_5 = m(in_t_9[:, :, :5])
+        self.assertEqual(out_t_9[:, :, :15], out_t_5)
+
     def test_upsamplingNearest2d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2)
@@ -4289,6 +4366,14 @@ class TestNN(NNTestCase):
         input = Variable(torch.randn(1, 1, 2, 2), requires_grad=True)
         gradcheck(lambda x: F.upsample(x, 4, mode='bilinear'), [input])
 
+    def test_upsamplingBilinear2d_spatial_invariance(self):
+        m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
+        in_t_9 = torch.zeros(1, 1, 9, 9)
+        in_t_9[:, :, :4, :4].normal_()
+        out_t_9 = m(in_t_9)
+        out_t_5 = m(in_t_9[:, :, :5, :5])
+        self.assertEqual(out_t_9[:, :, :15, :15], out_t_5)
+
     def test_upsamplingNearest3d(self):
         m = nn.Upsample(size=4, mode='nearest')
         in_t = torch.ones(1, 1, 2, 2, 2)
@@ -4310,6 +4395,14 @@ class TestNN(NNTestCase):
             F.upsample(input, scale_factor=2, mode='trilinear'))
         gradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
         gradgradcheck(lambda x: F.upsample(x, 4, mode='trilinear'), [input])
+
+    def test_upsamplingTrilinear3d_spatial_invariance(self):
+        m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
+        in_t_9 = torch.zeros(1, 1, 9, 9, 9)
+        in_t_9[:, :, :4, :4, :4].normal_()
+        out_t_9 = m(in_t_9)
+        out_t_5 = m(in_t_9[:, :, :5, :5, :5])
+        self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
@@ -4352,6 +4445,35 @@ class TestNN(NNTestCase):
 
         _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
+
+    def test_bilinear_no_bias(self):
+        module = nn.Bilinear(10, 10, 8)
+        module_no_bias = nn.Bilinear(10, 10, 8, False)
+
+        module.bias.data.zero_()
+        module.weight.data.copy_(module_no_bias.weight)
+
+        input1 = torch.randn(4, 10, requires_grad=True)
+        input2 = torch.randn(4, 10, requires_grad=True)
+        grad_output = torch.randn(4, 8)
+
+        def run(net):
+            input1.grad = input2.grad = None
+            output = net(input1, input2)
+            output.backward(grad_output)
+
+            return output.data, input1.grad.data, input2.grad.data
+
+        out, g1, g2 = run(module)
+        out_nb, g1_nb, g2_nb = run(module_no_bias)
+
+        self.assertEqual(out, out_nb)
+        self.assertEqual(g1, g1_nb)
+        self.assertEqual(g2, g2_nb)
+
+        _assertGradAndGradgradChecks(self,
+                                     lambda x1, x2: F.bilinear(x1, x2, module_no_bias.weight, module_no_bias.bias),
+                                     (input1, input2))
 
     def test_bilinear_broadcasting(self):
         m = nn.Bilinear(5, 6, 8)
@@ -4523,6 +4645,51 @@ class TestNN(NNTestCase):
                                 "\nbatch_size: " + str(batch_size) +
                                 "\ninp_size: " + str(inp_size) +
                                 "\ndilation: " + str(dilation))
+
+    def run_grad_conv_test(self, func_forward, func_backward, dim=1, gradient='input'):
+        for kern, inp_size in [(3, 6), (3, 7), (4, 9)]:
+            for batch, stride, padding, chan_in, chan_out, dilation in \
+                    product([1, 2], [1, 2], [0, 1, 2], [2], [3], [1]):
+
+                input_shape = [batch, chan_in]
+                weight_shape = [chan_out, chan_in]
+                for _ in range(dim):
+                    input_shape.append(inp_size)
+                    weight_shape.append(kern)
+
+                input = torch.randn(input_shape, requires_grad=True)
+                weight = torch.randn(weight_shape, requires_grad=True)
+                output = func_forward(input, weight, stride=stride, padding=padding, dilation=dilation)
+
+                gradient_o = torch.randn(output.shape)
+                gradient_w = torch.autograd.grad(output, input if (gradient == 'input') else weight, gradient_o)
+
+                self.assertAlmostEqual(gradient_w[0],
+                                       func_backward(
+                                           input_shape if (gradient == 'input') else input,
+                                           weight_shape if (gradient == 'weight') else weight,
+                                           gradient_o,
+                                           stride=stride,
+                                           padding=padding,
+                                           dilation=dilation))
+
+    def test_grad_conv1d_input(self):
+        self.run_grad_conv_test(F.conv1d, F.grad.conv1d_input, 1, 'input')
+
+    def test_grad_conv1d_weight(self):
+        self.run_grad_conv_test(F.conv1d, F.grad.conv1d_weight, 1, 'weight')
+
+    def test_grad_conv2d_input(self):
+        self.run_grad_conv_test(F.conv2d, F.grad.conv2d_input, 2, 'input')
+
+    def test_grad_conv2d_weight(self):
+        self.run_grad_conv_test(F.conv2d, F.grad.conv2d_weight, 2, 'weight')
+
+    def test_grad_conv3d_input(self):
+        self.run_grad_conv_test(F.conv3d, F.grad.conv3d_input, 3, 'input')
+
+    def test_grad_conv3d_weight(self):
+        self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
 
 
 class TestNNInit(TestCase):
@@ -5854,6 +6021,54 @@ new_module_tests = [
         desc='3d_elementwise_affine_tracking_stats',
     ),
     dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 6, 1e-3),
+        input_size=(4, 6, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(5, 5, 1e-3, False),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(1, 5, 1e-3, False),
+        input_size=(4, 5, 5),
+        cudnn=True,
+        check_eval=True,
+        desc='1d_no_affine_LN',  # this setting is equivalent with LayerNorm
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 6, 1e-3),
+        input_size=(4, 6, 2, 3),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_affine',
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(3, 3, 1e-3, False),
+        input_size=(4, 3, 2, 3),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_no_affine_IN',  # this setting is equivalent with InstanceNorm
+    ),
+    dict(
+        module_name='GroupNorm',
+        constructor_args=(1, 3, 1e-3, False),
+        input_size=(4, 3, 2, 3),
+        cudnn=True,
+        check_eval=True,
+        desc='2d_no_affine_LN',  # this setting is equivalent with LayerNorm
+    ),
+    dict(
         module_name='Conv1d',
         constructor_args=(4, 5, 3),
         input_size=(2, 4, 10),
@@ -6348,21 +6563,33 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(12, None, 'linear'),
+        constructor_args=(12, None, 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_1d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=((4, ), None, 'linear'),
+        constructor_args=((4, ), None, 'linear', False),
         input_size=(1, 2, 3),
         desc='linear_tuple_1d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'linear'),
+        constructor_args=(None, 4, 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_scale_1d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(12, None, 'linear', True),
+        input_size=(1, 2, 4),
+        desc='linear_1d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 4, 'linear', True),
+        input_size=(1, 2, 4),
+        desc='linear_scale_1d_align_corners',
     ),
     dict(
         module_name='Upsample',
@@ -6384,33 +6611,45 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(12, None, 'bilinear'),
+        constructor_args=(12, None, 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=((4, 6), None, 'bilinear'),
+        constructor_args=((4, 6), None, 'bilinear', False),
         input_size=(1, 2, 2, 3),
         desc='bilinear_tuple_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'bilinear'),
+        constructor_args=(None, 4, 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 2), 'bilinear'),
+        constructor_args=(None, (2, 2), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_shared_2d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, (2, 1), 'bilinear'),
+        constructor_args=(None, (2, 1), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6), None, 'bilinear', True),
+        input_size=(1, 2, 4, 4),
+        desc='bilinear_tuple_2d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, (2, 1), 'bilinear', True),
+        input_size=(1, 2, 4, 4),
+        desc='bilinear_scale_tuple_skewed_2d_align_corners',
     ),
     dict(
         module_name='Upsample',
@@ -6432,21 +6671,35 @@ new_module_tests = [
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(12, None, 'trilinear'),
+        constructor_args=(12, None, 'trilinear', False),
         input_size=(1, 2, 4, 4, 4),
         desc='trilinear_3d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=((4, 6, 6), None, 'trilinear'),
+        constructor_args=((4, 6, 6), None, 'trilinear', False),
         input_size=(1, 2, 2, 3, 3),
         desc='trilinear_tuple_3d',
     ),
     dict(
         module_name='Upsample',
-        constructor_args=(None, 4, 'trilinear'),
-        input_size=(1, 2, 4, 4, 4),
+        constructor_args=(None, 3, 'trilinear', False),
+        input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d',
+        # See https://github.com/pytorch/pytorch/issues/5006
+        precision=3e-4,
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=((4, 6, 6), None, 'trilinear', True),
+        input_size=(1, 2, 2, 3, 3),
+        desc='trilinear_tuple_3d_align_corners',
+    ),
+    dict(
+        module_name='Upsample',
+        constructor_args=(None, 3, 'trilinear', True),
+        input_size=(1, 2, 3, 4, 4),
+        desc='trilinear_scale_3d_align_corners',
         # See https://github.com/pytorch/pytorch/issues/5006
         precision=3e-4,
     ),

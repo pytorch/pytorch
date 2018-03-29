@@ -105,7 +105,8 @@ class BatchNorm1d(_BatchNorm):
         - Input: :math:`(N, C)` or :math:`(N, C, L)`
         - Output: :math:`(N, C)` or :math:`(N, C, L)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm1d(100)
         >>> # Without Learnable Parameters
@@ -174,7 +175,8 @@ class BatchNorm2d(_BatchNorm):
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm2d(100)
         >>> # Without Learnable Parameters
@@ -244,7 +246,8 @@ class BatchNorm3d(_BatchNorm):
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # With Learnable Parameters
         >>> m = nn.BatchNorm3d(100)
         >>> # Without Learnable Parameters

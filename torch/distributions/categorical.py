@@ -37,7 +37,7 @@ class Categorical(Distribution):
         probs (Tensor): event probabilities
         logits (Tensor): event log probabilities
     """
-    params = {'probs': constraints.simplex}
+    arg_constraints = {'probs': constraints.simplex}
     has_enumerate_support = True
 
     def __init__(self, probs=None, logits=None, validate_args=None):

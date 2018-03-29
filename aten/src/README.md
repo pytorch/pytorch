@@ -1,5 +1,7 @@
-This directory contains the low-level tensor libraries for PyTorch.
-This code traces its lineage from the original Torch.  There are
+This directory contains the low-level tensor libraries for PyTorch,
+as well as the new ATen C++ bindings.
+
+The low-level libraries trace their lineage from the original Torch.  There are
 multiple variants of the library, summarized here:
 
 * TH = TorcH

@@ -96,7 +96,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_output):
-                var1, var2 = ctx.saved_variables
+                var1, var2 = ctx.saved_tensors
                 # NOTE: self is the test case here
                 self.assertIsInstance(var1, Variable)
                 self.assertIsInstance(var2, Variable)
@@ -606,7 +606,7 @@ class TestAutograd(TestCase):
 
             @staticmethod
             def backward(ctx, grad_b):
-                b, = ctx.saved_variables
+                b, = ctx.saved_tensors
                 self.assertEqual(b.output_nr, 1)
 
         TestFn.apply(b).sum().backward()
@@ -764,6 +764,32 @@ class TestAutograd(TestCase):
         with warnings.catch_warnings(record=True) as w:
             self.assertFalse(v.volatile)
         self.assertIn('volatile', str(w[0].message))
+
+    def test_saved_variables_deprecated(self):
+        class MyFunction(Function):
+            @staticmethod
+            def forward(ctx, tensor1, tensor2):
+                ctx.save_for_backward(tensor1, tensor2)
+                return tensor1 + tensor2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                var1, var2 = ctx.saved_variables
+                return (grad_output, grad_output)
+
+        with warnings.catch_warnings(record=True) as warns:
+            warnings.simplefilter("always")
+            x = torch.randn((3, 3), requires_grad=True)
+            y = torch.randn((3, 3), requires_grad=True)
+            model = MyFunction()
+            model.apply(x, y).sum().backward()
+
+            has_deprecated = map(lambda warn:
+                                 'deprecated' in str(warn) and
+                                 'saved_variables' in str(warn),
+                                 warns)
+            has_deprecated = reduce(lambda x, y: x or y, has_deprecated)
+            self.assertTrue(has_deprecated)
 
     def test_requires_grad(self):
         x = Variable(torch.randn(5, 5))
@@ -2167,13 +2193,13 @@ def random_fullrank_matrix_distinct_singular_value(l):
 
 
 def uniform_scalar(offset=0, requires_grad=False):
-    v = torch.tensor(0).uniform_(0, 1) + offset
+    v = torch.tensor(0.).uniform_(0, 1) + offset
     v.requires_grad = requires_grad
     return v
 
 
 def normal_scalar_clamp(amin, amax, requires_grad=False):
-    v = torch.tensor(0).normal_().clamp(amin, amax)
+    v = torch.tensor(0.).normal_().clamp(amin, amax)
     v.requires_grad = requires_grad
     return v
 
@@ -2433,9 +2459,9 @@ method_tests = [
     ('prod', prod_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', [0]),
     ('prod', prod_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', [0]),
     ('prod', prod_single_zero(S), NO_ARGS, 'single_zero'),
-    ('prod', (torch.tensor(0, requires_grad=True)), NO_ARGS, 'scalar_zero'),
-    ('prod', (torch.tensor(0, requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
-    ('prod', (torch.tensor(0, requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
+    ('prod', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
+    ('prod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
+    ('prod', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
     ('var', (S, S, S), NO_ARGS),
     ('var', (S, S, S), (1,), 'dim', [0]),
     ('var', (S, S, S), (1, True, True), 'keepdim_dim', [0]),
@@ -2458,7 +2484,7 @@ method_tests = [
     ('cumprod', (S, S, S), (0,)),
     ('cumprod', (S, S, S), (1,), 'dim1', [0]),
     ('cumprod', (), (0,), 'scalar'),
-    ('cumprod', (torch.tensor(0, requires_grad=True)), (0,), 'scalar_zeros'),
+    ('cumprod', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_zeros'),
     ('cumprod', prod_zeros(S, [0, 1]), (1,), 'zeros_dim2', [0]),
     ('cumprod', prod_zeros(S, [0, 2]), (1,), 'zeros_dim1', [0]),
     ('cumprod', prod_zeros(S, [1, 2]), (1,), 'zeros_dim0', [0]),
@@ -2587,11 +2613,11 @@ method_tests = [
     ('index_select', (), (0, torch.tensor([0], dtype=torch.int64)), 'scalar_mixed_dim', [0]),
     ('index_select', (), (0, torch.tensor(0, dtype=torch.int64)), 'scalar_dim', [0]),
     ('index_add', (S, S), (0, index_variable(2, S), (2, S)), 'dim', [0]),
-    ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2])), 'scalar_input_dim', [0]),
-    ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2)), 'scalar_all_dim', [0]),
+    ('index_add', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
+    ('index_add', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
     ('index_copy', (S, S), (0, index_perm_variable(2, S), (2, S)), 'dim', [0]),
-    ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2])), 'scalar_input_dim', [0]),
-    ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2)), 'scalar_all_dim', [0]),
+    ('index_copy', (), (0, torch.tensor([0], dtype=torch.int64), torch.tensor([2.])), 'scalar_input_dim', [0]),
+    ('index_copy', (), (0, torch.tensor(0, dtype=torch.int64), torch.tensor(2.)), 'scalar_all_dim', [0]),
     ('index_fill', (S, S), (0, index_variable(2, S), 2), 'dim', [0]),
     # FIXME: we should compute the derivative w.r.t torch.tensor(2)
     ('index_fill', (S, S), (0, index_variable(2, S), non_differentiable(torch.tensor(2))),
@@ -2735,7 +2761,7 @@ method_tests = [
     ('resize_', (S, S, S), (torch.Size([S * S, S])), 'fewer_dims'),
     ('resize_', (), (dont_convert(()),), 'scalar'),
     ('resize_', (), (torch.Size([1, 1, 1])), 'scalar_to_dims'),
-    ('resize_as_', (), (non_differentiable(torch.tensor(5)),), 'scalar'),
+    ('resize_as_', (), (non_differentiable(torch.tensor(5.)),), 'scalar'),
     ('resize_as_', (), (non_differentiable(torch.randn((1, 1, 1))),), 'scalar_to_dims'),
     ('resize_as_', (S, S, S), (non_differentiable(torch.randn(S * S, S)),)),
     ('sort', (S, M, S), NO_ARGS),

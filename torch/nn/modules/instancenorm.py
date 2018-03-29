@@ -11,6 +11,23 @@ class _InstanceNorm(_BatchNorm):
     def _check_input_dim(self, input):
         return NotImplemented
 
+    def _load_state_dict_key_mismatch(self, full_name, name, is_missing):
+        if not is_missing and not self.track_running_stats and \
+                name in ('running_mean', 'running_var'):
+            raise KeyError(
+                'Unexpected running stats buffer "{name}" in state_dict for '
+                '{klass} with track_running_stats=False. If you are trying to '
+                'load a checkpoint saved before 0.4.0, this may be expected '
+                'because {klass} does not track running stats by default '
+                'anymore since 0.4.0. If running stats are not used, remove '
+                'them from state_dict before calling load_state_dict. '
+                'Otherwise, set track_running_stats=True in {klass} to use '
+                'running stats. See the documentation of {klass} for more '
+                'details.'
+                .format(name=full_name, klass=self.__class__.__name__))
+        super(_InstanceNorm, self)._load_state_dict_key_mismatch(
+            full_name, name, is_missing)
+
     def forward(self, input):
         self._check_input_dim(input)
 
@@ -64,7 +81,8 @@ class InstanceNorm1d(_InstanceNorm):
         - Input: :math:`(N, C, L)`
         - Output: :math:`(N, C, L)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm1d(100)
         >>> # With Learnable Parameters
@@ -127,7 +145,8 @@ class InstanceNorm2d(_InstanceNorm):
         - Input: :math:`(N, C, H, W)`
         - Output: :math:`(N, C, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm2d(100)
         >>> # With Learnable Parameters
@@ -190,7 +209,8 @@ class InstanceNorm3d(_InstanceNorm):
         - Input: :math:`(N, C, D, H, W)`
         - Output: :math:`(N, C, D, H, W)` (same shape as input)
 
-    Examples:
+    Examples::
+
         >>> # Without Learnable Parameters
         >>> m = nn.InstanceNorm3d(100)
         >>> # With Learnable Parameters

@@ -157,7 +157,7 @@ class TestIndexing(TestCase):
         self.assertEqual(a[0, one], a[zero, 1])
 
         # scalar indexed with scalar
-        r = torch.tensor(0).normal_()
+        r = torch.tensor(0.).normal_()
         with self.assertRaises(RuntimeError):
             r[:]
         with self.assertRaises(IndexError):
@@ -180,7 +180,7 @@ class TestIndexing(TestCase):
         self.assertEqual(7.7, a[1, 0])
 
         # scalar indexed with scalars
-        r = torch.tensor(0).normal_()
+        r = torch.tensor(0.).normal_()
         with self.assertRaises(RuntimeError):
             r[:] = 8.8
         with self.assertRaises(IndexError):

@@ -752,23 +752,6 @@ class TestCuda(TestCase):
         self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
         self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
 
-        y = x.new(dtype=torch.cuda.int64, device=1)
-        self.assertEqual(y.get_device(), 1)
-        self.assertIs(y.dtype, torch.cuda.int64)
-        y = x.new(dtype=torch.int64)
-        self.assertIs(y.dtype, torch.int64)
-
-        y = x.new(1, 2, 3, dtype=torch.cuda.int64, device=1)
-        self.assertEqual(y.get_device(), 1)
-        self.assertIs(y.dtype, torch.cuda.int64)
-        y = x.new(1, 2, 3, dtype=torch.int64)
-        self.assertIs(y.dtype, torch.int64)
-
-        y = x.new([0, 1, 2], dtype=torch.cuda.int64, device=1)
-        self.assertEqual(y.get_device(), 1)
-        self.assertIs(y.dtype, torch.cuda.int64)
-        y = x.new([0, 1, 2], dtype=torch.int64)
-        self.assertIs(y.dtype, torch.int64)
         with torch.cuda.device(1):
             self.assertEqual(x.new([0, 1, 2]).get_device(), 0)
             self.assertEqual(x.new([0, 1, 2], device=1).get_device(), 1)
@@ -1078,6 +1061,9 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
+    def test_cat_empty(self):
+        TestTorch._test_cat_empty(self, use_cuda=True)
+
     def test_bernoulli(self):
         x = torch.tensor([0, 1], dtype=torch.cuda.float32)
         self.assertEqual(x.bernoulli().tolist(), [0, 1])
@@ -1319,8 +1305,15 @@ class TestCuda(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
+    def test_fft_ifft_rfft_irfft(self):
+        def cuda_randn_double(*sizes):
+            return torch.cuda.DoubleTensor(*sizes).normal_()
+        TestTorch._test_fft_ifft_rfft_irfft(self, build_fn=cuda_randn_double)
+
     def test_stft(self):
-        TestTorch._test_stft(self, lambda t: t.cuda())
+        def cuda_randn_double(*sizes):
+            return torch.cuda.DoubleTensor(*sizes).normal_()
+        TestTorch._test_stft(self, build_fn=cuda_randn_double)
 
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)

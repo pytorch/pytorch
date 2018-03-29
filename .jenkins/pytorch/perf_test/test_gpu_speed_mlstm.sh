@@ -2,26 +2,21 @@
 
 . ./common.sh
 
-test_gpu_speed_mnist () {
-  echo "Testing: MNIST, GPU"
+test_gpu_speed_mlstm () {
+  echo "Testing: MLSTM, GPU"
 
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
 
-  git clone https://github.com/pytorch/examples.git -b perftests
+  git clone https://github.com/pytorch/benchmark.git
 
-  cd examples/mnist
-
-  pip install -r requirements.txt
-
-  # Download data
-  python main.py --epochs 0
+  cd benchmark/scripts/
 
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
-    runtime=$(get_runtime_of_command "python main.py --epochs 1 --no-log")
+    runtime=$(get_runtime_of_command python mlstm.py --skip-cpu-governor-check)
     echo $runtime
     SAMPLE_ARRAY+=(${runtime})
   done
@@ -40,5 +35,5 @@ test_gpu_speed_mnist () {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  run_test test_gpu_speed_mnist "$@"
+  run_test test_gpu_speed_mlstm "$@"
 fi

@@ -2,26 +2,29 @@
 
 . ./common.sh
 
-test_gpu_speed_cudnn_lstm () {
-  echo "Testing: CuDNN LSTM, GPU"
+test_cpu_speed_mini_sequence_labeler () {
+  echo "Testing: mini sequence labeler, CPU"
 
   export OMP_NUM_THREADS=4
   export MKL_NUM_THREADS=4
 
   git clone https://github.com/pytorch/benchmark.git
 
-  cd benchmark/scripts/
+  cd benchmark/
+
+  git checkout 726567a455edbfda6199445922a8cfee82535664
+
+  cd scripts/mini_sequence_labeler
 
   SAMPLE_ARRAY=()
   NUM_RUNS=$1
 
   for (( i=1; i<=$NUM_RUNS; i++ )) do
-    runtime=$(get_runtime_of_command "python cudnn_lstm.py --skip-cpu-governor-check")
-    echo $runtime
+    runtime=$(get_runtime_of_command python main.py)
     SAMPLE_ARRAY+=(${runtime})
   done
 
-  cd ../..
+  cd ../../..
 
   stats=$(python ../get_stats.py ${SAMPLE_ARRAY[@]})
   echo "Runtime stats in seconds:"
@@ -35,5 +38,5 @@ test_gpu_speed_cudnn_lstm () {
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  run_test test_gpu_speed_cudnn_lstm "$@"
+  run_test test_cpu_speed_mini_sequence_labeler "$@"
 fi
