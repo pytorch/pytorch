@@ -2297,7 +2297,10 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_output(self):
         def fn(input):
-            return [input, (input.sin(), input.cos(), [input.add(1)]), input]
+            return [
+                input, (input.sin(), input.cos(), [input.add(1)]), input,
+                {'a': input, 'b': [input.sin()]}
+            ]
 
         class Net(nn.Module):
             def forward(self, input):
@@ -2314,6 +2317,13 @@ class TestNN(NNTestCase):
         self.assertIsInstance(output[1][2], list)
         self.assertIsInstance(output[1][2][0], Variable)
         self.assertIsInstance(output[2], Variable)
+        self.assertIsInstance(output[3], dict)
+        self.assertEqual(len(output[3]), 2)
+        self.assertIn('a', output[3])
+        self.assertIn('b', output[3])
+        self.assertIsInstance(output[3]['a'], Variable)
+        self.assertIsInstance(output[3]['b'], list)
+        self.assertIsInstance(output[3]['b'][0], Variable)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_input(self):
