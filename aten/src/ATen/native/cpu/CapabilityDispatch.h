@@ -1,4 +1,3 @@
-#include <iostream>
 #include <type_traits>
 #include "ATen/cpu/cpuinfo/include/cpuinfo.h"
 
@@ -28,12 +27,12 @@ struct DispatchStub<void(ArgTypes...)> {
     if (cpuinfo_initialize()) {
     // Set function pointer to best implementation last
 #if defined(HAVE_AVX_CPU_DEFINITION)
-      if (cpuinfo_has_x86_avx()) {
+      if (!std::getenv("ATEN_DISABLE_AVX") && cpuinfo_has_x86_avx()) {
         *dispatch_ptr = allImpl<CPUCapability::AVX>::function;
       }
 #endif
 #if defined(HAVE_AVX2_CPU_DEFINITION)
-      if (cpuinfo_has_x86_avx2()) {
+      if (!std::getenv("ATEN_DISABLE_AVX2") && cpuinfo_has_x86_avx2()) {
         *dispatch_ptr = allImpl<CPUCapability::AVX2>::function;
       }
 #endif
