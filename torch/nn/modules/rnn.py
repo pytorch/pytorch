@@ -31,10 +31,10 @@ class RNNBase(Module):
                              "representing the probablity of an element being "
                              "zeroed")
         if dropout > 0 and num_layers == 1:
-            raise ValueError("dropout option adds dropout after all but last "
-                             "recurrent layer, so non-zero dropout expects "
-                             "num_layers greater than 1, but got dropout={} "
-                             "and num_layers={}".format(dropout, num_layers))
+            warnings.warn("dropout option adds dropout after all but last "
+                          "recurrent layer, so non-zero dropout expects "
+                          "num_layers greater than 1, but got dropout={} and "
+                          "num_layers={}".format(dropout, num_layers))
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
