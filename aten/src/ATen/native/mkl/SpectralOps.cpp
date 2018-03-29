@@ -157,7 +157,7 @@ static inline void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   });
 }
 
-// Returns undefined tensor if the parameter range is greater than MKL_LONG.
+// MKL DFTI
 Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
                 bool complex_input, bool complex_output,
                 bool inverse, IntList checked_signal_sizes,
@@ -261,7 +261,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   if (!complex_input || !complex_output) {
     MKL_DFTI_CHECK(DftiSetValue(descriptor.get(), DFTI_CONJUGATE_EVEN_STORAGE, DFTI_COMPLEX_COMPLEX));
   }
-  // if normalize output
+  // rescale if needed by normalized flag or inverse transform
   if (normalized || inverse) {
     auto signal_numel = std::accumulate(checked_signal_sizes.begin(), checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
     double double_scale;
