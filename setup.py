@@ -483,7 +483,10 @@ else:
                           # Clang has an unfixed bug leading to spurious missing
                           # braces warnings, see
                           # https://bugs.llvm.org/show_bug.cgi?id=21629
-                          '-Wno-missing-braces']
+                          '-Wno-missing-braces',
+                          # setuptools passes -Werror=format-security, but we
+                          # want to pass variables as format strings.
+                          '-Wno-format-security']
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
