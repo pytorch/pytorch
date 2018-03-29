@@ -32,6 +32,7 @@ struct ConvParams {
   bool is_padding_neg() const;
   void view1d_as_2d();
   bool use_cudnn(const at::Tensor& input) const;
+  bool use_mkldnn(const at::Tensor& input) const;
   bool use_nnpack(const at::Tensor& input) const;
   bool is_depthwise(const at::Tensor& input, const at::Tensor& weight) const;
 };
@@ -130,6 +131,17 @@ auto ConvParams::use_cudnn(const at::Tensor& input) const -> bool {
   return false;
 }
 
+auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
+#if AT_MKLDNN_ENABLED()
+  return input.type().backend() == kCPU &&
+         input.type().scalarType() == kFloat && // only on CPU Float Tensors
+         !is_dilated() && // doesn't support dilation
+         !transposed && // or transposed tensors
+         input.ndimension() == 4 && // must be in NCHW format
+         groups == 1;
+#endif
+  return false;
+}
 auto ConvParams::use_nnpack(const at::Tensor& input) const -> bool {
 #if AT_NNPACK_ENABLED()
   return input.type().backend() == kCPU &&
@@ -370,6 +382,21 @@ at::Tensor _convolution(
           input, weight, bias,
           params.padding, params.stride, params.dilation, params.groups, params.benchmark, params.deterministic);
     }
+#endif
+  } else if (params.use_mkldnn(input)) {
+#if AT_MKLDNN_ENABLED()
+    if (input.type() != weight.type()){
+      std::stringstream ss;
+      ss << "Input type (" << input.toString() << ") and weight type (" << weight.toString() << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+    if (bias.defined() && input.type() != bias.type()){
+      std::stringstream ss;
+      ss << "Input type (" << input.toString() << ") and bias type (" << bias.toString() << ") should be the same";
+      throw std::runtime_error(ss.str());
+    }
+
+    output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation);
 #endif
   } else {
     if (params.groups == 1) {
