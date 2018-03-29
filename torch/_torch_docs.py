@@ -3161,7 +3161,7 @@ of tensor :attr:`input`.
 Indices are ordered from left to right according to when each was sampled
 (first samples are placed in first column).
 
-If :attr:`input` is a vector, :attr:`out` is a vector of size :math:`num_samples`.
+If :attr:`input` is a vector, :attr:`out` is a vector of size :attr:`num_samples`.
 
 If :attr:`input` is a matrix with `m` rows, :attr:`out` is an matrix of shape
 :math:`(m \times num\_samples)`.
@@ -5719,7 +5719,7 @@ Short-time Fourier transform (STFT).
 Ignoring the batch dimension, this method computes the following expression:
 
 .. math::
-    X[m, \omega] = \sum_{k = 0}^{frame\_length}%
+    X[m, \omega] = \sum_{k = 0}^{\text{frame_length}}%
                         window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{\text{frame_length}}}
 
 where :math:`m` is the index of the sliding window, and :math:`\omega` is
