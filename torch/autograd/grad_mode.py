@@ -64,7 +64,7 @@ class enable_grad(object):
 class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
-    ``set_grad_enabled`` will enable or disable grads based on its argument ``mode``.
+    ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
 
     Arguments:

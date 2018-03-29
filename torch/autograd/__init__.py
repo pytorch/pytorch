@@ -107,7 +107,7 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         grad_outputs (sequence of Tensor): Gradients w.r.t. each output.
             None values can be specified for scalar Tensors or ones that don't require
             grad. If a None value would be acceptable for all grad_tensors, then this
-            argument is optional.
+            argument is optional. Default: None.
         retain_graph (bool, optional): If ``False``, the graph used to compute the grad
             will be freed. Note that in nearly all cases setting this option to ``True``
             is not needed and often can be worked around in a much more efficient

@@ -53,7 +53,15 @@ Variable (deprecated)
       declare then with ``requires_grad=False`` or detach them from the computation graph with
       :func:`torch.Tensor.detach`.
     - Methods such as ``var.backward(), var.detach(), var.register_hook()`` now work on tensors
-      with the same name.
+      with the same method names.
+
+    In addition, one can now create tensors with ``requires_grad=True`` using factory
+    methods such as :func:`torch.randn`, :func:`torch.zeros`, :func:`torch.ones`, and others
+    like the following:
+
+    ```
+    autograd_tensor = torch.randn((2, 3, 4), requires_grad=True)
+    ```
 
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
