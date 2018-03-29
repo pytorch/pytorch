@@ -1,6 +1,5 @@
 #include "ATen/native/cpu/UnaryOpsKernel.h"
 #include <cmath>
-#include <iostream>
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
 #include "ATen/native/cpu/Vec256.h"
@@ -26,96 +25,52 @@ kernel_(scalar_t* arr_out, const scalar_t* arr_in, size_t start, size_t end) {
   VOP<scalar_t>()(a).store(arr_out + k, leftover);
 }
 
-template <template <class> class VOP, CPUCapability C>
-inline void allImpl(Tensor& result, const Tensor& self, const char* name) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), name, [&] {
+// Functions excluding one-offs
+#define GENERIC_UNARY_OPS_MACRO(MACRO) \
+  MACRO (ceil) \
+  MACRO (cos) \
+  MACRO (exp) \
+  MACRO (floor) \
+  MACRO (log) \
+  MACRO (round) \
+  MACRO (sin) \
+  MACRO (sqrt) \
+  MACRO (trunc) \
+
+namespace {
+
+#define FUNCVOP(NAME)                          \
+  template <typename T>                        \
+  struct NAME##VOP {                           \
+    Vec256<T> operator()(Vec256<T>& x) const { \
+      return x.NAME();                         \
+    }                                          \
+  };
+
+UNARY_OPS_MACRO(FUNCVOP)
+
+} // namespace
+
+#define FUNCImpl(NAME)                                                      \
+  template <>                                                               \
+  void NAME##ImplC<CURRENT_CAPABILITY>::function(                           \
+      Tensor& result, const Tensor& self) {                                 \
+    AT_DISPATCH_FLOATING_TYPES(self.type(), NAME, [&] {                     \
+      at::parallel_for_1d<scalar_t>(                                        \
+          &kernel_<scalar_t, NAME##VOP, CURRENT_CAPABILITY>, result, self); \
+    });                                                                     \
+  }
+
+GENERIC_UNARY_OPS_MACRO(FUNCImpl)
+
+template <>
+void absImplC<CURRENT_CAPABILITY>::function(
+    Tensor& result,
+    const Tensor& self) {
+  AT_DISPATCH_ALL_TYPES(self.type(), abs, [&] {
     at::parallel_for_1d<scalar_t>(
-        &kernel_<scalar_t, VOP, CURRENT_CAPABILITY>, result, self);
+        &kernel_<scalar_t, absVOP, CURRENT_CAPABILITY>, result, self);
   });
 }
 
-namespace {
-
-template <typename T>
-struct ceilVOP {
-  Vec256<T> operator()(Vec256<T>& x) const {
-    return x.ceil();
-  }
-};
-} // namespace
-
-template <>
-void ceilImplC<CURRENT_CAPABILITY>::function(
-    Tensor& result,
-    const Tensor& self) {
-  allImpl<ceilVOP, CURRENT_CAPABILITY>(result, self, "ceil");
-}
-
-namespace {
-
-template <typename T>
-struct floorVOP {
-  Vec256<T> operator()(Vec256<T>& x) const {
-    return x.floor();
-  }
-};
-} // namespace
-
-template <>
-void floorImplC<CURRENT_CAPABILITY>::function(
-    Tensor& result,
-    const Tensor& self) {
-  allImpl<floorVOP, CURRENT_CAPABILITY>(result, self, "floor");
-}
-
-namespace {
-
-template <typename T>
-struct roundVOP {
-  Vec256<T> operator()(Vec256<T>& x) const {
-    return x.round();
-  }
-};
-} // namespace
-
-template <>
-void roundImplC<CURRENT_CAPABILITY>::function(
-    Tensor& result,
-    const Tensor& self) {
-  allImpl<roundVOP, CURRENT_CAPABILITY>(result, self, "round");
-}
-
-namespace {
-
-template <typename T>
-struct truncVOP {
-  Vec256<T> operator()(Vec256<T>& x) const {
-    return x.trunc();
-  }
-};
-} // namespace
-
-template <>
-void truncImplC<CURRENT_CAPABILITY>::function(
-    Tensor& result,
-    const Tensor& self) {
-  allImpl<truncVOP, CURRENT_CAPABILITY>(result, self, "trunc");
-}
-
-namespace {
-
-template <typename T>
-struct sqrtVOP {
-  Vec256<T> operator()(Vec256<T>& x) const {
-    return x.sqrt();
-  }
-};
-} // namespace
-
-template <>
-void sqrtImplC<CURRENT_CAPABILITY>::function(
-    Tensor& result,
-    const Tensor& self) {
-  allImpl<sqrtVOP, CURRENT_CAPABILITY>(result, self, "sqrt");
-}
 }} // namespace at::native
