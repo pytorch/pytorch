@@ -266,7 +266,7 @@ class TestTorch(TestCase):
 
         def compare_reference(input, dtype):
             input = torch.tensor(input, dtype=dtype)
-            res1 = torchfn(input)
+            res1 = torchfn(input.clone())
             res2 = input.clone().apply_(lambda x: mathfn(x))
             torch.testing.assert_allclose(res1, res2)
 
@@ -287,6 +287,32 @@ class TestTorch(TestCase):
         check_non_contiguous((5, 7), torch.float)
         check_non_contiguous((1024,), torch.float)
 
+        # If size(dim) == 1, stride(dim) is not defined.
+        # The code needs to be able to handle this
+        def check_contiguous_size1(dtype):
+            contig = torch.randn((5, 100), dtype=dtype)
+            contig = contig[:1, :50]
+            contig2 = torch.empty(contig.size(), dtype=dtype)
+            contig2.copy_(contig)
+            self.assertTrue(contig.is_contiguous())
+            self.assertTrue(contig2.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
+
+        check_contiguous_size1(torch.double)
+        check_contiguous_size1(torch.float)
+
+        def check_contiguous_size1_largedim(dtype):
+            contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype)
+            contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
+            contig2 = torch.empty(contig.size(), dtype=dtype)
+            contig2.copy_(contig)
+            self.assertTrue(contig.is_contiguous())
+            self.assertTrue(contig2.is_contiguous())
+            self.assertEqual(torchfn(contig), torchfn(contig2), 'contiguous size1')
+
+        check_contiguous_size1_largedim(torch.double)
+        check_contiguous_size1_largedim(torch.float)
+
         def check_large(dtype):
             input = torch.randn(1024, 512, dtype=dtype)
             actual = torchfn(input)
@@ -298,10 +324,19 @@ class TestTorch(TestCase):
         check_large(torch.double)
         check_large(torch.float)
 
-    def _test_math_by_name(self, function_name):
-        torchfn = getattr(torch, function_name)
-        mathfn = getattr(math, function_name)
+    def __test_math_by_name(self, function_name, mathfn, selffn):
+        mathfn = getattr(math, mathfn)
+        if selffn:
+            def torchfn(x):
+                return getattr(x, function_name)()
+        else:
+            torchfn = getattr(torch, function_name)
         self._test_math(torchfn, mathfn)
+
+    def _test_math_by_name(self, function_name, test_self=True):
+        if test_self:
+            self.__test_math_by_name(function_name + "_", function_name, True)
+        self.__test_math_by_name(function_name, function_name, False)
 
     def test_sin(self):
         self._test_math_by_name('sin')

@@ -1114,7 +1114,6 @@
     - Int
     - Short
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1161,7 +1160,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1354,7 +1352,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1400,7 +1397,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1475,7 +1471,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1695,7 +1690,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1741,7 +1735,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1758,7 +1751,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1775,7 +1767,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method
@@ -1792,7 +1783,6 @@
   types:
     - floating_point
   backends:
-    - CPU
     - CUDA
   variants:
     - method

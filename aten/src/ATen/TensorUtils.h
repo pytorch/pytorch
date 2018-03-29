@@ -72,7 +72,7 @@ void checkDefined(CheckedFrom c, const TensorArg& t);
 void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 
 // FixMe: does TensorArg slow things down?
-void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
+AT_API void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
 
 // Methods for getting data_ptr if tensor is defined
 void * maybe_data_ptr(const Tensor& tensor);
