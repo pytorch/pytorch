@@ -67,10 +67,11 @@ def backward(tensors, grad_tensors=None, retain_graph=None, create_graph=False, 
         if grad_tensors is None:
             grad_tensors = grad_variables
         else:
-            warnings.warn("'grad_tensors' and 'grad_variables' (deprecated) arguments both "
-                          "passed to backward(). Using 'grad_tensors'.")
+            raise RuntimeError("'grad_tensors' and 'grad_variables' (deprecated) "
+                               "arguments both passed to backward(). Please only "
+                               "use 'grad_tensors'.")
 
-    tensors = (tensors,) if isinstance(tensors, Variable) else tuple(tensors)
+    tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
 
     if grad_tensors is None:
         grad_tensors = [None] * len(tensors)
@@ -121,8 +122,8 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
     if allow_unused:
         warnings.warn("allow_unused argument is deprecated and is ignored now (defaults to True)!")
 
-    outputs = (outputs,) if isinstance(outputs, Variable) else tuple(outputs)
-    inputs = (inputs,) if isinstance(inputs, Variable) else tuple(inputs)
+    outputs = (outputs,) if isinstance(outputs, torch.Tensor) else tuple(outputs)
+    inputs = (inputs,) if isinstance(inputs, torch.Tensor) else tuple(inputs)
     if grad_outputs is None:
         grad_outputs = [None] * len(outputs)
     elif isinstance(grad_outputs, torch.Tensor):
