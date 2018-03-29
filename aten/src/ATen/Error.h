@@ -7,11 +7,18 @@
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include <stdarg.h>
 
 namespace at {
 namespace detail {
+/// A tiny implementation of static `all_of`.
+template <bool...>
+struct pack;
+template <bool... values>
+struct all_of : std::is_same<pack<values..., true>, pack<true, values...>> {};
+
 /// A printf wrapper that returns an std::string.
 inline std::string format(const char* format_string, ...) {
   static constexpr size_t kMaximumStringLength = 4096;
@@ -51,7 +58,16 @@ struct AT_API Error : public std::exception {
             format_string,
             std::forward<FormatArgs>(format_args)...)),
         what_(
-            what_without_location_ + " (" + source_location.toString() + ")") {}
+            what_without_location_ + " (" + source_location.toString() + ")") {
+    // NOTE: A "literal type"
+    // (http://en.cppreference.com/w/cpp/concept/LiteralType) could also be a
+    // constexpr struct, so it's not 100% guaranteed that the `printf` call
+    // inside `format` is safe, but it will catch 99.9% of all errors we'll run
+    // into, such as passing `std::string`.
+    static_assert(
+        detail::all_of<std::is_literal_type<FormatArgs>::value...>::value,
+        "arguments to `format` must be literal types!");
+  }
 
   /// Returns the complete error message including the source location.
   const char* what() const noexcept override {
