@@ -368,6 +368,10 @@
 - func: matmul(Tensor self, Tensor other) -> Tensor
 
 - func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
+
+- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
+  variants: function
+
 - func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
   dispatch:
     CPU: _gesv_helper_cpu

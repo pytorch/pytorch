@@ -1,5 +1,4 @@
 #include "ATen/ATen.h"
-#include "ATen/Check.h"
 #include "ATen/CPUApplyUtils.h"
 #include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
@@ -45,35 +44,33 @@ template<> void lapackGesv<double>(
 #endif
 
 template <typename real>
-struct SolveOp {
-  static void apply(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
+static void bgesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
-    runtime_error("gesv: LAPACK library not found in compilation");
+  runtime_error("gesv: LAPACK library not found in compilation");
 #endif
-    real* A_data = (real*)A.data_ptr();
-    real* b_data = (real*)b.data_ptr();
-    auto A_mat_stride = matrixStride(A);
-    auto b_mat_stride = matrixStride(b);
+  real* A_data = (real*)A.data_ptr();
+  real* b_data = (real*)b.data_ptr();
+  auto A_mat_stride = matrixStride(A);
+  auto b_mat_stride = matrixStride(b);
 
-    auto batch_size = batchCount(A);
-    auto n = A.size(-2);
-    auto nrhs = b.size(-1);
+  auto batch_size = batchCount(A);
+  auto n = A.size(-2);
+  auto nrhs = b.size(-1);
 
-    auto ipiv = b.type().toScalarType(kLong).tensor(n);
+  auto ipiv = b.type().toScalarType(kLong).tensor(n);
 
-    for (int64_t i = 0; i < batch_size; i++) {
-      int info;
-      real* A_working_ptr = &A_data[i * A_mat_stride];
-      real* b_working_ptr = &b_data[i * b_mat_stride];
-      lapackGesv<real>(n, nrhs, A_working_ptr, n, (int*)ipiv.data_ptr(),
-          b_working_ptr, n, &info);
-      infos[i] = info;
-      if (info != 0) {
-        return;
-      }
+  for (int64_t i = 0; i < batch_size; i++) {
+    int info;
+    real* A_working_ptr = &A_data[i * A_mat_stride];
+    real* b_working_ptr = &b_data[i * b_mat_stride];
+    lapackGesv<real>(n, nrhs, A_working_ptr, n, (int*)ipiv.data_ptr(),
+        b_working_ptr, n, &info);
+    infos[i] = info;
+    if (info != 0) {
+      return;
     }
   }
-};
+}
 
 std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
   if (self.ndimension() <= 2 && A.ndimension() <= 2) {
@@ -85,11 +82,16 @@ std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) 
   std::vector<int64_t> infos(batchCount(A), 0);
   auto A_working_copy = cloneBatchedColumnMajor(A);
   auto b_working_copy = cloneBatchedColumnMajor(self);
-  dispatch_floating_types<void, SolveOp>(b_working_copy.type(),
-        "_gesv_helper_cpu", b_working_copy, A_working_copy, infos);
-
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+    bgesv<scalar_t>(b_working_copy, A_working_copy, infos);
+  });
   checkErrors(infos);
   return std::tuple<Tensor,Tensor>(b_working_copy, A_working_copy);
+}
+
+std::tuple<Tensor&,Tensor&> gesv_out(Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
+  // TODO: error message for unbatched?
+  return at::_th_gesv_out(solution, lu, self, A);
 }
 
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
