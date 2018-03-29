@@ -1,76 +1,142 @@
 #include "ATen/native/cpu/UnaryOpsKernel.h"
+
 #include <cmath>
+#include <iostream>
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
-#include "ATen/native/cpu/Vec256.h"
+#include "ATen/cpu/vec256/vec256.h"
+#include "ATen/native/cpu/CapabilityDispatch.h"
 
 namespace at { namespace native {
 
 using namespace vec256;
 
-// This modifies arr in place with given OP
-template <class scalar_t, template <class> class VOP, CPUCapability C>
-inline void
-kernel_(scalar_t* arr_out, const scalar_t* arr_in, size_t start, size_t end) {
-  Vec256<scalar_t> a;
-  size_t epr = 32 / sizeof(scalar_t); // primitives per Vec256
-  size_t k = start;
-  size_t vec_end = end > epr ? end - epr : 0;
-  for (; k < vec_end; k += epr) {
-    a.load(arr_in + k);
-    VOP<scalar_t>()(a).store(arr_out + k);
+template <typename scalar_t, typename F>
+static void unary_kernel(scalar_t* arr_out, const scalar_t* arr_in, int64_t size, F func) {
+  using Vec = Vec256<scalar_t>;
+  int64_t size_rounded = size - (size % Vec::size);
+  int64_t k = 0;
+  for (; k != size_rounded; k += Vec::size) {
+    auto value = func(Vec::s_load(arr_in + k));
+    value.store(arr_out + k);
   }
-  size_t leftover = std::min((end - k), a.size);
-  a.load(arr_in + k, leftover);
-  VOP<scalar_t>()(a).store(arr_out + k, leftover);
+  auto leftover = size - k;
+  Vec a;
+  a.load_partial(arr_in + k, leftover);
+  func(a).store_partial(arr_out + k, leftover);
 }
 
-// Functions excluding one-offs
-#define GENERIC_UNARY_OPS_MACRO(MACRO) \
-  MACRO (ceil) \
-  MACRO (cos) \
-  MACRO (exp) \
-  MACRO (floor) \
-  MACRO (log) \
-  MACRO (round) \
-  MACRO (sin) \
-  MACRO (sqrt) \
-  MACRO (trunc) \
+template <class scalar_t, class F>
+static void parallel_apply(Tensor& result, const Tensor& self, F f) {
+  internal::init_tbb_num_threads();
 
-namespace {
+  static tbb::affinity_partitioner ap;
 
-#define FUNCVOP(NAME)                          \
-  template <typename T>                        \
-  struct NAME##VOP {                           \
-    Vec256<T> operator()(Vec256<T>& x) const { \
-      return x.NAME();                         \
-    }                                          \
-  };
-
-UNARY_OPS_MACRO(FUNCVOP)
-
-} // namespace
-
-#define FUNCImpl(NAME)                                                      \
-  template <>                                                               \
-  void NAME##ImplC<CURRENT_CAPABILITY>::function(                           \
-      Tensor& result, const Tensor& self) {                                 \
-    AT_DISPATCH_FLOATING_TYPES(self.type(), NAME, [&] {                     \
-      at::parallel_for_1d<scalar_t>(                                        \
-          &kernel_<scalar_t, NAME##VOP, CURRENT_CAPABILITY>, result, self); \
-    });                                                                     \
+  auto arr_out = result.data<scalar_t>();
+  auto arr_in = self.data<scalar_t>();
+  int64_t size = self.numel();
+  if (size < internal::TBB_GRAIN_SIZE) {
+    unary_kernel(arr_out, arr_in, size, f);
+  } else {
+    tbb::parallel_for(
+        tbb::blocked_range<int64_t>(0, size, internal::TBB_GRAIN_SIZE),
+        [&](const tbb::blocked_range<int64_t>& r) {
+          auto size = r.end() - r.begin();
+          unary_kernel(arr_out + r.begin(), arr_in + r.begin(), size, f);
+        },
+        ap);
   }
+}
 
-GENERIC_UNARY_OPS_MACRO(FUNCImpl)
-
-template <>
-void absImplC<CURRENT_CAPABILITY>::function(
-    Tensor& result,
-    const Tensor& self) {
-  AT_DISPATCH_ALL_TYPES(self.type(), abs, [&] {
-    at::parallel_for_1d<scalar_t>(
-        &kernel_<scalar_t, absVOP, CURRENT_CAPABILITY>, result, self);
+static void abs_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "abs", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.abs();
+    });
   });
 }
+
+static void ceil_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "ceil", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.ceil();
+    });
+  });
+}
+
+static void cos_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "cos", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.cos();
+    });
+  });
+}
+
+static void exp_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "exp", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.exp();
+    });
+  });
+}
+
+static void floor_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "floor", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.floor();
+    });
+  });
+}
+
+static void log_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "log", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.log();
+    });
+  });
+}
+
+static void round_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "round", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.round();
+    });
+  });
+}
+
+static void sin_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "sin", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.sin();
+    });
+  });
+}
+
+static void sqrt_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "sqrt", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.sqrt();
+    });
+  });
+}
+
+static void trunc_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "trunc", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.trunc();
+    });
+  });
+}
+
+REGISTER_DISPATCH(absImpl, &abs_kernel);
+REGISTER_DISPATCH(ceilImpl, &ceil_kernel);
+REGISTER_DISPATCH(cosImpl, &cos_kernel);
+REGISTER_DISPATCH(expImpl, &exp_kernel);
+REGISTER_DISPATCH(floorImpl, &floor_kernel);
+REGISTER_DISPATCH(logImpl, &log_kernel);
+REGISTER_DISPATCH(roundImpl, &round_kernel);
+REGISTER_DISPATCH(sinImpl, &sin_kernel);
+REGISTER_DISPATCH(sqrtImpl, &sqrt_kernel);
+REGISTER_DISPATCH(truncImpl, &trunc_kernel);
 
 }} // namespace at::native

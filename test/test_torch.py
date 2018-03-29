@@ -574,13 +574,10 @@ class TestTorch(TestCase):
                 diff = np.abs(nvs - tvs.numpy()).sum()
                 self.assertEqual(diff, 0)
 
-        sizes = []
-        sizes += [[2, 3, 3, 3, 3, 2, 2, 3, 2, 3, 2, 3, 3]]
-        sizes += [[4, 4, 4, 4, 4, 4, 4, 4, 4, 4]]
-        sizes += [[1, 32 * 8 * 32 * 8]]
-        sizes += [[1, 32770]]
-        for size in sizes:
-            _run_test(size)
+        _run_test([2, 3, 3, 3, 3, 2, 2, 3, 2, 3, 2, 3, 3])
+        _run_test([4, 4, 4, 4, 4, 4, 4, 4, 4, 4])
+        _run_test([1, 32 * 8 * 32 * 8])
+        _run_test([1, 32770])
 
     def _testCSelection(self, torchfn, mathfn):
         # Two tensors
@@ -1160,15 +1157,41 @@ class TestTorch(TestCase):
     def test_cpow(self):
         self._test_cop(torch.pow, lambda x, y: float('nan') if x < 0 else math.pow(x, y))
 
-    # TODO: these tests only check if it's possible to pass a return value
-    # it'd be good to expand them
-    def test_sum(self):
+    def test_sum_all(self):
+        def check_sum_all(tensor):
+            pylist = tensor.reshape(-1).tolist()
+            self.assertEqual(tensor.sum(), sum(pylist))
+
+        check_sum_all(torch.tensor([1, 2, 3, 4, 5]))
+        check_sum_all(torch.randn(200000))
+        check_sum_all(torch.randn(2000, 2)[:, 0])
+
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_sum_dim(self):
+        def check_sum_dim(tensor, dim):
+            expected = tensor.numpy().sum(dim)
+            actual = tensor.sum(dim)
+            self.assertEqual(expected.shape, actual.shape)
+            self.assertTrue(np.allclose(expected, actual.numpy()))
+
+        check_sum_dim(torch.randn(3, 5, 7), 0)
+        check_sum_dim(torch.randn(3, 5, 7), 1)
+        check_sum_dim(torch.randn(3, 5, 7), 2)
+        check_sum_dim(torch.randn(100000), -1)
+        check_sum_dim(torch.randn(5, 400000), 1)
+        check_sum_dim(torch.randn(50, 50, 50), 0)
+        check_sum_dim(torch.randn(50, 50, 50), 1)
+        check_sum_dim(torch.randn(50, 50, 50), 2)
+
+    def test_sum_out(self):
         x = torch.rand(100, 100)
         res1 = torch.sum(x, 1)
         res2 = torch.Tensor()
         torch.sum(x, 1, out=res2)
         self.assertEqual(res1, res2)
 
+    # TODO: these tests only check if it's possible to pass a return value
+    # it'd be good to expand them
     def test_prod(self):
         x = torch.rand(100, 100)
         res1 = torch.prod(x, 1)
@@ -2396,8 +2419,7 @@ class TestTorch(TestCase):
     def test_cat_scalars(self):
         x = torch.tensor(0)
         y = torch.tensor(1)
-        with self.assertRaisesRegexp(RuntimeError,
-                                     'zero-dimensional.*cannot be concatenated'):
+        with self.assertRaisesRegex(RuntimeError, 'zero-dimensional.*cannot be concatenated'):
             torch.cat([x, y])
 
     @staticmethod

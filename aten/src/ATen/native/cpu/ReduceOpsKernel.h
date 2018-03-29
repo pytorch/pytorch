@@ -1,21 +1,16 @@
 #pragma once
+
 #include <ATen/ATen.h>
-#include <ATen/Parallel.h>
-#include <stdexcept>
+#include <ATen/optional.h>
 #include "CapabilityDispatch.h"
 
-namespace at { namespace native {
+namespace at {
+namespace native {
 
-template <CPUCapability C>
-struct sumImplC {
-  static void
-  function(Tensor& result, const Tensor& self, size_t dim, bool all);
-};
+using reduce_fn = void(*)(Tensor &, const Tensor &, at::optional<int64_t>);
 
-template <CPUCapability C>
-struct prodImplC {
-  static void
-  function(Tensor& result, const Tensor& self, size_t dim, bool all);
-};
+extern DispatchStub<reduce_fn> sum_kernel;
+extern DispatchStub<reduce_fn> prod_kernel;
 
-}} // namespace at::native
+}
+}
