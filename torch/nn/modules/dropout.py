@@ -4,8 +4,8 @@ from .. import functional as F
 
 class Dropout(Module):
     r"""During training, randomly zeroes some of the elements of the input
-    tensor with probability *p* using samples from a bernoulli distribution.
-    The elements to zero are randomized on every forward call.
+    tensor with probability :attr:`p` using samples from a Bernoulli
+    distribution. The elements to zero are randomized on every forward call.
 
     This has proven to be an effective technique for regularization and
     preventing the co-adaptation of neurons as described in the paper

@@ -2,6 +2,7 @@ import math
 import torch
 import warnings
 import itertools
+import numbers
 
 from .module import Module
 from ..parameter import Parameter
@@ -24,6 +25,17 @@ class RNNBase(Module):
         self.dropout_state = {}
         self.bidirectional = bidirectional
         num_directions = 2 if bidirectional else 1
+
+        if not isinstance(dropout, numbers.Number) or not 0 <= dropout <= 1 or \
+                isinstance(dropout, bool):
+            raise ValueError("dropout should be a number in range [0, 1] "
+                             "representing the probablity of an element being "
+                             "zeroed")
+        if dropout > 0 and num_layers == 1:
+            warnings.warn("dropout option adds dropout after all but last "
+                          "recurrent layer, so non-zero dropout expects "
+                          "num_layers greater than 1, but got dropout={} and "
+                          "num_layers={}".format(dropout, num_layers))
 
         if mode == 'LSTM':
             gate_size = 4 * hidden_size
@@ -243,14 +255,18 @@ class RNN(RNNBase):
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
-        num_layers: Number of recurrent layers.
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two RNNs together to form a `stacked RNN`,
+            with the second RNN taking in outputs of the first RNN and
+            computing the final results. Default: 1
         nonlinearity: The non-linearity to use. Can be either 'tanh' or 'relu'. Default: 'tanh'
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
             as `(batch, seq, feature)`
-        dropout: If non-zero, introduces a `dropout` layer on the outputs of each
-            RNN layer except the last layer
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            RNN layer except the last layer, with dropout probablity equal to
+            :attr:`dropout`. Default: 0
         bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
 
     Inputs: input, h_0
@@ -334,14 +350,18 @@ class LSTM(RNNBase):
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
-        num_layers: Number of recurrent layers.
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two LSTMs together to form a `stacked LSTM`,
+            with the second LSTM taking in outputs of the first LSTM and
+            computing the final results. Default: 1
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
-        dropout: If non-zero, introduces a `dropout` layer on the outputs of each
-            RNN layer except the last layer
-        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            LSTM layer except the last layer, with dropout probablity equal to
+            :attr:`dropout`. Default: 0
+        bidirectional: If ``True``, becomes a bidirectional LSTM. Default: ``False``
 
     Inputs: input, (h_0, c_0)
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -359,7 +379,7 @@ class LSTM(RNNBase):
 
     Outputs: output, (h_n, c_n)
         - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
-          containing the output features `(h_t)` from the last layer of the RNN,
+          containing the output features `(h_t)` from the last layer of the LSTM,
           for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
           given as the input, the output will also be a packed sequence.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
@@ -414,14 +434,18 @@ class GRU(RNNBase):
     Args:
         input_size: The number of expected features in the input `x`
         hidden_size: The number of features in the hidden state `h`
-        num_layers: Number of recurrent layers.
+        num_layers: Number of recurrent layers. E.g., setting ``num_layers=2``
+            would mean stacking two GRUs together to form a `stacked GRU`,
+            with the second GRU taking in outputs of the first GRU and
+            computing the final results. Default: 1
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
             as (batch, seq, feature)
-        dropout: If non-zero, introduces a `dropout` layer on the outputs of each
-            RNN layer except the last layer
-        bidirectional: If ``True``, becomes a bidirectional RNN. Default: ``False``
+        dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
+            GRU layer except the last layer, with dropout probablity equal to
+            :attr:`dropout`. Default: 0
+        bidirectional: If ``True``, becomes a bidirectional GRU. Default: ``False``
 
     Inputs: input, h_0
         - **input** of shape `(seq_len, batch, input_size)`: tensor containing the features
@@ -434,7 +458,7 @@ class GRU(RNNBase):
 
     Outputs: output, h_n
         - **output** of shape `(seq_len, batch, hidden_size * num_directions)`: tensor
-          containing the output features h_t from the last layer of the RNN,
+          containing the output features h_t from the last layer of the GRU,
           for each t. If a :class:`torch.nn.utils.rnn.PackedSequence` has been
           given as the input, the output will also be a packed sequence.
         - **h_n** of shape `(num_layers * num_directions, batch, hidden_size)`: tensor
