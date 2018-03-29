@@ -48,10 +48,8 @@ Variable (deprecated)
     ``requires_grad`` set to ``True``. In addition, ``Variable(tensor)`` now returns
     a :class:`torch.Tensor`. Below please find a quick guide on what has changed:
 
-    - ``Variable(tensor, requires_grad=True)`` is now ``torch.tensor(tensor, requires_grad=True)``
-    - ``var.data`` is now just ``tensor``. If you don't want to record operations on tensors,
-      declare then with ``requires_grad=False`` or detach them from the computation graph with
-      :func:`torch.Tensor.detach`.
+    - ``Variable(tensor, requires_grad=True)`` is now ``torch.tensor(tensor, requires_grad=True)``.
+    - ``var.data`` is the same thing as ``tensor.data``.
     - Methods such as ``var.backward(), var.detach(), var.register_hook()`` now work on tensors
       with the same method names.
 
@@ -59,9 +57,7 @@ Variable (deprecated)
     methods such as :func:`torch.randn`, :func:`torch.zeros`, :func:`torch.ones`, and others
     like the following:
 
-    ```
-    autograd_tensor = torch.randn((2, 3, 4), requires_grad=True)
-    ```
+    ``autograd_tensor = torch.randn((2, 3, 4), requires_grad=True)``
 
 Tensor autograd functions
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
