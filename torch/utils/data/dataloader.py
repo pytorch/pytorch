@@ -392,6 +392,8 @@ class DataLoader(object):
                  unpicklable object, e.g., a lambda function.
     """
 
+    __initialized = False
+
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
                  timeout=0, worker_init_fn=None):
@@ -431,6 +433,16 @@ class DataLoader(object):
 
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.__initialized = True
+
+    def __setattr__(self, attr, val):
+        if self.__initialized and self.batch_sampler is not None and \
+                attr in ('batch_size', 'sampler', 'drop_last') and \
+                val is not None:
+            raise ValueError('{} should not be set when batch_sampler is '
+                             'used'.format(attr))
+
+        super(DataLoader, self).__setattr__(attr, val)
 
     def __iter__(self):
         return _DataLoaderIter(self)
