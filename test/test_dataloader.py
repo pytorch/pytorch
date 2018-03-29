@@ -299,6 +299,14 @@ class TestDataLoader(TestCase):
                                  math.ceil(float(len(loader.dataset)) / loader.batch_size))
                 return
 
+    def test_invalid_assign_after_init(self):
+        dl = DataLoader(self.dataset)
+        for attr in ('batch_size', 'sampler', 'drop_last'):
+            def fn():
+                setattr(dl, attr, {})
+
+            self.assertRaises(ValueError, fn)
+
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))
 

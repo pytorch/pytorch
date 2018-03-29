@@ -411,16 +411,18 @@ class DataLoader(object):
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
-                raise ValueError('batch_sampler is mutually exclusive with '
-                                 'batch_size, shuffle, sampler, and drop_last')
+                raise ValueError('batch_sampler option is mutually exclusive '
+                                 'with batch_size, shuffle, sampler, and '
+                                 'drop_last')
             self.batch_size = None
             self.drop_last = None
 
         if sampler is not None and shuffle:
-            raise ValueError('sampler is mutually exclusive with shuffle')
+            raise ValueError('sampler option is mutually exclusive with '
+                             'shuffle')
 
         if self.num_workers < 0:
-            raise ValueError('num_workers cannot be negative; '
+            raise ValueError('num_workers option cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
         if batch_sampler is None:
@@ -436,11 +438,9 @@ class DataLoader(object):
         self.__initialized = True
 
     def __setattr__(self, attr, val):
-        if self.__initialized and self.batch_sampler is not None and \
-                attr in ('batch_size', 'sampler', 'drop_last') and \
-                val is not None:
-            raise ValueError('{} should not be set when batch_sampler is '
-                             'used'.format(attr))
+        if self.__initialized and attr in ('batch_size', 'sampler', 'drop_last'):
+            raise ValueError('{} attribute should not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
 
         super(DataLoader, self).__setattr__(attr, val)
 
