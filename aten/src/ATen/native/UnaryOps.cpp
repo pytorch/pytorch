@@ -14,46 +14,35 @@
 
 namespace at { namespace native {
 
-using unary_type = void(Tensor&, const Tensor&);
-
-#define DISPATCH(NAME) \
-unary_type* NAME ## Impl = DispatchStub<unary_type>::init<NAME ## ImplC, &NAME ## Impl>;\
-
-#define BASIC(NAME) \
-Tensor NAME(const Tensor& self) { \
-  Tensor result = self.type().tensor(); \
-  return at::NAME ## _out(result, self); \
-} \
-
-#define SELF(NAME) \
-Tensor& NAME##_(Tensor& self) { \
-  return at::NAME ## _out(self, self); \
-} \
-
-#define OUTCPU(NAME) \
-Tensor& _ ## NAME ## _out_cpu(Tensor& result, const Tensor& self) { \
-  return _unops_out_cpu(NAME ## Impl, result, self) ? result \
-                                                : at::_ ## NAME ## _out(result, self); \
-} \
-
-#define OUTCUDA(NAME) \
-Tensor& _ ## NAME ## _out_cuda(Tensor& result, const Tensor& self) { \
-  return at::_ ## NAME ## _out(result, self); \
-} \
-
-bool _unops_out_cpu(unary_type* f, Tensor& result, const Tensor& self) {
-  if (result.is_contiguous() && self.is_contiguous()) {
-    result.resize_(self.sizes());
-    f(result, self);
-    return true;
-  }
-  return false;
+#define IMPLEMENT_UNARY_OP(op)                                                \
+Tensor op(const Tensor& self) {                                               \
+  Tensor result = self.type().tensor();                                       \
+  return at::op ## _out(result, self);                                        \
+}                                                                             \
+Tensor& op##_(Tensor& self) {                                                 \
+  return at::op ## _out(self, self);                                          \
+}                                                                             \
+Tensor& _ ## op ## _out_cuda(Tensor& result, const Tensor& self) {            \
+  return at::_ ## op ## _out(result, self);                                   \
+}                                                                             \
+Tensor& _ ## op ## _out_cpu(Tensor& result, const Tensor& self) {             \
+  if (result.is_contiguous() && self.is_contiguous()) {                       \
+    result.resize_(self.sizes());                                             \
+    op ## Impl(result, self);                                                 \
+    return result;                                                            \
+  }                                                                           \
+  return at::_ ## op ## _out(result, self);                                   \
 }
 
-UNARY_OPS_MACRO(DISPATCH)
-UNARY_OPS_MACRO(BASIC)
-UNARY_OPS_MACRO(SELF)
-UNARY_OPS_MACRO(OUTCPU)
-UNARY_OPS_MACRO(OUTCUDA)
+IMPLEMENT_UNARY_OP(abs)
+IMPLEMENT_UNARY_OP(ceil)
+IMPLEMENT_UNARY_OP(cos)
+IMPLEMENT_UNARY_OP(exp)
+IMPLEMENT_UNARY_OP(floor)
+IMPLEMENT_UNARY_OP(log)
+IMPLEMENT_UNARY_OP(round)
+IMPLEMENT_UNARY_OP(sin)
+IMPLEMENT_UNARY_OP(sqrt)
+IMPLEMENT_UNARY_OP(trunc)
 
 }} // namespace at::native

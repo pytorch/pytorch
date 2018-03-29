@@ -1,4 +1,5 @@
 #pragma once
+
 #include <ATen/ATen.h>
 #include <ATen/Parallel.h>
 #include <stdexcept>
@@ -6,25 +7,18 @@
 
 namespace at { namespace native {
 
-#define FUNCImplC(NAME) \
-template <CPUCapability C>\
-struct NAME ## ImplC {\
-  static void function(Tensor& result, const Tensor& self);\
-};\
+using unary_fn = void(*)(Tensor&, const Tensor&);
 
-#define UNARY_OPS_MACRO(MACRO) \
-  MACRO (abs) \
-  MACRO (ceil) \
-  MACRO (cos) \
-  MACRO (exp) \
-  MACRO (floor) \
-  MACRO (log) \
-  MACRO (round) \
-  MACRO (sin) \
-  MACRO (sqrt) \
-  MACRO (trunc) \
-
-UNARY_OPS_MACRO(FUNCImplC)
+extern DispatchStub<unary_fn> absImpl;
+extern DispatchStub<unary_fn> ceilImpl;
+extern DispatchStub<unary_fn> cosImpl;
+extern DispatchStub<unary_fn> expImpl;
+extern DispatchStub<unary_fn> floorImpl;
+extern DispatchStub<unary_fn> logImpl;
+extern DispatchStub<unary_fn> roundImpl;
+extern DispatchStub<unary_fn> sinImpl;
+extern DispatchStub<unary_fn> sqrtImpl;
+extern DispatchStub<unary_fn> truncImpl;
 
 // Missing unary functions
 // TODO: Add generic apply function for contiguous and non-contiguous tensors
@@ -46,6 +40,5 @@ UNARY_OPS_MACRO(FUNCImplC)
 // sinh
 // tan
 // tanh
-// trunc
 
 }} // namespace at::native
