@@ -52,63 +52,61 @@ bool isBroadcasting(Node* node) {
   return broadcasting.count(node->kind());
 }
 
-// First iterate over the 'from' tensor sizes. Ignore all leading and trailing
-// dimensions that are simply one, since they can be trivially broadcasted.
-// When iterating over the dimension sizes (with reduced 'from' tensor),
-// starting at the trailing dimension, the dimension sizes must either be equal,
-// or one of them does not exist. If a broadcast candidate is not found at the
-// trailing dimension, search at the leading dimension. If one is found here,
-// return the `axis` argument to be emitted to ONNX on the broadcasting operator
+// This boils down to
+//
+//     Treating leading and trailing `1`s in `from` as wildcards, is
+//     `from` a substring of `to`, and if so starting at which index?
+//
+// To answer it we do a naive, intentionally n-squared substring
+// search, tweaked to have the correct wildcard behavior.
 //
 // Note that this is NOT equivalent to numpy broadcasting semantics, and do
 // not represent the generalized broadcasting that Pytorch implements.
 // Rather, this is Caffe2-style broadcasting.
 //
 // Return value is 1) Whether this expand is fusable, 2) the `axis` argument we
-// should emit to ONNX. Coming from a Pytorch frontend, this should either not
-// be emitted (if we're broadcasting trailing dimensions) or it should be
-// emitted as `0` (leading dimensions.)
+// should emit to ONNX.
 std::tuple<bool, at::optional<size_t>> fusibleExpandTo(at::IntList from, at::IntList to) {
-  if (from.size() > to.size()) {
-    return std::make_tuple(false, at::nullopt);
+  int leading_ones = 0;
+  int trailing_ones = 0;
+  for (int i = 0; i < from.size(); i++) {
+    if (from[i] == 1) {
+      leading_ones++;
+    } else {
+      break;
+    }
   }
-  ssize_t from_dim_start = 0, from_dim_end = from.size() - 1;
-  while (from_dim_start < (ssize_t) from.size() && from[from_dim_start] == 1) {
-    from_dim_start++;
-  }
-  while (from_dim_end > from_dim_start && from[from_dim_end] == 1) {
-    from_dim_end--;
-  }
-
-  ssize_t f = from_dim_end;
-  ssize_t t = to.size() - 1;
-  bool trailing_expand = true;
-  for (; f >= from_dim_start && t >= 0; --f, --t) {
-    if (from[f] != to[t]) {
-      trailing_expand = false;
+  // In case `from` is all `1`s, arbitrarily consider them to be
+  // leading and not trailing.
+  for (int i = from.size() - 1; i >= leading_ones; i--) {
+    if (from[i] == 1) {
+      trailing_ones++;
+    } else {
       break;
     }
   }
 
-  // In the case that the 'to' tensor has leading ones in the same place that
-  // the 'from' tensor does, f will be less than from_dim_start rather than
-  // strictly equal. E.x.: to := [5, 1, 768] and from := [1, 1, 768]
-  if (trailing_expand && f <= from_dim_start) {
-    return std::make_tuple(true, at::nullopt);
-  }
+  std::vector<std::tuple<bool, at::optional<size_t>>> possible_results;
 
-  f = from_dim_start;
-  t = 0;
-  bool leading_expand = true;
-  for (; f <= from_dim_end && t < static_cast<ssize_t>(to.size()); ++f, ++t) {
-    if (from[f] != to[t]) {
-      leading_expand = false;
-      break;
+  for (int i = 0; i < to.size() - from.size(); i++) {
+    bool is_substring = true;
+    for (int j = leading_ones; j < to.size() - trailing_ones; j++) {
+      if (to[i + j] != from[i]) {
+        is_substring = false;
+        break;
+      }
+    }
+    if (is_substring) {
+      possible_results.push_back(std::make_tuple(true, i));
     }
   }
 
-  if (leading_expand && f >= from_dim_end) {
-    return std::make_tuple(true, 0);
+  if (possible_results.size() != 1) {
+    std::cerr << "Warning: found multiple ways to broadcast. choosing one arbitrarily" << std::endl;
+  }
+  if (possible_results.size()) {
+    // For backwards compatability, break ties in favor of the right-most position.
+    return possible_results[possible_results.size() - 1];
   }
 
   return std::make_tuple(false, at::nullopt);
@@ -152,7 +150,8 @@ void fuseBroadcast(std::shared_ptr<Graph>& graph) {
 
     n->replaceInput(input_index, unexpanded_rhs);
     n->i_(attr::broadcast, 1);
-    if (axis) {
+    // Gemm doesn't support the axis argument, so be sure to omit it for that op.
+    if (axis && n->kind() != onnx::Gemm) {
       n->i_(attr::axis, axis.value());
     }
     if (!expanded_rhs->hasUses()) {
