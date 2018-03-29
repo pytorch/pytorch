@@ -46,6 +46,15 @@ Type & Type::toBackend(Backend b) const {
 Type & Type::toScalarType(ScalarType s) const {
   return context->getType(backend(),s);
 }
+static std::vector<int64_t> defaultStrides(IntList sizes) {
+  std::vector<int64_t> strides(sizes.size());
+  int64_t stride = 1;
+  for(size_t i = sizes.size(); i > 0; --i) {
+    strides[i-1] = stride;
+    stride *= sizes[i-1];
+  }
+  return strides;
+}
 static int64_t computeStorageSize(IntList sizes, IntList strides) {
   // size of the underlying storage is 1 bigger than the offset
   // of the last element according to stride
