@@ -13,7 +13,8 @@ from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
-from common_nn import TEST_CUDA
+if __name__ == '__main__':
+    from common_nn import TEST_CUDA
 
 
 JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 4.5
