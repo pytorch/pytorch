@@ -229,7 +229,7 @@ static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) 
 
 Tensor index(const Tensor & self, TensorList indices) {
   if (indices.size() > (size_t)self.dim()) {
-    runtime_error("too many indices for tensor of dimension %d (got %d)",
+   AT_ERROR("too many indices for tensor of dimension %d (got %d)",
       (int)self.dim(), (int)indices.size());
   }
 
@@ -240,7 +240,7 @@ Tensor index(const Tensor & self, TensorList indices) {
 
 Tensor & index_put_(Tensor & self, TensorList indices, const Tensor & value) {
   if (indices.size() > (size_t)self.dim()) {
-    runtime_error("too many indices for tensor of dimension %d (got %d)",
+   AT_ERROR("too many indices for tensor of dimension %d (got %d)",
       (int)self.dim(), (int)indices.size());
   }
 
@@ -254,23 +254,23 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (index.dim() >= 2) {
-    runtime_error(
+   AT_ERROR(
         "index_copy_(): Index should have dimension 1 or 0 (got %d)",
         (int)index.dim());
   }
   int64_t numIndices = index.numel();
   if (source.dim() == 0 && numIndices != 1) {
-    runtime_error(
+   AT_ERROR(
         "index_copy_(): When source is scalar, index should have one element (got %d)",
         (int)numIndices);
   }
   if (source.dim() > 0 && numIndices != source.size(dim)) {
-    runtime_error(
+   AT_ERROR(
         "index_copy_(): Number of indices (%d) should be equal to source.size(dim) (%d)",
         (int)numIndices, (int)source.size(dim));
   }
   if (index.type().scalarType() != ScalarType::Long) {
-    runtime_error("index_copy_(): Expected LongTensor for index");
+   AT_ERROR("index_copy_(): Expected LongTensor for index");
   }
 
   // Check that source and destination slices have the same size

@@ -1,4 +1,5 @@
 #include "ATen/UndefinedType.h"
+#include "ATen/Error.h"
 
 namespace at {
 
@@ -15,25 +16,25 @@ bool UndefinedType::is_sparse() const { return false; }
 bool UndefinedType::is_distributed() const { return false; }
 
 std::unique_ptr<Storage> UndefinedType::storage() const {
-  runtime_error("storage not defined for UndefinedType");
+  AT_ERROR("storage not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::storage(size_t size) const {
-  runtime_error("storage(size_t) not defined for UndefinedType");
+  AT_ERROR("storage(size_t) not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-  runtime_error("storageFromBlob not defined for UndefinedType");
+  AT_ERROR("storageFromBlob not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  runtime_error("unsafeStorageFromTH not defined for UndefinedType");
+  AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
 }
 std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
-  runtime_error("storageWithAllocator not defined for UndefinedType");
+  AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  runtime_error("unsafeTensorFromTH not defined for UndefinedType");
+  AT_ERROR("unsafeTensorFromTH not defined for UndefinedType");
 }
 std::unique_ptr<Generator> UndefinedType::generator() const {
-  runtime_error("generator not defined for UndefinedType");
+  AT_ERROR("generator not defined for UndefinedType");
 }
 
 const char * UndefinedType::toString() const {
@@ -44,20 +45,20 @@ TypeID UndefinedType::ID() const {
 }
 
 std::size_t UndefinedType::elementSizeInBytes() const {
-  runtime_error("elementSizeInBytes not defined for UndefinedType");
+  AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 
 Type & UndefinedType::toBackend(Backend b) const {
   if (b == Backend::Undefined) {
     return Type::toBackend(b);
   }
-  runtime_error("toBackend not implemented for UndefinedType to non-UndefinedType");
+  AT_ERROR("toBackend not implemented for UndefinedType to non-UndefinedType");
 }
 Type & UndefinedType::toScalarType(ScalarType s) const {
   if (s == ScalarType::Undefined) {
     return Type::toScalarType(s);
   }
-  runtime_error("toScalarType not implemented for UndefinedType to non-UndefinedType");
+  AT_ERROR("toScalarType not implemented for UndefinedType to non-UndefinedType");
 }
 
 const char * UndefinedType::typeString() {
@@ -65,7 +66,7 @@ const char * UndefinedType::typeString() {
 }
 
 Tensor & UndefinedType::s_copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  runtime_error("s_copy not defined for UndefinedType");
+  AT_ERROR("s_copy not defined for UndefinedType");
 }
 
 }

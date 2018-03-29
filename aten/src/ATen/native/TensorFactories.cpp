@@ -1,10 +1,12 @@
 #include "ATen/ATen.h"
-#include "ATen/NativeFunctions.h"
-#include "TH/THRandom.h"
-#include "ATen/CheckGenerator.h"
 #include "ATen/CPUGenerator.h"
+#include "ATen/CheckGenerator.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Error.h"
+#include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
+#include "TH/THRandom.h"
+
 #include <algorithm>
 #include <sstream>
 
@@ -102,7 +104,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 
 Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
   if (dtype.is_sparse()) {
-    at::runtime_error("full(...) is not implemented for sparse types, got: %s", dtype.toString());
+    AT_ERROR("full(...) is not implemented for sparse types, got: %s", dtype.toString());
   }
   auto result = dtype.tensor(size);
   return result.fill_(fill_value);
@@ -110,7 +112,7 @@ Tensor full(const Type& dtype, IntList size, Scalar fill_value) {
 
 Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
   if (result.is_sparse()) {
-    at::runtime_error("full(...) is not implemented for sparse types, got: %s", result.type().toString());
+    AT_ERROR("full(...) is not implemented for sparse types, got: %s", result.type().toString());
   }
   result.resize_(size);
   return result.fill_(fill_value);

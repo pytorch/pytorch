@@ -32,8 +32,10 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
 
 static void check_out_type_matches(Tensor result, const at::Type &type) {
   if (result.type() != type) {
-    at::runtime_error("type corresponding to %s does not match type of out parameter (%s)",
-                      type.toString(), result.type().toString());
+    AT_ERROR(
+        "type corresponding to %s does not match type of out parameter (%s)",
+        type.toString(),
+        result.type().toString());
   }
 }
 
@@ -94,7 +96,7 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
     const at::Type& t1 = r.type(0);
     const at::Type& t2 = r.type(1);
     if (t1.backend() != t2.backend()) {
-      at::runtime_error("_promote_types only supports types with the same backends.  Got %s and %s.",
+      AT_ERROR("_promote_types only supports types with the same backends.  Got %s and %s.",
                         at::toString(t1.backend()), at::toString(t2.backend()));
     }
     ScalarType promoted = at::promoteTypes(t1.scalarType(), t2.scalarType());
