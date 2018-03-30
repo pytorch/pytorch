@@ -78,6 +78,7 @@ cmake_build
 gen
 .setuptools-cmake-build
 .pytest_cache
+dist
 
 # Bram
 plsdontbreak

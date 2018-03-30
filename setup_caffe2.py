@@ -65,7 +65,7 @@ try:
 except (OSError, subprocess.CalledProcessError):
     git_version = None
 
-with open(os.path.join(TOP_DIR, 'VERSION_NUMBER')) as version_file:
+with open(os.path.join(SRC_DIR, 'VERSION_NUMBER')) as version_file:
     VersionInfo = namedtuple('VersionInfo', ['version', 'git_version'])(
         version=version_file.read().strip(),
         git_version=git_version
