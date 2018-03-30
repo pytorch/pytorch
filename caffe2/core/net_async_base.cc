@@ -44,9 +44,12 @@ AsyncNetBase::AsyncNetBase(
     Workspace* ws)
     : NetBase(net_def, ws) {
   operator_nodes_ = dag_utils::prepareOperatorNodes(net_def, ws);
+  helper_ = caffe2::make_unique<AsyncNetExecutorHelper>(this);
   operators_.reserve(operator_nodes_.size());
   for (const auto& node : operator_nodes_) {
-    operators_.push_back(node.operator_.get());
+    auto op_ptr = node.operator_.get();
+    op_ptr->SetExecutorHelper(helper_.get());
+    operators_.push_back(op_ptr);
   }
 
   const auto& execution_chains = dag_utils::computeChains(operator_nodes_);

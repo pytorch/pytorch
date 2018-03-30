@@ -126,4 +126,9 @@ unique_ptr<NetBase> CreateNet(
   return net;
 }
 
-}  // namespace caffe2
+std::shared_ptr<TaskThreadPool> ExecutorHelper::GetPool(
+    const DeviceOption& /* unused */) const {
+  CAFFE_THROW("Not implemented");
+}
+
+} // namespace caffe2
