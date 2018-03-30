@@ -10,7 +10,7 @@ class GetIm2ColGradient : public GradientMakerBase {
     return SingleGradientDef(
         "Col2Im",
         "",
-        std::vector<string>{O(0), I(0)},
+        std::vector<string>{GO(0), I(0)},
         std::vector<string>{GI(0)});
   }
 };
@@ -20,7 +20,7 @@ class GetCol2ImGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
-        "Im2Col", "", std::vector<string>{O(0)}, std::vector<string>{GI(0)});
+        "Im2Col", "", std::vector<string>{GO(0)}, std::vector<string>{GI(0)});
   }
 };
 REGISTER_GRADIENT(Col2Im, GetCol2ImGradient);
