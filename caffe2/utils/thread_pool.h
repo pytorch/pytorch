@@ -65,6 +65,10 @@ class TaskThreadPool {
     }
   }
 
+  size_t size() const {
+    return threads_.size();
+  }
+
   /// @brief Add task to the thread pool if a thread is currently available.
   template <typename Task>
   void runTask(Task task) {

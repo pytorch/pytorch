@@ -19,6 +19,7 @@
 #include "caffe2/core/workspace.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/simple_queue.h"
+#include "caffe2/utils/thread_pool.h"
 
 namespace caffe2 {
 
@@ -121,6 +122,14 @@ class NetBase : public Observable<NetBase> {
   vector<const Event*> events_;
   std::shared_ptr<const NetDef> net_def_;
   DISABLE_COPY_AND_ASSIGN(NetBase);
+};
+
+class ExecutorHelper {
+ public:
+  ExecutorHelper() {}
+  virtual std::shared_ptr<TaskThreadPool> GetPool(
+      const DeviceOption& option) const;
+  virtual ~ExecutorHelper() {}
 };
 
 CAFFE_DECLARE_REGISTRY(
