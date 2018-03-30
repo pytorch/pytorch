@@ -401,16 +401,12 @@ public:
   // arguments. Returns the added node for ease of chaining.
   Value* insertInput(size_t i, Value* node) {
     JIT_ASSERT(graph_ == node->owningGraph());
-    node->uses_.emplace_back(this, i);
-    inputs_.insert(inputs_.begin() + i, node);
-    for (size_t use_itr = i + 1; use_itr < inputs_.size(); ++use_itr) {
-      for (auto& use : inputs_[use_itr]->uses_) {
-        if (use.user == this) {
-          use.offset += 1;
-          break;
-        }
-      }
+    for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+      auto use = findUseForInput(use_itr);
+      use->offset += 1;
     }
+    inputs_.insert(inputs_.begin() + i, node);
+    node->uses_.emplace_back(this, i);
     return node;
   }
 
