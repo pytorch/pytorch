@@ -7,8 +7,10 @@ if (NOT __NCCL_INCLUDED)
       add_library(__caffe2_nccl INTERFACE)
       target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
       target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
+      message(STATUS "Found NCCL at " ${NCCL_LIBRARIES} " and " ${NCCL_INCLUDE_DIRS})
   else()
     # build directory
+    message(STATUS "Could not find NCCL, so building nccl from third_party")
     set(nccl_PREFIX ${PROJECT_SOURCE_DIR}/third_party/nccl)
 
     # we build nccl statically, but want to link it into the caffe shared library
@@ -42,6 +44,7 @@ if (NOT __NCCL_INCLUDED)
     add_dependencies(__caffe2_nccl nccl_external)
     target_link_libraries(__caffe2_nccl INTERFACE ${NCCL_LIBRARIES})
     target_include_directories(__caffe2_nccl INTERFACE ${NCCL_INCLUDE_DIRS})
+    message(STATUS "Built NCCL at " ${NCCL_LIBRARIES} " and " ${NCCL_INCLUDE_DIRS})
   endif()
 
 endif()
