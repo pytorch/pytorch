@@ -58,14 +58,20 @@ class TestOneHotOps(hu.HypothesisTestCase):
     @given(
         x=hu.tensor(
             min_dim=2, max_dim=2, dtype=np.float32,
-            elements=st.floats(min_value=-5, max_value=5)),
+            elements=st.integers(min_value=-5, max_value=5)),
+        seed=st.integers(min_value=0, max_value=1000),
         **hu.gcs_cpu_only)
-    def test_batch_bucketized_one_hot(self, x, gc, dc):
+    def test_batch_bucketized_one_hot(self, x, seed, gc, dc):
+        np.random.seed(seed)
         d = x.shape[1]
         lens = np.random.randint(low=1, high=5, size=d)
         boundaries = []
         for i in range(d):
-            cur_boundary = np.random.randn(lens[i]) * 5
+            # add [0, 0] as duplicated bounary for heuristic bucketization
+            if lens[i] > 2:
+                cur_boundary = np.append(np.random.randn(lens[i] - 2) * 5, [0, 0])
+            else:
+                cur_boundary = np.random.randn(lens[i]) * 5
             cur_boundary.sort()
             boundaries += cur_boundary.tolist()
 
@@ -78,11 +84,18 @@ class TestOneHotOps(hu.HypothesisTestCase):
             boundary_offset = 0
             output_offset = 0
             for i, l in enumerate(lens):
-                bucket_idx = np.digitize(
+                bucket_idx_right = np.digitize(
                     x[:, i],
                     boundaries[boundary_offset:boundary_offset + l],
                     right=True
                 )
+                bucket_idx_left = np.digitize(
+                    x[:, i],
+                    boundaries[boundary_offset:boundary_offset + l],
+                    right=False
+                )
+                bucket_idx = np.floor_divide(
+                    np.add(bucket_idx_right, bucket_idx_left), 2)
                 for j in range(x.shape[0]):
                     ret[j, output_offset + bucket_idx[j]] = 1.0
                 boundary_offset += lens[i]
