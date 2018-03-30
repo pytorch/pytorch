@@ -182,6 +182,8 @@ class CosineAnnealingLR(_LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
+        T_mult (int): Multiplicative factor of T_max. Default: 2
+        restart (bool): If True, warm restart policy will be used.
         last_epoch (int): The index of last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
