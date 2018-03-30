@@ -156,7 +156,28 @@ class OperatorBase : public Observable<OperatorBase> {
   // event_ member object. If the specific operator does not support RunAsync,
   // it will simply be synchronous as a fallback.
   virtual bool RunAsync(int stream_id = 0) {
-    return Run(stream_id);
+    try {
+      auto result = Run(stream_id);
+      if (result) {
+        if (HasAsyncPart()) {
+          RecordEvent();
+        } else {
+          event().SetFinished();
+        }
+      } else {
+        event().SetFinished(getErrorMsg().c_str());
+      }
+      return result;
+    } catch (EnforceNotMet& err) {
+      event().SetFinished(err.what());
+      throw;
+    } catch (const std::exception& err) {
+      event().SetFinished(err.what());
+      throw;
+    } catch (...) {
+      event().SetFinished(getErrorMsg().c_str());
+      throw;
+    }
   }
 
   virtual void AddRelatedBlobInfo(EnforceNotMet* err) {
@@ -267,6 +288,14 @@ class OperatorBase : public Observable<OperatorBase> {
     return engine_;
   }
 
+  void SetExecutorHelper(ExecutorHelper* helper) {
+    helper_ = helper;
+  }
+
+  ExecutorHelper* GetExecutorHelper() const {
+    return helper_;
+  }
+
  public:
   static constexpr int kNoNetPositionSet = -1;
 
@@ -280,9 +309,19 @@ class OperatorBase : public Observable<OperatorBase> {
 
   int net_position_{kNoNetPositionSet};
 
+  ExecutorHelper* helper_ = nullptr;
+
  protected:
   virtual void RecordEvent(const char* err_msg = nullptr) {
     CAFFE_NOT_IMPLEMENTED;
+  }
+
+  std::string getErrorMsg() {
+    if (has_debug_def()) {
+      return "Error from operator: " + ProtoDebugString(debug_def());
+    } else {
+      return "Error from operator: no op def";
+    }
   }
 
   // An event used by asynchronous execution.
@@ -468,14 +507,6 @@ class Operator : public OperatorBase {
   void RecordEvent(const char* err_msg = nullptr) final {
     if (event_) {
       context_.Record(event_.get(), err_msg);
-    }
-  }
-
-  std::string getErrorMsg() {
-    if (has_debug_def()) {
-      return "Error from operator: " + ProtoDebugString(debug_def());
-    } else {
-      return "Error from operator: no op def";
     }
   }
 

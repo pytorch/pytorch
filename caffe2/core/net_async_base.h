@@ -14,6 +14,8 @@
 
 namespace caffe2 {
 
+class AsyncNetExecutorHelper;
+
 class AsyncNetBase : public NetBase {
  public:
   AsyncNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
@@ -73,9 +75,25 @@ class AsyncNetBase : public NetBase {
  private:
   std::shared_ptr<TaskThreadPool>
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
+
+  std::unique_ptr<AsyncNetExecutorHelper> helper_;
+
+  friend class AsyncNetExecutorHelper;
 };
 
 CAFFE_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);
+
+class AsyncNetExecutorHelper : public ExecutorHelper {
+ public:
+  explicit AsyncNetExecutorHelper(AsyncNetBase* net) : net_(net) {}
+  std::shared_ptr<TaskThreadPool> GetPool(
+      const DeviceOption& option) const override {
+    return net_->pool(option);
+  }
+
+ private:
+  AsyncNetBase* net_;
+};
 
 std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(
     int numa_node_id,
