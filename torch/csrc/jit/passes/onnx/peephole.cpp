@@ -290,6 +290,43 @@ void removeNopPacking(std::shared_ptr<Graph>& graph) {
   }
 }
 
+void fixDefaultRnnHiddenState(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (!isRNN(n)) {
+      continue;
+    }
+    if (n->inputs().size() < 6) {
+      continue;
+    }
+    auto initial_h = n->inputs()[5];
+    if (initial_h->node()->kind() == onnx::Constant) {
+      Node * undefined = graph->create(prim::Undefined, 1);
+      undefined->insertBefore(n);
+      n->replaceInput(5, undefined->outputs()[0]);
+    }
+  }
+}
+
+void fixDefaultLstmCellState(std::shared_ptr<Graph>& graph) {
+  for (auto it = graph->nodes().begin(); it != graph->nodes().end(); ++it) {
+    auto* n = *it;
+
+    if (n->kind() != onnx::LSTM) {
+      continue;
+    }
+    if (n->inputs().size() < 7) {
+      continue;
+    }
+    auto initial_h = n->inputs()[6];
+    if (initial_h->node()->kind() == onnx::Constant) {
+      Node * undefined = graph->create(prim::Undefined, 1);
+      undefined->insertBefore(n);
+      n->replaceInput(6, undefined->outputs()[0]);
+    }
+  }
+}
 
 // This optimization does ONNX-specific peephole optimizations.
 //
@@ -312,6 +349,8 @@ void PeepholeOptimizeONNX(std::shared_ptr<Graph>& graph) {
   // TODO: decide on fixpoint strategy
   // TODO: make it easier not to do O(k) iterations over the graph, where
   // k is the number of distinct peephole optimizations
+  fixDefaultRnnHiddenState(graph);
+  fixDefaultLstmCellState(graph);
   fuseBroadcast(graph);
   fuseConsecutiveTransposes(graph);
   eliminateNopTranspose(graph);
