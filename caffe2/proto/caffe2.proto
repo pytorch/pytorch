@@ -1,0 +1,328 @@
+syntax = "proto2";
+
+package caffe2;
+
+// A few notes about the Caffe2's protobuffer convention:
+// (1) Most objects are registered by their types, such as operators and nets.
+//     For these, we have a string-type field "type" for registration purposes.
+// (2) We do not use extension because that used to create quite some conflicts
+//     in Caffe's protobuf design.
+// (3) We have not used any proto3 specific features, such as Any or Map. This
+//     is mainly for backward compability purposes but we may consider using
+//     those in the future.
+
+// TensorProto stores serialized Tensor objects.
+message TensorProto {
+  // The dimensions in the tensor.
+  repeated int64 dims = 1;
+  enum DataType {
+    UNDEFINED = 0;
+    FLOAT = 1;  // float
+    INT32 = 2;  // int
+    BYTE = 3;  // BYTE, when deserialized, is going to be restored as uint8.
+    STRING = 4;  // string
+    // Less-commonly used data types.
+    BOOL = 5;  // bool
+    UINT8 = 6;  // uint8_t
+    INT8 = 7;  // int8_t
+    UINT16 = 8;  // uint16_t
+    INT16 = 9;  // int16_t
+    INT64 = 10;  // int64_t
+    FLOAT16 = 12;  // caffe2::__f16, caffe2::float16
+    DOUBLE = 13;  // double
+  }
+  optional DataType data_type = 2 [default = FLOAT];
+  // For float
+  repeated float float_data = 3 [packed = true];
+  // For int32, uint8, int8, uint16, int16, bool, and float16
+  // Note about float16: in storage we will basically convert float16 byte-wise
+  // to unsigned short and then store them in the int32_data field.
+  repeated int32 int32_data = 4 [packed = true];
+  // For bytes
+  optional bytes byte_data = 5;
+  // For strings
+  repeated bytes string_data = 6;
+  // For double
+  repeated double double_data = 9 [packed = true];
+  // For int64
+  repeated int64 int64_data = 10 [packed = true];
+  // Optionally, a name for the tensor.
+  optional string name = 7;
+
+  // Optionally, a TensorProto can contain the details about the device that
+  // it was serialized from. This is useful in cases like snapshotting a whole
+  // workspace in a multi-GPU environment.
+  optional DeviceOption device_detail = 8;
+  // When loading from chunks this is going to indicate where to put data in the
+  // full array. When not used full data have to be present
+  message Segment {
+    required int64 begin = 1;
+    required int64 end = 2;
+  }
+  optional Segment segment = 11;
+}
+
+message QTensorProto {
+  repeated int64 dims = 1;
+  required int32 precision = 2;
+  required double scale = 3;
+  required double bias = 4;
+  required bool is_signed = 5;
+  repeated int32 data = 6 [packed = true];
+  optional string name = 7;
+}
+
+// TensorProtos stores multiple TensorProto objects in one single proto. This
+// is useful for small tensors; For anything big, consider using a DB for
+// storage.
+message TensorProtos {
+  repeated TensorProto protos = 1;
+}
+
+message TensorShape {
+  repeated int64 dims = 1;
+  optional TensorProto.DataType data_type = 2 [default = FLOAT];
+  repeated int32 unknown_dims = 3;
+  optional bool unknown_shape = 4 [default = false];
+  optional string name = 5;
+
+}
+
+message TensorShapes {
+  repeated TensorShape shapes = 1;
+}
+
+// A named argument containing either singular float, integer and string
+// values, or repeated float, int and string arrays.
+message Argument {
+  optional string name = 1;
+  optional float f = 2;
+  optional int64 i = 3;
+  optional bytes s = 4;
+  optional NetDef n = 8;
+  repeated float floats = 5;
+  repeated int64 ints = 6;
+  repeated bytes strings = 7;
+  repeated NetDef nets = 9;
+}
+
+// DeviceType that Caffe2 currently supports.
+// Note: if you add a device type, make sure you add the corresponding device
+// line in core/blob_serialization.cc.
+enum DeviceType {
+  CPU = 0;                    // In default, we will use CPU.
+  CUDA = 1;                   // CUDA.
+  MKLDNN = 2;                 // Reserved for explicit MKLDNN
+  OPENGL = 3;                 // OpenGL
+  // Change the following number if you add more devices in the code.
+  COMPILE_TIME_MAX_DEVICE_TYPES = 4;
+  ONLY_FOR_TEST = 20901701;   // This device type is only for test.
+}
+
+// Device-specific options. We do not distinguish DeviceOption protos for
+// different DeviceTypes, so currently all devices share the same DeviceOption
+// proto. Fields that are specific to a device type is ignored if the type does
+// not match.
+// Note: if you add fields to the DeviceOption, make sure you add the
+// corresponding changes to IsSameDevice() function in utils/proto_utils.{h,cc}.
+message DeviceOption {
+  // [general] Options that need to be carried out before running the execution.
+  // optional DeviceType device_type = 1 [ default = CPU ];
+  optional int32 device_type = 1 [ default = 0 ]; // 0 is CPU.
+  // [CUDA specific] the cuda gpu id.
+  optional int32 cuda_gpu_id = 2;
+  // [general] The random seed to start the device random number generator with.
+  optional uint32 random_seed = 3;
+  // [general] What node this op should execute on.
+  // Used for net transformation purposes. Must be empty at execution time.
+  optional string node_name = 4;
+  // [CPU and Linux specific] NUMA node id
+  optional int32 numa_node_id = 5 [default = -1];
+}
+
+// Operator Definition.
+message OperatorDef {
+  repeated string input = 1; // the name of the input blobs
+  repeated string output = 2; // the name of output top blobs
+  optional string name = 3; // the operator name. This is optional.
+  // the operator type. This is needed to create the object from the operator
+  // registry.
+  optional string type = 4;
+  repeated Argument arg = 5;
+
+  // The device option that the operator should run under.
+  optional DeviceOption device_option = 6;
+
+  // Optionally, one can specify an engine when there are multiple
+  // implementations available simultaneously for one device type.
+  // If one specifies an engine but that engine does not exist in the compiled
+  // Caffe2 binary, Caffe2 will fall back to the default engine of that device
+  // type.
+  optional string engine = 7;
+
+
+  // Additional 'fake' inputs used for expressing control dependencies
+  // in the operator graph. This can be used to ensure that an
+  // operator does not run until another operator is ready, for e.g.
+  // scheduling control. These are not passed as actual inputs to the
+  // Operator implementation, and are only used by the Net class for
+  // scheduling purposes.
+  repeated string control_input = 8;
+
+  // is_gradient_op argument is only used as a hint in shape inference
+  // and has no runtime significance
+  optional bool is_gradient_op = 9 [default = false];
+
+  // debug information associated with the construction of the operator.
+  // This is an optional string with no assumed characteristics as
+  // operators can be constructed in any language.
+  optional string debug_info = 10;
+}
+
+// Network definition.
+message NetDef {
+  optional string name = 1; // the network's name
+  // Operators that the network contains.
+  // Note: this is not named "operator" because that is a reserved word in C++.
+  repeated OperatorDef op = 2;
+
+  // The type of network that the net should be run with. This routes the
+  // network instantiation to different execution modes. The default mode,
+  // "simple", runs the operators in a sequential way as the original Caffe
+  // implementation does.
+  optional string type = 3;
+
+  // the number of workers, if the operators in the network is to be carried out
+  // in parallel.
+  // Note: This is to be deprecated. Using the arg field with "num_workers" as
+  // key.
+  optional int32 num_workers = 4 [deprecated=true];
+
+  // The device option for the network. If a network has a specific device
+  // option and one of its operators does not have it set, we will copy over the
+  // device option to the operator. This allows us to basically avoid putting
+  // device options at every operator.
+  optional DeviceOption device_option = 5;
+
+  repeated Argument arg = 6;
+
+  // Two optional fields to declare external input and output of a net.
+  // If these two are set, when a net is created, we will sanity check for
+  // every op whether its input is declared (either as an external input,
+  // or as an intermediate blob created by one of the ops), and sanity check
+  // if all blobs in external_output are produced.
+  //
+  // In cases of memory optimization, declaring external_input and
+  // external_output also ensures that storage of these blobs are persistent:
+  // for any blob in external_input and external_output, after a network run
+  // finishes, their content are actually the right content. Any intermediate
+  // blobs' contents may be overwritten.
+  repeated string external_input = 7;
+  repeated string external_output = 8;
+}
+
+// ExecutionStep is actually a sort-of-hacky way we simulate iteration right
+// now.
+message ExecutionStep {
+  // ExecutionStep should either contain a set of substeps, or a set of
+  // network names to run in this execution step. They should NOT both be set
+  // at the same time.
+  optional string name = 1;
+  // An execution step could be recursive, in which it involves a set of
+  // substeps.
+  repeated ExecutionStep substep = 2;
+  // Alternatively, an execution step could involve one or more networks.
+  // Note that you cannot have both substeps and networks. Choose one.
+  // Note that an execution step refers networks by their name. The actual
+  // network definition of the same name should be included in the network field
+  // of the plan. The reason is that a network object might hold internal states
+  // (think of a data layer), so we want to have the same network object that
+  // multiple steps could ask to run.
+  repeated string network = 3;
+  // Number of iterations to run this step. The substeps or the networks
+  // specified will be run sequentially, and one sequential run is considered
+  // one iteration. If this is not set, the number of iterations is assumed to
+  // be 1.
+  optional int64 num_iter = 4;
+
+  // Criteria network specifies a single output (TensorCPU<bool>) of
+  // size (1), is run on every iteration by the executor, and
+  // execution terminates when the output[0] is `false`.
+  optional string criteria_network = 5 [deprecated=true];
+
+  // DEPRECATED. Use `run_every_ms`.
+  optional string report_net = 7;
+  optional int32 report_interval = 8;
+
+  // If provided, execute this step at every time interval (in millisecs)
+  // while its sibiling execution steps execute in parallel. This step is
+  // guaranteed to run at least once after all non-interval siblings finished.
+  optional int64 run_every_ms = 11;
+
+  // If false or not set, execute sub-steps serially.
+  // If true, execute all substeps concurrently, each one in a separte thread.
+  optional bool concurrent_substeps = 6;
+
+  // Name of a scalar boolean tensor.
+  // ES checks this blob AFTER every substeps/subnets.
+  // If specified, and the value is true, then ES will skip the rest and return
+  // immediately.
+  // This means that the report_net and the first step will always be called.
+  // Use cases:
+  // 1) the first substep stops the rest if data condition not met
+  // 2) the first substep decide which of the rest of the steps should be run.
+  // 3) external control
+  //
+  // ** It is the user's responsibility to not to put this blob in race conditions.
+  // ** For example when setting this blob in concurrent substeps
+  optional string should_stop_blob = 9;
+
+  // if only_once is true, this step will only be executed once. this ONLY takes
+  // effect when using should_stop_blob
+  optional bool only_once = 10;
+
+  // Whether to create a child workspace for this step.
+  // If yes, the workflow and nets are re-created every time this step is run.
+  optional bool create_workspace = 12;
+
+  // How many copies of the children execution steps to run concurrently.
+  optional int32 num_concurrent_instances = 13;
+}
+
+message PlanDef {
+  // All the networks that are used in this execution. Note that networks should
+  // be ordered in the way they are executed, i.e. for a layer in a network, all
+  // its input blobs should already have been initialized by the layers or
+  // networks defined before it.
+  optional string name = 1;
+  // The networks that are going to be used in this plan.
+  repeated NetDef network = 2;
+  repeated ExecutionStep execution_step = 3;
+}
+
+// Protobuf format for blobs that are not Tensors. We use a key to store the
+// type of the blob. For example for a serialized DBProto, the type should
+// be "DBReader" and the content should be a serialized DBProto object.
+message BlobProto {
+  optional string name = 1;
+  optional string type = 2;
+  optional TensorProto tensor = 3;
+  optional bytes content = 4;
+  optional QTensorProto qtensor = 5;
+  // If blob is not Tensor and is divided into chunks, content_num_chunks
+  // contains number of chunks, into which blob was divided.
+  optional int32 content_num_chunks = 6;
+  optional int32 content_chunk_id = 7;
+}
+
+// Protobuf format to serialize DBReader.
+message DBReaderProto {
+  // The name for the DB object in the workspace.
+  optional string name = 1;
+  // The source of the DB
+  optional string source = 2;
+  // The type of the DB
+  optional string db_type = 3;
+  // The current key of the DB if the DB supports seeking.
+  optional string key = 4;
+}
