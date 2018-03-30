@@ -2,4 +2,4 @@
 set -ex
 upstream="$1"
 pr="$2"
-git diff --name-only "$upstream" "$pr" | grep -Eq '^(aten/|cmake/|.jenkins/pytorch|docs/|mypy|requirements.txt|setup.py|test/|third_party/|tools/|\.gitmodules|torch/)'
+git diff --name-only "$upstream" "$pr" | grep -Eq '^(aten/|.jenkins/pytorch|docs/|mypy|requirements.txt|setup.py|test/|third_party/|tools/|\.gitmodules|torch/)'
