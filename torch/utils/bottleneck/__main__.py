@@ -9,6 +9,7 @@ import contextlib
 
 import torch
 from torch.autograd import profiler
+import torch.utils.envinfo as envinfo
 
 PY3 = sys.version_info >= (3, 0)
 
@@ -34,6 +35,22 @@ def check_running_cuda_version():
     if rc is not 0:
         return None
     m = re.search(r'V(.*)$', out)
+    assert m is not None
+    return m.group(1)
+
+
+def get_gpu_info():
+    rc, out, _ = run('nvidia-smi -L')
+    if rc is not 0:
+        return None
+    return out
+
+
+def get_nvidia_driver_version():
+    rc, out, _ = run('nvidia-smi')
+    if rc is not 0:
+        return None
+    m = re.search(r'Driver Version: (.*)$', out)
     assert m is not None
     return m.group(1)
 
@@ -67,9 +84,9 @@ def check_pip_packages():
     return 'pip3', out3
 
 
-def compiled_with_cuda():
-    if torch.version.cuda:
-        return 'compiled w/ CUDA {}'.format(torch.version.cuda)
+def compiled_with_cuda(sysinfo):
+    if sysinfo.cuda_compiled_version:
+        return 'compiled w/ CUDA {}'.format(sysinfo.cuda_compiled_version)
     return 'not compiled w/ CUDA'
 
 
@@ -87,28 +104,31 @@ Running with Python {py_version} and {cuda_runtime}
 
 def run_env_analysis():
     print('Running environment analysis...')
+    info = envinfo.get_env_info()
+
     result = []
 
     debug_str = ''
-    if torch.version.debug:
+    if info.is_debug_build:
         debug_str = ' DEBUG'
 
     cuda_avail = ''
-    if torch.cuda.is_available():
-        cuda = check_running_cuda_version()
-        if cuda is not None:
+    if info.is_cuda_available:
+        cuda = info.cuda_runtime_version
+        if cuda is not None and cuda is not envinfo.NOT_APPLICABLE:
             cuda_avail = 'CUDA ' + cuda
     else:
         cuda = 'CUDA unavailable'
 
-    pip_version, pip_list_output = check_pip_packages()
+    pip_version = info.pip_version
+    pip_list_output = info.pip_packages
     if pip_list_output is None:
         pip_list_output = 'Unable to fetch'
 
     result = {
         'debug_str': debug_str,
-        'pytorch_version': torch.__version__,
-        'cuda_compiled': compiled_with_cuda(),
+        'pytorch_version': info.torch_version,
+        'cuda_compiled': compiled_with_cuda(info),
         'py_version': '{}.{}'.format(sys.version_info[0], sys.version_info[1]),
         'cuda_runtime': cuda_avail,
         'pip_version': pip_version,
