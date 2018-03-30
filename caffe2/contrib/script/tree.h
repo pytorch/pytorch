@@ -56,7 +56,7 @@ struct Tree : std::enable_shared_from_this<Tree> {
   const TreeRef& tree(size_t i) const {
     return trees().at(i);
   }
-  virtual TreeRef map(std::function<TreeRef(TreeRef)> fn) {
+  virtual TreeRef map(std::function<TreeRef(TreeRef)> /*fn*/) {
     return shared_from_this();
   }
   template <typename... Args>

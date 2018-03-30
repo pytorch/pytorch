@@ -715,8 +715,8 @@ void Matrix::randomizeNormal() {
     //LOG(FATAL) << "randomizeNormal only implemented on MKL!";
 }
 
-void Matrix::randomizeNormal(MTYPE mean, MTYPE stdev) {
-    //LOG(FATAL) << "randomizeNormal only implemented on MKL!";
+void Matrix::randomizeNormal(MTYPE /*mean*/, MTYPE /*stdev*/) {
+  // LOG(FATAL) << "randomizeNormal only implemented on MKL!";
 }
 
 void Matrix::eltWiseDivideByVector(const Matrix& vec) {

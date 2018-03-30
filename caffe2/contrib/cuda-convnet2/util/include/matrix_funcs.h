@@ -29,12 +29,12 @@
 
 #define MYRAND ((double)rand() / ((double)RAND_MAX + 1))
 
-inline MTYPE _zero(MTYPE x) {
-    return 0;
+inline MTYPE _zero(MTYPE /*x*/) {
+  return 0;
 }
 
-inline MTYPE _one(MTYPE x) {
-    return 1;
+inline MTYPE _one(MTYPE /*x*/) {
+  return 1;
 }
 
 inline MTYPE _abs(MTYPE x) {
@@ -73,8 +73,8 @@ inline MTYPE _sign(MTYPE x) {
     return x > 0 ? 1 : -1;
 }
 
-inline MTYPE _rand(MTYPE x) {
-    return MYRAND;
+inline MTYPE _rand(MTYPE /*x*/) {
+  return MYRAND;
 }
 
 inline MTYPE _divide(MTYPE x, MTYPE y) {
