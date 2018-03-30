@@ -35,10 +35,20 @@ PyObject *THPDtype_is_cuda(THPDtype *self)
   }
 }
 
+PyObject *THPDtype_is_floating_point(THPDtype *self)
+{
+  if (at::isFloatingType(self->scalar_type)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+}
+
 typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDtype_properties[] = {
   {"is_cuda",      (getter)THPDtype_is_cuda, nullptr, nullptr, nullptr},
+  {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
