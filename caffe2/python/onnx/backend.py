@@ -679,6 +679,35 @@ class Caffe2Backend(Backend):
 
 
     @classmethod
+    def _substitute_raw_value(cls, tp, raw_values_dict):
+        if tp.HasField('raw_data') and tp.raw_data == bytes(b'__EXTERNAL'):
+            if tp.name not in raw_values_dict:
+                raise RuntimeError('TensorProto for value {} referenced raw data but it was not found!'.format(tp.name))
+            else:
+                tp.raw_data = raw_values_dict[tp.name]
+
+    @classmethod
+    def _visit_and_substitute_raw_values(cls, nodes, raw_values_dict):
+        for node in nodes:
+            for attr in node.attribute:
+                if attr.HasField('t'):
+                    cls._substitute_raw_value(attr.t, raw_values_dict)
+                for t in attr.tensors:
+                    cls._substitute_raw_value(t, raw_values_dict)
+                if attr.HasField('g'):
+                    cls._visit_and_substitute_raw_values(attr.g.node, raw_values_dict)
+                for g in attr.graphs:
+                    cls._visit_and_substitute_raw_values(g.node, raw_values_dict)
+
+    @classmethod
+    def _external_value_resolution_pass(cls, model, raw_values_dict):
+        for init in model.graph.initializer:
+            cls._substitute_raw_value(init, raw_values_dict)
+
+        cls._visit_and_substitute_raw_values(model.graph.node, raw_values_dict)
+
+
+    @classmethod
     def _direct_initialize_parameters(cls, initializer, ws, device_option):
         for tp in initializer:
             ws.FeedBlob(tp.name, onnx.numpy_helper.to_array(tp), device_option)
