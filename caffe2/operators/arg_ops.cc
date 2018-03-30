@@ -79,11 +79,11 @@ std::vector<TensorShape> InferTensor(
   ArgumentHelper helper(def);
   int axis = helper.GetSingleArgument("axis", -1);
   const bool keep_dims = helper.GetSingleArgument("keepdims", true);
-  if (axis == -1) {
-    axis = in[0].dims_size();
-  }
   const auto& in_dims = in[0].dims();
   auto* out_dims = out[0].mutable_dims();
+  if (axis == -1) {
+    axis = in_dims.size() - 1;
+  }
   for (int i = 0; i < axis; ++i) {
     out_dims->Add(in_dims.Get(i));
   }
