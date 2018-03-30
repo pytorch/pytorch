@@ -254,7 +254,7 @@ class OperatorBase : public Observable<OperatorBase> {
     return true;
   }
 
-  const std::string& type() {
+  const std::string& type() const {
     CAFFE_ENFORCE(operator_def_.get() != nullptr);
     return operator_def_->type();
   }
