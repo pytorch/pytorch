@@ -1,10 +1,13 @@
 #pragma once
 
 #include <ATen/ATenGeneral.h> // for AT_API
+#include <ATen/optional.h>
 
+#include <ciso646>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <memory>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -41,7 +44,7 @@ struct FrameInformation {
   std::string object_file;
 };
 
-inline FrameInformation parse_frame_information(
+inline at::optional<FrameInformation> parse_frame_information(
     const std::string& frame_string) {
   FrameInformation frame;
 
@@ -50,14 +53,28 @@ inline FrameInformation parse_frame_information(
   // https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling
   std::string mangled_function_name;
 
-#ifdef __GLIBCXX__
+#if defined(__GLIBCXX__)
   // In GLIBCXX, `frame_string` follows the pattern
   // `<object-file>(<mangled-function-name>+<offset-into-function>)
   // [<return-address>]`
 
-  const auto function_name_start = frame_string.find('(') + 1;
-  const auto offset_start = frame_string.find('+', function_name_start) + 1;
+  auto function_name_start = frame_string.find("$$$$$$$$$");
+  if (function_name_start == std::string::npos) {
+    return at::nullopt;
+  }
+  function_name_start += 1;
+
+  auto offset_start = frame_string.find('+', function_name_start);
+  if (offset_start == std::string::npos) {
+    return at::nullopt;
+  }
+  offset_start += 1;
+
   const auto offset_end = frame_string.find(')', offset_start);
+  if (offset_end == std::string::npos) {
+    return at::nullopt;
+  }
+
   frame.object_file = frame_string.substr(0, function_name_start - 1);
   frame.offset_into_function =
       frame_string.substr(offset_start, offset_end - offset_start);
@@ -67,38 +84,50 @@ inline FrameInformation parse_frame_information(
 
   mangled_function_name = frame_string.substr(
       function_name_start, (offset_start - 1) - function_name_start);
-#else
+#elif defined(_LIBCPP_VERSION)
   // In LIBCXX, The pattern is
   // `<frame number> <object-file> <return-address> <mangled-function-name> +
   // <offset-into-function>`
   std::string skip;
   std::istringstream input_stream(frame_string);
+  // operator>>() does not fail -- if the input stream is corrupted, the
+  // strings will simply be empty.
   input_stream >> skip >> frame.object_file >> skip >> mangled_function_name >>
       skip >> frame.offset_into_function;
+#else
+#warning Unknown standard library, backtraces may have incomplete debug information
+  return at::nullopt;
 #endif
+
+  // Some system-level functions don't have sufficient debug information, so
+  // we'll display them as "<unknown function>". They'll still have a return
+  // address and other pieces of information.
+  if (mangled_function_name.empty()) {
+    frame.function_name = "<unknown function>";
+    return frame;
+  }
 
   int status = -1;
   // This function will demangle the mangled function name into a more human
   // readable format, e.g. _Z1gv -> g().
   // More information:
   // https://github.com/gcc-mirror/gcc/blob/master/libstdc%2B%2B-v3/libsupc%2B%2B/cxxabi.h
-  char* demangled_function_name = abi::__cxa_demangle(
+  // NOTE: `__cxa_demangle` returns a malloc'd string that we have to free
+  // ourselves.
+  std::unique_ptr<char> demangled_function_name(abi::__cxa_demangle(
       mangled_function_name.c_str(),
       /*__output_buffer=*/nullptr,
       /*__length=*/0,
-      &status);
+      &status));
 
   // Demangling may fail, for example when the name does not follow the
-  // standard C++ (Itanium ABI) mangling scheme. This is the case for `main` or
-  // `clone` for example, so the mangled name is a fine default.
+  // standard C++ (Itanium ABI) mangling scheme. This is the case for `main`
+  // or `clone` for example, so the mangled name is a fine default.
   if (status == 0) {
-    frame.function_name = demangled_function_name;
+    frame.function_name = demangled_function_name.get();
   } else {
     frame.function_name = mangled_function_name;
   }
-
-  // `__cxa_demangle` returns a malloc'd string that we have to free ourselves.
-  free(demangled_function_name);
 
   return frame;
 }
@@ -131,13 +160,13 @@ inline std::string get_backtrace(
   // `backtrace_symbols` takes the return addresses obtained from `backtrace()`
   // and fetches string representations of each stack. Unfortunately it doesn't
   // return a struct of individual pieces of information but a concatenated
-  // string, so we'll have to parse the string after.
-  char** raw_symbols = ::backtrace_symbols(callstack.data(), callstack.size());
-  std::vector<std::string> symbols(raw_symbols, raw_symbols + callstack.size());
-
-  // The array returned by `backtrace_symbols` is malloc'd and must be manually
-  // freed, but not the strings inside the array.
-  free(raw_symbols);
+  // string, so we'll have to parse the string after. NOTE: The array returned
+  // by `backtrace_symbols` is malloc'd and must be manually freed, but not the
+  // strings inside the array.
+  std::unique_ptr<char*> raw_symbols(
+      ::backtrace_symbols(callstack.data(), callstack.size()));
+  const std::vector<std::string> symbols(
+      raw_symbols.get(), raw_symbols.get() + callstack.size());
 
   // The backtrace string goes into here.
   std::ostringstream stream;
@@ -146,17 +175,19 @@ inline std::string get_backtrace(
        ++frame_number) {
     const auto frame = parse_frame_information(symbols[frame_number]);
 
-    // These are usually uninteresting frames below `main` or `clone` with
-    // limited debugging information.
-    if (frame.function_name.empty()) {
-      break;
-    }
+    // frame #<number>:
+    stream << "frame #" << frame_number << ": ";
 
-    // frame #<number>: <function_name> + <offset> (<return-address> in
-    // <object-file>)
-    stream << "frame #" << frame_number << ": " << frame.function_name << " + "
-           << frame.offset_into_function << " (" << callstack[frame_number]
-           << " in " << frame.object_file << ")\n";
+    if (!frame.has_value()) {
+      // In the edge-case where we couldn't parse the frame string, we can just
+      // use it directly (it may have a different format).
+      stream << symbols[frame_number] << "\n";
+    } else {
+      // <function_name> + <offset> (<return-address> in <object-file>)
+      stream << frame->function_name << " + " << frame->offset_into_function
+             << " (" << callstack[frame_number] << " in " << frame->object_file
+             << ")\n";
+    }
   }
 
   return stream.str();
