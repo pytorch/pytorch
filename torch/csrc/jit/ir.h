@@ -401,11 +401,17 @@ public:
   // arguments. Returns the added node for ease of chaining.
   Value* insertInput(size_t i, Value* node) {
     JIT_ASSERT(graph_ == node->owningGraph());
+    // First we update the offsets for all existing inputs that will reside
+    // after the one we're inserting. Concretely, these are the inputs at
+    // indices [i, # input). Since we're inserting one input before all of
+    // these inputs, increment their use offsets for this Node by 1
     for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
       auto use = findUseForInput(use_itr);
       use->offset += 1;
     }
+    // Insert the actual input at the specified index
     inputs_.insert(inputs_.begin() + i, node);
+    // Register the new use of the value we're inserted as an input.
     node->uses_.emplace_back(this, i);
     return node;
   }
