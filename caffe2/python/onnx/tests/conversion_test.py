@@ -10,6 +10,7 @@ import tempfile
 import textwrap
 import traceback
 import unittest
+import zipfile
 
 from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core
@@ -136,6 +137,41 @@ class TestConversion(TestCase):
         self.assertEqual(set(sum([list(init_op.output)
                                   for init_op in caffe2_init_net.op], [])),
                          {'W'})
+
+
+    def test_onnx_to_caffe2_zipfile(self):
+        buf = tempfile.NamedTemporaryFile()
+        onnx_model = zipfile.ZipFile(buf, 'w')
+        output = tempfile.NamedTemporaryFile()
+        init_net_output = tempfile.NamedTemporaryFile()
+
+        node_def = helper.make_node(
+            "MatMul", ["X", "W"], ["Y"])
+        X = np.random.rand(2, 3).astype(np.float32)
+        W = np.random.rand(3, 2).flatten().astype(np.float32)
+        graph_def = helper.make_graph(
+            [node_def],
+            "test",
+            [helper.make_tensor_value_info("X", TensorProto.FLOAT, (2, 3)),
+             helper.make_tensor_value_info("W", TensorProto.FLOAT, (3, 2))],
+            [helper.make_tensor_value_info("Y", TensorProto.FLOAT, (2, 2))],
+            initializer=[helper.make_tensor("W",
+                                            TensorProto.FLOAT,
+                                            [3, 2],
+                                            b'__EXTERNAL',
+                                            raw=True)])
+        model_def = helper.make_model(graph_def, producer_name='onnx-to-caffe2-test')
+        onnx_model.writestr('__MODEL_PROTO', model_def.SerializeToString())
+        onnx_model.writestr('W', W.tobytes())
+        onnx_model.close()
+
+        W = W.reshape((3, 2))
+        Y_expect = np.matmul(X, W)
+
+        c2_model = c2.prepare_zip_archive(buf)
+        Y = c2_model.run(X).Y
+        np.testing.assert_allclose(Y, Y_expect)
+
 
     # TODO investigate why this is failing after changing Reshape
     # operator from taking the new shape as attribute to as input
