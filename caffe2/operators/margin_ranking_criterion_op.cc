@@ -12,11 +12,12 @@ bool MarginRankingCriterionOp<CPUContext>::RunOnDevice() {
   auto& X2 = Input(1);
   auto& Y = Input(2);
   auto* loss = Output(0);
-  CAFFE_ENFORCE(
-      X1.size() == X2.size(),
+  CAFFE_ENFORCE_EQ(
+      X1.size(),
+      X2.size(),
       "The two inputs for computing ranking loss should have the same size.");
-  CAFFE_ENFORCE(
-      X1.size() == Y.size(), "The input and label should have the same size.");
+  CAFFE_ENFORCE_EQ(
+      X1.size(), Y.size(), "The input and label should have the same size.");
   loss->ResizeLike(X1);
 
   const float* X1data = X1.data<float>();
