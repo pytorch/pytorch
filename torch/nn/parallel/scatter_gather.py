@@ -58,8 +58,8 @@ def gather(outputs, target_device, dim=0):
         if out is None:
             return None
         if isinstance(out, dict):
-            values = (item.values() for item in outputs)
-            return type(out)(zip(out, map(gather_map, zip(*values))))
+            return type(out)(((k, gather_map([d[k] for d in outputs]))
+                              for k in out))
         return type(out)(map(gather_map, zip(*outputs)))
 
     # Recursive function calls like this create reference cycles.
