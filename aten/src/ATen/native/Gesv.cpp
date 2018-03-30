@@ -86,7 +86,7 @@ std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
   if (self.dim() <= 2 && A.dim() <= 2) {
-    return at::_gesv(self, A);
+    return at::_gesv_single(self, A);
   }
 
   checkInputs(self, A);
@@ -117,7 +117,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(
                   "b.dim() (%lld) and A.dim() (%lld) must both be 2.",
                   (long long)self.dim(), (long long)A.dim());
   }
-  return at::_gesv_out(solution, lu, self, A);
+  return at::_gesv_single_out(solution, lu, self, A);
 }
 
 }}  // namespace at::native

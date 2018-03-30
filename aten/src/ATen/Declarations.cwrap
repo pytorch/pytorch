@@ -3004,7 +3004,7 @@
     - THTensor* tensor2
 ]]
 [[
-  name: _gesv
+  name: _gesv_single
   cname: gesv
   types:
     - Float

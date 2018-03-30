@@ -293,7 +293,7 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
-- name: _gesv(Tensor self, Tensor A)
+- name: _gesv_single(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, solution)
 
