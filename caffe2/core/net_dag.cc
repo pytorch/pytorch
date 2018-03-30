@@ -324,11 +324,13 @@ vector<float> DAGNetBase::TEST_Benchmark(
   auto millis = timer.MilliSeconds();
   std::cout << "Main run finished. Milliseconds per iter: "
             << millis / main_runs
-            << ". Iters per second: " << 1000.0 * main_runs / millis << std::endl;
+            << ". Iters per second: " << 1000.0 * main_runs / millis
+            << std::endl;
 
   if (run_individual) {
     std::cout << "DAGNet does not do per-op benchmark. To do so, "
-                 "switch to a simple net type." << std::endl;
+                 "switch to a simple net type."
+              << std::endl;
   }
   return vector<float>{millis / main_runs};
 }

@@ -108,7 +108,8 @@ vector<float> SimpleNet::TEST_Benchmark(
   auto millis = timer.MilliSeconds();
   std::cout << "Main run finished. Milliseconds per iter: "
             << millis / main_runs
-            << ". Iters per second: " << 1000.0 * main_runs / millis << std::endl;
+            << ". Iters per second: " << 1000.0 * main_runs / millis
+            << std::endl;
 
   vector<float> time_per_op(operators_.size(), 0);
   vector<uint64_t> flops_per_op;
