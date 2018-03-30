@@ -228,21 +228,11 @@ packages = setuptools.find_packages()
 
 install_requires.extend(['protobuf',
                          'numpy',
-                         'flask',
                          'future',
-                         'graphviz',
                          'hypothesis',
-                         'jupyter',
-                         'matplotlib',
-                         'pydot',
-                         'python-nvd3',
-                         'pyyaml',
                          'requests',
-                         'scikit-image',
                          'scipy',
-                         'setuptools',
-                         'six',
-                         'tornado'])
+                         'six',])
 
 ################################################################################
 # Test
