@@ -26,7 +26,7 @@ template<class real>
 void lapackGesv(
     int n, int nrhs, real* a, int lda, int* ipiv,
     real* b, int ldb, int* info) {
-  runtime_error("gesv only takes float or double Tensors");
+  AT_ERROR("gesv only takes float or double Tensors");
 }
 
 #ifdef USE_LAPACK
@@ -46,7 +46,7 @@ template<> void lapackGesv<double>(
 template <typename real>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
-  runtime_error("gesv: LAPACK library not found in compilation");
+  AT_ERROR("gesv: LAPACK library not found in compilation");
 #endif
   real* A_data = (real*)A.data_ptr();
   real* b_data = (real*)b.data_ptr();
@@ -113,7 +113,7 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
 std::tuple<Tensor&,Tensor&> gesv_out(
     Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
   if (self.dim() > 2 || A.dim() > 2) {
-    runtime_error("torch.gesv() with the `out` keyword does not support batching. "
+    AT_ERROR("torch.gesv() with the `out` keyword does not support batching. "
                   "b.dim() (%lld) and A.dim() (%lld) must both be 2.",
                   (long long)self.dim(), (long long)A.dim());
   }

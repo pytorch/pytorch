@@ -23,7 +23,7 @@ void magmaGesvBatched(
     magma_int_t n, magma_int_t nrhs, real** dA_array, magma_int_t ldda,
     magma_int_t** dipiv_array, real** dB_array, magma_int_t lddb,
     magma_int_t* dinfo_array, magma_int_t batch_count, magma_queue_t queue) {
-  runtime_error("gesv only takes float or double Tensors");
+  AT_ERROR("gesv only takes float or double Tensors");
 }
 
 template<>
@@ -76,7 +76,7 @@ static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
 template <typename real>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_MAGMA
-runtime_error("gesv: MAGMA library not found in "
+AT_ERROR("gesv: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");
 #else
   real* A_data = static_cast<real*>(A.data_ptr());
