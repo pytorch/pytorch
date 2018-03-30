@@ -231,10 +231,7 @@ of one-hot encoding for each column. For example
     .Output(
         0,
         "output",
-        "output matrix that expands each input column with one hot encoding")
-    .TensorInferenceFunction(TensorInferenceForBatchOneHot)
-    .CostInferenceFunction(
-        OpSchema::CostInferenceFunctionType(CostInferenceForBatchOneHot));
+        "output matrix that expands each input column with one hot encoding");
 
 OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
