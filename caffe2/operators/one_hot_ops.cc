@@ -125,11 +125,19 @@ bool BatchBucketOneHotOp<CPUContext>::RunOnDevice() {
 
     for (TIndex j = 0; j < D; j++) {
       // here we assume the boundary values for each feature are sorted
-      TIndex bucket_idx = std::lower_bound(
-                              boundaries_offset,
-                              boundaries_offset + lens_data[j],
-                              input_data[pos]) -
+      TIndex lower_bucket_idx = std::lower_bound(
+                                    boundaries_offset,
+                                    boundaries_offset + lens_data[j],
+                                    input_data[pos]) -
           boundaries_offset;
+
+      TIndex upper_bucket_idx = std::upper_bound(
+                                    boundaries_offset,
+                                    boundaries_offset + lens_data[j],
+                                    input_data[pos]) -
+          boundaries_offset;
+
+      TIndex bucket_idx = (lower_bucket_idx + upper_bucket_idx) / 2;
       output_data[i * output_dim + output_offset + bucket_idx] = 1.0;
       boundaries_offset += lens_data[j];
       output_offset += (lens_data[j] + 1);
@@ -196,10 +204,12 @@ Note that each bucket is right-inclusive. That is, given boundary values
 [b1, b2, b3], the buckets are defined as (-int, b1], (b1, b2], (b2, b3], (b3, inf).
 For example
 
-  If data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
-  and boundaries = [0.1, 2.5, 1, 3.1, 4.5], then
-
+  data = [[2, 3], [4, 1], [2, 5]], lengths = [2, 3],
+  If boundaries = [0.1, 2.5, 1, 3.1, 4.5], then
   output = [[0, 1, 0, 0, 1, 0, 0], [0, 0, 1, 1, 0, 0, 0], [0, 1, 0, 0, 0, 0, 1]]
+
+  If boundaries = [0.1, 2.5, 1, 1, 3.1], then
+  output = [[0, 1, 0, 0, 0, 1, 0], [0, 0, 1, 0, 1, 0, 0], [0, 1, 0, 0, 0, 0, 1]]
 
 )DOC")
     .Input(0, "data", "input tensor matrix")
