@@ -501,6 +501,9 @@
 - func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
 
+- func: randint(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
 - func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
   variants: function
 

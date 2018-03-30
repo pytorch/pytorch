@@ -249,6 +249,11 @@ Tensor& randperm_out(Tensor& result, int64_t n, Generator* generator) {
   return result;
 }
 
+Tensor randint(const Type& dtype, IntList size, Generator* generator) {
+  Tensor result = dtype.tensor(size);
+  return result.random_(0, 1, generator);
+}
+
 Tensor range(const Type& dtype, Scalar start, Scalar end, Scalar step) {
   return dtype._range(start, end, step);
 }
