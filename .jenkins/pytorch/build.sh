@@ -20,8 +20,8 @@ gcc --version
 # TODO: Don't run this...
 pip install -r requirements.txt || true
 
-if ! which conda; then
-  pip install mkl mkl-devel
+if which conda; then
+  conda install -c mingfeima mkldnn
 fi
 
 python setup.py install
