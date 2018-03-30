@@ -13,6 +13,9 @@ from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper
 from common import TestCase, run_tests, TEST_NUMPY, IS_WINDOWS
+
+# We set dummy defaults here and only overwrite these values when in __main__,
+# to get around duplicated import issue when using multiprocessing on Windows.
 TEST_CUDA = False
 if __name__ == '__main__':
     from common_nn import TEST_CUDA

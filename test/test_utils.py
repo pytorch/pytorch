@@ -16,10 +16,11 @@ from torch.autograd import Variable
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
-from torch.utils.serialization import load_lua
 from torch.autograd._functions.utils import prepare_onnx_paddings
 from torch.autograd._functions.utils import check_onnx_broadcast
 
+# We set dummy defaults here and only overwrite these values when in __main__,
+# to get around duplicated import issue when using multiprocessing on Windows.
 HAS_CUDA = False
 if __name__ == '__main__':
     HAS_CUDA = torch.cuda.is_available()
@@ -544,6 +545,7 @@ class TestONNXUtils(TestCase):
         try_check_onnx_broadcast(dims1, dims2, True, False)
 
 
-TestLuaReader.init()
 if __name__ == '__main__':
+    from torch.utils.serialization import load_lua
+    TestLuaReader.init()
     run_tests()
