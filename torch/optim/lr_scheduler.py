@@ -196,14 +196,10 @@ class CosineAnnealingLR(_LRScheduler):
         self.T_mult = T_mult
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
-    def _restart(self):
-        if self.last_epoch == self.T_max:
+    def get_lr(self):
+        if restart and self.last_epoch == self.T_max:
             self.last_epoch = -1
             self.T_max *= self.T_mult
-
-    def get_lr(self):
-        if restart:
-            self._restart()
         return [self.eta_min + (base_lr - self.eta_min) *
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
