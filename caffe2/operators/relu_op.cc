@@ -56,9 +56,6 @@ OpSchema::Cost CostInferenceForRelu(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   struct OpSchema::Cost cost = PointwiseCostInference<0>(def, in);
-  if (def.input(0) == def.output(0)) {
-    cost.bytes_moved = 0;
-  }
   cost.params_bytes = 0;
   return cost;
 }
