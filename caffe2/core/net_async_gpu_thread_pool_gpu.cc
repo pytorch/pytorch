@@ -6,20 +6,16 @@ CAFFE2_DEFINE_int(caffe2_threads_per_gpu, 1, "Number of CPU threads per GPU");
 
 namespace caffe2 {
 
-namespace {
-std::shared_ptr<TaskThreadPool> AsyncNetGPUThreadPoolCreator(
-    const DeviceOption& device_option) {
-  CAFFE_ENFORCE_EQ(
-      device_option.device_type(),
-      CUDA,
-      "Unexpected device type for CUDA thread pool");
-  return GetAsyncNetGPUThreadPool(device_option.cuda_gpu_id());
-}
-} // namespace
+CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, GetAsyncNetGPUThreadPool);
 
-CAFFE_REGISTER_CREATOR(ThreadPoolRegistry, CUDA, AsyncNetGPUThreadPoolCreator);
-
-std::shared_ptr<TaskThreadPool> GetAsyncNetGPUThreadPool(int gpu_id) {
+std::shared_ptr<TaskThreadPool> GetAsyncNetGPUThreadPool(
+    int gpu_id,
+    int pool_size) {
+  // For GPU, use per device thread pools of predefined constant size
+  if (pool_size != FLAGS_caffe2_threads_per_gpu) {
+    LOG(INFO) << "Overriding GPU pool size: using "
+              << FLAGS_caffe2_threads_per_gpu << " threads per GPU";
+  }
   static std::unordered_map<int, std::weak_ptr<TaskThreadPool>> pools;
   static std::mutex pool_mutex;
   std::lock_guard<std::mutex> lock(pool_mutex);
