@@ -761,7 +761,10 @@ class MaxReducer<T, CPUContext> : public BaseReducer {
   using FixedDispatch = FixedValues<1>;
 
   MaxReducer(const Meta& meta, T* out, CPUContext* /*context*/)
-      : out_(out), current_size_(0) {}
+      : out_(out), current_size_(0) {
+    // add a wrapper in Context for it
+    memset(out, 0, sizeof(T) * meta.block_size);
+  }
 
   template <int FixedSize>
   void process(
