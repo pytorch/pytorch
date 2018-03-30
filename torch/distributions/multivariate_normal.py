@@ -159,8 +159,9 @@ class MultivariateNormal(Distribution):
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        flat_conv = self.covariance_matrix.reshape((-1,) + self._event_shape * 2)
-        flat_precision = torch.stack([C.inverse() for C in flat_conv], 0)
+        scale_tril_inv = _batch_inverse(self.scale_tril)
+        flat_scale_tril_inv = self.scale_tril.reshape((-1,) + self._event_shape * 2)
+        flat_precision = torch.stack([C.t().matmul(C) for C in flat_scale_tril_inv], 0)
         return flat_precision.view(self.scale_tril.shape)
 
     @property
