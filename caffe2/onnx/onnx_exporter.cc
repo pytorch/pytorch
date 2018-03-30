@@ -580,6 +580,67 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
 
   return result;
 }
+
+void OnnxExporter::InitOpToTensorProto(
+    const caffe2::OperatorDef& op,
+    TensorProto* tensor) {
+  CAFFE_ENFORCE(op.input_size() == 0);
+  CAFFE_ENFORCE(op.output_size() == 1);
+
+  // Set name
+  tensor->set_name(op.output(0));
+
+  const Argument* values = nullptr;
+  const Argument* shape = nullptr;
+  for (const auto& arg: op.arg()) {
+    if (arg.name() == "values") {
+      values = &arg;
+    } else if (arg.name() == "shape") {
+      shape = &arg;
+    }
+  }
+
+  CAFFE_ENFORCE(values);
+  CAFFE_ENFORCE(shape);
+
+  // Set dims
+  for (const auto i: shape->ints()) {
+    tensor->add_dims(i);
+  }
+
+  // Set value
+  if (op.type() == "GivenTensorFill") {
+    tensor->set_data_type(TensorProto::FLOAT);
+    for (const auto i : values->floats()) {
+      tensor->add_float_data(i);
+    }
+  } else if (op.type() == "GivenTensorInt64Fill") {
+    tensor->set_data_type(TensorProto::INT64);
+    for (const auto i : values->ints()) {
+      tensor->add_int64_data(i);
+    }
+  } else if (op.type() == "GivenTensorIntFill") {
+    tensor->set_data_type(TensorProto::INT32);
+    for (const auto i : values->ints()) {
+      tensor->add_int32_data(i);
+    }
+  } else if (op.type() == "GivenTensorBoolFill") {
+    tensor->set_data_type(TensorProto::INT32);
+    for (const auto i : values->ints()) {
+      tensor->add_int32_data(i);
+    }
+  } else if (op.type() == "GivenTensorStringFill") {
+    tensor->set_data_type(TensorProto::STRING);
+    // TODO: we might need to do two pass to avoid adverse memory allocations
+    for (const auto& s : values->strings()) {
+      tensor->mutable_raw_data()->append(s);
+    }
+  } else {
+    CAFFE_THROW(
+        MakeString("Cannot convert C2 op ", op.type(), "to ONNX TensorProto"));
+  }
+}
+
 } // namespace onnx
 } // namespace caffe2
 

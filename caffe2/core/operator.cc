@@ -358,7 +358,7 @@ GradientOpsMeta GetGradientForOp(
   return meta;
 }
 
-static TensorShapes InferBlobShapesAndTypes(
+TensorShapes InferBlobShapesAndTypes(
     CaffeMap<string, TensorShape>& blob_desc,
     const vector<NetDef*>& nets) {
   for (auto& defptr : nets) {
