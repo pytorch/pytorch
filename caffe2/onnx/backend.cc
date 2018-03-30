@@ -431,7 +431,7 @@ Caffe2Ops Caffe2Backend::CreateReshape(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
     OnnxNode* onnx_node,
-    int opset_version) {
+    int /*opset_version*/) {
   const auto& node = onnx_node->node;
   if (node.input_size() != 1 || node.output_size() != 1) {
     CAFFE_THROW("Caffe2 Reciprocal should have 1 input and 1 output");
