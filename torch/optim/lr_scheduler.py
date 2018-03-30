@@ -171,30 +171,36 @@ class CosineAnnealingLR(_LRScheduler):
     .. math::
 
         \eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})(1 +
-        \cos(\frac{T_{cur}}{T_{max}}\pi))
+        \cos(\frac{T_{cur}}{T_{max}\times T_{mult}}\pi))
 
     When last_epoch=-1, sets initial lr as lr.
 
     It has been proposed in
-    `SGDR: Stochastic Gradient Descent with Warm Restarts`_. Note that this only
-    implements the cosine annealing part of SGDR, and not the restarts.
+    `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
+        T_mult (int): Multiplicative factor of T_max. Default: 2
+        restart (bool): If True, warm restart policy will be used.
         last_epoch (int): The index of last epoch. Default: -1.
 
     .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1):
+    def __init__(self, optimizer, T_max, eta_min=0, T_mult=2, restart=False, last_epoch=-1):
         self.T_max = T_max
         self.eta_min = eta_min
+        self.T_mult = T_mult
+        self.restart = restart
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
+        if self.restart and self.last_epoch == self.T_max:
+            self.last_epoch = -1
+            self.T_max *= self.T_mult
         return [self.eta_min + (base_lr - self.eta_min) *
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
