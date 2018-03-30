@@ -4,6 +4,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
+import collections
 import contextlib
 from google.protobuf.message import Message
 from multiprocessing import Process
@@ -334,7 +335,58 @@ def FetchBlob(name):
     Returns:
       Fetched blob (numpy array or string) if successful
     """
-    return C.fetch_blob(StringifyBlobName(name))
+    result = C.fetch_blob(StringifyBlobName(name))
+    if isinstance(result, tuple):
+        raise TypeError(
+            "Use FetchInt8Blob to fetch Int8 Blob {}".format(
+                StringifyBlobName(name)
+            )
+        )
+    return result
+
+
+Int8Tensor = collections.namedtuple(
+    'Int8Tensor', ['data', 'scale', 'zero_point']
+)
+
+
+def FetchInt8Blob(name):
+    """Fetches an Int8 blob from the workspace. It shared backend implementation
+    with FetchBlob but it is recommened when fetching Int8 Blobs
+
+    Inputs:
+      name: the name of the Int8 blob - a string or a BlobReference
+    Returns:
+      data: int8 numpy array, data
+      scale: float, fake quantization scale
+      zero_point: int, fake quantization offset
+    """
+    result = C.fetch_blob(StringifyBlobName(name))
+    assert isinstance(result, tuple), \
+        'You are not fetching an Int8Blob {}. Please use FetchBlob'.format(
+            StringifyBlobName(name))
+    return Int8Tensor(*result)
+
+
+def _Workspace_fetch_int8_blob(ws, name):
+    """Fetches an Int8 blob from the workspace. It shared backend implementation
+    with FetchBlob but it is recommened when fetching Int8 Blobs
+
+    Inputs:
+      name: the name of the Int8 blob - a string or a BlobReference
+    Returns:
+      data: int8 numpy array, data
+      scale: float, fake quantization scale
+      zero_point: int, fake quantization offset
+    """
+    result = ws.fetch_blob(name)
+    assert isinstance(result, tuple), \
+        'You are not fetching an Int8Blob {}. Please use fetch_blob'.format(
+            StringifyBlobName(name))
+    return Int8Tensor(*result)
+
+
+C.Workspace.fetch_int8_blob = _Workspace_fetch_int8_blob
 
 
 def ApplyTransform(transform_key, net):
