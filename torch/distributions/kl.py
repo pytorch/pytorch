@@ -18,7 +18,7 @@ from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
-from .multivariate_normal import MultivariateNormal, _batch_mahalanobis
+from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -287,24 +287,23 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
 
     def _batch_function(bmat, function, final_size):
         mat_size = bmat.size(-1)
-        values = t.stack([function(M) for M in bmat.contiguous().view((-1, mat_size, mat_size))])
-        return values.view_as(final_size)
+        values = torch.stack([function(M) for M in bmat.contiguous().view((-1, mat_size, mat_size))])
+        return values.view(final_size)
 
     def _batch_mm(bmat1, bmat2):
         mat_size = bmat1.size(-1)
         bmat1_squash = bmat1.contiguous().view((-1, mat_size, mat_size))
         bmat2_squash = bmat2.contiguous().view((-1, mat_size, mat_size))
-        return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)        
+        return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)
 
-    term1 = _batch_function(q.covariance_matrix, t.logdet, q.batch_shape)
-    term1 -= _batch_function(p.covariance_matrix, t.logdet, p.batch_shape)
+    term1 = _batch_diag(q.scale_tril).abs().log().sum(-1) - _batch_diag(p.scale_tril).abs().log().sum(-1)
 
-    term2 = _batch_function(q.covariance_matrix, t.inverse, q.covariance_matrix)
+    term2 = _batch_function(q.covariance_matrix, torch.inverse, q.covariance_matrix.size())
     term2 = _batch_mm(term2, p.covariance_matrix)
-    term2 = _batch_function(term2, t.trace, p.batch_shape)
+    term2 = _batch_function(term2, torch.trace, p.batch_shape)
 
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
-    return term1 + term2 + term3
+    return 0.5 * (term1 - q.loc.size(-1) + term2 + term3)
 
 
 @register_kl(Normal, Normal)
