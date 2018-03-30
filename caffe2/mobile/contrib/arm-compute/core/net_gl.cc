@@ -120,7 +120,8 @@ vector<float> GLNet::TEST_Benchmark(
   auto millis = timer.MilliSeconds();
   std::cout << "[C2DEBUG] Main run finished. Milliseconds per iter: "
             << millis / main_runs
-            << ". Iters per second: " << 1000.0 * main_runs / millis << std::endl;
+            << ". Iters per second: " << 1000.0 * main_runs / millis
+            << std::endl;
 
   vector<float> time_per_op(operators_.size(), 0);
   vector<uint64_t> flops_per_op(operators_.size(), 0);
@@ -175,8 +176,8 @@ vector<float> GLNet::TEST_Benchmark(
                   << to_string(1.0e-6 * flops_per_op[idx] / time_per_op[idx])
                   << " GFLOPS)";
       }
-      std::cout << "[C2DEBUG] Operator #" << idx << " (" << print_name << ", " << op_type
-                << ") " << time_per_op[idx] / main_runs << " ms/iter"
+      std::cout << "[C2DEBUG] Operator #" << idx << " (" << print_name << ", "
+                << op_type << ") " << time_per_op[idx] / main_runs << " ms/iter"
                 << flops_str.str() << std::endl;
       ++idx;
     }
@@ -189,8 +190,8 @@ vector<float> GLNet::TEST_Benchmark(
         time_per_op_type_vec.end(),
         PairLargerThan<string, float>);
     for (const auto& item : time_per_op_type_vec) {
-      std::cout << "[C2DEBUG] " << std::setw(15) << std::setfill(' ') << item.second / main_runs
-                << " " << item.first << std::endl;
+      std::cout << "[C2DEBUG] " << std::setw(15) << std::setfill(' ')
+                << item.second / main_runs << " " << item.first << std::endl;
     }
   }
   // We will reuse time_per_op to return the result of BenchmarkNet.
