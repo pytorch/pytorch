@@ -4,6 +4,7 @@ set -ex
 
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
+TEST_DIR=$ROOT_DIR/caffe2_tests
 
 # Figure out which Python to use
 PYTHON="python"
@@ -64,13 +65,12 @@ exit_code=0
 
 cd "$ROOT_DIR"
 
-if [ -d ./test ]; then
-  echo "Directory ./test already exists; please remove it..."
+if [ -d $TEST_DIR ]; then
+  echo "Directory $TEST_DIR already exists; please remove it..."
   exit 1
 fi
 
-mkdir -p ./test/{cpp,python}
-TEST_DIR="$PWD/test"
+mkdir -p $TEST_DIR/{cpp,python}
 
 cd ${INSTALL_PREFIX}
 
@@ -79,7 +79,7 @@ set +e
 
 # C++ tests
 echo "Running C++ tests.."
-for test in ./test/*; do
+for test in $INSTALL_PREFIX/test/*; do
   # Skip tests we know are hanging or bad
   case "$(basename "$test")" in
     mkl_utils_test)
