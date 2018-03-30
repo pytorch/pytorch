@@ -192,8 +192,8 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     // Real/imag dimension must be like complex type.
     need_contiguous |= input.stride(-1) != 1;
     // Strides of other dimensions needs to be aligned when viewed as of
-    // complex type, i.e., multiples of 2. The for-loop below checks signal
-    // dims, so we check the batch dim here.
+    // complex type, i.e., multiples of 2. We check the batch dim here. The
+    // other signal dims are checked in a for-loop afterwards.
     need_contiguous |= input.stride(0) % 2 != 0;
   } else if (is_half) {
     // For half, base strides on the real part of real-to-complex and
@@ -201,12 +201,16 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     // contiguous, only need to check real-to-complex case.
     need_contiguous |= input.stride(signal_ndim) != 1;
   }
-  // store last dimension stride to infer inembed array
+
+  // Store last dimension stride to infer inembed array
   // This is used when `need_contiguous=False`, so we can assume that the last
   // dimension is indeed aligned. Complex input's last signal dim can be viewed
   // as having stride=2, where the unit is sizeof(real_type).
   long long int ilast_stride = complex_input ? 2 : 1;
-   // for each signal dim from innermost to outermost
+  // For each signal dim from innermost to outermost, compute inembed values if
+  // possible. If not, then we need to make input contiguous. Notice that if we
+  // can compute inembed values, it means that the dimensions conform to the
+  // data type alignment, e.g., strides are multiples of 2 when complex_input.
   for (int64_t i = signal_ndim - 1; i >= 0; i--) {
     long long int signal_size = checked_signal_sizes[i];
     long long int istride = input.stride(i + 1);
