@@ -121,6 +121,15 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
+THSTensor* THSTensor_(_newWithDimsAndTensor)(int64_t nDimI, int64_t nDimV, int64_t *sizes, THLongTensor *indices, THTensor *values) {
+  THSTensor *self = THSTensor_(new)();
+  THSTensor_(rawResize)(self, nDimI, nDimV, sizes);
+
+  // NB: by default, we do NOT clone indices/values into the sparse tensor.
+  // Efficient API by default!
+  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
+  return self;
+}
 
 /*** end helper methods ***/
 
@@ -139,8 +148,6 @@ THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
   int64_t nDimI = THLongTensor_size(indices, 0);
   int64_t nDimV = THTensor_(nDimension)(values) - 1;
 
-  THSTensor *self = THSTensor_(new)();
-
   THLongTensor *ignore = THLongTensor_new();
   THLongTensor *computed_indices_sizes = THLongTensor_new();
   THLongTensor *computed_sizes = THLongTensor_newWithSize1d(nDimI + nDimV);
@@ -152,14 +159,11 @@ THSTensor *THSTensor_(newWithTensor)(THLongTensor *indices, THTensor *values)
   for (int d = 0; d < nDimV; d++) {
       THTensor_fastSet1d(computed_sizes, nDimI + d, THTensor_(size)(values, d + 1));
   }
-  THSTensor_(rawResize)(self, nDimI, nDimV, THLongTensor_data(computed_sizes));
+
+  THSTensor *self = THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongTensor_data(computed_sizes), indices, values);
   THLongTensor_free(computed_indices_sizes);
   THLongTensor_free(computed_sizes);
   THLongTensor_free(ignore);
-
-  // NB: by default, we do NOT clone indices/values into the sparse tensor.
-  // Efficient API by default!
-  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
   return self;
 }
 
@@ -177,13 +181,7 @@ THSTensor *THSTensor_(newWithTensorAndSizeUnsafe)(THLongTensor *indices, THTenso
   int64_t nDimI = THLongTensor_size(indices, 0);
   int64_t nDimV = THTensor_(nDimension)(values) - 1;
 
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, nDimI, nDimV, THLongStorage_data(sizes));
-
-  // NB: by default, we do NOT clone indices/values into the sparse tensor.
-  // Efficient API by default!
-  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
-  return self;
+  return THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
 
 THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *values, THLongStorage *sizes)
@@ -222,13 +220,7 @@ THSTensor *THSTensor_(newWithTensorAndSize)(THLongTensor *indices, THTensor *val
   }
   THLongTensor_free(max_indices);
 
-  THSTensor *self = THSTensor_(new)();
-  THSTensor_(rawResize)(self, nDimI, nDimV, THLongStorage_data(sizes));
-
-  // NB: by default, we do NOT clone indices/values into the sparse tensor.
-  // Efficient API by default!
-  THSTensor_(_move)(self, THLongTensor_newWithTensor(indices), THTensor_(newWithTensor)(values));
-  return self;
+  return THSTensor_(_newWithDimsAndTensor)(nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
 
 THSTensor *THSTensor_(newWithSize)(THLongStorage *size, THLongStorage *_ignored)
