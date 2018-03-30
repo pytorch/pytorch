@@ -176,7 +176,7 @@ class CosineAnnealingLR(_LRScheduler):
     When last_epoch=-1, sets initial lr as lr.
 
     It has been proposed in
-    `SGDR: Stochastic Gradient Descent with Warm Restarts`_. 
+    `SGDR: Stochastic Gradient Descent with Warm Restarts`_.
 
     Args:
         optimizer (Optimizer): Wrapped optimizer.
