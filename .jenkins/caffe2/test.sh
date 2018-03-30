@@ -79,7 +79,7 @@ set +e
 
 # C++ tests
 echo "Running C++ tests.."
-for test in $TEST_DIR/*; do
+for test in $INSTALL_PREFIX/test/*; do
   # Skip tests we know are hanging or bad
   case "$(basename "$test")" in
     mkl_utils_test)
