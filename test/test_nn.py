@@ -1759,24 +1759,17 @@ class TestNN(NNTestCase):
             self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=1e-5)
             self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=1e-5)
 
-            # test that LN with track_running_stats=True
-            ln = nn.LayerNorm(normalized_shape, momentum=1, eps=0,
-                              elementwise_affine=False, track_running_stats=True).type(type)
-            output_ref = ln(x).data.clone()
-            input_reshaped = x.view(*(unnormalized_shape + [-1]))
-            # make sure that running mean and var update correctly when training
-            mean = input_reshaped.mean(-1).mean()
-            var = input_reshaped.var(-1, unbiased=True).mean()
-            self.assertAlmostEqual(torch.abs(mean.data - ln.running_mean).mean(), 0, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var.data - ln.running_var).mean(), 0, delta=1e-5)
-            ln.eval()
-            old_running_mean = ln.running_mean.clone()
-            old_running_var = ln.running_var.clone()
-            output_new = ln(x + ln.running_var.sqrt()[0] * scale).data
-            self.assertAlmostEqual((output_new - output_ref).mean(), scale, delta=1e-5)
-            # make sure that running mean and var don't change in eval
-            self.assertEqual(old_running_mean, ln.running_mean)
-            self.assertEqual(old_running_var, ln.running_var)
+        bad_norm_shape_input_shape = {
+            (): (),
+            (2, 3): (3,),
+            (2,): (1, 2, 3),
+            (10,): (2, 3),
+            10: (2, 3),
+        }
+        for norm_shape, input_shape in bad_norm_shape_input_shape.items():
+            ln = nn.LayerNorm(norm_shape)
+            input = type(*input_shape).uniform_(0, 10)
+            self.assertRaises(RuntimeError, lambda: ln(input))
 
     def _test_LayerNorm_cuda_half(self):
         input = torch.zeros(2, 3, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
@@ -5963,7 +5956,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3),
+        constructor_args=([5], 1e-3),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -5971,7 +5964,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3, False),
+        constructor_args=([5], 1e-3, False),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -5979,15 +5972,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3, True, True),
-        input_size=(4, 5, 5),
-        cudnn=True,
-        check_eval=True,
-        desc='1d_elementwise_affine_tracking_stats',
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3),
+        constructor_args=([2, 2, 5], 1e-3),
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
@@ -5995,19 +5980,11 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3, False),
+        constructor_args=([2, 2, 5], 1e-3, False),
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3, True, True),
-        input_size=(4, 2, 2, 5),
-        cudnn=True,
-        check_eval=True,
-        desc='3d_elementwise_affine_tracking_stats',
     ),
     dict(
         module_name='GroupNorm',
