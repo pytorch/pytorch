@@ -226,13 +226,15 @@ ext_modules = [
 
 packages = setuptools.find_packages()
 
-install_requires.extend(['protobuf',
-                         'numpy',
-                         'future',
-                         'hypothesis',
-                         'requests',
-                         'scipy',
-                         'six',])
+install_requires.extend([
+    'protobuf',
+    'numpy',
+    'future',
+    'hypothesis',
+    'requests',
+    'scipy',
+    'six',
+])
 
 ################################################################################
 # Test
