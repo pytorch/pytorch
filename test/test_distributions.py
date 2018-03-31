@@ -2623,6 +2623,8 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual),
             ]))
 
+    # Multivariate normal has a separate Monte Carlo based test due to the requirement of random generation of
+    # positive (semi) definite matrices. n is set to 5, but can be increased during testing.
     def test_kl_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
@@ -2631,9 +2633,11 @@ class TestKL(TestCase):
             loc = []
             psd_cov = []
             for _ in range(0, 2):
-                loc.append(torch.randn(3))
-                tmp = torch.randn(3, 5)
-                psd_cov.append(tmp.mm.(tmp.t()))
+                loc.append(torch.randn(4))
+                tmp = torch.randn(4, 5)
+                psd_mat = tmp.mm(tmp.t())
+                psd_mat = psd_mat / (psd_mat.abs().max() + 1e-10) # To restrict high variance
+                psd_cov.append(psd_mat)
             p = MultivariateNormal(loc=loc[0], covariance_matrix=psd_cov[0])
             q = MultivariateNormal(loc=loc[1], covariance_matrix=psd_cov[1])
             actual = kl_divergence(p, q)
