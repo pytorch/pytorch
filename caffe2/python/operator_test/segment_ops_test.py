@@ -558,41 +558,41 @@ class TestSegmentOps(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             gc, op, [D, W, indices, L], ref_sparse)
 
-    @given(
-        inputs=hu.lengths_tensor(
-            dtype=np.float32,
-            min_value=1,
-            max_value=5,
-            min_dim=1,
-            max_dim=1,
-            allow_empty=False,
-        ),
-        **hu.gcs
-    )
-    def test_lengths_max_gpu(self, inputs, gc, dc):
-        def lengths_max_ref(I, L):
-            R = np.zeros(shape=(len(L)), dtype=I.dtype)
-            line = 0
-            for g in range(len(L)):
-                for i in range(L[g]):
-                    if i == 0:
-                        R[g] = I[line]
-                    else:
-                        R[g] = max(R[g], I[line])
-                    line += 1
-            return [R]
+   # @given(
+   #     inputs=hu.lengths_tensor(
+   #         dtype=np.float32,
+   #         min_value=1,
+   #         max_value=5,
+   #         min_dim=1,
+   #         max_dim=1,
+   #         allow_empty=False,
+   #     ),
+   #     **hu.gcs
+   # )
+   # def test_lengths_max_gpu(self, inputs, gc, dc):
+   #     def lengths_max_ref(I, L):
+   #         R = np.zeros(shape=(len(L)), dtype=I.dtype)
+   #         line = 0
+   #         for g in range(len(L)):
+   #             for i in range(L[g]):
+   #                 if i == 0:
+   #                     R[g] = I[line]
+   #                 else:
+   #                     R[g] = max(R[g], I[line])
+   #                 line += 1
+   #         return [R]
 
-        X, lengths = inputs
-        op = core.CreateOperator("LengthsMax", ["X", "lengths"], "out")
-        self.assertDeviceChecks(dc, op, [X, lengths], [0])
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X, lengths],
-            reference=lengths_max_ref,
-            threshold=1e-4,
-            output_to_grad='out',
-        )
+   #     X, lengths = inputs
+   #     op = core.CreateOperator("LengthsMax", ["X", "lengths"], "out")
+   #     self.assertDeviceChecks(dc, op, [X, lengths], [0])
+   #     self.assertReferenceChecks(
+   #         device_option=gc,
+   #         op=op,
+   #         inputs=[X, lengths],
+   #         reference=lengths_max_ref,
+   #         threshold=1e-4,
+   #         output_to_grad='out',
+   #     )
 
 
 if __name__ == "__main__":
