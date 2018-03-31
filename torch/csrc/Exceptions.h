@@ -18,7 +18,7 @@
   } catch (python_error &e) {                                                  \
     return retval;                                                             \
   } catch (const at::Error &e) {                                               \
-    auto msg = torch::processErrorMsg(e.what_without_location());              \
+    auto msg = torch::processErrorMsg(e.what_without_backtrace());              \
     PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
     return retval;                                                             \
   } catch (torch::PyTorchError &e) {                                           \
