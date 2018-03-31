@@ -13,8 +13,8 @@ from functools import reduce, wraps
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
-
-from common import TestCase, run_tests, skipIfNoLapack, suppress_warnings
+from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
+    suppress_warnings
 from torch.autograd import Variable, Function
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -1844,6 +1844,92 @@ class TestAutograd(TestCase):
 
         _test_with_size(S, S + 1)
         _test_with_size(S, S - 1)
+
+    @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
+    def test_fft_ifft_rfft_irfft(self):
+        def _test_complex(sizes, signal_ndim):
+            x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
+
+            for normalized in (True, False):
+                def fft(x):
+                    return x.fft(signal_ndim, normalized=normalized)
+
+                gradcheck(fft, [x])
+                gradgradcheck(fft, [x], gen_non_contig_grad_outputs=True)
+
+                def ifft(fx):
+                    return fx.ifft(signal_ndim, normalized=normalized)
+
+                fx = fft(x).detach()
+                fx.requires_grad = True
+                gradcheck(ifft, [fx])
+                gradgradcheck(ifft, [fx], gen_non_contig_grad_outputs=True)
+
+        def _test_real(sizes, signal_ndim):
+            x = torch.randn(sizes, requires_grad=True, dtype=torch.double)
+            if x.dim() == signal_ndim:
+                start_dim = 0
+            else:
+                start_dim = 1
+            signal_sizes = x.size()[start_dim:start_dim + signal_ndim]
+
+            for normalized, onesided in product((True, False), repeat=2):
+                def rfft(x):
+                    return x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+
+                gradcheck(rfft, [x])
+                gradgradcheck(rfft, [x], gen_non_contig_grad_outputs=True)
+
+                # Generally speaking, irfft itself won't and can't pass the
+                # current gradcheck as it assumes the input follows conjugate
+                # symmetry, an requirement that is never true with our point
+                # numerical Jacobian estimate. Without input symmtry, irfft's
+                # behavior is undefined.
+                #
+                # Even onesided results can't remove all redundancy. For
+                # example, consider the .select(last_signal_dim, 0) slice.
+                # It is entirely represented in the onesided results (except
+                # for 1D), and will be reflected onto itself!
+                #
+                # So only 1D onesided irfft should pass grad check as it is
+                # guaranteed that the input has no symmetrical values.
+                #
+                # In other cases, we test a function that first uses rfft to
+                # generate a tensor that follows the conjugate symmetry irfft
+                # expects, and then feeds it into irfft. Since rfft is already
+                # tested above, we thereby verify the correctness of irfft.
+                if signal_ndim == 1 and onesided:
+                    def irfft(fx):
+                        return fx.irfft(signal_ndim, normalized=normalized,
+                                        onesided=onesided, signal_sizes=signal_sizes)
+
+                    fx = rfft(x).detach()
+                    fx.requires_grad = True
+                    gradcheck(irfft, [fx])
+                    gradgradcheck(irfft, [fx], gen_non_contig_grad_outputs=True)
+                else:
+                    # Test this function: f(x) = ifft(rfft(x) + rfft(z)), where
+                    # z is some fixed tensor of same size as x. rfft(z) term is
+                    # needed because otherwise f becomes identity.
+                    z = torch.randn(sizes, dtype=torch.double)
+                    fz = z.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+
+                    def rfft_irfft(x):
+                        fx = x.rfft(signal_ndim, normalized=normalized, onesided=onesided)
+                        y = fx + fz
+                        return y.irfft(signal_ndim, normalized=normalized,
+                                       onesided=onesided, signal_sizes=signal_sizes)
+
+                    gradcheck(rfft_irfft, [x])
+                    gradgradcheck(rfft_irfft, [x], gen_non_contig_grad_outputs=True)
+
+        _test_real((2, 10), 1)
+        _test_real((2, 3, 4), 2)
+        _test_real((2, 3, 4, 3), 3)
+
+        _test_complex((2, 10, 2), 1)
+        _test_complex((2, 3, 4, 2), 2)
+        _test_complex((2, 3, 4, 3, 2), 3)
 
     def test_variable_traverse(self):
         def get_out_and_unrefed_cycle():
