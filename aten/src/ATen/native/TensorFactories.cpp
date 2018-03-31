@@ -216,6 +216,42 @@ Tensor randint(const Type& dtype, int64_t low, int64_t high, IntList size, Gener
   }
 }
 
+Tensor& randint_out(Tensor& result, int64_t high, IntList size, Generator* generator) {
+  result.resize_(size);
+  if (high > 0) { 
+    return result.random_(0, high, generator);
+  }
+  else {
+    throw std::domain_error("high parameter of randint must greater than equal to low parameter (0 in this case)");
+  }
+}
+
+Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size, Generator* generator) {
+  result.resize_(size);
+  if (high > low) { 
+    return result.random_(0, high, generator);
+  }
+  else {
+    throw std::domain_error("high parameter of randint must greater than equal to low parameter");
+  }
+}
+
+Tensor randint_like(const Tensor& self, int64_t high) {
+  return at::native::randint_like(self, high, self.type());
+}
+
+Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
+  return at::native::randint_like(self, low, high, self.type());
+}
+
+Tensor randint_like(const Tensor& self, int64_t high, const Type& dtype) {
+  return at::native::randint(dtype, high, self.sizes(), nullptr);
+}
+
+Tensor randint_like(const Tensor& self, int64_t low, int64_t high, const Type& dtype) {
+  return at::native::randint(dtype, low, high, self.sizes(), nullptr);
+}
+
 namespace {
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
