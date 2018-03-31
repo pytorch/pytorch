@@ -107,21 +107,24 @@ protected:
   TreeRef tree_;
 };
 
+template<typename T>
+struct ListIterator {
+  ListIterator(TreeList::const_iterator it) : it(it) {}
+  bool operator!=(const ListIterator& rhs) const { return it != rhs.it; }
+  bool operator==(const ListIterator& rhs) const { return it == rhs.it; }
+  T operator*() const { return T(*it); }
+  ListIterator& operator+=(std::ptrdiff_t n) { it += n; return *this; }
+  ListIterator& operator++() { ++it; return *this; }
+  ListIterator& operator--() { --it; return *this; }
+
+private:
+  TreeList::const_iterator it;
+};
+
 template <typename T>
 struct List : public TreeView {
-  struct Iterator {
-    Iterator(TreeList::const_iterator it) : it(it) {}
-    bool operator!=(const Iterator& rhs) const { return it != rhs.it; }
-    bool operator==(const Iterator& rhs) const { return it == rhs.it; }
-    T operator*() const { return T(*it); }
-    void operator++() { ++it; }
-    void operator--() { --it; }
-
-  private:
-    TreeList::const_iterator it;
-  };
-  typedef Iterator iterator;
-  typedef Iterator const_iterator;
+  using iterator = ListIterator<T>;
+  using const_iterator = ListIterator<T>;
 
   List(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_LIST);
@@ -715,3 +718,11 @@ struct ListLiteral : public Expr {
 } // namespace script
 } // namespace jit
 } // namespace torch
+
+namespace std {
+
+template<typename T>
+struct iterator_traits<torch::jit::script::ListIterator<T>>
+  : std::iterator_traits<torch::jit::script::TreeList::const_iterator> {};
+
+} // namespace std
