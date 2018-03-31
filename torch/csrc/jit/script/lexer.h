@@ -372,11 +372,6 @@ struct Token {
   }
 };
 
-struct Lookahead {
-  std::vector<Token> tokens;
-  bool valid = false;
-};
-
 struct Lexer {
   explicit Lexer(const std::string& str)
       : file(std::make_shared<std::string>(str)),

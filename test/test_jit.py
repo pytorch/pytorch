@@ -1815,7 +1815,7 @@ class TestScript(TestCase):
             return a * 1., a * 2., a * 3.
 
         a = torch.randn(1, dtype=torch.float)
-        # self.checkScript(no_return, [a], optimize=True)
+        self.checkScript(no_return, [a], optimize=True)
         self.checkScript(void_return, [a], optimize=True)
         self.checkScript(one_return, [a], optimize=True)
         self.checkScript(multiple_returns, [a], optimize=True)
