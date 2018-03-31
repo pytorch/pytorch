@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/python_compiled_function.h"
+#include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -13,6 +14,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -69,6 +71,10 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_peephole", graph_pass<PeepholeOptimize>)
    .def("_jit_pass_canonicalize", graph_pass<Canonicalize>)
    .def("_jit_pass_lint", graph_pass<LintGraph>)
+   .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
+     auto tensor_inputs = createVariableTensorList(inputs);
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
+   })
    .def("_jit_run_cpp_tests", runJITCPPTests)
    .def("_jit_flatten", [](py::handle& obj) {
      auto res =  python::flatten(obj);

@@ -1412,6 +1412,17 @@ class TestJit(TestCase):
 
         self.assertEqual(cu.test_integral_shape_inference(*inputs), outputs)
 
+    def test_shape_analysis_broadcast(self):
+        def broadcast(a, b):
+            return a + b
+
+        x = torch.randn(3, 1, 5, requires_grad=True)
+        y = torch.randn(4, 1, 8, 5, requires_grad=True)
+
+        graph = torch.jit._script_graph(broadcast)
+        torch._C._jit_pass_shape_analysis(graph, (x, y), False)
+        self.assertExpected(str(graph))
+
     def test_fuser_multiple_blocks(self):
         cu = torch.jit.CompilationUnit('''
         def test_fuser_multiple_blocks(this, that, theother, meme):

@@ -65,15 +65,15 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
       return;
     auto graph = node->owningGraph();
     Node *expand = graph->create(aten::expand, {node->inputs().at(input_idx)})
-                        ->is_(attr::sizes, expected_size)
+                        ->is_(attr::size, expected_size)
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
   };
   broadcast(0);
   broadcast(1);
-  types[0] = node->inputs().at(0)->expect<TensorType>();
-  types[1] = node->inputs().at(1)->expect<TensorType>();
+  types[0] = node->inputs().at(0)->type()->expect<TensorType>();
+  types[1] = node->inputs().at(1)->type()->expect<TensorType>();
 }
 
 void PropagateShapeOnNode(Node * node) {
