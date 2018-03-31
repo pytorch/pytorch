@@ -1223,7 +1223,7 @@ Args:
     offset (int, optional): the diagonal to consider. Default: 0 (main
         diagonal).
 
-Examples:
+Examples::
 
     >>> a = torch.randn(3)
     >>> a
@@ -1282,7 +1282,8 @@ Args:
     offset (int, optional): which diagonal to consider. Default: 0
         (main diagonal).
 
-Examples:
+Examples::
+
     >>> a = torch.randn(3, 3)
     >>> a
 
