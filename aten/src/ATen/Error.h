@@ -3,10 +3,10 @@
 #include <ATen/ATenGeneral.h> // for AT_API
 #include <ATen/optional.h>
 
-#include <ciso646>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
+#include <functional>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -97,7 +97,7 @@ inline at::optional<FrameInformation> parse_frame_information(
 #else
 #warning Unknown standard library, backtraces may have incomplete debug information
   return at::nullopt;
-#endif
+#endif // defined(__GLIBCXX__)
 
   // Some system-level functions don't have sufficient debug information, so
   // we'll display them as "<unknown function>". They'll still have a return
