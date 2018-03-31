@@ -57,7 +57,7 @@
 - func: adaptive_max_pool1d(Tensor self, IntList[1] output_size) -> (Tensor, Tensor)
   variants: function
 
-- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8) -> bool
+- func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -378,6 +378,8 @@
   variants: method
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+
+- func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
 
