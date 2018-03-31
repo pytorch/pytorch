@@ -16,9 +16,7 @@ class _ContextMethodMixin(object):
         :func:`forward` **method.**
 
         Later, saved tensors can be accessed through the :attr:`saved_tensors`
-        attribute; or, if the corresponding Variable is needed (e.g. for double
-        backwards), those can be accessed through the :attr:`saved_variables`
-        attribute.  Before returning them to the user, a check is made, to ensure
+        attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
         Arguments can also be ``None``.
@@ -110,7 +108,7 @@ class FunctionMeta(type):
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
     """Records operation history and defines formulas for differentiating ops.
 
-    Every operation performed on :class:`Variable` s creates a new function
+    Every operation performed on :class:`Tensor` s creates a new function
     object, that performs the computation, and records that it happened.
     The history is retained in the form of a DAG of functions, with edges
     denoting data dependencies (``input <- output``). Then, when backward is
@@ -159,7 +157,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         It must accept a context ctx as the first argument, followed by any
         number of arguments (tensors or other types).
 
-        The context can be used to store variables that can be then retrieved
+        The context can be used to store tensors that can be then retrieved
         during the backward pass.
         """
         raise NotImplementedError
@@ -176,7 +174,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         gradient w.r.t the given output, and each returned value should be the
         gradient w.r.t. the corresponding input.
 
-        The context can be used to retrieve variables saved during the forward
+        The context can be used to retrieve tensors saved during the forward
         pass.
         """
         raise NotImplementedError
@@ -233,7 +231,7 @@ def traceable(fn_cls):
     Traceable functions have additional restrictions - they can't pass any
     data-dependent values to backward (e.g. Prod passes the output, which makes
     it non-traceable), and their backward should be implemented entirely in terms
-    of operations on autograd Variables in all cases.
+    of operations on autograd Tensors in all cases.
 
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).

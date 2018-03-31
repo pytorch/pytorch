@@ -14,6 +14,8 @@ import unittest
 import inspect
 import textwrap
 import numpy as np
+import tempfile
+import shutil
 
 from torch.jit.frontend import NotSupportedError
 
@@ -2020,6 +2022,45 @@ class TestScript(TestCase):
         self.assertEqual(o, m.sub(input))
         with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
             m.sub = nn.Linear(5, 5)
+
+
+# Smoke tests for export methods
+class TestPytorchExportModes(unittest.TestCase):
+    class MyModel(nn.Module):
+        def __init__(self):
+            super(TestPytorchExportModes.MyModel, self).__init__()
+
+        def forward(self, x):
+            return x.t()
+
+    def test_protobuf(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.PROTOBUF_FILE)
+
+    def test_zipfile(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.ZIP_ARCHIVE)
+
+    def test_compressed_zipfile(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE)
+
+    def test_directory(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        d = tempfile.mkdtemp()
+        torch.onnx._export(torch_model, (fake_input), d, verbose=False,
+                           export_type=torch.onnx.ExportTypes.DIRECTORY)
+        shutil.rmtree(d)
 
 
 if __name__ == '__main__':
