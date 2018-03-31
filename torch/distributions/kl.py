@@ -285,10 +285,10 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
         raise ValueError("KL-divergence between two Multivariate Normals with\
                           different batch shapes cannot be computed")
 
-    def _batch_function(bmat, function, final_size):
+    def _batch_trace(bmat):
         mat_size = bmat.size(-1)
-        values = torch.stack([function(M) for M in bmat.contiguous().view((-1, mat_size, mat_size))])
-        return values.view(final_size)
+        values = torch.stack([torch.trace(M) for M in bmat.contiguous().view((-1, mat_size, mat_size))])
+        return values.view(bmat.shape[:-2])
 
     def _batch_mm(bmat1, bmat2):
         mat_size = bmat1.size(-1)
@@ -298,9 +298,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
 
     term1 = _batch_diag(q.scale_tril).abs().log().sum(-1) - _batch_diag(p.scale_tril).abs().log().sum(-1)
 
-    term2 = _batch_function(q.covariance_matrix, torch.inverse, q.covariance_matrix.size())
-    term2 = _batch_mm(term2, p.covariance_matrix)
-    term2 = _batch_function(term2, torch.trace, p.batch_shape)
+    term2 = _batch_trace(_batch_mm(q.precision_matrix, p.covariance_matrix))
 
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
     return 0.5 * (term1 - q.loc.size(-1) + term2 + term3)

@@ -2623,6 +2623,36 @@ class TestKL(TestCase):
                 'Actual (analytic): {}'.format(actual),
             ]))
 
+    def test_kl_multivariate_normal(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        n = 5  # Number of tests for multivariate_normal
+        print('Testing KL(MultivariateNormal, MultivariateNormal) using Monte Carlo')
+        for i in range(0, n):
+            loc = []
+            psd_cov = []
+            for _ in range(0, 2):
+                loc.append(torch.randn(3))
+                tmp = torch.randn(3, 5)
+                psd_cov.append(tmp.mm.(tmp.t()))
+            p = MultivariateNormal(loc=loc[0], covariance_matrix=psd_cov[0])
+            q = MultivariateNormal(loc=loc[1], covariance_matrix=psd_cov[1])
+            actual = kl_divergence(p, q)
+            numerator = 0
+            denominator = 0
+            while denominator < self.max_samples:
+                x = p.sample(sample_shape=(self.samples_per_batch,))
+                numerator += (p.log_prob(x) - q.log_prob(x)).sum(0)
+                denominator += x.size(0)
+                expected = numerator / denominator
+                error = torch.abs(expected - actual) / (1 + expected)
+                if error[error == error].max() < self.precision:
+                    break
+            self.assertLess(error[error == error].max(), self.precision, '\n'.join([
+                 'Incorrect KL(MultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
+                 'Expected ({} Monte Carlo sample): {}'.format(denominator, expected),
+                 'Actual (analytic): {}'.format(actual),
+            ]))
+
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
             if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
