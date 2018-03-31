@@ -147,7 +147,7 @@ class profile(object):
         instance should be enabled at any given time.
 
     Example:
-        >>> x = Variable(torch.randn(1, 1), requires_grad=True)
+        >>> x = torch.randn((1, 1), requires_grad=True)
         >>> with torch.autograd.profiler.profile() as prof:
         ...     y = x ** 2
         ...     y.backward()

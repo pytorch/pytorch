@@ -1257,66 +1257,13 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
                           eps=eps)
 
 
-def layer_norm(input, normalized_shape, running_mean=None, running_var=None,
-               weight=None, bias=None, use_input_stats=True,
-               momentum=0.1, eps=1e-5):
+def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
     r"""Applies Layer Normalization for last certain number of dimensions.
 
     See :class:`~torch.nn.LayerNorm` for details.
     """
-    if not use_input_stats and (running_mean is None or running_var is None):
-        raise ValueError('Expected running_mean and running_var to be not None when use_input_stats=False')
-
-    if weight is not None and weight.size() != normalized_shape:
-        raise ValueError('Expected weight to be of same shape as '
-                         'normalized_shape, but got {} weight and '
-                         'normalized_shape={}'.format(weight.size(), normalized_shape))
-
-    if bias is not None and bias.size() != normalized_shape:
-        raise ValueError('Expected bias to be of same shape as '
-                         'normalized_shape, but got {} bias and '
-                         'normalized_shape={}'.format(bias.size(), normalized_shape))
-
-    normalized_ndim = len(normalized_shape)
-    input_shape = input.size()
-
-    if input_shape[-normalized_ndim:] != torch.Size(normalized_shape):
-        raise ValueError('Expected input with shape [*, {}], but got {} input'
-                         .format(', '.join(normalized_shape), list(input_shape)))
-
-    n = reduce(mul, input_shape[:-normalized_ndim], 1)
-
-    # Repeat stored stats if necessary
-    if running_mean is not None:
-        running_mean_orig = running_mean
-        running_mean = running_mean_orig.repeat(n)
-    if running_var is not None:
-        running_var_orig = running_var
-        running_var = running_var_orig.repeat(n)
-
-    # Apply layer norm
-    input_reshaped = input.contiguous().view(1, n, -1)
-
-    out = batch_norm(
-        input_reshaped, running_mean, running_var, None, None,
-        use_input_stats, momentum, eps)
-
-    # Copy back
-    if running_mean is not None:
-        running_mean_orig.fill_(running_mean.mean())
-    if running_var is not None:
-        running_var_orig.fill_(running_var.mean())
-
-    out = out.view(*input_shape)
-
-    if weight is not None and bias is not None:
-        return torch.addcmul(bias, 1, out, weight)
-    elif weight is not None:
-        return torch.mul(out, weight)
-    elif bias is not None:
-        return torch.add(out, bias)
-    else:
-        return out
+    return torch.layer_norm(input, normalized_shape, weight, bias, eps,
+                            torch.backends.cudnn.enabled)
 
 
 def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
@@ -1324,7 +1271,8 @@ def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
 
     See :class:`~torch.nn.GroupNorm` for details.
     """
-    return torch.group_norm(input, num_groups, weight, bias, eps)
+    return torch.group_norm(input, num_groups, weight, bias, eps,
+                            torch.backends.cudnn.enabled)
 
 
 def local_response_norm(input, size, alpha=1e-4, beta=0.75, k=1):
@@ -1365,7 +1313,7 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             in case of 2D Loss, or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K > 1`
             in the case of K-dimensional loss.
         target: :math:`(N)` where each value is :math:`0 \leq \text{targets}[i] \leq C-1`,
-            or :math:`(N, C, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
+            or :math:`(N, d_1, d_2, ..., d_K)` where :math:`K \geq 1` for
             K-dimensional loss.
         weight (Tensor, optional): a manual rescaling weight given to each
             class. If given, has to be a Tensor of size `C`
@@ -1388,6 +1336,12 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
     dim = input.dim()
     if torch.is_tensor(weight):
         weight = weight
+    if dim < 2:
+        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
+
+    if input.size(0) != target.size(0):
+        raise ValueError('Expected input batch_size ({}) to match target batch_size ({}).'
+                         .format(input.size(0), target.size(0)))
     if dim == 2:
         return torch._C._nn.nll_loss(input, target, weight, size_average, ignore_index, reduce)
     elif dim == 4:
@@ -1405,8 +1359,6 @@ def nll_loss(input, target, weight=None, size_average=True, ignore_index=-100, r
             return torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         out = torch._C._nn.nll_loss2d(input, target, weight, size_average, ignore_index, reduce)
         return out.view(out_size)
-    else:
-        raise ValueError('Expected 2 or more dimensions (got {})'.format(dim))
 
 
 def poisson_nll_loss(input, target, log_input=True, full=False, size_average=True, eps=1e-8, reduce=True):
@@ -1734,7 +1686,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     expected inputs are 3-D, 4-D or 5-D in shape.
 
     The input dimensions are interpreted in the form:
-    `mini-batch x channels x [depth] x [height] x width`
+    `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
     `bilinear` (4D-only), `trilinear` (5D-only)
@@ -1757,8 +1709,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         output and input pixels, and thus the output values can depend on the
         input size. This was the default behavior for these modes up to version
         0.3.1. Since then, the default behavior is ``align_corners = False``.
-        See :class:`nn.Upsample` for concrete examples on how this affects the
-        outputs.
+        See :class:`~torch.nn.Upsample` for concrete examples on how this
+        affects the outputs.
 
     """
     from numbers import Integral
@@ -1844,7 +1796,7 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :meth:`nn.functional.upsample`.
+        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -1864,7 +1816,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :meth:`nn.functional.upsample`.
+        This function is deprecated in favor of :meth:`torch.nn.functional.upsample`.
         This is equivalent with
         ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
 
@@ -1900,8 +1852,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     :attr:`grid` has values in the range of `[-1, 1]`. This is because the
     pixel locations are normalized by the input height and width.
 
-    For example, values: x: -1, y: -1 is the left-top pixel of the input
-                 values: x: 1, y: 1 is the right-bottom pixel of the input
+    For example, values: x: -1, y: -1 is the left-top pixel of the input, and
+    values: x: 1, y: 1 is the right-bottom pixel of the input.
 
     If :attr:`grid` has values outside the range of `[-1, 1]`, those locations
     are handled as defined by `padding_mode`. Options are `zeros` or `border`,
@@ -2046,7 +1998,7 @@ def cosine_similarity(x1, x2, dim=1, eps=1e-8):
 def triplet_margin_loss(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False, size_average=True,
                         reduce=True):
     r"""
-    See :class:`torch.nn.TripletMarginLoss` for details
+    See :class:`~torch.nn.TripletMarginLoss` for details
     """
     return torch._C._VariableFunctions.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap,
                                                            size_average, reduce)

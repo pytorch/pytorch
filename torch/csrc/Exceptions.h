@@ -6,6 +6,7 @@
 
 #ifndef NO_PYTHON
 
+#include "ATen/Error.h"
 #include "THP_export.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -16,11 +17,15 @@
 #define END_HANDLE_TH_ERRORS_RET(retval)                                       \
   } catch (python_error &e) {                                                  \
     return retval;                                                             \
+  } catch (const at::Error &e) {                                               \
+    auto msg = torch::processErrorMsg(e.what_without_location());              \
+    PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
+    return retval;                                                             \
   } catch (torch::PyTorchError &e) {                                           \
     auto msg = torch::processErrorMsg(e.what());                               \
     PyErr_SetString(e.python_type(), msg.c_str());                             \
     return retval;                                                             \
-  } catch (std::exception &e) {                                                \
+  } catch (const std::exception &e) {                                          \
     auto msg = torch::processErrorMsg(e.what());                               \
     PyErr_SetString(PyExc_RuntimeError, msg.c_str());                          \
     return retval;                                                             \

@@ -1759,24 +1759,17 @@ class TestNN(NNTestCase):
             self.assertAlmostEqual(torch.abs(mean.data).mean(), bias, delta=1e-5)
             self.assertAlmostEqual(torch.abs(var.data).mean(), scale ** 2, delta=1e-5)
 
-            # test that LN with track_running_stats=True
-            ln = nn.LayerNorm(normalized_shape, momentum=1, eps=0,
-                              elementwise_affine=False, track_running_stats=True).type(type)
-            output_ref = ln(x).data.clone()
-            input_reshaped = x.view(*(unnormalized_shape + [-1]))
-            # make sure that running mean and var update correctly when training
-            mean = input_reshaped.mean(-1).mean()
-            var = input_reshaped.var(-1, unbiased=True).mean()
-            self.assertAlmostEqual(torch.abs(mean.data - ln.running_mean).mean(), 0, delta=1e-5)
-            self.assertAlmostEqual(torch.abs(var.data - ln.running_var).mean(), 0, delta=1e-5)
-            ln.eval()
-            old_running_mean = ln.running_mean.clone()
-            old_running_var = ln.running_var.clone()
-            output_new = ln(x + ln.running_var.sqrt()[0] * scale).data
-            self.assertAlmostEqual((output_new - output_ref).mean(), scale, delta=1e-5)
-            # make sure that running mean and var don't change in eval
-            self.assertEqual(old_running_mean, ln.running_mean)
-            self.assertEqual(old_running_var, ln.running_var)
+        bad_norm_shape_input_shape = {
+            (): (),
+            (2, 3): (3,),
+            (2,): (1, 2, 3),
+            (10,): (2, 3),
+            10: (2, 3),
+        }
+        for norm_shape, input_shape in bad_norm_shape_input_shape.items():
+            ln = nn.LayerNorm(norm_shape)
+            input = type(*input_shape).uniform_(0, 10)
+            self.assertRaises(RuntimeError, lambda: ln(input))
 
     def _test_LayerNorm_cuda_half(self):
         input = torch.zeros(2, 3, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
@@ -2934,6 +2927,13 @@ class TestNN(NNTestCase):
 
     def test_loss_equal_input_target_shape(self):
         self._test_loss_equal_input_target_shape(lambda x: x)
+
+    def test_NLLLoss_mismatched_batch(self):
+        x = torch.randn((10, 3), requires_grad=True)
+        # t should have size (10,)
+        t = torch.zeros((3,), dtype=torch.int64)
+        with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
+            F.nll_loss(x, t)
 
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
@@ -4421,6 +4421,35 @@ class TestNN(NNTestCase):
         _assertGradAndGradgradChecks(self, lambda x1, x2: F.bilinear(x1, x2, module.weight, module.bias),
                                      (input1_1, input2_1))
 
+    def test_bilinear_no_bias(self):
+        module = nn.Bilinear(10, 10, 8)
+        module_no_bias = nn.Bilinear(10, 10, 8, False)
+
+        module.bias.data.zero_()
+        module.weight.data.copy_(module_no_bias.weight)
+
+        input1 = torch.randn(4, 10, requires_grad=True)
+        input2 = torch.randn(4, 10, requires_grad=True)
+        grad_output = torch.randn(4, 8)
+
+        def run(net):
+            input1.grad = input2.grad = None
+            output = net(input1, input2)
+            output.backward(grad_output)
+
+            return output.data, input1.grad.data, input2.grad.data
+
+        out, g1, g2 = run(module)
+        out_nb, g1_nb, g2_nb = run(module_no_bias)
+
+        self.assertEqual(out, out_nb)
+        self.assertEqual(g1, g1_nb)
+        self.assertEqual(g2, g2_nb)
+
+        _assertGradAndGradgradChecks(self,
+                                     lambda x1, x2: F.bilinear(x1, x2, module_no_bias.weight, module_no_bias.bias),
+                                     (input1, input2))
+
     def test_bilinear_broadcasting(self):
         m = nn.Bilinear(5, 6, 8)
         input1 = torch.randn(2, 3, 5)
@@ -4711,7 +4740,7 @@ class TestNNInit(TestCase):
                 input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50, as_variable=as_variable)
                 a = self._random_float(-3, 3)
                 b = a + self._random_float(1, 5)
-                init.uniform(input_tensor, a=a, b=b)
+                init.uniform_(input_tensor, a=a, b=b)
                 assert self._is_uniform(input_tensor, a, b)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
@@ -4721,7 +4750,7 @@ class TestNNInit(TestCase):
                 input_tensor = self._create_random_nd_tensor(dims, size_min=30, size_max=50, as_variable=as_variable)
                 mean = self._random_float(-3, 3)
                 std = self._random_float(1, 5)
-                init.normal(input_tensor, mean=mean, std=std)
+                init.normal_(input_tensor, mean=mean, std=std)
 
                 assert self._is_normal(input_tensor, mean, std)
 
@@ -4730,7 +4759,7 @@ class TestNNInit(TestCase):
             for dims in [1, 2, 4]:
                 input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
                 val = self._random_float(1, 10)
-                init.constant(input_tensor, val)
+                init.constant_(input_tensor, val)
                 if as_variable:
                     input_tensor = input_tensor.data
 
@@ -4739,7 +4768,7 @@ class TestNNInit(TestCase):
     def test_eye(self):
         for as_variable in [True, False]:
             input_tensor = self._create_random_nd_tensor(2, size_min=1, size_max=5, as_variable=as_variable)
-            init.eye(input_tensor)
+            init.eye_(input_tensor)
             if as_variable:
                 input_tensor = input_tensor.data
 
@@ -4756,13 +4785,13 @@ class TestNNInit(TestCase):
             for dims in [1, 3]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                    init.eye(tensor)
+                    init.eye_(tensor)
 
     def test_dirac_properties(self):
         for as_variable in [True, False]:
             for dims in [3, 4, 5]:
                 input_tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=5, as_variable=as_variable)
-                init.dirac(input_tensor)
+                init.dirac_(input_tensor)
                 if as_variable:
                     input_tensor = input_tensor.data
 
@@ -4778,7 +4807,7 @@ class TestNNInit(TestCase):
         # Test 1D
         input_var = Variable(torch.randn(batch, in_c, size))
         filter_var = Variable(torch.zeros(out_c, in_c, kernel_size))
-        init.dirac(filter_var)
+        init.dirac_(filter_var)
         output_var = F.conv1d(input_var, filter_var)
         input_tensor, output_tensor = input_var.data, output_var.data  # Variables do not support nonzero
         self.assertEqual(input_tensor[:, :, 1:-1], output_tensor[:, :in_c, :])  # Assert in_c outputs are preserved
@@ -4787,7 +4816,7 @@ class TestNNInit(TestCase):
         # Test 2D
         input_var = Variable(torch.randn(batch, in_c, size, size))
         filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size))
-        init.dirac(filter_var)
+        init.dirac_(filter_var)
         output_var = F.conv2d(input_var, filter_var)
         input_tensor, output_tensor = input_var.data, output_var.data
         self.assertEqual(input_tensor[:, :, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
@@ -4796,7 +4825,7 @@ class TestNNInit(TestCase):
         # Test 3D
         input_var = Variable(torch.randn(batch, in_c, size, size, size))
         filter_var = Variable(torch.zeros(out_c, in_c, kernel_size, kernel_size, kernel_size))
-        init.dirac(filter_var)
+        init.dirac_(filter_var)
         output_var = F.conv3d(input_var, filter_var)
         input_tensor, output_tensor = input_var.data, output_var.data
         self.assertEqual(input_tensor[:, :, 1:-1, 1:-1, 1:-1], output_tensor[:, :in_c, :, :])
@@ -4807,21 +4836,21 @@ class TestNNInit(TestCase):
             for dims in [1, 2, 6]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                    init.dirac(tensor)
+                    init.dirac_(tensor)
 
     def test_xavier_uniform_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
                 with self.assertRaises(ValueError):
-                    init.xavier_uniform(tensor)
+                    init.xavier_uniform_(tensor)
 
     def test_xavier_normal_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
                 with self.assertRaises(ValueError):
-                    init.xavier_normal(tensor)
+                    init.xavier_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_xavier_uniform(self):
@@ -4834,9 +4863,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.xavier_uniform(input_tensor, gain=gain)
+                        init.xavier_uniform_(input_tensor, gain=gain)
                     else:
-                        init.xavier_uniform(input_tensor)
+                        init.xavier_uniform_(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
@@ -4862,9 +4891,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.xavier_normal(input_tensor, gain=gain)
+                        init.xavier_normal_(input_tensor, gain=gain)
                     else:
-                        init.xavier_normal(input_tensor)
+                        init.xavier_normal_(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
@@ -4883,14 +4912,14 @@ class TestNNInit(TestCase):
             for dims in [0, 1]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
-                    init.kaiming_uniform(tensor)
+                    init.kaiming_uniform_(tensor)
 
     def test_kaiming_normal_errors_on_inputs_smaller_than_2d(self):
         for as_variable in [True, False]:
             for dims in [0, 1]:
                 with self.assertRaises(ValueError):
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=1, as_variable=as_variable)
-                    init.kaiming_normal(tensor)
+                    init.kaiming_normal_(tensor)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_kaiming_uniform(self):
@@ -4902,10 +4931,10 @@ class TestNNInit(TestCase):
                                                                      as_variable=as_variable)
                         if use_a:
                             a = self._random_float(0.1, 2)
-                            init.kaiming_uniform(input_tensor, a=a, mode=mode)
+                            init.kaiming_uniform_(input_tensor, a=a, mode=mode)
                         else:
                             a = 0
-                            init.kaiming_uniform(input_tensor, mode=mode)
+                            init.kaiming_uniform_(input_tensor, mode=mode)
 
                         if as_variable:
                             input_tensor = input_tensor.data
@@ -4935,10 +4964,10 @@ class TestNNInit(TestCase):
                                                                      as_variable=as_variable)
                         if use_a:
                             a = self._random_float(0.1, 2)
-                            init.kaiming_normal(input_tensor, a=a, mode=mode)
+                            init.kaiming_normal_(input_tensor, a=a, mode=mode)
                         else:
                             a = 0
-                            init.kaiming_normal(input_tensor, mode=mode)
+                            init.kaiming_normal_(input_tensor, mode=mode)
 
                         if as_variable:
                             input_tensor = input_tensor.data
@@ -4963,7 +4992,7 @@ class TestNNInit(TestCase):
                 with self.assertRaises(ValueError):
                     sparsity = self._random_float(0.1, 0.9)
                     tensor = self._create_random_nd_tensor(dims, size_min=1, size_max=3, as_variable=as_variable)
-                    init.sparse(tensor, sparsity)
+                    init.sparse_(tensor, sparsity)
 
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found.")
     def test_sparse_default_std(self):
@@ -4976,9 +5005,9 @@ class TestNNInit(TestCase):
                 std = 0.01  # default std
                 if use_random_std:
                     std = self._random_float(0.01, 0.2)
-                    init.sparse(input_tensor, sparsity=sparsity, std=std)
+                    init.sparse_(input_tensor, sparsity=sparsity, std=std)
                 else:
-                    init.sparse(input_tensor, sparsity=sparsity)
+                    init.sparse_(input_tensor, sparsity=sparsity)
 
                 if as_variable:
                     input_tensor = input_tensor.data
@@ -5002,9 +5031,9 @@ class TestNNInit(TestCase):
 
                     if use_gain:
                         gain = self._random_float(0.1, 2)
-                        init.orthogonal(input_tensor, gain=gain)
+                        init.orthogonal_(input_tensor, gain=gain)
                     else:
-                        init.orthogonal(input_tensor)
+                        init.orthogonal_(input_tensor)
 
                     if as_variable:
                         input_tensor = input_tensor.data
@@ -5017,6 +5046,13 @@ class TestNNInit(TestCase):
                     else:
                         self.assertEqual(torch.mm(flattened_tensor, flattened_tensor.t()),
                                          torch.eye(rows) * gain ** 2, prec=1e-6)
+
+    def test_deprecation(self):
+        x = torch.randn(3, 3)
+
+        def fn():
+            init.normal(x)
+        self.assertWarnsRegex(fn, 'deprecated', 'methods not suffixed with underscore should be deprecated')
 
 
 # Generates rand tensor with non-equal values. This ensures that duplicate
@@ -5920,7 +5956,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3),
+        constructor_args=([5], 1e-3),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -5928,7 +5964,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3, False),
+        constructor_args=([5], 1e-3, False),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -5936,15 +5972,7 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([5], 1e-3, 0.3, True, True),
-        input_size=(4, 5, 5),
-        cudnn=True,
-        check_eval=True,
-        desc='1d_elementwise_affine_tracking_stats',
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3),
+        constructor_args=([2, 2, 5], 1e-3),
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
@@ -5952,19 +5980,11 @@ new_module_tests = [
     ),
     dict(
         module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3, False),
+        constructor_args=([2, 2, 5], 1e-3, False),
         input_size=(4, 2, 2, 5),
         cudnn=True,
         check_eval=True,
         desc='3d_no_elementwise_affine',
-    ),
-    dict(
-        module_name='LayerNorm',
-        constructor_args=([2, 2, 5], 1e-3, 0.3, True, True),
-        input_size=(4, 2, 2, 5),
-        cudnn=True,
-        check_eval=True,
-        desc='3d_elementwise_affine_tracking_stats',
     ),
     dict(
         module_name='GroupNorm',

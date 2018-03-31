@@ -86,9 +86,9 @@ FOREACH(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     SET(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
     LIST(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
     IF(MSVC)
-      SET(MACRO_FLAG "/DCPUCAPABILITY${CPU_CAPABILITY}")
+      SET(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
     ELSE(MSVC)
-      SET(MACRO_FLAG "-DCPUCAPABILITY${CPU_CAPABILITY}")
+      SET(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
     ENDIF(MSVC)
     SET_SOURCE_FILES_PROPERTIES(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
   ENDFOREACH()
@@ -149,6 +149,7 @@ FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
 FILE(GLOB native_cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cudnn/*.cpp")
 FILE(GLOB native_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cuda/*.cu")
 FILE(GLOB native_mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkl/*.cpp")
+FILE(GLOB native_mkldnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkldnn/*.cpp")
 
 FILE(GLOB_RECURSE cuda_h
      RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -156,6 +157,7 @@ FILE(GLOB_RECURSE cuda_h
 
 FILE(GLOB cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cudnn/*.cpp")
 FILE(GLOB mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkl/*.cpp")
+FILE(GLOB mkldnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkldnn/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
@@ -201,7 +203,7 @@ ADD_CUSTOM_TARGET(aten_files_are_generated
 )
 
 
-SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
+SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
@@ -217,6 +219,10 @@ IF(NOT NO_CUDA)
     SET(all_cpp ${all_cpp} ${mkl_cpp})
   ENDIF()
 endif()
+
+IF(AT_MKLDNN_ENABLED)
+  SET(all_cpp ${all_cpp} ${mkldnn_cpp})
+ENDIF()
 
 filter_list(generated_h generated_cpp "\\.h$")
 
@@ -315,6 +321,9 @@ if (NNPACK_FOUND)
   target_link_libraries(ATen ${NNPACK_LIBRARIES})
 endif(NNPACK_FOUND)
 
+if(MKLDNN_FOUND)
+  target_link_libraries(ATen ${MKLDNN_LIBRARIES})
+endif(MKLDNN_FOUND)
 
 # ---[ Configure cpuinfo
 IF(NOT TARGET cpuinfo)
@@ -325,7 +334,6 @@ IF(NOT TARGET cpuinfo)
   ADD_SUBDIRECTORY("cpu/cpuinfo")
 ENDIF()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
-
 
 IF(CUDA_FOUND)
   TARGET_LINK_LIBRARIES(ATen

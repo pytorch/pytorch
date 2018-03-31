@@ -840,9 +840,6 @@ class TestSparse(TestCase):
             self.assertEqual(x.new(indices, values), x)
         self.assertEqual(x.new(indices, values, x.size()), x)
 
-        self.assertIs(torch.sparse.uint8, x.new(dtype=torch.sparse.uint8).dtype)
-        self.assertIs(torch.sparse.uint8, x.new(1, 2, dtype=torch.sparse.uint8).dtype)
-
     @cpu_only  # not really, but we only really want to run this once
     def test_factory(self):
         default_size = torch.Size([1, 3])
@@ -872,6 +869,15 @@ class TestSparse(TestCase):
                         if use_cuda:
                             self.assertEqual(device, sparse_tensor._values().get_device())
                         self.assertEqual(True, sparse_tensor.requires_grad)
+
+    @cpu_only
+    def test_factory_type_inference(self):
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float32))
+        self.assertEqual(torch.sparse.float32, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float64))
+        self.assertEqual(torch.sparse.float64, t.dtype)
+        t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
+        self.assertEqual(torch.sparse.int64, t.dtype)
 
     @cpu_only
     def test_factory_copy(self):

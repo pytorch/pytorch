@@ -79,7 +79,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 5
+_onnx_opset_version = 6
 
 
 # ---------------------------------------------------------------------
@@ -420,7 +420,7 @@ def avg_pool3d(g, input, kernel_size, stride, padding, ceil_mode, count_include_
     return g.op("AveragePool", input,
                 kernel_shape_i=_triple(kernel_size),
                 strides_i=_triple(stride),
-                pads_i=_triple(padding))
+                pads_i=_triple(padding) * 2)
 
 
 def reflection_pad(g, input, padding):
@@ -507,7 +507,6 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
                is_test_i=not training,
                epsilon_f=eps,
                momentum_f=1 - momentum,
-               consumed_inputs_i=(0, 0, 0, 1, 1),
                outputs=1 if not training else 5)
     if not training:
         return out
@@ -643,11 +642,11 @@ def instance_norm(g, input, **kwargs):
     weight = kwargs.get("weight", None)
     bias = kwargs.get("bias", None)
     eps = kwargs.get("eps", 1e-5)
-    if not weight:
+    if weight is None:
         weight = g.constant(1.0, [input.type().sizes()[1]], input_type)
     else:
         weight = g.op('Constant', value_t=weight)
-    if not bias:
+    if bias is None:
         bias = g.constant(0.0, [input.type().sizes()[1]], input_type)
     else:
         bias = g.op('Constant', value_t=bias)

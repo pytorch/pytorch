@@ -15,27 +15,23 @@
 namespace at {
 namespace native {
 
-using reduce_type = void(Tensor &, const Tensor &, size_t, bool);
-reduce_type *sumImpl = &DispatchStub<reduce_type>::init<sumImplC, &sumImpl>;
-reduce_type *prodImpl = &DispatchStub<reduce_type>::init<prodImplC, &prodImpl>;
-
 // ALL REDUCE #################################################################
 
-Tensor _reduce_cpu(reduce_type *f, const Tensor &self) {
-  Tensor result = self.type().tensor({});
-  f(result, self, 0, true);
-  return result;
-}
-
-Tensor _sum_cpu(const Tensor &self) {
-  if (self.is_contiguous())
-    return _reduce_cpu(sumImpl, self);
+Tensor _sum_cpu(const Tensor& self) {
+  if (self.is_contiguous()) {
+    Tensor result = self.type().tensor({});
+    sum_kernel(result, self, at::nullopt);
+    return result;
+  }
   return self._sumall();
 }
 
 Tensor _prod_cpu(const Tensor &self) {
-  if (self.is_contiguous())
-    return _reduce_cpu(prodImpl, self);
+  if (self.is_contiguous()) {
+    Tensor result = self.type().tensor({});
+    prod_kernel(result, self, at::nullopt);
+    return result;
+  }
   return self._prodall();
 }
 
@@ -73,22 +69,16 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
   return result;
 }
 
-Tensor &_reduce_out_cpu(reduce_type *f, Tensor &result, const Tensor &self,
-                        int64_t dim, bool keepdim) {
-  result = _dimreduce_setup(result, self, dim);
-  f(result, self, dim, false);
-  if (!keepdim)
-    result.squeeze_(dim);
-  return result;
-}
-
 Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
                      bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   if (_dimreduce_return_trivial(result, self, 0))
     return result;
   if (self.is_contiguous() && result.is_contiguous()) {
-    return _reduce_out_cpu(sumImpl, result, self, dim, keepdim);
+    _dimreduce_setup(result, self, dim);
+    sum_kernel(result, self, dim);
+    if (!keepdim) result.squeeze_(dim);
+    return result;
   }
   return at::_sum_out(result, self, dim, keepdim);
 }
@@ -99,7 +89,10 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   if (_dimreduce_return_trivial(result, self, 1))
     return result;
   if (self.is_contiguous() && result.is_contiguous()) {
-    return _reduce_out_cpu(prodImpl, result, self, dim, keepdim);
+    _dimreduce_setup(result, self, dim);
+    prod_kernel(result, self, dim);
+    if (!keepdim) result.squeeze_(dim);
+    return result;
   }
   return at::_prod_out(result, self, dim, keepdim);
 }

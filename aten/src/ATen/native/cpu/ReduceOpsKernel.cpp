@@ -1,118 +1,154 @@
 #include "ATen/native/cpu/ReduceOpsKernel.h"
+
+#include <numeric>
+
 #include "ATen/Dispatch.h"
 #include "ATen/Parallel.h"
+#include "ATen/optional.h"
+#include "ATen/cpu/vec256/vec256.h"
 
 namespace at {
 namespace native {
 
 using namespace vec256;
 
-// This adds the content of arr to sum
-template <class scalar_t, template <class> class OP, CPUCapability C>
-inline scalar_t allreduce_kernel_(const scalar_t *arr, size_t start, size_t end,
-                                  scalar_t sum) {
-  Vec256<scalar_t> part_sum;
-  // Use all 16 registers.
-  Vec256<scalar_t> tmp_sum[4], tmp_sum1, tmp_sum2, tmp_sum3;
-  Vec256<scalar_t> a[8];
-  size_t width =
-      256 / sizeof(scalar_t); // primitives per 256 bytes (two cache lines)
-  size_t epr = 32 / sizeof(scalar_t); // primitives per Vec256
-  size_t k = 0;
-  for (; k < (end - start) / width; k++) {
-    for (size_t i = 0; i < 8; i++) {
-      a[i].load(arr + (k * width) + i * epr + start);
-    }
-    for (size_t i = 0; i < 8; i += 2) {
-      tmp_sum[i / 2] = OP<Vec256<scalar_t>>()(a[i], a[i + 1]);
-    }
-    tmp_sum1 = OP<Vec256<scalar_t>>()(tmp_sum[0], tmp_sum[1]);
-    tmp_sum2 = OP<Vec256<scalar_t>>()(tmp_sum[2], tmp_sum[3]);
-    if (k == 0) {
-      part_sum = OP<Vec256<scalar_t>>()(tmp_sum1, tmp_sum2);
-    } else {
-      tmp_sum3 = OP<Vec256<scalar_t>>()(tmp_sum1, tmp_sum2);
-      part_sum = OP<Vec256<scalar_t>>()(part_sum, tmp_sum3);
-    }
-  }
-  if (k > 0) {
-    scalar_t sarr[32 / sizeof(scalar_t)];
-    part_sum.store(sarr);
-    for (size_t i = 0; i < part_sum.size(); i++) {
-      sum = OP<scalar_t>()(sum, sarr[i]);
-    }
-  }
-  k = k * width + start;
-  for (; k < end; k++) {
-    sum = OP<scalar_t>()(sum, arr[k]);
-  }
-  return sum;
+static inline int64_t round_down(int64_t a, int64_t m) {
+  return a - (a % m);
 }
 
-// This overwrites the content of outarr
-template <class scalar_t, template <class> class OP, CPUCapability C>
-inline void dimreduce_kernel_(const scalar_t *arr, scalar_t *outarr,
-                              size_t num_rows, size_t num_cols) {
-  size_t width =
-      256 / (sizeof(scalar_t)); // primitives per 256 bytes (two cache lines)
-  Vec256<scalar_t> a[8];
-  Vec256<scalar_t> b[8];
-  constexpr size_t epr = 32 / sizeof(scalar_t); // primitives per Vec256
-  size_t tile = 0;
-  for (; tile < (num_cols) / width; tile++) {
-    size_t row_ind = tile * width;
-    for (size_t i = 0; i < num_rows; i += 1) {
-      for (int ib = 0; ib < 8; ib++) {
-        if (i == 0) {
-          b[ib].load(arr + i * num_cols + tile * width + ib * epr);
-        } else {
-          a[ib].load(arr + i * num_cols + tile * width + ib * epr);
-          b[ib] = OP<Vec256<scalar_t>>()(b[ib], a[ib]);
+template<typename F>
+static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
+  if (parallelize) {
+    tbb::parallel_for<int64_t>(0, end, step, func);
+  } else {
+    for (int64_t i = 0; i != end; i += step) {
+      func(i);
+    }
+  }
+}
+
+static tbb::affinity_partitioner ap;
+
+// Vectorized reduction defined by reduce operation `Op` with identity `ident`.
+// The reduction is built on top of reduce128, which reduces down a column
+// 128 bytes wide (WIDTH scalar elements). The width of 128 bytes is chosen
+// because of the "adjacent cache line prefetch" behavior on x86 CPUs.
+template<typename scalar_t, template <class> class Op, int ident>
+struct Reduction {
+  // reduction width in number of scalar elements
+  static constexpr int WIDTH = 128 / sizeof(scalar_t);
+
+  using Vec = Vec256<scalar_t>;
+  using Reduce = Op<Vec>;
+  using ReduceScalar = Op<scalar_t>;
+
+  static void apply(Tensor& res, const Tensor& self, at::optional<int64_t> dim) {
+    internal::init_tbb_num_threads();
+
+    auto out = res.data<scalar_t>();
+    auto data = self.data<scalar_t>();
+    auto numel = self.numel();
+    if (!dim.has_value()) {
+      *out = reduce_all(data, numel);
+      return;
+    }
+
+    int64_t n = self.size(*dim);
+    int64_t stride = self.stride(*dim);
+    int64_t batch = numel / (n * stride);
+    bool paralellize = batch * n > internal::TBB_GRAIN_SIZE;
+    parallel_for(batch, 1, paralellize, [=](int64_t b) {
+      if (stride == 1) {
+        out[b] = reduce_all(&data[b * n], n);
+      } else {
+        reduce2d(&data[b * n * stride], &out[b * stride], n, stride, stride);
+      }
+    });
+  }
+
+  static scalar_t reduce_all(const scalar_t* data, int64_t size) {
+    int64_t k = size / WIDTH;
+
+    scalar_t sum;
+    if (size > internal::TBB_GRAIN_SIZE) {
+      sum = tbb::parallel_reduce(
+          tbb::blocked_range<int64_t>(0, k, internal::TBB_GRAIN_SIZE / WIDTH),
+          scalar_t(ident),
+          [=](const tbb::blocked_range<int64_t>& r, scalar_t init) {
+            scalar_t buf[WIDTH];
+            reduce128(&data[r.begin() * WIDTH], buf, r.end() - r.begin(), WIDTH);
+            return std::accumulate(buf, buf + WIDTH, init, ReduceScalar());
+          },
+          ReduceScalar(),
+          ap);
+    } else {
+      scalar_t buf[WIDTH];
+      reduce128(data, buf, k, WIDTH);
+      sum = std::accumulate(buf, buf + WIDTH, scalar_t(ident), ReduceScalar());
+    }
+
+    for (int i = k * WIDTH; i != size; i++) {
+      sum = ReduceScalar()(sum, data[i]);
+    }
+    return sum;
+  }
+
+  // Reduce down a column of WIDTH elements (128 bytes) with the given number
+  // of rows. Stores the results in out[0 ... WIDTH-1].
+  static void reduce128(const scalar_t* data, scalar_t* out, int64_t rows, int64_t stride) {
+    Vec acc[4] = {ident, ident, ident, ident};  // 128 bytes (two cache lines)
+    static_assert(sizeof(acc) == 128, "accumulator should be 128 bytes");
+    for (int64_t row = 0; row != rows; row++) {
+      for (int j = 0; j != 4; j++) {
+        auto val = Vec::s_load(&data[row * stride + j * Vec::size]);
+        acc[j] = Reduce()(acc[j], val);
+      }
+    }
+    for (int j = 0; j != 4; j++) {
+      acc[j].store(&out[j * Vec::size]);
+    }
+  }
+
+  // Reduce a 2d matrix down each column. Stores the results in out[0 ... cols-1]
+  static void reduce2d(const scalar_t* data, scalar_t* out, int64_t rows, int64_t cols, int64_t stride) {
+    int64_t cols_rounded = round_down(cols, WIDTH);
+    bool paralellize = cols * rows > internal::TBB_GRAIN_SIZE;
+    parallel_for(cols_rounded, WIDTH, paralellize, [=](int64_t col) {
+      reduce128(&data[col], &out[col], rows, stride);
+    });
+
+    if (cols_rounded != cols) {
+      scalar_t buf[WIDTH];
+      for (int64_t j = 0; j != cols - cols_rounded; j++) {
+        buf[j] = ident;
+      }
+      for (int64_t row = 0; row != rows; row++) {
+        for (int64_t j = 0; j != cols - cols_rounded; j++) {
+          auto val = data[row * stride + j + cols_rounded];
+          buf[j] = ReduceScalar()(buf[j], val);
         }
       }
-    }
-    for (int ib = 0; ib < 8; ib++) {
-      b[ib].store(outarr + row_ind + ib * epr);
-    }
-  }
-  size_t k = tile * width;
-  for (; k < num_cols; k++) {
-    for (size_t i = 0; i < num_rows; i += 1) {
-      if (i == 0) {
-        outarr[k] = arr[i * num_cols + k];
-      } else {
-        outarr[k] = OP<scalar_t>()(outarr[k], arr[i * num_cols + k]);
+      for (int64_t j = 0; j != cols - cols_rounded; j++) {
+        out[j + cols_rounded] = buf[j];
       }
     }
   }
+};
+
+static void sum_kernel_impl(Tensor& result, const Tensor& self, at::optional<int64_t> dim) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "sum", [&] {
+    Reduction<scalar_t, std::plus, 0>::apply(result, self, dim);
+  });
 }
 
-template <template <class> class OP, CPUCapability C>
-inline void allImpl(Tensor & result, const Tensor & self, size_t dim, bool all, const char* name, int64_t init) {
-  AT_DISPATCH_ALL_TYPES(self.type(), name, [&] {
-    if (all) {
-      result.fill_(at::parallel_reduce<scalar_t, OP>(
-          &allreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>, self.data<scalar_t>(),
-          (size_t)0, (size_t)self.numel(), (scalar_t)init));
-    } else {
-      at::parallel_reduce_2d<scalar_t>(
-          &dimreduce_kernel_<scalar_t, OP, CURRENT_CAPABILITY>,
-          self.sizes()[dim], self.strides()[dim], self.numel(),
-          self.data<scalar_t>(), result.data<scalar_t>());
-    }
-    });
+static void prod_kernel_impl(Tensor& result, const Tensor& self, at::optional<int64_t> dim) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "prod", [&] {
+    Reduction<scalar_t, std::multiplies, 1>::apply(result, self, dim);
+  });
 }
 
-template <>
-void sumImplC<CURRENT_CAPABILITY>::function(Tensor &result, const Tensor &self,
-                                            size_t dim, bool all) {
-  allImpl<std::plus, CURRENT_CAPABILITY>(result, self, dim, all, "sum", 0);
-}
+REGISTER_DISPATCH(sum_kernel, &sum_kernel_impl);
+REGISTER_DISPATCH(prod_kernel, &prod_kernel_impl);
 
-template <>
-void prodImplC<CURRENT_CAPABILITY>::function(Tensor &result, const Tensor &self,
-                                             size_t dim, bool all) {
-  allImpl<std::multiplies, CURRENT_CAPABILITY>(result, self, dim, all, "prod", 1);
-}
 }
 }

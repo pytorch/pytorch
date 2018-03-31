@@ -1,6 +1,15 @@
 import functools
 import types
 
+ONNX_ARCHIVE_MODEL_PROTO_NAME = "__MODEL_PROTO"
+
+
+class ExportTypes:
+    PROTOBUF_FILE = 1
+    ZIP_ARCHIVE = 2
+    COMPRESSED_ZIP_ARCHIVE = 3
+    DIRECTORY = 4
+
 
 def _export(*args, **kwargs):
     from torch.onnx import utils

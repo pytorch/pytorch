@@ -1,3 +1,5 @@
+## PyTorch
+
 build/
 dist/
 torch.egg-info/
@@ -60,3 +62,112 @@ test/data/linear.pt
 compile_commands.json
 *.egg-info/
 docs/source/_static/img/activation/
+
+## General
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.cuo
+*.obj
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Compiled protocol buffers
+*.pb.h
+*.pb.cc
+*_pb2.py
+
+# Compiled python
+*.pyc
+*.pyd
+
+# Compiled MATLAB
+*.mex*
+
+# IPython notebook checkpoints
+.ipynb_checkpoints
+
+# Editor temporaries
+*.swn
+*.swo
+*.swp
+*~
+
+# Sublime Text settings
+*.sublime-workspace
+*.sublime-project
+
+# Eclipse Project settings
+*.*project
+.settings
+
+# QtCreator files
+*.user
+
+# PyCharm files
+.idea
+
+# Visual Studio Code files
+.vscode
+.vs
+
+# OSX dir files
+.DS_Store
+
+## Caffe2
+
+# build, distribute, and bins (+ python proto bindings)
+build
+build_host_protoc
+build_android
+build_ios
+build_*
+.build_debug/*
+.build_release/*
+distribute/*
+*.testbin
+*.bin
+cmake_build
+.cmake_build
+gen
+.setuptools-cmake-build
+.pytest_cache
+
+# Bram
+plsdontbreak
+
+# Generated documentation
+docs/_site
+docs/gathered
+_site
+doxygen
+docs/dev
+
+# LevelDB files
+*.sst
+*.ldb
+LOCK
+LOG*
+CURRENT
+MANIFEST-*
+
+# generated version file
+caffe2/version.py
+
+# setup.py intermediates
+.eggs
+caffe2.egg-info
+
+# Atom/Watchman required file
+.watchmanconfig

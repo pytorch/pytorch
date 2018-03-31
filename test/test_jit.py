@@ -14,6 +14,10 @@ import unittest
 import inspect
 import textwrap
 import numpy as np
+import tempfile
+import shutil
+
+from torch.jit.frontend import NotSupportedError
 
 try:
     import torchvision
@@ -445,7 +449,7 @@ class TestJit(TestCase):
 
             @staticmethod
             def backward(ctx, grad_a):
-                a, = ctx.saved_variables
+                a, = ctx.saved_tensors
                 return a * grad_a
 
         x = Variable(torch.randn(10, 10), requires_grad=True)
@@ -1818,6 +1822,13 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, "failed in interpreter"):
             bar(Variable(torch.rand(10), requires_grad=True), Variable(torch.rand(9), requires_grad=True))
 
+    def test_binop_unsupported_error(self):
+        with self.assertRaisesRegex(NotSupportedError, "unsupported binary operator:"):
+            @torch.jit.script
+            def binop(x, y):
+                # Replace this with another unsupported op when/if it gets supported
+                return x ** y
+
     def test_python_call(self):
         def pyfunc(a):
             return a * 3.0
@@ -1971,6 +1982,85 @@ class TestScript(TestCase):
         m2.sub.weight = nn.Parameter(torch.zeros_like(m2.sub.weight))
         m2.sub2.a.data.zero_()
         self.assertEqual(torch.zeros(2, 2), m2.forward(torch.randn(3, 2)))
+
+    def test_script_module_call_noscript(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.value = 1
+
+            def foo(self):
+                return torch.ones(2, 2) + self.value
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + self.foo()
+
+        m = M()
+        input = torch.randn(2, 2)
+        o = m(input)
+        self.assertEqual(o, input + torch.ones(2, 2) + 1)
+        # check that we can change python attributes
+        # and that those changes are picked up in script methods
+        m.value = 2
+        o = m(input)
+        self.assertEqual(o, input + torch.ones(2, 2) + 2)
+
+    def test_script_module_nochange_submodule(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.sub = nn.Linear(5, 5)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return self.sub(input)
+
+        m = M()
+        input = torch.randn(1, 5, 5)
+        o = m(input)
+        self.assertEqual(o, m.sub(input))
+        with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
+            m.sub = nn.Linear(5, 5)
+
+
+# Smoke tests for export methods
+class TestPytorchExportModes(unittest.TestCase):
+    class MyModel(nn.Module):
+        def __init__(self):
+            super(TestPytorchExportModes.MyModel, self).__init__()
+
+        def forward(self, x):
+            return x.t()
+
+    def test_protobuf(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.PROTOBUF_FILE)
+
+    def test_zipfile(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.ZIP_ARCHIVE)
+
+    def test_compressed_zipfile(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE)
+
+    def test_directory(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        d = tempfile.mkdtemp()
+        torch.onnx._export(torch_model, (fake_input), d, verbose=False,
+                           export_type=torch.onnx.ExportTypes.DIRECTORY)
+        shutil.rmtree(d)
 
 
 if __name__ == '__main__':

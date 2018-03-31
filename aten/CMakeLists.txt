@@ -32,6 +32,11 @@ ENDIF(NOT MSVC)
 
 INCLUDE(CheckCXXSourceCompiles)
 
+# disable some verbose warnings
+IF (MSVC)
+  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
+ENDIF(MSVC)
+
 # windef.h will define max/min macros if NOMINMAX is not defined
 IF(MSVC)
   add_definitions(/DNOMINMAX)
@@ -75,7 +80,7 @@ ENDIF()
 IF(MSVC)
   # we want to respect the standard, and we are bored of those **** .
   ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503")
+  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
   ADD_DEFINITIONS(-DTH_EXPORTS)
   IF (NOT NO_CUDA)
     ADD_DEFINITIONS(-DTHC_EXPORTS)
@@ -387,7 +392,8 @@ IF(BLAS_FOUND)
     ADD_DEFINITIONS(-DTH_BLAS_MKL)
     IF(NOT BLAS_INCLUDE_DIR)
       MESSAGE(FATAL_ERROR "MKL is used, but MKL header files are not found. \
-        You can get them by `conda install mkl-include` if using conda, and \
+        You can get them by `conda install mkl-include` if using conda (if \
+        it is missing, run `conda upgrade -n root conda` first), and \
         `pip install mkl-devel` if using pip. If build fails with header files \
         available in the system, please make sure that CMake will search the \
         directory containing them, e.g., by setting CMAKE_INCLUDE_PATH.")
@@ -453,6 +459,20 @@ ELSE()
   INCLUDE_DIRECTORIES(BEFORE ${CUDNN_INCLUDE_DIRS})
   set(AT_CUDNN_ENABLED 1)
 ENDIF()
+
+if(NO_MKLDNN)
+  message("disabling MKLDNN because NO_MKLDNN is set")
+  set(AT_MKLDNN_ENABLED 0)
+else()
+  find_package(MKLDNN)
+  if(NOT MKLDNN_FOUND)
+    message(STATUS "MKLDNN not found. Compiling without MKLDNN support")
+    set(AT_MKLDNN_ENABLED 0)
+  else()
+    INCLUDE_DIRECTORIES(${MKLDNN_INCLUDE_DIRS})
+    set(AT_MKLDNN_ENABLED 1)
+  endif()
+endif()
 
 if(NO_NNPACK)
   message("disabling NNPACK because NO_NNPACK is set")

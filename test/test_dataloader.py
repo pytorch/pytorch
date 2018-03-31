@@ -63,6 +63,26 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
 
+    def test_single_tensor(self):
+        t = torch.randn(5, 10)
+        source = TensorDataset(t)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t[i], source[i][0])
+
+    def test_many_tensors(self):
+        t0 = torch.randn(5, 10, 2, 3, 4, 5)
+        t1 = torch.randn(5, 10)
+        t2 = torch.randn(5, 10, 2, 5)
+        t3 = torch.randn(5, 10, 3, 7)
+        source = TensorDataset(t0, t1, t2, t3)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t0[i], source[i][0])
+            self.assertEqual(t1[i], source[i][1])
+            self.assertEqual(t2[i], source[i][2])
+            self.assertEqual(t3[i], source[i][3])
+
 
 class TestConcatDataset(TestCase):
 
@@ -278,6 +298,14 @@ class TestDataLoader(TestCase):
                 self.assertEqual(errors,
                                  math.ceil(float(len(loader.dataset)) / loader.batch_size))
                 return
+
+    def test_invalid_assign_after_init(self):
+        dl = DataLoader(self.dataset)
+        for attr in ('batch_size', 'sampler', 'drop_last'):
+            def fn():
+                setattr(dl, attr, {})
+
+            self.assertRaises(ValueError, fn)
 
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))

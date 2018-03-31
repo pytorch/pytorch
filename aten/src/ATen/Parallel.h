@@ -1,6 +1,7 @@
 #pragma once
-#include <cstddef>
+#include <ATen/ATen.h>
 #include <tbb/tbb.h>
+#include <cstddef>
 
 namespace at {
 namespace internal {
@@ -20,34 +21,43 @@ void init_tbb_num_threads();
 // deemed inefficient to parallelise over arrays shorter than 32768. Further,
 // no parallel algorithm (such as parallel_reduce) should split work into
 // smaller than GRAIN_SIZE chunks.
-constexpr size_t TBB_GRAIN_SIZE = 32768;
-}
+constexpr int64_t TBB_GRAIN_SIZE = 32768;
+} // namespace internal
 
 template <class T, template <class> class OP>
-T parallel_reduce(T (*f)(const T *, size_t, size_t, T), const T *data,
-                  size_t start, size_t end, T init_) {
-
+T parallel_reduce(
+    T (*f)(const T*, size_t, size_t, T),
+    const T* data,
+    size_t start,
+    size_t end,
+    T init_) {
   internal::init_tbb_num_threads();
 
   T result_;
   static tbb::affinity_partitioner ap;
-  if ((size_t)(end - start) < internal::TBB_GRAIN_SIZE) {
+  if (end - start < internal::TBB_GRAIN_SIZE) {
     result_ = f(data, start, end, init_);
   } else {
     result_ = tbb::parallel_reduce(
-        tbb::blocked_range<size_t>(start, end, internal::TBB_GRAIN_SIZE), init_,
+        tbb::blocked_range<size_t>(start, end, internal::TBB_GRAIN_SIZE),
+        init_,
         [&data, &f](const tbb::blocked_range<size_t> r, T init) -> T {
           return f(data, r.begin(), r.end(), init);
         },
-        OP<T>(), ap);
+        OP<T>(),
+        ap);
   }
   return result_;
 }
 
 template <class T>
-void parallel_reduce_2d(void (*f)(const T *, T *, size_t, size_t), size_t num_rows,
-                     size_t num_cols, size_t numel, const T *arr_, T *outarr_) {
-
+void parallel_reduce_2d(
+    void (*f)(const T*, T*, size_t, size_t),
+    size_t num_rows,
+    size_t num_cols,
+    size_t numel,
+    const T* arr_,
+    T* outarr_) {
   internal::init_tbb_num_threads();
 
   static tbb::affinity_partitioner ap;
@@ -63,19 +73,20 @@ void parallel_reduce_2d(void (*f)(const T *, T *, size_t, size_t), size_t num_ro
       f(arr, outarr, num_rows, num_cols);
     }
   } else {
-    tbb::parallel_for(tbb::blocked_range<size_t>(
-                          0, max_i_, 1),
-                      [&arr_, &outarr_, num_rows, num_cols,
-                       &f](const tbb::blocked_range<size_t> r) {
-                        for (size_t i_ = r.begin(); i_ < r.end(); i_++) {
-                          int64_t i = i_ * num_rows * num_cols;
-                          int64_t i_r = i_ * num_cols;
-                          const T *arr = arr_ + i;
-                          T *outarr = outarr_ + i_r;
-                          f(arr, outarr, num_rows, num_cols);
-                        }
-                      },
-                      ap);
+    tbb::parallel_for(
+        tbb::blocked_range<size_t>(0, max_i_, 1),
+        [&arr_, &outarr_, num_rows, num_cols, &f](
+            const tbb::blocked_range<size_t> r) {
+          for (size_t i_ = r.begin(); i_ < r.end(); i_++) {
+            int64_t i = i_ * num_rows * num_cols;
+            int64_t i_r = i_ * num_cols;
+            const T* arr = arr_ + i;
+            T* outarr = outarr_ + i_r;
+            f(arr, outarr, num_rows, num_cols);
+          }
+        },
+        ap);
   }
 }
-}
+
+} // namespace at

@@ -35,7 +35,6 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
 Tensor embedding_backward(
     const Tensor & grad, const Tensor & indices, int64_t num_weights,
     int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
-
   if (sparse) {
     return at::embedding_sparse_backward(
         grad, indices, num_weights, padding_idx, scale_grad_by_freq);
@@ -55,7 +54,8 @@ Tensor embedding_sparse_backward(
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
-    runtime_error("embedding_backward: scale_grad_by_freq not supported with sparse gradients");
+    AT_ERROR(
+        "embedding_backward: scale_grad_by_freq not supported with sparse gradients");
   }
 
   Tensor indices = indices_;

@@ -182,12 +182,12 @@ conda install -c pytorch magma-cuda80 # or magma-cuda90 if CUDA 9
 On macOS
 ```bash
 export CMAKE_PREFIX_PATH=[anaconda root directory]
-conda install numpy pyyaml setuptools cmake cffi typing
+conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 
 On Windows
 ```cmd
-conda install numpy pyyaml setuptools cmake cffi typing
+conda install numpy pyyaml mkl mkl-include setuptools cmake cffi typing
 ```
 #### Get the PyTorch source
 ```bash
@@ -222,7 +222,7 @@ python setup.py install
 
 Dockerfile is supplied to build images with cuda support and cudnn v7. Build as usual
 ```
-docker build -t pytorch .
+docker build -t pytorch -f docker/pytorch/Dockerfile .
 ```
 
 Alternatively, if you want to use a runtime image, you can use the pre-built one from Docker Hub and run with nvidia-docker:
@@ -255,7 +255,7 @@ Three pointers to get you started:
 ## Releases and Contributing
 
 PyTorch has a 90 day release cycle (major releases).
-It's current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
+Its current state is Beta, we expect no obvious bugs. Please let us know if you encounter a bug by [filing an issue](https://github.com/pytorch/pytorch/issues).
 
 We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
 
