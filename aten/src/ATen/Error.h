@@ -114,11 +114,13 @@ inline at::optional<FrameInformation> parse_frame_information(
   // https://github.com/gcc-mirror/gcc/blob/master/libstdc%2B%2B-v3/libsupc%2B%2B/cxxabi.h
   // NOTE: `__cxa_demangle` returns a malloc'd string that we have to free
   // ourselves.
-  std::unique_ptr<char> demangled_function_name(abi::__cxa_demangle(
-      mangled_function_name.c_str(),
-      /*__output_buffer=*/nullptr,
-      /*__length=*/0,
-      &status));
+  std::unique_ptr<char, std::function<void(char*)>> demangled_function_name(
+      abi::__cxa_demangle(
+          mangled_function_name.c_str(),
+          /*__output_buffer=*/nullptr,
+          /*__length=*/0,
+          &status),
+      /*deleter=*/free);
 
   // Demangling may fail, for example when the name does not follow the
   // standard C++ (Itanium ABI) mangling scheme. This is the case for `main`
@@ -163,8 +165,9 @@ inline std::string get_backtrace(
   // string, so we'll have to parse the string after. NOTE: The array returned
   // by `backtrace_symbols` is malloc'd and must be manually freed, but not the
   // strings inside the array.
-  std::unique_ptr<char*> raw_symbols(
-      ::backtrace_symbols(callstack.data(), callstack.size()));
+  std::unique_ptr<char*, std::function<void(char**)>> raw_symbols(
+      ::backtrace_symbols(callstack.data(), callstack.size()),
+      /*deleter=*/free);
   const std::vector<std::string> symbols(
       raw_symbols.get(), raw_symbols.get() + callstack.size());
 
