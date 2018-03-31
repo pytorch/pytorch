@@ -491,8 +491,8 @@ class TestLRScheduler(TestCase):
 
     def test_step_lr(self):
         # lr = 0.05     if epoch < 3
-        # lr = 0.005    if 30 <= epoch < 6
-        # lr = 0.0005   if epoch >= 9
+        # lr = 0.005    if 3 <= epoch < 6
+        # lr = 0.0005   if epoch >= 6
         epochs = 10
         single_targets = [0.05] * 3 + [0.005] * 3 + [0.0005] * 3 + [0.00005] * 3
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
@@ -525,6 +525,19 @@ class TestLRScheduler(TestCase):
                           for x in range(epochs)]
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
         scheduler = CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min)
+        self._test(scheduler, targets, epochs)
+
+    def test_warm_restart_lr(self):
+        epochs = 10
+        eta_min = 1e-10
+        T_mult = 2
+        T_max = 2
+        T_cur = list(range(T_max)) + list(range(T_max * T_mult)) + list(range(T_max * T_mult * T_mult))
+        T_i = [T_max] * T_max + [T_max * T_mult] * T_max * T_mult + [T_max * T_mult * T_mult] * T_max * T_mult * T_mult
+        single_targets = [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * x / y)) / 2
+                          for x, y in zip(T_cur, T_i)]
+        targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min, T_mult=T_mult, restart=True)
         self._test(scheduler, targets, epochs)
 
     def test_reduce_lr_on_plateau1(self):
