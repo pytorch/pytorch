@@ -6,7 +6,20 @@ from .. import functional as F
 # TODO: grad_output size asserts in THNN
 
 
-class ConstantPad1d(Module):
+class _ConstantPadNd(Module):
+
+    def __init__(self, value):
+        super(_ConstantPadNd, self).__init__()
+        self.value = value
+
+    def forward(self, input):
+        return F.pad(input, self.padding, 'constant', self.value)
+
+    def extra_repr(self):
+        return 'padding={}, value={}'.format(self.padding, self.value)
+
+
+class ConstantPad1d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
@@ -30,19 +43,11 @@ class ConstantPad1d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad1d, self).__init__()
+        super(ConstantPad1d, self).__init__(value)
         self.padding = _pair(padding)
-        self.value = value
-
-    def forward(self, input):
-        return F.pad(input, self.padding, 'constant', self.value)
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
 
 
-class ConstantPad2d(Module):
+class ConstantPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     For Nd-padding, use :meth:`nn.functional.pad()`.
@@ -70,19 +75,11 @@ class ConstantPad2d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad2d, self).__init__()
+        super(ConstantPad2d, self).__init__(value)
         self.padding = _quadruple(padding)
-        self.value = value
-
-    def forward(self, input):
-        return F.pad(input, self.padding, 'constant', self.value)
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
 
 
-class ConstantPad3d(Module):
+class ConstantPad3d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
@@ -109,19 +106,20 @@ class ConstantPad3d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad3d, self).__init__()
+        super(ConstantPad3d, self).__init__(value)
         self.padding = _ntuple(6)(padding)
-        self.value = value
+
+
+class _ReflectionPadNd(Module):
 
     def forward(self, input):
-        return F.pad(input, self.padding, 'constant', self.value)
+        return F.pad(input, self.padding, 'reflect')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
+    def extra_repr(self):
+        return '{}'.format(self.padding)
 
 
-class ReflectionPad1d(Module):
+class ReflectionPad1d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
     Args:
@@ -148,15 +146,8 @@ class ReflectionPad1d(Module):
         super(ReflectionPad1d, self).__init__()
         self.padding = _pair(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'reflect')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
-
-class ReflectionPad2d(Module):
+class ReflectionPad2d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
     Args:
@@ -185,15 +176,17 @@ class ReflectionPad2d(Module):
         super(ReflectionPad2d, self).__init__()
         self.padding = _quadruple(padding)
 
+
+class _ReplicationPadNd(Module):
+
     def forward(self, input):
-        return F.pad(input, self.padding, 'reflect')
+        return F.pad(input, self.padding, 'replicate')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
+    def extra_repr(self):
+        return '{}'.format(self.padding)
 
 
-class ReplicationPad1d(Module):
+class ReplicationPad1d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
     Args:
@@ -220,15 +213,8 @@ class ReplicationPad1d(Module):
         super(ReplicationPad1d, self).__init__()
         self.padding = _pair(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'replicate')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
-
-class ReplicationPad2d(Module):
+class ReplicationPad2d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
     Args:
@@ -257,15 +243,8 @@ class ReplicationPad2d(Module):
         super(ReplicationPad2d, self).__init__()
         self.padding = _quadruple(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'replicate')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
-
-class ReplicationPad3d(Module):
+class ReplicationPad3d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
     Args:
@@ -294,13 +273,6 @@ class ReplicationPad3d(Module):
     def __init__(self, padding):
         super(ReplicationPad3d, self).__init__()
         self.padding = _ntuple(6)(padding)
-
-    def forward(self, input):
-        return F.pad(input, self.padding, 'replicate')
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
 
 
 class ZeroPad2d(ConstantPad2d):
