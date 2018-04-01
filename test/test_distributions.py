@@ -2626,7 +2626,7 @@ class TestKL(TestCase):
     # Multivariate normal has a separate Monte Carlo based test due to the requirement of random generation of
     # positive (semi) definite matrices. n is set to 5, but can be increased during testing.
     def test_kl_multivariate_normal(self):
-        set_rng_seed(1)  # see Note [Randomized statistical tests]
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
         print('Testing KL(MultivariateNormal, MultivariateNormal) using Monte Carlo')
         for i in range(0, n):

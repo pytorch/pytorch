@@ -135,6 +135,7 @@ def _batch_trace(bmat):
     values = torch.stack([torch.trace(M) for M in bmat.reshape((-1, mat_size, mat_size))])
     return values.view(bmat.shape[:-2])
 
+
 def _batch_inverse(bmat):
     """
     Utility function for calculating the inverse of matrices with arbitrary trailing batch dimensions
