@@ -373,8 +373,8 @@ class AffineTransform(Transform):
     Transform via the pointwise affine mapping :math:`y = \text{loc} + \text{scale} \times x`.
 
     Args:
-        loc (Tensor): Location parameter.
-        scale (Tensor): Scale parameter.
+        loc (Tensor or float): Location parameter.
+        scale (Tensor or float): Scale parameter.
         event_dim (int): Optional size of `event_shape`. This should be zero
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.
