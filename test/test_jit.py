@@ -2213,6 +2213,39 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, "is not iterable"):
             M()
 
+    def test_script_star_expr(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, *inputs):
+                output = inputs[0]
+                for i in range(1, len(inputs)):
+                    output += inputs[i]
+                return output
+
+        class Mult(torch.nn.Module):
+            def __init__(self):
+                super(Mult, self).__init__()
+
+            def forward(self, rep):
+                return rep, rep, rep
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.m = torch.jit.trace(
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(M())
+                self.g = torch.jit.trace(torch.ones(4, 3))(Mult())
+
+            @torch.jit.script_method
+            def forward(self, rep):
+                tup = self.g(rep)
+                # return self.m(*tup)
+                return tup
+
+        m = M2()
+        m(torch.zeros(4, 3))
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
