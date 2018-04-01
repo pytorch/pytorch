@@ -198,42 +198,22 @@ Tensor randn_like(const Tensor& self, const Type& dtype) {
 
 Tensor randint(const Type& dtype, int64_t high, IntList size, Generator* generator) {
   Tensor result = dtype.tensor(size);
-  if (high > 0) { 
-    return result.random_(0, high, generator);
-  }
-  else {
-    throw std::domain_error("high parameter of randint must greater than equal to low parameter (0 in this case)");
-  }  
+  return result.random_(0, high, generator);
 }
 
 Tensor randint(const Type& dtype, int64_t low, int64_t high, IntList size, Generator* generator) {
   Tensor result = dtype.tensor(size);
-  if (high > low) { 
-    return result.random_(low, high, generator);
-  }
-  else {
-    throw std::domain_error("high parameter of randint must greater than equal to low parameter");
-  }
+  return result.random_(low, high, generator);
 }
 
 Tensor& randint_out(Tensor& result, int64_t high, IntList size, Generator* generator) {
   result.resize_(size);
-  if (high > 0) { 
-    return result.random_(0, high, generator);
-  }
-  else {
-    throw std::domain_error("high parameter of randint must greater than equal to low parameter (0 in this case)");
-  }
+  return result.random_(0, high, generator);
 }
 
 Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size, Generator* generator) {
   result.resize_(size);
-  if (high > low) { 
-    return result.random_(0, high, generator);
-  }
-  else {
-    throw std::domain_error("high parameter of randint must greater than equal to low parameter");
-  }
+  return result.random_(0, high, generator);
 }
 
 Tensor randint_like(const Tensor& self, int64_t high) {
