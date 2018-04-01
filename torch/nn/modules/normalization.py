@@ -214,9 +214,9 @@ class GroupNorm(Module):
         return F.group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps)
 
-    def __repr__(self):
+    def extra_repr(self):
         return '{num_groups}, {num_channels}, eps={eps}, ' \
-                'affine={affine}'.format(**self.__dict__)
+            'affine={affine}'.format(**self.__dict__)
 
 
 # TODO: ContrastiveNorm2d
