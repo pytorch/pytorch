@@ -311,7 +311,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
     term2 = _batch_trace(_batch_mm(q.precision_matrix, p.covariance_matrix))
 
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
-    return 0.5 * (2 * term1 - p.event_shape[0] + term2 + term3)
+    return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
 
 
 @register_kl(Normal, Normal)
