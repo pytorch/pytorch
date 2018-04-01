@@ -2646,9 +2646,9 @@ class TestKL(TestCase):
                 if error[error == error].max() < self.precision:
                     break
             self.assertLess(error[error == error].max(), self.precision, '\n'.join([
-                 'Incorrect KL(MultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
-                 'Expected ({} Monte Carlo sample): {}'.format(denominator, expected),
-                 'Actual (analytic): {}'.format(actual),
+                'Incorrect KL(MultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected ({} Monte Carlo sample): {}'.format(denominator, expected),
+                'Actual (analytic): {}'.format(actual),
             ]))
 
     def test_kl_multivariate_normal_batched(self):
@@ -2656,9 +2656,8 @@ class TestKL(TestCase):
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
         scale_tril = [transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3)) for _ in range(0, 2)]
         expected_kl = torch.stack([
-                        kl_divergence(MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
-                                      MultivariateNormal(loc[1][i], scale_tril=scale_tril[1][i]))
-                        for i in range(0, b)])
+            kl_divergence(MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
+                          MultivariateNormal(loc[1][i], scale_tril=scale_tril[1][i])) for i in range(0, b)])
         actual_kl = kl_divergence(MultivariateNormal(loc[0], scale_tril=scale_tril[0]),
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
