@@ -2631,15 +2631,12 @@ class TestKL(TestCase):
         print('Testing KL(MultivariateNormal, MultivariateNormal) using Monte Carlo')
         for i in range(0, n):
             loc = []
-            psd_cov = []
+            scale_tril = []
             for _ in range(0, 2):
                 loc.append(torch.randn(4))
-                tmp = torch.randn(4, 5)
-                psd_mat = tmp.mm(tmp.t())
-                psd_mat = psd_mat / (psd_mat.abs().max() + 1e-10) # To restrict high variance
-                psd_cov.append(psd_mat)
-            p = MultivariateNormal(loc=loc[0], covariance_matrix=psd_cov[0])
-            q = MultivariateNormal(loc=loc[1], covariance_matrix=psd_cov[1])
+                scale_tril.append(transform_to(constraints.lower_cholesky)(torch.randn(4, 4)))
+            p = MultivariateNormal(loc=loc[0], scale_tril=scale_tril[0])
+            q = MultivariateNormal(loc=loc[1], scale_tril=scale_tril[1])
             actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0

@@ -127,6 +127,26 @@ def _x_log_x(tensor):
     return tensor * tensor.log()
 
 
+def _batch_trace(bmat):
+    """
+    Utility function for calculating the trace of matrices with arbitrary trailing batch dimensions
+    """
+    mat_size = bmat.size(-1)
+    values = torch.stack([torch.trace(M) for M in bmat.reshape((-1, mat_size, mat_size))])
+    return values.view(bmat.shape[:-2])
+
+
+def _batch_mm(bmat1, bmat2):
+    """
+    Utility function for calculating the matrix product of two batch matrices
+    with arbitrary trailing batch dimensions
+    """
+    mat_size = bmat1.size(-1)
+    bmat1_squash = bmat1.reshape((-1, mat_size, mat_size))
+    bmat2_squash = bmat2.reshape((-1, mat_size, mat_size))
+    return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)
+    
+
 def kl_divergence(p, q):
     r"""
     Compute Kullback-Leibler divergence :math:`KL(p \| q)` between two distributions.
@@ -281,27 +301,17 @@ def _kl_laplace_laplace(p, q):
 
 @register_kl(MultivariateNormal, MultivariateNormal)
 def _kl_multivariatenormal_multivariatenormal(p, q):
-    if p.batch_shape != q.batch_shape:
+    # From https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Kullback%E2%80%93Leibler_divergence
+    if p.event_shape != q.event_shape:
         raise ValueError("KL-divergence between two Multivariate Normals with\
-                          different batch shapes cannot be computed")
+                          different event shapes cannot be computed")
 
-    def _batch_trace(bmat):
-        mat_size = bmat.size(-1)
-        values = torch.stack([torch.trace(M) for M in bmat.contiguous().view((-1, mat_size, mat_size))])
-        return values.view(bmat.shape[:-2])
-
-    def _batch_mm(bmat1, bmat2):
-        mat_size = bmat1.size(-1)
-        bmat1_squash = bmat1.contiguous().view((-1, mat_size, mat_size))
-        bmat2_squash = bmat2.contiguous().view((-1, mat_size, mat_size))
-        return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)
-
-    term1 = _batch_diag(q.scale_tril).abs().log().sum(-1) - _batch_diag(p.scale_tril).abs().log().sum(-1)
+    term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
 
     term2 = _batch_trace(_batch_mm(q.precision_matrix, p.covariance_matrix))
 
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
-    return 0.5 * (term1 - q.loc.size(-1) + term2 + term3)
+    return 0.5 * (term1 - p.event_shape[0] + term2 + term3)
 
 
 @register_kl(Normal, Normal)
