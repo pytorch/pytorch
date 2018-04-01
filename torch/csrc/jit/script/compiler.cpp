@@ -270,17 +270,19 @@ struct to_ir {
     auto stmts = def.statements();
     auto stmts_begin = stmts.begin();
     auto stmts_end = stmts.end();
-    if (stmts_begin == stmts_end)
-      throw ErrorReport(def) << "functions need to have a non-empty body";
-    --stmts_end;
-    if ((*stmts_end).kind() != TK_RETURN)
-      throw ErrorReport(*stmts_end) << "functions need to end with a return statement";
+    bool has_return = false;
+    if (stmts_begin != stmts_end && (*std::prev(stmts_end)).kind() == TK_RETURN) {
+      --stmts_end;
+      has_return = true;
+    }
 
     emitStatements(stmts_begin, stmts_end);
 
     // outputs
-    for (auto output : Return(*stmts_end).values()) {
-      graph->registerOutput(emitExpr(output, 1)[0]);
+    if (has_return) {
+      for (auto output : Return(*stmts_end).values()) {
+        graph->registerOutput(emitExpr(output, 1)[0]);
+      }
     }
   }
 

@@ -5,7 +5,7 @@ class no_grad(object):
     r"""Context-manager that disabled gradient calculation.
 
     Disabling gradient calculation is useful for inference, when you are sure
-    that you will not call :meth:`Variable.backward()`. It will reduce memory
+    that you will not call :meth:`Tensor.backward()`. It will reduce memory
     consumption for computations that would otherwise have `requires_grad=True`.
     In this mode, the result of every computation will have
     `requires_grad=False`, even when the inputs have `requires_grad=True`.
@@ -64,12 +64,12 @@ class enable_grad(object):
 class set_grad_enabled(object):
     r"""Context-manager that sets gradient calculation to on or off.
 
-    `set_grad_enabled` will enable or disable grads based on its argument `mode`.
+    ``set_grad_enabled`` will enable or disable grads based on its argument :attr:`mode`.
     It can be used as a context-manager or as a function.
 
     Arguments:
-        mode (bool): Flag whether to enable grad (True), or disable
-                     (False). This can be used to conditionally enable
+        mode (bool): Flag whether to enable grad (``True``), or disable
+                     (``False``). This can be used to conditionally enable
                      gradients.
 
 

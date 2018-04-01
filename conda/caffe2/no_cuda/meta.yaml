@@ -1,0 +1,55 @@
+{% set version = "0.8.dev" %}
+
+package:
+  name: caffe2
+  version: {{ version }}
+
+source:
+  path: ../../..
+
+build:
+  number: 0
+  skip: True  # [win]
+  script_env:
+    - CONDA_CMAKE_BUILD_ARGS
+
+requirements:
+  build:
+    - cmake
+    - future
+    - gflags
+    - glog
+    - leveldb
+    - lmdb
+    - mkl
+    - mkl-include
+    - numpy
+    - opencv
+    - protobuf
+    - python
+    - six
+    # other packages here
+  run:
+    - future
+    - gflags
+    - glog
+    - leveldb
+    - lmdb
+    - mkl
+    - mkl-include
+    - numpy
+    - opencv
+    - protobuf
+    - python
+    - six
+    # other packages here
+
+
+about:
+  home: https://caffe2.ai/
+  license: BSD
+  summary: Caffe2 is a lightweight, modular, and scalable deep learning framework.
+
+extra:
+  recipe-maintainers:
+    - pjh5

@@ -353,7 +353,7 @@
 - func: ger_out(Tensor result, Tensor self, Tensor vec2) -> Tensor
   variants: function
 
-- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5) -> Tensor
+- func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
 
 # FFT
@@ -392,6 +392,9 @@
 - func: is_signed(Tensor self) -> bool
 
 - func: is_sparse(Tensor self) -> bool
+
+- func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
+  variants: function
 
 - func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
   variants: function
@@ -436,20 +439,6 @@
   variants: function
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
-
-# TODO: Why does kW come before kH?  Hella confusing, because it
-# doesn't match the input layout.
-- func: nnpack_spatial_convolution(Tensor input, Tensor weight, Tensor? bias, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
-- func: nnpack_spatial_convolution_backward(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
-  variants: function
-
-- func: nnpack_spatial_convolution_backward_input(Tensor input, Tensor grad_output, Tensor weight, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
-
-- func: nnpack_spatial_convolution_backward_weight(Tensor input, IntList weight_size, Tensor grad_output, int64_t kW, int64_t kH, int64_t padW, int64_t padH) -> Tensor
-  variants: function
 
 - func: ones(Type dtype, IntList size) -> Tensor
   variants: function
