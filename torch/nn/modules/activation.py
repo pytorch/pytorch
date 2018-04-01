@@ -242,7 +242,6 @@ class Sigmoid(Module):
         return torch.sigmoid(input)
 
 
-
 class Tanh(Module):
     r"""Applies element-wise,
     :math:`\text{Tanh}(x) = \tanh(x) = \frac{e^x - e^{-x}} {e^x + e^{-x}}`
@@ -263,7 +262,6 @@ class Tanh(Module):
 
     def forward(self, input):
         return torch.tanh(input)
-
 
 
 class ELU(Module):
@@ -474,7 +472,6 @@ class LogSigmoid(Module):
         return F.logsigmoid(input)
 
 
-
 class Softplus(Module):
     r"""Applies element-wise :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`
 
@@ -625,7 +622,6 @@ class Softsign(Module):
         return F.softsign(input)
 
 
-
 class Tanhshrink(Module):
     r"""Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
 
@@ -645,7 +641,6 @@ class Tanhshrink(Module):
 
     def forward(self, input):
         return F.tanhshrink(input)
-
 
 
 class Softmin(Module):
@@ -679,7 +674,6 @@ class Softmin(Module):
 
     def forward(self, input):
         return F.softmin(input, self.dim, _stacklevel=5)
-
 
 
 class Softmax(Module):
@@ -727,7 +721,6 @@ class Softmax(Module):
         return F.softmax(input, self.dim, _stacklevel=5)
 
 
-
 class Softmax2d(Module):
     r"""Applies SoftMax over features to each spatial location.
 
@@ -753,7 +746,6 @@ class Softmax2d(Module):
     def forward(self, input):
         assert input.dim() == 4, 'Softmax2d requires a 4D tensor as input'
         return F.softmax(input, 1, _stacklevel=5)
-
 
 
 class LogSoftmax(Module):
@@ -792,4 +784,3 @@ class LogSoftmax(Module):
 
     def forward(self, input):
         return F.log_softmax(input, self.dim, _stacklevel=5)
-
