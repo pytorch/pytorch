@@ -49,9 +49,8 @@ class _BatchNorm(Module):
             self.training or not self.track_running_stats, self.momentum, self.eps)
 
     def extra_repr(self):
-        return ('{num_features}, eps={eps}, momentum={momentum},'
-                ' affine={affine}, track_running_stats={track_running_stats}'
-                .format(**self.__dict__))
+        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
+               'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
 
 class BatchNorm1d(_BatchNorm):

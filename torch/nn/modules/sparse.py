@@ -106,8 +106,8 @@ class Embedding(Module):
             input, self.weight, self.padding_idx, self.max_norm,
             self.norm_type, self.scale_grad_by_freq, self.sparse)
 
-    def __repr__(self):
-        s = '{name}({num_embeddings}, {embedding_dim}'
+    def extra_repr(self):
+        s = '{num_embeddings}, {embedding_dim}'
         if self.padding_idx is not None:
             s += ', padding_idx={padding_idx}'
         if self.max_norm is not None:
@@ -118,8 +118,7 @@ class Embedding(Module):
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
         if self.sparse is not False:
             s += ', sparse=True'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     @classmethod
     def from_pretrained(cls, embeddings, freeze=True):
@@ -238,8 +237,8 @@ class EmbeddingBag(Module):
                                self.max_norm, self.norm_type,
                                self.scale_grad_by_freq, self.mode, self.sparse)
 
-    def __repr__(self):
-        s = '{name}({num_embeddings}, {embedding_dim}'
+    def extra_repr(self):
+        s = '{num_embeddings}, {embedding_dim}'
         if self.max_norm is not None:
             s += ', max_norm={max_norm}'
         if self.norm_type != 2:
@@ -247,7 +246,6 @@ class EmbeddingBag(Module):
         if self.scale_grad_by_freq is not False:
             s += ', scale_grad_by_freq={scale_grad_by_freq}'
         s += ', mode={mode}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
 # TODO: SparseLinear
