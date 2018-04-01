@@ -580,4 +580,44 @@ TEST(NetTest, FailingOperator) {
   }
 }
 
+const int kTestPoolSize = 4;
+
+class ExecutorHelperDummyOp final : public OperatorBase {
+ public:
+  using OperatorBase::OperatorBase;
+
+  ExecutorHelperDummyOp(const OperatorDef& operator_def, Workspace* ws)
+      : OperatorBase(operator_def, ws) {}
+
+  bool Run(int /* unused */ /*stream_id*/) override {
+    auto helper = GetExecutorHelper();
+    CAFFE_ENFORCE(helper);
+    auto pool = helper->GetPool(device_option());
+    CAFFE_ENFORCE(pool);
+    auto pool_size = pool->size();
+    CAFFE_ENFORCE_EQ(pool_size, kTestPoolSize);
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(ExecutorHelperDummy, ExecutorHelperDummyOp);
+
+TEST(NetTest, OperatorWithExecutorHelper) {
+  const auto spec = R"DOC(
+        name: "example"
+        type: "async_scheduling"
+        op {
+          type: "ExecutorHelperDummy"
+        }
+)DOC";
+
+  NetDef net_def;
+  CAFFE_ENFORCE(TextFormat::ParseFromString(spec, &net_def));
+
+  Workspace ws;
+  net_def.set_num_workers(kTestPoolSize);
+  std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
+  ASSERT_TRUE(net->Run());
+}
+
 } // namespace caffe2

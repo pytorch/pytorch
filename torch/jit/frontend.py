@@ -204,7 +204,7 @@ class StmtBuilder(Builder):
     def build_Return(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("return"))
         values = (stmt.value,) if not isinstance(stmt.value, ast.Tuple) else stmt.value.elts
-        return Return(r, [build_expr(ctx, val) for val in values])
+        return Return(r, [build_expr(ctx, val) for val in values if val is not None])
 
     @staticmethod
     def build_AugAssign(ctx, stmt):

@@ -17,6 +17,7 @@
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/opt/mobile.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -1424,6 +1425,20 @@ void addGlobalMethods(py::module& m) {
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
 
 #undef CAFFE2_CPU_FEATURE_SUPPORT
+
+  // Transformations are exposed as functions here and wrapped
+  // into a python interface in transformations.py
+  // Prefix the transformation with transform_ to avoid clobbering the
+  // function namespace.
+
+  m.def("transform_addNNPACK", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto new_proto = opt::addNNPACK(proto);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
 
   auto initialize = [&]() {
     // Initialization of the module

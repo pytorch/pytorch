@@ -14,6 +14,8 @@
 
 namespace caffe2 {
 
+class AsyncNetExecutorHelper;
+
 class AsyncNetBase : public NetBase {
  public:
   AsyncNetBase(const std::shared_ptr<const NetDef>& net_def, Workspace* ws);
@@ -58,26 +60,44 @@ class AsyncNetBase : public NetBase {
 
   // Pools and streams
   std::mutex pools_mutex_;
-  std::shared_ptr<TaskThreadPool> cpu_pool_;
-  std::vector<std::shared_ptr<TaskThreadPool>> cpu_pools_;
-  std::vector<std::shared_ptr<TaskThreadPool>> gpu_pools_;
+  // first int key - device id, second - pool size, one pool per (device, size)
+  typedef std::unordered_map<
+      int,
+      std::unordered_map<int, std::shared_ptr<TaskThreadPool>>>
+      PoolsMap;
+  PoolsMap cpu_pools_;
+  PoolsMap gpu_pools_;
   static thread_local std::vector<int> stream_counters_;
+  int num_workers_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
-  std::shared_ptr<TaskThreadPool> pool_getter(
-      std::vector<std::shared_ptr<TaskThreadPool>>& pools,
-      int pool_idx,
-      const DeviceOption& device_option);
+  std::shared_ptr<TaskThreadPool>
+  pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
+
+  std::unique_ptr<AsyncNetExecutorHelper> helper_;
+
+  friend class AsyncNetExecutorHelper;
 };
 
-CAFFE_DECLARE_SHARED_REGISTRY(
-    ThreadPoolRegistry,
-    TaskThreadPool,
-    const DeviceOption&);
+CAFFE_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);
 
-std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(int numa_node_id);
+class AsyncNetExecutorHelper : public ExecutorHelper {
+ public:
+  explicit AsyncNetExecutorHelper(AsyncNetBase* net) : net_(net) {}
+  std::shared_ptr<TaskThreadPool> GetPool(
+      const DeviceOption& option) const override {
+    return net_->pool(option);
+  }
+
+ private:
+  AsyncNetBase* net_;
+};
+
+std::shared_ptr<TaskThreadPool> GetAsyncNetCPUThreadPool(
+    int numa_node_id,
+    int pool_size);
 
 } // namespace caffe2
 

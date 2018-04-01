@@ -178,6 +178,8 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diagflat
+.. autofunction:: diagonal
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace
