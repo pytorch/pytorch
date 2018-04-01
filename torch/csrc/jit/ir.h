@@ -69,6 +69,28 @@ static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
 }
 
+// Note [User node does not uniquely identify use]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// A while back, we wrote some code manipulating uses that looked like this:
+//
+//    for (auto& use : used_val->uses_) {
+//      if (use.user == this_node) {
+//        use.offset += 1;
+//        break;
+//      }
+//    }
+//
+// This code is trying to find a particular use (our node's use) to update it.
+// However, it's wrong: there may be *multiple* uses of a value %x in a node,
+// as might be the case in this IR:
+//
+//    %y = Add %x %x
+//
+// In this case, there are two uses of %x whose user is the node 'Add %x %x'.
+// So, "use induced by this node" is not a well-formed concept.
+//
+// If you are looking for "use induced by an input", it's best to use
+// findUseForInput() to get it.
 
 
 // Scope is a node of a trie that represents the tree of nested scopes.
@@ -406,6 +428,7 @@ public:
     // indices [i, # input). Since we're inserting one input before all of
     // these inputs, increment their use offsets for this Node by 1
     for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+      // See Note [User node does not uniquely identify use]
       auto use = findUseForInput(use_itr);
       use->offset += 1;
     }
