@@ -58,6 +58,8 @@ def gather(outputs, target_device, dim=0):
         if out is None:
             return None
         if isinstance(out, dict):
+            if not all((len(out) == len(d) for d in outputs)):
+                raise ValueError('All dicts must have the same number of keys')
             return type(out)(((k, gather_map([d[k] for d in outputs]))
                               for k in out))
         return type(out)(map(gather_map, zip(*outputs)))

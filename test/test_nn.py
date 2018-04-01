@@ -2054,6 +2054,18 @@ class TestNN(NNTestCase):
     def test_gather_gpu(self):
         self._test_gather(0)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_gather_different_len_dicts(self):
+        inputs = (
+            {'a': Variable(torch.randn(1, 2).cuda(0), requires_grad=True)},
+            {
+                'b': Variable(torch.randn(1, 2).cuda(1), requires_grad=True),
+                'a': Variable(torch.randn(1, 2).cuda(1), requires_grad=True)
+            }
+        )
+        with self.assertRaises(ValueError):
+            _ = dp.gather(inputs, target_device=0)
+
     def _test_broadcast_double_backwards(self, *tensors):
         variables = tuple(Variable(t, requires_grad=True) for t in tensors)
         _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), variables)
