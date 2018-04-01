@@ -145,7 +145,7 @@ def _batch_mm(bmat1, bmat2):
     bmat1_squash = bmat1.reshape((-1, mat_size, mat_size))
     bmat2_squash = bmat2.reshape((-1, mat_size, mat_size))
     return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)
-    
+
 
 def kl_divergence(p, q):
     r"""
