@@ -128,6 +128,14 @@ static void trunc_kernel(Tensor& result, const Tensor& self) {
   });
 }
 
+static void tanh_kernel(Tensor& result, const Tensor& self) {
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "tanh", [&] {
+    parallel_apply<scalar_t>(result, self, [](const Vec256<scalar_t>& x) {
+      return x.tanh();
+    });
+  });
+}
+
 REGISTER_DISPATCH(absImpl, &abs_kernel);
 REGISTER_DISPATCH(ceilImpl, &ceil_kernel);
 REGISTER_DISPATCH(cosImpl, &cos_kernel);
@@ -138,5 +146,6 @@ REGISTER_DISPATCH(roundImpl, &round_kernel);
 REGISTER_DISPATCH(sinImpl, &sin_kernel);
 REGISTER_DISPATCH(sqrtImpl, &sqrt_kernel);
 REGISTER_DISPATCH(truncImpl, &trunc_kernel);
+REGISTER_DISPATCH(tanhImpl, &tanh_kernel);
 
 }} // namespace at::native

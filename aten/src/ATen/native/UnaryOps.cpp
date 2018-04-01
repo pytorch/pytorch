@@ -44,5 +44,6 @@ IMPLEMENT_UNARY_OP(round)
 IMPLEMENT_UNARY_OP(sin)
 IMPLEMENT_UNARY_OP(sqrt)
 IMPLEMENT_UNARY_OP(trunc)
+IMPLEMENT_UNARY_OP(tanh)
 
 }} // namespace at::native

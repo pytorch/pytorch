@@ -127,23 +127,4 @@ void THFloatVector_sigmoid_AVX2(float *y, const float *x, const ptrdiff_t n) {
   }
 }
 
-void THFloatVector_tanh_AVX2(float* y, const float* x, const ptrdiff_t n) {
-  ptrdiff_t i;
-  for (i = 0; i<=((n)-16); i+=16) {
-    __m256 YMM0, YMM1, YMM2, YMM3;
-    YMM0 = _mm256_loadu_ps(x + i);
-    YMM1 = _mm256_loadu_ps(x + i + 8);
-
-    // using tanh256_ps from avx_mathfun.h
-    YMM2 = tanh256_ps(YMM0);
-    YMM3 = tanh256_ps(YMM1);
-
-    _mm256_storeu_ps(y + i, YMM2);
-    _mm256_storeu_ps(y + i + 8, YMM3);
-  }
-  for (; i<(n); i++) {
-    y[i] = tanh(x[i]);
-  }
-}
-
 #endif // defined(__AVX2__)

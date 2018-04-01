@@ -80,6 +80,9 @@ public:
   Vec256<double> sqrt() const {
     return _mm256_sqrt_pd(values);
   }
+  Vec256<double> tanh() const {
+    return map(std::tanh);
+  }
 };
 
 template <>

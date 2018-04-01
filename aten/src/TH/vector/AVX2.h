@@ -17,7 +17,6 @@ void THFloatVector_normal_fill_AVX2(float *data,
                                     const float mean,
                                     const float stddev);
 void THFloatVector_sigmoid_AVX2(float *y, const float *x, const ptrdiff_t n);
-void THFloatVector_tanh_AVX2(float *y, const float *x, const ptrdiff_t n);
 #ifdef __cplusplus
 }
 #endif
