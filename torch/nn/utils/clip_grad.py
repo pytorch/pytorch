@@ -31,3 +31,20 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
         for p in parameters:
             p.grad.data.mul_(clip_coef)
     return total_norm
+
+
+def clip_grad_value(parameters, clip_value):
+    r"""Clips gradient of an iterable of parameters at specified value.
+
+    Gradients are modified in-place.
+
+    Arguments:
+        parameters (Iterable[Variable]): an iterable of Variables that will have
+            gradients normalized
+        clip_value (float or int): maximum allowed value of the gradients
+            The gradients are clipped in the range [-clip_value, clip_value]
+    """
+    parameters = list(filter(lambda p: p.grad is not None, parameters))
+    clip_value = float(clip_value)
+    for p in parameters:
+        p.grad.data.clamp_(min=-clip_value, max=clip_value)
