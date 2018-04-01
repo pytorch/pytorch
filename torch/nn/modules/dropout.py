@@ -5,7 +5,7 @@ from .. import functional as F
 class _DropoutNd(Module):
 
     def __init__(self, p=0.5, inplace=False):
-        super(Dropout, self).__init__()
+        super(_DropoutNd, self).__init__()
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
@@ -129,7 +129,6 @@ class Dropout3d(_DropoutNd):
 
     def forward(self, input):
         return F.dropout3d(input, self.p, self.training, self.inplace)
-
 
 
 class AlphaDropout(Module):
