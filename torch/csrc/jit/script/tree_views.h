@@ -245,6 +245,7 @@ struct Expr : public TreeView {
       case '/':
       case TK_NOT:
       /* case '-': - unary minus */
+      /* case '*': - unary starred */
       case TK_CONST:
       case TK_TRUE:
       case TK_FALSE:
@@ -255,7 +256,6 @@ struct Expr : public TreeView {
       case TK_GATHER:
       case TK_VAR:
       case TK_LIST_LITERAL:
-      case TK_STARRED:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -720,13 +720,13 @@ struct ListLiteral : public Expr {
 
 struct Starred : public Expr {
   explicit Starred(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_STARRED);
+    tree_->match('*');
   }
   Expr expr() const {
     return Expr(subtree(0));
   }
   static Starred create(const SourceRange& range, const Expr& expr) {
-    return Starred(Compound::create(TK_STARRED, range, {expr}));
+    return Starred(Compound::create('*', range, {expr}));
   }
 };
 

@@ -598,7 +598,10 @@ private:
         else
           return aten::sub;
       case '*':
-        return aten::mul;
+        if (ninputs == 1)
+          return prim::Starred;
+        else
+          return aten::mul;
       case '/':
         return aten::div;
       case TK_NE:
@@ -710,7 +713,6 @@ private:
       case '>':
       case TK_LE:
       case TK_GE:
-      case '*':
       case '/':
       case TK_AND:
       case TK_OR:
@@ -729,6 +731,21 @@ private:
         if (kind != aten::neg)
           node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
+      }
+      case '*': {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        if (kind == prim::Starred) {
+          const auto starred = Starred(tree);
+          auto sugared = environment_stack->getSugaredVar(Var(starred.expr()).name());
+          return sugared->asValues(starred.range(), environment_stack->method);
+        } else {
+          expectOutputs(tree, output_size, 1);
+          const auto& inputs = tree->trees();
+          auto kind = getNodeKind(tree->kind(), inputs.size());
+          auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
+          return node->outputs();
+        }
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
@@ -772,11 +789,6 @@ private:
         expectOutputs(tree, output_size, 1);
         return emitTernaryIf(TernaryIf(tree));
       } break;
-      case TK_STARRED: {
-        const auto starred = Starred(tree);
-        auto sugared = environment_stack->getSugaredVar(Var(starred.expr()).name());
-        return sugared->asValues(starred.range(), environment_stack->method);
-      }
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
