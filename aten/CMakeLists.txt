@@ -10,61 +10,12 @@ project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
 
-# RPATH stuff
-# see https://cmake.org/Wiki/CMake_RPATH_handling
-if(APPLE)
-  set(CMAKE_MACOSX_RPATH ON)
-endif()
-set(CMAKE_SKIP_BUILD_RPATH  FALSE)
-set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
-set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
-set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
-list(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_PREFIX}/lib" isSystemDir)
-if("${isSystemDir}" STREQUAL "-1")
-  set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/lib")
-endif()
+include(CompilerRPATH)
+include(CompilerSettings)
+include(CheckCXXSourceCompiles)
 
-IF(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "--std=c++11 -Wall -Wno-unknown-pragmas -Wno-vla -fexceptions ${CMAKE_CXX_FLAGS}")
-  set(CMAKE_C_FLAGS "-fexceptions ${CMAKE_C_FLAGS}")
-ENDIF(NOT MSVC)
-
-INCLUDE(CheckCXXSourceCompiles)
-
-# disable some verbose warnings
-IF (MSVC)
-  set(CMAKE_CXX_FLAGS "/wd4267 /wd4251 /wd4522 /wd4522 /wd4838 /wd4305 /wd4244 /wd4190 /wd4101 /wd4996 /wd4275 ${CMAKE_CXX_FLAGS}")
-ENDIF(MSVC)
-
-# windef.h will define max/min macros if NOMINMAX is not defined
-IF(MSVC)
-  add_definitions(/DNOMINMAX)
-ENDIF(MSVC)
-
-#Check if certain std functions are supported. Sometimes
-#_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-CHECK_CXX_SOURCE_COMPILES("
-#include <cmath>
-#include <string>
-
-int main() {
-  int a = std::isinf(3.0);
-  int b = std::isnan(0.0);
-  std::string s = std::to_string(1);
-
-  return 0;
-  }" SUPPORT_GLIBCXX_USE_C99)
-
-if(NOT SUPPORT_GLIBCXX_USE_C99)
-  message(FATAL_ERROR
-          "The C++ compiler does not support required functions. "
-          "This is very likely due to a known bug in GCC 5 "
-          "(and maybe other versions) on Ubuntu 17.10 and newer. "
-          "For more information, see: "
-          "https://github.com/pytorch/pytorch/issues/5229"
-         )
-endif()
+# Test for an GCC 5 bug on Ubuntu 17.10 and newer
+include(TestForGlibCXXUseC99)
 
 # Top-level build config
 ############################################
