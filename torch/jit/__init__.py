@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ParameterList, Parameter
+from torch.nn import Module, ModuleList, ParameterList, Parameter
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -669,8 +669,11 @@ def _get_valid_constant(v):
         return tuple(_get_valid_constant(x) for x in v)
     constants = ", ".join(typ.__name__ for typ in _constant_types)
     raise TypeError(
-        "'{}' object is not a valid constant or a list/tuple of valid constants. ".format(type(v).__name__) +
-        "Valid constants are {{{}}}".format(constants))
+        "'{}' object is not a valid constant.\n".format(type(v).__name__) +
+        "Valid constants are:\n" +
+        "  1. a nn.ModuleList\n" +
+        "  2. a value of type {{{}}}\n".format(constants) +
+        "  3. a list or tuple of (2)\n")
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -732,7 +735,7 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
             return super(ScriptModule, self).__setattr__(attr, value)
         if hasattr(self, attr):
             raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        if (isinstance(value, tuple) or isinstance(value, list)) and all(isinstance(x, Module) for x in value):
+        if isinstance(value, ModuleList):
             # special case for list of modules. Modules need to be registered with their
             # parent module. To do this, we create a ConstModuleList, which is itself a module, that
             # contains each of these modules as submodules. The ConstModuleList then

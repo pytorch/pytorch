@@ -2146,7 +2146,7 @@ class TestScript(TestCase):
 
             def __init__(self):
                 super(M, self).__init__(False)
-                self.mods = [Sub() for i in range(10)]
+                self.mods = nn.ModuleList([Sub() for i in range(10)])
 
             @torch.jit.script_method
             def forward(self, v):
