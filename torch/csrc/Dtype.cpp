@@ -83,11 +83,13 @@ PyTypeObject THPDtypeType = {
   0,                                     /* tp_new */
 };
 
-bool THPDtype_init(PyObject *module)
+void THPDtype_init(PyObject *module)
 {
-  if (PyType_Ready(&THPDtypeType) < 0)
-    return false;
+  if (PyType_Ready(&THPDtypeType) < 0) {
+    throw python_error();
+  }
   Py_INCREF(&THPDtypeType);
-  PyModule_AddObject(module, "dtype", (PyObject *)&THPDtypeType);
-  return true;
+  if (PyModule_AddObject(module, "dtype", (PyObject *)&THPDtypeType) != 0) {
+    throw python_error();
+  }
 }

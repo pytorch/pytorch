@@ -67,7 +67,7 @@ PyTypeObject THPLayoutType = {
   0,                                     /* tp_iternext */
   0,                                     /* tp_methods */
   0,                                     /* tp_members */
-  THPLayout_properties,                                     /* tp_getset */
+  THPLayout_properties,                  /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -78,11 +78,13 @@ PyTypeObject THPLayoutType = {
   0,                                     /* tp_new */
 };
 
-bool THPLayout_init(PyObject *module)
+void THPLayout_init(PyObject *module)
 {
-  if (PyType_Ready(&THPLayoutType) < 0)
-    return false;
+  if (PyType_Ready(&THPLayoutType) < 0) {
+    throw python_error();
+  }
   Py_INCREF(&THPLayoutType);
-  PyModule_AddObject(module, "layout", (PyObject *)&THPLayoutType);
-  return true;
+  if (PyModule_AddObject(module, "layout", (PyObject *)&THPLayoutType) != 0) {
+    throw python_error();
+  }
 }

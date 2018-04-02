@@ -427,7 +427,7 @@ PyObject *THPVariable_dtype(THPVariable *self)
 
 static PyObject * THPVariable_layout(THPVariable* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  auto& self_ =  self->cdata;
+  auto& self_ = self->cdata;
   return torch::autograd::utils::wrap(torch::getLayout(self_.type().backend()));
   END_HANDLE_TH_ERRORS
 }

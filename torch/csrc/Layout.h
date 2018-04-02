@@ -19,4 +19,4 @@ inline bool THPLayout_Check(PyObject *obj) {
 
 PyObject * THPLayout_New(bool is_strided, const std::string& name);
 
-bool THPLayout_init(PyObject *module);
+void THPLayout_init(PyObject *module);

@@ -20,4 +20,4 @@ inline bool THPDtype_Check(PyObject *obj) {
 
 PyObject * THPDtype_New(at::ScalarType scalar_type, bool is_cuda, const std::string& name);
 
-bool THPDtype_init(PyObject *module);
+void THPDtype_init(PyObject *module);
