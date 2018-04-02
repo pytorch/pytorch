@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
+#include <ATen/optional.h>
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
@@ -135,6 +136,64 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   });
 }
 
+// [ NOTE ] cuFFT Embedded Strides
+//
+// cuFFT supports a subset of arbitrary strides via their "advanced data layout"
+// option (http://docs.nvidia.com/cuda/cufft/index.html#advanced-data-layout).
+// Specifically, these are tensors that can be viewed as subtensors resulted
+// from slicing a larger contiguous tensors. For such input tensors, let the
+// sizes of the enclosing tensor be `inembed`, and we can have in 3d case:
+//
+//     input[x, y, z] = input[((x * inembed[1] + y) * inembed[2] + z)]
+//
+// Above is the simplified the formulate ignoring the batch dimension. In fact,
+// the last dimension of the enclosing tensor doesn't have to be contiguous,
+// i.e., it can be greater than 1. Then one can set the base stride for the
+// enclosing tensor with `istride`. Then we have
+//
+//     input[x, y, z] = input[((x * inembed[1] + y) * inembed[2] + z) * istride]
+//
+// For example, consider
+//
+//     enclosing = torch.zeros(6, 8, 10)  # contiguous
+//     input = enclosing[:4, 2:6, 6:]
+//     input.size()                       # [ 4,  4,  4]
+//     input.stride()                     # [80, 10,  1]
+//     # inembed = [6, 8, 10]
+//     input[2, 1, 3] = input[((2 * 8) + 1) * 10 + 3]   # using above formula
+//                    = input[173]
+//                    = input[2 * 80 + 1 * 10 + 1 * 3]  # using strides directly
+//
+// Generally, the embedded strides can be computed as
+//
+//     embed[i] = stride[i - 1] / stride[i].
+//
+// Note that the value of embed[0] isn't used to compute indices and doesn't
+// matter.
+
+// Returns `embed` values if `stride` can be viewed as embedded.
+// See [ NOTE ] cuFFT Embedded Strides.
+template <typename T>
+__forceinline__
+static at::optional<std::vector<T>> is_embedded_strides(IntList strides) {
+  auto n = strides.size();
+  std::vector<T> embed(n);
+  auto last_stride = strides[n - 1];
+  if (last_stride <= 0) {
+    return {};
+  }
+  for (auto i = n - 1; i > 0 /* embed[0] doesn't matteer */; i--) {
+    auto stride = strides[i - 1];
+    if (stride > 0 && stride % last_stride == 0) {
+      embed[i] = stride / last_stride;
+      last_stride = stride;
+    } else {
+      return {};
+    }
+  }
+  return embed;
+}
+
 // cuFFT
 // Currently not utilizing multi GPUs so this potentially speed up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
@@ -176,13 +235,8 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // check input batch size
   long long int batch = input.size(0);
 
-  std::vector<long long int> signal_sizes(signal_ndim);
-
-  // cuFFT needs inembds and onembed, which are the sizes of enclosing tensor.
-  // inembds can be used to support non-contiguous in certain cases, the
-  // following loop does the check that if the input tensor can be viewed as
-  // enclosed in a larger tensor. If not, we need to .contiguous it.
-  std::vector<long long int> inembed(signal_ndim);
+  std::vector<long long int> signal_sizes(checked_signal_sizes.begin(),
+                                          checked_signal_sizes.end());
 
   // check the input sizes and strides to see if we need to make it contiguous
   // cuFFT doesn't support batch dim with stride 0
@@ -192,53 +246,44 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     // Real/imag dimension must be like complex type.
     need_contiguous |= input.stride(-1) != 1;
     // Strides of other dimensions needs to be aligned when viewed as of
-    // complex type, i.e., multiples of 2. We check the batch dim here. The
-    // other signal dims are checked in a for-loop afterwards.
-    need_contiguous |= input.stride(0) % 2 != 0;
+    // complex type, i.e., multiples of 2. We check the batch dim and last
+    // signal dim here. If the input can be viewed as having embedded strides,
+    // the other signal dims will also satisfy this.
+    // See [ NOTE ] cuFFT Embedded Strides.
+    need_contiguous |= (input.size(0) > 0 && input.stride(0) % 2 != 0) ||
+                       input.stride(signal_ndim) % 2 != 0 ;
   } else if (is_half) {
     // For half, base strides on the real part of real-to-complex and
     // complex-to-real transforms are not supported. Since our output is always
     // contiguous, only need to check real-to-complex case.
     need_contiguous |= input.stride(signal_ndim) != 1;
   }
-
-  // Store last dimension stride to infer inembed array
-  // This is used when `need_contiguous=False`, so we can assume that the last
-  // dimension is indeed aligned. Complex input's last signal dim can be viewed
-  // as having stride=2, where the unit is sizeof(real_type).
-  long long int ilast_stride = complex_input ? 2 : 1;
-  // For each signal dim from innermost to outermost, compute inembed values if
-  // possible. If not, then we need to make input contiguous. Notice that if we
-  // can compute inembed values, it means that the dimensions conform to the
-  // data type alignment, e.g., strides are multiples of 2 when complex_input.
-  for (int64_t i = signal_ndim - 1; i >= 0; i--) {
-    long long int signal_size = checked_signal_sizes[i];
-    long long int istride = input.stride(i + 1);
-    if (is_half && !is_pow_of_two(signal_size)) {
-      std::ostringstream ss;
-      ss << "cuFFT doesn't support signals of half type with size that is not "
-         << "a power of two, but got a signal size of " << signal_size << " at"
-         << "signal dimension " << i;
-      throw std::runtime_error(ss.str());
-    }
-    signal_sizes[i] = signal_size;
-    if (!need_contiguous) {
-      // set the inembed for dim in last dimension
-      // ilast_stride is always positive in this block
-      need_contiguous = istride == 0 || istride % ilast_stride != 0;
-      if (i < signal_ndim - 1) {
-        inembed[i + 1] = istride / ilast_stride;
+  if (is_half) {
+    for (int64_t i = 0; i < signal_ndim; i--) {
+      auto signal_size = checked_signal_sizes[i];
+      if (!is_pow_of_two(signal_size)) {
+        std::ostringstream ss;
+        ss << "cuFFT doesn't support signals of half type with size at any "
+           << "dimension that is not a power of two, but got a signal size of "
+           << checked_signal_sizes;
+        throw std::runtime_error(ss.str());
       }
-      ilast_stride = istride;
     }
   }
+
+  at::optional<std::vector<long long int>> inembed_opt;
+  if (!need_contiguous) {
+    inembed_opt = is_embedded_strides<long long int>(input.strides().slice(1, signal_ndim));
+    if (!inembed_opt) {
+      need_contiguous = true;
+    }
+  }
+
   if (need_contiguous) {
     input = input.contiguous();
     auto input_size = input.sizes();
     // Copies new input sizes to inemed
-    std::copy(/* first signal dim */      input_size.begin() + 1,
-              /* after last signal dim */ input_size.begin() + signal_ndim + 1,
-              /* iterator to write */     inembed.begin());
+    inembed_opt.emplace(input_size.begin() + 1, input_size.begin() + signal_ndim + 1);
   }
 
   // set idist (stride at batch dim)
@@ -281,7 +326,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
 
   // make plan
   CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
-    inembed.data(), base_istride, idist, itype, onembed.data(), base_ostride,
+    inembed_opt->data(), base_istride, idist, itype, onembed.data(), base_ostride,
     odist, otype, batch, &ws, exec_type));
 
   // set to current stream
