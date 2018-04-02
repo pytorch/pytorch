@@ -24,27 +24,8 @@ include(TestForGlibCXXUseC99)
 
 # Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
-IF(NOT CUDA_FOUND)
-  FIND_PACKAGE(CUDA 5.5)
-ENDIF()
-
-IF(MSVC)
-  # we want to respect the standard, and we are bored of those **** .
-  ADD_DEFINITIONS(-D_CRT_SECURE_NO_DEPRECATE=1)
-  LIST(APPEND CUDA_NVCC_FLAGS "-Xcompiler /wd4819 -Xcompiler /wd4503 -Xcompiler /wd4190 -Xcompiler /wd4244 -Xcompiler /wd4251 -Xcompiler /wd4275 -Xcompiler /wd4522")
-  ADD_DEFINITIONS(-DTH_EXPORTS)
-  IF (NOT NO_CUDA)
-    ADD_DEFINITIONS(-DTHC_EXPORTS)
-  ENDIF()
-ENDIF(MSVC)
-
-IF (NOT MSVC)
-  IF (CMAKE_VERSION VERSION_LESS "3.1")
-    SET(CMAKE_C_FLAGS "-std=c11 ${CMAKE_C_FLAGS}")
-  ELSE ()
-    SET(CMAKE_C_STANDARD 11)
-  ENDIF ()
-ENDIF(NOT MSVC)
+find_package(CUDA 5.5)
+include(CudaCompilerSettings)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER "4.9")
