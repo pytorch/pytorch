@@ -19,7 +19,7 @@ class Initializer(object):
             first = non_tensor_args[0]
         if first is None:
             return object.__new__(cls)
-        if isinstance(first, torch.Tensor):
+        if isinstance(first, (torch.Tensor, torch.autograd.Variable)):
             return cls(*non_tensor_args[1:], **non_tensor_kwargs)(first)
         else:
             return object.__new__(cls)
@@ -30,18 +30,52 @@ class Initializer(object):
 
 
 class Ones(Initializer):
+    r"""Fills the input Tensor with ones.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.ones(w)
+        >>> ones_init = nn.init.ones()
+        >>> ones_init(w)
+    """
     def __call__(self, tensor):
         with torch.no_grad():
             return tensor.fill_(1)
 
 
 class Zeros(Initializer):
+    r"""Fills the input Tensor with zeros.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.zeros(w)
+        >>> zeros_init = nn.init.zeros()
+        >>> zeros_init(w)
+    """
     def __call__(self, tensor):
         with torch.no_grad():
             return tensor.fill_(0)
 
 
 class Constant(Initializer):
+    r"""Fills the input Tensor with the value :math:`\text{val}`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        val: the value to fill the tensor with
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.constant(w, 0.3)
+        >>> const_init = nn.init.constant(0.3)
+        >>> const_init(w)
+    """
     def __init__(self, val):
         self.val = val
 
@@ -51,6 +85,19 @@ class Constant(Initializer):
 
 
 class Eye(Initializer):
+    r"""Fills the 2-dimensional input `Tensor` with the identity
+    matrix. Preserves the identity of the inputs in `Linear` layers, where as
+    many inputs are preserved as possible.
+
+    Args:
+        tensor: a 2-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.eye(w)
+        >>> eye_init = nn.init.eye()
+        >>> eye_init(w)
+    """
     def __call__(self, tensor):
         if tensor.ndimension() != 2:
             raise ValueError("Only tensors with 2 dimensions are supported")
@@ -61,6 +108,22 @@ class Eye(Initializer):
 
 
 class Orthogonal(Initializer):
+    r"""Fills the input `Tensor` with a (semi) orthogonal matrix, as
+    described in "Exact solutions to the nonlinear dynamics of learning in deep
+    linear neural networks" - Saxe, A. et al. (2013). The input tensor must have
+    at least 2 dimensions, and for tensors with more than 2 dimensions the
+    trailing dimensions are flattened.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`, where :math:`n \geq 2`
+        gain: optional scaling factor
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.orthogonal(w)
+        >>> orth_init = nn.init.orthogonal(5)
+        >>> orth_init(w)
+    """
     def __init__(self, gain=1):
         self.gain = gain
 
@@ -90,6 +153,20 @@ class Orthogonal(Initializer):
 
 
 class Uniform(Initializer):
+    r"""Fills the input Tensor with values drawn from the uniform
+    distribution :math:`\mathcal{U}(a, b)`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        a: the lower bound of the uniform distribution
+        b: the upper bound of the uniform distribution
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.uniform(w, 4, 5)
+        >>> uniform_init = nn.init.uniform(4, 5)
+        >>> uniform_init(w)
+    """
     def __init__(self, a=0, b=1):
         self.a = a
         self.b = b
@@ -100,6 +177,20 @@ class Uniform(Initializer):
 
 
 class Normal(Initializer):
+    r"""Fills the input Tensor with values drawn from the normal
+    distribution :math:`\mathcal{N}(\text{mean}, \text{std})`.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        mean: the mean of the normal distribution
+        std: the standard deviation of the normal distribution
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.normal(w)
+        >>> normal_init = nn.init.normal()
+        >>> normal_init(w)
+    """
     def __init__(self, mean=0, std=1):
         self.mean = mean
         self.std = std
@@ -110,6 +201,19 @@ class Normal(Initializer):
 
 
 class Dirac(Initializer):
+    r"""Fills the {3, 4, 5}-dimensional input `Tensor` with the Dirac
+    delta function. Preserves the identity of the inputs in `Convolutional`
+    layers, where as many input channels are preserved as possible.
+
+    Args:
+        tensor: a {3, 4, 5}-dimensional `torch.Tensor`
+
+    Examples:
+        >>> w = torch.Tensor(3, 16, 5, 5)
+        >>> nn.init.dirac(w)
+        >>> dirac_init = nn.init.dirac()
+        >>> dirac_init(w)
+    """
     def __call__(self, tensor):
         dimensions = tensor.ndimension()
         if dimensions not in [3, 4, 5]:
@@ -131,6 +235,23 @@ class Dirac(Initializer):
 
 
 class Sparse(Initializer):
+    r"""Fills the 2D input `Tensor` as a sparse matrix, where the
+    non-zero elements will be drawn from the normal distribution
+    :math:`\mathcal{N}(0, 0.01)`, as described in "Deep learning via
+    Hessian-free optimization" - Martens, J. (2010).
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        sparsity: The fraction of elements in each column to be set to zero
+        std: the standard deviation of the normal distribution used to generate
+            the non-zero values
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.sparse(w, sparsity=0.1)
+        >>> sparse_init = nn.init.sparse(sparsity=0.1)
+        >>> sparse_init(w)
+    """
     def __init__(self, sparsity, std=0.01):
         self.sparsity = sparsity
         self.std = std
@@ -192,6 +313,25 @@ class VarianceScaling(object):
 
 
 class XavierUniform(Initializer):
+    r"""Fills the input `Tensor` with values according to the method
+    described in "Understanding the difficulty of training deep feedforward
+    neural networks" - Glorot, X. & Bengio, Y. (2010), using a uniform
+    distribution. The resulting tensor will have values sampled from
+    :math:`\mathcal{U}(-a, a)` where
+    .. math::
+        a = \text{gain} \times \sqrt{\frac{6}{\text{fan_in} + \text{fan_out}}}
+    Also known as Glorot initialisation.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        gain: an optional scaling factor
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.xavier_uniform(w, gain=nn.init.calculate_gain('relu'))
+        >>> xavier_init = nn.init.xavier_uniform(gain=nn.init.calculate_gain('relu'))
+        >>> xavier_init(w)
+    """
     def __init__(self, gain=1.):
         gain = gain ** 2
         self.vs = VarianceScaling(
@@ -205,6 +345,25 @@ class XavierUniform(Initializer):
 
 
 class XavierNormal(Initializer):
+    r"""Fills the input `Tensor` with values according to the method
+    described in "Understanding the difficulty of training deep feedforward
+    neural networks" - Glorot, X. & Bengio, Y. (2010), using a normal
+    distribution. The resulting tensor will have values sampled from
+    :math:`\mathcal{N}(0, \text{std})` where
+    .. math::
+        \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan_in} + \text{fan_out}}}
+    Also known as Glorot initialisation.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        gain: an optional scaling factor
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.xavier_normal(w)
+        >>> xavier_init = nn.init.xavier_normal(gain=nn.init.calculate_gain('relu'))
+        >>> xavier_init(w)
+    """
     def __init__(self, gain=1.):
         gain = gain ** 2
         self.vs = VarianceScaling(
@@ -218,6 +377,30 @@ class XavierNormal(Initializer):
 
 
 class KaimingUniform(Initializer):
+    r"""Fills the input `Tensor` with values according to the method
+    described in "Delving deep into rectifiers: Surpassing human-level
+    performance on ImageNet classification" - He, K. et al. (2015), using a
+    uniform distribution. The resulting tensor will have values sampled from
+    :math:`\mathcal{U}(-\text{bound}, \text{bound})` where
+    .. math::
+        \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan_in}}}
+    Also known as He initialisation.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        a: the negative slope of the rectifier used after this layer (0 for ReLU
+            by default)
+        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in`
+            preserves the magnitude of the variance of the weights in the
+            forward pass. Choosing `fan_out` preserves the magnitudes in the
+            backwards pass.
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.kaiming_uniform(w, mode='fan_in')
+        >>> he_init = nn.init.kaiming_uniform(mode='fan_in')
+        >>> he_init(w)
+    """
     def __init__(self, a=0, mode="fan_in"):
         gain = calculate_gain('leaky_relu', a) ** 2
         self.vs = VarianceScaling(
@@ -231,6 +414,30 @@ class KaimingUniform(Initializer):
 
 
 class KaimingNormal(Initializer):
+    r"""Fills the input `Tensor` with values according to the method
+    described in "Delving deep into rectifiers: Surpassing human-level
+    performance on ImageNet classification" - He, K. et al. (2015), using a
+    normal distribution. The resulting tensor will have values sampled from
+    :math:`\mathcal{N}(0, \text{std})` where
+    .. math::
+        \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan_in}}}
+    Also known as He initialisation.
+
+    Args:
+        tensor: an n-dimensional `torch.Tensor`
+        a: the negative slope of the rectifier used after this layer (0 for ReLU
+            by default)
+        mode: either 'fan_in' (default) or 'fan_out'. Choosing `fan_in`
+            preserves the magnitude of the variance of the weights in the
+            forward pass. Choosing `fan_out` preserves the magnitudes in the
+            backwards pass.
+
+    Examples:
+        >>> w = torch.Tensor(3, 5)
+        >>> nn.init.kaiming_normal(w, mode='fan_out')
+        >>> he_init = nn.init.kaiming_normal(mode='fan_out')
+        >>> he_init(w)
+    """
     def __init__(self, a=0, mode="fan_in"):
         gain = calculate_gain('leaky_relu', a) ** 2
         self.vs = VarianceScaling(
@@ -328,11 +535,3 @@ def _calculate_fan_in_and_fan_out(tensor):
         fan_out = num_output_fmaps * receptive_field_size
 
     return fan_in, fan_out
-
-
-def get(identifier):
-    if isinstance(identifier, str):
-        func = globals()[identifier]
-        return func
-    elif callable(identifier):
-        return identifier

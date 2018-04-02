@@ -39,7 +39,7 @@ class Linear(Module):
     """
 
     def __init__(self, in_features, out_features, bias=True,
-                 weight_init='xavier_uniform', bias_init='zeros'):
+                 weight_init=init.xavier_uniform, bias_init=init.zeros):
         super(Linear, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
@@ -48,8 +48,8 @@ class Linear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
-        self.weight_init = init.get(weight_init)
-        self.bias_init = init.get(bias_init)
+        self.weight_init = weight_init
+        self.bias_init = bias_init
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -101,7 +101,7 @@ class Bilinear(Module):
     """
 
     def __init__(self, in1_features, in2_features, out_features, bias=True,
-                 weight_init='xavier_uniform', bias_init='zeros'):
+                 weight_init=init.xavier_uniform, bias_init=init.zeros):
         super(Bilinear, self).__init__()
         self.in1_features = in1_features
         self.in2_features = in2_features
@@ -112,8 +112,8 @@ class Bilinear(Module):
             self.bias = Parameter(torch.Tensor(out_features))
         else:
             self.register_parameter('bias', None)
-        self.weight_init = init.get(weight_init)
-        self.bias_init = init.get(bias_init)
+        self.weight_init = weight_init
+        self.bias_init = bias_init
         self.reset_parameters()
 
     def reset_parameters(self):

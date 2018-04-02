@@ -4164,7 +4164,7 @@ class TestNN(NNTestCase):
                                 "\ninp_size: " + str(inp_size) +
                                 "\ndilation: " + str(dilation))
 
-
+# hey kevin
 class TestNNInit(TestCase):
     def setUp(self):
         super(TestNNInit, self).setUp()
@@ -4198,7 +4198,7 @@ class TestNNInit(TestCase):
     def test_calculate_gain_nonlinear(self):
         for fn in ['sigmoid', 'tanh', 'relu', 'leaky_relu']:
             gain = init.calculate_gain(fn)
-            if fn == 'sigmoid':
+            if fn in ['sigmoid', 'selu']:
                 self.assertEqual(gain, 1)
             elif fn == 'tanh':  # 5 / 3
                 self.assertEqual(gain, 1.6666666666666667)
