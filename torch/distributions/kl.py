@@ -18,8 +18,7 @@ from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
-from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis, _batch_diag,
-                                  _batch_inverse, _batch_mm)
+from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag, _batch_inverse
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -297,7 +296,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
                           different event shapes cannot be computed")
 
     term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
-    term2 = _batch_trace_XXT(_batch_mm(_batch_inverse(q.scale_tril), p.scale_tril))
+    term2 = _batch_trace_XXT(torch.matmul(_batch_inverse(q.scale_tril), p.scale_tril))
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
     return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
 

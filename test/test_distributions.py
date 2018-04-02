@@ -2613,7 +2613,6 @@ class TestKL(TestCase):
     def test_kl_monte_carlo(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         for (p, _), (_, q) in self.finite_examples:
-            print('Testing KL({}, {}) using Monte Carlo'.format(type(p).__name__, type(q).__name__))
             actual = kl_divergence(p, q)
             numerator = 0
             denominator = 0
@@ -2636,7 +2635,6 @@ class TestKL(TestCase):
     def test_kl_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for multivariate_normal
-        print('Testing KL(MultivariateNormal, MultivariateNormal) using Monte Carlo')
         for i in range(0, n):
             loc = [torch.randn(4) for _ in range(0, 2)]
             scale_tril = [transform_to(constraints.lower_cholesky)(torch.randn(4, 4)) for _ in range(0, 2)]
@@ -2673,7 +2671,6 @@ class TestKL(TestCase):
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
             if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
-                print('Testing KL({}, {}) using Bregman Divergence'.format(type(p).__name__, type(q).__name__))
                 actual = kl_divergence(p, q)
                 expected = _kl_expfamily_expfamily(p, q)
                 if isinstance(expected, Variable) and not isinstance(actual, Variable):

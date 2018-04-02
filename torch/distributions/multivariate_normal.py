@@ -64,17 +64,6 @@ def _batch_inverse(bmat):
     return flat_inv_bmat.view(bmat.shape)
 
 
-def _batch_mm(bmat1, bmat2):
-    r"""
-    Utility function for calculating the matrix product of two batch matrices
-    with arbitrary trailing batch dimensions
-    """
-    mat_size = bmat1.size(-1)
-    bmat1_squash = bmat1.reshape((-1, mat_size, mat_size))
-    bmat2_squash = bmat2.reshape((-1, mat_size, mat_size))
-    return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)
-
-
 def _batch_mahalanobis(L, x):
     r"""
     Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
@@ -163,13 +152,13 @@ class MultivariateNormal(Distribution):
 
     @lazy_property
     def covariance_matrix(self):
-        return _batch_mm(self.scale_tril, self.scale_tril.transpose(-1, -2))
+        return torch.matmul(self.scale_tril, self.scale_tril.transpose(-1, -2))
 
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
         scale_tril_inv = _batch_inverse(self.scale_tril)
-        return _batch_mm(scale_tril_inv.transpose(-1, -2), scale_tril_inv)
+        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv)
 
     @property
     def mean(self):
