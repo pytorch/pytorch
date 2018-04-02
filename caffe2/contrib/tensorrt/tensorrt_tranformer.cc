@@ -211,7 +211,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   auto trt_engine =
       InferObject(trt_builder->buildCudaEngine(*trt_network.get()));
 
-  // Set up inputs/outputs
+  // Set up inputs/outputs in the order of they appearnce in getNbBindings
   int num_bindings = trt_engine->getNbBindings();
   for (int b = 0; b < num_bindings; ++b) {
     const auto& name = trt_engine->getBindingName(b);
@@ -242,16 +242,17 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   auto* output_size_names_arg = op.add_arg();
   output_size_hints_arg->set_name("output_size_hints");
   output_size_names_arg->set_name("output_size_names");
-  for(const auto& o: op.output()) {
+  for (int i = 0; i < op.output_size(); ++i) {
+    const auto& o = op.output(i);
     const auto it = output_size_hints.find(o);
     if (it != output_size_hints.end()) {
       const auto& dims = it->second;
-      for (const auto& i : dims) {
-        output_size_hints_arg->add_ints(i);
+      auto* output_size_hint_arg = op.add_arg();
+      output_size_hint_arg->set_name(MakeString("output_size_hint_", i));
+      for (const auto& d : dims) {
+        output_size_hint_arg->add_ints(d);
       }
-      // Add an extra -1 to indicate the end
-      output_size_hints_arg->add_ints(-1);
-      output_size_names_arg->add_strings(o);
+
       LOG(INFO) << "Adding output hint: " << o;
     }
   }

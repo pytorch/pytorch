@@ -46,51 +46,27 @@ TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
         engine_string.data(), engine_string.size(), nullptr));
   }
 
-  if(!trt_engine_) {
-    CAFFE_THROW("Cannot deserialize TensorRT engine!");
-  }
-
-  std::unordered_map<std::string, int> inputs;
-  std::unordered_map<std::string, int> outputs;
-  for (int i = 0; i < operator_def.input_size(); ++i) {
-    inputs.emplace(operator_def.input(i), i);
-    VLOG(0) << "Adding Input: " << operator_def.input(i);
-  }
-  for (int i = 0; i < operator_def.output_size(); ++i) {
-    outputs.emplace(operator_def.output(i), i);
-    VLOG(0) << "Adding Output: " << operator_def.output(i);
-  }
-
-  // Set up the output size hints
-  std::vector<int> output_size_hints_encoded(
-      OperatorBase::GetRepeatedArgument<int>("output_size_hints"));
-  std::vector<std::string> output_size_names(
-      OperatorBase::GetRepeatedArgument<std::string>("output_size_names"));
-  int idx = 0;
-  for (const auto& oname : output_size_names) {
-    const auto it = outputs.find(oname);
-    if (it != outputs.end()) {
-      std::vector<TIndex> dims;
-      for (; idx < output_size_hints_encoded.size() && output_size_hints_encoded[idx] > 0; ++idx) {
-        dims.push_back(output_size_hints_encoded[idx]);
-      }
-      output_size_hints_.emplace(it->second, std::move(dims));
-    }
-  }
+  CAFFE_ENFORCE(trt_engine_, "Cannot deserialize TensorRT engine!");
 
   // match and bind the input/output
-  int num_bindings = trt_engine_->getNbBindings();
+  const int num_bindings = trt_engine_->getNbBindings();
+  int output_idx = 0;
   for (int b = 0; b < num_bindings; ++b) {
-    const auto& name = trt_engine_->getBindingName(b);
     nv_dims_.push_back(trt_engine_->getBindingDimensions(b));
-    if (trt_engine_->bindingIsInput(b)) {
-      const auto it = inputs.find(name);
-      CAFFE_ENFORCE(it != inputs.end(), MakeString("Cannot find trt input: ", name));
-      binding_hints_.emplace_back(it->second, true);
-    } else {
-      const auto it = outputs.find(name);
-      CAFFE_ENFORCE(it != outputs.end());
-      binding_hints_.emplace_back(it->second, false);
+    bool is_input = trt_engine_->bindingIsInput(b);
+    is_input_.push_back(is_input);
+    if (!is_input) {
+      // For output, we try to get its output size hint
+      const std::string key = MakeString("output_size_hint_", output_idx);
+      auto output_size_hint = OperatorBase::GetRepeatedArgument<int>(key);
+      if (!output_size_hint.empty()) {
+        std::vector<TIndex> dims;
+        for (const auto v: output_size_hint) {
+          dims.push_back(v);
+        }
+        output_size_hints_.emplace(output_idx, std::move(dims));
+      }
+      ++output_idx;
     }
   }
 
@@ -131,16 +107,23 @@ bool TensorRTOp::RunOnDevice() {
   CAFFE_ENFORCE(trt_executor_);
   // Decide input batch size
   size_t N = 0;
-  bool first = true;
   for (int i = 0; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const auto& tensor_dims = input_tensor.dims();
-    if (first) {
+    if (i == 0) {
       N = tensor_dims.front();
-      first = false;
     } else {
       CAFFE_ENFORCE_EQ(
           N, tensor_dims.front(), "Mismatched batch size in input tensors");
+    }
+  }
+
+  // Input size check and output allocation
+  for (auto i = 0; i < is_input_.size(); ++i) {
+    const auto& dims = nv_dims_[i];
+    if (is_input_[i]) {
+      // Check input dimensions
+
     }
   }
 
@@ -148,19 +131,22 @@ bool TensorRTOp::RunOnDevice() {
   // exact shapes of the tensors now. In addtion, since TensorRT engine has
   // max_batch_size, we need to call that multiple times if input batch size
   // exceeeds this limit.
+  CAFFE_ENFORCE_EQ(is_input_.size(), nv_dims_.size());
   std::vector<void*> bindings;
+  bindings.reserve(is_input_.size());
   auto batch_size = max_batch_size_;
   for (size_t offset = 0; offset < N; offset += batch_size) {
     bindings.clear();
     batch_size =
         offset + max_batch_size_ > N ? N - offset : max_batch_size_;
     VLOG(2) << "Offset: " << offset << ", batch_size: " << batch_size << ", N: " << N;
-    int b = 0;
-    for (const auto& p : binding_hints_) {
-      const auto& dims = nv_dims_[b++];
-      if (p.second) {
+    int input_idx = 0;
+    int output_idx = 0;
+    for (auto i = 0; i < is_input_.size(); ++i) {
+      const auto& dims = nv_dims_[i];
+      if (is_input_[i]) {
         // input, check input dimensions
-        const auto& input_tensor = Input(p.first);
+        const auto& input_tensor = Input(input_idx++);
         const float* input_data = input_tensor.data<float>();
         const auto& tensor_dims = input_tensor.dims();
         auto chw = CheckDims(dims, tensor_dims);
@@ -168,7 +154,7 @@ bool TensorRTOp::RunOnDevice() {
         bindings.push_back((void*)(input_data + offset * chw));
       } else {
         // output, we need to allocate the output tensor at first batch run
-        auto* output_tensor = Output(p.first);
+        auto* output_tensor = Output(output_idx);
         std::vector<TIndex> tensor_dims;
         tensor_dims.push_back(N);
         int64_t chw = 1;
@@ -178,9 +164,10 @@ bool TensorRTOp::RunOnDevice() {
         }
 
         if (offset == 0) {
-          MaybeAdjustOutputShape(p.first, &tensor_dims);
+          MaybeAdjustOutputShape(output_idx, &tensor_dims);
           output_tensor->Resize(tensor_dims);
         }
+        ++output_idx;
         float* output_data = output_tensor->mutable_data<float>();
         bindings.push_back((void*)(output_data + offset * chw));
       }
