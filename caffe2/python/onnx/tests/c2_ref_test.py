@@ -310,9 +310,6 @@ class TestCaffe2End2End(TestCase):
     def test_squeezenet(self):
         self._test_net('squeezenet')
 
-    def test_shufflenet(self):
-        self._test_net('shufflenet')
-
     def test_densenet121(self):
         self._test_net('densenet121')
 
