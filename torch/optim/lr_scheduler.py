@@ -190,15 +190,14 @@ class CosineAnnealingLR(_LRScheduler):
         https://arxiv.org/abs/1608.03983
     """
 
-    def __init__(self, optimizer, T_max, eta_min=0, T_mult=2, restart=False, last_epoch=-1):
+    def __init__(self, optimizer, T_max, eta_min=0, T_mult=2, last_epoch=-1):
         self.T_max = T_max
         self.eta_min = eta_min
         self.T_mult = T_mult
-        self.restart = restart
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def get_lr(self):
-        if self.restart and self.last_epoch == self.T_max:
+        if self.last_epoch == self.T_max:
             self.last_epoch = 0
             self.T_max *= self.T_mult
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
