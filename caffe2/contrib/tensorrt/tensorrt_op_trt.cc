@@ -9,12 +9,12 @@ namespace caffe2 {
 namespace {
 // Note that input of trt tensor is in CHW format, while our tensor is NCHW
 // \return -1 if there is dimension mismatch between C2 tensor and trt tensor.
-// Otherwise, return the multiplicaton of CHW dimensions
+// Otherwise, return the product of CHW dimensions
 int64_t CheckDims(
     const nvinfer1::Dims& nv_dims,
     const std::vector<TIndex>& c2_dims) {
   if (nv_dims.nbDims + 1 != c2_dims.size()) {
-    return -1;
+    CAFFE_THROW("Mismatched dimensions between TRT input and C2 input");
   }
   int64_t chw = 1;
   for (int i = 0; i < nv_dims.nbDims; ++i) {
@@ -28,13 +28,13 @@ int64_t CheckDims(
 
 } // namespace
 
-// Upon construction, we build the inference enigne by deserializing from
+// Upon construction, we build the inference engine by deserializing from
 // protobuf string. And since we know the input/output blobs, we can do the
 // binding here too.
 TensorRTOp::TensorRTOp(const OperatorDef& operator_def, Workspace* ws)
     : Operator<CUDAContext>(operator_def, ws),
       logger_((nvinfer1::ILogger::Severity)(
-          OperatorBase::GetSingleArgument<int>("log_verbosity", 2))),
+          OperatorBase::GetSingleArgument<int>("log_verbosity", FLAGS_minloglevel))),
       max_batch_size_(OperatorBase::GetSingleArgument<int>("max_batch_size", 1)) {
   {
     auto engine_string =
@@ -84,18 +84,7 @@ void TensorRTOp::MaybeAdjustOutputShape(int output_idx, std::vector<TIndex>* dim
       return;
     }
 
-    bool identical_shape = true;
-    if (dims->size() != dims_hint.size()) {
-      identical_shape = false;
-    } else {
-      for (int i = 0; i < dims->size(); ++i) {
-        if((*dims)[i] != dims_hint[i]) {
-          identical_shape = false;
-          break;
-        }
-      }
-    }
-
+    bool identical_shape = std::equal(dims->cbegin(), dims->cend(), dims_hint.cbegin());
     // We conform to the output shape hints. NB: We might need an explicit reshape op for this
     if (!identical_shape) {
       *dims = dims_hint;
@@ -110,7 +99,7 @@ bool TensorRTOp::RunOnDevice() {
   for (int i = 0; i < InputSize(); ++i) {
     const auto& input_tensor = Input(i);
     const auto& tensor_dims = input_tensor.dims();
-    if (i == 0) {
+    if (i == 0 && !tensor_dims.empty()) {
       N = tensor_dims.front();
     } else {
       CAFFE_ENFORCE_EQ(
@@ -150,7 +139,6 @@ bool TensorRTOp::RunOnDevice() {
         const float* input_data = input_tensor.data<float>();
         const auto& tensor_dims = input_tensor.dims();
         auto chw = CheckDims(dims, tensor_dims);
-        CAFFE_ENFORCE_GE(chw, 0, "Mismatched dimensions between TRT input and C2 input");
         bindings.push_back((void*)(input_data + offset * chw));
       } else {
         // output, we need to allocate the output tensor at first batch run
@@ -173,9 +161,9 @@ bool TensorRTOp::RunOnDevice() {
       }
     }
 
-    CAFFE_ENFORCE(bindings.size() == InputSize() + OutputSize());
-    if(!trt_executor_->execute(batch_size, &bindings[0])){
-      return false;
+    CAFFE_ENFORCE_EQ(bindings.size(), InputSize() + OutputSize());
+    if(!trt_executor_->execute(batch_size, bindings.data())){
+      CAFFE_THROW("Error running the TensorRT executor");
     }
   }
   return true;

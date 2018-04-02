@@ -3,6 +3,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnx_exporter.h"
+#include "caffe2/utils/proto_utils.h"
 #include <onnx2trt.hpp>
 #include <NvInfer.h>
 
@@ -38,6 +39,13 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
+// Figuring out the input the tensorrt runnable subgraph
+// `start` and `end` defines the continuous chunk of ops that can be readily
+// converted into an TensorRT op. And this function tries to figure out what's
+// the inputs of the to be converted TesnorRT op. What it does is that it
+// collects the outputs from previous ops, which forms a cut boundary, and they
+// can potential input of the TensorRT op (if referenced).
+// `FigureOutputs` works similarly
 std::vector<std::string> FigureInputs(
     const NetDef& pred_net,
     int start,
@@ -51,7 +59,6 @@ std::vector<std::string> FigureInputs(
     boundary_inputs.emplace(i);
   }
 
-  //
   for (const auto& op : new_ops) {
     for (const auto& output: op.output()) {
       boundary_inputs.emplace(output);
@@ -70,7 +77,7 @@ std::vector<std::string> FigureInputs(
           total_inputs_vec.emplace_back(input);
           initialization_list->emplace(input);
         } else if (boundary_inputs.count(input)) {
-          LOG(INFO) << "Adding boundary input: " << input;
+          VLOG(1) << "Adding boundary input: " << input;
           total_inputs_vec.emplace_back(input);
         }
       }
@@ -79,20 +86,15 @@ std::vector<std::string> FigureInputs(
   return total_inputs_vec;
 }
 
+// Outputs of the tensorrt runnable subgraph are computed as outputs from the
+// ops of the subgraph that is
+  // 1. referred by the subsequent ops
+  // 2. in the external ouput of the net
 std::vector<std::string>
 FigureOutputs(const NetDef& pred_net, int start, int end) {
-  std::unordered_set<std::string> all_outputs;
-  std::vector<std::string> all_outputs_vec;
   std::unordered_set<std::string> ext_outputs;
   for (const auto& e: pred_net.external_output()) {
     ext_outputs.emplace(e);
-  }
-  for (int i = start; i < end; ++i) {
-    const auto& op = pred_net.op(i);
-    for (const auto& output: op.output()) {
-      all_outputs.emplace(output);
-      all_outputs_vec.emplace_back(output);
-    }
   }
   std::unordered_set<std::string> referred_inputs;
   for (int i = end; i < pred_net.op_size(); ++i) {
@@ -101,18 +103,20 @@ FigureOutputs(const NetDef& pred_net, int start, int end) {
       referred_inputs.emplace(input);
     }
   }
-  // Remove the output that is
-  // 1. Not referred by the subsequent ops
-  // 2. Not in the external ouput of the net
-  all_outputs_vec.erase(
-      std::remove_if(
-          all_outputs_vec.begin(),
-          all_outputs_vec.end(),
-          [&ext_outputs, &referred_inputs](const std::string& output) {
-            return (
-                !referred_inputs.count(output) && !ext_outputs.count(output));
-          }),
-      all_outputs_vec.end());
+
+  std::unordered_set<std::string> all_outputs;
+  std::vector<std::string> all_outputs_vec;
+  for (int i = start; i < end; ++i) {
+    const auto& op = pred_net.op(i);
+    for (const auto& output: op.output()) {
+      if (referred_inputs.count(output) || ext_outputs.count(output)) {
+        if(all_outputs.emplace(output).second) {
+          all_outputs_vec.emplace_back(output);
+        }
+      }
+    }
+  }
+
   return all_outputs_vec;
 }
 
@@ -141,7 +145,7 @@ std::vector<::ONNX_NAMESPACE::ValueInfoProto> ConvertToValueInfo(
   return r;
 }
 
-void PruneWeights(const NetDef& pred_net, NetDef* init_net) {
+void PruneUsedWeights(const NetDef& pred_net, NetDef* init_net) {
   std::unordered_set<std::string> used_weights;
   for (const auto& op: pred_net.op()) {
     for (const auto& i: op.input()) {
@@ -192,7 +196,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   auto importer = InferObject(onnx2trt::createImporter(trt_network.get()));
   auto status = importer->import(onnx_model_str.data(), onnx_model_str.size(), false);
   if (status.is_error()) {
-    CAFFE_THROW(MakeString(
+    CAFFE_THROW(
         "TensorRTTransformer ERROR: ",
         status.file(),
         ":",
@@ -203,7 +207,7 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
         "[",
         status.code(),
         "] ",
-        status.desc()));
+        status.desc());
   }
   trt_builder->setMaxBatchSize(max_batch_size_);
   trt_builder->setMaxWorkspaceSize(max_workspace_size_);
@@ -303,7 +307,7 @@ void TensorRTTransformer::ClusterToTrtOp(
   // Convert weights to initializing tensors
   onnx::OnnxExporter exporter;
   for (const auto& op: init_net.op()) {
-    CAFFE_ENFORCE(op.output_size() == 1);
+    CAFFE_ENFORCE_EQ(op.output_size(), 1);
     auto it = initialization_list.find(op.output(0));
     if (it != initialization_list.end()) {
       auto* init_tensor = model->mutable_graph()->add_initializer();
@@ -335,9 +339,9 @@ void TensorRTTransformer::Transform(
   std::unordered_set<std::string> weights;
   if (init_net) {
     for (const auto& op : init_net->op()) {
-      CAFFE_ENFORCE(op.type().find("GivenTensor") == 0);
-      CAFFE_ENFORCE(op.type().rfind("Fill") == op.type().size() - 4);
-      CAFFE_ENFORCE(op.output_size() == 1);
+      CAFFE_ENFORCE_EQ(op.type().find("GivenTensor"), 0);
+      CAFFE_ENFORCE_EQ(op.type().rfind("Fill"), op.type().size() - 4);
+      CAFFE_ENFORCE_EQ(op.output_size(), 1);
       for (const auto& op_output : op.output()) {
         weights.emplace(op_output);
       }
@@ -358,7 +362,7 @@ void TensorRTTransformer::Transform(
     bool support_trt = true;
     const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
     caffe2::onnx::ConvertedResult results;
-    if (!schema or schema->onnx_schema().empty()) {
+    if (!schema || schema->onnx_schema().empty()) {
       LOG(INFO) << "Cannot export c2 op " << op.type() << " to onnx";
       support_trt = false;
     } else {
@@ -418,7 +422,7 @@ void TensorRTTransformer::Transform(
   for (const auto& op : new_ops) {
     pred_net->add_op()->CopyFrom(op);
   }
-  PruneWeights(*pred_net, init_net);
+  PruneUsedWeights(*pred_net, init_net);
 }
 
 }

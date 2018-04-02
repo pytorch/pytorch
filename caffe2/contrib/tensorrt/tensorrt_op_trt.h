@@ -5,8 +5,6 @@
 #include "caffe2/core/operator.h"
 
 #include <NvInfer.h>
-#include <iostream>
-#include <memory>
 #include <unordered_map>
 
 namespace caffe2 {

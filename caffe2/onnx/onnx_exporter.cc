@@ -285,7 +285,7 @@ ConvertedResult OnnxExporter::CreateConvPoolNodes(
     CAFFE_ENFORCE(!global);
     const auto& input_size = shapes.at(node.input(0));
     const auto& output_size = shapes.at(node.output(0));
-    CAFFE_ENFORCE(output_size.dims().size() == 4);
+    CAFFE_ENFORCE_EQ(output_size.dims().size(), 4);
     if (legacy_pad_attr.i() ==
         static_cast<int64_t>(caffe2::LegacyPadding::VALID)) {
       CAFFE_ENFORCE(!attrs.count("pads"));
@@ -584,8 +584,8 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
 void OnnxExporter::InitOpToTensorProto(
     const caffe2::OperatorDef& op,
     TensorProto* tensor) {
-  CAFFE_ENFORCE(op.input_size() == 0);
-  CAFFE_ENFORCE(op.output_size() == 1);
+  CAFFE_ENFORCE_EQ(op.input_size(), 0);
+  CAFFE_ENFORCE_EQ(op.output_size(), 1);
 
   // Set name
   tensor->set_name(op.output(0));
