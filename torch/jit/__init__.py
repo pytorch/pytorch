@@ -672,21 +672,6 @@ def _get_valid_constant(v):
         "'{}' object is not a valid constant or a list/tuple of valid constants. ".format(type(v).__name__) +
         "Valid constants are {{{}}}".format(constants))
 
-
-class _Const(object):
-    def __init__(self, v):
-        self._value = _get_valid_constant(v)
-
-
-def const(v):
-    if (isinstance(v, tuple) or isinstance(v, list)) and all(isinstance(x, Module) for x in v):
-        # special case for list of modules. Modules need to be registered with their
-        # parent module. To do this, we create a ConstModuleList, which is itself a module, that
-        # contains each of these modules as submodules. The ConstModuleList then
-        # is set as an attribute of the parent module.
-        return _ConstModuleList(v)
-    return _Const(v)
-
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
 # in a ScriptModule and removes them from the class attributes, and
@@ -711,6 +696,8 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
+        super_constants = getattr(super(cls), '_constants_set', set())
+        cls._constants_set = set(getattr(cls, '__constants__', ())).union(super_constants)
 
         def init_then_register(self, *args, **kwargs):
             # ensure even if the user forgets to call super that
@@ -729,7 +716,6 @@ class ScriptMeta(type(torch._C.ScriptModule)):
 class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __init__(self, optimize=True):
         # must be before Module.init since the field is used in __getattr__
-        self._constants = OrderedDict()
         Module.__init__(self)
         self._set_optimized(optimize)
         self._parameters = OrderedParameterDict(self)
@@ -739,20 +725,21 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __getattr__(self, attr):
         if self._has_method(attr):
             return self._get_method(attr)
-        elif attr in self._constants:
-            # note: we return the _value_ of the constant so that in
-            # non-script mode you can use it directly
-            # we ensure that all values have the same (non-)mutability
-            # in the script as their python equivalents
-            return self._constants[attr]._value
         return Module.__getattr__(self, attr)
 
     def __setattr__(self, attr, value):
-        if not isinstance(value, _Const):
+        if attr not in self._constants_set:
             return super(ScriptModule, self).__setattr__(attr, value)
-        if attr in self._constants:
+        if hasattr(self, attr):
             raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        self._constants[attr] = value
+        if (isinstance(value, tuple) or isinstance(value, list)) and all(isinstance(x, Module) for x in value):
+            # special case for list of modules. Modules need to be registered with their
+            # parent module. To do this, we create a ConstModuleList, which is itself a module, that
+            # contains each of these modules as submodules. The ConstModuleList then
+            # is set as an attribute of the parent module.
+            super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+        else:
+            super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
     def __dir__(self):
         return sorted(Module.__dir__(self) + self._method_names())

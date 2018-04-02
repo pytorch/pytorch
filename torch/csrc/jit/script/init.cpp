@@ -194,10 +194,10 @@ struct ModuleValue : public SugaredValue {
       if(py::isinstance<py::function>(attr) ||
          py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
         return std::make_shared<PythonValue>(attr);
-      } else if(py_module.attr("_constants").contains(field.c_str())) {
+      } else if(py_module.attr("_constants_set").contains(field.c_str())) {
         return createConstantSugaredValue(attr);
       } else {
-        throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you mean to use torch.jit.const?)";
+        throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
     }
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
