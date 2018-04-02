@@ -128,13 +128,13 @@ def _x_log_x(tensor):
     return tensor * tensor.log()
 
 
-def _batch_trace(bmat):
+def _batch_trace_XXT(bmat):
     """
-    Utility function for calculating the trace of matrices with arbitrary trailing batch dimensions
+    Utility function for calculating the trace of XX^{T} with X having arbitrary trailing batch dimensions
     """
     mat_size = bmat.size(-1)
-    values = torch.stack([torch.trace(M) for M in bmat.reshape((-1, mat_size, mat_size))])
-    return values.view(bmat.shape[:-2])
+    flat_trace = bmat.reshape(-1, mat_size * mat_size).pow(2).sum(-1)
+    return flat_trace.view(bmat.shape[:-2])
 
 
 def kl_divergence(p, q):
@@ -297,7 +297,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
                           different event shapes cannot be computed")
 
     term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
-    term2 = _batch_trace(_batch_mm(q.precision_matrix, p.covariance_matrix))
+    term2 = _batch_trace_XXT(_batch_mm(_batch_inverse(q.scale_tril), p.scale_tril))
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
     return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
 
