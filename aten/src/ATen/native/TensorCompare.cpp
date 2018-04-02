@@ -79,4 +79,20 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
   });
   return ret;
 }
+
+Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<0>(self.max(dim, keepdim));
+}
+
+Tensor min_values(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<0>(self.min(dim, keepdim));
+}
+
+Tensor argmax(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<1>(self.max(dim, keepdim));
+}
+
+Tensor argmin(const Tensor& self, int64_t dim, bool keepdim) {
+  return std::get<1>(self.min(dim, keepdim));
+}
 }} // namespace at::native
