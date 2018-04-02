@@ -20,7 +20,7 @@ import torch.nn.parallel as dp
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
-from torch.nn.utils import clip_grad_norm
+from torch.nn.utils import clip_grad_norm, clip_grad_value
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -1187,6 +1187,19 @@ class TestNN(NNTestCase):
             self.assertLessEqual(norm_after, max_norm)
             scale = compare_scaling(grads)
             self.assertEqual(scale, 1)
+
+    def test_clip_grad_value(self):
+        l = nn.Linear(10, 10)
+        clip_value = 2.5
+
+        grads = torch.arange(-50, 50).view(10, 10).div(5), torch.ones(10).mul(2)
+        for p, g in zip(l.parameters(), grads):
+            p._grad = Variable(g.clone().view_as(p.data))
+
+        clip_grad_value(l.parameters(), clip_value)
+        for p in l.parameters():
+            self.assertLessEqual(p.grad.data.max(), clip_value)
+            self.assertGreaterEqual(p.grad.data.min(), -clip_value)
 
     def test_parameters_to_vector(self):
         conv1 = nn.Conv2d(3, 10, 5)

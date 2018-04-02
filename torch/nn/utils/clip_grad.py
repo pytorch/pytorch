@@ -44,7 +44,6 @@ def clip_grad_value(parameters, clip_value):
         clip_value (float or int): maximum allowed value of the gradients
             The gradients are clipped in the range [-clip_value, clip_value]
     """
-    parameters = list(filter(lambda p: p.grad is not None, parameters))
     clip_value = float(clip_value)
-    for p in parameters:
+    for p in list(filter(lambda p: p.grad is not None, parameters)):
         p.grad.data.clamp_(min=-clip_value, max=clip_value)
