@@ -160,7 +160,7 @@ class MultivariateNormal(Distribution):
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
         scale_tril_inv = _batch_inverse(self.scale_tril)
-        flat_scale_tril_inv = self.scale_tril.reshape((-1,) + self._event_shape * 2)
+        flat_scale_tril_inv = scale_tril_inv.reshape((-1,) + self._event_shape * 2)
         flat_precision = torch.bmm(flat_scale_tril_inv.transpose(-1, -2),
                                    flat_scale_tril_inv)
         return flat_precision.view(self.scale_tril.shape)

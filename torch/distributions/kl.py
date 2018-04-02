@@ -136,15 +136,6 @@ def _batch_trace(bmat):
     return values.view(bmat.shape[:-2])
 
 
-def _batch_inverse(bmat):
-    """
-    Utility function for calculating the inverse of matrices with arbitrary trailing batch dimensions
-    """
-    mat_size = bmat.size(-1)
-    values = torch.stack([torch.inverse(M) for M in bmat.reshape((-1, mat_size, mat_size))])
-    return values.view_as(bmat)
-
-
 def _batch_mm(bmat1, bmat2):
     """
     Utility function for calculating the matrix product of two batch matrices
@@ -317,7 +308,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
 
     term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
 
-    term2 = _batch_trace(_batch_mm(_batch_inverse(q.covariance_matrix), p.covariance_matrix))
+    term2 = _batch_trace(_batch_mm(q.precision_matrix, p.covariance_matrix))
 
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
     return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
