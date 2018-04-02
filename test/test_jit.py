@@ -2241,8 +2241,7 @@ class TestScript(TestCase):
             @torch.jit.script_method
             def forward(self, rep):
                 tup = self.g(rep)
-                # return self.m(*tup)
-                return tup
+                return self.m(*tup)
 
         m = M2()
         m(torch.zeros(4, 3))

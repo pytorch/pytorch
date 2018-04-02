@@ -35,6 +35,12 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     throw ErrorReport(loc) << "attribute lookup is not defined on " << kind();
   }
 
+  // use it as a vector of values, e.g. a tuple of values as return value from
+  // a method invocation
+  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m) {
+    throw ErrorReport(loc) << kind() << " cannot be used as repeated values";
+  }
+
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::vector<Value*> call(
     SourceRange loc,
@@ -70,6 +76,22 @@ struct SimpleValue : public SugaredValue {
 
 private:
   Value* value;
+};
+
+// Vector of values. Used to implement tuple return values and unpacking
+struct TupleValue : public SugaredValue {
+  TupleValue(std::vector<Value*> values) : values(std::move(values)) {}
+
+  virtual std::string kind() const override {
+    return "tuple";
+  }
+
+  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m) override {
+    return values;
+  }
+
+private:
+  std::vector<Value*> values;
 };
 
 struct BuiltinFunction : public SugaredValue {

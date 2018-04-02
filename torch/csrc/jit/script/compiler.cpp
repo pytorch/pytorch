@@ -574,10 +574,16 @@ private:
     } else {
       outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
     }
-    int i = 0;
-    for (auto ident : stmt.lhs()) {
-      environment_stack->setVar(Ident(ident).name(), outputs.at(i));
-      i++;
+    if (stmt.lhs().size() == 1 && outputs.size() != 1) {
+      // Pack up a tuple sugared value
+      SugaredValuePtr tup = std::make_shared<TupleValue>(outputs);
+      environment_stack->setSugaredVar(Ident(stmt.lhs()[0]).name(), tup);
+    } else {
+      int i = 0;
+      for (auto ident : stmt.lhs()) {
+        environment_stack->setVar(Ident(ident).name(), outputs.at(i));
+        i++;
+      }
     }
     return outputs;
   }
