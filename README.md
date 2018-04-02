@@ -163,6 +163,7 @@ If you want to compile with CUDA support, install
 - [NVIDIA cuDNN](https://developer.nvidia.com/cudnn) v6.x or above
 
 If you want to disable CUDA support, export environment variable `NO_CUDA=1`.
+Other potentially useful environment variables may be found in `setup.py`.
 
 If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
 
