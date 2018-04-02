@@ -911,8 +911,8 @@ class TestSparse(TestCase):
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda]
+        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and d != torch.float16]
+        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and d != torch.cuda.float16]
         TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, torch.sparse_coo)
 
     @cpu_only  # not really, but we only really want to run this once
