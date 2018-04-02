@@ -180,7 +180,7 @@ static at::optional<std::vector<T>> is_embedded_strides(IntList strides) {
   std::vector<T> embed(n);
   auto last_stride = strides[n - 1];
   if (last_stride <= 0) {
-    return {};
+    return at::nullopt;
   }
   for (auto i = n - 1; i > 0 /* embed[0] doesn't matteer */; i--) {
     auto stride = strides[i - 1];
@@ -188,7 +188,7 @@ static at::optional<std::vector<T>> is_embedded_strides(IntList strides) {
       embed[i] = stride / last_stride;
       last_stride = stride;
     } else {
-      return {};
+      return at::nullopt;
     }
   }
   return embed;
@@ -271,7 +271,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     }
   }
 
-  at::optional<std::vector<long long int>> inembed_opt;
+  at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
   if (!need_contiguous) {
     inembed_opt = is_embedded_strides<long long int>(input.strides().slice(1, signal_ndim));
     if (!inembed_opt) {
