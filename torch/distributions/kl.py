@@ -18,7 +18,8 @@ from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
-from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag
+from .multivariate_normal import (MultivariateNormal, _batch_mahalanobis, _batch_diag,
+                                  _batch_inverse, _batch_mm)
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -134,17 +135,6 @@ def _batch_trace(bmat):
     mat_size = bmat.size(-1)
     values = torch.stack([torch.trace(M) for M in bmat.reshape((-1, mat_size, mat_size))])
     return values.view(bmat.shape[:-2])
-
-
-def _batch_mm(bmat1, bmat2):
-    """
-    Utility function for calculating the matrix product of two batch matrices
-    with arbitrary trailing batch dimensions
-    """
-    mat_size = bmat1.size(-1)
-    bmat1_squash = bmat1.reshape((-1, mat_size, mat_size))
-    bmat2_squash = bmat2.reshape((-1, mat_size, mat_size))
-    return bmat1_squash.bmm(bmat2_squash).view_as(bmat1)
 
 
 def kl_divergence(p, q):
@@ -307,9 +297,7 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
                           different event shapes cannot be computed")
 
     term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
-
     term2 = _batch_trace(_batch_mm(q.precision_matrix, p.covariance_matrix))
-
     term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
     return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
 

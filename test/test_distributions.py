@@ -1375,6 +1375,14 @@ class TestDistributions(TestCase):
                                     'MultivariateNormal(loc={}, scale_tril={})'.format(mean, scale_tril),
                                     multivariate=True)
 
+    def test_multivariate_normal_properties(self):
+        loc = torch.randn(5)
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
+        m = MultivariateNormal(loc=loc, scale_tril=scale_tril)
+        self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
+        self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
+        self.assertEqual(m.scale_tril, torch.potrf(m.covariance_matrix, upper=False))
+
     def test_exponential(self):
         rate = variable(torch.randn(5, 5).abs(), requires_grad=True)
         rate_1d = variable(torch.randn(1).abs(), requires_grad=True)
