@@ -3285,21 +3285,22 @@ class TestTransforms(TestCase):
 
 
 class TestConstraintRegistry(TestCase):
-    def setUp(self):
-        self.constraints = [
+    def get_constraints(self, is_cuda=False):
+        tensor = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
+        return [
             constraints.real,
             constraints.positive,
-            constraints.greater_than(torch.tensor([-10., -2, 0, 2, 10])),
+            constraints.greater_than(tensor([-10., -2, 0, 2, 10])),
             constraints.greater_than(0),
             constraints.greater_than(2),
             constraints.greater_than(-2),
-            constraints.less_than(torch.tensor([-10., -2, 0, 2, 10])),
+            constraints.less_than(tensor([-10., -2, 0, 2, 10])),
             constraints.less_than(0),
             constraints.less_than(2),
             constraints.less_than(-2),
             constraints.unit_interval,
-            constraints.interval(torch.tensor([-4., -2, 0, 2, 4]),
-                                 torch.tensor([-3., 3, 1, 5, 5])),
+            constraints.interval(tensor([-4., -2, 0, 2, 4]),
+                                 tensor([-3., 3, 1, 5, 5])),
             constraints.interval(-2, -1),
             constraints.interval(1, 2),
             constraints.simplex,
@@ -3307,7 +3308,7 @@ class TestConstraintRegistry(TestCase):
         ]
 
     def test_biject_to(self):
-        for constraint in self.constraints:
+        for constraint in self.get_constraints():
             try:
                 t = biject_to(constraint)
             except NotImplementedError:
@@ -3326,10 +3327,42 @@ class TestConstraintRegistry(TestCase):
             j = t.log_abs_det_jacobian(x, y)
             self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_biject_to_cuda(self):
+        for constraint in self.get_constraints(is_cuda=True):
+            try:
+                t = biject_to(constraint)
+            except NotImplementedError:
+                continue
+            self.assertTrue(t.bijective, "biject_to({}) is not bijective".format(constraint))
+            x = variable(torch.Tensor(5, 5)).normal_().cuda()
+            y = t(x)
+            self.assertTrue(constraint.check(y).all(), '\n'.join([
+                "Failed to biject_to({})".format(constraint),
+                "x = {}".format(x),
+                "biject_to(...)(x) = {}".format(y),
+            ]))
+            x2 = t.inv(y)
+            self.assertEqual(x, x2, message="Error in biject_to({}) inverse".format(constraint))
+
+            j = t.log_abs_det_jacobian(x, y)
+            self.assertEqual(j.shape, x.shape[:x.dim() - t.event_dim])
+
     def test_transform_to(self):
-        for constraint in self.constraints:
+        for constraint in self.get_constraints():
             t = transform_to(constraint)
             x = variable(torch.Tensor(5, 5)).normal_()
+            y = t(x)
+            self.assertTrue(constraint.check(y).all(), "Failed to transform_to({})".format(constraint))
+            x2 = t.inv(y)
+            y2 = t(x2)
+            self.assertEqual(y, y2, message="Error in transform_to({}) pseudoinverse".format(constraint))
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    def test_transform_to_cuda(self):
+        for constraint in self.get_constraints(is_cuda=True):
+            t = transform_to(constraint)
+            x = variable(torch.Tensor(5, 5)).normal_().cuda()
             y = t(x)
             self.assertTrue(constraint.check(y).all(), "Failed to transform_to({})".format(constraint))
             x2 = t.inv(y)
