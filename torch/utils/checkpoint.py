@@ -22,6 +22,7 @@ class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *args):
+        assert (torch.autograd.is_checkpoint_valid()), "Checkpointing is not compatible with .grad(), please use .backward() instead if possible"
         inputs = ctx.saved_tensors
         inputs_list = detach_variable(inputs)
         with torch.enable_grad():

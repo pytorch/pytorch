@@ -13,7 +13,7 @@ from .gradcheck import gradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from . import profiler
 
-__all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable']
+__all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable', 'is_checkpoint_valid']
 
 
 def _make_grads(outputs, grads):
@@ -139,6 +139,8 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         outputs, grad_outputs, retain_graph, create_graph,
         inputs)
 
+def is_checkpoint_valid():
+    return Variable._execution_engine.is_checkpoint_valid()
 
 def variable(*args, **kwargs):
     warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")

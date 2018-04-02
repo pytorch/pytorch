@@ -7,6 +7,27 @@ from torch.utils.checkpoint import checkpoint_sequential
 
 class TestCheckpoint(unittest.TestCase):
 
+    def test_checkpoint_valid(self):
+        model = nn.Sequential(
+            nn.Linear(100, 50),
+            nn.ReLU(),
+            nn.Linear(50, 20),
+            nn.ReLU(),
+            nn.Linear(20, 5),
+            nn.ReLU()
+        )
+
+        input_var = Variable(torch.randn(1, 100), requires_grad=True)
+
+        # checkpointed
+        chunks = 2
+        modules = [module for k, module in model._modules.items()]
+        out = checkpoint_sequential(modules, chunks, input_var)
+        with self.assertRaises(AssertionError):
+            torch.autograd.grad(
+                outputs=[out], grad_outputs=[torch.ones(1, 5)], inputs=[input_var], create_graph=True
+            )
+
     def test_checkpoint(self):
         model = nn.Sequential(
             nn.Linear(100, 50),

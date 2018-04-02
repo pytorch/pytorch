@@ -33,6 +33,11 @@ namespace torch { namespace autograd {
 static constexpr int NO_DEVICE = -2;
 static thread_local int worker_device = NO_DEVICE;
 
+// this variable captures whether we are inside torch.autograd.grad() or not.
+// if not, that means user is running torch.autograd.backward(). Checkpoint is only
+// valid if the user calls torch.autograd.backward()
+static thread_local bool checkpoint_valid = true;
+
 // XXX: Changes to the way multithreading works in execute should be done with
 // great care. Right now the implementation guarantees that a single function's
 // apply will never be entered concurrently (even if multiple graphs are
@@ -77,6 +82,10 @@ struct GraphTask {
   std::atomic<uint64_t> outstanding_tasks;
   bool keep_graph;
   bool grad_mode;
+  // check whether the user passes inputs for which grad is to be calculated.
+  // if torch.autograd.backward() is called, it is imperative.
+  // if torch.autograd.grad() is called, it is non-imperative.
+  bool is_imperative_backward;
 
   std::mutex mutex;
   // Notified when a task finishes executing.  Check outstanding_tasks to see
@@ -116,6 +125,7 @@ struct GraphTask {
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
     , grad_mode(grad_mode)
+    , is_imperative_backward(true)
     , mutex()
     , not_done()
     , not_ready()
@@ -228,6 +238,8 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 }
 
 static variable_list call_function(FunctionTask& task) {
+  bool prev_checkpoint_valid_state = checkpoint_valid;
+  checkpoint_valid = (task.base->is_imperative_backward) && prev_checkpoint_valid_state;
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -235,7 +247,7 @@ static variable_list call_function(FunctionTask& task) {
     fn.will_release_variables();
   }
   auto outputs = fn(inputs);
-
+  checkpoint_valid = prev_checkpoint_valid_state;
   return call_post_hooks(fn, std::move(outputs), std::move(inputs));
 }
 
@@ -373,6 +385,7 @@ auto Engine::execute(const edge_list& input_roots,
   auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
+    graph_task.is_imperative_backward = false;
     graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));
@@ -421,6 +434,10 @@ Engine& Engine::getDefaultEngine() {
 void Engine::queue_callback(std::function<void()> callback) {
   std::lock_guard<std::mutex> lock(post_callbacks_lock);
   final_callbacks.emplace_back(std::move(callback));
+}
+
+bool Engine::is_checkpoint_valid() {
+  return checkpoint_valid;
 }
 
 auto Engine::ready_queue(int device) -> ReadyQueue& {
