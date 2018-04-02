@@ -120,7 +120,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
 
-    Each function is meant to be used only once (in the forward pass).
+    Each function object is meant to be used only once (in the forward pass).
 
     Attributes:
         requires_grad: Boolean indicating whether the :func:`backward` will
