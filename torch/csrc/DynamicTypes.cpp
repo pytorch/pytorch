@@ -4,6 +4,7 @@
 #include "PythonTypes.h"
 #include "Exceptions.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/utils/cuda_enabled.h"
 
 #include <vector>
 #include <unordered_map>
@@ -96,7 +97,7 @@ at::Type& getType(const THPDtype &dtype, const THPLayout& layout) {
   if (!baseType) {
     std::ostringstream oss;
     oss << "Error attempting to use dtype " << dtype.name << " with layout " << layout.name << ".";
-    if (dtype.is_cuda) {
+    if (!torch::utils::cuda_enabled()) {
       oss << "  Torch not compiled with CUDA enabled." << std::endl;
     }
     throw std::runtime_error(oss.str());

@@ -13,6 +13,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
+#include "torch/csrc/utils/cuda_enabled.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_new.h"
@@ -43,7 +44,7 @@ static void py_bind_tensor_types(const std::vector<PyTensorType>& tensor_types);
 static void py_bind_torch_storage(const PyTensorType& py_type);
 
 static TypeError unavailable_type(const PyTensorType& type) {
-  const char* cuda_msg = type.dtype->is_cuda ? ". Torch not compiled with CUDA enabled." : "";
+  const char* cuda_msg = torch::utils::cuda_enabled() ? ". Torch not compiled with CUDA enabled." : "";
   return TypeError("type %s not available%s", type.name, cuda_msg);
 }
 
