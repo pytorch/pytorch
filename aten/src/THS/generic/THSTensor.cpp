@@ -121,7 +121,7 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
-THSTensor* THSTensor_(_newWithDimsAndTensor)(int64_t nDimI, int64_t nDimV, int64_t *sizes, THLongTensor *indices, THTensor *values) {
+static inline THSTensor* THSTensor_(_newWithDimsAndTensor)(int64_t nDimI, int64_t nDimV, int64_t *sizes, THLongTensor *indices, THTensor *values) {
   THSTensor *self = THSTensor_(new)();
   THSTensor_(rawResize)(self, nDimI, nDimV, sizes);
 
