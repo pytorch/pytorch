@@ -9,7 +9,7 @@ import contextlib
 
 import torch
 from torch.autograd import profiler
-import torch.utils.envinfo as envinfo
+from torch.utils.collect_env import get_env_info
 
 PY3 = sys.version_info >= (3, 0)
 
@@ -104,7 +104,7 @@ Running with Python {py_version} and {cuda_runtime}
 
 def run_env_analysis():
     print('Running environment analysis...')
-    info = envinfo.get_env_info()
+    info = get_env_info()
 
     result = []
 
@@ -115,7 +115,7 @@ def run_env_analysis():
     cuda_avail = ''
     if info.is_cuda_available:
         cuda = info.cuda_runtime_version
-        if cuda is not None and cuda is not envinfo.NOT_APPLICABLE:
+        if cuda is not None:
             cuda_avail = 'CUDA ' + cuda
     else:
         cuda = 'CUDA unavailable'

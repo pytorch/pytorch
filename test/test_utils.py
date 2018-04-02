@@ -597,6 +597,17 @@ class TestBottleneck(TestCase):
         self._check_cuda(out)
 
 
+from torch.utils.collect_env import get_pretty_env_info
+
+
+class TestEnvinfo(TestCase):
+    def test_integration(self):
+        info = get_pretty_env_info()
+        print(info)
+        import os
+        print(os.environ['BUILD_ENVIRONMENT'])
+
+
 class TestONNXUtils(TestCase):
     def test_prepare_onnx_paddings(self):
         sizes = [2, 3, 4]
