@@ -402,6 +402,12 @@ class ExprBuilder(Builder):
         r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + len(value))
         return Const(r, value)
 
+
+    @staticmethod
+    def build_Starred(ctx, expr):
+        r = ctx.make_range(expr.lineno, expr.col_offset, expr.col_offset + 1)
+        return Starred(r, build_expr(ctx, expr.value))
+
 build_expr = ExprBuilder()
 build_stmt = StmtBuilder()
 

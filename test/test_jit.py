@@ -2246,6 +2246,31 @@ class TestScript(TestCase):
         m = M2()
         m(torch.zeros(4, 3))
 
+    def test_script_star_assign(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super(M, self).__init__()
+
+            def forward(self, *inputs):
+                output = inputs[0]
+                for i in range(1, len(inputs)):
+                    output += inputs[i]
+                return output
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.g = torch.jit.trace(torch.ones(4, 3))(Mult())
+
+            @torch.jit.script_method
+            def forward(self, rep):
+                head, *tail = self.g(rep)
+                return head
+
+        m = M2()
+        m(torch.zeros(4, 3))
+
+
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
     class MyModel(nn.Module):

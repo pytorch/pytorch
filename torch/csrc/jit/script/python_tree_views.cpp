@@ -194,6 +194,10 @@ void initTreeViewBindings(PyObject *module) {
                            wrap_maybe(base.range(), lower),
                            wrap_maybe(base.range(), upper));
     }));
+  py::class_<Starred, Expr>(m, "Starred")
+    .def(py::init([](const SourceRange& range, Expr expr){
+      return Starred::create(range, expr);
+    }));
 }
 
 }}} // namespace torch::jit::script

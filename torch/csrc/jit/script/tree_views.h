@@ -56,6 +56,7 @@ namespace script {
 //       | Gather(Expr value, Expr indices)                             TK_GATHER
 //       | Var(Ident name)                                              TK_VAR
 //       | ListLiteral(List<Expr> inputs)                               TK_LIST_LITERAL
+//       | Starred(Expr expr)                                           TK_STARRED
 //
 // -- NB: only allowed expressions are Const or List(Const)
 //        (List as a value, not type constructor)
@@ -254,6 +255,7 @@ struct Expr : public TreeView {
       case TK_GATHER:
       case TK_VAR:
       case TK_LIST_LITERAL:
+      case TK_STARRED:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -712,6 +714,19 @@ struct ListLiteral : public Expr {
   }
   static ListLiteral create(const SourceRange& range, const List<Expr>& inputs) {
     return ListLiteral(Compound::create(TK_LIST_LITERAL, range, {inputs}));
+  }
+};
+
+
+struct Starred : public Expr {
+  explicit Starred(const TreeRef& tree) : Expr(tree) {
+    tree_->match(TK_STARRED);
+  }
+  Expr expr() const {
+    return Expr(subtree(0));
+  }
+  static Starred create(const SourceRange& range, const Expr& expr) {
+    return Starred(Compound::create(TK_STARRED, range, {expr}));
   }
 };
 

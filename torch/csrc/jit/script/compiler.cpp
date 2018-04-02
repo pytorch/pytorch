@@ -628,7 +628,9 @@ private:
   std::vector<Value*> getValues(const Trees& trees) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
-      values.push_back(emitExpr(tree, 1)[0]);
+      for (Value* v : emitExpr(tree, 1)) {
+        values.push_back(v);
+      }
     }
     return values;
   }
@@ -770,6 +772,11 @@ private:
         expectOutputs(tree, output_size, 1);
         return emitTernaryIf(TernaryIf(tree));
       } break;
+      case TK_STARRED: {
+        const auto starred = Starred(tree);
+        auto sugared = environment_stack->getSugaredVar(Var(starred.expr()).name());
+        return sugared->asValues(starred.range(), environment_stack->method);
+      }
       default:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
