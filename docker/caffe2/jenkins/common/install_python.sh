@@ -150,5 +150,7 @@ pip install --no-cache-dir \
     scipy==0.19.1 \
     scikit-image \
     tabulate \
-    virtualenv
+    virtualenv \
+    typing \
+    typing-extensions
 
