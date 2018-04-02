@@ -9,8 +9,8 @@ class DistributedDataParallelCPU(Module):
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
-    dimension. The module is replicated on each machine, and each such replica 
-    handles a portion of the input. During the backwards pass, gradients from 
+    dimension. The module is replicated on each machine, and each such replica
+    handles a portion of the input. During the backwards pass, gradients from
     each node are averaged.
 
     This module should be used in conjunction with the DistributedSampler,
@@ -50,7 +50,7 @@ class DistributedDataParallelCPU(Module):
 
     .. note::
         Parameters are broadcast between nodes in the first forward. The
-        module performs an all-reduce step on gradients and assumes that they 
+        module performs an all-reduce step on gradients and assumes that they
         will be modified by the optimizer in all processes in the same way.
 
     .. warning::
