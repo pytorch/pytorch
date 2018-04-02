@@ -93,7 +93,7 @@ def get_cudnn_version(run_lambda):
     """This will return a list of libcudnn.so; it's hard to tell which one is being used"""
     rc, out, _ = run_lambda('find /usr/local -type f -name "libcudnn*"  2>/dev/null')
     # find will return 1 if there are permission errors or if not found
-    if rc == 1 and len(out.strip()) == 0:
+    if len(out.strip()) == 0:
         return None
     if rc != 1 and rc != 0:
         return None
@@ -244,6 +244,23 @@ def pretty_str(envinfo):
     if mutable_dict['conda_packages'] is not None:
         mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
                                                  '[conda] ')
+
+    # If the machine doesn't have CUDA, report some fields as 'Unavailable'
+    dynamic_cuda_fields = [
+        'cuda_runtime_version',
+        'nvidia_gpu_models',
+        'nvidia_driver_version',
+    ]
+    all_cuda_fields = list(dynamic_cuda_fields)
+    all_cuda_fields.append('cudnn_version')
+
+    no_dynamic_cuda = all(mutable_dict[field] is None for field in dynamic_cuda_fields)
+    if not torch.cuda.is_available() and no_dynamic_cuda:
+        for field in all_cuda_fields:
+            mutable_dict[field] = 'Unavailable'
+        if envinfo.cuda_compiled_version is None:
+            mutable_dict['cuda_compiled_version'] = 'None'
+
     mutable_dict = replace_nones(mutable_dict)
     return env_info_fmt.format(**mutable_dict)
 
