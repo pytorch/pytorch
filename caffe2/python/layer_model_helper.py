@@ -543,13 +543,15 @@ class LayerModelHelper(model_helper.ModelHelper):
         trainer_init_net,
         grad_map,
         blob_to_device=None,
+        modify_output_record=False,
     ):
         param_grad_map = {param: grad_map[param]
             for param in self.param_to_optim.keys() if param in grad_map}
 
         for modifier in self._post_grad_net_modifiers:
             modifier(trainer_net, trainer_init_net, param_grad_map,
-                     blob_to_device=blob_to_device)
+                     blob_to_device=blob_to_device,
+                     modify_output_record=modify_output_record)
 
     def apply_final_net_modifiers(
         self,
@@ -557,10 +559,12 @@ class LayerModelHelper(model_helper.ModelHelper):
         trainer_init_net,
         grad_map,
         blob_to_device=None,
+        modify_output_record=False,
     ):
         for modifier in self._final_net_modifiers:
             modifier(trainer_net, trainer_init_net, grad_map,
-                     blob_to_device=blob_to_device)
+                     blob_to_device=blob_to_device,
+                     modify_output_record=modify_output_record)
 
     def apply_optimizers(
         self,

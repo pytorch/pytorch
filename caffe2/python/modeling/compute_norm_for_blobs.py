@@ -30,7 +30,8 @@ class ComputeNormForBlobs(NetModifier):
         if compute_averaged_norm:
             self._field_name_suffix = '_averaged' + self._field_name_suffix
 
-    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
+    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
+                   modify_output_record=False):
 
         p = self._p
         compute_averaged_norm = self._compute_averaged_norm
@@ -47,17 +48,18 @@ class ComputeNormForBlobs(NetModifier):
             if self._logging_frequency >= 1:
                 net.Print(norm, [], every_n=self._logging_frequency)
 
-            output_field_name = str(blob) + self._field_name_suffix
-            output_scalar = schema.Scalar((np.float, (1,)), norm)
+            if modify_output_record:
+                output_field_name = str(blob) + self._field_name_suffix
+                output_scalar = schema.Scalar((np.float, (1,)), norm)
 
-            if net.output_record() is None:
-                net.set_output_record(
-                    schema.Struct((output_field_name, output_scalar))
-                )
-            else:
-                net.AppendOutputRecordField(
-                    output_field_name,
-                    output_scalar)
+                if net.output_record() is None:
+                    net.set_output_record(
+                        schema.Struct((output_field_name, output_scalar))
+                    )
+                else:
+                    net.AppendOutputRecordField(
+                        output_field_name,
+                        output_scalar)
 
     def field_name_suffix(self):
         return self._field_name_suffix
