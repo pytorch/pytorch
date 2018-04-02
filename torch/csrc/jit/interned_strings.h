@@ -48,6 +48,7 @@ _(prim, Loop) \
 _(prim, Param) \
 _(prim, PackPadded) /* onnx */ \
 _(prim, PadPacked) /* onnx */ \
+_(prim, SequenceLengthsOfPackedSequence) /* onnx */ \
 _(prim, Placeholder) /* debug */ \
 _(prim, Print) \
 _(prim, PythonOp) \
