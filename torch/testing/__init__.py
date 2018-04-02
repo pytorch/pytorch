@@ -42,13 +42,7 @@ def get_all_dtypes():
                   torch.float16, torch.float32, torch.float64]
     cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
                    torch.cuda.float16, torch.cuda.float32, torch.cuda.float64]
-    cpum = torch.sparse
-    cpu_sparse_dtypes = [cpum.uint8, cpum.int8, cpum.int16, cpum.int32, cpum.int64,
-                         cpum.float32, cpum.float64]
-    cudam = torch.cuda.sparse
-    cuda_sparse_dtypes = [cudam.uint8, cudam.int8, cudam.int16, cudam.int32, cudam.int64,
-                          cudam.float32, cudam.float64]
-    return cpu_dtypes + cuda_dtypes + cpu_sparse_dtypes + cuda_sparse_dtypes
+    return cpu_dtypes + cuda_dtypes
 
 rand_like = torch._C._VariableFunctions.rand_like
 randn_like = torch._C._VariableFunctions.randn_like

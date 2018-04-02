@@ -1,58 +1,53 @@
-#include "Dtype.h"
+#include "Layout.h"
 
 #include <cstring>
 #include <structmember.h>
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
-#include "torch/csrc/utils/tensor_dtypes.h"
-#include "torch/csrc/utils/tensor_types.h"
 
-PyObject * THPDtype_New(at::ScalarType scalar_type, bool is_cuda, const std::string& name)
+PyObject *THPLayoutClass = NULL;
+
+PyObject *THPLayout_New(bool is_strided, const std::string& name)
 {
-  auto type = (PyTypeObject*)&THPDtypeType;
+  auto type = (PyTypeObject*)&THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
-  auto self_ = reinterpret_cast<THPDtype*>(self.get());
-  self_->scalar_type = scalar_type;
-  self_->is_cuda = is_cuda;
-  std::strncpy (self_->name, name.c_str(), DTYPE_NAME_LEN);
-  self_->name[DTYPE_NAME_LEN] = '\0';
+  auto self_ = reinterpret_cast<THPLayout*>(self.get());
+  self_->is_strided = is_strided;
+  std::strncpy (self_->name, name.c_str(), LAYOUT_NAME_LEN);
+  self_->name[LAYOUT_NAME_LEN] = '\0';
   return self.release();
 }
 
-PyObject *THPDtype_repr(THPDtype *self)
+PyObject *THPLayout_repr(THPLayout *self)
 {
   return THPUtils_packString(self->name);
 }
 
-PyObject *THPDtype_is_cuda(THPDtype *self)
+PyObject *THPLayout_is_cuda(THPLayout *self)
 {
-  if (self->is_cuda) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
+  Py_RETURN_TRUE;
 }
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
-static struct PyGetSetDef THPDtype_properties[] = {
-  {"is_cuda",      (getter)THPDtype_is_cuda, nullptr, nullptr, nullptr},
+static struct PyGetSetDef THPLayout_properties[] = {
+  {"is_cuda",      (getter)THPLayout_is_cuda, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
-PyTypeObject THPDtypeType = {
+PyTypeObject THPLayoutType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch.dtype",                         /* tp_name */
-  sizeof(THPDtype),                      /* tp_basicsize */
+  "torch.layout",                        /* tp_name */
+  sizeof(THPLayout),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
   0,                                     /* tp_print */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */
-  (reprfunc)THPDtype_repr,               /* tp_repr */
+  (reprfunc)THPLayout_repr,              /* tp_repr */
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
   0,                                     /* tp_as_mapping */
@@ -72,7 +67,7 @@ PyTypeObject THPDtypeType = {
   0,                                     /* tp_iternext */
   0,                                     /* tp_methods */
   0,                                     /* tp_members */
-  THPDtype_properties,                   /* tp_getset */
+  THPLayout_properties,                  /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -83,13 +78,13 @@ PyTypeObject THPDtypeType = {
   0,                                     /* tp_new */
 };
 
-void THPDtype_init(PyObject *module)
+void THPLayout_init(PyObject *module)
 {
-  if (PyType_Ready(&THPDtypeType) < 0) {
+  if (PyType_Ready(&THPLayoutType) < 0) {
     throw python_error();
   }
-  Py_INCREF(&THPDtypeType);
-  if (PyModule_AddObject(module, "dtype", (PyObject *)&THPDtypeType) != 0) {
+  Py_INCREF(&THPLayoutType);
+  if (PyModule_AddObject(module, "layout", (PyObject *)&THPLayoutType) != 0) {
     throw python_error();
   }
 }
