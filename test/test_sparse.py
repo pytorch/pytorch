@@ -852,20 +852,19 @@ class TestSparse(TestCase):
                         include_size = include_size or use_cuda
                         dtype = torch.cuda.float64 if use_cuda else torch.float64
                         long_dtype = torch.cuda.int64 if use_cuda else torch.int64
-                        sparse_dtype = torch.cuda.sparse.float64 if use_cuda else torch.sparse.float64
                         device = -1 if not use_cuda else torch.cuda.device_count() - 1
                         indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
                         values = torch.tensor([1.], dtype=dtype) if use_tensor_val else 1.
                         if include_size:
-                            sparse_tensor = torch.sparse_coo_tensor(indices, values, size, dtype=sparse_dtype,
+                            sparse_tensor = torch.sparse_coo_tensor(indices, values, size, dtype=dtype,
                                                                     device=device, requires_grad=True)
                         else:
-                            sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=sparse_dtype,
+                            sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=dtype,
                                                                     device=device, requires_grad=True)
                         self.assertEqual(indices, sparse_tensor._indices())
                         self.assertEqual(values, sparse_tensor._values())
                         self.assertEqual(size if include_size else default_size, sparse_tensor.size())
-                        self.assertEqual(sparse_dtype, sparse_tensor.dtype)
+                        self.assertEqual(dtype, sparse_tensor.dtype)
                         if use_cuda:
                             self.assertEqual(device, sparse_tensor._values().get_device())
                         self.assertEqual(True, sparse_tensor.requires_grad)
@@ -873,66 +872,55 @@ class TestSparse(TestCase):
     @cpu_only
     def test_factory_type_inference(self):
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float32))
-        self.assertEqual(torch.sparse.float32, t.dtype)
+        self.assertEqual(torch.float32, t.dtype)
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1.], dtype=torch.float64))
-        self.assertEqual(torch.sparse.float64, t.dtype)
+        self.assertEqual(torch.float64, t.dtype)
         t = torch.sparse_coo_tensor(torch.tensor(([0], [2])), torch.tensor([1]))
-        self.assertEqual(torch.sparse.int64, t.dtype)
+        self.assertEqual(torch.int64, t.dtype)
 
     @cpu_only
     def test_factory_copy(self):
         # both correct
         indices = torch.tensor(([0], [2]), dtype=torch.int64)
         values = torch.tensor([1.], dtype=torch.float64)
-        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.sparse.float64)
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.float64)
         self.assertEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
         self.assertEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
 
         # only indices correct
         indices = torch.tensor(([0], [2]), dtype=torch.int64)
         values = torch.tensor([1.], dtype=torch.float32)
-        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.sparse.float64)
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.float64)
         self.assertEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
         self.assertNotEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
 
         # only values correct
         indices = torch.tensor(([0], [2]), dtype=torch.int32)
         values = torch.tensor([1.], dtype=torch.float64)
-        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.sparse.float64)
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.float64)
         self.assertNotEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
         self.assertEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
 
         # neither correct
         indices = torch.tensor(([0], [2]), dtype=torch.int32)
         values = torch.tensor([1.], dtype=torch.float32)
-        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.sparse.float64)
+        sparse_tensor = torch.sparse_coo_tensor(indices, values, dtype=torch.float64)
         self.assertNotEqual(indices.data_ptr(), sparse_tensor._indices().data_ptr())
         self.assertNotEqual(values.data_ptr(), sparse_tensor._values().data_ptr())
-
-    @cpu_only
-    def test_factory_non_sparse_dtype(self):
-        indices = torch.tensor(([0], [2]), dtype=torch.int64)
-        values = torch.tensor([1.])
-        size = torch.Size([3, 3])
-        self.assertRaises(TypeError, lambda: torch.sparse_coo_tensor(indices, values, dtype=torch.float64))
-        self.assertRaises(TypeError, lambda: torch.sparse_coo_tensor(indices, values, size, dtype=torch.float64))
-        if torch.cuda.is_available():
-            self.assertRaises(TypeError, lambda: torch.sparse_coo_tensor(indices, values, dtype=torch.cuda.float64))
-            self.assertRaises(TypeError, lambda: torch.sparse_coo_tensor(indices, values, size, dtype=torch.float64))
 
     @cpu_only  # not really, but we only really want to run this once
     def test_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if d.is_sparse and not d.is_cuda]
-        cuda_dtypes = [d for d in all_dtypes if d.is_sparse and d.is_cuda]
-        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, True)
+        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and d != torch.float16]
+        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and d != torch.cuda.float16]
+        TestTorch._test_dtypes(self, cpu_dtypes, cuda_dtypes, torch.sparse_coo)
 
     @cpu_only  # not really, but we only really want to run this once
     def test_empty_full(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if d.is_sparse and not d.is_cuda]
-        cuda_dtypes = [d for d in all_dtypes if d.is_sparse and d.is_cuda]
-        TestTorch._test_empty_full(self, cpu_dtypes, cuda_dtypes)
+        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and d != torch.half]
+        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and d != torch.cuda.half]
+        TestTorch._test_empty_full(self, cpu_dtypes, cuda_dtypes, torch.sparse_coo)
 
     def test_is_sparse(self):
         x = torch.randn(3, 3)
