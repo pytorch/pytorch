@@ -537,7 +537,7 @@ class TestLRScheduler(TestCase):
         single_targets = [eta_min + (0.05 - eta_min) * (1 + math.cos(math.pi * x / y)) / 2
                           for x, y in zip(T_cur, T_i)]
         targets = [single_targets, list(map(lambda x: x * epochs, single_targets))]
-        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min, T_mult=T_mult, restart=True)
+        scheduler = CosineAnnealingLR(self.opt, T_max=T_max, eta_min=eta_min, T_mult=T_mult)
         self._test(scheduler, targets, epochs)
 
     def test_reduce_lr_on_plateau1(self):
