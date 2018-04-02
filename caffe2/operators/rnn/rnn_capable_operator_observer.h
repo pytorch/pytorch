@@ -28,7 +28,9 @@ namespace caffe2 {
 class RNNCapableOperatorObserver : public ObserverBase<OperatorBase> {
  public:
   explicit RNNCapableOperatorObserver(OperatorBase* op)
-      : ObserverBase<OperatorBase>(op){};
+      : ObserverBase<OperatorBase>(op) {
+    SetIsRNNCapable();
+  };
 
   virtual std::unique_ptr<ObserverBase<OperatorBase>> rnnCopy(
       OperatorBase* subject,

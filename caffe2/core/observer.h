@@ -28,8 +28,22 @@ class ObserverBase {
     return subject_;
   }
 
+  bool IsRNNCapable() {
+    return rnn_capable_;
+  }
+
+  // NOTE: This should only be called from RNNCapableOperatorObserver
+  // There is a static cast that depends on this assertion that will crash
+  // if broken.
+  void SetIsRNNCapable() {
+    rnn_capable_ = true;
+  }
+
  protected:
   T* subject_;
+
+ private:
+  bool rnn_capable_ = false;
 };
 
 /**

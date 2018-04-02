@@ -136,10 +136,10 @@ class RecurrentNetworkExecutorBase {
 
           rnn_op.op = CreateOperator(op_copy, ws);
           for (const auto& observer : observers_list) {
-            auto rnn_observer =
-                dynamic_cast_if_rtti<const RNNCapableOperatorObserver*>(
-                    observer.get());
-            if (rnn_observer) {
+            if (observer->IsRNNCapable()) {
+              auto rnn_observer =
+                  static_cast<const RNNCapableOperatorObserver*>(
+                      observer.get());
               std::unique_ptr<ObserverBase<OperatorBase>> rnn_observer_copy =
                   rnn_observer->rnnCopy(rnn_op.op.get(), rnn_op.order);
               CAFFE_ENFORCE(
@@ -161,10 +161,10 @@ class RecurrentNetworkExecutorBase {
             // owned by this timestep.
             rnn_op.op = CreateOperator(step_net_def_.op(rnn_op.order), ws);
             for (const auto& observer : observers_list) {
-              auto rnn_observer =
-                  dynamic_cast_if_rtti<const RNNCapableOperatorObserver*>(
-                      observer.get());
-              if (rnn_observer) {
+              if (observer->IsRNNCapable()) {
+                auto rnn_observer =
+                    static_cast<const RNNCapableOperatorObserver*>(
+                        observer.get());
                 std::unique_ptr<ObserverBase<OperatorBase>> rnn_observer_copy =
                     rnn_observer->rnnCopy(rnn_op.op.get(), rnn_op.order);
                 CAFFE_ENFORCE(
