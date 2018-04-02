@@ -24,6 +24,7 @@
 #include <list>
 #include <memory>
 #include <structmember.h>
+#include <sstream>
 
 using namespace at;
 using namespace torch::autograd;
@@ -432,6 +433,20 @@ static PyObject * THPVariable_layout(THPVariable* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
+  std::ostringstream oss;
+  if (self_.type().is_cuda()) {
+    oss << "cuda:" << self_.get_device();
+  }
+  else {
+    oss << "cpu";
+  }
+  return THPUtils_packString(oss.str().c_str());
+  END_HANDLE_TH_ERRORS
+}
+
 static struct PyGetSetDef THPVariable_properties[] = {
   {"_cdata", (getter)THPVariable_get_cdata, nullptr, nullptr, nullptr},
   {"_version", (getter)THPVariable_get_version, nullptr, nullptr, nullptr},
@@ -452,6 +467,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"is_sparse", (getter)THPVariable_is_sparse, nullptr, nullptr, nullptr},
   {"dtype", (getter)THPVariable_dtype, NULL, NULL, NULL},
   {"layout", (getter)THPVariable_layout, NULL, NULL, NULL},
+  {"device", (getter)THPVariable_device, NULL, NULL, NULL},
   {nullptr}
 };
 
