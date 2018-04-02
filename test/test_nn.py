@@ -768,6 +768,24 @@ class TestNN(NNTestCase):
         for key in keys:
             self.assertTrue(hasattr(linear, key))
 
+    def test_repr(self):
+        # no extra information or sub-modules
+        empty_sequential = nn.Sequential()
+        expected_repr_empty = 'Sequential()'
+        self.assertEqual(repr(empty_sequential), expected_repr_empty)
+
+        # one liner extra information
+        linear = nn.Linear(1, 1)
+        expected_repr_linear = 'Linear(in_features=1, out_features=1, bias=True)'
+        self.assertEqual(repr(linear), expected_repr_linear)
+
+        # sub-modules repr
+        sequential = nn.Sequential(linear)
+        expected_repr_sequential = 'Sequential(\n' \
+            '  (0): Linear(in_features=1, out_features=1, bias=True)\n' \
+            ')'
+        self.assertEqual(repr(sequential), expected_repr_sequential)
+
     def test_dir_digit(self):
         model = nn.Sequential(nn.Linear(2, 2))
         keys = dir(model)
