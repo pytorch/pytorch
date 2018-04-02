@@ -29,4 +29,3 @@ class TestRelu(hu.HypothesisTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
