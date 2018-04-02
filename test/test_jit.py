@@ -2065,9 +2065,9 @@ class TestScript(TestCase):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__(False)
-                self.b = torch.jit.Const(False)
-                self.i = torch.jit.Const(1)
-                self.c = torch.jit.Const(3.5)
+                self.b = torch.jit.const(False)
+                self.i = torch.jit.const(1)
+                self.c = torch.jit.const(3.5)
 
             @torch.jit.script_method
             def forward(self):
@@ -2092,23 +2092,23 @@ class TestScript(TestCase):
             M()
 
     def test_script_module_valid_consts(self):
-        torch.jit.Const(1)
-        torch.jit.Const(1.2)
-        torch.jit.Const(False)
-        torch.jit.Const(nn.Linear(3, 4))
-        torch.jit.Const(lambda x: x)
-        self.assertTrue(type(torch.jit.Const([3, 4, 5])._value) is tuple)
-        torch.jit.Const([3, (3, 4), 5])
+        torch.jit.const(1)
+        torch.jit.const(1.2)
+        torch.jit.const(False)
+        torch.jit.const([nn.Linear(3, 4)])
+        torch.jit.const(lambda x: x)
+        self.assertTrue(type(torch.jit.const([3, 4, 5])._value) is tuple)
+        torch.jit.const([3, (3, 4), 5])
         with self.assertRaisesRegex(TypeError, "is not a valid constant"):
-            torch.jit.Const(type(1))
+            torch.jit.const(type(1))
         with self.assertRaisesRegex(TypeError, "is not a valid constant"):
-            torch.jit.Const((3, 4, {}))
+            torch.jit.const((3, 4, {}))
 
     def test_script_module_for(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__(False)
-                self.b = torch.jit.Const([1, 2, 3, 4])
+                self.b = torch.jit.const([1, 2, 3, 4])
 
             @torch.jit.script_method
             def forward(self):
@@ -2133,13 +2133,7 @@ class TestScript(TestCase):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__(False)
-                mods = []
-                for i in range(10):
-                    m = Sub()
-                    self.add_module('m' + str(i), m)
-                    mods.append(m)
-
-                self.mods = torch.jit.Const(mods)
+                self.mods = torch.jit.const([Sub() for i in range(10)])
 
             @torch.jit.script_method
             def forward(self, v):
@@ -2151,8 +2145,8 @@ class TestScript(TestCase):
         m = M()
         o = m(i)
         v = i
-        for i in range(10):
-            v = getattr(m, "m" + str(i))(v)
+        for sub in m.mods:
+            v = sub(v)
         self.assertEqual(o, v)
 
     def test_script_module_const_submodule_fail(self):
@@ -2168,16 +2162,22 @@ class TestScript(TestCase):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__(False)
-                mods = [Sub() for _ in range(10)]
-                self.mods = torch.jit.Const(mods)
-        with self.assertRaisesRegex(RuntimeError, "which is not a submodule"):
+                self.mods = [Sub() for _ in range(10)]
+
+            @torch.jit.script_method
+            def forward(self):
+                for _ in self.mods:
+                    print(1)
+                return 4
+
+        with self.assertRaisesRegex(RuntimeError, "did you mean to use"):
             M()
 
     def test_script_module_not_tuple(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 super(M, self).__init__(False)
-                self.mods = torch.jit.Const(1)
+                self.mods = torch.jit.const(1)
 
             @torch.jit.script_method
             def forward(self, v):

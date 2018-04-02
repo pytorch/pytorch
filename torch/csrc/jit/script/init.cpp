@@ -197,7 +197,7 @@ struct ModuleValue : public SugaredValue {
       } else if(py_module.attr("_constants").contains(field.c_str())) {
         return createConstantSugaredValue(attr);
       } else {
-        throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you mean to use torch.jit.Const?)";
+        throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you mean to use torch.jit.const?)";
       }
     }
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
@@ -206,6 +206,19 @@ struct ModuleValue : public SugaredValue {
   virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_outputs);
   }
+
+  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) override {
+    py::object py_module = py::cast(module);
+    if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
+      return SugaredValue::unrolledFor(loc, m);
+    std::vector<std::shared_ptr<SugaredValue>> result;
+    for(py::handle module : py_module) {
+      result.push_back(createConstantSugaredValue(
+        py::reinterpret_borrow<py::object>(module)));
+    }
+    return result;
+  }
+
 private:
   std::shared_ptr<Module> module;
 };

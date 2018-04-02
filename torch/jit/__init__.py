@@ -656,9 +656,10 @@ class OrderedBufferDict(OrderedDictWrapper):
             raise KeyError(k)
         return self.module._get_parameter(k)
 
-# types that can be constants. If you edit this list,
-# then you also need to edit the handlers in ConstantValue in jit/script/init.cpp
-_constant_types = [bool, float, int, Module, types.FunctionType]
+# base types that can be constants in addition to tuples and lists
+# If you edit this list, then you also need to edit the handlers in
+# ConstantValue in jit/script/init.cpp
+_constant_types = [bool, float, int, types.FunctionType]
 
 
 def _get_valid_constant(v):
@@ -672,9 +673,19 @@ def _get_valid_constant(v):
         "Valid constants are {{{}}}".format(constants))
 
 
-class Const(object):
+class _Const(object):
     def __init__(self, v):
         self._value = _get_valid_constant(v)
+
+
+def const(v):
+    if (isinstance(v, tuple) or isinstance(v, list)) and all(isinstance(x, Module) for x in v):
+        # special case for list of modules. Modules need to be registered with their
+        # parent module. To do this, we create a ConstModuleList, which is itself a module, that
+        # contains each of these modules as submodules. The ConstModuleList then
+        # is set as an attribute of the parent module.
+        return _ConstModuleList(v)
+    return _Const(v)
 
 # For each user-defined class that subclasses ScriptModule this meta-class,
 # (1) finds all the methods annotated with @script_method
@@ -724,8 +735,6 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
         self._parameters = OrderedParameterDict(self)
         self._buffers = OrderedBufferDict(self)
         self._modules = OrderedModuleDict(self)
-        # to accelerate _is_script_submodule
-        self._all_script_modules = set()
 
     def __getattr__(self, attr):
         if self._has_method(attr):
@@ -739,11 +748,10 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
         return Module.__getattr__(self, attr)
 
     def __setattr__(self, attr, value):
-        if not isinstance(value, Const):
+        if not isinstance(value, _Const):
             return super(ScriptModule, self).__setattr__(attr, value)
         if attr in self._constants:
             raise RuntimeError("attempting to re-assign constant '{}'".format(attr))
-        self._check_modules_are_owned(value._value)
         self._constants[attr] = value
 
     def __dir__(self):
@@ -757,29 +765,6 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def define(self, lang):
         rcb = createResolutionCallback()
         self._define(lang, rcb, True)
-
-    def _check_modules_are_owned(self, v):
-        if isinstance(v, ScriptModule) and not self._is_script_submodule(v):
-            raise RuntimeError("torch.jit.Const includes a module '{}'".format(type(v).__name__) +
-                               " which is not a submodule of this module")
-        if isinstance(v, tuple):
-            for e in v:
-                self._check_modules_are_owned(e)
-
-    def _is_script_submodule(self, m):
-        # fast check, we already know about this module
-        # and do not need to recalculate it
-        if id(m) in self._all_script_modules:
-            return True
-        # slow check, recalculate all submodules (more may have been added)
-        return id(m) in self._calc_all_script_modules()
-
-    def _calc_all_script_modules(self):
-        for m in self._modules.values():
-            if(isinstance(m, ScriptModule)):
-                self._all_script_modules.add(id(m))
-                self._all_script_modules.update(m._calc_all_script_modules())
-        return self._all_script_modules
 
 
 def _get_methods(cls):
@@ -862,6 +847,33 @@ class TopLevelTracedModule(TracedModule):
     def forward(self, *args, **kwargs):
         return self._get_method('forward')(*args, **kwargs)
 
+
+class _ConstModuleList(ScriptModule):
+    def __init__(self, modules):
+        super(_ConstModuleList, self).__init__()
+        for i, module in enumerate(modules):
+            self.add_module(str(i), module)
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            return _ConstModuleList(list(self._modules.values())[idx])
+        else:
+            if not (-len(self) <= idx < len(self)):
+                raise IndexError('index {} is out of range'.format(idx))
+            if idx < 0:
+                idx += len(self)
+            return self._modules[str(idx)]
+
+    def __len__(self):
+        return len(self._modules)
+
+    def __iter__(self):
+        return iter(self._modules.values())
+
+    def __dir__(self):
+        keys = super(_ConstModuleList, self).__dir__()
+        keys = [key for key in keys if not key.isdigit()]
+        return keys
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
