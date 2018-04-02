@@ -4,6 +4,7 @@
 #include "THGeneral.h"
 #include "THAllocator.h"
 #include "THCThreadLocal.h"
+#include "THCRTSGeneral.h"
 #undef log10
 #undef log1p
 #undef log2
@@ -47,15 +48,6 @@
 struct THCRNGState;  /* Random number generator state. */
 typedef struct THCStream THCStream;
 typedef struct THCState THCState;
-
-typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
-   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
-   cudaError_t (*free)(void*, void*);
-   cudaError_t (*emptyCache)(void*);
-   cudaError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
-   void* state;
-} THCDeviceAllocator;
 
 typedef struct _THCCudaResourcesPerDevice {
   THCStream** streams;
@@ -201,8 +193,6 @@ THC_API size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device);
 #define THCublasCheck(err)  __THCublasCheck(err,  __FILE__, __LINE__)
 #define THCusparseCheck(err)  __THCusparseCheck(err,  __FILE__, __LINE__)
 
-THC_API void __THCudaCheck(cudaError_t err, const char *file, const int line);
-THC_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line);
 THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 

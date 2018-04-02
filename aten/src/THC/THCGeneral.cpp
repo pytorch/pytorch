@@ -1,5 +1,4 @@
 #include "THCGeneral.h"
-#include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
 #include "THCStream.h"
@@ -717,28 +716,6 @@ size_t THCState_getDeviceScratchSpaceSize(THCState* state, int device)
   return res->scratchSpacePerStream;
 }
 
-void __THCudaCheck(cudaError_t err, const char *file, const int line)
-{
-  if(err != cudaSuccess)
-  {
-    static int alreadyFailed = 0;
-    if(!alreadyFailed) {
-      fprintf(stderr, "THCudaCheck FAIL file=%s line=%i error=%i : %s\n", file, line, err, cudaGetErrorString(err));
-      alreadyFailed = 1;
-    }
-    _THError(file, line, "cuda runtime error (%d) : %s", err,
-             cudaGetErrorString(err));
-  }
-}
-
-void __THCudaCheckWarn(cudaError_t err, const char *file, const int line)
-{
-  if(err != cudaSuccess)
-  {
-    fprintf(stderr, "THCudaCheckWarn FAIL file=%s line=%i error=%i : %s\n", file, line, err, cudaGetErrorString(err));
-  }
-}
-
 void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
 {
   if(status != CUBLAS_STATUS_SUCCESS)
@@ -915,9 +892,6 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_SM_STREAM
 #undef MIN_GLOBAL_SCRATCH_SPACE_PER_DEVICE
-
-#include "THCStorage.c"
-#include "THCAllocator.c"
 
 /* from THCHalf.h */
 

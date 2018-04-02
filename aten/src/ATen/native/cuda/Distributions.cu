@@ -6,7 +6,7 @@
 #include <curand_kernel.h>
 #include <curand_philox4x32_x.h>
 
-#include <TH/THAtomic.h>
+#include <THAtomic.h>
 
 #include <THC/THCGeneral.h>
 #include <THC/THCTensorRandom.h>
