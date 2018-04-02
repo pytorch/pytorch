@@ -13,7 +13,7 @@ struct assert_error final : public std::exception {
 };
 
 [[noreturn]]
-THP_CLASS void barf(const char *fmt, ...);
+THP_API void barf(const char *fmt, ...);
 
 } // namespace torch
 
