@@ -46,7 +46,7 @@ def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
 
     index = _unravel_index(index.item(), actual.shape)
 
-    # Count nubmer of offenders
+    # Count number of offenders
     count = (~close).long().sum()
 
     msg = ('Not within tolerance rtol={} atol={} at input{} ({} vs. {}) and {}'
