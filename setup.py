@@ -443,6 +443,23 @@ class build_ext(build_ext_parent):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
+        # Copy the essential export library to compile C++ extensions.
+        if IS_WINDOWS:
+            build_temp = self.build_temp
+
+            ext_filename = self.get_ext_filename('_C')
+            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
+
+            export_lib = os.path.join(
+                build_temp, 'torch', 'csrc', lib_filename).replace('\\', '/')
+
+            build_lib = self.build_lib
+
+            target_lib = os.path.join(
+                build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            self.copy_file(export_lib, target_lib)
+
 
 class build(distutils.command.build.build):
     sub_commands = [
