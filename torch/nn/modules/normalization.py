@@ -46,12 +46,8 @@ class LocalResponseNorm(Module):
         return F.local_response_norm(input, self.size, self.alpha, self.beta,
                                      self.k)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.size) \
-            + ', alpha=' + str(self.alpha) \
-            + ', beta=' + str(self.beta) \
-            + ', k=' + str(self.k) + ')'
+    def extra_repr(self):
+        return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
 
 
 class CrossMapLRN2d(Module):
@@ -67,12 +63,8 @@ class CrossMapLRN2d(Module):
         return self._backend.CrossMapLRN2d(self.size, self.alpha, self.beta,
                                            self.k)(input)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.size) \
-            + ', alpha=' + str(self.alpha) \
-            + ', beta=' + str(self.beta) \
-            + ', k=' + str(self.k) + ')'
+    def extra_repr(self):
+        return '{size}, alpha={alpha}, beta={beta}, k={k}'.format(**self.__dict__)
 
 
 class LayerNorm(Module):
@@ -153,10 +145,9 @@ class LayerNorm(Module):
         return F.layer_norm(
             input, self.normalized_shape, self.weight, self.bias, self.eps)
 
-    def __repr__(self):
-        return ('{name}({normalized_shape}, eps={eps}, '
-                ' elementwise_affine={elementwise_affine},'
-                .format(name=self.__class__.__name__, **self.__dict__))
+    def extra_repr(self):
+        return '{normalized_shape}, eps={eps}, ' \
+            'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
 class GroupNorm(Module):
@@ -223,10 +214,9 @@ class GroupNorm(Module):
         return F.group_norm(
             input, self.num_groups, self.weight, self.bias, self.eps)
 
-    def __repr__(self):
-        return ('{name}({num_groups}, {num_channels}, eps={eps}, '
-                'affine={affine},'
-                .format(name=self.__class__.__name__, **self.__dict__))
+    def extra_repr(self):
+        return '{num_groups}, {num_channels}, eps={eps}, ' \
+            'affine={affine}'.format(**self.__dict__)
 
 
 # TODO: ContrastiveNorm2d

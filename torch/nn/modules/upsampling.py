@@ -138,13 +138,13 @@ class Upsample(Module):
     def forward(self, input):
         return F.upsample(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
-    def __repr__(self):
+    def extra_repr(self):
         if self.scale_factor is not None:
             info = 'scale_factor=' + str(self.scale_factor)
         else:
             info = 'size=' + str(self.size)
         info += ', mode=' + self.mode
-        return self.__class__.__name__ + '(' + info + ')'
+        return info
 
 
 class UpsamplingNearest2d(Upsample):

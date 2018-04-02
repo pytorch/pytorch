@@ -766,14 +766,39 @@ class Module(object):
     def _get_name(self):
         return self.__class__.__name__
 
+    def extra_repr(self):
+        r"""Set the extra representation of the module
+
+        To print customized extra information, you should reimplement
+        this method in your own modules. Both single-line and multi-line
+        strings are acceptable.
+        """
+        return ''
+
     def __repr__(self):
-        tmpstr = self._get_name() + '(\n'
+        # We treat the extra repr like the sub-module, one item per line
+        extra_lines = []
+        extra_repr = self.extra_repr()
+        # empty string will be split into list ['']
+        if extra_repr:
+            extra_lines = extra_repr.split('\n')
+        child_lines = []
         for key, module in self._modules.items():
-            modstr = module.__repr__()
-            modstr = _addindent(modstr, 2)
-            tmpstr = tmpstr + '  (' + key + '): ' + modstr + '\n'
-        tmpstr = tmpstr + ')'
-        return tmpstr
+            mod_str = repr(module)
+            mod_str = _addindent(mod_str, 2)
+            child_lines.append('(' + key + '): ' + mod_str)
+        lines = extra_lines + child_lines
+
+        main_str = self._get_name() + '('
+        if lines:
+            # simple one-liner info, which most builtin Modules will use
+            if len(extra_lines) == 1 and not child_lines:
+                main_str += extra_lines[0]
+            else:
+                main_str += '\n  ' + '\n  '.join(lines) + '\n'
+
+        main_str += ')'
+        return main_str
 
     def __dir__(self):
         module_attrs = dir(self.__class__)
