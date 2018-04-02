@@ -82,7 +82,6 @@ models = [
     'inception_v1',
     'inception_v2',
     'resnet50',
-    'shufflenet',
 
     # TODO currently onnx can't translate squeezenet :(
     # 'squeezenet',
