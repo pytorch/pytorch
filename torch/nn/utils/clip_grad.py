@@ -6,7 +6,7 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
     concatenated into a single vector. Gradients are modified in-place.
 
     Arguments:
-        parameters (Iterable[Variable]): an iterable of Variables that will have
+        parameters (Iterable[Tensor]): an iterable of Tensors that will have
             gradients normalized
         max_norm (float or int): max norm of the gradients
         norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
@@ -39,7 +39,7 @@ def clip_grad_value(parameters, clip_value):
     Gradients are modified in-place.
 
     Arguments:
-        parameters (Iterable[Variable]): an iterable of Variables that will have
+        parameters (Iterable[Tensor]): an iterable of Tensors that will have
             gradients normalized
         clip_value (float or int): maximum allowed value of the gradients
             The gradients are clipped in the range [-clip_value, clip_value]
