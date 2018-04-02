@@ -52,6 +52,10 @@
 #     specify the version of PyTorch, rather than the hard-coded version
 #     in this file; used when we're building binaries for distribution
 #
+#   TORCH_CUDA_ARCH_LIST
+#     specify which CUDA architectures to build for.
+#     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
