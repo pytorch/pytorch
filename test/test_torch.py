@@ -299,6 +299,8 @@ class TestTorch(TestCase):
     def test_tanh(self):
         self._testMathByName('tanh')
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_tanh_numpy(self):
         # test with high values
         x = np.linspace(-2000000000000.0, 2000000000000.0, 100)
         y = torch.FloatTensor(x)
