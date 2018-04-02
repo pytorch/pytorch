@@ -88,10 +88,6 @@ protected:
   py::object self;
 };
 
-// get the SugaredValue for something inside a torch.jit.Const
-// this can either be a ConstantPythonValue or a ModuleValue
-static std::shared_ptr<SugaredValue> createConstantSugaredValue(py::object obj);
-
 // by using torch.jit.Const, a user can mark a python value constant
 // we then make that value immutable.
 // once marked constant, we enable additional behavior such as
@@ -116,7 +112,7 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(size_t i = 0; i < tup.size(); ++i) {
-      result.push_back(createConstantSugaredValue(tup[i]));
+      result.push_back(std::make_shared<ConstantPythonValue>(tup[i]));
     }
     return result;
   }
@@ -195,7 +191,7 @@ struct ModuleValue : public SugaredValue {
          py::isinstance(attr, py::module::import("torch.nn").attr("Module"))) {
         return std::make_shared<PythonValue>(attr);
       } else if(py_module.attr("_constants_set").contains(field.c_str())) {
-        return createConstantSugaredValue(attr);
+        return std::make_shared<ConstantPythonValue>(attr);
       } else {
         throw ErrorReport(loc) << "attribute '" << field << "' of type '" << typeString(attr) << "' is not usable in a script method (did you forget to add it __constants__?)";
       }
@@ -213,8 +209,13 @@ struct ModuleValue : public SugaredValue {
       return SugaredValue::unrolledFor(loc, m);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
-      result.push_back(createConstantSugaredValue(
-        py::reinterpret_borrow<py::object>(module)));
+      py::object obj = py::reinterpret_borrow<py::object>(module);
+      if(py::isinstance<Module>(obj)) {
+        auto r = py::cast<std::shared_ptr<Module>>(obj);
+        result.push_back(std::make_shared<ModuleValue>(r));
+      } else {
+        result.push_back(std::make_shared<ConstantPythonValue>(obj));
+      }
     }
     return result;
   }
@@ -223,13 +224,6 @@ private:
   std::shared_ptr<Module> module;
 };
 
-static std::shared_ptr<SugaredValue> createConstantSugaredValue(py::object obj) {
-  if(py::isinstance<Module>(obj)) {
-    auto r = py::cast<std::shared_ptr<Module>>(obj);
-    return std::make_shared<ModuleValue>(r);
-  }
-  return std::make_shared<ConstantPythonValue>(obj);
-}
 
 // TODO: dedup with other init
 

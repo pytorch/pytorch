@@ -90,7 +90,9 @@ struct Environment {
 
     return sv;
   }
-
+  Block* block() {
+    return b;
+  }
   Symbol getBlockOwningKind() {
     Symbol owning_kind = Symbol();
     if (b->owningNode()) {
@@ -538,10 +540,18 @@ private:
     // unrolled
     auto sv = emitSugaredExpr(itrs[0]);
     auto instances = sv->unrolledFor(stmt.range(), method);
+    const std::string& target_name = targets[0].name();
+    pushFrame(environment_stack->block());
     for(auto inst : instances) {
-      environment_stack->setSugaredVar(targets[0].name(), inst);
+      environment_stack->setSugaredVar(target_name, inst);
       emitStatements(body);
     }
+    for (const auto & n : environment_stack->definedVariables()) {
+      if (environment_stack->findInParentFrame(n)) {
+        environment_stack->next->setVar(n, environment_stack->getVar(n, stmt.range()));
+      }
+    }
+    popFrame();
   }
 
   void emitWhile(const While& stmt) {

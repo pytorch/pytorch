@@ -656,14 +656,15 @@ class OrderedBufferDict(OrderedDictWrapper):
             raise KeyError(k)
         return self.module._get_parameter(k)
 
-# base types that can be constants in addition to tuples and lists
+# base types that can be constants
+# in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = [bool, float, int, types.FunctionType]
+_constant_types = (bool, float, int, types.FunctionType)
 
 
 def _get_valid_constant(v):
-    if any(isinstance(v, typ) for typ in _constant_types):
+    if isinstance(v, _constant_types):
         return v
     elif isinstance(v, tuple) or isinstance(v, list):
         return tuple(_get_valid_constant(x) for x in v)
