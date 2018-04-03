@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
   ${CMAKE_MODULE_PATH})
