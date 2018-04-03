@@ -113,7 +113,7 @@ struct MethodValue : public SugaredValue {
     if(attributes.size() != 0) {
       throw ErrorReport(loc) << "not yet implemented - calls to python functions using keyword arguments";
     }
-    ensureSizeMatches(loc, caller.num_inputs(), inputs.size(), "inputs");
+    ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
     ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
     return outputs;
