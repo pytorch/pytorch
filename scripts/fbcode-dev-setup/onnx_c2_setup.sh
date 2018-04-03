@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# This script helps developers set up the ONNX and Caffe2 develop environment on devgpu.
+# This script helps developers set up the ONNX Caffe2 and PyTorch develop environment on devgpu.
 # It creates an virtualenv instance, and installs all the dependencies in this environment.
 # The script will creates a folder called onnx-dev folder under the $HOME directory.
-# onnx, pytorch and caffe2 are installed as submodules in $HOME/onnx-dev/onnx-fb-universe/repos.
+# onnx, pytorch and caffe2 are installed seperately.
 # Please source $HOME/onnx-dev/.onnx_env_init to initialize the development before starting developing.
 
 
@@ -92,7 +92,7 @@ chmod u+x "$onnx_init_file"
 cd "$onnx_root"
 if [ ! -f "$ccache_script" ]; then
   ccache_script="$onnx_root/ccache_install.sh"
-  with_proxy wget https://raw.githubusercontent.com/onnxbot/onnx-fb-universe/master/scripts/ccache_setup.sh -O "$ccache_script"
+  with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/master/scripts/fbcode-dev-setup/ccache_setup.sh -O "$ccache_script"
 fi
 chmod u+x "$ccache_script"
 "$ccache_script" --path "$ccache_root"
@@ -124,14 +124,15 @@ with_proxy python -m pip install future numpy "protobuf>3.2" pytest-runner pyyam
 
 # Cloning repos
 cd "$onnx_root"
-with_proxy git clone https://github.com/onnxbot/onnx-fb-universe --recursive
+with_proxy git clone https://github.com/onnx/onnx --recursive
+with_proxy git clone https://github.com/pytorch/pytorch --recursive
 
 # Build ONNX
-cd "$onnx_root/onnx-fb-universe/repos/onnx"
+cd "$onnx_root/onnx"
 with_proxy python setup.py develop
 
 # Build PyTorch
-cd "$onnx_root/onnx-fb-universe/repos/pytorch"
+cd "$onnx_root/pytorch"
 with_proxy pip install -r "requirements.txt"
 with_proxy python setup.py build develop
 
@@ -139,11 +140,11 @@ with_proxy python setup.py build develop
 set +e
 
 cd "$onnx_root"
-with_proxy wget https://raw.githubusercontent.com/onnxbot/onnx-fb-universe/master/scripts/onnx_c2_sanity_check.sh -O "$sanity_script"
+with_proxy wget https://raw.githubusercontent.com/pytorch/pytorch/master/scripts/fbcode-dev-setup/onnx_c2_sanity_check.sh -O "$sanity_script"
 chmod u+x "$sanity_script"
 
-cd "$onnx_root/onnx-fb-universe/repos/caffe2"
-with_proxy python setup.py develop
+cd "$onnx_root/pytorch"
+with_proxy python setup_caffe2.py develop
 caffe2_exit_code=$?
 caffe2_ok=true
 if [ $caffe2_exit_code != 0 ]; then
@@ -161,7 +162,7 @@ if ! $caffe2_ok; then
   echo "${CYAN}source $onnx_init_file${NC}"
   echo "#####################################################################################"
   echo "########## Please run the following command to install Caffe2 seperately:  ##########"
-  echo "${CYAN}cd $onnx_root/onnx-fb-universe/repos/caffe2; python setup.py develop${NC}"
+  echo "${CYAN}cd $onnx_root/pytorch; python setup_caffe2.py develop${NC}"
   echo "#####################################################################################"
   echo "########### Please run the following command to check your installation:  ###########"
   echo "${CYAN}$sanity_script${NC}"
