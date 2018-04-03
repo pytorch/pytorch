@@ -28,22 +28,15 @@ class ObserverBase {
     return subject_;
   }
 
-  bool IsRNNCapable() {
-    return rnn_capable_;
-  }
-
-  // NOTE: This should only be called from RNNCapableOperatorObserver
-  // There is a static cast that depends on this assertion that will crash
-  // if broken.
-  void SetIsRNNCapable() {
-    rnn_capable_ = true;
-  }
+  virtual std::unique_ptr<ObserverBase<T>> rnnCopy(T* subject, int rnn_order)
+      const {
+    LOG(WARNING)
+        << "rnnCopy() is not implemented and nullptr will be returned.";
+    return nullptr;
+  };
 
  protected:
   T* subject_;
-
- private:
-  bool rnn_capable_ = false;
 };
 
 /**
