@@ -2340,6 +2340,22 @@ class TestScript(TestCase):
             m = M2()
             m(torch.zeros(4, 3))
 
+    def test_rnn_trace_override(self):
+        from torch.nn.utils.rnn import pack_padded_sequence
+        class PadPackedWrapper(torch.nn.Module):
+            def __init__(self):
+                super(PadPackedWrapper, self).__init__()
+
+            def forward(self, x, seq_lens):
+                packed_input, batch_sizes = pack_padded_sequence(x, seq_lens)
+                return packed_input
+
+        T, B, C = 3, 5, 7
+        x = torch.zeros(T, B, C)
+        seq_lens = torch.ones(B, dtype=torch.int32)
+        m = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
+        self.assertEqual(m(x, seq_lens), pack_padded_sequence(x, seq_lens)[0])
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
