@@ -58,7 +58,13 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
   return THCTensor_(newNarrow)(state, self->values, 0, 0, self->nnz);
 }
 
-
+THCudaIntTensor *THCSTensor_(newCsr)(THCState *state, const THCSTensor *self) {
+  if (THCudaIntTensor_nDimension(state, self->csr) == 0) {
+    THCudaIntTensor_retain(state, self->csr);
+    return self->csr;
+  }
+  return THCudaIntTensor_newNarrow(state, self->csr, 0, 0, self->size[0] + 1); 
+}
 /******************************************************************************
  * creation methods
  ******************************************************************************/
@@ -73,6 +79,7 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
   self->nDimensionV = 0;
   self->coalesced = 0;
   self->nnz = 0;
+  self->csr = THCudaIntTensor_new(state);
   // self->flag = TH_TENSOR_REFCOUNTED;
   self->refcount = 1;
 }
@@ -111,6 +118,8 @@ THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor
   self->values = values;
   self->nnz = empty ? 0 : THCTensor_(size)(state, values, 0);
   self->coalesced = 0;
+  THCudaIntTensor_free(state, self->csr);
+  self->csr = THCudaIntTensor_new(state);
 
   return self;
 }
@@ -120,6 +129,22 @@ THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor 
   return THCSTensor_(_move)(state, self, THCIndexTensor_(newClone)(state, indices), THCTensor_(newClone)(state, values));
 }
 
+THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntTensor *csr) {
+  int empty = THCudaIntTensor_nDimension(state, csr) == 0;
+  if (!empty) {
+    THArgCheck(self->size[0] + 1 == THCudaIntTensor_size(state, csr, 0), 1, 
+        "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1,
+        THCudaIntTensor_size(state, csr, 0));
+  }
+  THCudaIntTensor_free(state, self->csr);
+  self->csr = csr;
+
+  return self;
+}
+
+THCSTensor* THCSTensor_(_set_csr)(THCState *state, THCSTensor *self, THCudaIntTensor * csr) {
+  return THCSTensor_(_move_csr)(state, self, THCudaIntTensor_newClone(state, csr));
+}
 /*** end helper methods ***/
 
 /* Empty init */
@@ -249,6 +274,7 @@ THCSTensor *THCSTensor_(newClone)(THCState *state, THCSTensor *self) {
 
   other->nnz = self->nnz;
   other->coalesced = self->coalesced;
+  THCSTensor_(_set_csr)(state, other, self->csr);
   return other;
 }
 
@@ -347,10 +373,15 @@ void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src) {
   THCSTensor_(_set)(state, self, src->indices, src->values);
   self->nnz = src->nnz;
   self->coalesced = src->coalesced;
+  THCSTensor_(_set_csr)(state, self, src->csr);
 }
 
 int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self) {
   return self->coalesced;
+}
+
+int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self) {
+  return THCudaIntTensor_nDimension(state, self->csr) != 0;
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)
@@ -362,6 +393,7 @@ void THCSTensor_(free)(THCState *state, THCSTensor *self)
     THFree(self->size);
     THCIndexTensor_(free)(state, self->indices);
     THCTensor_(free)(state, self->values);
+    THCudaIntTensor_free(state, self->csr);
     THFree(self);
   }
 }
@@ -446,6 +478,7 @@ void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCST
   THCTensor *rValues = THCTensor_(new)(state);
   THCTensor_(resizeAs)(state, rValues, maskValues);
   THCSTensor_(_move)(state, r_, THCIndexTensor_(newClone)(state, maskIndices), rValues);
+  THCSTensor_(_set_csr)(state, r_, mask->csr);
   r_->coalesced = mask->coalesced;
   r_->nnz = mask->nnz;
 

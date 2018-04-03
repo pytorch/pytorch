@@ -15,6 +15,8 @@ typedef struct THCSTensor
     THCTensor *values;
     // Some math operations can only be performed on ordered sparse tensors
     int coalesced;
+	THCudaIntTensor *csr;
+
     int refcount;
 
 } THCSTensor;
@@ -28,6 +30,7 @@ TH_API ptrdiff_t THCSTensor_(nnz)(THCState *state, const THCSTensor *self);
 TH_API THLongStorage *THCSTensor_(newSizeOf)(THCState *state, THCSTensor *self);
 TH_API THCIndexTensor *THCSTensor_(newIndices)(THCState *state, const THCSTensor *self);
 TH_API THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self);
+TH_API THCudaIntTensor *THCSTensor_(newCsr)(THCState *state, const THCSTensor *self);
 
 /**** creation methods ****/
 TH_API THCSTensor *THCSTensor_(new)(THCState *state);
@@ -58,7 +61,11 @@ TH_API void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src
 
 TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimension1_, int dimension2_);
 TH_API int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self);
+TH_API int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self);
 TH_API THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self);
+TH_API THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz);
+TH_API THCSTensor *THCSTensor_(newCSR)(THCState *state, THCSTensor *self);
+
 
 TH_API void THCTensor_(sparseMask)(THCState *state, THCSTensor *r_, THCTensor *t, THCSTensor *mask);
 
@@ -76,6 +83,8 @@ TH_API THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int
 TH_API THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, int64_t nnz);
 TH_API THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
 TH_API THCSTensor* THCSTensor_(_set)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values);
+TH_API THCSTensor* THCSTensor_(_move_csr)(THCState *state, THCSTensor *self, THCudaIntTensor *csr);
+TH_API THCSTensor* THCSTensor_(_set_csr)(THCState *state, THCSTensor *self, THCudaIntTensor *csr);
 // forceClone is intended to use as a boolean
 TH_API THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self, int forceClone);
 

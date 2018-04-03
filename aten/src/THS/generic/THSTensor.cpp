@@ -57,6 +57,14 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
   return THTensor_(newNarrow)(self->values, 0, 0, self->nnz);
 }
 
+THLongTensor *THSTensor_(newCsr)(const THSTensor *self) {
+  if (THLongTensor_nDimension(self->csr) == 0) {
+    // Narrows don't work on 0-length tensors
+    THLongTensor_retain(self->csr);
+    return self->csr;
+  }
+  return THLongTensor_newNarrow(self->csr, 0, 0, self->size[0] + 1);
+}
 
 /******************************************************************************
  * creation methods
@@ -73,6 +81,7 @@ static void THSTensor_(rawInit)(THSTensor *self)
   self->nDimensionV = 0;
   self->coalesced = 0;
   self->nnz = 0;
+  self->csr = THLongTensor_new();
   // self->flag = TH_TENSOR_REFCOUNTED;
 }
 
@@ -107,10 +116,12 @@ THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *v
   }
   THLongTensor_free(self->indices);
   THTensor_(free)(self->values);
+  THLongTensor_free(self->csr);
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THTensor_(size)(values, 0);
   self->coalesced = 0;
+  self->csr = THLongTensor_new();
 
   return self;
 }
@@ -121,6 +132,22 @@ THSTensor* THSTensor_(_set)(THSTensor *self, THLongTensor *indices, THTensor *va
     self, THLongTensor_newClone(indices), THTensor_(newClone)(values));
 }
 
+THSTensor* THSTensor_(_move_csr)(THSTensor *self, THLongTensor *csr) {
+  int empty = THLongTensor_nDimension(csr) == 0;
+  if (!empty) {
+    THArgCheck(self->size[0] + 1 == THLongTensor_size(csr, 0), 1, 
+        "csr must be of length of first dimension + 1, expected %d, got %d", self->size[0] + 1, THLongTensor_size(csr, 0));
+  }
+  THLongTensor_free(self->csr);
+  self->csr = csr;
+
+  return self;
+}
+
+THSTensor* THSTensor_(_set_csr)(THSTensor *self, THLongTensor *csr) {
+  return THSTensor_(_move_csr)(
+    self, THLongTensor_newClone(csr));
+}
 
 /*** end helper methods ***/
 
@@ -268,6 +295,8 @@ THSTensor *THSTensor_(newClone)(THSTensor *self) {
 
   other->coalesced = self->coalesced;
   other->nnz = self->nnz;
+  THSTensor_(_set_csr)(other, self->csr);
+
   return other;
 }
 
@@ -280,6 +309,27 @@ THSTensor *THSTensor_(newTranspose)(THSTensor *self, int d1, int d2) {
 /******************************************************************************
  * reshaping methods
  ******************************************************************************/
+
+/*** Helper methods ***/
+THLongTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz) {
+  int64_t h, i, hp0, hp1;
+  THLongTensor *csr = THLongTensor_newWithSize1d(dim + 1);
+  THLongTensor_zero(csr);
+
+  // Convert the sparse matrix to CSR format
+#pragma omp parallel for private(i, h, hp0, hp1) schedule(static) if (nnz > 10000)
+  for (i=0; i<nnz; i++) {
+    hp0 = indices[i];
+    hp1 = (i+1 == nnz) ?  dim : indices[i+1];
+    if (hp0 != hp1) for (h = hp0; h < hp1; h++) {
+      THTensor_fastSet1d(csr, h+1, i+1);
+    }
+  }
+  return csr;
+}
+
+
+/*** end helper methods ***/
 
 int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
 {
@@ -357,6 +407,7 @@ void THSTensor_(copy)(THSTensor *self, THSTensor *src) {
   THSTensor_(_set)(self, src->indices, src->values);
   self->nnz = src->nnz;
   self->coalesced = src->coalesced;
+  THSTensor_(_set_csr)(self, src->csr);
 }
 
 // In place transpose
@@ -375,12 +426,18 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
   THLongTensor_free(indices);
+  self->coalesced = 0;
+  THLongTensor_free(self->csr);
+  self->csr = THLongTensor_new(); 
 }
 
 int THSTensor_(isCoalesced)(const THSTensor *self) {
   return self->coalesced;
 }
 
+int THSTensor_(hasCSR)(const THSTensor *self) {
+  return THLongTensor_nDimension(self->csr) != 0;
+}
 /* Internal slice operations. Buffers can be reused across calls to avoid
 allocating tensors every time */
 
@@ -496,6 +553,18 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   return dst;
 }
 
+THSTensor* THSTensor_(newCSR)(THSTensor *self) {
+  THSTensor* c = THSTensor_(newCoalesce)(self);
+  if (THLongTensor_nDimension(c->csr)!=0) {
+    return self;
+  }
+  THLongTensor_free(c->csr);
+  c->csr = THSTensor_(toCSR)(THLongTensor_data(c->indices), c->size[0], c->nnz);
+
+  return c;
+
+}
+
 void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THArgCheck(mask->coalesced, 2, "mask is uncoalesced");
   THSTensor_(resizeAs)(r_, mask);
@@ -510,6 +579,7 @@ void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask) {
   THTensor *r_values_ = THTensor_(new)();
   THTensor_(resizeAs)(r_values_, mask_values_);
   THSTensor_(_move)(r_, THLongTensor_newClone(mask_indices_), r_values_);
+  THSTensor_(_set_csr)(r_, mask->csr);
   r_->coalesced = mask->coalesced;
   r_->nnz = mask->nnz;
 
@@ -550,6 +620,7 @@ void THSTensor_(free)(THSTensor *self)
     THFree(self->size);
     THLongTensor_free(self->indices);
     THTensor_(free)(self->values);
+    THLongTensor_free(self->csr);
     THFree(self);
   }
 }

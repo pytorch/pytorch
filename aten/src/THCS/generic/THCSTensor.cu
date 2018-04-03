@@ -19,6 +19,16 @@
 #define I_INFO(tensor) getTensorInfo<THCIndexTensor, uint64_t>(state, tensor)
 #define V_INFO(tensor) getTensorInfo<THCTensor, uint64_t>(state, tensor)
 
+THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz) {
+  THCudaIntTensor *csr = THCudaIntTensor_newWithSize1d(state, dim + 1);
+  THCudaIntTensor *rowIndicesInt = THCudaIntTensor_newWithSize1d(state, rowIndices->size[0]);
+  THCudaIntTensor_copyCudaLong(state, rowIndicesInt, rowIndices);
+  THCudaSparse_Xcoo2csr(
+    state, THCudaIntTensor_data(state, rowIndicesInt), nnz, dim, THCudaIntTensor_data(state, csr));
+  THCudaIntTensor_free(state, rowIndicesInt);
+  return csr;
+}
+
 THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self) {
   THLongStorage *size;
   THCTensor *dst;
@@ -171,6 +181,20 @@ THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self) {
 #undef THRUST_EXEC
 }
 
+THCSTensor* THCSTensor_(newCSR)(THCState *state, THCSTensor *self) {
+  THCSTensor *c = THCSTensor_(newCoalesce)(state, self);
+  if (THCudaIntTensor_nDimension(state, c->csr) != 0) {
+    return self;
+  }
+  THCudaIntTensor_free(state, c->csr);
+  THCIndexTensor *rowIndices = THCIndexTensor_(newSelect)(state, c->indices, 0, 0);
+  c->csr = THCSTensor_(toCSR)(state, rowIndices, c->size[0], c->nnz);
+  THCIndexTensor_(free)(state, rowIndices);
+
+  return c;
+}
+
+
 // forceClone is intended to use as a boolean, if set, the result will forced to
 // be a clone of self.
 THCIndexTensor* THCSTensor_(newFlattenedIndices)(THCState *state, THCSTensor *self, int forceClone) {
@@ -224,6 +248,9 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   THCIndexTensor_(free)(state, buffer);
   THCIndexTensor_(free)(state, slice1);
   THCIndexTensor_(free)(state, slice2);
+  self->coalesced = 0;
+  THCudaIntTensor_free(state, self->csr);
+  self->csr = THCudaIntTensor_new(state);
 }
 
 int THCSTensor_(getDevice)(THCState* state, const THCSTensor* tensor) {
