@@ -43,8 +43,7 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
         :func:`torch.nn.utils.clip_grad_norm_`.
     """
     warnings.warn("torch.nn.utils.clip_grad_norm is now deprecated in favor "
-                  "of torch.nn.utils.clip_grad_norm_.",
-                  category=DeprecationWarning, stacklevel=2)
+                  "of torch.nn.utils.clip_grad_norm_.", stacklevel=2)
     return clip_grad_norm_(parameters, max_norm, norm_type)
 
 
