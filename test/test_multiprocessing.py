@@ -371,6 +371,22 @@ class TestMultiprocessing(TestCase):
             self.assertEqual(list(tensor), [4, 4, 4, 4])
         p.join()
 
+    def _test_empty_tensor_sharing(self, dtype):
+        q = mp.Queue()
+        empty = torch.tensor([], dtype=dtype)
+        q.put(empty)
+        out = q.get(timeout=1)
+        self.assertEqual(out, empty)
+
+    def test_empty_tensor_sharing(self):
+        self._test_empty_tensor_sharing(torch.float32)
+        self._test_empty_tensor_sharing(torch.int64)
+
+    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    def test_empty_tensor_sharing_cuda(self):
+        self._test_empty_tensor_sharing(torch.cuda.float32)
+        self._test_empty_tensor_sharing(torch.cuda.int64)
+
     def _test_autograd_sharing(self, var):
         ready = mp.Event()
         master_modified = mp.Event()
