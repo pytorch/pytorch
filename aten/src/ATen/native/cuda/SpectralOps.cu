@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Utils.h"
 #include <ATen/optional.h>
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
@@ -22,7 +23,6 @@
 #include <cufft.h>
 #include <cufftXt.h>
 #include <cmath>
-#include <numeric>
 
 namespace at { namespace native {
 
@@ -299,7 +299,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // See [ NOTE ] cuFFT Embedded Strides.
 
   bool simple_layout = !(!complex_input && complex_output && !onesided) &&  // not twosided R2C
-                       (clone_input || input.is_contiguous());               // contiguous
+                       (clone_input || input.is_contiguous());              // contiguous
   if (!simple_layout && complex_input && !complex_output) {
     clone_input = true;
     simple_layout = true;
@@ -384,7 +384,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // rescale if needed by normalized flag or inverse transform
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
   if (normalized || inverse) {
-    auto signal_numel = std::accumulate(checked_signal_sizes.begin(), checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
+    auto signal_numel = at::prod_intlist(checked_signal_sizes);
     double scale_denom;
     if (normalized) {
       scale_denom = std::sqrt(static_cast<double>(signal_numel));

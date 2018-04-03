@@ -22,6 +22,7 @@ Tensor _fft_mkl(const Tensor& input, int64_t signal_ndim,
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Utils.h"
 #include "ATen/NativeFunctions.h"
 
 #include <algorithm>
@@ -267,7 +268,7 @@ Tensor _fft_mkl(const Tensor& self, int64_t signal_ndim,
   }
   // rescale if needed by normalized flag or inverse transform
   if (normalized || inverse) {
-    auto signal_numel = std::accumulate(checked_signal_sizes.begin(), checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
+    auto signal_numel = at::prod_intlist(checked_signal_sizes);
     double double_scale;
     if (normalized) {
       double_scale = 1.0 / std::sqrt(static_cast<double>(signal_numel));
