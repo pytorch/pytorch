@@ -3,7 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter
 from torch.jit.frontend import get_jit_ast
-from torch._six import raise_from, with_metaclass
+from torch._six import raise_from, with_metaclass, string_classes
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
 import warnings
@@ -16,7 +16,9 @@ import functools
 import inspect
 import copy
 import numbers
-
+import numbers
+import collections
+import re
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -872,3 +874,165 @@ class _ConstModuleList(ScriptModule):
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
+
+
+def _scalar(x):
+    """Convert a scalar tensor into a Python value."""
+    assert x.numel() == 1
+    return x[0]
+
+
+def _is_onnx_list(value):
+    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
+        return True
+    return False
+
+
+attr_pattern = re.compile("^(.+)_([ifstgz])$")
+
+
+def _add_attribute(node, key, value, aten):
+    r""" initializes the right attribute based on type of value """
+    m = attr_pattern.match(key)
+    if m is None:
+        raise IndexError((
+            "Invalid attribute specifier '{}' names " +
+            " must be suffixed with type, e.g. 'dim_i' or 'dims_i'").format(key))
+    name, kind = m.group(1), m.group(2)
+    if _is_onnx_list(value):
+        kind += "s"
+    if aten:
+        if torch.is_tensor(value):
+            # Caffe2 proto does not support tensor attribute.
+            if value.numel() > 1:
+                raise ValueError("Should not pass tensor attribute")
+            value = _scalar(value)
+            if isinstance(value, float):
+                kind = "f"
+            else:
+                kind = "i"
+    return getattr(node, kind + "_")(name, value)
+
+
+def _newNode(g, opname, outputs, *args, **kwargs):
+    if "::" in opname:
+        aten = False
+        ns_opname = opname
+    else:
+        aten = kwargs.pop("aten", False)
+        ns = "aten" if aten else "onnx"
+        ns_opname = ns + "::" + opname
+    n = g.create(ns_opname, args, outputs)
+    for k, v in sorted(kwargs.items()):
+        # TODO: enable inplace in aten exporting mode.
+        if k == "inplace":
+            continue
+        _add_attribute(n, k, v, aten=aten)
+    return n
+
+
+def _graph_op(g, opname, *raw_args, **kwargs):
+    r"""
+    Create an ONNX operator 'opname', taking 'args' as inputs and attributes
+    'kwargs'; returning the node representing the single output of this operator
+    (see the `outputs` keyword argument for multi-return nodes).
+
+    The set of operators and the inputs/attributes they take
+    is documented at https://github.com/onnx/onnx/blob/master/docs/Operators.md
+
+    This function is monkey-patched onto Graph.
+
+    Arguments:
+        opname (string): The ONNX operator name, e.g., `Abs` or `Add`.
+        args (Node...): The inputs to the operator; usually provided
+            as arguments to the `symbolic` definition.
+        kwargs: The attributes of the ONNX operator, with keys named
+            according to the following convention: `alpha_f` indicates
+            the `alpha` attribute with type `f`.  The valid type specifiers are
+            `f` (float), `i` (int), `s` (string) or `t` (Tensor).  An attribute
+            specified with type float accepts either a single float, or a
+            list of floats (e.g., you would say `dims_i` for a `dims` attribute
+            that takes a list of integers).
+        outputs (int, optional):  The number of outputs this operator returns;
+            by default an operator is assumed to return a single output.
+            If `outputs` is greater than one, this functions returns a tuple
+            of output `Node`, representing each output of the ONNX operator
+            in positional.
+    """
+    outputs = kwargs.pop('outputs', 1)
+
+    # Filter out None attributes, this can be convenient client side because
+    # now they can pass through None attributes, and have them not show up
+    kwargs = dict((k, v) for k, v in kwargs.items() if v is not None)
+
+    def const_if_tensor(arg):
+        if arg is None:
+            return arg
+        elif isinstance(arg, torch._C.Value):
+            return arg
+        else:
+            return g.op("Constant", value_z=arg)
+
+    args = list(const_if_tensor(arg) for arg in raw_args)
+    n = g.appendNode(_newNode(g, opname, outputs, *args, **kwargs))
+    if outputs == 1:
+        return n.output()
+    return tuple(o for o in n.outputs())
+
+
+# Generate an ONNX ATen op node.
+def _graph_at(g, opname, *args, **kwargs):
+    return g.op("ATen", *args, operator_s=opname, **kwargs)
+
+
+# This helper function can create either constant tensor or constant scalar.
+# If dims is None or 0 or [0], generate a 0-d tensor (scalar).
+#
+# TODO: We might not need this anymore, since most scalars now show up
+# as tensors
+def _graph_constant(g, value, dims, type, *args, **kwargs):
+    assert isinstance(value, numbers.Number)
+    assert type is not None
+    isscalar = False
+    if dims is None or dims == 0 or set(dims) == set([0]):
+        dims = [1]
+        isscalar = True
+    type = type.lower()
+    if type == "char":
+        tensor = torch.CharTensor(*dims)
+    elif type == "short":
+        tensor = torch.ShortTensor(*dims)
+    elif type == "int":
+        tensor = torch.IntTensor(*dims)
+    elif type == "long":
+        tensor = torch.LongTensor(*dims)
+    elif type == "half":
+        tensor = torch.HalfTensor(*dims)
+    elif type == "float":
+        tensor = torch.FloatTensor(*dims)
+    elif type == "double":
+        tensor = torch.DoubleTensor(*dims)
+    else:
+        raise ValueError("Unknown type, type should be one of the following strings: "
+                         "char, short, int, long, half, float, double")
+    tensor.fill_(value)
+    if isscalar:
+        return g.op("Constant", *args, value_z=tensor, **kwargs)
+    return g.op("Constant", *args, value_t=tensor, **kwargs)
+
+
+def _node_getitem(self, k):
+    r"""
+    Accessor for attributes of a node which is polymorphic over
+    return type.
+
+    NB: This is monkey-patched onto Node.
+    """
+    sel = self.kindOf(k)
+    return getattr(self, sel)(k)
+
+
+torch._C.Graph.op = _graph_op
+torch._C.Graph.at = _graph_at
+torch._C.Graph.constant = _graph_constant
+torch._C.Node.__getitem__ = _node_getitem
