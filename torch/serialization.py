@@ -178,7 +178,7 @@ def _save_portable(obj, in_mod_path, model_save_path):
 
 def load_portable(local_file_path, temp_location="/tmp", path_delimiter='/'):
     """
-    Portably deserializes a portable serialized torch model saved with "save_portable". The magic here is 
+    Portably deserializes a portable serialized torch model saved with "save_portable". The magic here is
     you don't need the original network definition code in order to load this network and utilize it, as the
     necessary source code is provided along with the network.
     Args:
