@@ -1,0 +1,42 @@
+graph torch-jit-export (
+  %0[FLOAT, 2x3x224x224]
+  %1[FLOAT, 64x3x11x11]
+  %2[FLOAT, 64]
+  %3[FLOAT, 192x64x5x5]
+  %4[FLOAT, 192]
+  %5[FLOAT, 384x192x3x3]
+  %6[FLOAT, 384]
+  %7[FLOAT, 256x384x3x3]
+  %8[FLOAT, 256]
+  %9[FLOAT, 256x256x3x3]
+  %10[FLOAT, 256]
+  %11[FLOAT, 4096x9216]
+  %12[FLOAT, 4096]
+  %13[FLOAT, 4096x4096]
+  %14[FLOAT, 4096]
+  %15[FLOAT, 1000x4096]
+  %16[FLOAT, 1000]
+) {
+  %17 = Conv[dilations = [1, 1], group = 1, kernel_shape = [11, 11], pads = [2, 2, 2, 2], strides = [4, 4]](%0, %1, %2)
+  %18 = Relu(%17)
+  %19 = MaxPool[kernel_shape = [3, 3], pads = [0, 0, 0, 0], strides = [2, 2]](%18)
+  %20 = Conv[dilations = [1, 1], group = 1, kernel_shape = [5, 5], pads = [2, 2, 2, 2], strides = [1, 1]](%19, %3, %4)
+  %21 = Relu(%20)
+  %22 = MaxPool[kernel_shape = [3, 3], pads = [0, 0, 0, 0], strides = [2, 2]](%21)
+  %23 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%22, %5, %6)
+  %24 = Relu(%23)
+  %25 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%24, %7, %8)
+  %26 = Relu(%25)
+  %27 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%26, %9, %10)
+  %28 = Relu(%27)
+  %29 = MaxPool[kernel_shape = [3, 3], pads = [0, 0, 0, 0], strides = [2, 2]](%28)
+  %30 = Flatten[axis = 1](%29)
+  %31, %32 = Dropout[is_test = 1, ratio = 0.5](%30)
+  %33 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%31, %11, %12)
+  %34 = Relu(%33)
+  %35, %36 = Dropout[is_test = 1, ratio = 0.5](%34)
+  %37 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%35, %13, %14)
+  %38 = Relu(%37)
+  %39 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%38, %15, %16)
+  return %39
+}

@@ -1,0 +1,88 @@
+graph torch-jit-export (
+  %0[FLOAT, 2x3x224x224]
+  %1[FLOAT, 64x3x3x3]
+  %2[FLOAT, 64]
+  %3[FLOAT, 64x64x3x3]
+  %4[FLOAT, 64]
+  %5[FLOAT, 128x64x3x3]
+  %6[FLOAT, 128]
+  %7[FLOAT, 128x128x3x3]
+  %8[FLOAT, 128]
+  %9[FLOAT, 256x128x3x3]
+  %10[FLOAT, 256]
+  %11[FLOAT, 256x256x3x3]
+  %12[FLOAT, 256]
+  %13[FLOAT, 256x256x3x3]
+  %14[FLOAT, 256]
+  %15[FLOAT, 256x256x3x3]
+  %16[FLOAT, 256]
+  %17[FLOAT, 512x256x3x3]
+  %18[FLOAT, 512]
+  %19[FLOAT, 512x512x3x3]
+  %20[FLOAT, 512]
+  %21[FLOAT, 512x512x3x3]
+  %22[FLOAT, 512]
+  %23[FLOAT, 512x512x3x3]
+  %24[FLOAT, 512]
+  %25[FLOAT, 512x512x3x3]
+  %26[FLOAT, 512]
+  %27[FLOAT, 512x512x3x3]
+  %28[FLOAT, 512]
+  %29[FLOAT, 512x512x3x3]
+  %30[FLOAT, 512]
+  %31[FLOAT, 512x512x3x3]
+  %32[FLOAT, 512]
+  %33[FLOAT, 4096x25088]
+  %34[FLOAT, 4096]
+  %35[FLOAT, 4096x4096]
+  %36[FLOAT, 4096]
+  %37[FLOAT, 1000x4096]
+  %38[FLOAT, 1000]
+) {
+  %39 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%0, %1, %2)
+  %40 = Relu(%39)
+  %41 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%40, %3, %4)
+  %42 = Relu(%41)
+  %43 = MaxPool[kernel_shape = [2, 2], pads = [0, 0, 0, 0], strides = [2, 2]](%42)
+  %44 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%43, %5, %6)
+  %45 = Relu(%44)
+  %46 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%45, %7, %8)
+  %47 = Relu(%46)
+  %48 = MaxPool[kernel_shape = [2, 2], pads = [0, 0, 0, 0], strides = [2, 2]](%47)
+  %49 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%48, %9, %10)
+  %50 = Relu(%49)
+  %51 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%50, %11, %12)
+  %52 = Relu(%51)
+  %53 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%52, %13, %14)
+  %54 = Relu(%53)
+  %55 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%54, %15, %16)
+  %56 = Relu(%55)
+  %57 = MaxPool[kernel_shape = [2, 2], pads = [0, 0, 0, 0], strides = [2, 2]](%56)
+  %58 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%57, %17, %18)
+  %59 = Relu(%58)
+  %60 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%59, %19, %20)
+  %61 = Relu(%60)
+  %62 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%61, %21, %22)
+  %63 = Relu(%62)
+  %64 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%63, %23, %24)
+  %65 = Relu(%64)
+  %66 = MaxPool[kernel_shape = [2, 2], pads = [0, 0, 0, 0], strides = [2, 2]](%65)
+  %67 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%66, %25, %26)
+  %68 = Relu(%67)
+  %69 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%68, %27, %28)
+  %70 = Relu(%69)
+  %71 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%70, %29, %30)
+  %72 = Relu(%71)
+  %73 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%72, %31, %32)
+  %74 = Relu(%73)
+  %75 = MaxPool[kernel_shape = [2, 2], pads = [0, 0, 0, 0], strides = [2, 2]](%74)
+  %76 = Flatten[axis = 1](%75)
+  %77 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%76, %33, %34)
+  %78 = Relu(%77)
+  %79, %80 = Dropout[is_test = 1, ratio = 0.5](%78)
+  %81 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%79, %35, %36)
+  %82 = Relu(%81)
+  %83, %84 = Dropout[is_test = 1, ratio = 0.5](%82)
+  %85 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%83, %37, %38)
+  return %85
+}

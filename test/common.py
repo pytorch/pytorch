@@ -21,6 +21,7 @@ from torch.autograd import Variable
 from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
+import torch.autograd.function as function
 
 
 torch.set_default_tensor_type('torch.DoubleTensor')
@@ -70,6 +71,24 @@ def skipIfNoLapack(fn):
                 raise unittest.SkipTest('Compiled without Lapack')
             raise
     return wrapper
+
+
+def _skipper(condition, reason):
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            if condition():
+                raise unittest.SkipTest(reason)
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+
+skipIfNoCuda = _skipper(lambda: not torch.cuda.is_available(),
+                        'CUDA is not available')
+
+skipIfCI = _skipper(lambda: os.getenv('CI'),
+                    'Skip In CI')
 
 
 def suppress_warnings(fn):
@@ -457,3 +476,7 @@ def download_file(url, binary=True):
         msg = "could not download test file '{}'".format(url)
         warnings.warn(msg, RuntimeWarning)
         raise unittest.SkipTest(msg)
+
+
+def flatten(x):
+    return tuple(function._iter_filter(lambda o: isinstance(o, Variable) or torch.is_tensor(o))(x))

@@ -1,0 +1,132 @@
+graph torch-jit-export (
+  %0[INT64, 10x5]
+  %1[FLOAT, 5x5x5]
+  %2[FLOAT, 10x5]
+  %3[FLOAT, 15x5]
+  %4[FLOAT, 15x5]
+  %5[FLOAT, 15]
+  %6[FLOAT, 15]
+  %7[FLOAT, 15x5]
+  %8[FLOAT, 15x5]
+  %9[FLOAT, 15]
+  %10[FLOAT, 15]
+  %11[FLOAT, 15x5]
+  %12[FLOAT, 15x5]
+  %13[FLOAT, 15]
+  %14[FLOAT, 15]
+  %15[FLOAT, 15x5]
+  %16[FLOAT, 15x5]
+  %17[FLOAT, 15]
+  %18[FLOAT, 15]
+  %19[FLOAT, 15x5]
+  %20[FLOAT, 15x5]
+  %21[FLOAT, 15]
+  %22[FLOAT, 15]
+  %23[FLOAT, 10x5]
+  %24[FLOAT, 10]
+) {
+  %25 = Gather(%2, %0)
+  %26, %27 = Dropout[is_test = 1, ratio = 0.200000002980232](%25)
+  %29 = Slice[axes = [0], ends = [10], starts = [5]](%3)
+  %30 = Slice[axes = [0], ends = [5], starts = [0]](%3)
+  %31 = Slice[axes = [0], ends = [15], starts = [10]](%3)
+  %32 = Concat[axis = 0](%29, %30, %31)
+  %33 = Slice[axes = [0], ends = [10], starts = [5]](%4)
+  %34 = Slice[axes = [0], ends = [5], starts = [0]](%4)
+  %35 = Slice[axes = [0], ends = [15], starts = [10]](%4)
+  %36 = Concat[axis = 0](%33, %34, %35)
+  %37 = Slice[axes = [0], ends = [10], starts = [5]](%5)
+  %38 = Slice[axes = [0], ends = [5], starts = [0]](%5)
+  %39 = Slice[axes = [0], ends = [15], starts = [10]](%5)
+  %40 = Concat[axis = 0](%37, %38, %39)
+  %41 = Slice[axes = [0], ends = [10], starts = [5]](%6)
+  %42 = Slice[axes = [0], ends = [5], starts = [0]](%6)
+  %43 = Slice[axes = [0], ends = [15], starts = [10]](%6)
+  %44 = Concat[axis = 0](%41, %42, %43)
+  %45 = Concat[axis = 0](%40, %44)
+  %46 = Slice[axes = [0], ends = [1], starts = [0]](%1)
+  %47, %48 = GRU[hidden_size = 5, linear_before_reset = 1](%26, %32, %36, %45, %, %46)
+  %49 = Slice[axes = [0], ends = [10], starts = [5]](%7)
+  %50 = Slice[axes = [0], ends = [5], starts = [0]](%7)
+  %51 = Slice[axes = [0], ends = [15], starts = [10]](%7)
+  %52 = Concat[axis = 0](%49, %50, %51)
+  %53 = Slice[axes = [0], ends = [10], starts = [5]](%8)
+  %54 = Slice[axes = [0], ends = [5], starts = [0]](%8)
+  %55 = Slice[axes = [0], ends = [15], starts = [10]](%8)
+  %56 = Concat[axis = 0](%53, %54, %55)
+  %57 = Slice[axes = [0], ends = [10], starts = [5]](%9)
+  %58 = Slice[axes = [0], ends = [5], starts = [0]](%9)
+  %59 = Slice[axes = [0], ends = [15], starts = [10]](%9)
+  %60 = Concat[axis = 0](%57, %58, %59)
+  %61 = Slice[axes = [0], ends = [10], starts = [5]](%10)
+  %62 = Slice[axes = [0], ends = [5], starts = [0]](%10)
+  %63 = Slice[axes = [0], ends = [15], starts = [10]](%10)
+  %64 = Concat[axis = 0](%61, %62, %63)
+  %65 = Concat[axis = 0](%60, %64)
+  %66 = Slice[axes = [0], ends = [2], starts = [1]](%1)
+  %67, %68 = GRU[hidden_size = 5, linear_before_reset = 1](%47, %52, %56, %65, %, %66)
+  %69 = Slice[axes = [0], ends = [10], starts = [5]](%11)
+  %70 = Slice[axes = [0], ends = [5], starts = [0]](%11)
+  %71 = Slice[axes = [0], ends = [15], starts = [10]](%11)
+  %72 = Concat[axis = 0](%69, %70, %71)
+  %73 = Slice[axes = [0], ends = [10], starts = [5]](%12)
+  %74 = Slice[axes = [0], ends = [5], starts = [0]](%12)
+  %75 = Slice[axes = [0], ends = [15], starts = [10]](%12)
+  %76 = Concat[axis = 0](%73, %74, %75)
+  %77 = Slice[axes = [0], ends = [10], starts = [5]](%13)
+  %78 = Slice[axes = [0], ends = [5], starts = [0]](%13)
+  %79 = Slice[axes = [0], ends = [15], starts = [10]](%13)
+  %80 = Concat[axis = 0](%77, %78, %79)
+  %81 = Slice[axes = [0], ends = [10], starts = [5]](%14)
+  %82 = Slice[axes = [0], ends = [5], starts = [0]](%14)
+  %83 = Slice[axes = [0], ends = [15], starts = [10]](%14)
+  %84 = Concat[axis = 0](%81, %82, %83)
+  %85 = Concat[axis = 0](%80, %84)
+  %86 = Slice[axes = [0], ends = [3], starts = [2]](%1)
+  %87, %88 = GRU[hidden_size = 5, linear_before_reset = 1](%67, %72, %76, %85, %, %86)
+  %89 = Slice[axes = [0], ends = [10], starts = [5]](%15)
+  %90 = Slice[axes = [0], ends = [5], starts = [0]](%15)
+  %91 = Slice[axes = [0], ends = [15], starts = [10]](%15)
+  %92 = Concat[axis = 0](%89, %90, %91)
+  %93 = Slice[axes = [0], ends = [10], starts = [5]](%16)
+  %94 = Slice[axes = [0], ends = [5], starts = [0]](%16)
+  %95 = Slice[axes = [0], ends = [15], starts = [10]](%16)
+  %96 = Concat[axis = 0](%93, %94, %95)
+  %97 = Slice[axes = [0], ends = [10], starts = [5]](%17)
+  %98 = Slice[axes = [0], ends = [5], starts = [0]](%17)
+  %99 = Slice[axes = [0], ends = [15], starts = [10]](%17)
+  %100 = Concat[axis = 0](%97, %98, %99)
+  %101 = Slice[axes = [0], ends = [10], starts = [5]](%18)
+  %102 = Slice[axes = [0], ends = [5], starts = [0]](%18)
+  %103 = Slice[axes = [0], ends = [15], starts = [10]](%18)
+  %104 = Concat[axis = 0](%101, %102, %103)
+  %105 = Concat[axis = 0](%100, %104)
+  %106 = Slice[axes = [0], ends = [4], starts = [3]](%1)
+  %107, %108 = GRU[hidden_size = 5, linear_before_reset = 1](%87, %92, %96, %105, %, %106)
+  %109 = Slice[axes = [0], ends = [10], starts = [5]](%19)
+  %110 = Slice[axes = [0], ends = [5], starts = [0]](%19)
+  %111 = Slice[axes = [0], ends = [15], starts = [10]](%19)
+  %112 = Concat[axis = 0](%109, %110, %111)
+  %113 = Slice[axes = [0], ends = [10], starts = [5]](%20)
+  %114 = Slice[axes = [0], ends = [5], starts = [0]](%20)
+  %115 = Slice[axes = [0], ends = [15], starts = [10]](%20)
+  %116 = Concat[axis = 0](%113, %114, %115)
+  %117 = Slice[axes = [0], ends = [10], starts = [5]](%21)
+  %118 = Slice[axes = [0], ends = [5], starts = [0]](%21)
+  %119 = Slice[axes = [0], ends = [15], starts = [10]](%21)
+  %120 = Concat[axis = 0](%117, %118, %119)
+  %121 = Slice[axes = [0], ends = [10], starts = [5]](%22)
+  %122 = Slice[axes = [0], ends = [5], starts = [0]](%22)
+  %123 = Slice[axes = [0], ends = [15], starts = [10]](%22)
+  %124 = Concat[axis = 0](%121, %122, %123)
+  %125 = Concat[axis = 0](%120, %124)
+  %126 = Slice[axes = [0], ends = [5], starts = [4]](%1)
+  %127, %128 = GRU[hidden_size = 5, linear_before_reset = 1](%107, %112, %116, %125, %, %126)
+  %129, %130 = Dropout[is_test = 1, ratio = 0.200000002980232](%127)
+  %131 = Constant[value = <Tensor>]()
+  %132 = Reshape(%129, %131)
+  %133 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%132, %23, %24)
+  %134 = Constant[value = <Tensor>]()
+  %135 = Reshape(%133, %134)
+  return %135
+}

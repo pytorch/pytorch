@@ -1,0 +1,6 @@
+graph torch-jit-export (
+  %0[FLOAT, 2x3x10x12]
+) {
+  %1 = Transpose[perm = [2, 3, 0, 1]](%0)
+  return %1
+}

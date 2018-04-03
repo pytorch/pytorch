@@ -1,0 +1,7 @@
+graph torch-jit-export (
+  %0[FLOAT, 2x3]
+  %1[FLOAT, 2x3]
+) {
+  %2 = Concat[axis = 1](%0, %1)
+  return %2
+}

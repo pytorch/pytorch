@@ -1,0 +1,52 @@
+graph torch-jit-export (
+  %0[INT64, 10x5]
+  %1[FLOAT, 5x5x5]
+  %2[FLOAT, 10x5]
+  %3[FLOAT, 5x5]
+  %4[FLOAT, 5x5]
+  %5[FLOAT, 5]
+  %6[FLOAT, 5]
+  %7[FLOAT, 5x5]
+  %8[FLOAT, 5x5]
+  %9[FLOAT, 5]
+  %10[FLOAT, 5]
+  %11[FLOAT, 5x5]
+  %12[FLOAT, 5x5]
+  %13[FLOAT, 5]
+  %14[FLOAT, 5]
+  %15[FLOAT, 5x5]
+  %16[FLOAT, 5x5]
+  %17[FLOAT, 5]
+  %18[FLOAT, 5]
+  %19[FLOAT, 5x5]
+  %20[FLOAT, 5x5]
+  %21[FLOAT, 5]
+  %22[FLOAT, 5]
+  %23[FLOAT, 10x5]
+  %24[FLOAT, 10]
+) {
+  %25 = Gather(%2, %0)
+  %26, %27 = Dropout[is_test = 1, ratio = 0.200000002980232](%25)
+  %29 = Concat[axis = 0](%5, %6)
+  %30 = Slice[axes = [0], ends = [1], starts = [0]](%1)
+  %31, %32 = RNN[activations = [u'relu'], hidden_size = 5](%26, %3, %4, %29, %, %30)
+  %33 = Concat[axis = 0](%9, %10)
+  %34 = Slice[axes = [0], ends = [2], starts = [1]](%1)
+  %35, %36 = RNN[activations = [u'relu'], hidden_size = 5](%31, %7, %8, %33, %, %34)
+  %37 = Concat[axis = 0](%13, %14)
+  %38 = Slice[axes = [0], ends = [3], starts = [2]](%1)
+  %39, %40 = RNN[activations = [u'relu'], hidden_size = 5](%35, %11, %12, %37, %, %38)
+  %41 = Concat[axis = 0](%17, %18)
+  %42 = Slice[axes = [0], ends = [4], starts = [3]](%1)
+  %43, %44 = RNN[activations = [u'relu'], hidden_size = 5](%39, %15, %16, %41, %, %42)
+  %45 = Concat[axis = 0](%21, %22)
+  %46 = Slice[axes = [0], ends = [5], starts = [4]](%1)
+  %47, %48 = RNN[activations = [u'relu'], hidden_size = 5](%43, %19, %20, %45, %, %46)
+  %49, %50 = Dropout[is_test = 1, ratio = 0.200000002980232](%47)
+  %51 = Constant[value = <Tensor>]()
+  %52 = Reshape(%49, %51)
+  %53 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%52, %23, %24)
+  %54 = Constant[value = <Tensor>]()
+  %55 = Reshape(%53, %54)
+  return %55
+}
