@@ -9,6 +9,7 @@ import torch
 import tarfile
 import tempfile
 import warnings
+import zipfile
 from contextlib import closing, contextmanager
 from ._utils import _import_dotted_name
 from ._six import string_classes as _string_classes
@@ -148,8 +149,7 @@ def save_portable(obj, mod_path, output_path):
         >>> ...
         >>> torch.save_portable(net, "src.some_project.pytorch_defs", "/tmp/myModel.zip")
         
-"""
-    import zipfile
+    """
     _, model_temp = tempfile.mkstemp()
     input_system_path = input_mod_path.replace('.', '/')
     _save_portable(model, input_mod_path, model_temp)
@@ -192,7 +192,6 @@ def load_portable(local_file_path, temp_location="/tmp"):
         >>> model = torch.load_portable(local_portable_model_path)
         >>> output = model.forward(...)
     """
-    import zipfile
     with zipfile.ZipFile(local_file_path) as zip:
         zip.extractall(temp_location)
     sys.path.insert(0, temp_location)
