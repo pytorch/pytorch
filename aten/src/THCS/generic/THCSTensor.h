@@ -15,7 +15,7 @@ typedef struct THCSTensor
     THCTensor *values;
     // Some math operations can only be performed on ordered sparse tensors
     int coalesced;
-	THCudaIntTensor *csr;
+    THCudaIntTensor *csr;
 
     int refcount;
 
