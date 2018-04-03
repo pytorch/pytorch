@@ -233,14 +233,15 @@ struct Parser {
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
   // first[,other,lhs] = rhs
-  Assign parseAssign(Ident first) {
-    List<Expr> list = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
+  Assign parseAssign(Expr first) {
+    List<Expr> list = parseOneOrMoreExprs(first);
     auto red = parseOptionalReduction();
     auto rhs = parseExp();
     L.expect(TK_NEWLINE);
     return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
   }
   TreeRef parseStmt() {
+    std::cout << "stmt kind " << L.cur().kind << std::endl;
     switch (L.cur().kind) {
       case TK_IF:
         return parseIf();
@@ -263,7 +264,9 @@ struct Parser {
       default: {
         Expr r = Expr(parseExp());
         if (r.kind() == TK_VAR && L.cur().kind != TK_NEWLINE) {
-          return parseAssign(Var(r).name());
+          return parseAssign(r);
+        if (r.kind() == TK_VAR && !isEndOfLine()) {
+          return parseAssign(r);
         } else {
           L.expect(TK_NEWLINE);
           return ExprStmt::create(r.range(), r);
@@ -299,12 +302,12 @@ struct Parser {
   // 'first' has already been parsed, add the rest
   // if they exist
   // first[, the, rest]
-  List<Ident> parseOneOrMoreIdents(Ident first) {
-    std::vector<Ident> idents {first};
+  List<Expr> parseOneOrMoreExprs(Expr first) {
+    std::vector<Expr> idents {first};
     while (L.nextIf(',')) {
-      idents.push_back(parseIdent());
+      idents.push_back(parseExp());
     }
-    return List<Ident>::create(idents.back().range(), std::move(idents));
+    return List<Expr>::create(idents.back().range(), std::move(idents));
   }
   TreeRef parseIf() {
     auto r = L.cur().range;
