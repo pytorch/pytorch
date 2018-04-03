@@ -122,7 +122,7 @@ def _with_file_like(f, mode, body):
         if new_fd:
             f.close()
 
-            
+
 def _is_real_file(f):
     """Checks if f is backed by a real file (has a fileno)"""
     try:
@@ -142,7 +142,6 @@ def save_portable(obj, mod_path, output_path, path_delimiter='/'):
         a separate module, that is self contained (IE does not use resources from other parts of your project).
         output_path: the output file path where you'd like to save your model to.
         path_delimiter: how your operating system delimits filepaths, the default assumes you're using a unix kernel.
-        
     Example:
         >>> # save portable version of your model
         >>> from src.some_project.pytorch_defs.net import Net
@@ -150,7 +149,6 @@ def save_portable(obj, mod_path, output_path, path_delimiter='/'):
         >>> output = net.forward()
         >>> ...
         >>> torch.save_portable(net, "src.some_project.pytorch_defs", "/tmp/myModel.zip")
-        
     """
     _, model_temp = tempfile.mkstemp()
     input_system_path = input_mod_path.replace('.', path_delimiter)
@@ -183,13 +181,11 @@ def load_portable(local_file_path, temp_location="/tmp", path_delimiter='/'):
     Portably deserializes a portable serialized torch model saved with "save_portable". The magic here is 
     you don't need the original network definition code in order to load this network and utilize it, as the
     necessary source code is provided along with the network.
-    
     Args:
         local_file_path: The local system file path to your portable model object.
         temp_location: a scratchspace location to use for the unzip/depickling process, if you're
         using a non debian based kernel (or wholy different operating system) you'll want to change this.
         path_delimiter: how your operating system delimits filepaths, the default assumes you're using a unix kernel.
-        
     Example:
         >>> # Load a portable model
         >>> local_portable_model_path = "/tmp/myModel.zip"
