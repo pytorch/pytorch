@@ -214,6 +214,14 @@ class Tensor(torch._C._TensorBase):
     def view_as(self, tensor):
         return self.view(tensor.size())
 
+    def argmax(self, dim=None, keepdim=False):
+        r"""See :func:`torch.argmax`"""
+        return torch.argmax(self, dim, keepdim)
+
+    def argmin(self, dim=None, keepdim=False):
+        r"""See :func:`torch.argmin`"""
+        return torch.argmin(self, dim, keepdim)
+
     def btrifact(self, info=None, pivot=True):
         r"""See :func:`torch.btrifact`
         """

@@ -86,9 +86,18 @@
 - func: arange_out(Tensor result, Scalar end) -> Tensor
   variants: function
 
-- func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+# `argmin` and `argmax` are exposed in C++ but not in Python, where we only
+# expose `_argmin` and `_argmax` (which call the first versions). In Python, we
+# then define our own `argmax` and `argmin` that handle passing `dim=None`,
+# which gets the argmax/argmin of the flattened array.
 
 - func: argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmax(Tensor self) -> Tensor
+- func: _argmax(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+- func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+- func: argmin(Tensor self) -> Tensor
+- func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
