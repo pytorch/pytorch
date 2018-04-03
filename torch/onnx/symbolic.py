@@ -1,3 +1,5 @@
+import numbers
+
 import torch
 from torch.nn.modules.utils import _single, _pair, _triple
 from torch.nn.utils.rnn import PackedSequence
@@ -562,12 +564,40 @@ def clamp(g, self, min, max):
     return g.op("Clip", self, min_f=min, max_f=max)
 
 
-def max(g, self, other):
-    return g.op("Max", self, other)
+# torch.max (same for torch.min) actually has two interfaces smashed together:
+# torch.max(x, dim, keepdim) and torch.max(x, y)
+def max(g, self, *args, **kwargs):
+    dim = kwargs.get("dim", None)
+    if dim is None and isinstance(args[0], numbers.Number):
+        dim = args[0]
+    if dim is not None:
+        keepdim = kwargs.get("keepdim", False)
+        # TODO: export it as ReduceMax
+        return g.op("ATen",
+                    self,
+                    operator_s="max",
+                    dim_i=dim,
+                    keepdim_i=keepdim,
+                    outputs=2)
+    else:
+        return g.op("Max", self, args[0])
 
 
-def min(g, self, other):
-    return g.op("Min", self, other)
+def min(g, self, *args, **kwargs):
+    dim = kwargs.get("dim", None)
+    if dim is None and isinstance(args[0], numbers.Number):
+        dim = args[0]
+    if dim is not None:
+        keepdim = kwargs.get("keepdim", False)
+        # TODO: export it as ReduceMin
+        return g.op("ATen",
+                    self,
+                    operator_s="min",
+                    dim_i=dim,
+                    keepdim_i=keepdim,
+                    outputs=2)
+    else:
+        return g.op("Min", self, args[0])
 
 
 def eq(g, self, other):
