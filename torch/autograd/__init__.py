@@ -139,8 +139,10 @@ def grad(outputs, inputs, grad_outputs=None, retain_graph=None, create_graph=Fal
         outputs, grad_outputs, retain_graph, create_graph,
         inputs)
 
+
 def is_checkpoint_valid():
     return Variable._execution_engine.is_checkpoint_valid()
+
 
 def variable(*args, **kwargs):
     warnings.warn("torch.autograd.variable(...) is deprecated, use torch.tensor(...) instead")

@@ -33,9 +33,9 @@ namespace torch { namespace autograd {
 static constexpr int NO_DEVICE = -2;
 static thread_local int worker_device = NO_DEVICE;
 
-// this variable captures whether we are inside torch.autograd.grad() or not.
-// if not, that means user is running torch.autograd.backward(). Checkpoint is only
-// valid if the user calls torch.autograd.backward()
+// This variable is true if ALL invocations in the stack of re-entrant engine
+// invocations are imperative backwards. This special variable is needed for the
+// gradient checkpointing feature only.
 static thread_local bool checkpoint_valid = true;
 
 // XXX: Changes to the way multithreading works in execute should be done with
@@ -84,7 +84,7 @@ struct GraphTask {
   bool grad_mode;
   // check whether the user passes inputs for which grad is to be calculated.
   // if torch.autograd.backward() is called, it is imperative.
-  // if torch.autograd.grad() is called, it is non-imperative.
+  // if torch.autograd.grad() is called, it is not imperative.
   bool is_imperative_backward;
 
   std::mutex mutex;
@@ -239,7 +239,7 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 
 static variable_list call_function(FunctionTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
-  checkpoint_valid = (task.base->is_imperative_backward) && prev_checkpoint_valid_state;
+  checkpoint_valid = task.base->is_imperative_backward && prev_checkpoint_valid_state;
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
