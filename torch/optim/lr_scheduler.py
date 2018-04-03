@@ -165,7 +165,8 @@ class ExponentialLR(_LRScheduler):
 
 class CosineAnnealingLR(_LRScheduler):
     r"""Set the learning rate of each parameter group using a cosine annealing
-    schedule, where :math:`\eta_{max}` is set to the initial lr and
+    schedule, where :math:`\eta_{max}` is set to the initial lr,
+    :math:`T_{mult}` is the multiplicative factor of T_max and
     :math:`T_{cur}` is the number of epochs since the last restart in SGDR:
 
     .. math::
@@ -191,15 +192,26 @@ class CosineAnnealingLR(_LRScheduler):
 
     def __init__(self, optimizer, T_max, eta_min=0, T_mult=2, last_epoch=-1):
         self.T_max = T_max
+        self.Ti = T_max
         self.eta_min = eta_min
         self.T_mult = T_mult
-        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, last_epoch)
+    
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.last_epoch + 1
+        else:
+            cycle = int(math.log(self.Ti / self.T_max, self.T_max))
+            epoch -= sum([self.T_max ** (x + 1) for x in range(cycle)])
+        self.last_epoch = epoch
+        for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
+            param_group['lr'] = lr
 
     def get_lr(self):
-        if self.last_epoch == self.T_max:
+        if self.last_epoch == self.Ti:
             self.last_epoch = 0
-            self.T_max *= self.T_mult
-        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
+            self.Ti *= self.T_mult
+        return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.last_epoch / self.Ti)) / 2
                 for base_lr in self.base_lrs]
 
 
