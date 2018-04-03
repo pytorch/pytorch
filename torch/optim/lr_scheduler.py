@@ -195,7 +195,7 @@ class CosineAnnealingLR(_LRScheduler):
         self.Ti = T_max
         self.eta_min = eta_min
         self.T_mult = T_mult
-        super().__init__(optimizer, last_epoch)
+        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def step(self, epoch=None):
         if epoch is None:
