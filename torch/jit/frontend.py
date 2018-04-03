@@ -297,6 +297,9 @@ class ExprBuilder(Builder):
     def build_Call(ctx, expr):
         func = build_expr(ctx, expr.func)
         args = [build_expr(ctx, py_arg) for py_arg in expr.args]
+        if hasattr(expr, 'starargs') and expr.starargs:
+            stararg_expr = build_expr(ctx, expr.starargs)
+            args += [Starred(stararg_expr.range(), stararg_expr)]
         kwargs = []
         for kw in expr.keywords:
             kw_expr = build_expr(ctx, kw.value)
