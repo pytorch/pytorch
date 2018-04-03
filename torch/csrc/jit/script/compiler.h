@@ -86,11 +86,12 @@ struct TupleValue : public SugaredValue {
     return "tuple";
   }
 
-  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m) override {
+  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m)
+      override {
     return values;
   }
 
-private:
+ private:
   std::vector<Value*> values;
 };
 

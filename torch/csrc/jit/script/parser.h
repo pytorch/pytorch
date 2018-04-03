@@ -302,7 +302,7 @@ struct Parser {
   // if they exist
   // first[, the, rest]
   List<Expr> parseOneOrMoreExprs(Expr first) {
-    std::vector<Expr> idents {first};
+    std::vector<Expr> idents{first};
     while (L.nextIf(',')) {
       idents.push_back(parseExp());
     }

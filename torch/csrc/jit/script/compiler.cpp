@@ -569,12 +569,14 @@ private:
       } else if (assignee.kind() == '*') {
         num_starred++;
       } else {
-        throw ErrorReport(assignee) << "lhs of assignment must be a variable or starred expression.";
+        throw ErrorReport(assignee)
+            << "lhs of assignment must be a variable or starred expression.";
       }
     }
 
     if (num_starred > 1) {
-      throw ErrorReport(stmt) << "Only one starred expression is allowed on the lhs.";
+      throw ErrorReport(stmt)
+          << "Only one starred expression is allowed on the lhs.";
     }
 
     if (num_starred) {
@@ -598,7 +600,8 @@ private:
                                 Var::create(lhs.range(), lhs), stmt.rhs());
       outputs = emitExpr(expr, 1);
     } else {
-      outputs = emitExpr(stmt.rhs(), num_starred_unpack ? -1 : stmt.lhs().size());
+      outputs =
+          emitExpr(stmt.rhs(), num_starred_unpack ? -1 : stmt.lhs().size());
     }
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value
@@ -611,9 +614,11 @@ private:
           environment_stack->setVar(Var(assignee).name().name(), outputs.at(i));
           i++;
         } else if (assignee.kind() == '*') {
-          std::vector<Value*> starred_slice(outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
+          std::vector<Value*> starred_slice(
+              outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
           SugaredValuePtr tup = std::make_shared<TupleValue>(starred_slice);
-          environment_stack->setSugaredVar(Var(Starred(assignee).expr()).name().name(), tup);
+          environment_stack->setSugaredVar(
+              Var(Starred(assignee).expr()).name().name(), tup);
           i += num_starred_unpack;
         }
       }
@@ -770,13 +775,15 @@ private:
         auto kind = getNodeKind(tree->kind(), inputs.size());
         if (kind == prim::Starred) {
           const auto starred = Starred(tree);
-          auto sugared = environment_stack->getSugaredVar(Var(starred.expr()).name());
+          auto sugared =
+              environment_stack->getSugaredVar(Var(starred.expr()).name());
           return sugared->asValues(starred.range(), environment_stack->method);
         } else {
           expectOutputs(tree, output_size, 1);
           const auto& inputs = tree->trees();
           auto kind = getNodeKind(tree->kind(), inputs.size());
-          auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
+          auto* node =
+              emitNode(kind, tree->range(), getValues(inputs), output_size);
           return node->outputs();
         }
       }
