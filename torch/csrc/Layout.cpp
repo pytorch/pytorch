@@ -6,8 +6,6 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 
-PyObject *THPLayoutClass = NULL;
-
 PyObject *THPLayout_New(bool is_strided, const std::string& name)
 {
   auto type = (PyTypeObject*)&THPLayoutType;
