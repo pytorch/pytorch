@@ -530,6 +530,24 @@ static PyObject* initModule() {
   END_HANDLE_TH_ERRORS
 }
 
+// Checks that the _C shared library isn't initialized multiple times. This
+// can happen if the same csrc files are compiled into multiple shared
+// libraries.
+inline void pytorch_duplicate_guard() {
+  static int initialized = 0;
+  if (initialized) {
+    fprintf(stderr, "pytorch: _C shared library re-initialized\n");
+    abort();
+  }
+  initialized = 1;
+;}
+
+struct call_duplicate_guard {
+  call_duplicate_guard() { pytorch_duplicate_guard(); }
+};
+
+static call_duplicate_guard _call_duplicate_guard;
+
 #if PY_MAJOR_VERSION == 2
 PyMODINIT_FUNC init_C()
 #else
