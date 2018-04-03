@@ -8,7 +8,7 @@ if(USE_ATEN)
   set(AT_LINK_STYLE STATIC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fvisibility=hidden")
-  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/aten aten EXCLUDE_FROM_ALL)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/aten aten EXCLUDE_FROM_ALL)
 
   add_custom_command(OUTPUT aten_op.h
   COMMAND
