@@ -559,20 +559,45 @@ private:
     emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
   }
 
+  size_t calcNumStarredUnpack(const List<Expr>& lhs, const Assign& stmt) {
+    size_t num_normal_assign = 0;
+    size_t num_starred = 0;
+    for (const auto& assignee : lhs) {
+      if (assignee.kind() == TK_VAR) {
+        num_normal_assign++;
+      } else if (assignee.kind() == '*') {
+        num_starred++;
+      } else {
+        throw ErrorReport(assignee) << "lhs of assignment must be a variable or starred expression.";
+      }
+    }
+
+    if (num_starred > 1) {
+      throw ErrorReport(stmt) << "Only one starred expression is allowed on the lhs.";
+    }
+
+    if (num_starred) {
+      return lhs.size() - num_normal_assign;
+    } else {
+      return 0;
+    }
+  }
+
   std::vector<Value*> emitAssignment(const Assign& stmt) {
     std::vector<Value*> outputs{stmt.lhs().size()};
+    size_t num_starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt);
     if (stmt.reduction() != '=') {
       if (stmt.lhs().size() != 1) {
         throw ErrorReport(stmt)
             << "reductions are only allow when there is a single variable "
             << "on the left-hand side.";
       }
-      Ident lhs = stmt.lhs()[0];
+      Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
       outputs = emitExpr(expr, 1);
     } else {
-      outputs = emitExpr(stmt.rhs(), stmt.lhs().size());
+      outputs = emitExpr(stmt.rhs(), num_starred_unpack ? -1 : stmt.lhs().size());
     }
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value
@@ -580,9 +605,16 @@ private:
       environment_stack->setSugaredVar(Ident(stmt.lhs()[0]).name(), tup);
     } else {
       int i = 0;
-      for (auto ident : stmt.lhs()) {
-        environment_stack->setVar(Ident(ident).name(), outputs.at(i));
-        i++;
+      for (auto assignee : stmt.lhs()) {
+        if (assignee.kind() == TK_VAR) {
+          environment_stack->setVar(Var(assignee).name().name(), outputs.at(i));
+          i++;
+        } else if (assignee.kind() == '*') {
+          std::vector<Value*> starred_slice(outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
+          SugaredValuePtr tup = std::make_shared<TupleValue>(starred_slice);
+          environment_stack->setSugaredVar(Var(Starred(assignee).expr()).name().name(), tup);
+          i += num_starred_unpack;
+        }
       }
     }
     return outputs;

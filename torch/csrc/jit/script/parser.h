@@ -234,7 +234,7 @@ struct Parser {
   // alone on a line:
   // first[,other,lhs] = rhs
   Assign parseAssign(Ident first) {
-    List<Ident> list = parseOneOrMoreIdents(first);
+    List<Expr> list = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
     auto red = parseOptionalReduction();
     auto rhs = parseExp();
     L.expect(TK_NEWLINE);

@@ -112,10 +112,10 @@ void initTreeViewBindings(PyObject *module) {
 
 
   py::class_<Assign, Stmt>(m, "Assign")
-    .def(py::init([](std::vector<Ident> lhs, std::string kind_str, const Expr& rhs) {
+    .def(py::init([](std::vector<Expr> lhs, std::string kind_str, const Expr& rhs) {
       auto r = lhs.at(0).range();
       auto kind = AssignKind(Compound::create(stringToKind(kind_str), r, {}));
-      return Assign::create(r, List<Ident>::create(r, std::move(lhs)), kind, rhs);
+      return Assign::create(r, List<Expr>::create(r, std::move(lhs)), kind, rhs);
     }));
   py::class_<Return, Stmt>(m, "Return")
     .def(py::init([](const SourceRange& range, std::vector<Expr> values) {

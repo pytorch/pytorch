@@ -26,7 +26,7 @@ namespace script {
 //       | For(List<Ident> targets, List<Expr> iters, List<Stmt> body)  TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
-//       | Assign(List<Ident> lhs, AssignType maybe_reduce, Expr rhs)   TK_ASSIGN
+//       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(Expr expr)                                          TK_EXPR_STMT
 //
@@ -454,13 +454,13 @@ struct Assign : public Stmt {
   }
   static Assign create(
       const SourceRange& range,
-      const List<Ident>& lhs,
+      const List<Expr>& lhs,
       const AssignKind& reduction,
       const Expr& rhs) {
     return Assign(Compound::create(TK_ASSIGN, range, {lhs, reduction, rhs}));
   }
-  List<Ident> lhs() const {
-    return List<Ident>(subtree(0));
+  List<Expr> lhs() const {
+    return List<Expr>(subtree(0));
   }
   int reduction() const {
     return subtree(1)->kind();

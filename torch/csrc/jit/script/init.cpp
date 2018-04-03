@@ -157,7 +157,7 @@ struct MethodValue : public SugaredValue {
     ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
     // Allow for tuples. TODO: starred exprs?
-    if (n_outputs != 1) {
+    if (n_outputs != 1 && n_outputs != -1) {
       ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
     }
     return outputs;

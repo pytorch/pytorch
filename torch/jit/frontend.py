@@ -181,13 +181,13 @@ class StmtBuilder(Builder):
         return ExprStmt(build_expr(ctx, stmt.value))
 
     @staticmethod
-    def get_assign_ident(ctx, expr):
+    def get_assign_lhs_expr(ctx, expr):
         var = build_expr(ctx, expr)
-        if not isinstance(var, Var):
+        if not isinstance(var, Var) and not isinstance(var, Starred):
             raise NotSupportedError(var.range(),
                                     "the only expressions allowed on the left hand side of "
                                     "assignments are variable names")
-        return var.name
+        return var
 
     @staticmethod
     def build_Assign(ctx, stmt):
@@ -198,7 +198,7 @@ class StmtBuilder(Builder):
                                     "Performing multiple assignments in a single line isn't supported")
         py_lhs = stmt.targets[0]
         py_lhs_exprs = py_lhs.elts if isinstance(py_lhs, ast.Tuple) else [py_lhs]
-        return Assign([StmtBuilder.get_assign_ident(ctx, e) for e in py_lhs_exprs], '=', rhs)
+        return Assign([StmtBuilder.get_assign_lhs_expr(ctx, e) for e in py_lhs_exprs], '=', rhs)
 
     @staticmethod
     def build_Return(ctx, stmt):
