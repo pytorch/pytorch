@@ -73,7 +73,13 @@ endif()
 
 # Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
-IF(NOT CUDA_FOUND)
+#
+# NB: We MUST NOT run this find_package if NO_CUDA is set, because upstream
+# FindCUDA has a bug where it will still attempt to make use of NOTFOUND
+# compiler variables to run various probe tests.  We could try to fix
+# this, but since FindCUDA upstream is subsumed by first-class support
+# for CUDA language, it seemed not worth fixing.
+IF(NOT CUDA_FOUND AND NOT NO_CUDA)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 
