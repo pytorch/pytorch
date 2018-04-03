@@ -30,9 +30,6 @@ struct PyTensorType {
   at::Type* aten_type;
   THPDtype* dtype;
   THPLayout* layout;
-  // The base tensor type i.e. `torch.Tensor`. All tensors are pass isinstance
-  // checks on the base type.
-  bool is_base_type;
   char name[64];
 };
 
