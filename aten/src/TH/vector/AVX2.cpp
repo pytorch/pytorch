@@ -6,7 +6,7 @@
 #include <immintrin.h>
 #endif
 #include "AVX2.h"
-#include "avx_mathfun.h"
+#include <ATen/native/cpu/avx_mathfun.h>
 #include "../THRandom.h"
 
 void THDoubleVector_cadd_AVX2(double *z, const double *x, const double *y, const double c, const ptrdiff_t n) {

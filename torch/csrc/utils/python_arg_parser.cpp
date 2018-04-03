@@ -23,7 +23,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"bool", ParameterType::BOOL},
   {"Storage", ParameterType::STORAGE},
   {"PyObject*", ParameterType::PYOBJECT},
-  {"Type", ParameterType::TYPE},
+  {"Dtype", ParameterType::DTYPE},
+  {"Layout", ParameterType::LAYOUT},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -108,7 +109,8 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::BOOL: return PyBool_Check(obj);
     case ParameterType::STORAGE: return isStorage(obj);
     case ParameterType::PYOBJECT: return true;
-    case ParameterType::TYPE: return THPDtype_Check(obj);
+    case ParameterType::DTYPE: return THPDtype_Check(obj);
+    case ParameterType::LAYOUT: return THPLayout_Check(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -125,7 +127,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::BOOL: return "bool";
     case ParameterType::STORAGE: return "torch.Storage";
     case ParameterType::PYOBJECT: return "object";
-    case ParameterType::TYPE: return "torch.dtype";
+    case ParameterType::DTYPE: return "torch.dtype";
+    case ParameterType::LAYOUT: return "torch.layout";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -156,11 +159,19 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str != "None") {
       default_intlist.assign(size, std::stoi(str));
     }
-  } else if (type_ == ParameterType::TYPE) {
+  } else if (type_ == ParameterType::DTYPE) {
     if (str == "None") {
-      default_type = nullptr;
+      default_dtype = nullptr;
     } else if (str == "torch.int64") {
-      default_type = torch::autograd::VariableType::getType(CPU(kLong));
+      default_dtype = torch::getDtype(kLong, false);
+    } else {
+      throw std::runtime_error("invalid default value for dtype: " + str);
+    }
+  } else if (type_ == ParameterType::LAYOUT) {
+    if (str == "torch.strided") {
+      default_layout = torch::getLayout(at::Backend::CPU);
+    } else if (str == "torch.sparse_coo") {
+      default_layout = torch::getLayout(at::Backend::SparseCPU);
     } else {
       throw std::runtime_error("invalid default value for dtype: " + str);
     }

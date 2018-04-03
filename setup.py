@@ -27,6 +27,9 @@
 #   NO_CUDNN
 #     disables the cuDNN build
 #
+#   NO_MKLDNN
+#     disables the MKLDNN build
+#
 #   NO_NNPACK
 #     disables NNPACK build
 #
@@ -49,6 +52,10 @@
 #     specify the version of PyTorch, rather than the hard-coded version
 #     in this file; used when we're building binaries for distribution
 #
+#   TORCH_CUDA_ARCH_LIST
+#     specify which CUDA architectures to build for.
+#     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -66,6 +73,11 @@
 #   NCCL_LIB_DIR
 #   NCCL_INCLUDE_DIR
 #     specify where nccl is installed
+#
+#   MKLDNN_LIB_DIR
+#   MKLDNN_LIBRARY
+#   MKLDNN_INCLUDE_DIR
+#     specify where MKLDNN is installed
 #
 #   NVTOOLSEXT_PATH (Windows only)
 #     specify where nvtoolsext is installed
@@ -99,6 +111,8 @@ from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
                                        CUDNN_LIB_DIR, CUDNN_INCLUDE_DIR)
 from tools.setup_helpers.nccl import WITH_NCCL, WITH_SYSTEM_NCCL, NCCL_LIB_DIR, \
     NCCL_INCLUDE_DIR, NCCL_ROOT_DIR, NCCL_SYSTEM_LIB
+from tools.setup_helpers.mkldnn import (WITH_MKLDNN, MKLDNN_LIBRARY,
+                                        MKLDNN_LIB_DIR, MKLDNN_INCLUDE_DIR)
 from tools.setup_helpers.nnpack import WITH_NNPACK
 from tools.setup_helpers.nvtoolext import NVTOOLEXT_HOME
 from tools.setup_helpers.generate_code import generate_code
@@ -214,6 +228,11 @@ def build_libs(libs):
         my_env["CUDNN_LIB_DIR"] = CUDNN_LIB_DIR
         my_env["CUDNN_LIBRARY"] = CUDNN_LIBRARY
         my_env["CUDNN_INCLUDE_DIR"] = CUDNN_INCLUDE_DIR
+    if WITH_MKLDNN:
+        my_env["MKLDNN_LIB_DIR"] = MKLDNN_LIB_DIR
+        my_env["MKLDNN_LIBRARY"] = MKLDNN_LIBRARY
+        my_env["MKLDNN_INCLUDE_DIR"] = MKLDNN_INCLUDE_DIR
+        build_libs_cmd += ['--with-mkldnn']
 
     if WITH_GLOO_IBVERBS:
         build_libs_cmd += ['--with-gloo-ibverbs']
@@ -397,6 +416,10 @@ class build_ext(build_ext_parent):
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
             print('-- Not using CUDA')
+        if WITH_MKLDNN:
+            print('-- Detected MKLDNN at ' + MKLDNN_LIBRARY + ', ' + MKLDNN_INCLUDE_DIR)
+        else:
+            print('-- Not using MKLDNN')
         if WITH_NCCL and WITH_SYSTEM_NCCL:
             print('-- Using system provided NCCL library at ' +
                   NCCL_SYSTEM_LIB + ', ' + NCCL_INCLUDE_DIR)
@@ -419,6 +442,23 @@ class build_ext(build_ext_parent):
 
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
+
+        # Copy the essential export library to compile C++ extensions.
+        if IS_WINDOWS:
+            build_temp = self.build_temp
+
+            ext_filename = self.get_ext_filename('_C')
+            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
+
+            export_lib = os.path.join(
+                build_temp, 'torch', 'csrc', lib_filename).replace('\\', '/')
+
+            build_lib = self.build_lib
+
+            target_lib = os.path.join(
+                build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            self.copy_file(export_lib, target_lib)
 
 
 class build(distutils.command.build.build):
@@ -532,6 +572,7 @@ main_sources = [
     "torch/csrc/Size.cpp",
     "torch/csrc/Dtype.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/Layout.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/DataLoader.cpp",
     "torch/csrc/DynamicTypes.cpp",
@@ -547,6 +588,7 @@ main_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",
+    "torch/csrc/utils/tensor_layouts.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
@@ -602,6 +644,7 @@ main_sources = [
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/autograd/python_legacy_variable.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/generated/VariableType.cpp",

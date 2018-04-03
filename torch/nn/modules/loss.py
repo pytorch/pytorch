@@ -119,9 +119,9 @@ class NLLLoss(_WeightedLoss):
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \sum_{n=1}^N \frac{w_{y_n}}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
+            \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
             \text{size_average} = \text{True},\\
-            \sum_{n=1}^N w_{y_n} l_n,  & \text{if}\;
+            \sum_{n=1}^N l_n,  & \text{if}\;
             \text{size_average} = \text{False}.
         \end{cases}
 

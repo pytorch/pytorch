@@ -69,6 +69,28 @@ static inline bool operator==(const Use & a, const Use & b) {
   return a.user == b.user && a.offset == b.offset;
 }
 
+// Note [User node does not uniquely identify use]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// A while back, we wrote some code manipulating uses that looked like this:
+//
+//    for (auto& use : used_val->uses_) {
+//      if (use.user == this_node) {
+//        use.offset += 1;
+//        break;
+//      }
+//    }
+//
+// This code is trying to find a particular use (our node's use) to update it.
+// However, it's wrong: there may be *multiple* uses of a value %x in a node,
+// as might be the case in this IR:
+//
+//    %y = Add %x %x
+//
+// In this case, there are two uses of %x whose user is the node 'Add %x %x'.
+// So, "use induced by this node" is not a well-formed concept.
+//
+// If you are looking for "use induced by an input", it's best to use
+// findUseForInput() to get it.
 
 
 // Scope is a node of a trie that represents the tree of nested scopes.
@@ -401,16 +423,19 @@ public:
   // arguments. Returns the added node for ease of chaining.
   Value* insertInput(size_t i, Value* node) {
     JIT_ASSERT(graph_ == node->owningGraph());
-    node->uses_.emplace_back(this, i);
-    inputs_.insert(inputs_.begin() + i, node);
-    for (size_t use_itr = i + 1; use_itr < inputs_.size(); ++use_itr) {
-      for (auto& use : inputs_[use_itr]->uses_) {
-        if (use.user == this) {
-          use.offset += 1;
-          break;
-        }
-      }
+    // First we update the offsets for all existing inputs that will reside
+    // after the one we're inserting. Concretely, these are the inputs at
+    // indices [i, # input). Since we're inserting one input before all of
+    // these inputs, increment their use offsets for this Node by 1
+    for (size_t use_itr = i; use_itr < inputs_.size(); ++use_itr) {
+      // See Note [User node does not uniquely identify use]
+      auto use = findUseForInput(use_itr);
+      use->offset += 1;
     }
+    // Insert the actual input at the specified index
+    inputs_.insert(inputs_.begin() + i, node);
+    // Register the new use of the value we're inserted as an input.
+    node->uses_.emplace_back(this, i);
     return node;
   }
 

@@ -31,6 +31,11 @@ namespace torch { namespace autograd {
 
 // NB: -1 indicates the CPU worker!
 static constexpr int NO_DEVICE = -2;
+
+// Threads spawned by the engine are assigned a constant 'worker_device'
+// specifying what device they process work for.  This variable is initialized
+// at thread creation time and is constant afterwards.  This is used when
+// handling reentrant backwards calls; see Note [Reentrant backwards]
 static thread_local int worker_device = NO_DEVICE;
 
 // XXX: Changes to the way multithreading works in execute should be done with
@@ -69,6 +74,44 @@ struct ReadyQueue {
   FunctionTask pop();
 };
 
+// Note [Reentrant backwards]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~
+// To understand the reentrant backwards problem, we have to notice two
+// aspects of how the autograd engine is implemented today:
+//
+//  1. When you call Engine::execute(), you want to block until
+//  differentiation finishes so that you can get the final result variables
+//  of the backwards pass.
+//
+//  2. The engine operates by having a single worker thread per work queue,
+//  and every work queue is pinned to a specific device where the
+//  operation is executed.
+//
+// The problem is, suppose that you call backward() inside of a worker
+// thread.  By property (1), we're supposed to block until the nested task
+// finishes.  However, by property (2), this worker thread is on the
+// hook for processing the tasks assigned to it; we better not block,
+// because then all of our backward executions (including the one we
+// just started) will deadlock!
+//
+// Here's our cunning idea: instead of blocking, just get back to work
+// on whatever task queue you should have been working on previously
+// (this is saved via the thread local variable worker_device)!  There are
+// "simply" two things you have to arrange for:
+//
+//  - We have to promptly kick ourselves out of the thread_main() loop
+//    when our graph_task complete, because we need to unblock the
+//    parent function tasks that started the reentrant execution in
+//    the first place.  This is why thread_main() takes an optional
+//    graph_task as input.
+//
+//  - When we finish a GraphTask, we have to make sure we wake up the worker
+//    thread so that it actually has a chance to exit the thread_main()
+//    loop.  Thus the faffing about in thread_main() after
+//    evaluate_function() completes.
+
+
+// GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask {
   std::exception_ptr exception;
   // Indicates if an error occurred while executing any task.  When this is
@@ -108,6 +151,8 @@ struct GraphTask {
 
   void init_to_execute(Function& graph_root, const edge_list& captures);
 
+  // The value of worker_device in the thread that created this task.
+  // See Note [Reentrant backwards]
   int owner;
 
   GraphTask(bool keep_graph, bool grad_mode)
@@ -168,6 +213,8 @@ auto Engine::thread_init(int device) -> void {
 // in case this code is to be changed.
 auto Engine::thread_main(GraphTask *graph_task) -> void {
   auto queue = ready_queues[worker_device + 1];
+  // Why the test on graph_task->outstanding_tasks?  See
+  // Note [Reentrant backwards]
   while (!graph_task || graph_task->outstanding_tasks > 0) {
     FunctionTask task = queue->pop();
     if (task.fn && !task.base->has_error.load()) {
@@ -178,6 +225,9 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
         thread_on_exception(task, e);
       }
     }
+    // Notify downstream about the completion of tasks depending
+    // on both where the task was executed, and who owned the overall
+    // graph (in case of reentrant execution.)  See Note [Reentrant backwards].
     auto base_owner = task.base->owner;
     // Task from a non-worker thread. Easy case.
     if (base_owner == NO_DEVICE) {
@@ -384,6 +434,9 @@ auto Engine::execute(const edge_list& input_roots,
       return graph_task.outstanding_tasks.load() == 0;
     });
   } else {
+    // Get back to work while we wait for our new graph_task to
+    // complete!
+    // See Note [Reentrant backwards]
     graph_task.owner = worker_device;
     lock.unlock();
     thread_main(&graph_task);

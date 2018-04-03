@@ -383,8 +383,8 @@ Tensor embedding_bag_backward_cuda(const Tensor &grad_, const Tensor &indices,
       return embedding_bag_backward_cuda_max(grad, max_indices, num_weights);
 
     default:
-      at::runtime_error(                                               
-          "Unknown mode for embedding_bag_backward_cuda", mode);
+      AT_ERROR(                                               
+          "Unknown mode for embedding_bag_backward_cuda %d", mode);
   }
 }
 

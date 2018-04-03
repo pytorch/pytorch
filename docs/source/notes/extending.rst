@@ -173,6 +173,13 @@ This is how a ``Linear`` module can be implemented::
             # See the autograd section for explanation of what happens here.
             return LinearFunction.apply(input, self.weight, self.bias)
 
+        def extra_repr(self):
+            # (Optional)Set the extra information about this module. You can test
+            # it by printing an object of this class.
+            return 'in_features={}, out_features={}, bias={}'.format(
+                self.in_features, self.out_features, self.bias is not None
+            )
+
 
 Writing custom C extensions
 ---------------------------

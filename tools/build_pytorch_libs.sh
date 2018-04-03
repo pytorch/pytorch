@@ -23,6 +23,12 @@ if [[ "$1" == "--with-nnpack" ]]; then
   shift
 fi
 
+WITH_MKLDNN=0
+if [[ "$1" == "--with-mkldnn" ]]; then
+  WITH_MKLDNN=1
+  shift
+fi
+
 WITH_GLOO_IBVERBS=0
 if [[ "$1" == "--with-gloo-ibverbs" ]]; then
   WITH_GLOO_IBVERBS=1
@@ -100,6 +106,15 @@ if [ -z "$NUM_JOBS" ]; then
   NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
+BUILD_TYPE="Release"
+if [[ "$DEBUG" ]]; then
+  BUILD_TYPE="Debug"
+elif [[ "$REL_WITH_DEB_INFO" ]]; then
+  BUILD_TYPE="RelWithDebInfo"
+fi
+
+echo "Building in $BUILD_TYPE mode"
+
 # Used to build an individual library
 function build() {
   # We create a build directory for the library, which will
@@ -143,7 +158,7 @@ function build() {
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
-              -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
+              -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
               ${@:2} \
               -DCMAKE_EXPORT_COMPILE_COMMANDS=1
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
@@ -196,12 +211,16 @@ function build_aten() {
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
-      -DCMAKE_BUILD_TYPE=$([ $DEBUG ] && echo Debug || echo Release) \
+      -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DNO_CUDA=$((1-$WITH_CUDA)) \
       -DNO_NNPACK=$((1-$WITH_NNPACK)) \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
+      -DNO_MKLDNN=$((1-$WITH_MKLDNN)) \
+      -DMKLDNN_INCULDE_DIR=$MKLDNN_INCLUDE_DIR \
+      -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
+      -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
       -DATEN_NO_CONTRIB=1 \
       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \

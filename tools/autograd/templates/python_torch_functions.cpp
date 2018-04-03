@@ -8,12 +8,15 @@
 
 #include <Python.h>
 
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/utils/tensor_layouts.h"
 
 #include "python_torch_functions_dispatch.h"
 
@@ -30,10 +33,13 @@ static Tensor set_requires_grad(Tensor self, bool requires_grad) {
   return self;
 }
 
-static void check_out_type_matches(Tensor result, const at::Type &type) {
+static void check_out_type_matches(Tensor result, const THPDtype &dtype, const THPLayout& layout) {
+  const auto& type = torch::getType(dtype, layout);
   if (result.type() != type) {
-    at::runtime_error("type corresponding to %s does not match type of out parameter (%s)",
-                      type.toString(), result.type().toString());
+    AT_ERROR(
+        "type corresponding to %s does not match type of out parameter (%s)",
+        type.toString(),
+        result.type().toString());
   }
 }
 
@@ -86,19 +92,19 @@ static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyO
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "_promote_types(Type type1, Type type2)",
+    "_promote_types(Dtype type1, Dtype type2)",
   });
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    const at::Type& t1 = r.type(0);
-    const at::Type& t2 = r.type(1);
-    if (t1.backend() != t2.backend()) {
-      at::runtime_error("_promote_types only supports types with the same backends.  Got %s and %s.",
-                        at::toString(t1.backend()), at::toString(t2.backend()));
+    auto& d1 = r.dtype(0);
+    auto& d2 = r.dtype(1);
+    if (d1.is_cuda != d2.is_cuda) {
+      AT_ERROR("_promote_types only supports dtypes being both on cpu or cuda.  Got %s and %s",
+               d1.is_cuda ? "true" : "false", d2.is_cuda ? "true" : "false");
     }
-    ScalarType promoted = at::promoteTypes(t1.scalarType(), t2.scalarType());
-    return torch::autograd::utils::wrap(torch::getDtype(t1.backend(), promoted));
+    ScalarType promoted = at::promoteTypes(d1.scalar_type, d2.scalar_type);
+    return torch::autograd::utils::wrap(torch::getDtype(promoted, d1.is_cuda));
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

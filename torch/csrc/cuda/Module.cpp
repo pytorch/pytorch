@@ -65,30 +65,6 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceName");
-  long device = THPUtils_unpackLong(arg);
-
-  cudaDeviceProp prop;
-  THCudaCheck(cudaGetDeviceProperties(&prop, device));
-  return THPUtils_packString(prop.name);
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_getDeviceCapability_wrap(PyObject *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceCapability");
-  long device = THPUtils_unpackLong(arg);
-
-  cudaDeviceProp prop;
-  THCudaCheck(cudaGetDeviceProperties(&prop, device));
-  return Py_BuildValue("(ii)", prop.major, prop.minor);
-  END_HANDLE_TH_ERRORS
-}
-
 
 PyObject * THCPModule_getCurrentStream_wrap(PyObject *self)
 {
@@ -413,8 +389,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
-  {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
-  {"_cuda_getDeviceCapability", (PyCFunction)THCPModule_getDeviceCapability_wrap, METH_O,   NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
