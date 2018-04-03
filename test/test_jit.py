@@ -2041,6 +2041,26 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
             m.sub = nn.Linear(5, 5)
 
+    def test_script_inline_trace_multiple_args(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            def forward(self, input, input2):
+                return input + input2
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                self.m = torch.jit.trace(torch.zeros(4, 3), torch.zeros(4, 3))(M())
+
+            @torch.jit.script_method
+            def forward(self, inp):
+                return self.m(inp, inp)
+
+        m2 = M2()
+        m2(torch.zeros(4, 3))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
