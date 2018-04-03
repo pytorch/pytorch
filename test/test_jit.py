@@ -2291,29 +2291,18 @@ class TestScript(TestCase):
                     output += inputs[i]
                 return output, output, output
 
-        if PY2:
-            class M2(torch.jit.ScriptModule):
-                def __init__(self):
-                    super(M2, self).__init__(True)
-                    self.g = torch.jit.trace(torch.ones(4, 3))(M())
-
-                @torch.jit.script_method
-                def forward(self, rep):
-                    head, tail1, tail2 = self.g(rep)
-                    return head
-        else:
-            class M2(torch.jit.ScriptModule):
-                def __init__(self):
-                    super(M2, self).__init__(True)
-                    self.g = torch.jit.trace(torch.ones(4, 3))(M())
-
-                @torch.jit.script_method
-                def forward(self, rep):
-                    head, *tail = self.g(rep) # NOQA
-                    return head
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(True)
+                self.g = torch.jit.trace(torch.ones(4, 3))(M())
+                self.define('''
+            def forward(self, rep):
+                head, *tail = self.g(rep)
+                return head
+                ''')
 
         m = M2()
-        m(torch.zeros(4, 3))
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
 
 # Smoke tests for export methods
