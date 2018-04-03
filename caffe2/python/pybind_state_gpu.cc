@@ -14,9 +14,9 @@
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"
 
-#ifdef USE_TRT
+#ifdef CAFFE2_USE_TRT
 #include "caffe2/contrib/tensorrt/tensorrt_tranformer.h"
-#endif // USE_TRT
+#endif // CAFFE2_USE_TRT
 
 namespace caffe2 {
 namespace python {
@@ -54,7 +54,6 @@ void addCUDAGlobalMethods(py::module& m) {
     obj["totalGlobalMem"] = py::cast(prop.totalGlobalMem);
     return obj;
   });
-#ifdef USE_TRT
   m.def(
       "onnx_to_trt_op",
       [](const py::bytes& onnx_model_str,
@@ -64,6 +63,7 @@ void addCUDAGlobalMethods(py::module& m) {
          int max_workspace_size,
          int verbosity,
          bool debug_builder) -> py::bytes {
+#ifdef CAFFE2_USE_TRT
         TensorRTTransformer t(
             max_batch_size, max_workspace_size, verbosity, debug_builder);
         auto op_def =
@@ -71,6 +71,9 @@ void addCUDAGlobalMethods(py::module& m) {
         std::string out;
         op_def.SerializeToString(&out);
         return py::bytes(out);
+#else
+        CAFFE_THROW("Please build Caffe2 with USE_TENSORRT=1");
+#endif // CAFFE2_USE_TRT
       });
   m.def(
       "transform_trt",
@@ -81,6 +84,7 @@ void addCUDAGlobalMethods(py::module& m) {
          int max_workspace_size,
          int verbosity,
          bool debug_builder) -> std::vector<py::bytes> {
+#ifdef CAFFE2_USE_TRT
         caffe2::NetDef init_net;
         if(!ParseProtoFromLargeString(
             init_net_str.cast<std::string>(), &init_net)) {
@@ -104,8 +108,10 @@ void addCUDAGlobalMethods(py::module& m) {
         init_net.SerializeToString(&init_net_str2);
         pred_net.SerializeToString(&pred_net_str2);
         return {py::bytes(init_net_str2), py::bytes(pred_net_str2)};
+#else
+        CAFFE_THROW("Please build Caffe2 with USE_TENSORRT=1");
+#endif // CAFFE2_USE_TRT
       });
-#endif // USE_TRT
 };
 
 void addCUDAObjectMethods(py::module& m) {

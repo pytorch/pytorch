@@ -134,7 +134,7 @@ class TensorRTOpTest(TestCase):
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
 
 
-class TensorRTTransformmTest(TestCase):
+class TensorRTTransformTest(TestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('ONNX_HOME', '~/.caffe2'))
         models_dir = os.getenv('ONNX_MODELS', os.path.join(caffe2_home, 'models'))

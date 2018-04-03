@@ -3,7 +3,6 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnx_exporter.h"
-#include "caffe2/utils/proto_utils.h"
 #include <onnx2trt.hpp>
 #include <NvInfer.h>
 
@@ -242,10 +241,6 @@ OperatorDef TensorRTTransformer::BuildTrtOp(
   verbosity_arg->set_name("log_verbosity");
   verbosity_arg->set_i(verbosity_);
 
-  auto* output_size_hints_arg = op.add_arg();
-  auto* output_size_names_arg = op.add_arg();
-  output_size_hints_arg->set_name("output_size_hints");
-  output_size_names_arg->set_name("output_size_names");
   for (int i = 0; i < op.output_size(); ++i) {
     const auto& o = op.output(i);
     const auto it = output_size_hints.find(o);

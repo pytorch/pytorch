@@ -11,26 +11,21 @@ class TrtLogger : public nvinfer1::ILogger {
   using nvinfer1::ILogger::Severity;
 
  public:
-  TrtLogger(
-      Severity verbosity = Severity::kWARNING,
-      std::ostream& ostream = std::cout)
-      : _verbosity(verbosity), _ostream(&ostream) {}
+  TrtLogger(Severity verbosity = Severity::kWARNING) : _verbosity(verbosity) {}
   void log(Severity severity, const char* msg) override {
     if (severity <= _verbosity) {
-      std::string sevstr =
-          (severity == Severity::kINTERNAL_ERROR
-               ? "INTERNAL ERROR"
-               : severity == Severity::kERROR ? "  ERROR"
-                                              : severity == Severity::kWARNING
-                       ? "WARNING"
-                       : severity == Severity::kINFO ? "   INFO" : "UNKNOWN");
-      (*_ostream) << "[" << sevstr << "] " << msg << std::endl;
+      if (severity == Severity::kINTERNAL_ERROR || severity == Severity::kERROR) {
+        LOG(ERROR) << msg;
+      } else if (severity == Severity::kWARNING) {
+        LOG(WARNING)  << msg;
+      } else if (severity == Severity::kINFO) {
+        LOG(INFO) << msg;
+      }
     }
   }
 
  private:
   Severity _verbosity;
-  std::ostream* _ostream;
 };
 
 struct InferDeleter {

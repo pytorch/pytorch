@@ -27,6 +27,12 @@ def _get_output_shapes(output_value_infos):
     return dict(zip(names, shapes))
 
 
+def check_gpu_():
+    try:
+        C.get_cuda_version()
+    except Exception as _:
+       raise Exception("TensorRT related functions require CUDA support")
+
 def convert_onnx_model_to_trt_op(onnx_model,
         max_batch_size=50,
         max_workspace_size=2*1024*1024,
@@ -35,6 +41,7 @@ def convert_onnx_model_to_trt_op(onnx_model,
     """
     Convert the whole ONNX model to a TensorRT C2 op
     """
+    check_gpu_()
     trt_str = C.onnx_to_trt_op(onnx_model.SerializeToString(),
                                _get_output_shapes(onnx_model.graph.output),
                                max_batch_size,
@@ -77,6 +84,7 @@ def transform_caffe2_net(init_net,
     """
     Transfrom the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
     """
+    check_gpu_()
     c2_front.ssa_rewrite(pred_net, init_net, value_info=input_info)
     input_data = {}
     for k,v in input_shapes.iteritems():
