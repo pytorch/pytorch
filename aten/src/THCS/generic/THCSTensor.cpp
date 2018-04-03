@@ -117,9 +117,7 @@ THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THCTensor_(size)(state, values, 0);
-  self->coalesced = 0;
-  THCudaIntTensor_free(state, self->csr);
-  self->csr = THCudaIntTensor_new(state);
+  THCSTensor_(uncoalesce)(state, self);
 
   return self;
 }
@@ -382,6 +380,12 @@ int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self) {
 
 int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self) {
   return THCudaIntTensor_nDimension(state, self->csr) != 0;
+}
+
+void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self) {
+  self->coalesced = 0;
+  THCudaIntTensor_free(state, self->csr);
+  self->csr = THCudaIntTensor_new(state);
 }
 
 void THCSTensor_(free)(THCState *state, THCSTensor *self)

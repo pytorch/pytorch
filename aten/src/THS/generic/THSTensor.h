@@ -68,6 +68,7 @@ TH_API int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor *src)
 TH_API THSTensor *THSTensor_(newCoalesce)(THSTensor *self);
 TH_API THLongTensor *THSTensor_(toCSR)(int64_t const *indices, int64_t dim, int64_t nnz);
 TH_API THSTensor *THSTensor_(newCSR)(THSTensor *self);
+TH_API void THSTensor_(uncoalesce)(THSTensor *self);
 
 TH_API void THTensor_(sparseMask)(THSTensor *r_, THTensor *t, THSTensor *mask);
 

@@ -248,9 +248,7 @@ void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int d1, int d2) {
   THCIndexTensor_(free)(state, buffer);
   THCIndexTensor_(free)(state, slice1);
   THCIndexTensor_(free)(state, slice2);
-  self->coalesced = 0;
-  THCudaIntTensor_free(state, self->csr);
-  self->csr = THCudaIntTensor_new(state);
+  THCSTensor_(uncoalesce)(state, self);
 }
 
 int THCSTensor_(getDevice)(THCState* state, const THCSTensor* tensor) {

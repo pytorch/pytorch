@@ -116,12 +116,10 @@ THSTensor* THSTensor_(_move)(THSTensor *self, THLongTensor *indices, THTensor *v
   }
   THLongTensor_free(self->indices);
   THTensor_(free)(self->values);
-  THLongTensor_free(self->csr);
   self->indices = indices;
   self->values = values;
   self->nnz = empty ? 0 : THTensor_(size)(values, 0);
-  self->coalesced = 0;
-  self->csr = THLongTensor_new();
+  THSTensor_(uncoalesce)(self);
 
   return self;
 }
@@ -426,9 +424,7 @@ void THSTensor_(transpose)(THSTensor *self, int d1, int d2) {
   self->size[d1] = self->size[d2];
   self->size[d2] = i;
   THLongTensor_free(indices);
-  self->coalesced = 0;
-  THLongTensor_free(self->csr);
-  self->csr = THLongTensor_new(); 
+  THSTensor_(uncoalesce)(self);
 }
 
 int THSTensor_(isCoalesced)(const THSTensor *self) {
@@ -551,6 +547,12 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
   THTensor_(free)(values);
 
   return dst;
+}
+
+void THSTensor_(uncoalesce)(THSTensor *self) {
+  self->coalesced = 0;
+  THLongTensor_free(self->csr);
+  self->csr = THLongTensor_new();
 }
 
 THSTensor* THSTensor_(newCSR)(THSTensor *self) {

@@ -63,6 +63,7 @@ TH_API void THCSTensor_(transpose)(THCState *state, THCSTensor *self, int dimens
 TH_API int THCSTensor_(isCoalesced)(THCState *state, const THCSTensor *self);
 TH_API int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self);
 TH_API THCSTensor *THCSTensor_(newCoalesce)(THCState *state, THCSTensor *self);
+TH_API void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self);
 TH_API THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices, int64_t dim, int64_t nnz);
 TH_API THCSTensor *THCSTensor_(newCSR)(THCState *state, THCSTensor *self);
 
