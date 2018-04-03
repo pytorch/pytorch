@@ -578,7 +578,7 @@ class TestTorch(TestCase):
             if dtype == torch.uint8:  # Doesn't support negative values
                 continue
             x = cast(torch.tensor(example, dtype=dtype))
-            self.assertEqual(x.view(-1).argmax().item(), 5)
+            self.assertEqual(x.view(-1).argmax(dim=0).item(), 5)
             self.assertEqual(x.argmax(0), torch.FloatTensor([1, 1, 1]))
             self.assertEqual(x.argmax(1), torch.FloatTensor([1, 2]))
 
@@ -586,7 +586,7 @@ class TestTorch(TestCase):
             if dtype == torch.uint8:  # Doesn't support negative values
                 continue
             x = cast(torch.tensor(example, dtype=dtype))
-            self.assertEqual(x.view(-1).argmin().item(), 0)
+            self.assertEqual(x.view(-1).argmin(dim=0).item(), 0)
             self.assertEqual(x.argmin(0), torch.FloatTensor([0, 0, 0]))
             self.assertEqual(x.argmin(1), torch.FloatTensor([0, 1]))
 
