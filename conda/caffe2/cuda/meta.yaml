@@ -24,7 +24,6 @@ requirements:
     - numpy
     - opencv
     - python
-    - protobuf {{ protobuf }}
     - six
     # other packages here
   run:
