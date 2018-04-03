@@ -434,15 +434,6 @@ class MaxUnpool3d(_MaxUnpoolNd):
 
 class _AvgPoolNd(Module):
 
-    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
-                 count_include_pad=True):
-        super(_AvgPoolNd, self).__init__()
-        self.kernel_size = _single(kernel_size)
-        self.stride = _single(stride if stride is not None else kernel_size)
-        self.padding = _single(padding)
-        self.ceil_mode = ceil_mode
-        self.count_include_pad = count_include_pad
-
     def extra_repr(self):
         return 'kernel_size={}, stride={}, padding={}'.format(
             self.kernel_size, self.stride, self.padding
@@ -495,6 +486,15 @@ class AvgPool1d(_AvgPoolNd):
           2  4  6
         [torch.FloatTensor of size (1,1,3)]
     """
+
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
+        super(AvgPool1d, self).__init__()
+        self.kernel_size = _single(kernel_size)
+        self.stride = _single(stride if stride is not None else kernel_size)
+        self.padding = _single(padding)
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
         return F.avg_pool1d(
@@ -553,6 +553,15 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
+
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
+        super(AvgPool2d, self).__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
         return F.avg_pool2d(input, self.kernel_size, self.stride,
@@ -615,6 +624,15 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50,44, 31)
         >>> output = m(input)
     """
+
+    def __init__(self, kernel_size, stride=None, padding=0, ceil_mode=False,
+                 count_include_pad=True):
+        super(AvgPool3d, self).__init__()
+        self.kernel_size = kernel_size
+        self.stride = stride or kernel_size
+        self.padding = padding
+        self.ceil_mode = ceil_mode
+        self.count_include_pad = count_include_pad
 
     def forward(self, input):
         return F.avg_pool3d(input, self.kernel_size, self.stride,
