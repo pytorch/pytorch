@@ -379,7 +379,9 @@ class TestSparse(TestCase):
             [1],
         ])
         D = self.SparseTensor(i, v, torch.Size([3, 3])).coalesce()
-        r = torch.mm(D, x)
+        Dt = D.t()
+        self.assertFalse(Dt.is_coalesced())
+        r = torch.mm(Dt, x)
         self.assertEqual(r, res)
 
     @cpu_only

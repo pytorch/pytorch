@@ -17,8 +17,8 @@ typedef struct THSTensor
     // the indices tensor, and the indices are in sorted order.
     // Most math operations can only be performed on ordered sparse tensors
     int coalesced;
-	// csr representation
-	THLongTensor *csr;
+    // csr representation
+    THLongTensor *csr;
 
     int refcount;
 
