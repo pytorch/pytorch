@@ -546,6 +546,7 @@ private:
       environment_stack->setSugaredVar(target_name, inst);
       emitStatements(body);
     }
+
     for (const auto & n : environment_stack->definedVariables()) {
       if (environment_stack->findInParentFrame(n)) {
         environment_stack->next->setVar(n, environment_stack->getVar(n, stmt.range()));
@@ -602,7 +603,7 @@ private:
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value
       SugaredValuePtr tup = std::make_shared<TupleValue>(outputs);
-      environment_stack->setSugaredVar(Ident(stmt.lhs()[0]).name(), tup);
+      environment_stack->setSugaredVar(Var(stmt.lhs()[0]).name().name(), tup);
     } else {
       int i = 0;
       for (auto assignee : stmt.lhs()) {

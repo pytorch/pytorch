@@ -132,7 +132,7 @@ void initTreeViewBindings(PyObject *module) {
       return While::create(range, cond, wrap_list(range, std::move(body)));
     }));
   py::class_<For, Stmt>(m, "For").def(py::init([](const SourceRange range,
-                                                  std::vector<Ident>& targets,
+                                                  std::vector<Expr>& targets,
                                                   std::vector<Expr>& itrs,
                                                   std::vector<Stmt> body) {
     return For::create(

@@ -208,7 +208,7 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_AugAssign(ctx, stmt):
-        lhs = [StmtBuilder.get_assign_ident(ctx, stmt.target)]
+        lhs = [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)]
         rhs = build_expr(ctx, stmt.value)
         op = type(stmt.op)
         if op in StmtBuilder.augassign_map:
@@ -232,7 +232,7 @@ class StmtBuilder(Builder):
     def build_For(ctx, stmt):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("for"))
         return For(
-            r, [StmtBuilder.get_assign_ident(ctx, stmt.target)],
+            r, [StmtBuilder.get_assign_lhs_expr(ctx, stmt.target)],
             [build_expr(ctx, stmt.iter)], [build_stmt(ctx, s) for s in stmt.body])
 
     @staticmethod

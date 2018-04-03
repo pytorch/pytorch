@@ -241,7 +241,6 @@ struct Parser {
     return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
   }
   TreeRef parseStmt() {
-    std::cout << "stmt kind " << L.cur().kind << std::endl;
     switch (L.cur().kind) {
       case TK_IF:
         return parseIf();
@@ -333,7 +332,7 @@ struct Parser {
   TreeRef parseFor() {
     auto r = L.cur().range;
     L.expect(TK_FOR);
-    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
+    auto targets = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
     L.expect(TK_IN);
     auto itrs = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
     L.expect(':');
