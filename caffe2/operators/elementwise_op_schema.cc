@@ -76,7 +76,7 @@ OPERATOR_SCHEMA(Div)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}})
-    .CostInferenceFunction(PointwiseCostInference<1>)
+    .CostInferenceFunction(PointwiseCostInference<0>)
     .IdenticalTypeAndShapeOfInput(0)
     .FillUsing(MathDocGenerator("division"))
     .InheritOnnxSchema("Div");

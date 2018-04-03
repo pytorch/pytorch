@@ -223,10 +223,27 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+vector<TensorShape> TensorInferenceForDotProduct(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  vector<TIndex> dims;
+  if (in[0].dims().size() > 0) {
+    dims.push_back(in[0].dims(0));
+  }
+  return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
+}
+
 OpSchema::Cost CostInferenceForDotProduct(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
-  struct OpSchema::Cost c = PointwiseCostInference<1>(def, in);
+  std::vector<TensorShape> out = TensorInferenceForDotProduct(def, in);
+  uint64_t size_out = 1;
+  for (auto i = 0; i < out[0].dims().size(); ++i) {
+    size_out *= out[0].dims(i);
+  }
+
+  struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
+  c.bytes_moved = size_out * sizeof(out[0].data_type());
   c.params_bytes = 0;
   return c;
 }
@@ -421,6 +438,7 @@ of the dot product between X and Y.
     .Input(0, "X", "1D or 2D input tensor")
     .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
     .Output(0, "Z", "1D output tensor")
+    .TensorInferenceFunction(TensorInferenceForDotProduct)
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct));
 
