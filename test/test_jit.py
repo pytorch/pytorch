@@ -2244,7 +2244,7 @@ class TestScript(TestCase):
                 return self.m(*tup)
 
         m = M2()
-        self.assertEqual(m(torch.zeros(4, 3)), 3*torch.zeros(4, 3))
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
     def test_script_star_expr_string(self):
         class M(torch.nn.Module):
@@ -2278,7 +2278,7 @@ class TestScript(TestCase):
                 ''')
 
         m = M2()
-        self.assertEqual(m(torch.zeros(4, 3)), 3*torch.zeros(4, 3))
+        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
     def test_script_star_assign(self):
         class M(torch.nn.Module):
@@ -2291,15 +2291,26 @@ class TestScript(TestCase):
                     output += inputs[i]
                 return output, output, output
 
-        class M2(torch.jit.ScriptModule):
-            def __init__(self):
-                super(M2, self).__init__(True)
-                self.g = torch.jit.trace(torch.ones(4, 3))(M())
+        if PY2:
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__(True)
+                    self.g = torch.jit.trace(torch.ones(4, 3))(M())
 
-            @torch.jit.script_method
-            def forward(self, rep):
-                head, *tail = self.g(rep)
-                return head
+                @torch.jit.script_method
+                def forward(self, rep):
+                    head, tail1, tail2 = self.g(rep)
+                    return head
+        else:
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__(True)
+                    self.g = torch.jit.trace(torch.ones(4, 3))(M())
+
+                @torch.jit.script_method
+                def forward(self, rep):
+                    head, *tail = self.g(rep) # NOQA
+                    return head
 
         m = M2()
         m(torch.zeros(4, 3))
