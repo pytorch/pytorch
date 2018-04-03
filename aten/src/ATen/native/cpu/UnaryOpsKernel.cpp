@@ -21,9 +21,11 @@ static void unary_kernel(scalar_t* arr_out, const scalar_t* arr_in, int64_t size
     value.store(arr_out + k);
   }
   auto leftover = size - k;
-  Vec a;
-  a.load_partial(arr_in + k, leftover);
-  func(a).store_partial(arr_out + k, leftover);
+  if (leftover > 0) {
+    Vec a;
+    a.load_partial(arr_in + k, leftover);
+    func(a).store_partial(arr_out + k, leftover);
+  }
 }
 
 template <class scalar_t, class F>
