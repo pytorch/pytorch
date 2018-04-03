@@ -202,7 +202,7 @@ class CosineAnnealingLR(_LRScheduler):
             epoch = self.last_epoch + 1
         else:
             cycle = int(math.log(self.Ti / self.T_max, self.T_mult))
-            epoch -= sum([self.T_max ** (x + 1) for x in range(cycle)])
+            epoch -= sum([self.T_max * self.T_mult ** x for x in range(cycle)])
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
