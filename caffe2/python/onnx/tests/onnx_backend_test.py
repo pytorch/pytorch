@@ -22,6 +22,14 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_mean|test_hardmax'  # Does not support Mean and Hardmax.
                      '|test_cast.*FLOAT16.*'  # Does not support Cast on Float16.
                      '|test_depthtospace.*'  # Does not support DepthToSpace.
+                     '|test_reduce_l1.*'  # Does not support ReduceL1.
+                     '|test_reduce_l2.*'  # Does not support ReduceL2.
+                     '|test_reduce_log_sum.*'  # Does not support ReduceLogSum.
+                     '|test_reduce_max.*'  # Does not support ReduceMax.
+                     '|test_reduce_min.*'  # Does not support ReduceMin.
+                     '|test_reduce_mean_cuda.*'  # Does not support ReduceMean CUDA.
+                     '|test_reduce_prod.*'  # Does not support ReduceProd.
+                     '|test_reduce_sum.*'  # Does not support ReduceSum and ReduceSumSquare
                      '|test_.*pool_.*same.*)')  # Does not support pool same.
 
 # Skip vgg to speed up CI
