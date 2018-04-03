@@ -23,7 +23,6 @@
 #include <cufftXt.h>
 #include <cmath>
 #include <numeric>
-#include <iostream>
 
 namespace at { namespace native {
 
@@ -36,6 +35,7 @@ static bool is_pow_of_two(long long int  x) {
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
 // case of real-to-complex transform with onesided=False flag.
+// See [ NOTE ] Fourier Transform Congjugate Symmetry in native/SpectralOpsUtils.h.
 
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
@@ -170,6 +170,11 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 //
 // Note that the value of embed[0] isn't used to compute indices and doesn't
 // matter.
+//
+// Contrary to advanced data layout, simple layout means that *embeds have
+// unit-strides. In particular, unit-stride refers to that the input and output
+// tensors being contiguous, and that the strides at the innermost signal
+// dimension being unit (1) w.r.t. the corresponding data type.
 
 // Returns `embed` values if `stride` can be viewed as embedded.
 // See [ NOTE ] cuFFT Embedded Strides.
@@ -203,9 +208,30 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
                   IntList output_sizes) {
   Tensor input = self;
 
-  bool is_half = input.type().scalarType() == ScalarType::Half;
+  // Slice when twosided complex-to-real. This is not necessarily needed because
+  // we calculate the inembed. But it will benefit us in certain cases where we
+  // clone the input tensor.
+  //
+  // See [ NOTE ] cuFFT Embedded Strides.
+  // See [ NOTE ] Fourier Transform Congjugate Symmetry in native/SpectralOpsUtils.h.
+  if (complex_input && !complex_output && !onesided) {
+    auto onesided_size = infer_ft_real_to_complex_onesided_size(checked_signal_sizes[signal_ndim - 1]);
+    input = input.narrow(signal_ndim, 0, onesided_size);
+  }
 
-  if (is_half) {
+  // signal sizes
+  std::vector<long long int> signal_sizes(checked_signal_sizes.begin(),
+                                          checked_signal_sizes.end());
+
+  // input batch size
+  long long int batch = input.size(0);
+
+  // Since cuFFT has limited non-unit stride support and various constraints, we
+  // use a flag to keep track throughout this function to see if we need to
+  // input = input.clone();
+  bool clone_input = false;
+
+  if (input.type().scalarType() == ScalarType::Half) {
     // cuFFT on half requires compute capability of at least SM_53
     auto dev_prop = at::globalContext().getCurrentDeviceProperties();
     if (dev_prop->major < 5 || (dev_prop->major == 5 && dev_prop->minor < 3)) {
@@ -215,50 +241,6 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
          << "tensor only has SM_" << dev_prop->major << dev_prop->minor;
       throw std::runtime_error(ss.str());
     }
-  }
-
-  // cuFFT requires input and output data pointers to complex type aligned
-  // our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.
-  // from a slicing.
-  //
-  // cuFFT out-of-place complex-to-real transforms with non-unit strides may
-  // overwrite input.
-  //
-  // We need to clone the input tensor in these two cases.
-  auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
-  if ((reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0 ||
-      (complex_input && !complex_output && input.stride(signal_ndim) != 2))) {
-    input = self.clone();
-  }
-
-  // check input batch size
-  long long int batch = input.size(0);
-
-  std::vector<long long int> signal_sizes(checked_signal_sizes.begin(),
-                                          checked_signal_sizes.end());
-
-  // check the input sizes and strides to see if we need to make it contiguous
-  // cuFFT doesn't support batch dim with stride 0
-  bool need_contiguous = input.stride(0) == 0;
-
-  if (complex_input) {
-    // Real/imag dimension must be like complex type.
-    need_contiguous |= input.stride(-1) != 1;
-    // Strides of other dimensions needs to be aligned when viewed as of
-    // complex type, i.e., multiples of 2. We check the batch dim and last
-    // signal dim here. If the input can be viewed as having embedded strides,
-    // the other signal dims will also satisfy this.
-    // See [ NOTE ] cuFFT Embedded Strides.
-    need_contiguous |= (input.size(0) > 0 && input.stride(0) % 2 != 0) ||
-                       input.stride(signal_ndim) % 2 != 0 ;
-  } else if (is_half) {
-    // For half, base strides on the real part of real-to-complex and
-    // complex-to-real transforms are not supported. Since our output is always
-    // contiguous, only need to check real-to-complex case.
-    need_contiguous |= input.stride(signal_ndim) != 1;
-  }
-  if (is_half) {
     for (int64_t i = 0; i < signal_ndim; i--) {
       auto signal_size = checked_signal_sizes[i];
       if (!is_pow_of_two(signal_size)) {
@@ -269,38 +251,69 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
         throw std::runtime_error(ss.str());
       }
     }
+    // For half, base strides on the real part of real-to-complex and
+    // complex-to-real transforms are not supported. Since our output is always
+    // contiguous, only need to check real-to-complex case.
+    clone_input |= input.stride(signal_ndim) != 1;
+  }
+
+  // cuFFT requires input and output data pointers to complex type aligned
+  // our allocated output tensor is always 256 bytes aligned so it is fine, but
+  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // from a slicing.
+  auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
+  clone_input |= reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0;
+
+  // check the input sizes and strides to see if we need to make it contiguous
+  // cuFFT doesn't support batch dim with stride 0
+  clone_input |= input.stride(0) == 0;
+
+  if (complex_input) {
+    // Real/imag dimension must be like complex type.
+    clone_input |= input.stride(-1) != 1;
+    // Strides of other dimensions needs to be aligned when viewed as of
+    // complex type, i.e., multiples of 2. We check the batch dim and last
+    // signal dim here. If the input can be viewed as having embedded strides,
+    // the other signal dims will also satisfy this.
+    // See [ NOTE ] cuFFT Embedded Strides.
+    clone_input |= (batch > 0 && input.stride(0) % 2 != 0) ||
+                    input.stride(signal_ndim) % 2 != 0;
   }
 
   at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
-  if (!need_contiguous) {
+  if (!clone_input) {
     inembed_opt = is_embedded_strides<long long int>(input.strides().slice(1, signal_ndim));
-    if (!inembed_opt) {
-      need_contiguous = true;
+    clone_input = !inembed_opt;
+  }
+
+  // Check if we can take advantage of simple data layout.
+  //
+  // Note that this is actually before cloning. This is intentional so we can
+  // check for advanced data layout with complex-to-real transform. cuFFT
+  // out-of-place complex-to-real transforms with advanced layout may overwrite
+  // input.
+  //
+  // This just needs contiguity in cases except for twosided real-to-complex
+  // transform where we won't have simple data layout as output is two sided.
+  //
+  // See [ NOTE ] cuFFT Embedded Strides.
+
+  bool simple_layout = !(!complex_input && complex_output && !onesided) &&  // not twosided R2C
+                       (clone_input || input.is_contiguous());               // contiguous
+  if (!simple_layout && complex_input && !complex_output) {
+    clone_input = true;
+    simple_layout = true;
+  }
+
+  // clone if needed
+  if (clone_input) {
+    input = input.clone();
+    if (!simple_layout) {
+      // If advanced layout, copy new input sizes to inemed
+      auto input_size = input.sizes();
+      inembed_opt.emplace(input_size.begin() + 1, input_size.begin() + signal_ndim + 1);
     }
   }
-
-  if (need_contiguous) {
-    input = input.contiguous();
-    auto input_size = input.sizes();
-    // Copies new input sizes to inemed
-    inembed_opt.emplace(input_size.begin() + 1, input_size.begin() + signal_ndim + 1);
-  }
-
-  // set idist (stride at batch dim)
-  long long int idist = complex_input ? input.stride(0) >> 1 : input.stride(0);
-  // Even if batch dimension is one and idist (stride(0)) doesn't matter,
-  // cuFFT errors if idist = 0. This is hack to make it succeed.
-  if (idist == 0 && batch == 1) {
-    idist = 1;
-  }
-  // set base_istride (stride at innermost dim of signal)
-  long long int base_istride = complex_input ? input.stride(signal_ndim) >> 1 : input.stride(signal_ndim);
-
-  // set output, odist, onembed, base_ostride
-  auto output = input.type().tensor(output_sizes);
-  long long int odist = complex_output ? output.stride(0) >> 1 : output.stride(0);
-  std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
-  long long int base_ostride = 1;
 
   CufftHandle plan;
   size_t ws = 0;
@@ -324,10 +337,42 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     throw std::runtime_error(ss.str());
   }
 
+  // set output
+  auto output = input.type().tensor(output_sizes);
+
   // make plan
-  CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
-    inembed_opt->data(), base_istride, idist, itype, onembed.data(), base_ostride,
-    odist, otype, batch, &ws, exec_type));
+  if (simple_layout) {
+    // If with unit-stride, we tell cuFFT by setting inembed == onembed == NULL.
+    // In such case, cuFFT ignores base_istride, base_ostride, idist, and odist
+    // by assuming base_istride = base_ostride = 1.
+    //
+    // See [ NOTE ] cuFFT Embedded Strides.
+    CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
+      /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
+      /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
+      batch, &ws, exec_type));
+  } else {
+    // set idist (stride at batch dim)
+    long long int idist = complex_input ? input.stride(0) >> 1 : input.stride(0);
+    // Even if batch dimension is one and idist (stride(0)) doesn't matter,
+    // cuFFT errors if idist = 0. This is hack to make it succeed.
+    if (idist == 0 && batch == 1) {
+      idist = 1;
+    }
+    // set base_istride (stride at innermost dim of signal)
+    long long int base_istride = complex_input ? input.stride(signal_ndim) >> 1
+                                               : input.stride(signal_ndim);
+
+    // set odist, onembed, base_ostride
+    long long int odist = complex_output ? output.stride(0) >> 1 : output.stride(0);
+    std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
+    long long int base_ostride = 1;
+
+    CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
+      inembed_opt->data(), base_istride, idist, itype,
+      onembed.data()     , base_ostride, odist, otype,
+      batch, &ws, exec_type));
+  }
 
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan.get(), at::globalContext().getCurrentCUDAStream()));
