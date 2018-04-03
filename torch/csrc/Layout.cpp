@@ -23,18 +23,6 @@ PyObject *THPLayout_repr(THPLayout *self)
   return THPUtils_packString(self->name);
 }
 
-PyObject *THPLayout_is_cuda(THPLayout *self)
-{
-  Py_RETURN_TRUE;
-}
-
-typedef PyObject *(*getter)(PyObject *, void *);
-
-static struct PyGetSetDef THPLayout_properties[] = {
-  {"is_cuda",      (getter)THPLayout_is_cuda, nullptr, nullptr, nullptr},
-  {nullptr}
-};
-
 PyTypeObject THPLayoutType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
   "torch.layout",                        /* tp_name */
@@ -65,7 +53,7 @@ PyTypeObject THPLayoutType = {
   0,                                     /* tp_iternext */
   0,                                     /* tp_methods */
   0,                                     /* tp_members */
-  THPLayout_properties,                  /* tp_getset */
+  0,                                     /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
