@@ -74,7 +74,6 @@ def _ssa_rewrite_input(i):
 
 def transform_caffe2_net(init_net,
         pred_net,
-        input_info,
         input_shapes,
         populate_shapes = False,
         max_batch_size=50,
@@ -85,7 +84,7 @@ def transform_caffe2_net(init_net,
     Transfrom the caffe2_net by collapsing TRT-runnable nodes into trt c2 ops
     """
     check_gpu_()
-    c2_front.ssa_rewrite(pred_net, init_net, value_info=input_info)
+    c2_front.ssa_rewrite(pred_net, init_net, value_info=[])
     input_data = {}
     for k,v in input_shapes.iteritems():
         input_data[_ssa_rewrite_input(k)] = np.random.randn(*v).astype(np.float32)

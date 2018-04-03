@@ -17,6 +17,7 @@ from caffe2.python.onnx.tests.test_utils import TestCase
 import numpy as np
 import os.path
 import json
+import time
 import unittest
 import tarfile
 import tempfile
@@ -208,9 +209,13 @@ class TensorRTTransformTest(TestCase):
 
     @unittest.skipIf('TEST_C2_TRT' not in os.environ, "No TensortRT support")
     def test_resnet50_core(self):
-        init_net, pred_net, value_info = self._get_c2_model('resnet50')
+        N = 2
+        warmup = 20
+        repeat = 100
+        print("Batch size: {}, repeat inference {} times, warmup {} times".format(N, repeat, warmup))
+        init_net, pred_net, _  = self._get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
-        input_blob_dims = (1, 3, 224, 224)
+        input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"
 
         device_option = core.DeviceOption(caffe2_pb2.CUDA, 0)
@@ -221,24 +226,41 @@ class TensorRTTransformTest(TestCase):
         net_outputs = pred_net.external_output
         Y_c2 = None
         data =  np.random.randn(*input_blob_dims).astype(np.float32)
+        c2_time = 1
         with Workspace(), core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.RunNetOnce(init_net)
-            workspace.RunNetOnce(pred_net)
+            workspace.CreateNet(pred_net)
+            for _ in range(warmup):
+                workspace.RunNet(pred_net.name)
+            start = time.time()
+            for _ in range(repeat):
+                workspace.RunNet(pred_net.name)
+            end = time.time()
+            c2_time = end - start
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_c2 = namedtupledict('Outputs', net_outputs)(*output_values)
 
         # Cut the graph
-        init_net_cut, pred_net_cut = transform_caffe2_net(init_net, pred_net, value_info, {input_name: input_blob_dims})
+        init_net_cut, pred_net_cut = transform_caffe2_net(init_net, pred_net, {input_name: input_blob_dims})
         del init_net, pred_net
         #print_net(pred_net_cut)
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
+        print("C2 runtime: {}s".format(c2_time))
         with Workspace(), core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.RunNetOnce(init_net_cut)
-            workspace.RunNetOnce(pred_net_cut)
+            workspace.CreateNet(pred_net_cut)
+            for _ in range(warmup):
+                workspace.RunNet(pred_net_cut.name)
+            start = time.time()
+            for _ in range(repeat):
+                workspace.RunNet(pred_net_cut.name)
+            end = time.time()
+            trt_time = end - start
+            print("TRT runtime: {}s, improvement: {}%".format(trt_time, (c2_time-trt_time)/c2_time*100))
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)
