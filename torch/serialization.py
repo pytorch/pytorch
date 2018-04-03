@@ -122,7 +122,6 @@ def _with_file_like(f, mode, body):
         if new_fd:
             f.close()
 
-
 def _is_real_file(f):
     """Checks if f is backed by a real file (has a fileno)"""
     try:
@@ -132,7 +131,7 @@ def _is_real_file(f):
     except AttributeError:
         return False
 
-def save_portable(obj, mod_path, output_path):
+def save_portable(obj, mod_path, output_path, path_delimiter='/'):
     """
     Portably serializes a torch module file to a disk, along with the network definition module required to execute it.
     Args:
@@ -140,6 +139,7 @@ def save_portable(obj, mod_path, output_path):
         mod_path: the pythonic import path to your network definition module (it's recommended that this is
         a separate module, that is self contained (IE does not use resources from other parts of your project).
         output_path: the output file path where you'd like to save your model to.
+        path_delimiter: how your operating system delimits filepaths, the default assumes you're using a unix kernel.
         
     Example:
         >>> # save portable version of your model
@@ -151,7 +151,7 @@ def save_portable(obj, mod_path, output_path):
         
     """
     _, model_temp = tempfile.mkstemp()
-    input_system_path = input_mod_path.replace('.', '/')
+    input_system_path = input_mod_path.replace('.', path_delimiter)
     _save_portable(model, input_mod_path, model_temp)
     source_files = []
     for root, dirs, files in os.walk(input_system_path):
@@ -174,8 +174,7 @@ def _save_portable(obj, in_mod_path, model_save_path):
     with open(model_save_path, 'wb') as f:
         f.write(serialized_model)
 
-        
-def load_portable(local_file_path, temp_location="/tmp"):
+def load_portable(local_file_path, temp_location="/tmp", path_delimiter='/'):
     """
     Portably deserializes a portable serialized torch model saved with "save_portable". The magic here is 
     you don't need the original network definition code in order to load this network and utilize it, as the
@@ -185,6 +184,7 @@ def load_portable(local_file_path, temp_location="/tmp"):
         local_file_path: The local system file path to your portable model object.
         temp_location: a scratchspace location to use for the unzip/depickling process, if you're
         using a non debian based kernel (or wholy different operating system) you'll want to change this.
+        path_delimiter: how your operating system delimits filepaths, the default assumes you're using a unix kernel.
         
     Example:
         >>> # Load a portable model
@@ -195,14 +195,13 @@ def load_portable(local_file_path, temp_location="/tmp"):
     with zipfile.ZipFile(local_file_path) as zip:
         zip.extractall(temp_location)
     sys.path.insert(0, temp_location)
-    model = _load_portable("{}/model.t7".format(str(temp_location)))
+    model = _load_portable("{}{}model.t7".format(str(temp_location), path_delimiter))
     return model
 
 def _load_portable(model_path):
     with open(filepath, 'rb') as f:
         mod = pickle.load(f)
     return mod
-    
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
