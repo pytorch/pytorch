@@ -580,7 +580,8 @@ def max(g, self, *args, **kwargs):
                     keepdim_i=keepdim,
                     outputs=2)
     else:
-        return g.op("Max", self, args[0])
+        (other,) = args
+        return g.op("Max", self, other)
 
 
 def min(g, self, *args, **kwargs):
@@ -597,7 +598,8 @@ def min(g, self, *args, **kwargs):
                     keepdim_i=keepdim,
                     outputs=2)
     else:
-        return g.op("Min", self, args[0])
+        (other,) = args
+        return g.op("Min", self, other)
 
 
 def eq(g, self, other):
