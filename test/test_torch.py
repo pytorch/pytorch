@@ -574,6 +574,22 @@ class TestTorch(TestCase):
             self.assertEqual(x.min(0), (torch.FloatTensor([-1, 2, 1]), torch.FloatTensor([0, 0, 0])))
             self.assertEqual(x.min(1), (torch.FloatTensor([-1, 3]), torch.FloatTensor([0, 1])))
 
+        for dtype in types:
+            if dtype == torch.uint8:  # Doesn't support negative values
+                continue
+            x = cast(torch.tensor(example, dtype=dtype))
+            self.assertEqual(x.view(-1).argmax().item(), 5)
+            self.assertEqual(x.argmax(0), torch.FloatTensor([1, 1, 1]))
+            self.assertEqual(x.argmax(1), torch.FloatTensor([1, 2]))
+
+        for dtype in types:
+            if dtype == torch.uint8:  # Doesn't support negative values
+                continue
+            x = cast(torch.tensor(example, dtype=dtype))
+            self.assertEqual(x.view(-1).argmin().item(), 0)
+            self.assertEqual(x.argmin(0), torch.FloatTensor([0, 0, 0]))
+            self.assertEqual(x.argmin(1), torch.FloatTensor([0, 1]))
+
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",
             "std", "sum", "var", "max", "min"]
