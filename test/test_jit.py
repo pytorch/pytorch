@@ -2354,7 +2354,8 @@ class TestScript(TestCase):
         x = torch.zeros(T, B, C)
         seq_lens = torch.ones(B, dtype=torch.int32)
         m = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
-        self.assertEqual(m(x, seq_lens), pack_padded_sequence(x, seq_lens)[0])
+        mod_outs = m(x, seq_lens)
+        self.assertEqual(mod_outs, pack_padded_sequence(x, seq_lens)[0])
 
 
 # Smoke tests for export methods

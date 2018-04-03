@@ -92,16 +92,6 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
-def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
-    if batch_first:
-        input = g.op('Transpose', input, perm_i=[1, 0, 2])
-    # There currently is no PackPadded operator in ONNX. We rely on an
-    # optimization pass to remove this later. It is an error if all
-    # PackPadded operators cannot be optimized out.
-    return g.op("prim::PackPadded", input, lengths, outputs=2)
-
-
-@torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)
 def pack_padded_sequence(input, lengths, batch_first=False):
     r"""Packs a Variable containing padded sequences of variable length.
 
@@ -137,9 +127,26 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(data, batch_sizes)
 
 
-def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0, total_length=None):
+def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
+    return g.op("prim::PackPadded", input, lengths, outputs=2)
+
+
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0, total_length=None):
     if total_length is not None:
         raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
+    if batch_first:
+        input = g.op('Transpose', input, perm_i=[1, 0, 2])
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimization pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+    outputs = g.wrapPyFuncWithSymbolic(pack_padded_sequence, [input, lengths], 2, _onnx_symbolic_pack_padded_sequence)
+    return tuple(o for o in outputs)
+
+
+pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)(pack_padded_sequence)
+
+
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0):
     # See comment on _symbolic_pack_padded_sequence
     data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
     if batch_first:

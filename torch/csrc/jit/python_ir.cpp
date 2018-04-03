@@ -10,6 +10,7 @@
 
 namespace torch { namespace jit {
 
+
 void initPythonIRBindings(PyObject * module_) {
   auto m = py::handle(module_).cast<py::module>();
   #define GS(name) \
@@ -21,6 +22,18 @@ void initPythonIRBindings(PyObject * module_) {
       ss << g;
       return ss.str();
     })
+    .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
+      std::string cconv(inputs.size(), 't');
+      func.attr("symbolic") = symbolic;
+      Node* new_node = g.insertNode(g.createPythonOp(
+        THPObjectPtr(func.release().ptr()), cconv, false, {}, {}, false));
+      for (auto i : inputs)
+        new_node->addInput(i);
+      std::vector<Value*> outputs;
+      for (size_t i = 0; i < n_outputs; ++i)
+        new_node->addOutput();
+      return py::make_iterator(new_node->outputs().begin(), new_node->outputs().end());
+    }, py::return_value_policy::reference_internal)
     .def("inputs",[](Graph &g) {
       return py::make_iterator(g.inputs().begin(), g.inputs().end());
     })
