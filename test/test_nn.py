@@ -20,7 +20,7 @@ import torch.nn.parallel as dp
 import torch.nn.init as init
 import torch.nn.utils.rnn as rnn_utils
 import torch.legacy.nn as legacy
-from torch.nn.utils import clip_grad_norm, clip_grad_value
+from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 from torch.nn.utils import parameters_to_vector, vector_to_parameters
 from torch.autograd import Variable, gradcheck
 from torch.autograd.gradcheck import gradgradcheck
@@ -1167,7 +1167,7 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p._grad = Variable(g.clone().view_as(p.data))
             norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
             self.assertEqual(norm, norm_before)
             self.assertEqual(norm_after, max_norm)
@@ -1180,7 +1180,7 @@ class TestNN(NNTestCase):
             for p, g in zip(l.parameters(), grads):
                 p.grad.data.copy_(g)
             norm_before = compute_norm(norm_type)
-            norm = clip_grad_norm(l.parameters(), max_norm, norm_type=norm_type)
+            norm = clip_grad_norm_(l.parameters(), max_norm, norm_type=norm_type)
             norm_after = compute_norm(norm_type)
             self.assertEqual(norm, norm_before)
             self.assertEqual(norm_before, norm_after)
@@ -1196,7 +1196,7 @@ class TestNN(NNTestCase):
         for p, g in zip(l.parameters(), grads):
             p._grad = Variable(g.clone().view_as(p.data))
 
-        clip_grad_value(l.parameters(), clip_value)
+        clip_grad_value_(l.parameters(), clip_value)
         for p in l.parameters():
             self.assertLessEqual(p.grad.data.max(), clip_value)
             self.assertGreaterEqual(p.grad.data.min(), -clip_value)

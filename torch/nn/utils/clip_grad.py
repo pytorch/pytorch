@@ -1,5 +1,5 @@
 
-def clip_grad_norm(parameters, max_norm, norm_type=2):
+def clip_grad_norm_(parameters, max_norm, norm_type=2):
     r"""Clips gradient norm of an iterable of parameters.
 
     The norm is computed over all gradients together, as if they were
@@ -33,7 +33,7 @@ def clip_grad_norm(parameters, max_norm, norm_type=2):
     return total_norm
 
 
-def clip_grad_value(parameters, clip_value):
+def clip_grad_value_(parameters, clip_value):
     r"""Clips gradient of an iterable of parameters at specified value.
 
     Gradients are modified in-place.
