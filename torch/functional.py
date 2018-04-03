@@ -369,7 +369,7 @@ def unique(input, sorted=False, return_inverse=False):
          1  2
         [torch.LongTensor of size (2,2)]
     """
-    output, inverse_indices = torch._C._VariableBase._unique(
+    output, inverse_indices = torch._C._VariableFunctions._unique(
         input,
         sorted=sorted,
         return_inverse=return_inverse,

@@ -23,9 +23,10 @@
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/Layout.h"
 #include "torch/csrc/autograd/generated/python_nn_functions.h"
-#include "torch/csrc/utils/tensor_dtypes.h"
+#include "torch/csrc/autograd/python_legacy_variable.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/tensor_dtypes.h"
 #include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/tensor_layouts.h"
 #include "torch/csrc/utils/tensor_numpy.h"
@@ -326,6 +327,16 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
   Py_RETURN_TRUE;
 }
 
+PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  auto& type = torch::tensor::get_default_tensor_type();
+  bool is_cuda = type.backend() == at::kCUDA;
+  auto dtype = (PyObject*)torch::getDtype(type.scalarType(), is_cuda);
+  Py_INCREF(dtype);
+  return dtype;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyMethodDef TorchMethods[] = {
   {"_initExtension",  (PyCFunction)THPModule_initExtension,   METH_O,       NULL},
   {"_autograd_init",  (PyCFunction)THPAutograd_initExtension, METH_NOARGS,  NULL},
@@ -350,6 +361,7 @@ static PyMethodDef TorchMethods[] = {
   {"_to_dlpack",      (PyCFunction)THPModule_toDLPack,          METH_O,       NULL},
   {"_from_dlpack",    (PyCFunction)THPModule_fromDLPack,        METH_O,       NULL},
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
+  {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -457,6 +469,7 @@ static PyObject* initModule() {
   torch::autograd::initAutogradClosureBindings(module);
   torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
+  torch::autograd::init_legacy_variable(module);
 #ifdef WITH_CUDA
   torch::cuda::initModule(module);
 #endif
