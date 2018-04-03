@@ -142,20 +142,6 @@ class MaxPool2d(_MaxPoolNd):
                             self.padding, self.dilation, self.ceil_mode,
                             self.return_indices)
 
-#     def extra_repr(self):
-#         kh, kw = _pair(self.kernel_size)
-#         dh, dw = _pair(self.stride)
-#         padh, padw = _pair(self.padding)
-#         dilh, dilw = _pair(self.dilation)
-#         padding_str = ', padding=(' + str(padh) + ', ' + str(padw) + ')' \
-#             if padh != 0 or padw != 0 else ''
-#         dilation_str = (', dilation=(' + str(dilh) + ', ' + str(dilw) + ')'
-#                         if dilh != 0 and dilw != 0 else '')
-#         ceil_str = ', ceil_mode=' + str(self.ceil_mode)
-#         return 'kernel_size=(' + str(kh) + ', ' + str(kw) + ')' \
-#             + ', stride=(' + str(dh) + ', ' + str(dw) + ')' \
-#             + padding_str + dilation_str + ceil_str
-
 
 class MaxPool3d(_MaxPoolNd):
     r"""Applies a 3D max pooling over an input signal composed of several input
