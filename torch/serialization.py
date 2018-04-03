@@ -122,6 +122,7 @@ def _with_file_like(f, mode, body):
         if new_fd:
             f.close()
 
+            
 def _is_real_file(f):
     """Checks if f is backed by a real file (has a fileno)"""
     try:
@@ -130,6 +131,7 @@ def _is_real_file(f):
         return False
     except AttributeError:
         return False
+
 
 def save_portable(obj, mod_path, output_path, path_delimiter='/'):
     """
@@ -166,6 +168,7 @@ def save_portable(obj, mod_path, output_path, path_delimiter='/'):
     os.remove(model_temp)
     return output_path
 
+
 def _save_portable(obj, in_mod_path, model_save_path):
     serialized_model = pickle.dumps(obj, byref=False)
     input_mod_path = input_mod_path.encode('utf-8')
@@ -173,6 +176,7 @@ def _save_portable(obj, in_mod_path, model_save_path):
     serialized_model = serialized_model.replace(input_mod_path, DEFAULT_MOD_PATH)
     with open(model_save_path, 'wb') as f:
         f.write(serialized_model)
+
 
 def load_portable(local_file_path, temp_location="/tmp", path_delimiter='/'):
     """
@@ -198,10 +202,12 @@ def load_portable(local_file_path, temp_location="/tmp", path_delimiter='/'):
     model = _load_portable("{}{}model.t7".format(str(temp_location), path_delimiter))
     return model
 
+
 def _load_portable(model_path):
     with open(filepath, 'rb') as f:
         mod = pickle.load(f)
     return mod
+
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
     """Saves an object to a disk file.
