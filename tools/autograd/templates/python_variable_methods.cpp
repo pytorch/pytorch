@@ -557,7 +557,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto& type = is_dtype ? r.type(0) : torch::utils::type_from_string(type_name);
+  auto& type = is_dtype ? torch::getType(r.dtype(0), *torch::getLayout(self_.type().backend())) :
+                          torch::utils::type_from_string(type_name);
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, -1, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }

@@ -20,7 +20,7 @@ struct THPVariable {
 THP_API PyObject *THPVariableClass;
 
 bool THPVariable_initModule(PyObject *module);
-PyObject * THPVariable_Wrap(torch::autograd::Variable var);
+THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
 inline bool THPVariable_Check(PyObject *obj)
 {

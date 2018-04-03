@@ -595,7 +595,7 @@ class JobRunner(object):
         self.job = job
         self.upload_task_group_builder = upload_task_group_builder
 
-    def __call__(self, session):
+    def train(self, session):
         """Runs the training flow.
 
         Args:

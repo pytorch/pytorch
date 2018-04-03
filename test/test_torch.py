@@ -1280,36 +1280,38 @@ class TestTorch(TestCase):
         self.assertEqual(output, expected)
 
     @staticmethod
-    def _test_dtypes(self, cpu_dtypes, cuda_dtypes, is_sparse):
+    def _test_dtypes(self, cpu_dtypes, cuda_dtypes, layout):
         dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
 
         for dtype in dtypes:
             # no ops on torch.float16 currently, cuda.float16 doesn't work on windows
             if dtype != torch.float16:
                 if dtype.is_cuda and torch.cuda.device_count() > 1:
-                    out = torch.zeros((2, 3), device=1, dtype=dtype)
+                    out = torch.zeros((2, 3), device=1, dtype=dtype, layout=layout)
                     self.assertIs(dtype, out.dtype)
+                    self.assertIs(layout, out.layout)
                     self.assertEqual(1, out.get_device())
                 else:
-                    out = torch.zeros((2, 3), dtype=dtype)
+                    out = torch.zeros((2, 3), dtype=dtype, layout=layout)
                     self.assertIs(dtype, out.dtype)
+                    self.assertIs(layout, out.layout)
             self.assertEqual(dtype in cuda_dtypes, dtype.is_cuda)
-            self.assertEqual(is_sparse, dtype.is_sparse)
 
     def test_dtypes(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and not d.is_sparse]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and not d.is_sparse]
-        self._test_dtypes(self, cpu_dtypes, cuda_dtypes, False)
+        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda]
+        cuda_dtypes = [d for d in all_dtypes if d.is_cuda]
+        self._test_dtypes(self, cpu_dtypes, cuda_dtypes, torch.strided)
 
     @staticmethod
-    def _test_empty_full(self, cpu_dtypes, cuda_dtypes):
+    def _test_empty_full(self, cpu_dtypes, cuda_dtypes, layout):
         dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
         shape = torch.Size([2, 3])
 
-        def check_value(tensor, dtype, device, value, requires_grad):
+        def check_value(tensor, dtype, layout, device, value, requires_grad):
             self.assertEqual(shape, tensor.shape)
             self.assertIs(dtype, tensor.dtype)
+            self.assertIs(layout, tensor.layout)
             self.assertEqual(tensor.requires_grad, requires_grad)
             if tensor.is_cuda and device != -1:
                 self.assertEqual(device, tensor.get_device())
@@ -1323,43 +1325,44 @@ class TestTorch(TestCase):
                 return torch.int64
             return operator.attrgetter(module)(torch).int64
 
-        check_value(torch.empty(shape), torch.Tensor.dtype, -1, None, False)
-        check_value(torch.full(shape, -5), torch.Tensor.dtype, -1, None, False)
+        check_value(torch.empty(shape), torch.Tensor.dtype, torch.Tensor.layout, -1, None, False)
+        check_value(torch.full(shape, -5), torch.Tensor.dtype, torch.Tensor.layout, -1, None, False)
         for dtype in dtypes:
             for rg in [True, False]:
                 int64_dtype = get_int64_dtype(dtype)
                 device = -1 if not (dtype.is_cuda and torch.cuda.device_count() > 1) else 1
-                v = torch.empty(shape, dtype=dtype, device=device, requires_grad=rg)
-                check_value(v, dtype, device, None, rg)
+                v = torch.empty(shape, dtype=dtype, device=device, layout=layout, requires_grad=rg)
+                check_value(v, dtype, layout, device, None, rg)
                 out = v.new()
-                check_value(torch.empty(shape, out=out, device=device, requires_grad=rg),
-                            dtype, device, None, rg)
-                check_value(v.new_empty(shape), dtype, device, None, False)
+                check_value(torch.empty(shape, out=out, device=device, layout=layout, requires_grad=rg),
+                            dtype, layout, device, None, rg)
+                check_value(v.new_empty(shape), dtype, layout, device, None, False)
                 check_value(v.new_empty(shape, dtype=int64_dtype, device=device, requires_grad=rg),
-                            int64_dtype, device, None, rg)
-                check_value(torch.empty_like(v), dtype, device, None, False)
-                check_value(torch.empty_like(v, dtype=int64_dtype, device=device, requires_grad=rg),
-                            int64_dtype, device, None, rg)
+                            int64_dtype, layout, device, None, rg)
+                check_value(torch.empty_like(v), dtype, layout, device, None, False)
+                check_value(torch.empty_like(v, dtype=int64_dtype, layout=layout, device=device, requires_grad=rg),
+                            int64_dtype, layout, device, None, rg)
 
-                if dtype is not torch.float16 and not dtype.is_sparse:
+                if dtype is not torch.float16 and layout != torch.sparse_coo:
                     fv = 3
-                    v = torch.full(shape, fv, dtype=dtype, device=device, requires_grad=rg)
-                    check_value(v, dtype, device, fv, rg)
-                    check_value(v.new_full(shape, fv + 1), dtype, device, fv + 1, False)
+                    v = torch.full(shape, fv, dtype=dtype, layout=layout, device=device, requires_grad=rg)
+                    check_value(v, dtype, layout, device, fv, rg)
+                    check_value(v.new_full(shape, fv + 1), dtype, layout, device, fv + 1, False)
                     out = v.new()
-                    check_value(torch.full(shape, fv + 2, out=out, device=device, requires_grad=rg),
-                                dtype, device, fv + 2, rg)
+                    check_value(torch.full(shape, fv + 2, out=out, device=device, layout=layout, requires_grad=rg),
+                                dtype, layout, device, fv + 2, rg)
                     check_value(v.new_full(shape, fv + 3, dtype=int64_dtype, device=device, requires_grad=rg),
-                                int64_dtype, device, fv + 3, rg)
-                    check_value(torch.full_like(v, fv + 4), dtype, device, fv + 4, False)
-                    check_value(torch.full_like(v, fv + 5, dtype=int64_dtype, device=device, requires_grad=rg),
-                                int64_dtype, device, fv + 5, rg)
+                                int64_dtype, layout, device, fv + 3, rg)
+                    check_value(torch.full_like(v, fv + 4), dtype, layout, device, fv + 4, False)
+                    check_value(torch.full_like(v, fv + 5,
+                                                dtype=int64_dtype, layout=layout, device=device, requires_grad=rg),
+                                int64_dtype, layout, device, fv + 5, rg)
 
     def test_empty_full(self):
         all_dtypes = torch.testing.get_all_dtypes()
-        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda and not d.is_sparse]
-        cuda_dtypes = [d for d in all_dtypes if d.is_cuda and not d.is_sparse]
-        self._test_empty_full(self, cpu_dtypes, cuda_dtypes)
+        cpu_dtypes = [d for d in all_dtypes if not d.is_cuda]
+        cuda_dtypes = [d for d in all_dtypes if d.is_cuda]
+        self._test_empty_full(self, cpu_dtypes, cuda_dtypes, torch.strided)
 
     def test_dtype_out_match(self):
         d = torch.autograd.Variable(torch.DoubleTensor(2, 3))
@@ -1393,8 +1396,6 @@ class TestTorch(TestCase):
         # don't support integral or sparse default types.
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type('torch.IntTensor'))
         self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.int64))
-        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.sparse.int64))
-        self.assertRaises(TypeError, lambda: torch.set_default_tensor_type(torch.sparse.float64))
 
         torch.set_default_tensor_type(default_type)
 

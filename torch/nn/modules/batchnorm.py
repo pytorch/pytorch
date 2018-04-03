@@ -48,10 +48,9 @@ class _BatchNorm(Module):
             input, self.running_mean, self.running_var, self.weight, self.bias,
             self.training or not self.track_running_stats, self.momentum, self.eps)
 
-    def __repr__(self):
-        return ('{name}({num_features}, eps={eps}, momentum={momentum},'
-                ' affine={affine}, track_running_stats={track_running_stats})'
-                .format(name=self.__class__.__name__, **self.__dict__))
+    def extra_repr(self):
+        return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
+               'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
 
 class BatchNorm1d(_BatchNorm):
