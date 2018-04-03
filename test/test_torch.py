@@ -1325,8 +1325,9 @@ class TestTorch(TestCase):
                 return torch.int64
             return operator.attrgetter(module)(torch).int64
 
-        check_value(torch.empty(shape), torch.Tensor.dtype, torch.Tensor.layout, -1, None, False)
-        check_value(torch.full(shape, -5), torch.Tensor.dtype, torch.Tensor.layout, -1, None, False)
+        default_dtype = torch.get_default_dtype()
+        check_value(torch.empty(shape), default_dtype, torch.strided, -1, None, False)
+        check_value(torch.full(shape, -5), default_dtype, torch.strided, -1, None, False)
         for dtype in dtypes:
             for rg in [True, False]:
                 int64_dtype = get_int64_dtype(dtype)
@@ -1437,7 +1438,7 @@ class TestTorch(TestCase):
 
     def test_tensor_factory_type_inference(self):
         def test_inference(default_dtype):
-            saved_dtype = torch.Tensor.dtype
+            saved_dtype = torch.get_default_dtype()
             torch.set_default_tensor_type(default_dtype)
             self.assertIs(default_dtype, torch.tensor(()).dtype)
             self.assertIs(default_dtype, torch.tensor(5.).dtype)
@@ -1466,7 +1467,7 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
     def test_tensor_factory_cuda_type_inference(self):
-        saved_dtype = torch.Tensor.dtype
+        saved_dtype = torch.get_default_dtype()
         torch.set_default_tensor_type(torch.float32)
         self.assertIs(torch.float32, torch.tensor(0.).dtype)
         torch.set_default_tensor_type(torch.cuda.float64)
