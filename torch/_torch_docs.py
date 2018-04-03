@@ -5907,3 +5907,63 @@ Example::
     )
 
 """)
+
+add_docstr(torch.argmax, r"""
+    Returns the indices of the maximum values of a tensor across a dimension.
+
+    This is the second value returned by :meth:`torch.max`. See its
+    documentation for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int): the dimension to reduce
+        keepdim (bool): whether the output tensors have :attr:`dim` retained or not
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+
+         2.3461  0.0056  1.4846  0.3911
+        -1.3584 -1.0066  0.0530  1.1754
+        -0.7929 -0.3194 -1.4865  0.4020
+         0.1101  0.6694  1.3456  0.8235
+        [torch.FloatTensor of size (4,4)]
+
+        >>> torch.argmax(a, dim=1)
+        0
+        3
+        3
+        2
+        [torch.LongTensor of size (4,)]
+""")
+
+add_docstr(torch.argmin, r"""
+    Returns the indices of the minimum values of a tensor across a dimension.
+
+    This is the second value returned by :meth:`torch.min`. See its
+    documentation for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int): the dimension to reduce
+        keepdim (bool): whether the output tensors have :attr:`dim` retained or not
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+
+         2.3461  0.0056  1.4846  0.3911
+        -1.3584 -1.0066  0.0530  1.1754
+        -0.7929 -0.3194 -1.4865  0.4020
+         0.1101  0.6694  1.3456  0.8235
+        [torch.FloatTensor of size (4,4)]
+
+        >>> torch.argmin(a, dim=1)
+         1
+         0
+         2
+         0
+        [torch.LongTensor of size (4,)]
+""")
