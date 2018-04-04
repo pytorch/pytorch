@@ -135,6 +135,8 @@ Pointwise Ops
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: argmax
+.. autofunction:: argmin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
