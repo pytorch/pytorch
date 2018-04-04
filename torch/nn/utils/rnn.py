@@ -154,7 +154,8 @@ def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding
     return tuple(o for o in outputs)
 
 
-pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)(pack_padded_sequence)
+pack_padded_sequence = torch.onnx.symbolic_override_first_arg_based(
+    _symbolic_pack_padded_sequence)(pack_padded_sequence)
 
 
 def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
@@ -239,7 +240,7 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
 
     def pad_packed_sequence_trace_wrapper(data, batch_sizes):
         return pad_packed_sequence(PackedSequence(data, batch_sizes),
-                            batch_first=batch_first, padding_value=padding_value)
+                                   batch_first=batch_first, padding_value=padding_value)
 
     data, lengths = g.wrapPyFuncWithSymbolic(
         pad_packed_sequence_trace_wrapper, [input.data, input.batch_sizes], 2,
@@ -247,7 +248,8 @@ def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0
     return data, lengths
 
 
-pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(_symbolic_pad_packed_sequence)(pad_packed_sequence)
+pad_packed_sequence = torch.onnx.symbolic_override_packed_sequence_based(
+    _symbolic_pad_packed_sequence)(pad_packed_sequence)
 
 
 def pad_sequence(sequences, batch_first=False, padding_value=0):
