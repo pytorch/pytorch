@@ -384,6 +384,10 @@ int THCSTensor_(hasCSR)(THCState *state, const THCSTensor *self) {
 
 void THCSTensor_(uncoalesce)(THCState *state, THCSTensor *self) {
   self->coalesced = 0;
+  THCSTensor_(invalidateCSR)(state, self);
+}
+
+void THCSTensor_(invalidateCSR)(THCState *state, THCSTensor *self) {
   THCudaIntTensor_free(state, self->csr);
   self->csr = THCudaIntTensor_new(state);
 }

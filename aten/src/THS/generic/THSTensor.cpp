@@ -551,6 +551,10 @@ THSTensor *THSTensor_(newCoalesce)(THSTensor *self) {
 
 void THSTensor_(uncoalesce)(THSTensor *self) {
   self->coalesced = 0;
+  THSTensor_(invalidateCSR)(self);
+}
+
+void THSTensor_(invalidateCSR)(THSTensor *self) {
   THLongTensor_free(self->csr);
   self->csr = THLongTensor_new();
 }

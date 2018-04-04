@@ -197,6 +197,7 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   // index goes backwards) which may be more precise than using the
   // coalesced flag here.  But this is easy.
   r_->coalesced = t_coalesced && s_coalesced;
+  THSTensor_(invalidateCSR)(r_);
 
   THLongTensor_free(t_indices_);
   THTensor_(free)(t_values_);
@@ -266,6 +267,7 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t_, THSTensor *src_) {
 
   r_->nnz = r_i;
   r_->coalesced = 1;
+  THSTensor_(invalidateCSR)(r_);
 
   THLongTensor_free(t_indices_);
   THTensor_(free)(t_values_);

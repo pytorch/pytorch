@@ -402,6 +402,7 @@ void THCSTensor_(cadd)(THCState *state, THCSTensor *r_, THCSTensor *t, real valu
   THCTensor_(cat)(state, r_values_, t_values_, s_values_, 0);
   THCSTensor_(resizeAs)(state, r_, src);
   THCSTensor_(_move)(state, r_, r_indices_, r_values_);
+  THCSTensor_(uncoalesce)(state, r_);
 
   // FIXME: add some heuristic about when to call coalesce() here, so that
   // tensors don't totally blow up in size by concatenation; e.g.
@@ -470,6 +471,7 @@ void THCSTensor_(cmul)(THCState *state, THCSTensor *r_, THCSTensor *t_, THCSTens
   r_->nnz = THCudaLongStorage_get(state, resultNnz, 0);
   THCudaLongStorage_free(state, resultNnz);
   r_->coalesced = 1;
+  THCSTensor_(invalidateCSR)(state, r_);
 
   THCIndexTensor_(free)(state, t_indices_);
   THCTensor_(free)(state, t_values_);
