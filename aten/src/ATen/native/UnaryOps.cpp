@@ -28,7 +28,9 @@ Tensor& _ ## op ## _out_cuda(Tensor& result, const Tensor& self) {            \
 Tensor& _ ## op ## _out_cpu(Tensor& result, const Tensor& self) {             \
   if (result.is_contiguous() && self.is_contiguous()) {                       \
     result.resize_(self.sizes());                                             \
-    op ## Impl(result, self);                                                 \
+    if (result.numel() > 0) {                                                 \
+      op ## Impl(result, self);                                               \
+    }                                                                         \
     return result;                                                            \
   }                                                                           \
   return at::_ ## op ## _out(result, self);                                   \
