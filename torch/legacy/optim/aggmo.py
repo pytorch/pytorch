@@ -31,7 +31,7 @@ def aggmo(opfunc, x, config, state=None):
     lr = config.get('learningRate', 1e-3)
     lrd = config.get('learningRateDecay', 0)
     wd = config.get('weightDecay', 0)
-    mom = config.get('momentum', [0,0.9,0.99])
+    mom = config.get('momentum', [0, 0.9, 0.99])
     lrs = config.get('learningRates', None)
     wds = config.get('weightDecays', None)
     if 'evalCounter' not in state:
