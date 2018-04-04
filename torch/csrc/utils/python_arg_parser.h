@@ -273,30 +273,33 @@ inline const THPLayout& PythonArgs::layout(int i) {
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
-  return toInt64WithDefault(i, signature.params[i].default_int);
+  if (!args[i]) return signature.params[i].default_int;
+  return THPUtils_unpackLong(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i]) return default_int;
-  return THPUtils_unpackLong(args[i]);
+  return toInt64(i);
 }
 
 inline double PythonArgs::toDouble(int i) {
-  return toDoubleWithDefault(i, signature.params[i].default_double);
+  if (!args[i]) return signature.params[i].default_double;
+  return THPUtils_unpackDouble(args[i]);
 }
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i]) return default_double;
-  return THPUtils_unpackDouble(args[i]);
+  return toDouble(i);
 }
 
 inline bool PythonArgs::toBool(int i) {
-  return toBoolWithDefault(i, signature.params[i].default_bool);
+  if (!args[i]) return signature.params[i].default_bool;
+  return args[i] == Py_True;
 }
 
 inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {
   if (!args[i]) return default_bool;
-  return args[i] == Py_True;
+  return toBool(i);
 }
 
 inline bool PythonArgs::isNone(int i) {
