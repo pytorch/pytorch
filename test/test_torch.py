@@ -2551,10 +2551,10 @@ class TestTorch(TestCase):
 
     def test_randint(self):
         torch.manual_seed(123456)
-        res1 = torch.randint(3,6,(SIZE, SIZE))
+        res1 = torch.randint(3, 6, (SIZE, SIZE))
         res2 = torch.Tensor()
         torch.manual_seed(123456)
-        torch.randint(3,6,(SIZE, SIZE), out=res2)
+        torch.randint(3, 6, (SIZE, SIZE), out=res2)
         self.assertEqual(res1, res2)
 
     def test_slice(self):
