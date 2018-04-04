@@ -36,6 +36,12 @@
         ]
     },
     {
+        "algorithm": "aggmo",
+        "config": [
+            {}
+        ]
+    }
+    {
         "algorithm": "asgd",
         "config": [
             {},

@@ -2,6 +2,7 @@ from .adadelta import adadelta
 from .adagrad import adagrad
 from .adam import adam
 from .adamax import adamax
+from .aggmo import aggmo
 from .asgd import asgd
 from .cg import cg
 from .nag import nag
