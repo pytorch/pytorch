@@ -213,7 +213,7 @@ Tensor& randint_out(Tensor& result, int64_t high, IntList size, Generator* gener
 
 Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size, Generator* generator) {
   result.resize_(size);
-  return result.random_(0, high, generator);
+  return result.random_(low, high, generator);
 }
 
 Tensor randint_like(const Tensor& self, int64_t high) {

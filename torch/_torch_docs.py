@@ -4108,6 +4108,44 @@ Example::
 
 """)
 
+add_docstr(torch.randint,
+           r"""
+randn(low=0,high,sizes, out=None) -> Tensor
+
+Returns a tensor filled with random integers generated uniformly 
+between :attr:`low` (inclusive) and :attr:`high` (exclusive).
+
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
+
+Args:
+	low (int): Lowest (positive) integer to be drawn from the distribution.
+	high (int): One above the highest (positive) integer to be drawn from the distribution. 
+    sizes (int...): a tuple defining the shape of the output tensor (Note that (3) is not a tuple but integer, use (3,) as sizes).
+    out (Tensor, optional): the output tensor
+
+Example::
+
+	>>> torch.randint(3,5,(3,))
+
+	 4
+	 4
+	 3
+	[torch.FloatTensor of size (3,)]
+
+	>>> torch.randint(5,(2,2))
+
+	 3  0
+	 0  2
+	[torch.FloatTensor of size (2,2)]
+
+	>>> torch.randint(3,10,(2,2))
+
+	 6  8
+	 9  4
+	[torch.FloatTensor of size (2,2)]
+
+""")
+
 add_docstr(torch.randperm,
            r"""
 randperm(n, out=None) -> LongTensor
