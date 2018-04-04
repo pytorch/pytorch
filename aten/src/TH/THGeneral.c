@@ -254,7 +254,7 @@ void THFree(void *ptr)
 
 double THLog10(const double x)
 {
-  return log10(x)
+  return log10(x);
 }
 
 double THLog1p(const double x)
