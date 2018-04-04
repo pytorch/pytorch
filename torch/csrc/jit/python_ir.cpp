@@ -10,7 +10,6 @@
 
 namespace torch { namespace jit {
 
-
 void initPythonIRBindings(PyObject * module_) {
   auto m = py::handle(module_).cast<py::module>();
   #define GS(name) \
@@ -23,6 +22,15 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .def("wrapPyFuncWithSymbolic", [](Graph &g, py::function func, std::vector<Value*> inputs, size_t n_outputs, py::function symbolic) {
+      // This function should be used for situations where we have a Python function
+      // that should have different behavior when exporting for JIT interpreter
+      // execution v.s. for ONNX export. For example, nn.utils.rnn.pack_padded_sequence
+      // emits a placeholder under ONNX export, but we want to keep the ability to
+      // run this in the interpreter, thus we emit a PythonOp for that use case.
+
+      // Concretely, this function emits a PythonOp wrapping the passed-in
+      // parameter `func`, while storing the function `symbolic` for use by the
+      // ONNX export
       std::string cconv(inputs.size(), 't');
       func.attr("symbolic") = symbolic;
       Node* new_node = g.insertNode(g.createPythonOp(
@@ -32,10 +40,8 @@ void initPythonIRBindings(PyObject * module_) {
       std::vector<Value*> outputs;
       for (size_t i = 0; i < n_outputs; ++i)
         new_node->addOutput();
-#ifndef NO_PYTHON
       auto sl = std::make_shared<StringSourceLocation>(tracer::getPythonInterpreterStackTrace());
       new_node->setSourceLocation(sl);
-#endif
       return py::make_iterator(new_node->outputs().begin(), new_node->outputs().end());
     }, py::return_value_policy::reference_internal)
     .def("inputs",[](Graph &g) {
