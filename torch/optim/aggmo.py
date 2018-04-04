@@ -66,5 +66,5 @@ class AggMo(Optimizer):
                 for beta in momentum:
                     buf = param_state['momentum_buffer'][beta]
                     buf.mul_(beta).add_(d_p)
-                    p.data.sub_(group['lr'] / total_mom , buf)
+                    p.data.sub_(group['lr'] / total_mom, buf)
         return loss
