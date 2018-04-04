@@ -1,5 +1,4 @@
 from collections import namedtuple
-from functools import partial
 
 import torch
 from torch.autograd import Variable
