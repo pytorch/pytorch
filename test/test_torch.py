@@ -398,7 +398,10 @@ class TestTorch(TestCase):
                 return float('-inf')
             elif x < 0:
                 return float('nan')
-            return math.log2(x)
+            try:
+                return math.log2(x)
+            except AttributeError:
+                return math.log(x, 2)
         self._test_math(torch.log2, log2)
 
     def test_sqrt(self):
