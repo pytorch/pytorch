@@ -2341,21 +2341,31 @@ class TestScript(TestCase):
             m(torch.zeros(4, 3))
 
     def test_rnn_trace_override(self):
-        from torch.nn.utils.rnn import pack_padded_sequence
+        from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+        T, B, C = 3, 5, 7
         class PadPackedWrapper(torch.nn.Module):
             def __init__(self):
                 super(PadPackedWrapper, self).__init__()
+                self.rnn = torch.nn.LSTM(input_size=7, hidden_size=13,
+                                         num_layers=3, bias=True,
+                                         batch_first=False, dropout=0,
+                                         bidirectional=True)
 
             def forward(self, x, seq_lens):
-                packed_input, batch_sizes = pack_padded_sequence(x, seq_lens)
-                return packed_input
+                x = pack_padded_sequence(x, seq_lens)
+                x, _ = self.rnn(x, None)
+                x, _ = pad_packed_sequence(x)
+                return x
 
-        T, B, C = 3, 5, 7
         x = torch.zeros(T, B, C)
         seq_lens = torch.ones(B, dtype=torch.int32)
-        m = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
-        mod_outs = m(x, seq_lens)
+        m = PadPackedWrapper()
+        m_traced = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
+        mod_outs = m_traced(x, seq_lens)
         self.assertEqual(mod_outs, pack_padded_sequence(x, seq_lens)[0])
+
+        f = io.BytesIO()
+        torch.onnx._export(m, (x, seq_lens), f, verbose=False)
 
 
 # Smoke tests for export methods

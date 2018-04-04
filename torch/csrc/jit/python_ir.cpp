@@ -32,6 +32,10 @@ void initPythonIRBindings(PyObject * module_) {
       std::vector<Value*> outputs;
       for (size_t i = 0; i < n_outputs; ++i)
         new_node->addOutput();
+#ifndef NO_PYTHON
+      auto sl = std::make_shared<StringSourceLocation>(tracer::getPythonInterpreterStackTrace());
+      new_node->setSourceLocation(sl);
+#endif
       return py::make_iterator(new_node->outputs().begin(), new_node->outputs().end());
     }, py::return_value_policy::reference_internal)
     .def("inputs",[](Graph &g) {
