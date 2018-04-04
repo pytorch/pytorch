@@ -1,0 +1,8 @@
+# This is a comment.
+# Each line is a file pattern followed by one or more owners.
+
+# Owners of the aten directory
+/aten/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+
+# Owners of the torch directory
+/torch/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
