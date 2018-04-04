@@ -83,9 +83,10 @@ class WeightedRandomSampler(Sampler):
     """
 
     def __init__(self, weights, num_samples, replacement=True):
-        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool):
-            raise ValueError("num_samples should be an integeral value, but "
-                             "got num_samples={}".format(num_samples))
+        if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
+                num_samples <= 0:
+            raise ValueError("num_samples should be a positive integeral "
+                             "value, but got num_samples={}".format(num_samples))
         if not isinstance(replacement, bool):
             raise ValueError("replacement should be a boolean value, but got"
                              "got replacement={}".format(replacement))
@@ -121,9 +122,10 @@ class BatchSampler(object):
             raise ValueError("sampler should be an instance of "
                              "torch.utils.data.Sampler, but got sampler={}"
                              .format(sampler))
-        if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool):
-            raise ValueError("batch_size should be an integeral value, but "
-                             "got batch_size={}".format(batch_size))
+        if not isinstance(batch_size, _int_classes) or isinstance(batch_size, bool) or \
+                batch_size <= 0:
+            raise ValueError("batch_size should be a positive integeral value, "
+                             "but got batch_size={}".format(batch_size))
         if not isinstance(drop_last, bool):
             raise ValueError("drop_last should be a boolean value, but got"
                              "got drop_last={}".format(drop_last))
