@@ -25,26 +25,31 @@ macro(custom_protobuf_find)
     add_definitions(-DPROTOBUF_USE_DLLS)
   endif()
 
-  # We will need to build protobuf with -fPIC.
+  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+    set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
+    set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
+    set(BUILD_SHARED_LIBS OFF)
+    if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
+    endif()
+    if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility-inlines-hidden")
+    endif()
+  endif()
+
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
-  set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
-  set(__caffe2_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS OFF)
-  set(BUILD_SHARED_LIBS OFF)
-  if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility=hidden")
-  endif()
-  if (${COMPILER_SUPPORTS_HIDDEN_INLINE_VISIBILITY})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fvisibility-inlines-hidden")
-  endif()
 
   add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
-  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
-  set(BUILD_SHARED_LIBS ON)
-  set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
+
+  if (${CAFFE2_LINK_LOCAL_PROTOBUF})
+    set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
+    set(BUILD_SHARED_LIBS ON)
+    set(CMAKE_CXX_FLAGS ${__caffe2_CMAKE_CXX_FLAGS})
+  endif()
 
   # Protobuf "namespaced" target is only added post protobuf 3.5.1. As a
   # result, for older versions, we will manually add alias.
