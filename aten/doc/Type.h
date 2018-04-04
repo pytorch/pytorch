@@ -318,15 +318,9 @@ struct AT_API Type {
   virtual Tensor & log_(Tensor & self) const;
   virtual Tensor & log_out(Tensor & result, const Tensor & self) const;
   virtual Tensor log(const Tensor & self) const;
-  virtual Tensor & log10_(Tensor & self) const;
-  virtual Tensor & log10_out(Tensor & result, const Tensor & self) const;
-  virtual Tensor log10(const Tensor & self) const;
   virtual Tensor & log1p_(Tensor & self) const;
   virtual Tensor & log1p_out(Tensor & result, const Tensor & self) const;
   virtual Tensor log1p(const Tensor & self) const;
-  virtual Tensor & log2_(Tensor & self) const;
-  virtual Tensor & log2_out(Tensor & result, const Tensor & self) const;
-  virtual Tensor log2(const Tensor & self) const;
   virtual Tensor & lgamma_out(Tensor & result, const Tensor & self) const;
   virtual Tensor lgamma(const Tensor & self) const;
   virtual Tensor & lgamma_(Tensor & self) const;

@@ -220,12 +220,8 @@ struct Tensor : public detail::TensorBase {
   Tensor sigmoid() const;
   Tensor & log_();
   Tensor log() const;
-  Tensor & log10_();
-  Tensor log10() const;
   Tensor & log1p_();
   Tensor log1p() const;
-  Tensor & log2_();
-  Tensor log2() const;
   Tensor lgamma() const;
   Tensor & lgamma_();
   Tensor digamma() const;

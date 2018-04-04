@@ -115,10 +115,6 @@ static inline Tensor & log_out(Tensor & result, const Tensor & self);
 static inline Tensor log(const Tensor & self);
 static inline Tensor & log1p_out(Tensor & result, const Tensor & self);
 static inline Tensor log1p(const Tensor & self);
-static inline Tensor & log2_out(const & result, const Tensor & self);
-static inline Tensor log2(const Tensor & self);
-static inline Tensor & log10_out(const & result, const Tensor & self);
-static inline Tensor log10(const Tensor & self);
 static inline Tensor & lgamma_out(Tensor & result, const Tensor & self);
 static inline Tensor lgamma(const Tensor & self);
 static inline Tensor & digamma_out(Tensor & result, const Tensor & self);
@@ -1118,23 +1114,11 @@ static inline Tensor & log_out(Tensor & result, const Tensor & self) {
 static inline Tensor log(const Tensor & self) {
     return infer_type(self).log(self);
 }
-static inline Tensor log10_out(const Tensor & result, const Tensor & self) {
-    return infer_type(self).log10_out(result, self);
-}
-static inline Tensor log10(const Tensor & self) {
-    return infer_type(self).log10(self);
-}
 static inline Tensor & log1p_out(Tensor & result, const Tensor & self) {
     return infer_type(self).log1p_out(result, self);
 }
 static inline Tensor log1p(const Tensor & self) {
     return infer_type(self).log1p(self);
-}
-static inline Tensor log2_out(const Tensor & result, const Tensor & self) {
-    return infer_type(self).log2_out(result, self);
-}
-static inline Tensor log2(const Tensor & self) {
-    return infer_type(self).log2(self);
 }
 static inline Tensor & lgamma_out(Tensor & result, const Tensor & self) {
     return infer_type(self).lgamma_out(result, self);
