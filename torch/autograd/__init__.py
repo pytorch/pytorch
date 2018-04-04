@@ -13,7 +13,7 @@ from .gradcheck import gradcheck
 from .grad_mode import no_grad, enable_grad, set_grad_enabled
 from . import profiler
 
-__all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable', 'is_checkpoint_valid']
+__all__ = ['Variable', 'Function', 'backward', 'grad_mode', 'variable']
 
 
 def _make_grads(outputs, grads):

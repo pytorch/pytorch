@@ -196,15 +196,13 @@ PyObject* THPEngine_queue_callback(PyObject *self, PyObject *_callback) {
 }
 
 PyObject* THPEngine_is_checkpoint_valid(PyObject *self) {
-  try {
-    if(engine.is_checkpoint_valid()) {
-      Py_RETURN_TRUE;
-    } else {
-      Py_RETURN_FALSE;
-    }
-  } catch (python_error& e) {
-    throw e;
+  HANDLE_TH_ERRORS
+  if(engine.is_checkpoint_valid()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
   }
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject *THPEngine_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)

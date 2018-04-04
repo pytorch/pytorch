@@ -8,7 +8,8 @@ def detach_variable(inputs):
     elif isinstance(inputs, tuple):
         return tuple(detach_variable(v) for v in inputs)
     else:
-        raise RuntimeError("Unsupported input type: ", type(inputs).__name__)
+        raise RuntimeError(
+            "Only tensor or tuple of tensors is supported. Got Unsupported input type: ", type(inputs).__name__)
 
 
 class CheckpointFunction(torch.autograd.Function):
@@ -23,19 +24,16 @@ class CheckpointFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *args):
-        assert (torch.autograd.is_checkpoint_valid()), \
-            "Checkpointing is not compatible with .grad(), please use .backward() if possible"
+        if (not torch.autograd.is_checkpoint_valid()):
+            raise RuntimeError("Checkpointing is not compatible with .grad(), please use .backward() if possible")
         inputs = ctx.saved_tensors
         inputs_list = detach_variable(inputs)
         with torch.enable_grad():
             outputs = ctx.run_function(*inputs_list)
 
-        if isinstance(outputs, tuple):
-            output_list = list(outputs)
-        elif torch.is_tensor(outputs):
-            output_list = [outputs]
-        out_grads = [grad for grad in args]
-        torch.autograd.backward(output_list, out_grads)
+        if torch.is_tensor(outputs):
+            outputs = (outputs,)
+        torch.autograd.backward(outputs, args)
 
         input_grads = None
         if isinstance(inputs_list, tuple):
@@ -50,13 +48,14 @@ def checkpoint(run_function, *args):
     r"""Checkpoint a model or part of the model
 
     Checkpoint works by trading compute for memory. It can be applied on any
-    part of the model. In the forward pass, the model is run in volatile
-    manner i.e. the activations are not stored. The forward pass save the
-    inputs tuple and the run_function parameter. In the backwards pass, the
-    saved inputs and run_function is retreived, and the forward pass is done
-    on the model again (non-volatile this time) since we need to get the
-    activations values for calculating the gradient and then the gradients are
-    calculated.
+    part of the model. In the forward pass, the model activations are not
+    stored. The forward pass save the inputs tuple and the run_function
+    parameter. In the backwards pass, the saved inputs and run_function is
+    retreived, and the forward pass is done on the model again (non-volatile
+    this time) since we need to get the activations values for calculating the
+    gradient and then the gradients are calculated.
+    WARNING: checkpointing doesn't work with torch.autograd.grad(), but only with
+    torch.autograd.backward()
 
     Args:
         run_function : describes what to run in the forward pass of the model or
@@ -85,11 +84,7 @@ def checkpoint_sequential(modules, segments, *inputs):
 
     Args:
         modules: The sequence of modules (comprising the model) to run in order.
-                 Usually
-                    modules = [module for k, module in self._modules.items()][0]
-
         segments: Number of times chunks to create in the model
-
         inputs: tuple containing the inputs to run_function
 
     Returns:
