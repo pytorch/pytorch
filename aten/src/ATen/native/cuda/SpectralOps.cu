@@ -176,29 +176,6 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 // tensors being contiguous, and that the strides at the innermost signal
 // dimension being unit (1) w.r.t. the corresponding data type.
 
-// Returns `embed` values if `stride` can be viewed as embedded.
-// See [ NOTE ] cuFFT Embedded Strides.
-template <typename T>
-__forceinline__
-static at::optional<std::vector<T>> is_embedded_strides(IntList strides) {
-  auto n = strides.size();
-  std::vector<T> embed(n);
-  auto last_stride = strides[n - 1];
-  if (last_stride <= 0) {
-    return at::nullopt;
-  }
-  for (auto i = n - 1; i > 0 /* embed[0] doesn't matteer */; i--) {
-    auto stride = strides[i - 1];
-    if (stride > 0 && stride % last_stride == 0) {
-      embed[i] = stride / last_stride;
-      last_stride = stride;
-    } else {
-      return at::nullopt;
-    }
-  }
-  return embed;
-}
-
 // cuFFT
 // Currently not utilizing multi GPUs so this potentially speed up.
 Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
@@ -271,27 +248,43 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   if (complex_input) {
     // Real/imag dimension must be like complex type.
     clone_input |= input.stride(-1) != 1;
-    // Strides of other dimensions needs to be aligned when viewed as of
-    // complex type, i.e., multiples of 2. We check the batch dim and last
-    // signal dim here. If the input can be viewed as having embedded strides,
-    // the other signal dims will also satisfy this.
+    // Strides of other dimensions needs to be aligned when viewed as of complex
+    // type, i.e., multiples of 2. We check the batch dim and last signal dim
+    // here. If the input can be viewed as having embedded strides, the other
+    // signal dims will also satisfy this.
     // See [ NOTE ] cuFFT Embedded Strides.
     clone_input |= (batch > 0 && input.stride(0) % 2 != 0) ||
                     input.stride(signal_ndim) % 2 != 0;
   }
 
-  at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
+  // Checks if input strides can be viewed as embedded.
+  // See [ NOTE ] cuFFT Embedded Strides.
+  //
+  // TODO: Figure out why windows fails to compile
+  //         at::optional<std::vector<long long int>> inembed_opt = at::nullopt;
+  //       Then move the following to a helper function.
+  std::vector<long long int>inembed(signal_ndim);
   if (!clone_input) {
-    inembed_opt = is_embedded_strides<long long int>(input.strides().slice(1, signal_ndim));
-    clone_input = !inembed_opt;
+    auto istrides = input.strides();
+    auto last_istride = istrides[signal_ndim];
+    clone_input = last_istride <= 0;
+    for (auto i = signal_ndim - 1; !clone_input && i > 0 /* inembed[0] doesn't matteer */; i--) {
+      auto istride = istrides[i];
+      if (istride > 0 && istride % last_istride == 0) {
+        inembed[i] = istride / last_istride;
+        last_istride = istride;
+      } else {
+        clone_input = true;
+      }
+    }
   }
 
   // Check if we can take advantage of simple data layout.
   //
-  // Note that this is actually before cloning. This is intentional so we can
+  // Note that this is before the actual cloning. This is intentional so we can
   // check for advanced data layout with complex-to-real transform. cuFFT
   // out-of-place complex-to-real transforms with advanced layout may overwrite
-  // input.
+  // input, and we need to clone the input.
   //
   // This just needs contiguity in cases except for twosided real-to-complex
   // transform where we won't have simple data layout as output is two sided.
@@ -311,7 +304,9 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     if (!simple_layout) {
       // If advanced layout, copy new input sizes to inemed
       auto input_size = input.sizes();
-      inembed_opt.emplace(input_size.begin() + 1, input_size.begin() + signal_ndim + 1);
+      std::copy(input_size.begin() + 1,                // begin of signal dim in input
+                input_size.begin() + signal_ndim + 1,  // end of signal dim in input
+                inembed.begin());                      // begin of output
     }
   }
 
@@ -369,8 +364,8 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     long long int base_ostride = 1;
 
     CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
-      inembed_opt->data(), base_istride, idist, itype,
-      onembed.data()     , base_ostride, odist, otype,
+      inembed.data(), base_istride, idist, itype,
+      onembed.data(), base_ostride, odist, otype,
       batch, &ws, exec_type));
   }
 
