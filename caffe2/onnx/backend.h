@@ -125,6 +125,8 @@ class Caffe2Backend {
       bool include_initializers,
       const std::vector<Caffe2Ops>& extras);
 
+  void CheckOpSchemaArguments(const caffe2::OpSchema& schema, const caffe2::OperatorDef& op);
+
   Caffe2Ops OnnxNodeToCaffe2Ops(
       const ModelProto& init_model,
       const ModelProto& pred_model,
