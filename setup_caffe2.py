@@ -137,6 +137,7 @@ class cmake_build(Caffe2Command):
                 '-DBUILD_TEST=OFF',
                 '-DBUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
+                '-DBUILD_CUSTOM_PROTOBUF=OFF',
             ]
             if NINJA:
                 cmake_args.extend(['-G', 'Ninja'])
