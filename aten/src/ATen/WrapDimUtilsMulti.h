@@ -12,7 +12,7 @@ namespace at {
 
 constexpr size_t dim_bitset_size = 64;
 
-static inline std::bitset<dim_bitset_size> dim_list_to_vector(IntList dims, int64_t ndims, bool wrap_scalar=true) {
+static inline std::bitset<dim_bitset_size> dim_list_to_bitset(IntList dims, int64_t ndims, bool wrap_scalar=true) {
   AT_ASSERT(ndims <= (int64_t) dim_bitset_size, "tensor dimension must be <= %zu for multiple dims", dim_bitset_size);
   std::bitset<dim_bitset_size> seen;
   for (size_t i = 0; i < dims.size(); i++) {

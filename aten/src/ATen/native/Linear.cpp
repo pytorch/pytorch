@@ -2,10 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
 
-namespace at { namespace
-
-
-native {
+namespace at { namespace native {
 
 Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed
@@ -45,6 +42,7 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   std::vector<int64_t> out_size;
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
+  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
   for (auto& d : ro) out_size.push_back(right.size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -57,38 +55,41 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   rpermutation.insert(rpermutation.end(), ro.begin(), ro.end());
   rpermutation.insert(rpermutation.end(), lo.begin(), lo.end());
 
-  std::vector<int64_t> opermutation(lro.size()+lo.size()+ro.size(), -1);
+  std::vector<int64_t> opermutation(lro.size()+lo.size()+sum_dims_.size()+ro.size(), -1);
   {
   int64_t i = 0;
 
-  for (auto it = lro.begin(); it != lro.end(); i++, it++)
+  for (auto it = lro.begin(); it != lro.end(); i++, it++) {
     opermutation[*it] = i;
-  for (auto it = lo.begin(); it != lo.end(); i++, it++)
-    opermutation[(*it)+lro.size()] = i;
-  for (auto it = ro.begin(); it != ro.end(); i++, it++)
-    opermutation[(*it)+lro.size()+lo.size()] = i;
+  }
+  for (auto it = lo.begin(); it != lo.end(); i++, it++) {
+    opermutation[*it] = i;
+  }
+  for (auto it = sum_dims_.begin(); it != sum_dims_.end(); i++, it++) {
+    opermutation[*it] = i;
+  }
+  for (auto it = ro.begin(); it != ro.end(); i++, it++) {
+    opermutation[*it] = i;
+  }
   }
 
   left = left.permute(lpermutation).reshape({lro_size, lo_size, sum_size});
   right = right.permute(rpermutation).reshape({lro_size, sum_size, ro_size});
   Tensor result = at::bmm(left, right);
-  result = result.view(out_size).reshape(opermutation);
-  if (keepdim) {
-    for (int i = 0; i < dim; i++)
+  result = result.view(out_size).permute(opermutation);
+  if (! keepdim) {
+    for (int i = dim-1; i>=0; i--)
       if (sum_dims[i])
-	result.unsqueeze_(i);
+	result.squeeze_(i);
   }
   return result;
 }
-
-    //static inline std::bitset<dim_bitset_size> dim_list_to_vector(IntList dims, int64_t ndims, bool wrap_scalar=true) {
 
 Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 		 IntList expand1_, IntList expand2_, IntList expand3_,
 		 IntList sumdim_) {
   int64_t unroll_dim  = 1;
   int64_t total_dim = i1_.dim()+expand1_.size();
-  std::cout << "totdim" << total_dim << std::endl;
   auto expand1 = dim_list_to_vector(expand1_, total_dim);
   auto expand2 = dim_list_to_vector(expand2_, total_dim);
   auto expand3 = dim_list_to_vector(expand3_, total_dim);
@@ -121,28 +122,35 @@ Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
       if (sumdim[i] && (i != unroll_dim))
 	sum_dims_23.push_back(i);
     }
-    if (! sumdim[i])
-      output_size.push_back(s);
+    output_size.push_back(sumdim[i] ? 1 : s);
     if (i == unroll_dim)
       unroll_size = s;
   }
-  
+  int64_t slicemul1 = (expand1[unroll_dim] ? 0 : 1);
+  int64_t slicemul2 = (expand2[unroll_dim] ? 0 : 1);
+  int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
+
   auto output = i1.type().tensor(output_size).zero_();
   if (! sumdim[unroll_dim]) {
-    for (int64_t i = 0; i < unroll_size; i++) {
-      Tensor buf = sumproduct_pair(i1, i2, sum_dims_12, true);
-      buf = sumproduct_pair(buf, i3, sum_dims_23, true);
-      output.add_(buf);
+    for (int64_t k = 0; k < unroll_size; k++) {
+      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
+					       i2.narrow(unroll_dim, k * slicemul2, 1),
+					       sum_dims_12, true);
+      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+      output.narrow(unroll_dim, k, 1).add_(buf);
     }
   }
   else {
-    std::cout << "hello4" << std::endl;
-    for (int64_t i = 0; i < unroll_size; i++) {
-      Tensor buf = sumproduct_pair(i1, i2, sum_dims_12, true);
-      buf = sumproduct_pair(buf, i3, sum_dims_23, true);
+    for (int64_t k = 0; k < unroll_size; k++) {
+      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
+					       i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
       output.add_(buf);
     }
   }
+  for (int64_t i = 0; i < output.dim(); i++)
+    if (sumdim[i])
+      output.squeeze_(i);
   return output;
 }
 
@@ -164,49 +172,7 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
             "bilinear(): bias size does not match weight size: got %lld but expected %lld",
             (long long)bias.size(0), (long long)weight.size(0));
 
-  Tensor output = trilinear(input1, weight, input2, {1,3},{0},{1,2},{2,3});
-  if (bias.defined()) {
-    output = output + bias;
-  }
-  return output;
-  
-}
-
-Tensor bilinear2(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
-  AT_ASSERT(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got %lld and %lld",
-            (long long)input1.dim(), (long long)input2.dim());
-  for (int64_t i = 0; i < input1.dim() - 1; i++) {
-    AT_ASSERT(input1.size(i) == input2.size(i),
-              "bilinear(): input batch dimensions do not match at dim %lld: got %lld and %lld",
-              (long long)i, (long long)input1.size(i), (long long)input2.size(i));
-  }
-  AT_ASSERT(input1.size(input1.dim() - 1) == weight.size(1),
-            "bilinear(): input1 size does not match weight size: got %lld but expected %lld",
-            (long long)input1.size(input1.dim() - 1), (long long)weight.size(1));
-  AT_ASSERT(input2.size(input2.dim() - 1) == weight.size(2),
-            "bilinear(): input2 size does not match weight size: got %lld but expected %lld",
-            (long long)input2.size(input2.dim() - 1), (long long)weight.size(2));
-  AT_ASSERT(!bias.defined() || bias.size(0) == weight.size(0),
-            "bilinear(): bias size does not match weight size: got %lld but expected %lld",
-            (long long)bias.size(0), (long long)weight.size(0));
-
-  std::vector<int64_t> output_size;
-  auto size1 = input1.sizes();
-  output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
-  output_size.push_back(weight.size(0));
-
-  auto output = input1.type().tensor(output_size);
-  auto buf = input1.type().tensor(input2.sizes());
-
-  size_t output_features = weight.size(0);
-  auto input1_flattened = input1.view({-1, input1.size(-1)});
-  auto buf_flattened = buf.view({-1, buf.size(-1)});
-  for (size_t k = 0; k < output_features; k++) {
-    at::mm_out(buf_flattened, input1_flattened, weight[k]);
-    buf.mul_(input2);
-    auto output_col = output.narrow(-1, k, 1);
-    sum_out(output_col, buf, -1, true);
-  }
+  Tensor output = trilinear(input1, weight, input2, {1,3}, {0}, {1,2}, {2,3});
   if (bias.defined()) {
     output = output + bias;
   }
