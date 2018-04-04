@@ -175,7 +175,7 @@ class TestConversion(TestCase):
 
     # TODO investigate why this is failing after changing Reshape
     # operator from taking the new shape as attribute to as input
-    @unittest.skip
+    @unittest.skip('Start failing after Reshape op change')
     def test_convert_end2end(self):
         predict_net_f = tempfile.NamedTemporaryFile()
         init_net_f = tempfile.NamedTemporaryFile()
