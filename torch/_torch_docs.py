@@ -2387,7 +2387,7 @@ Example::
 
 add_docstr(torch.log10,
            r"""
-log(input, out=None) -> Tensor
+log10(input, out=None) -> Tensor
 
 Returns a new tensor with the logarithm to the base 10 of the elements
 of :attr:`input`.
@@ -2401,7 +2401,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(5)
+    >>> a = torch.rand(5)
     >>> a
 
      0.4496
@@ -2462,7 +2462,7 @@ Example::
 
 add_docstr(torch.log2,
            r"""
-log(input, out=None) -> Tensor
+log2(input, out=None) -> Tensor
 
 Returns a new tensor with the logarithm to the base 2 of the elements
 of :attr:`input`.
@@ -2476,7 +2476,7 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(5)
+    >>> a = torch.rand(5)
     >>> a
 
      0.2260
@@ -2486,7 +2486,7 @@ Example::
      0.0058
     [torch.FloatTensor of size (5,)]
 
-    >>> torch.log10(a)
+    >>> torch.log2(a)
 
     -2.1458
     -4.2070
