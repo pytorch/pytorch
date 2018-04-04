@@ -223,6 +223,7 @@ class TensorRTTransformTest(TestCase):
         pred_net.device_option.CopyFrom(device_option)
         for op in pred_net.op:
             op.device_option.CopyFrom(device_option)
+            op.engine = 'CUDNN'
         net_outputs = pred_net.external_output
         Y_c2 = None
         data =  np.random.randn(*input_blob_dims).astype(np.float32)

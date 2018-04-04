@@ -106,14 +106,10 @@ bool TensorRTOp::RunOnDevice() {
           N, tensor_dims.front(), "Mismatched batch size in input tensors");
     }
   }
-
-  // Input size check and output allocation
-  for (auto i = 0; i < is_input_.size(); ++i) {
-    const auto& dims = nv_dims_[i];
-    if (is_input_[i]) {
-      // Check input dimensions
-
-    }
+  if (N > max_batch_size_) {
+    LOG(WARNING) << "Batch size (" << N << ") is larger than max_batch_size ("
+                 << max_batch_size_ << ") optimized for TensorRT operator. "
+                 << "Performance may be sub-optimal.";
   }
 
   // We need to do the binding at RunOnDevice time because we only know the
