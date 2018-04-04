@@ -195,8 +195,8 @@ class RNNBase(Module):
             output = PackedSequence(output, batch_sizes)
         return output, hidden
 
-    def __repr__(self):
-        s = '{name}({input_size}, {hidden_size}'
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
         if self.num_layers != 1:
             s += ', num_layers={num_layers}'
         if self.bias is not True:
@@ -207,8 +207,7 @@ class RNNBase(Module):
             s += ', dropout={dropout}'
         if self.bidirectional is not False:
             s += ', bidirectional={bidirectional}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     def __setstate__(self, d):
         super(RNNBase, self).__setstate__(d)
@@ -487,14 +486,13 @@ class GRU(RNNBase):
 
 class RNNCellBase(Module):
 
-    def __repr__(self):
-        s = '{name}({input_size}, {hidden_size}'
+    def extra_repr(self):
+        s = '{input_size}, {hidden_size}'
         if 'bias' in self.__dict__ and self.bias is not True:
             s += ', bias={bias}'
         if 'nonlinearity' in self.__dict__ and self.nonlinearity != "tanh":
             s += ', nonlinearity={nonlinearity}'
-        s += ')'
-        return s.format(name=self.__class__.__name__, **self.__dict__)
+        return s.format(**self.__dict__)
 
     def check_forward_input(self, input):
         if input.size(1) != self.input_size:

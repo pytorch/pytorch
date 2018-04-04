@@ -549,7 +549,11 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   std::string type_name;
   bool is_dtype = false;
   if (PyType_Check(obj)) {
-    type_name = ((PyTypeObject*)obj)->tp_name;
+    if (obj == THPVariableClass) {
+      type_name = "torch.Tensor";
+    } else {
+      type_name = ((PyTypeObject*)obj)->tp_name;
+    }
   } else if (THPUtils_checkString(obj)) {
     type_name = THPUtils_unpackString(obj);
   } else if (THPDtype_Check(obj)) {
@@ -557,7 +561,8 @@ static PyObject * THPVariable_type(PyObject* self, PyObject* args, PyObject* kwa
   } else {
     throw TypeError("dtype must be a type, str, or dtype object");
   }
-  auto& type = is_dtype ? r.type(0) : torch::utils::type_from_string(type_name);
+  auto& type = is_dtype ? torch::getType(r.dtype(0), *torch::getLayout(self_.type().backend())) :
+                          torch::utils::type_from_string(type_name);
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, -1, r.toBool(1)));
   END_HANDLE_TH_ERRORS
 }

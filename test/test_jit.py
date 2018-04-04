@@ -14,6 +14,8 @@ import unittest
 import inspect
 import textwrap
 import numpy as np
+import tempfile
+import shutil
 
 from torch.jit.frontend import NotSupportedError
 
@@ -1475,7 +1477,6 @@ class TestScript(TestCase):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize)
             ge = getattr(cu, name)
-            self.assertIsNotNone(outputs)
         else:
             if capture_output:
                 with self.capture_stdout() as captured:
@@ -1804,6 +1805,25 @@ class TestScript(TestCase):
         a = torch.randn(6)
         self.checkScript(func, [a], optimize=True)
 
+    def test_return(self):
+        def no_return(a):
+            a + 1
+
+        def void_return(a):
+            return
+
+        def one_return(a):
+            return a + 1.
+
+        def multiple_returns(a):
+            return a * 1., a * 2., a * 3.
+
+        a = torch.randn(1, dtype=torch.float)
+        self.checkScript(no_return, [a], optimize=True)
+        self.checkScript(void_return, [a], optimize=True)
+        self.checkScript(one_return, [a], optimize=True)
+        self.checkScript(multiple_returns, [a], optimize=True)
+
     def test_error(self):
         @torch.jit.script
         def foo(a):
@@ -2020,6 +2040,65 @@ class TestScript(TestCase):
         self.assertEqual(o, m.sub(input))
         with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
             m.sub = nn.Linear(5, 5)
+
+    def test_script_inline_trace_multiple_args(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            def forward(self, input, input2):
+                return input + input2
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                self.m = torch.jit.trace(torch.zeros(4, 3), torch.zeros(4, 3))(M())
+
+            @torch.jit.script_method
+            def forward(self, inp):
+                return self.m(inp, inp)
+
+        m2 = M2()
+        m2(torch.zeros(4, 3))
+
+
+# Smoke tests for export methods
+class TestPytorchExportModes(unittest.TestCase):
+    class MyModel(nn.Module):
+        def __init__(self):
+            super(TestPytorchExportModes.MyModel, self).__init__()
+
+        def forward(self, x):
+            return x.t()
+
+    def test_protobuf(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.PROTOBUF_FILE)
+
+    def test_zipfile(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.ZIP_ARCHIVE)
+
+    def test_compressed_zipfile(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        f = io.BytesIO()
+        torch.onnx._export(torch_model, (fake_input), f, verbose=False,
+                           export_type=torch.onnx.ExportTypes.COMPRESSED_ZIP_ARCHIVE)
+
+    def test_directory(self):
+        torch_model = TestPytorchExportModes.MyModel()
+        fake_input = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
+        d = tempfile.mkdtemp()
+        torch.onnx._export(torch_model, (fake_input), d, verbose=False,
+                           export_type=torch.onnx.ExportTypes.DIRECTORY)
+        shutil.rmtree(d)
 
 
 if __name__ == '__main__':

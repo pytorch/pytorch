@@ -1,0 +1,35 @@
+syntax = "proto2";
+
+package caffe2;
+
+enum LegacyPadding {
+  NOTSET = 0;  // Do not use old-stype padding strategies.
+
+  // VALID and SAME are two strategies adopted in Google DistBelief: it forces
+  // the input shape as follows. For SAME, the output is:
+  //   R_out = ceil(float(R) / float(S))
+  //   C_out = ceil(float(C) / float(S))
+  // where R and C are row and column, S is the stride, and K is the kernel.
+  // The number of padded pixels is then computed as
+  //   Pr = ((R_out - 1) * S + K - R)
+  //   Pc = ((C_out - 1) * S + K - C)
+  // When Pr and Pc are even numbers, both sides (left and right, or top and
+  // bottom) get half each. When Pr and Pc are odd numbers, the right and the
+  // bottom gets the one additional padding pixel.
+  // For VALID, padding values of 0 are always used.
+  VALID = 1;
+  SAME = 2;
+
+  // CAFFE_LEGACY_POOLING is a flag that notifies the code to use the old Caffe
+  // padding strategy.
+  // Basically, in caffe2, after padding the convolution and pooling use the
+  // same computation strategy: half-windows at the right and bottom are
+  // discarded. In Caffe, convolution follows this strategy but if there are
+  // some pixels in the half-windows, the pooling layer will actually put one
+  // additional output. If you set LegacyPadding to this, we will compute the
+  // equivalent padding strategy in caffe2 so that the output size is
+  // backward compatible with Caffe.
+  // THIS IS NOW DEPRECATED. ANY non-conventional use has to be manually
+  // converted.
+  CAFFE_LEGACY_POOLING = 3;
+}

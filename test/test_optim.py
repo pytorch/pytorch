@@ -260,6 +260,10 @@ class TestOptim(TestCase):
                 self._build_params_dict_single(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD(
+                self._build_params_dict_single(weight, bias, lr=1e-2))
+        )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
             optim.SGD(None, lr=1e-2, momentum=-0.5)
 
