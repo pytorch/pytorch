@@ -260,12 +260,13 @@ if (MSVC)
   # We know that VS2017 needs the new FindCUDA functionality, so we will
   # simply enable it for the whole Windows build.
   set(CAFFE2_CMAKE_USE_LOCAL_FINDCUDA ON)
-elseif (${CMAKE_VERSION} VERSION_LESS 3.7 AND ${USE_CUDA})
+else (${CMAKE_VERSION} VERSION_LESS 3.12 AND ${USE_CUDA})
   set(CAFFE2_CMAKE_USE_LOCAL_FINDCUDA ON)
 endif()
 
 if (${CAFFE2_CMAKE_USE_LOCAL_FINDCUDA})
   list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/Modules_CUDA_fix)
+  include(CMakeInitializeConfigs)
 endif()
 
 if (USE_NATIVE_ARCH)
