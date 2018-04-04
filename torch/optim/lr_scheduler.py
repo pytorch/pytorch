@@ -195,22 +195,24 @@ class CosineAnnealingLR(_LRScheduler):
         self.Ti = T_max
         self.eta_min = eta_min
         self.T_mult = T_mult
+        self.cycle = 0
         super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
 
     def step(self, epoch=None):
         if epoch is None:
             epoch = self.last_epoch + 1
+            if epoch == self.Ti:
+                epoch = 0
+                self.cycle += 1
         else:
-            cycle = int(math.log(self.Ti / self.T_max, self.T_mult))
-            epoch -= sum([self.T_max * self.T_mult ** x for x in range(cycle)])
+            self.cycle = int(math.floor(math.log(epoch / self.T_max * (self.T_mult - 1) + 1, self.T_mult)))
+            epoch -= sum([self.T_max * self.T_mult ** x for x in range(self.cycle)])
         self.last_epoch = epoch
+        self.Ti = self.T_max * self.T_mult ** self.cycle
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
 
     def get_lr(self):
-        if self.last_epoch == self.Ti:
-            self.last_epoch = 0
-            self.Ti *= self.T_mult
         return [self.eta_min + (base_lr - self.eta_min) * (1 + math.cos(math.pi * self.last_epoch / self.Ti)) / 2
                 for base_lr in self.base_lrs]
 
