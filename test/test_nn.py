@@ -768,6 +768,24 @@ class TestNN(NNTestCase):
         for key in keys:
             self.assertTrue(hasattr(linear, key))
 
+    def test_repr(self):
+        # no extra information or sub-modules
+        empty_sequential = nn.Sequential()
+        expected_repr_empty = 'Sequential()'
+        self.assertEqual(repr(empty_sequential), expected_repr_empty)
+
+        # one liner extra information
+        linear = nn.Linear(1, 1)
+        expected_repr_linear = 'Linear(in_features=1, out_features=1, bias=True)'
+        self.assertEqual(repr(linear), expected_repr_linear)
+
+        # sub-modules repr
+        sequential = nn.Sequential(linear)
+        expected_repr_sequential = 'Sequential(\n' \
+            '  (0): Linear(in_features=1, out_features=1, bias=True)\n' \
+            ')'
+        self.assertEqual(repr(sequential), expected_repr_sequential)
+
     def test_dir_digit(self):
         model = nn.Sequential(nn.Linear(2, 2))
         keys = dir(model)
@@ -1272,6 +1290,18 @@ class TestNN(NNTestCase):
         # out of bounds check for padding_idx
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=25)
         self.assertRaises(AssertionError, nn.Embedding, num_embeddings=10, embedding_dim=20, padding_idx=-25)
+
+        # test backward when input contains padding_idx
+        padding_idx = 0
+        embedding = nn.Embedding(5, 2, padding_idx=padding_idx)
+        for n in (1, 2):
+            for other_indices in ([], [1, 3], [2]):
+                indices = torch.LongTensor(other_indices + [padding_idx] * n)
+                pre = embedding.weight[padding_idx].clone()
+                embedding(indices).sum().backward()
+                after = (embedding.weight + embedding.weight.grad)[padding_idx]
+                embedding.zero_grad()
+                self.assertEqual(after, pre)
 
     def test_embedding_max_norm(self):
         embedding = nn.Embedding(22, 5, max_norm=1.0)
@@ -2047,6 +2077,18 @@ class TestNN(NNTestCase):
     def test_gather_gpu(self):
         self._test_gather(0)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_gather_different_len_dicts(self):
+        inputs = (
+            {'a': Variable(torch.randn(1, 2).cuda(0), requires_grad=True)},
+            {
+                'b': Variable(torch.randn(1, 2).cuda(1), requires_grad=True),
+                'a': Variable(torch.randn(1, 2).cuda(1), requires_grad=True)
+            }
+        )
+        with self.assertRaises(ValueError):
+            _ = dp.gather(inputs, target_device=0)
+
     def _test_broadcast_double_backwards(self, *tensors):
         variables = tuple(Variable(t, requires_grad=True) for t in tensors)
         _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), variables)
@@ -2290,7 +2332,10 @@ class TestNN(NNTestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_output(self):
         def fn(input):
-            return [input, (input.sin(), input.cos(), [input.add(1)]), input]
+            return [
+                input, (input.sin(), input.cos(), [input.add(1)]), input,
+                {'a': input, 'b': [input.sin()]}
+            ]
 
         class Net(nn.Module):
             def forward(self, input):
@@ -2307,6 +2352,13 @@ class TestNN(NNTestCase):
         self.assertIsInstance(output[1][2], list)
         self.assertIsInstance(output[1][2][0], Variable)
         self.assertIsInstance(output[2], Variable)
+        self.assertIsInstance(output[3], dict)
+        self.assertEqual(len(output[3]), 2)
+        self.assertIn('a', output[3])
+        self.assertIn('b', output[3])
+        self.assertIsInstance(output[3]['a'], Variable)
+        self.assertIsInstance(output[3]['b'], list)
+        self.assertIsInstance(output[3]['b'][0], Variable)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_nested_input(self):

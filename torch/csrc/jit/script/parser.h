@@ -229,18 +229,6 @@ struct Parser {
     auto ident = parseIdent();
     return Param::create(typ->range(), Ident(ident), Type(typ));
   }
-  // TODO: these functions should be unnecessary, but we currently do not
-  // emit a TK_NEWLINE before a series of TK_DEDENT tokens
-  // so if we see a TK_DEDENT then we know a newline must have happened and
-  // ignore it. The real fix is to patch the lexer so TK_NEWLINE does get
-  // emited before a TK_INDENT
-  void expectEndOfLine() {
-    if (L.cur().kind != TK_DEDENT)
-      L.expect(TK_NEWLINE);
-  }
-  bool isEndOfLine() {
-    return L.cur().kind == TK_NEWLINE || L.cur().kind == TK_DEDENT;
-  }
 
   // 'first' has already been parsed since expressions can exist
   // alone on a line:
@@ -249,7 +237,7 @@ struct Parser {
     List<Ident> list = parseOneOrMoreIdents(first);
     auto red = parseOptionalReduction();
     auto rhs = parseExp();
-    expectEndOfLine();
+    L.expect(TK_NEWLINE);
     return Assign::create(list.range(), list, AssignKind(red), Expr(rhs));
   }
   TreeRef parseStmt() {
@@ -263,21 +251,21 @@ struct Parser {
       case TK_GLOBAL: {
         auto range = L.next().range;
         auto idents = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseIdent);
-        expectEndOfLine();
+        L.expect(TK_NEWLINE);
         return Global::create(range, idents);
       }
       case TK_RETURN: {
         auto range = L.next().range;
-        auto values = parseList(TK_NOTHING, ',', TK_NOTHING, &Parser::parseExp);
-        expectEndOfLine();
+        // XXX: TK_NEWLINE makes it accept an empty list
+        auto values = parseList(TK_NOTHING, ',', TK_NEWLINE, &Parser::parseExp);
         return Return::create(range, values);
       }
       default: {
         Expr r = Expr(parseExp());
-        if (r.kind() == TK_VAR && !isEndOfLine()) {
+        if (r.kind() == TK_VAR && L.cur().kind != TK_NEWLINE) {
           return parseAssign(Var(r).name());
         } else {
-          expectEndOfLine();
+          L.expect(TK_NEWLINE);
           return ExprStmt::create(r.range(), r);
         }
       }

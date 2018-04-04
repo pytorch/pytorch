@@ -474,20 +474,6 @@ else()
   endif()
 endif()
 
-if(NO_NNPACK)
-  message("disabling NNPACK because NO_NNPACK is set")
-  set(AT_NNPACK_ENABLED 0)
-else()
-  find_package(NNPACK)
-  if(NOT NNPACK_FOUND)
-    MESSAGE(STATUS "NNPACK not found. Compiling without NNPACK support")
-    set(AT_NNPACK_ENABLED 0)
-  ELSE()
-    INCLUDE_DIRECTORIES(${NNPACK_INCLUDE_DIRS})
-    set(AT_NNPACK_ENABLED 1)
-  ENDIF()
-endif()
-
 set(cwrap_files
   ${CMAKE_CURRENT_SOURCE_DIR}/src/ATen/Declarations.cwrap
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THNN/generic/THNN.h

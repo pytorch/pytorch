@@ -105,8 +105,10 @@ if [[ $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
 fi
-if [[ $BUILD_ENVIRONMENT == *full* ]]; then
-  CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-full"
+if [[ "$(uname)" != 'Darwin' ]]; then
+  if [[ $BUILD_ENVIRONMENT == *full* ]]; then
+    CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-full"
+  fi
 fi
 portable_sed "s/name: caffe2.*\$/name: ${CAFFE2_PACKAGE_NAME}/" "${META_YAML}"
 
@@ -147,40 +149,8 @@ if [[ "$(uname)" != 'Darwin' ]]; then
       add_package 'numpy' '>1.11'
     fi
     CONDA_BUILD_ARGS+=(" -c conda-forge")
-
-  else
-    # gflags 2.2.1 is built against the new ABI but gflags 2.2.0 is not
-    add_package 'gflags' '==2.2.1'
-
-    # opencv 3.3.1 requires protobuf 3.2.0 explicitly, so we use opencv 3.1.0
-    # since protobuf 3.2.0 is not in conda
-    add_package 'opencv' '==3.1.0'
-    if [[ "$PYTHON_VERSION" == 3.* ]]; then
-      # opencv 3.1.0 for python 3 requires numpy 1.12
-      add_package 'numpy' '>1.11'
-    fi
-
-    # These calls won't work since
-    #  - these package requirements can't be put in meta.yaml (no support yet)
-    #  - if they're put here then they won't be installed at test or install
-    #      time
-    # glog 0.3.5=0 is built against old ABI, but 0.3.5=hf484d3e_1 is not
-    #remove_package 'glog'
-    #conda install -y 'glog=0.3.5=hf484d3e_1'
-
-    # leveldb=1.20 is built against old ABI, but 1.20=hf484d3e_1 is built
-    # against the new one
-    #remove_package 'leveldb'
-    #conda install -y 'leveldb=1.20=hf484d3e_1'
   fi
-else
-  # On macOS opencv 3.3.1 (there's only 3.3.1 and 2.4.8) requires protobuf
-  # 3.4
-  portable_sed "s/3.5.1/3.4.1/" "${CONDA_BUILD_CONFIG_YAML}"
 fi
-
-
-#
 
 # Build Caffe2 with conda-build
 #

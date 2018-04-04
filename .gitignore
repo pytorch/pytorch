@@ -40,6 +40,7 @@ test/.coverage
 */*.so*
 */**/*.so*
 */**/*.dylib*
+*/**/*.pyd
 test/data/legacy_serialized.pt
 test/data/linear.pt
 .mypy_cache

@@ -1477,7 +1477,6 @@ class TestScript(TestCase):
         if isinstance(script, str):
             cu = torch.jit.CompilationUnit(script, optimize)
             ge = getattr(cu, name)
-            self.assertIsNotNone(outputs)
         else:
             if capture_output:
                 with self.capture_stdout() as captured:
@@ -1806,6 +1805,25 @@ class TestScript(TestCase):
         a = torch.randn(6)
         self.checkScript(func, [a], optimize=True)
 
+    def test_return(self):
+        def no_return(a):
+            a + 1
+
+        def void_return(a):
+            return
+
+        def one_return(a):
+            return a + 1.
+
+        def multiple_returns(a):
+            return a * 1., a * 2., a * 3.
+
+        a = torch.randn(1, dtype=torch.float)
+        self.checkScript(no_return, [a], optimize=True)
+        self.checkScript(void_return, [a], optimize=True)
+        self.checkScript(one_return, [a], optimize=True)
+        self.checkScript(multiple_returns, [a], optimize=True)
+
     def test_error(self):
         @torch.jit.script
         def foo(a):
@@ -2022,6 +2040,26 @@ class TestScript(TestCase):
         self.assertEqual(o, m.sub(input))
         with self.assertRaisesRegex(RuntimeError, "cannot re-assign"):
             m.sub = nn.Linear(5, 5)
+
+    def test_script_inline_trace_multiple_args(self):
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+
+            def forward(self, input, input2):
+                return input + input2
+
+        class M2(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M2, self).__init__(False)
+                self.m = torch.jit.trace(torch.zeros(4, 3), torch.zeros(4, 3))(M())
+
+            @torch.jit.script_method
+            def forward(self, inp):
+                return self.m(inp, inp)
+
+        m2 = M2()
+        m2(torch.zeros(4, 3))
 
 
 # Smoke tests for export methods

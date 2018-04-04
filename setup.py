@@ -52,6 +52,10 @@
 #     specify the version of PyTorch, rather than the hard-coded version
 #     in this file; used when we're building binaries for distribution
 #
+#   TORCH_CUDA_ARCH_LIST
+#     specify which CUDA architectures to build for.
+#     ie `TORCH_CUDA_ARCH_LIST="6.0;7.0"`
+#
 # Environment variables we respect (these environment variables are
 # conventional and are often understood/set by other software.)
 #
@@ -439,6 +443,23 @@ class build_ext(build_ext_parent):
         # It's an old-style class in Python 2.7...
         setuptools.command.build_ext.build_ext.run(self)
 
+        # Copy the essential export library to compile C++ extensions.
+        if IS_WINDOWS:
+            build_temp = self.build_temp
+
+            ext_filename = self.get_ext_filename('_C')
+            lib_filename = '.'.join(ext_filename.split('.')[:-1]) + '.lib'
+
+            export_lib = os.path.join(
+                build_temp, 'torch', 'csrc', lib_filename).replace('\\', '/')
+
+            build_lib = self.build_lib
+
+            target_lib = os.path.join(
+                build_lib, 'torch', 'lib', '_C.lib').replace('\\', '/')
+
+            self.copy_file(export_lib, target_lib)
+
 
 class build(distutils.command.build.build):
     sub_commands = [
@@ -551,6 +572,7 @@ main_sources = [
     "torch/csrc/Size.cpp",
     "torch/csrc/Dtype.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/Layout.cpp",
     "torch/csrc/Storage.cpp",
     "torch/csrc/DataLoader.cpp",
     "torch/csrc/DynamicTypes.cpp",
@@ -566,6 +588,7 @@ main_sources = [
     "torch/csrc/utils/tensor_new.cpp",
     "torch/csrc/utils/tensor_numpy.cpp",
     "torch/csrc/utils/tensor_dtypes.cpp",
+    "torch/csrc/utils/tensor_layouts.cpp",
     "torch/csrc/utils/tensor_types.cpp",
     "torch/csrc/utils/tuple_parser.cpp",
     "torch/csrc/utils/tensor_apply.cpp",
@@ -621,6 +644,7 @@ main_sources = [
     "torch/csrc/autograd/python_cpp_function.cpp",
     "torch/csrc/autograd/python_variable.cpp",
     "torch/csrc/autograd/python_variable_indexing.cpp",
+    "torch/csrc/autograd/python_legacy_variable.cpp",
     "torch/csrc/autograd/python_engine.cpp",
     "torch/csrc/autograd/python_hook.cpp",
     "torch/csrc/autograd/generated/VariableType.cpp",

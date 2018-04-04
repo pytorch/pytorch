@@ -52,7 +52,8 @@ class GradientClipping(NetModifier):
         self.use_parameter_norm = use_parameter_norm
         self.compute_norm_ratio = compute_norm_ratio
 
-    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
+    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
+                   modify_output_record=False):
 
         assert grad_map is not None
 
