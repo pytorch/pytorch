@@ -12,7 +12,7 @@ from torch._C import _add_docstr
 class Tensor(torch._C._TensorBase):
     def __deepcopy__(self, memo):
         if not self.is_leaf:
-            raise RuntimeError("Only Variables created explicitly by the user "
+            raise RuntimeError("Only Tensors created explicitly by the user "
                                "(graph leaves) support the deepcopy protocol at the moment")
         if id(self) in memo:
             return memo[id(self)]
@@ -37,12 +37,16 @@ class Tensor(torch._C._TensorBase):
         return (torch._utils._rebuild_tensor_v2, args)
 
     def __setstate__(self, state):
-        if len(state) == 5:
+        if not self.is_leaf:
+            raise RuntimeError('__setstate__ can be only called on leaf Tensors')
+        if len(state) == 4:
+            # legacy serialization of Tensor
+            self.set_(*state)
+            return
+        elif len(state) == 5:
             # legacy serialization of Variable
             self.data = state[0]
             state = (state[3], state[4], state[2])
-        if not self.is_leaf:
-            raise RuntimeError('__setstate__ can be only called on leaf variables')
         self.requires_grad, _, self._backward_hooks = state
 
     def __repr__(self):
@@ -59,9 +63,9 @@ class Tensor(torch._C._TensorBase):
                 return torch._tensor_str._str(self).encode('UTF-8', 'replace')
 
     def backward(self, gradient=None, retain_graph=None, create_graph=False):
-        r"""Computes the gradient of current variable w.r.t. graph leaves.
+        r"""Computes the gradient of current tensor w.r.t. graph leaves.
 
-        The graph is differentiated using the chain rule. If the variable is
+        The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
         gradient, the function additionally requires specifying ``gradient``.
         It should be a tensor of matching type and location, that contains
@@ -71,10 +75,10 @@ class Tensor(torch._C._TensorBase):
         zero them before calling it.
 
         Arguments:
-            gradient (Tensor, Variable or None): Gradient w.r.t. the
-                variable. If it is a tensor, it will be automatically converted
-                to a Variable that does not require grad unless ``create_graph`` is True.
-                None values can be specified for scalar Variables or ones that
+            gradient (Tensor or None): Gradient w.r.t. the
+                tensor. If it is a tensor, it will be automatically converted
+                to a Tensor that does not require grad unless ``create_graph`` is True.
+                None values can be specified for scalar Tensors or ones that
                 don't require grad. If a None value would be acceptable then
                 this argument is optional.
             retain_graph (bool, optional): If ``False``, the graph used to compute
@@ -92,9 +96,9 @@ class Tensor(torch._C._TensorBase):
         r"""Registers a backward hook.
 
         The hook will be called every time a gradient with respect to the
-        variable is computed. The hook should have the following signature::
+        Tensor is computed. The hook should have the following signature::
 
-            hook(grad) -> Variable or None
+            hook(grad) -> Tensor or None
 
         The hook should not modify its argument, but it can optionally return
         a new gradient which will be used in place of :attr:`grad`.
@@ -103,18 +107,20 @@ class Tensor(torch._C._TensorBase):
         that removes the hook from the module.
 
         Example:
-            >>> v = Variable(torch.Tensor([0, 0, 0]), requires_grad=True)
+            >>> v = torch.tensor([0., 0., 0.], requires_grad=True)
             >>> h = v.register_hook(lambda grad: grad * 2)  # double the gradient
-            >>> v.backward(torch.Tensor([1, 1, 1]))
-            >>> v.grad.data
+            >>> v.backward(torch.tensor([1., 2., 3.]))
+            >>> v.grad
+
              2
-             2
-             2
-            [torch.FloatTensor of size 3]
+             4
+             6
+            [torch.FloatTensor of size (3,)]
+
             >>> h.remove()  # removes the hook
         """
         if not self.requires_grad:
-            raise RuntimeError("cannot register a hook on a variable that "
+            raise RuntimeError("cannot register a hook on a tensor that "
                                "doesn't require gradient")
         if self._backward_hooks is None:
             self._backward_hooks = OrderedDict()
@@ -152,28 +158,28 @@ class Tensor(torch._C._TensorBase):
         """))
 
     detach = _add_docstr(_C._TensorBase.detach, r"""
-    Returns a new Variable, detached from the current graph.
+    Returns a new Tensor, detached from the current graph.
 
     The result will never require gradient.
 
     .. note::
 
-      Returned Variable uses the same data tensor as the original one.
+      Returned Tensor uses the same data tensor as the original one.
       In-place modifications on either of them will be seen, and may trigger
       errors in correctness checks.
     """)
 
     detach_ = _add_docstr(_C._TensorBase.detach_, r"""
-    Detaches the Variable from the graph that created it, making it a leaf.
+    Detaches the Tensor from the graph that created it, making it a leaf.
     Views cannot be detached in-place.
     """)
 
     def retain_grad(self):
-        """Enables .grad attribute for non-leaf Variables."""
+        r"""Enables .grad attribute for non-leaf Tensors."""
         if self.grad_fn is None:  # no-op for leaves
             return
         if not self.requires_grad:
-            raise RuntimeError("can't retain_grad on Variable that has requires_grad=False")
+            raise RuntimeError("can't retain_grad on Tensor that has requires_grad=False")
         if hasattr(self, 'retains_grad'):
             return
         weak_self = weakref.ref(self)
@@ -222,7 +228,7 @@ class Tensor(torch._C._TensorBase):
                           "consider using btrifact_with_info instead", stacklevel=2)
             factorization, pivots, _info = super(Tensor, self).btrifact_with_info(pivot=pivot)
             if info.type() != _info.type():
-                raise ValueError('btrifact expects info to be a Variable of IntTenor')
+                raise ValueError('btrifact expects info to be an IntTenor')
             info.resize_as_(_info).copy_(_info)
             return factorization, pivots
         else:
@@ -233,10 +239,10 @@ class Tensor(torch._C._TensorBase):
         from torch.autograd._functions import Resize
         return Resize.apply(self, sizes)
 
-    def resize_as(self, variable):
+    def resize_as(self, tensor):
         warnings.warn("non-inplace resize_as is deprecated")
         from torch.autograd._functions import Resize
-        return Resize.apply(self, variable.size())
+        return Resize.apply(self, tensor.size())
 
     def split(self, split_size, dim=0):
         r"""See :func:`torch.split`
@@ -261,16 +267,16 @@ class Tensor(torch._C._TensorBase):
     def scatter_add(self, dim, index, source):
         return self.clone().scatter_add_(dim, index, source)
 
-    def masked_copy(self, mask, variable):
+    def masked_copy(self, mask, tensor):
         warnings.warn("masked_copy is deprecated and renamed to masked_scatter, and will be removed in v0.3")
-        return self.masked_scatter(mask, variable)
+        return self.masked_scatter(mask, tensor)
 
-    def masked_copy_(self, mask, variable):
+    def masked_copy_(self, mask, tensor):
         warnings.warn("masked_copy_ is deprecated and renamed to masked_scatter_, and will be removed in v0.3")
-        return self.masked_scatter_(mask, variable)
+        return self.masked_scatter_(mask, tensor)
 
-    def masked_scatter(self, mask, variable):
-        return self.clone().masked_scatter_(mask, variable)
+    def masked_scatter(self, mask, tensor):
+        return self.clone().masked_scatter_(mask, tensor)
 
     def masked_fill(self, mask, value):
         return self.clone().masked_fill_(mask, value)
@@ -341,10 +347,10 @@ class Tensor(torch._C._TensorBase):
         return id(self)
 
     def __dir__(self):
-        variable_methods = dir(self.__class__)
-        variable_methods.remove('volatile')  # deprecated
+        tensor_methods = dir(self.__class__)
+        tensor_methods.remove('volatile')  # deprecated
         attrs = list(self.__dict__.keys())
-        keys = variable_methods + attrs
+        keys = tensor_methods + attrs
         return sorted(keys)
 
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
