@@ -2343,17 +2343,13 @@ class TestScript(TestCase):
     def test_rnn_trace_override(self):
         from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
         T, B, C = 3, 5, 7
+
         class PadPackedWrapper(torch.nn.Module):
             def __init__(self):
                 super(PadPackedWrapper, self).__init__()
-                self.rnn = torch.nn.LSTM(input_size=7, hidden_size=13,
-                                         num_layers=3, bias=True,
-                                         batch_first=False, dropout=0,
-                                         bidirectional=True)
 
             def forward(self, x, seq_lens):
                 x = pack_padded_sequence(x, seq_lens)
-                x, _ = self.rnn(x, None)
                 x, _ = pad_packed_sequence(x)
                 return x
 
@@ -2361,8 +2357,7 @@ class TestScript(TestCase):
         seq_lens = torch.ones(B, dtype=torch.int32)
         m = PadPackedWrapper()
         m_traced = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
-        mod_outs = m_traced(x, seq_lens)
-        self.assertEqual(mod_outs, pack_padded_sequence(x, seq_lens)[0])
+        self.assertEqual(m_traced(x, seq_lens), m(x, seq_lens))
 
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
