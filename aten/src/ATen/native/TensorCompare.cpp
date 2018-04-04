@@ -95,7 +95,7 @@ Tensor argmax(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor argmax(const Tensor& self) {
-  return std::get<1>(self.view({-1}).max(/*dim=*/0));
+  return std::get<1>(self.contiguous().view({-1}).max(/*dim=*/0));
 }
 
 Tensor argmin(const Tensor& self, int64_t dim, bool keepdim) {
@@ -103,7 +103,7 @@ Tensor argmin(const Tensor& self, int64_t dim, bool keepdim) {
 }
 
 Tensor argmin(const Tensor& self) {
-  return std::get<1>(self.view({-1}).min(/*dim=*/0));
+  return std::get<1>(self.contiguous().view({-1}).min(/*dim=*/0));
 }
 
 // `argmin` and `argmax` are exposed in C++ but not in Python, where we only

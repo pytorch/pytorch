@@ -582,6 +582,8 @@ class TestTorch(TestCase):
             self.assertEqual(x.argmax(dim=0), torch.FloatTensor([1, 1, 1]))
             self.assertEqual(x.argmax(dim=1), torch.FloatTensor([1, 2]))
             self.assertEqual(x.argmax(dim=0, keepdim=True), torch.FloatTensor([[1, 1, 1]]))
+            # test that non-contiguous tensors work
+            self.assertEqual(x[:, :2].argmax().item(), 2)
 
         for dtype in types:
             if dtype == torch.uint8:  # Doesn't support negative values
@@ -591,6 +593,8 @@ class TestTorch(TestCase):
             self.assertEqual(x.argmin(dim=0), torch.FloatTensor([0, 0, 0]))
             self.assertEqual(x.argmin(dim=1), torch.FloatTensor([0, 1]))
             self.assertEqual(x.argmin(dim=1, keepdim=True), torch.FloatTensor([[0], [1]]))
+            # test that non-contiguous tensors work
+            self.assertEqual(x[:, :2].argmin().item(), 0)
 
         dim_red_fns = [
             "mean", "median", "mode", "norm", "prod",

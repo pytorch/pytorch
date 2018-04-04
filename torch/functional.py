@@ -414,7 +414,7 @@ def argmax(input, dim=None, keepdim=False):
         [torch.LongTensor of size (4,)]
     """
     if dim is None:
-        return torch._argmax(input.view(-1), dim=0, keepdim=False)
+        return torch._argmax(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmax(input, dim, keepdim)
 
 
@@ -450,5 +450,5 @@ def argmin(input, dim=None, keepdim=False):
         [torch.LongTensor of size (4,)]
     """
     if dim is None:
-        return torch._argmin(input.view(-1), dim=0, keepdim=False)
+        return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmin(input, dim, keepdim)
