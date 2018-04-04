@@ -62,7 +62,12 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   "${ROOT_DIR}/scripts/build_anaconda.sh" "$@"
 
   # This build will be tested against onnx tests, which needs onnx installed.
-  pip install "${ROOT_DIR}/third_party/onnx"
+  # At this point the visible protbuf installation will be in conda, since one
+  # of Caffe2's dependencies uses conda, so the correct protobuf include
+  # headers are those in conda as well
+  # This path comes from install_anaconda.sh which installs Anaconda into the
+  # docker image
+  PROTOBUF_INCDIR=/opt/conda/include pip install "${ROOT_DIR}/third_party/onnx"
   exit 0
 fi
 
