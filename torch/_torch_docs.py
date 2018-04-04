@@ -4112,7 +4112,7 @@ add_docstr(torch.randint,
            r"""
 randn(low=0,high,sizes, out=None) -> Tensor
 
-Returns a tensor filled with random integers generated uniformly 
+Returns a tensor filled with random integers generated uniformly
 between :attr:`low` (inclusive) and :attr:`high` (exclusive).
 
 The shape of the tensor is defined by the variable argument :attr:`sizes`.
@@ -4120,7 +4120,7 @@ The shape of the tensor is defined by the variable argument :attr:`sizes`.
 Args:
     low (int): Lowest (positive) integer to be drawn from the distribution.
     high (int): One above the highest (positive) integer to be drawn from the distribution.
-    sizes (int...): a tuple defining the shape of the output tensor (Note for one dimension tuple use (d,) and not (d) where d is number of elements in tensor).
+    sizes (tuple): a tuple defining the shape of the output tensor.
     out (Tensor, optional): the output tensor
 
 Example::
