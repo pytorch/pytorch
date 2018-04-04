@@ -856,6 +856,20 @@ log10_() -> Tensor
 In-place version of :meth:`~Tensor.log10`
 """)
 
+add_docstr_all('log1p',
+               r"""
+log1p() -> Tensor
+
+See :func:`torch.log1p`
+""")
+
+add_docstr_all('log1p_',
+               r"""
+log1p_() -> Tensor
+
+In-place version of :meth:`~Tensor.log1p`
+""")
+
 add_docstr_all('log2',
                r"""
 log2() -> Tensor
