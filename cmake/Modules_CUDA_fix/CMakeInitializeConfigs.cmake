@@ -1,7 +1,8 @@
 # Distributed under the OSI-approved BSD 3-Clause License.  See accompanying
 # file Copyright.txt or https://cmake.org/licensing for details.
 
-include_guard(GLOBAL)
+# Present in upstream, but not supported on versions of cmake we need to support
+# include_guard(GLOBAL)
 
 # Initializes `<_PREFIX>_<CONFIG>` variables from the corresponding
 # `<_PREFIX>_<CONFIG>_INIT`, for the configurations currently used.
