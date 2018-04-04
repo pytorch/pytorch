@@ -10,7 +10,7 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   if (sum_dims_.size() == 0)
     return at::mul(left_, right_);
   int64_t dim = left_.dim();
-  auto sum_dims = dim_list_to_vector(sum_dims_, dim);
+  auto sum_dims = dim_list_to_bitset(sum_dims_, dim);
   std::vector<int64_t> lro, lo, ro;
   int64_t lro_size = 1, lo_size = 1, ro_size = 1, sum_size = 1;
   Tensor left = left_;
@@ -85,15 +85,15 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   return result;
 }
 
-Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
-		 IntList expand1_, IntList expand2_, IntList expand3_,
-		 IntList sumdim_) {
-  int64_t unroll_dim  = 1;
+Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
+		  IntList expand1_, IntList expand2_, IntList expand3_,
+		  IntList sumdim_, int64_t unroll_dim) {
   int64_t total_dim = i1_.dim()+expand1_.size();
-  auto expand1 = dim_list_to_vector(expand1_, total_dim);
-  auto expand2 = dim_list_to_vector(expand2_, total_dim);
-  auto expand3 = dim_list_to_vector(expand3_, total_dim);
-  auto sumdim  = dim_list_to_vector(sumdim_,  total_dim);
+  AT_ASSERT((unroll_dim >= 0) && (unroll_dim < total_dim), "unroll_dim must be in [0,%zd]", total_dim-1);
+  auto expand1 = dim_list_to_bitset(expand1_, total_dim);
+  auto expand2 = dim_list_to_bitset(expand2_, total_dim);
+  auto expand3 = dim_list_to_bitset(expand3_, total_dim);
+  auto sumdim  = dim_list_to_bitset(sumdim_,  total_dim);
   Tensor i1 = i1_;
   Tensor i2 = i2_;
   Tensor i3 = i3_;
@@ -148,7 +148,7 @@ Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
       output.add_(buf);
     }
   }
-  for (int64_t i = 0; i < output.dim(); i++)
+  for (int64_t i = output.dim()-1; i >= 0; i--)
     if (sumdim[i])
       output.squeeze_(i);
   return output;
@@ -172,55 +172,17 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
             "bilinear(): bias size does not match weight size: got %lld but expected %lld",
             (long long)bias.size(0), (long long)weight.size(0));
 
-  Tensor output = trilinear(input1, weight, input2, {1,3}, {0}, {1,2}, {2,3});
+  std::vector<int64_t> output_size;
+  auto size1 = input1.sizes();
+  output_size.insert(output_size.end(), size1.begin(), size1.end() - 1);
+  output_size.push_back(weight.size(0));
+  auto input1_flattened = input1.view({-1, input1.size(-1)});
+  auto input2_flattened = input2.view({-1, input2.size(-1)});
+  Tensor output = at::_trilinear(input1_flattened, weight, input2_flattened, {1,3}, {0}, {1,2}, {2,3}).reshape(output_size);
   if (bias.defined()) {
     output = output + bias;
   }
   return output;
-}
-
-std::tuple<Tensor, Tensor, Tensor, Tensor> bilinear_backward(const Tensor& grad_out, const Tensor& input1, const Tensor& input2,
-							     const Tensor& weight, std::array<bool, 4> grad_mask)
-{
-  Tensor grad_input1, grad_input2, grad_weight, grad_bias;
-
-  size_t output_features = weight.size(0);
-  auto input1_flattened = input1.view({-1, input1.size(-1)});
-  auto input2_flattened = input2.view({-1, input2.size(-1)});
-  auto grad_out_flattened = grad_out.view({-1, grad_out.size(-1)});
-
-  if (grad_mask[0]) {
-    grad_input1 = at::mm(input2_flattened, weight[0].t());
-    grad_input1.mul_(grad_out_flattened.narrow(1, 0, 1));
-    for (size_t k = 1; k < output_features; k++) {
-      auto buf = input2_flattened.mm(weight[k].t());
-      buf.mul_(grad_out_flattened.narrow(1, k, 1));
-      grad_input1 += buf;
-    }
-    grad_input1 = grad_input1.view_as(input1);
-  }
-  if (grad_mask[1]) {
-    grad_input2 = at::mm(input1_flattened, weight[0]);
-    grad_input2.mul_(grad_out_flattened.narrow(1, 0, 1));
-    for (size_t k = 1; k < output_features; k++) {
-      auto buf = input1_flattened.mm(weight[k]);
-      buf.mul_(grad_out_flattened.narrow(1, k, 1));
-      grad_input2 += buf;
-    }
-    grad_input2 = grad_input2.view_as(input2);
-  }
-  if (grad_mask[2]) {
-    grad_weight = weight.type().tensor(weight.sizes());
-    for (size_t k = 0; k < output_features; k++) {
-      auto buf = input1_flattened.mul(grad_out_flattened.narrow(1, k, 1));
-      auto weight_row = grad_weight[k];
-      at::mm_out(weight_row, buf.t(), input2_flattened);
-    }
-  }
-  if (grad_mask[3]) {
-    grad_bias = grad_out_flattened.sum(0, false);
-  }
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(grad_input1, grad_input2, grad_weight, grad_bias);
 }
 
 }}  // namespace at::native

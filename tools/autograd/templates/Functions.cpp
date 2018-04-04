@@ -1164,95 +1164,17 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> bilinear_double_backward(const Tensor& grad_out_grad_input1, const Tensor& grad_out_grad_input2,
-								    const Tensor& grad_out_grad_weight, const Tensor& grad_out_grad_bias,
-								    const Tensor& grad_out,
-								    const Tensor& input1, const Tensor& input2, const Tensor& weight, std::array<bool, 4> grad_mask) {
-  Tensor gradgrad_input1, gradgrad_input2, gradgrad_weight, grad_grad_out;
-  size_t output_features = weight.size(0);
-  auto input1_flattened = input1.view({-1, input1.size(-1)});
-  auto input2_flattened = input2.view({-1, input2.size(-1)});
-  auto grad_out_flattened = grad_out.view({-1, grad_out.size(-1)});
-  if (grad_mask[0]) grad_grad_out = at::zeros_like(grad_out_flattened);
-  if (grad_mask[1]) gradgrad_input1 = at::zeros_like(input1_flattened);
-  if (grad_mask[2]) gradgrad_input2 = at::zeros_like(input2_flattened);
-  if (grad_mask[3]) gradgrad_weight = at::zeros_like(weight);
-  if (grad_out_grad_input1.defined()) {
-    auto grad_out_grad_input1_flattened = grad_out_grad_input1.view({-1, input1.size(-1)});
-    if (grad_mask[2]) {
-      for (size_t k = 0; k < output_features; k++) {
-        auto buf = grad_out_grad_input1_flattened.mm(weight[k]);
-        buf.mul_(grad_out_flattened.narrow(1, k, 1));
-        gradgrad_input2 += buf;
-      }
-    }
-    if (grad_mask[3]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = grad_out_grad_input1_flattened.mul(grad_out_flattened.narrow(1, k, 1));
-	gradgrad_weight[k].addmm_(buf.t(), input2_flattened);
-      }
-    }
-    if (grad_mask[0]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = grad_out_grad_input1_flattened.mm(weight[k]);
-	buf.mul_(input2_flattened);
-	grad_grad_out.narrow(1, k, 1) += buf.sum(-1, true);
-      }
-    }
-  }
-  if (grad_out_grad_input2.defined()) {
-    auto grad_out_grad_input2_flattened = grad_out_grad_input2.view({-1, input2.size(-1)});
-    if (grad_mask[1]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = grad_out_grad_input2_flattened.mm(weight[k].t());
-	buf.mul_(grad_out_flattened.narrow(1, k, 1));
-	gradgrad_input1 += buf;
-      }
-    }
-    if (grad_mask[3]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = input1_flattened.mul(grad_out_flattened.narrow(1, k, 1));
-	gradgrad_weight[k].addmm_(buf.t(), grad_out_grad_input2_flattened);
-      }
-    }
-    if (grad_mask[0]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = input1_flattened.mm(weight[k]);
-	buf.mul_(grad_out_grad_input2);
-	grad_grad_out.narrow(1, k, 1) += buf.sum(-1, true);
-      }
-    }
-  }
-  if (grad_out_grad_weight.defined()) {
-    if (grad_mask[1]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = input2_flattened.mm(grad_out_grad_weight[k].t());
-	buf.mul_(grad_out_flattened.narrow(1, k, 1));
-	gradgrad_input1 += buf;
-      }
-    }
-    if (grad_mask[2]) {
-      for (size_t k = 0; k < output_features; k++) {
-        auto buf = input1_flattened.mm(grad_out_grad_weight[k]);
-        buf.mul_(grad_out_flattened.narrow(1, k, 1));
-        gradgrad_input2 += buf;
-      }
-    }
-    if (grad_mask[0]) {
-      for (size_t k = 0; k < output_features; k++) {
-	auto buf = input1_flattened.mm(grad_out_grad_weight[k]);
-	buf.mul_(input2_flattened);
-	grad_grad_out.narrow(1, k, 1) += buf.sum(-1, true);
-      }
-    }
-  }
-  if (grad_out_grad_bias.defined() && grad_mask[0]) {
-    grad_grad_out += grad_out_grad_bias;
-  }
-  if (grad_mask[0]) grad_grad_out = grad_grad_out.view_as(grad_out);
-  if (grad_mask[1]) gradgrad_input1 = gradgrad_input1.view_as(input1);
-  if (grad_mask[2]) gradgrad_input2 = gradgrad_input2.view_as(input2);
-  return std::tuple<Tensor, Tensor, Tensor, Tensor>(grad_grad_out, gradgrad_input1, gradgrad_input2, gradgrad_weight);
+std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, const Tensor& i1, const Tensor& i2, const Tensor& i3,
+						       IntList expand1, IntList expand2, IntList expand3,
+						       IntList sumdim, int64_t unroll_dim, std::array<bool, 3> grad_mask) {
+  Tensor grad_i1, grad_i2, grad_i3;
+  if (grad_mask[0])
+    grad_i1 = at::_trilinear(grad_out, i2, i3, sumdim, expand2, expand3, expand1);
+  if (grad_mask[1])
+    grad_i2 = at::_trilinear(i1, grad_out, i3, expand1, sumdim, expand3, expand2);
+  if (grad_mask[2])
+    grad_i3 = at::_trilinear(i1, i2, grad_out, expand1, expand2, sumdim, expand3);
+  return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
 
 } // anonymous namespace
