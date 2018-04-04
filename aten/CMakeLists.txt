@@ -10,6 +10,9 @@ project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
 
+# Polyfill for upstream FindCUDA
+include(CMakeInitializeConfigs)
+
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
 if(APPLE)
