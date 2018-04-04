@@ -282,9 +282,11 @@ public:
 
   /// \brief Deletes a edge from the graph.
   /// \p e A reference to the edge.
-  void deleteEdge(EdgeRef e) {
-    e->Tail->removeOutEdge(e);
-    e->Head->removeInEdge(e);
+  void deleteEdge(EdgeRef e, bool remove_ref = true) {
+    if (remove_ref) {
+      e->Tail->removeOutEdge(e);
+      e->Head->removeInEdge(e);
+    }
     for (auto i = Edges.begin(); i != Edges.end(); ++i) {
       if (&*i == e) {
         Edges.erase(i);
