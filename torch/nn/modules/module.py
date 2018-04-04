@@ -123,7 +123,7 @@ class Module(object):
                             .format(torch.typename(param), name))
         elif param.grad_fn:
             raise ValueError(
-                "Cannot assign non-leaf Variable to parameter '{0}'. Model "
+                "Cannot assign non-leaf Tensor to parameter '{0}'. Model "
                 "parameters must be created explicitly. To express '{0}' "
                 "as a function of another variable, compute the value in "
                 "the forward() method.".format(name))
@@ -153,7 +153,7 @@ class Module(object):
 
         for param in self._parameters.values():
             if param is not None:
-                # Variables stored in modules are graph leaves, and we don't
+                # Tensors stored in modules are graph leaves, and we don't
                 # want to create copy nodes, so we have to unpack the data.
                 param.data = fn(param.data)
                 if param._grad is not None:
@@ -377,9 +377,9 @@ class Module(object):
                     "didn't return None".format(hook))
         if len(self._backward_hooks) > 0:
             var = result
-            while not isinstance(var, Variable):
+            while not torch.is_tensor(var):
                 if isinstance(var, dict):
-                    var = next((v for v in var.values() if isinstance(v, Variable)))
+                    var = next((v for v in var.values() if torch.is_tensor(v)))
                 else:
                     var = var[0]
             grad_fn = var.grad_fn

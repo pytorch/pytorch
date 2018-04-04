@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 from ._functions import Scatter, Gather
 
 
@@ -11,7 +10,7 @@ def scatter(inputs, target_gpus, dim=0):
     support Tensors.
     """
     def scatter_map(obj):
-        if isinstance(obj, Variable):
+        if torch.is_tensor(obj):
             return Scatter.apply(target_gpus, None, dim, obj)
         assert not torch.is_tensor(obj), "Tensors not supported in scatter."
         if isinstance(obj, tuple) and len(obj) > 0:
@@ -53,7 +52,7 @@ def gather(outputs, target_device, dim=0):
     """
     def gather_map(outputs):
         out = outputs[0]
-        if isinstance(out, Variable):
+        if torch.is_tensor(out):
             return Gather.apply(target_device, dim, *outputs)
         if out is None:
             return None

@@ -1,21 +1,20 @@
 import threading
 import torch
-from torch.autograd import Variable
 
 
 def get_a_var(obj):
-    if isinstance(obj, Variable):
+    if torch.is_tensor(obj):
         return obj
 
     if isinstance(obj, list) or isinstance(obj, tuple):
         results = map(get_a_var, obj)
         for result in results:
-            if isinstance(result, Variable):
+            if torch.is_tensor(obj):
                 return result
     if isinstance(obj, dict):
         results = map(get_a_var, obj.items())
         for result in results:
-            if isinstance(result, Variable):
+            if torch.is_tensor(obj):
                 return result
     return None
 

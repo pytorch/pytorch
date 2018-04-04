@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 
 from .module import Module
 from .utils import _single, _pair, _triple
@@ -334,10 +333,10 @@ class MaxUnpool2d(_MaxUnpoolNd):
 
         >>> pool = nn.MaxPool2d(2, stride=2, return_indices=True)
         >>> unpool = nn.MaxUnpool2d(2, stride=2)
-        >>> input = Variable(torch.Tensor([[[[ 1,  2,  3,  4],
-                                             [ 5,  6,  7,  8],
-                                             [ 9, 10, 11, 12],
-                                             [13, 14, 15, 16]]]]))
+        >>> input = torch.Tensor([[[[ 1,  2,  3,  4],
+                                    [ 5,  6,  7,  8],
+                                    [ 9, 10, 11, 12],
+                                    [13, 14, 15, 16]]]])
         >>> output, indices = pool(input)
         >>> unpool(output, indices)
 
