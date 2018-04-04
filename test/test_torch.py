@@ -374,6 +374,33 @@ class TestTorch(TestCase):
             return math.log(x)
         self._test_math(torch.log, log)
 
+    def test_log10(self):
+        def log10(x):
+            if x == 0:
+                return float('-inf')
+            elif x < 0:
+                return float('nan')
+            return math.log10(x)
+        self._test_math(torch.log10, log10)
+
+    def test_log1p(self):
+        def log1p(x):
+            if x == -1:
+                return float('-inf')
+            elif x < -1:
+                return float('nan')
+            return math.log1p(x)
+        self._test_math(torch.log1p, log1p)
+
+    def test_log2(self):
+        def log2(x):
+            if x == 0:
+                return float('-inf')
+            elif x < 0:
+                return float('nan')
+            return math.log2(x)
+        self._test_math(torch.log2, log2)
+
     def test_sqrt(self):
         self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else float('nan'))
 

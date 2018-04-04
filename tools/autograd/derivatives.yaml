@@ -348,8 +348,14 @@
 - name: log(Tensor self)
   self: grad.div(self)
 
+- name: log10(Tensor self)
+  self: grad / (self * 2.3025850929940456)
+
 - name: log1p(Tensor self)
   self: grad / (self + 1)
+
+- name: log2(Tensor self)
+  self: grad / (self * 0.6931471805599453)
 
 - name: logdet(Tensor self)
   self: logdet_backward(grad, self, result)
