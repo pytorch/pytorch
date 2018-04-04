@@ -101,14 +101,14 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   # and manually set the package name ourself.
   CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-cuda${CAFFE2_CUDA_VERSION}-cudnn${CAFFE2_CUDNN_VERSION}"
 fi
-if [[ $GCC_USE_C11 -eq 0 ]]; then
-  # gcc compatibility is not tracked by conda-forge, so we track it ourselves
-  CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
-fi
 if [[ "$(uname)" != 'Darwin' ]]; then
-  if [[ $BUILD_ENVIRONMENT == *full* ]]; then
-    CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-full"
+  if [[ $GCC_USE_C11 -eq 0 ]]; then
+    # gcc compatibility is not tracked by conda-forge, so we track it ourselves
+    CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
   fi
+fi
+if [[ $BUILD_ENVIRONMENT == *full* ]]; then
+  CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-full"
 fi
 portable_sed "s/name: caffe2.*\$/name: ${CAFFE2_PACKAGE_NAME}/" "${META_YAML}"
 
@@ -139,7 +139,6 @@ if [[ "$(uname)" != 'Darwin' ]]; then
     CMAKE_BUILD_ARGS+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
     # Default conda channels use gcc 7.2 (for recent packages), conda-forge uses
     # gcc 4.8.5
-    # TODO don't do this if user also specified a channel
     CAFFE2_CONDA_CHANNEL='-c conda-forge'
 
     # opencv 3.3.1 in conda-forge doesn't have imgcodecs
@@ -148,7 +147,6 @@ if [[ "$(uname)" != 'Darwin' ]]; then
       # opencv 3.1.0 for python 3 requires numpy 1.12
       add_package 'numpy' '>1.11'
     fi
-    CONDA_BUILD_ARGS+=(" -c conda-forge")
   fi
 fi
 
