@@ -270,13 +270,13 @@ class TestOptim(TestCase):
 
     def test_aggmo(self):
         self._test_rosenbrock(
-            lambda params: optim.AggMo(params, lr=1e-3),
-            wrap_old_fn(old_optim.aggmo, learningRate=1e-3)
+            lambda params: optim.AggMo(params, lr=1e-4),
+            wrap_old_fn(old_optim.aggmo, learningRate=1e-4)
         )
         self._test_rosenbrock(
-            lambda params: optim.AggMo(params, lr=1e-3, momentum=[0, 0.9, 0.99],
-                                    weight_decay=1e-4),
-            wrap_old_fn(old_optim.aggmo, learningRate=1e-3, momentum=[0, 0.9, 0.99],
+            lambda params: optim.AggMo(params, lr=1e-4, momentum=[0, 0.9, 0.99],
+                                       weight_decay=1e-4),
+            wrap_old_fn(old_optim.aggmo, learningRate=1e-4, momentum=[0, 0.9, 0.99],
                         weightDecay=1e-4)
         )
         self._test_basic_cases(
@@ -292,12 +292,12 @@ class TestOptim(TestCase):
                 self._build_params_dict_single(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
-        with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
+        with self.assertRaisesRegex(ValueError, "Invalid momentum parameter at index 0: -0.5"):
             optim.AggMo(None, lr=1e-2, momentum=[-0.5])
 
     def test_aggmo_sparse(self):
         self._test_rosenbrock_sparse(
-            lambda params: optim.AggMo(params, lr=5e-3)
+            lambda params: optim.AggMo(params, lr=5e-4)
         )
 
     def test_adam(self):

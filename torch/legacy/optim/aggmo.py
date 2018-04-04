@@ -31,7 +31,7 @@ def aggmo(opfunc, x, config, state=None):
     lr = config.get('learningRate', 1e-3)
     lrd = config.get('learningRateDecay', 0)
     wd = config.get('weightDecay', 0)
-    mom = config.get('momentum', [0, 0.9, 0.99])
+    mom = config.get('momentum', [0.0, 0.9, 0.99])
     lrs = config.get('learningRates', None)
     wds = config.get('weightDecays', None)
     if 'evalCounter' not in state:
@@ -53,16 +53,15 @@ def aggmo(opfunc, x, config, state=None):
         dfdx.add_(state['decayParameters'])
 
     # (3) apply momentum
-    dx = 0
+    dx = torch.zeros_like(dfdx)
     if len(mom) != 0:
         if 'dfdx' not in state:
             state['dfdx'] = {}
             for b in mom:
-                state['dfdx'][b] = torch.Tensor().type_as(dfdx).resize_as_(dfdx).copy_(dfdx)
-        else:
-            for b in mom:
-                state['dfdx'][b].mul_(b).add_(dfdx)
-                dx += state['dfdx'][b]
+                state['dfdx'][b] = torch.zeros_like(dfdx)
+        for b in mom:
+            state['dfdx'][b].mul_(b).add_(dfdx)
+            dx += state['dfdx'][b]
         dfdx = dx / len(mom)
 
     # (4) learning rate decay (annealing)
