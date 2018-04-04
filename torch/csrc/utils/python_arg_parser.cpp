@@ -25,6 +25,8 @@ static std::unordered_map<std::string, ParameterType> type_map = {
   {"PyObject*", ParameterType::PYOBJECT},
   {"Dtype", ParameterType::DTYPE},
   {"Layout", ParameterType::LAYOUT},
+  {"Device", ParameterType::DEVICE},
+  {"String", ParameterType::STRING},
 };
 
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
@@ -111,6 +113,9 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::PYOBJECT: return true;
     case ParameterType::DTYPE: return THPDtype_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
+    case ParameterType::DEVICE:
+      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDeviceSpec_Check(obj);
+    case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -129,6 +134,8 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::DTYPE: return "torch.dtype";
     case ParameterType::LAYOUT: return "torch.layout";
+    case ParameterType::DEVICE: return "Device";
+    case ParameterType::STRING: return "str";
     default: throw std::runtime_error("unknown parameter type");
   }
 }
@@ -174,6 +181,14 @@ void FunctionParameter::set_default_str(const std::string& str) {
       default_layout = torch::getLayout(at::Backend::SparseCPU);
     } else {
       throw std::runtime_error("invalid default value for dtype: " + str);
+    }
+  } else if (type_ == ParameterType::DEVICE) {
+    if (str != "None") {
+      throw std::runtime_error("invalid device: " + str);
+    }
+  } else if (type_ == ParameterType::STRING) {
+    if (str != "None" || str != "") {
+      throw std::runtime_error("invalid default string: " + str);
     }
   }
 }

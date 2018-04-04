@@ -26,22 +26,25 @@
 #include <vector>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/DeviceSpec.h"
 #include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Generator.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/device.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_strings.h"
 #include "torch/csrc/utils/numpy_stub.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT, DTYPE, LAYOUT
+  BOOL, STORAGE, PYOBJECT, DTYPE, LAYOUT, DEVICE, STRING
 };
 
 struct FunctionParameter;
@@ -93,6 +96,8 @@ struct PythonArgs {
   inline const THPDtype& dtype(int i);
   inline const THPDtype& dtypeWithDefault(int i, const THPDtype& default_dtype);
   inline const THPLayout& layout(int i);
+  inline Device device(int i);
+  inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -270,6 +275,37 @@ inline const THPDtype& PythonArgs::dtype(int i) {
 inline const THPLayout& PythonArgs::layout(int i) {
   if (!args[i]) return *signature.params[i].default_layout;
   return *reinterpret_cast<THPLayout*>(args[i]);
+}
+
+inline Device PythonArgs::device(int i) {
+  if (!args[i]) return Device(DeviceType::CPU, -1, true);  // TODO: use CUDA if default type is a cuda type.
+  if (THPDeviceSpec_Check(args[i])) {
+    auto device_spec = reinterpret_cast<THPDeviceSpec*>(args[i]);
+    return Device(device_spec->device_type, device_spec->device_index, device_spec->is_default);
+  }
+  if (THPUtils_checkLong(args[i])) {
+    return Device(DeviceType::CUDA, THPUtils_unpackLong(args[i]), false);
+  }
+  std::string device_str = THPUtils_unpackString(args[i]);
+  std::string cpu_prefix("cpu:");
+  std::string cuda_prefix("cuda:");
+  if (device_str == "cpu") {
+    return Device(DeviceType::CPU, -1, true);
+  } else if (device_str == "cuda") {
+    return Device(DeviceType::CUDA, -1, true);
+  } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
+    return Device(DeviceType::CPU, device_index, false);
+  } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
+    return Device(DeviceType::CUDA, device_index, false);
+  }
+  throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
+}
+
+inline std::string PythonArgs::string(int i) {
+  if (!args[i]) return "";
+  return THPUtils_unpackString(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64(int i) {
