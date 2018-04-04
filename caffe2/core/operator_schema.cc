@@ -228,9 +228,10 @@ OpSchema& OpSchema::IdenticalTypeAndShapeOfInputDim(int idx, int dim) {
 
 OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
   return TensorInferenceFunction(
-      [dt](const OperatorDef&, const vector<TensorShape>& /*input_types*/) {
-        vector<TensorShape> out(1);
-        out[0].set_data_type(dt);
+      [dt](const OperatorDef& def, const vector<TensorShape>& /*input_types*/) {
+        TensorShape shape;
+        shape.set_data_type(dt);
+        vector<TensorShape> out(def.output_size(),shape);
         return out;
       });
 }
