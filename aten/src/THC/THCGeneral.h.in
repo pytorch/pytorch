@@ -4,7 +4,9 @@
 #include "THGeneral.h"
 #include "THAllocator.h"
 #include "THCThreadLocal.h"
+#undef log10
 #undef log1p
+#undef log2
 #undef expm1
 
 #include "cuda.h"
