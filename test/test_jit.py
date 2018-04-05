@@ -2353,11 +2353,25 @@ class TestScript(TestCase):
                 x, _ = pad_packed_sequence(x)
                 return x
 
-        x = torch.zeros(T, B, C)
+        x = torch.ones(T, B, C, requires_grad=True)
         seq_lens = torch.ones(B, dtype=torch.int32)
         m = PadPackedWrapper()
-        m_traced = torch.jit.trace(x, seq_lens)(PadPackedWrapper())
-        self.assertEqual(m_traced(x, seq_lens), m(x, seq_lens))
+        m_traced = torch.jit.trace(x, seq_lens)(m)
+        criterion = nn.MSELoss()
+
+        y = m(x, seq_lens)
+        loss = criterion(y, torch.zeros_like(y))
+        loss.backward()
+        grad = x.grad.clone()
+        x.grad.zero_()
+
+        y_traced = m_traced(x, seq_lens)
+        loss_traced = criterion(y_traced, torch.zeros_like(y_traced))
+        loss_traced.backward()
+        grad_traced = x.grad.clone()
+
+        self.assertEqual(y_traced, y)
+        self.assertEqual(grad, grad_traced)
 
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
