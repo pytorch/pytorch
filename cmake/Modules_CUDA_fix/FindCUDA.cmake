@@ -557,6 +557,13 @@ else()
       set(c_compiler_realpath "")
     endif()
     set(CUDA_HOST_COMPILER "${c_compiler_realpath}" CACHE FILEPATH "Host side compiler used by NVCC")
+  elseif(MSVC AND "${CMAKE_C_COMPILER}" MATCHES "clcache")
+    # NVCC does not think it will work if it is passed clcache.exe as the host
+    # compiler, which means that builds with CC=cl.exe won't work.  Best to just
+    # feed it whatever the actual cl.exe is as the host compiler.
+    #
+    # FYI: clcache works as the match, but clcache.exe does NOT.
+    set(CUDA_HOST_COMPILER "cl.exe" CACHE FILEPATH "Host side compiler used by NVCC")
   else()
     set(CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}"
       CACHE FILEPATH "Host side compiler used by NVCC")
