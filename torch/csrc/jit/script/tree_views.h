@@ -26,6 +26,7 @@ namespace script {
 //       | For(List<Expr> targets, List<Expr> iters, List<Stmt> body)   TK_FOR
 //       | While(Expr cond, List<Stmt> body)                            TK_WHILE
 //       | Global(List<Ident> idents)                                   TK_GLOBAL
+//       -- NB: the only type of Expr's allowed on lhs are Starred and Var
 //       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
 //       | ExprStmt(Expr expr)                                          TK_EXPR_STMT

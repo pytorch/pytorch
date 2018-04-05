@@ -560,6 +560,14 @@ private:
     emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
   }
 
+  // Validate that the `lhs` Expr's in an assignment statement are valid. That
+  // is:
+  //
+  // 1) All lhs Expr's are either Var or Starred nodes
+  // 2) There is at most one Starred node in the lhs Expr
+  // 3) A Starred node can only appear when there is another non-Starred lhs Expr
+  //    Concretely this means that `*abc = func()` is illegal. Unpacking all
+  //    outputs into a tuple is covered by `abc = func()`.
   size_t calcNumStarredUnpack(const List<Expr>& lhs, const Assign& stmt) {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
@@ -579,11 +587,13 @@ private:
           << "Only one starred expression is allowed on the lhs.";
     }
 
-    if (num_starred) {
-      return lhs.size() - num_normal_assign;
-    } else {
-      return 0;
+    if (num_starred > 0 && num_normal_assign == 0) {
+      throw ErrorReport(stmt) << "A Starred expression may only appear on the "
+                              << "lhs within the presence of another non-starred"
+                              << " expression.";
     }
+
+    return num_starred;
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {

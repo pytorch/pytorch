@@ -38,7 +38,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
   virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m) {
-    throw ErrorReport(loc) << kind() << " cannot be used as repeated values";
+    throw ErrorReport(loc) << kind() << " cannot be used as values";
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
