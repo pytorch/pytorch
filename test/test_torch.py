@@ -1348,13 +1348,14 @@ class TestTorch(TestCase):
             ("ijk,ik->j", C, B),        # fixme -- non contiguous
             ("ijk,ik->jk", C, B),       # fixme -- non contiguous with double indices
             # -- Other
-            ("bn,anm,bm->ba", l, w, r), # as torch.bilinear
-            ]
+            ("bn,anm,bm->ba", l, w, r),  # as torch.bilinear
+        ]
         for test in test_list:
             actual = torch.einsum(test[0], test[1:])
             expected = np.einsum(test[0], *[t.numpy() for t in test[1:]])
             self.assertEqual(expected.shape, actual.shape)
             self.assertTrue(np.allclose(expected, actual.numpy()))
+
             def do_einsum(*args):
                 return torch.einsum(test[0], args)
             self.assertTrue(torch.autograd.gradcheck(do_einsum, test[1:]))
