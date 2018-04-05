@@ -15,6 +15,7 @@
 
 namespace at {
 namespace vec256 {
+namespace {
 
 template <typename T>
 std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
@@ -31,5 +32,4 @@ std::ostream& operator<<(std::ostream& stream, const Vec256<T>& vec) {
   return stream;
 }
 
-}
-}
+}}}
