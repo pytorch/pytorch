@@ -2556,7 +2556,7 @@ class TestTorch(TestCase):
         torch.manual_seed(123456)
         torch.randint(0, 6, (SIZE, SIZE), out=res2)
         torch.manual_seed(123456)
-        res3 = torch.randint(6, (SIZE,SIZE))
+        res3 = torch.randint(6, (SIZE, SIZE))
         res4 = torch.Tensor()
         torch.manual_seed(123456)
         torch.randint(6, (SIZE, SIZE), out=res4)        
