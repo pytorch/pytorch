@@ -63,7 +63,6 @@ ENDIF (CMAKE_COMPILER_IS_GNUCC)
 # Kernel libraries dynamically loaded
 SET(mklkerlibs "mc" "mc3" "nc" "p4n" "p4m" "p4m3" "p4p" "def")
 SET(mklseq)
-SET(INTEL_COMPILER_DIR "/opt/intel")
 
 
 # Paths
