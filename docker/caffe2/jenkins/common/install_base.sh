@@ -74,7 +74,6 @@ install_centos() {
   yum install -y \
       autoconf \
       automake \
-      cmake \
       cmake3 \
       curl \
       gcc \
