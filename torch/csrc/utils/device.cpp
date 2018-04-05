@@ -4,8 +4,7 @@
 namespace torch {
 
 Device::Device(DeviceType device_type, int64_t device_index, bool is_default)
-    : device_type(device_type), device_index(device_index), is_default(is_default),
-      autogpu_index((is_default || device_type == DeviceType::CPU) ? -1 : device_index) {
+    : device_type(device_type), device_index(device_index), is_default(is_default) {
   if (!is_default) {
     switch (device_type) {
       case DeviceType::CPU:

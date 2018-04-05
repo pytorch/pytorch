@@ -10,7 +10,6 @@ struct Device {
   const DeviceType device_type;
   const int64_t device_index;
   const bool is_default;   // is default device for type.
-  const int autogpu_index;
   Device(DeviceType device_type, int64_t device_index, bool is_default);
 };
 
