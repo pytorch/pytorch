@@ -191,6 +191,7 @@ Other Operations
 .. autofunction:: diag
 .. autofunction:: diagflat
 .. autofunction:: diagonal
+.. autofunction:: einsum
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace
