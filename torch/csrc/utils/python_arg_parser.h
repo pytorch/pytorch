@@ -97,6 +97,7 @@ struct PythonArgs {
   inline const THPDtype& dtypeWithDefault(int i, const THPDtype& default_dtype);
   inline const THPLayout& layout(int i);
   inline Device device(int i);
+  inline int64_t deviceInt64(int i);
   inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
@@ -301,6 +302,10 @@ inline Device PythonArgs::device(int i) {
     return Device(DeviceType::CUDA, device_index, false);
   }
   throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
+}
+
+inline int64_t PythonArgs::deviceInt64(int i) {
+  return device(i).autogpu_index;
 }
 
 inline std::string PythonArgs::string(int i) {
