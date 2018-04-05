@@ -285,7 +285,8 @@ inline Device PythonArgs::device(int i) {
     return Device(device->device_type, device->device_index, device->is_default);
   }
   if (THPUtils_checkLong(args[i])) {
-    return Device(DeviceType::CUDA, THPUtils_unpackLong(args[i]), false);
+    auto index = THPUtils_unpackLong(args[i]);
+    return Device(DeviceType::CUDA, index, index == -1);
   }
   std::string device_str = THPUtils_unpackString(args[i]);
   std::string cpu_prefix("cpu:");
