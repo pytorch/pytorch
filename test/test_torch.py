@@ -1350,7 +1350,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: torch.device('other'))
         self.assertRaises(TypeError, lambda: torch.device('other:0'))
 
-
     def test_tensor_device(self):
         def assertEqual(device_str, fn):
             self.assertEqual(torch.device(device_str), fn().device)
