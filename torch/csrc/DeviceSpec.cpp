@@ -82,7 +82,7 @@ PyObject *THPDeviceSpec_pynew(PyTypeObject *type, PyObject *args, PyObject *kwar
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDeviceSpec_device_type(THPDeviceSpec *self)
+PyObject *THPDeviceSpec_type(THPDeviceSpec *self)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packString(deviceTypeString(self->device_type).c_str());
@@ -90,7 +90,7 @@ PyObject *THPDeviceSpec_device_type(THPDeviceSpec *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDeviceSpec_device_index(THPDeviceSpec *self)
+PyObject *THPDeviceSpec_index(THPDeviceSpec *self)
 {
   HANDLE_TH_ERRORS
   if (self->is_default) {
@@ -101,14 +101,14 @@ PyObject *THPDeviceSpec_device_index(THPDeviceSpec *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDeviceSpec_cuda_device_index(THPDeviceSpec *self)
+PyObject *THPDeviceSpec_cuda_index(THPDeviceSpec *self)
 {
   HANDLE_TH_ERRORS
   if (self->device_type == torch::DeviceType::CUDA) {
     return THPUtils_packInt64(self->device_index);
   }
   std::ostringstream oss;
-  oss << "cuda_device_index only supported on cuda device, got: " << deviceTypeString(self->device_type);
+  oss << "cuda_index only supported on cuda device, got: " << deviceTypeString(self->device_type);
   throw std::runtime_error(oss.str());
   END_HANDLE_TH_ERRORS
 }
@@ -155,9 +155,9 @@ PyObject *THPDeviceSpec_rc(PyObject *a, PyObject *b, int op) {
 typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDeviceSpec_properties[] = {
-  {"device_type",       (getter)THPDeviceSpec_device_type, nullptr, nullptr, nullptr},
-  {"device_index",      (getter)THPDeviceSpec_device_index, nullptr, nullptr, nullptr},
-  {"cuda_device_index", (getter)THPDeviceSpec_cuda_device_index, nullptr, nullptr, nullptr},
+  {"type",       (getter)THPDeviceSpec_type, nullptr, nullptr, nullptr},
+  {"index",      (getter)THPDeviceSpec_index, nullptr, nullptr, nullptr},
+  {"cuda_index", (getter)THPDeviceSpec_cuda_index, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
