@@ -1,6 +1,7 @@
 import torch.cuda
 from setuptools import setup
 from torch.utils.cpp_extension import CppExtension, CUDAExtension
+from torch.utils.cpp_extension import CUDA_HOME
 
 ext_modules = [
     CppExtension(
@@ -8,7 +9,7 @@ ext_modules = [
         extra_compile_args=['-g']),
 ]
 
-if torch.cuda.is_available():
+if torch.cuda.is_available() and CUDA_HOME is not None:
     extension = CUDAExtension(
         'torch_test_cuda_extension', [
             'cuda_extension.cpp',
