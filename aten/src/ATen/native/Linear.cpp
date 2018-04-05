@@ -2,6 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
 
+
 namespace at { namespace native {
 
 Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
@@ -180,7 +181,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
       result = result.sum(sorted_position[idx], true);
     }
   }
-  
+
   for (int64_t i = 1; i < (int64_t) permuted_ops.size(); i++) {
     std::vector<int64_t> sum_dims;
     for (int64_t idx = 0; idx < 26; idx++) {
@@ -194,75 +195,6 @@ Tensor einsum(std::string eqn, TensorList tensors) {
   for (int64_t dim = position_labels.size()-1; dim >= num_outputs; dim--)
     result.squeeze_(dim);
   return result;
-}
-
-Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
-		 IntList expand1_, IntList expand2_, IntList expand3_,
-		 IntList sumdim_) {
-  int64_t unroll_dim  = 1;
-  int64_t total_dim = i1_.dim()+expand1_.size();
-  auto expand1 = dim_list_to_vector(expand1_, total_dim);
-  auto expand2 = dim_list_to_vector(expand2_, total_dim);
-  auto expand3 = dim_list_to_vector(expand3_, total_dim);
-  auto sumdim  = dim_list_to_vector(sumdim_,  total_dim);
-  Tensor i1 = i1_;
-  Tensor i2 = i2_;
-  Tensor i3 = i3_;
-  std::vector<int64_t> output_size;
-  std::vector<int64_t> sum_dims_12, sum_dims_23;
-  int64_t unroll_size = -1;
-  // asserts...
-  for (int64_t i = 0; i < total_dim; i++) {
-    int64_t s = 0;
-    if (expand1[i]) {
-      i1 = i1.unsqueeze(i);
-    } else  {
-      s = i1.size(i);
-    }
-    if (expand2[i]) {
-      i2 = i2.unsqueeze(i);
-    } else  {
-      s = i2.size(i);
-    }
-    if (expand3[i]) {
-      i3 = i3.unsqueeze(i);
-      if (sumdim[i] && (i != unroll_dim))
-	sum_dims_12.push_back(i);
-    } else  {
-      s = i3.size(i);
-      if (sumdim[i] && (i != unroll_dim))
-	sum_dims_23.push_back(i);
-    }
-    output_size.push_back(sumdim[i] ? 1 : s);
-    if (i == unroll_dim)
-      unroll_size = s;
-  }
-  int64_t slicemul1 = (expand1[unroll_dim] ? 0 : 1);
-  int64_t slicemul2 = (expand2[unroll_dim] ? 0 : 1);
-  int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
-
-  auto output = i1.type().tensor(output_size).zero_();
-  if (! sumdim[unroll_dim]) {
-    for (int64_t k = 0; k < unroll_size; k++) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
-					       i2.narrow(unroll_dim, k * slicemul2, 1),
-					       sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
-      output.narrow(unroll_dim, k, 1).add_(buf);
-    }
-  }
-  else {
-    for (int64_t k = 0; k < unroll_size; k++) {
-      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
-					       i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
-      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
-      output.add_(buf);
-    }
-  }
-  for (int64_t i = 0; i < output.dim(); i++)
-    if (sumdim[i])
-      output.squeeze_(i);
-  return output;
 }
 
 // sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
@@ -423,31 +355,6 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 }
 
 Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
-  AT_ASSERT(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got %lld and %lld",
-            (long long)input1.dim(), (long long)input2.dim());
-  for (int64_t i = 0; i < input1.dim() - 1; i++) {
-    AT_ASSERT(input1.size(i) == input2.size(i),
-              "bilinear(): input batch dimensions do not match at dim %lld: got %lld and %lld",
-              (long long)i, (long long)input1.size(i), (long long)input2.size(i));
-  }
-  AT_ASSERT(input1.size(input1.dim() - 1) == weight.size(1),
-            "bilinear(): input1 size does not match weight size: got %lld but expected %lld",
-            (long long)input1.size(input1.dim() - 1), (long long)weight.size(1));
-  AT_ASSERT(input2.size(input2.dim() - 1) == weight.size(2),
-            "bilinear(): input2 size does not match weight size: got %lld but expected %lld",
-            (long long)input2.size(input2.dim() - 1), (long long)weight.size(2));
-  AT_ASSERT(!bias.defined() || bias.size(0) == weight.size(0),
-            "bilinear(): bias size does not match weight size: got %lld but expected %lld",
-            (long long)bias.size(0), (long long)weight.size(0));
-
-  Tensor output = trilinear(input1, weight, input2, {1,3},{0},{1,2},{2,3});
-  if (bias.defined()) {
-    output = output + bias;
-  }
-  return output;
-}
-
-Tensor bilinear2(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {
   AT_ASSERT(input1.dim() == input2.dim(), "bilinear(): input dimensions do not match: got %lld and %lld",
             (long long)input1.dim(), (long long)input2.dim());
   for (int64_t i = 0; i < input1.dim() - 1; i++) {

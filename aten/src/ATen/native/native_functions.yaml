@@ -711,9 +711,6 @@
     CPU: _sum_out_cpu
     CUDA: _sum_out_cuda
 
-- func: sumproduct_pair(Tensor left, Tensor right, IntList sum_dims, bool keepdim=False) -> Tensor
-  variants: function
-
 - func: sqrt(Tensor self) -> Tensor
 
 - func: sqrt_(Tensor self) -> Tensor
