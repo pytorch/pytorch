@@ -226,10 +226,10 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
 vector<TensorShape> TensorInferenceForDotProduct(
     const OperatorDef& /* def */,
     const vector<TensorShape>& in) {
-  vector<TIndex> dims;
-  if (in[0].dims().size() > 0) {
-    dims.push_back(in[0].dims(0));
-  }
+  CAFFE_ENFORCE_GT(in.size(), 0);
+
+  vector<TIndex> dims(1);
+  dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
   return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
 }
 
@@ -237,13 +237,11 @@ OpSchema::Cost CostInferenceForDotProduct(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
   std::vector<TensorShape> out = TensorInferenceForDotProduct(def, in);
-  uint64_t size_out = 1;
-  for (auto i = 0; i < out[0].dims().size(); ++i) {
-    size_out *= out[0].dims(i);
-  }
+  CAFFE_ENFORCE_GT(out.size(), 0);
+  CAFFE_ENFORCE_EQ(out[0].dims().size(), 1);
 
   struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
-  c.bytes_moved = size_out * sizeof(out[0].data_type());
+  c.bytes_moved = out[0].dims(0) * sizeof(out[0].data_type());
   c.params_bytes = 0;
   return c;
 }
