@@ -4922,34 +4922,34 @@ class TestNN(NNTestCase):
 
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
-        
+
     def test_adaptive_log_softmax(self):
         # args validation
         with self.assertRaises(ValueError):
-            _ = nn.AdaptiveLogSoftmax(16, 20, [5, 15, 15])
+            _ = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 15, 15], div_value=2.)
 
         with self.assertRaises(ValueError):
-            _ = nn.AdaptiveLogSoftmax(16, 20, [5, 15, 10])
+            _ = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 15, 10], div_value=2.)
 
         with self.assertRaises(ValueError):
-            _ = nn.AdaptiveLogSoftmax(16, 20, [5, 10, 25])
+            _ = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 25], div_value=2.)
 
         # input shapes
         with self.assertRaisesRegex(RuntimeError, "Input and target should have the same size"):
-            asfm = nn.AdaptiveLogSoftmax(16, 20, [5, 10, 15])
+            asfm = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 15], div_value=2.)
             x = Variable(torch.randn(2, 16))
             y = Variable(torch.LongTensor([0, 5, 10]))
             asfm(x, y)
 
         # out-of-bound targets
         with self.assertRaisesRegex(RuntimeError, "Target values should be in"):
-            asfm = nn.AdaptiveLogSoftmax(16, 20, [5, 10, 15])
+            asfm = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 15], div_value=2.)
             x = Variable(torch.randn(2, 16))
             y = Variable(torch.LongTensor([0, 20]))
             asfm(x, y)
 
         # cluster sizes
-        asfm = nn.AdaptiveLogSoftmax(16, 20, [5, 10, 15], return_logprob=True)
+        asfm = nn.AdaptiveLogSoftmaxWIthLoss(16, 20, [5, 10, 15], div_value=2.)
         x = Variable(torch.randn(2, 16))
         y = Variable(torch.LongTensor([0, 17]))
 
@@ -4958,33 +4958,22 @@ class TestNN(NNTestCase):
         self.assertEqual(asfm.tail[1][1].weight.size(), (5, 4))
         self.assertEqual(asfm.tail[2][1].weight.size(), (5, 2))
 
-        self.assertEqual(asfm(x, y).size(), (2, ))
+        self.assertEqual(asfm(x, y).output.size(), (2, ))
 
-        # get_log_proba actually returns log_proba
-        asfm = nn.AdaptiveLogSoftmax(8, 4, [2], return_logprob=True)
+        # log_probs actually returns log_proba
+        asfm = nn.AdaptiveLogSoftmaxWIthLoss(8, 4, [2], div_value=2.)
         x = Variable(torch.randn(4, 8))
-        logprob_out = asfm.get_log_proba(x)
+        logprob_out = asfm.log_prob(x)
 
         self.assertEqual(torch.exp(logprob_out).data.sum(1), torch.ones(4))
 
-        # forward returns the same thing as get_log_proba
+        # forward returns the same thing as log_probs
         for v in [0, 1, 2, 3]:
             y = Variable(torch.zeros(4).fill_(v).long())
-            out = asfm(x, y)
+            out, loss = asfm(x, y)
 
             self.assertEqual(out, logprob_out.gather(1, y.unsqueeze(1)).squeeze())
-
-        # reduction
-        x = Variable(torch.randn(4, 8))
-        y = Variable(torch.LongTensor([0, 1, 2, 3]))
-
-        asfm = nn.AdaptiveLogSoftmax(8, 4, [2], return_logprob=False)
-        reduced = asfm(x, y)
-
-        asfm.return_logprob = True
-        logprob = -(asfm(x, y).mean())
-
-        self.assertEqual(reduced, logprob)
+            self.assertEqual(loss, F.nll_loss(logprob_out, y))
 
 
 class TestNNInit(TestCase):
@@ -7362,21 +7351,16 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 
-class _AdaptiveLogSoftmax(nn.AdaptiveLogSoftmax):
+class _AdaptiveLogSoftmaxWIthLoss(nn.AdaptiveLogSoftmaxWIthLoss):
     def __call__(self, input):
         t = Variable(torch.LongTensor([0, 1, 4, 8]).type_as(input).long())
-        return nn.AdaptiveLogSoftmax.__call__(self, input, t)
+        return nn.AdaptiveLogSoftmaxWIthLoss.__call__(self, input, t).output
 
 
 add_test(NewModuleTest(
-    constructor=lambda: _AdaptiveLogSoftmax(16, 10, [2, 6]),
+    constructor=lambda: _AdaptiveLogSoftmaxWIthLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
-
-add_test(NewModuleTest(
-    constructor=lambda: _AdaptiveLogSoftmax(16, 10, [2, 6], return_logprob=True),
-    input_size=(4, 16),
-    fullname='AdaptiveLogSoftmaxLogprob'))
 
 
 if __name__ == '__main__':
