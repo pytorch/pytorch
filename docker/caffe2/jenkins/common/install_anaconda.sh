@@ -18,3 +18,7 @@ rm "$CONDA_PKG_NAME"
 
 export PATH="/opt/conda/bin:$PATH"
 echo 'export PATH=/opt/conda/bin:$PATH' > ~/.bashrc
+
+# Install packages needed for tests, but that aren't included in the base conda
+# requirements to keep them slim
+conda install -y hypothesis tabulate pydot
