@@ -134,7 +134,32 @@ bool UniqueOp<CUDAContext>::DoRunWithType() {
   return true;
 }
 
+template <>
+template <typename T>
+bool SparseHashUniqueOp<CUDAContext>::DoRunWithType() {
+  Tensor<CPUContext>* remapping_buffer_ptr =
+      REMAPPING < OutputSize() ? &remapping_buffer_ : nullptr;
+  // Copy data to CPU, since sparse hashMap only works on CPU data.
+  input_buffer_.CopyFrom<CUDAContext, CUDAContext>(Input(0), &context_);
+  bool succ = RunOnCPU<T>(input_buffer_, &unique_buffer_, &remapping_buffer_);
+
+  // copy result back
+  if (succ && remapping_buffer_ptr) {
+    Output(REMAPPING)->CopyFrom<CPUContext, CUDAContext>(
+        remapping_buffer_, &context_);
+  }
+  if (succ) {
+    Output(UNIQUE)->CopyFrom<CPUContext, CUDAContext>(
+        unique_buffer_, &context_);
+  }
+  return succ;
+}
+
 REGISTER_CUDA_OPERATOR(Unique, UniqueOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR_WITH_ENGINE(
+    Unique,
+    SparseHash,
+    SparseHashUniqueOp<CUDAContext>);
 
 #endif // THRUST_VERSION >= 100800
 } // namespace caffe2

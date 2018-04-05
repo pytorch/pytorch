@@ -77,7 +77,7 @@ class TestUniqueOps(hu.HypothesisTestCase):
             elements=st.integers(min_value=0, max_value=10)),
         return_remapping=st.booleans(),
         # sparse hash unique op only has cpu impl.
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
     def test_sparse_hash_unique_op(self, X, return_remapping, gc, dc):
         # impl of unique op does not guarantees return order, sort the input
