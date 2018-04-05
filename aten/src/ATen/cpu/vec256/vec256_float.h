@@ -5,6 +5,7 @@
 
 namespace at {
 namespace vec256 {
+namespace {
 
 #ifdef __AVX__
 
@@ -94,4 +95,4 @@ Vec256<float> inline operator*(const Vec256<float>& a, const Vec256<float>& b) {
 
 #endif
 
-}}
+}}}
