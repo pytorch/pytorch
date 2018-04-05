@@ -90,7 +90,9 @@ struct Environment {
 
     return sv;
   }
-
+  Block* block() {
+    return b;
+  }
   Symbol getBlockOwningKind() {
     Symbol owning_kind = Symbol();
     if (b->owningNode()) {
@@ -100,23 +102,23 @@ struct Environment {
   }
 
   void setVar(const std::string& name, Value* value) {
-    setSugaredVar(name, std::make_shared<SimpleValue>(value));
-  }
-  void setSugaredVar(const std::string& name, SugaredValuePtr value) {
     if (!findInThisFrame(name) && findInParentFrame(name) &&
         getBlockOwningKind() == prim::Loop)
       createCapturedInput(name);
+    setSugaredVar(name, std::make_shared<SimpleValue>(value));
+  }
+  void setSugaredVar(const std::string& name, SugaredValuePtr value) {
     value_table[name] = std::move(value);
   }
 
   SugaredValuePtr getSugaredVar(const Ident& ident, bool required=true) {
-    return getSugaredVar(ident.name(), ident);
+    return getSugaredVar(ident.name(), ident.range());
   }
   Value* getVar(const Ident& ident) {
     return getSugaredVar(ident)->asValue(ident.range(), method);
   }
 
-  SugaredValuePtr getSugaredVar(const std::string& ident, const TreeView& tv, bool required=true) {
+  SugaredValuePtr getSugaredVar(const std::string& ident, SourceRange range, bool required=true) {
     auto retval = findInThisFrame(ident);
 
     if (!retval && (retval = findInParentFrame(ident)) &&
@@ -129,13 +131,13 @@ struct Environment {
     }
 
     if (!retval && required) {
-      throw ErrorReport(tv) << "undefined value " << ident;
+      throw ErrorReport(range) << "undefined value " << ident;
     }
     return retval;
   }
 
-  Value* getVar(const std::string& ident, const TreeView& tv) {
-    return getSugaredVar(ident, tv)->asValue(tv.range(), method);
+  Value* getVar(const std::string& ident, SourceRange range) {
+    return getSugaredVar(ident, range)->asValue(range, method);
   }
 
   // Given that after emitting statements in a block, we've added block inputs
@@ -409,10 +411,10 @@ private:
 
     // Register outputs in each block
     for (const auto& x : sorted_mutations) {
-      true_block->registerOutput(save_true->getVar(x, stmt));
+      true_block->registerOutput(save_true->getVar(x, stmt.range()));
     }
     for (const auto& x : sorted_mutations) {
-      false_block->registerOutput(save_false->getVar(x, stmt));
+      false_block->registerOutput(save_false->getVar(x, stmt.range()));
     }
 
     // Add op outputs
@@ -439,12 +441,12 @@ private:
   // in a way that ensure single static assignment.
 
   void emitLoopCommon(
+      SourceRange range,
       at::optional<Expr> max_trip_count,
       at::optional<Expr> cond,
       const List<Stmt>& body,
-      const Stmt& stmt,
       at::optional<Ident> itr_ident) {
-    Node* n = graph->insertNode(create(prim::Loop, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::Loop, range, 0));
     Value *max_trip_count_val, *cond_val;
     {
       WithInsertPoint guard(n);
@@ -452,12 +454,12 @@ private:
         max_trip_count_val = emitExpr(max_trip_count.value(), 1)[0];
       } else {
         max_trip_count_val =
-            emitConst(Const::create(stmt.range(), std::to_string(INT_MAX)))[0];
+            emitConst(Const::create(range, std::to_string(INT_MAX)))[0];
       }
       if (cond) {
         cond_val = emitExpr(cond.value(), 1)[0];
       } else {
-        cond_val = emitBooleanConst(stmt, true)[0];
+        cond_val = emitBooleanConst(range, true)[0];
       }
     }
     n->addInput(max_trip_count_val);
@@ -479,7 +481,7 @@ private:
         Value* body_cond_value = emitExpr(cond.value(), 1)[0];
         body_block->registerOutput(body_cond_value);
       } else {
-        Value* cond_value_dummy = emitBooleanConst(stmt, true)[0];
+        Value* cond_value_dummy = emitBooleanConst(range, true)[0];
         body_block->registerOutput(cond_value_dummy);
       }
 
@@ -487,69 +489,74 @@ private:
       auto outer_frame = environment_stack;
       // Remove inputs for values that did not mutate within the
       // block
-      body_frame->deleteExtraInputs(stmt.range(), skip_inputs_num);
+      body_frame->deleteExtraInputs(range, skip_inputs_num);
 
       // Add block outputs
       for (const auto& x : body_frame->captured_inputs) {
-        body_block->registerOutput(body_frame->getValueInThisFrame(stmt.range(), x));
-        n->addInput(outer_frame->getVar(x, stmt));
+        body_block->registerOutput(body_frame->getValueInThisFrame(range, x));
+        n->addInput(outer_frame->getVar(x, range));
         outer_frame->setVar(x, n->addOutput());
       }
 
     }
   }
 
+  void emitForRange(SourceRange range, const Ident& target, const List<Expr>& args, const List<Stmt>& body) {
+    // TODO: start, stop, step loop
+    if (args.size() != 1) {
+      throw ErrorReport(range)
+          << "range() expects one argument but got" << args.size();
+    }
+    emitLoopCommon(range, {args[0]}, {}, body, target);
+  }
+
   void emitFor(const For& stmt) {
     // For now, we only support range loops. e.g. for i in range(3): ...
-
     auto targets = stmt.targets();
     auto itrs = stmt.itrs();
     auto body = stmt.body();
 
-    // itrs must consist of a single Apply node
     if (stmt.itrs().size() != 1) {
       throw ErrorReport(stmt)
           << "List of iterables is not supported currently.";
     }
-    if (itrs[0].kind() != TK_APPLY) {
-      throw ErrorReport(stmt)
-          << "Non-range for loops are currently not supported.";
+    if (targets.size() != 1) {
+      throw ErrorReport(stmt) << "Iteration variable unpacking is not supported";
     }
 
-    Apply range_iterator = Apply(itrs[0]);
-    if (range_iterator.callee().kind() != TK_VAR) {
-      throw ErrorReport(stmt)
-          << "Non-range for loops are currently not supported.";
-    }
-
-    {
-      Var var = Var(range_iterator.callee());
-      if (var.name().name() != "range") {
-        throw ErrorReport(stmt)
-            << "Non-range for loops are currently not supported.";
+    // match range(<expr>) style loops
+    // itrs must consist of a single Apply node
+    if (itrs[0].kind() == TK_APPLY) {
+      Apply range_iterator = Apply(itrs[0]);
+      if (range_iterator.callee().kind() == TK_VAR) {
+        Var var = Var(range_iterator.callee());
+        if (var.name().name() == "range") {
+          return emitForRange(stmt.range(), targets[0], range_iterator.inputs(), body);
+        }
       }
     }
 
-    List<Expr> args = range_iterator.inputs();
-    // TODO: start, stop, step loop
-    if (args.size() != 1) {
-      throw ErrorReport(stmt)
-          << "range() expects one argument but got" << args.size();
+    // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can be
+    // unrolled
+    auto sv = emitSugaredExpr(itrs[0]);
+    auto instances = sv->unrolledFor(stmt.range(), method);
+    const std::string& target_name = targets[0].name();
+    pushFrame(environment_stack->block());
+    for(auto inst : instances) {
+      environment_stack->setSugaredVar(target_name, inst);
+      emitStatements(body);
     }
-
-    auto target_list = List<Ident>(targets);
-    if (target_list.size() != 1) {
-      throw ErrorReport(stmt)
-          << "Iteration variable unpacking is not supported";
+    for (const auto & n : environment_stack->definedVariables()) {
+      if (environment_stack->findInParentFrame(n)) {
+        environment_stack->next->setVar(n, environment_stack->getVar(n, stmt.range()));
+      }
     }
-    at::optional<Ident> target_ident{target_list[0]};
-
-    emitLoopCommon({args[0]}, {}, stmt.body(), stmt, target_ident);
+    popFrame();
   }
 
   void emitWhile(const While& stmt) {
     auto cond = stmt.cond();
-    emitLoopCommon({}, {cond}, stmt.body(), stmt, {});
+    emitLoopCommon(stmt.range(), {}, {cond}, stmt.body(), {});
   }
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
@@ -734,10 +741,10 @@ private:
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
-        return emitBooleanConst(tree, true);
+        return emitBooleanConst(tree->range(), true);
       } break;
       case TK_FALSE: {
-        return emitBooleanConst(tree, false);
+        return emitBooleanConst(tree->range(), false);
       } break;
       case TK_SLICE: {
         expectOutputs(tree, output_size, 1);
@@ -789,13 +796,8 @@ private:
         ->outputs();
   }
 
-  std::vector<Value*> emitBooleanConst(const TreeRef& tree, bool val) {
-    return {createConstant(tree->range(), at::CPU(at::kByte).scalarTensor(val))};
-  }
-
-  std::vector<Value*> emitBooleanConst(const TreeRef& tree) {
-    bool val = tree->kind() == TK_TRUE;
-    return emitBooleanConst(tree, val);
+  std::vector<Value*> emitBooleanConst(SourceRange range, bool val) {
+    return {createConstant(range, at::CPU(at::kByte).scalarTensor(val))};
   }
 
   std::vector<Value*> emitConst(const Const& c) {

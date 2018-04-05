@@ -162,14 +162,18 @@ struct GraphExecutorImpl {
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable)
   : graph(std::move(graph))
   , optimize(optimize)
+  , num_inputs(this->graph->inputs().size())
   , symbolically_differentiable(symbolically_differentiable) {}
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
-  : graph(std::move(graph))
-  , optimize(optimize)
-  , symbolically_differentiable(isDifferentiable(*this->graph)) {}
+  : GraphExecutorImpl(graph, optimize, isDifferentiable(*graph)) {}
 
   // entry point where execution begins
   variable_tensor_list run(variable_tensor_list inputs) {
+    if(inputs.size() != num_inputs) {
+      std::stringstream ss;
+      ss << "expected " << num_inputs << " inputs but got " << inputs.size() << " inputs";
+      throw std::runtime_error(ss.str());
+    }
     // this is the fallback pathway, when we cannot differentiate
     if(!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
       auto & fb = getOrCreateAutogradFallback();
@@ -338,6 +342,7 @@ private:
   // false - do not modifiy the graph at all and just use the interpreter
   // to run the graph. Useful for debugging correctness issues in the implementation
   bool optimize;
+  size_t num_inputs;
 
   // GraphExecutor optimizes more aggresively when we _know_ the graph will be
   // symbolically differentiable.
