@@ -128,6 +128,26 @@ class PackedSequenceTest(TestCase):
         unpacked, _ = rnn_utils.pad_packed_sequence(packed)
         self.assertEqual(unpacked.type(), cuda_type_str)
 
+    def test_total_length(self):
+        padded, lengths = self._padded_sequence(torch.FloatTensor)
+        max_length = max(lengths)
+        packed = rnn_utils.pack_padded_sequence(padded, lengths)
+        # test ValueError if total_length < max_length
+        for total_length in (-1, 0, max_length - 1):
+            for batch_first in (True, False):
+                def err_fn():
+                    rnn_utils.pad_packed_sequence(packed, batch_first=batch_first,
+                                                  total_length=total_length)
+            self.assertRaises(ValueError, err_fn)
+        # test that pad_packed_sequence returns results of correct length
+        for total_length_delta in (0, 1, 8):
+            for batch_first in (True, False):
+                total_length = max_length + total_length_delta
+                unpacked, lengths_out = rnn_utils.pad_packed_sequence(packed, batch_first=batch_first,
+                                                                      total_length=total_length)
+                self.assertEqual(lengths, lengths_out)
+                self.assertEqual(unpacked.size(1 if batch_first else 0), total_length)
+
 
 def default_tensor_type(type):
     type_str = torch.typename(type)

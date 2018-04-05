@@ -124,7 +124,8 @@ def symbolic_override_first_arg_based(symbolic_fn):
 
     def might_trace(args):
         import torch
-        return torch._C._jit_is_tracing(args[0])
+        first_arg = args[0]
+        return torch.is_tensor(first_arg) and torch._C._jit_is_tracing(first_arg)
 
     return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, might_trace)
 
@@ -140,6 +141,11 @@ def symbolic_override_packed_sequence_based(symbolic_fn):
 
     def might_trace(args):
         import torch
-        return torch._C._jit_is_tracing(args[0][0])
+        first_arg = args[0]
+        if not isinstance(first_arg, torch.nn.utils.rnn.PackedSequence):
+            raise ValueError('pad_packed_sequence expects sequence to be a '
+                             'PackedSequence, but got an object of type {}'
+                             .format(type(first_arg)))
+        return torch.is_tensor(first_arg[0]) and torch._C._jit_is_tracing(first_arg[0])
 
     return functools.partial(_symbolic_override_wrapper_maker, symbolic_fn, might_trace)
