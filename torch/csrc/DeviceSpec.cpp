@@ -20,12 +20,15 @@ PyObject *THPDeviceSpec_New(torch::DeviceType device_type, int64_t device_index,
   return self.release();
 }
 
-static inline std::string deviceTypeString(torch::DeviceType device_type) {
+static const char* cuda_str = "cuda";
+static const char* cpu_str = "cpu";
+
+static inline const char* deviceTypeString(torch::DeviceType device_type) {
   switch (device_type) {
     case torch::DeviceType::CUDA:
-      return "cuda";
+      return cuda_str;
     case torch::DeviceType::CPU:
-      return "cpu";
+      return cpu_str;
     default:
       throw std::runtime_error("unexpected device type");
   }
@@ -85,7 +88,7 @@ PyObject *THPDeviceSpec_pynew(PyTypeObject *type, PyObject *args, PyObject *kwar
 PyObject *THPDeviceSpec_type(THPDeviceSpec *self)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packString(deviceTypeString(self->device_type).c_str());
+  return THPUtils_packString(deviceTypeString(self->device_type));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
