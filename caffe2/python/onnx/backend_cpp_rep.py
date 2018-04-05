@@ -50,3 +50,22 @@ class Caffe2CppRep(BackendRep):
             output_values = self.__core.run([inputs])
         return namedtupledict('Outputs', self.__external_outputs)(*output_values)
 
+    def run_in_new_workspace(self, inputs):
+        output_values = None
+        if isinstance(inputs, dict):
+            output_values = self.__core.run_in_new_workspace(inputs)
+        elif isinstance(inputs, list) or isinstance(inputs, tuple):
+            if len(inputs) != len(self.__uninitialized_inputs):
+                raise RuntimeError('Expected {} values for uninitialized '
+                                   'graph inputs ({}), but got {}.'.format(
+                                        len(self.__uninitialized_inputs),
+                                        ', '.join(self.__uninitialized_inputs),
+                                        len(inputs)))
+            input_map = {}
+            for k, v in zip(self.__uninitialized_inputs, inputs):
+                input_map[k] = v
+            output_values = self.__core.run_in_new_workspace(input_map)
+        else:
+            # single input
+            output_values = self.__core.run_in_new_workspace([inputs])
+        return namedtupledict('Outputs', self.__external_outputs)(*output_values)

@@ -706,6 +706,67 @@ void addObjectMethods(py::module& m) {
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
+          })
+      .def(
+          "run_in_new_workspace",
+          [](caffe2::onnx::Caffe2BackendRep& instance,
+             std::map<std::string, py::object> inputs)
+              -> std::vector<py::object> {
+            Predictor::TensorMap tensors;
+            std::map<std::string, TensorCPU> tensors_data{};
+            for (const auto pair : inputs) {
+              const auto& name = pair.first;
+              const auto& input = pair.second;
+              CAFFE_ENFORCE(
+                  PyArray_Check(input.ptr()),
+                  "Input must be of type numpy array.");
+              PyArrayObject* array =
+                  reinterpret_cast<PyArrayObject*>(input.ptr());
+              TensorFeeder<CPUContext>().FeedTensor(
+                  DeviceOption(), array, &tensors_data[name]);
+              tensors.insert(std::make_pair(name, &tensors_data[name]));
+            }
+            std::vector<std::shared_ptr<caffe2::TensorCPU>> out;
+            {
+              py::gil_scoped_release g;
+              instance.RunMapInNewWorkspace(tensors, out);
+            }
+            std::vector<py::object> pyout;
+            for (auto t : out) {
+              pyout.push_back(
+                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+            }
+            return pyout;
+          })
+      .def(
+          "run_in_new_workspace",
+          [](caffe2::onnx::Caffe2BackendRep& instance,
+             std::vector<py::object> inputs)
+              -> std::vector<py::object> {
+            Predictor::TensorVector tensors;
+            std::vector<TensorCPU> tensors_data(inputs.size());
+            for (auto i = 0; i < inputs.size(); ++i) {
+              auto input = inputs[i];
+              CAFFE_ENFORCE(
+                  PyArray_Check(input.ptr()),
+                  "Input must be of type numpy array.");
+              PyArrayObject* array =
+                  reinterpret_cast<PyArrayObject*>(input.ptr());
+              TensorFeeder<CPUContext>().FeedTensor(
+                  DeviceOption(), array, &(tensors_data[i]));
+              tensors.push_back(&(tensors_data[i]));
+            }
+            std::vector<std::shared_ptr<caffe2::TensorCPU>> out;
+            {
+              py::gil_scoped_release g;
+              instance.RunInNewWorkspace(tensors, out);
+            }
+            std::vector<py::object> pyout;
+            for (auto t : out) {
+              pyout.push_back(
+                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
+            }
+            return pyout;
           });
 
   py::class_<caffe2::onnx::Caffe2Backend>(m, "Caffe2Backend")

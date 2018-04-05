@@ -4,6 +4,7 @@
 #include "caffe2/proto/caffe2.pb.h"
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -16,6 +17,12 @@ class Caffe2BackendRep {
   void RunMap(
       const caffe2::Predictor::TensorMap& inputs,
       caffe2::Predictor::TensorVector* outputs);
+  void RunInNewWorkspace(
+      const caffe2::Predictor::TensorVector& inputs,
+      std::vector<std::shared_ptr<caffe2::TensorCPU>> &outputs);
+  void RunMapInNewWorkspace(
+      const caffe2::Predictor::TensorMap& inputs,
+      std::vector<std::shared_ptr<caffe2::TensorCPU>> &outputs);
 
   caffe2::NetDef& init_net() {
     return init_net_;
@@ -44,5 +51,6 @@ class Caffe2BackendRep {
   caffe2::NetDef pred_net_;
   std::vector<std::string> uninitialized_inputs_;
   std::unique_ptr<caffe2::Predictor> predictor_{nullptr};
+  std::mutex mutex_;
 };
 }}
