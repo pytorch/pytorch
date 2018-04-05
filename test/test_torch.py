@@ -362,6 +362,18 @@ class TestTorch(TestCase):
     def test_tanh(self):
         self._test_math_by_name('tanh')
 
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_tanh_numpy(self):
+        # test with high values
+        x = np.linspace(-2000000000000.0, 2000000000000.0, 100)
+        y = torch.FloatTensor(x)
+        self.assertEqual(np.tanh(y), torch.tanh(y))
+
+        # test with fractional values
+        x = np.linspace(-1.0, 1.0, 100)
+        y = torch.FloatTensor(x)
+        self.assertEqual(np.tanh(y), torch.tanh(y))
+
     def test_atan(self):
         self._test_math_by_name('atan')
 

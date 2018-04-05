@@ -19,6 +19,7 @@ extern DispatchStub<unary_fn> roundImpl;
 extern DispatchStub<unary_fn> sinImpl;
 extern DispatchStub<unary_fn> sqrtImpl;
 extern DispatchStub<unary_fn> truncImpl;
+extern DispatchStub<unary_fn> tanhImpl;
 
 // Missing unary functions
 // TODO: Add generic apply function for contiguous and non-contiguous tensors
@@ -39,6 +40,5 @@ extern DispatchStub<unary_fn> truncImpl;
 // sigmoid
 // sinh
 // tan
-// tanh
 
 }} // namespace at::native

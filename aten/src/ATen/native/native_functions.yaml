@@ -321,6 +321,16 @@
     CPU: _exp_out_cpu
     CUDA: _exp_out_cuda
 
+- func: tanh(Tensor self) -> Tensor
+
+- func: tanh_(Tensor self) -> Tensor
+
+- func: tanh_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _tanh_out_cpu
+    CUDA: _tanh_out_cuda
+
 - func: expand(Tensor self, IntList size) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
