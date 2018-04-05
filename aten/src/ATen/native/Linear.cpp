@@ -2,10 +2,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtilsMulti.h"
 
-namespace at { namespace
-
-
-native {
+namespace at { namespace native {
 
 Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed
@@ -45,6 +42,7 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   std::vector<int64_t> out_size;
   for (auto& d : lro) out_size.push_back(left.size(d));
   for (auto& d : lo) out_size.push_back(left.size(d));
+  for (auto& d : sum_dims_) { out_size.push_back(1); (void)(d); }; // avoid warining about not using d
   for (auto& d : ro) out_size.push_back(right.size(d));
 
   std::vector<int64_t> lpermutation(lro);
@@ -57,38 +55,152 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   rpermutation.insert(rpermutation.end(), ro.begin(), ro.end());
   rpermutation.insert(rpermutation.end(), lo.begin(), lo.end());
 
-  std::vector<int64_t> opermutation(lro.size()+lo.size()+ro.size(), -1);
+  std::vector<int64_t> opermutation(lro.size()+lo.size()+sum_dims_.size()+ro.size(), -1);
   {
   int64_t i = 0;
 
-  for (auto it = lro.begin(); it != lro.end(); i++, it++)
+  for (auto it = lro.begin(); it != lro.end(); i++, it++) {
     opermutation[*it] = i;
-  for (auto it = lo.begin(); it != lo.end(); i++, it++)
-    opermutation[(*it)+lro.size()] = i;
-  for (auto it = ro.begin(); it != ro.end(); i++, it++)
-    opermutation[(*it)+lro.size()+lo.size()] = i;
+  }
+  for (auto it = lo.begin(); it != lo.end(); i++, it++) {
+    opermutation[*it] = i;
+  }
+  for (auto it = sum_dims_.begin(); it != sum_dims_.end(); i++, it++) {
+    opermutation[*it] = i;
+  }
+  for (auto it = ro.begin(); it != ro.end(); i++, it++) {
+    opermutation[*it] = i;
+  }
   }
 
   left = left.permute(lpermutation).reshape({lro_size, lo_size, sum_size});
   right = right.permute(rpermutation).reshape({lro_size, sum_size, ro_size});
   Tensor result = at::bmm(left, right);
-  result = result.view(out_size).reshape(opermutation);
-  if (keepdim) {
-    for (int i = 0; i < dim; i++)
+  result = result.view(out_size).permute(opermutation);
+  if (! keepdim) {
+    for (int i = dim-1; i>=0; i--)
       if (sum_dims[i])
-	result.unsqueeze_(i);
+	result.squeeze_(i);
   }
   return result;
 }
 
-    //static inline std::bitset<dim_bitset_size> dim_list_to_vector(IntList dims, int64_t ndims, bool wrap_scalar=true) {
+
+Tensor einsum(std::string eqn, TensorList tensors) {
+  std::string in_eqn;
+  size_t pos;
+  std::vector<std::int64_t> number_of_occurences(26, 0);
+  std::vector<std::int64_t> last_occurence(26, -1);
+  std::vector<std::int64_t> sorted_position(26, -1);
+  if ((pos = eqn.find("->")) != std::string::npos) {
+    in_eqn = eqn.substr(0, pos);
+  } else {
+    in_eqn = eqn;
+  }
+
+  int64_t operand = 0;
+  std::stringstream eqn_stream(in_eqn);
+  std::string term;
+  while (! eqn_stream.eof()) {
+    std::getline(eqn_stream, term, ',');
+    int64_t dims_in_operand = 0;
+    for (auto &c : term) {
+      AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
+      int64_t index_num = c-'a';
+      number_of_occurences[index_num]++;
+      AT_ASSERT(last_occurence[index_num] < operand, "diagonals (multiple occurences of the same index for one tensor) not implemented yet")
+      last_occurence[index_num] = operand;
+      dims_in_operand++;
+    }
+    AT_ASSERT((int64_t) tensors.size()>operand, "more operands in equation than tensors");
+    AT_ASSERT(dims_in_operand == tensors[operand].dim(), "dimension mismatch for operand %zd: equation %zd, tensor %zd", operand, dims_in_operand, tensors[operand].dim());
+    operand++;
+  }
+  AT_ASSERT((int64_t) tensors.size()==operand, "more tensors than operands in equation");
+
+  int64_t num_outputs = 0;
+  std::vector<int64_t> position_labels;
+  if (pos != std::string::npos) {
+    for (auto &c : eqn.substr(pos+2)) {
+      AT_ASSERT(('a' <= c) && (c <= 'z'), "only lowercase letters a-z allowed as indices");
+      int64_t index_num = c-'a';
+      AT_ASSERT(sorted_position[index_num] == -1, "index %c occurs twice in output", c);
+      sorted_position[index_num] = num_outputs;
+      position_labels.push_back(index_num);
+      num_outputs++;
+    }
+  } else {
+    for (size_t idx = 0; idx < 26; idx++) {
+      if (number_of_occurences[idx] == 1) {
+	sorted_position[idx] = num_outputs;
+	position_labels.push_back(idx);
+	num_outputs++;
+      }
+    }
+  }
+  int64_t position = num_outputs;
+  for (int64_t idx = 0; idx < 26; idx++) {
+    if ((number_of_occurences[idx] > 0) && (sorted_position[idx]==-1)) {
+      sorted_position[idx] = position;
+      position_labels.push_back(idx);
+      position++;
+    }
+  }
+  std::vector<Tensor> permuted_ops;
+  eqn_stream.clear();
+  eqn_stream.seekg(0, std::ios_base::beg);
+  for (int64_t op = 0; op < (int64_t) tensors.size(); op++) {
+    std::vector<int64_t> axes(26, -1);
+    std::vector<int64_t> permutation;
+    std::getline(eqn_stream, term, ',');
+    int64_t dim = 0;
+    for (auto &c : term) {
+      int64_t index_num = c-'a';
+      axes[index_num] = dim;
+      dim++;
+    }
+    for (auto &c : position_labels) {
+      if (axes[c] > -1) {
+	permutation.push_back(axes[c]);
+      }
+    }
+    permuted_ops.push_back(tensors[op].permute(permutation));
+    for (int64_t dim = 0; dim < (int64_t) position_labels.size(); dim++) {
+      auto c = position_labels[dim];
+      if (axes[c] == -1) {
+	permuted_ops.back().unsqueeze_(dim);
+      }
+    }
+  }
+  // we just go left to right. numpy allows to optimize the path...
+  Tensor result = permuted_ops[0];
+  for (int64_t idx = 0; idx < 26; idx++) {
+    if ((last_occurence[idx] == 0)
+	&& (sorted_position[idx]>=num_outputs)) {
+      result = result.sum(sorted_position[idx], true);
+    }
+  }
+  
+  for (int64_t i = 1; i < (int64_t) permuted_ops.size(); i++) {
+    std::vector<int64_t> sum_dims;
+    for (int64_t idx = 0; idx < 26; idx++) {
+      if ((last_occurence[idx] == i)
+	  && (sorted_position[idx]>=num_outputs)) {
+	sum_dims.push_back(sorted_position[idx]);
+      }
+    }
+    result = at::native::sumproduct_pair(result, permuted_ops[i], sum_dims, true);
+  }
+  for (int64_t dim = position_labels.size()-1; dim >= num_outputs; dim--)
+    result.squeeze_(dim);
+  return result;
+}
 
 Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 		 IntList expand1_, IntList expand2_, IntList expand3_,
 		 IntList sumdim_) {
   int64_t unroll_dim  = 1;
   int64_t total_dim = i1_.dim()+expand1_.size();
-  std::cout << "totdim" << total_dim << std::endl;
   auto expand1 = dim_list_to_vector(expand1_, total_dim);
   auto expand2 = dim_list_to_vector(expand2_, total_dim);
   auto expand3 = dim_list_to_vector(expand3_, total_dim);
@@ -121,28 +233,35 @@ Tensor trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
       if (sumdim[i] && (i != unroll_dim))
 	sum_dims_23.push_back(i);
     }
-    if (! sumdim[i])
-      output_size.push_back(s);
+    output_size.push_back(sumdim[i] ? 1 : s);
     if (i == unroll_dim)
       unroll_size = s;
   }
-  
+  int64_t slicemul1 = (expand1[unroll_dim] ? 0 : 1);
+  int64_t slicemul2 = (expand2[unroll_dim] ? 0 : 1);
+  int64_t slicemul3 = (expand3[unroll_dim] ? 0 : 1);
+
   auto output = i1.type().tensor(output_size).zero_();
   if (! sumdim[unroll_dim]) {
-    for (int64_t i = 0; i < unroll_size; i++) {
-      Tensor buf = sumproduct_pair(i1, i2, sum_dims_12, true);
-      buf = sumproduct_pair(buf, i3, sum_dims_23, true);
-      output.add_(buf);
+    for (int64_t k = 0; k < unroll_size; k++) {
+      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k * slicemul1, 1),
+					       i2.narrow(unroll_dim, k * slicemul2, 1),
+					       sum_dims_12, true);
+      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k * slicemul3, 1), sum_dims_23, true);
+      output.narrow(unroll_dim, k, 1).add_(buf);
     }
   }
   else {
-    std::cout << "hello4" << std::endl;
-    for (int64_t i = 0; i < unroll_size; i++) {
-      Tensor buf = sumproduct_pair(i1, i2, sum_dims_12, true);
-      buf = sumproduct_pair(buf, i3, sum_dims_23, true);
+    for (int64_t k = 0; k < unroll_size; k++) {
+      Tensor buf = at::native::sumproduct_pair(i1.narrow(unroll_dim, k*slicemul1, 1),
+					       i2.narrow(unroll_dim, k*slicemul2, 1), sum_dims_12, true);
+      buf = at::native::sumproduct_pair(buf, i3.narrow(unroll_dim, k*slicemul3, 1), sum_dims_23, true);
       output.add_(buf);
     }
   }
+  for (int64_t i = 0; i < output.dim(); i++)
+    if (sumdim[i])
+      output.squeeze_(i);
   return output;
 }
 
@@ -326,7 +445,6 @@ Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight
     output = output + bias;
   }
   return output;
-  
 }
 
 Tensor bilinear2(const Tensor& input1, const Tensor& input2, const Tensor& weight, const Tensor& bias) {

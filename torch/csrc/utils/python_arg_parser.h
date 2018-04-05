@@ -92,6 +92,7 @@ struct PythonArgs {
   inline std::vector<int64_t> intlist(int i);
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
+  inline std::string string(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
   inline at::ScalarType scalartype(int i);
   inline at::ScalarType scalartypeWithDefault(int i, at::ScalarType default_scalartype);
@@ -374,6 +375,10 @@ inline bool PythonArgs::isNone(int i) {
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
+}
+
+inline std::string PythonArgs::string(int i) {
+  return THPUtils_unpackString(args[i]);
 }
 
 inline std::unique_ptr<at::Storage> PythonArgs::storage(int i) {
