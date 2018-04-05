@@ -1359,7 +1359,7 @@ class TestTorch(TestCase):
         assertEqual('cpu', lambda: torch.tensor(5))
         assertEqual('cpu', lambda: torch.ones((2, 3), dtype=torch.float32, device='cpu'))
         # NOTE: 'cpu' is the canonical representation of 'cpu:0', but 'cuda:X' is the canonical
-        # representation of cuda devices
+        # representation of cuda devices.
         assertEqual('cpu', lambda: torch.ones((2, 3), dtype=torch.float32, device='cpu:0'))
         if torch.cuda.is_available():
             assertEqual('cuda:0', lambda: torch.tensor(5).cuda(0))
