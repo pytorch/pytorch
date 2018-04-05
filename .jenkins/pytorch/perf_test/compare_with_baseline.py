@@ -61,6 +61,6 @@ else:
             new_data = json.load(new_data_file)
         new_data[test_name] = {}
         new_data[test_name]['mean'] = sample_mean
-        new_data[test_name]['sigma'] = max(sample_sigma, sample_mean * 0.1)
+        new_data[test_name]['sigma'] = max(sample_sigma, sample_mean * 0.02)
         with open(new_data_file_path, 'w') as new_data_file:
             json.dump(new_data, new_data_file, indent=4)
