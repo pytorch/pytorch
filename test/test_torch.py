@@ -2548,7 +2548,7 @@ class TestTorch(TestCase):
         torch.manual_seed(123456)
         torch.randn(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
-        
+
     def test_randint(self):
         torch.manual_seed(123456)
         res1 = torch.randint(0, 6, (SIZE, SIZE))
