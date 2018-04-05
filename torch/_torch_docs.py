@@ -2385,6 +2385,42 @@ Example::
 
 """)
 
+add_docstr(torch.log10,
+           r"""
+log10(input, out=None) -> Tensor
+
+Returns a new tensor with the logarithm to the base 10 of the elements
+of :attr:`input`.
+
+.. math::
+    y_{i} = \log_{10} (x_{i})
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+
+     0.4496
+     0.1608
+     0.6884
+     0.8989
+     0.1774
+    [torch.FloatTensor of size (5,)]
+
+    >>> torch.log10(a)
+
+    -0.3472
+    -0.7937
+    -0.1622
+    -0.0463
+    -0.7511
+    [torch.FloatTensor of size (5,)]
+""")
+
 add_docstr(torch.log1p,
            r"""
 log1p(input, out=None) -> Tensor
@@ -2422,6 +2458,42 @@ Example::
      0.4611
     [torch.FloatTensor of size (5,)]
 
+""")
+
+add_docstr(torch.log2,
+           r"""
+log2(input, out=None) -> Tensor
+
+Returns a new tensor with the logarithm to the base 2 of the elements
+of :attr:`input`.
+
+.. math::
+    y_{i} = \log_{2} (x_{i})
+
+Args:
+    input (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> a = torch.rand(5)
+    >>> a
+
+     0.2260
+     0.0541
+     0.3393
+     0.7210
+     0.0058
+    [torch.FloatTensor of size (5,)]
+
+    >>> torch.log2(a)
+
+    -2.1458
+    -4.2070
+    -1.5593
+    -0.4719
+    -7.4246
+    [torch.FloatTensor of size (5,)]
 """)
 
 add_docstr(torch.logspace,
