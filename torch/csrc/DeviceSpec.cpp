@@ -113,6 +113,44 @@ PyObject *THPDeviceSpec_cuda_device_index(THPDeviceSpec *self)
   END_HANDLE_TH_ERRORS
 }
 
+static bool THPDeviceSpec_equal(THPDeviceSpec *a, THPDeviceSpec *b) {
+  return a->device_type == b->device_type && a->device_index == b->device_index && a->is_default == b->is_default;
+}
+
+PyObject *THPDeviceSpec_rc(PyObject *a, PyObject *b, int op) {
+  HANDLE_TH_ERRORS
+  if (!THPDeviceSpec_Check(a)) {
+    throw torch::TypeError("DeviceSpec can only be compared with DeviceType, got %s", Py_TYPE(a)->tp_name);
+  }
+  if (!THPDeviceSpec_Check(b)) {
+    throw torch::TypeError("DeviceSpec can only be compared with DeviceType, got %s", Py_TYPE(b)->tp_name);
+  }
+  THPDeviceSpec *da = reinterpret_cast<THPDeviceSpec*>(a);
+  THPDeviceSpec *db = reinterpret_cast<THPDeviceSpec*>(b);
+
+  switch(op) {
+    case Py_EQ:
+      if (THPDeviceSpec_equal(da, db)) {
+        Py_RETURN_TRUE;
+      } else {
+        Py_RETURN_FALSE;
+      }
+    case Py_NE:
+      if (!THPDeviceSpec_equal(da, db)) {
+        Py_RETURN_TRUE;
+      } else {
+        Py_RETURN_FALSE;
+      }
+    case Py_LT:
+    case Py_LE:
+    case Py_GT:
+    case Py_GE:
+      throw torch::TypeError("comparison not implemented");
+    default:
+      throw torch::TypeError("unexpected comparison op");
+  }
+  END_HANDLE_TH_ERRORS
+}
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
@@ -147,7 +185,7 @@ PyTypeObject THPDeviceSpecType = {
   nullptr,                               /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
-  0,                                     /* tp_richcompare */
+  (richcmpfunc)THPDeviceSpec_rc,         /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */

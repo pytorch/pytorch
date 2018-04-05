@@ -1,6 +1,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 
 #include "THP.h"
+#include "torch/csrc/DeviceSpec.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
@@ -436,6 +437,18 @@ static PyObject * THPVariable_layout(THPVariable* self, PyObject* args) {
 static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
+  if (self_.type().is_cuda()) {
+    return THPDeviceSpec_New(torch::DeviceType::CUDA, self_.get_device(), false);
+  }
+  else {
+    return THPDeviceSpec_New(torch::DeviceType::CPU, -1, true);
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_device_str(THPVariable* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  auto& self_ = self->cdata;
   std::ostringstream oss;
   if (self_.type().is_cuda()) {
     oss << "cuda:" << self_.get_device();
@@ -468,6 +481,7 @@ static struct PyGetSetDef THPVariable_properties[] = {
   {"dtype", (getter)THPVariable_dtype, NULL, NULL, NULL},
   {"layout", (getter)THPVariable_layout, NULL, NULL, NULL},
   {"device", (getter)THPVariable_device, NULL, NULL, NULL},
+  {"device_str", (getter)THPVariable_device_str, NULL, NULL, NULL},
   {nullptr}
 };
 
