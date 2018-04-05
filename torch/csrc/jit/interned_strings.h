@@ -82,16 +82,24 @@ FORALL_ATEN_EXTRA_SYMBOLS(_)
 
 #define FORALL_ONNX_SYMBOLS(_) \
 _(onnx, Add) \
+_(onnx, Concat) \
 _(onnx, Constant) \
+_(onnx, ConstantFill) \
 _(onnx, Div) \
 _(onnx, GRU) \
+_(onnx, Gather) \
 _(onnx, Gemm) \
 _(onnx, LSTM) \
 _(onnx, Mul) \
 _(onnx, Pow) \
 _(onnx, RNN) \
+_(onnx, Shape) \
+_(onnx, Size) \
+_(onnx, Slice) \
+_(onnx, Squeeze) \
 _(onnx, Sub) \
 _(onnx, Transpose) \
+_(onnx, Unsqueeze) \
 /* end */
 
 // These symbols are attribute keys.  They are shared between both ONNX and ATen
@@ -101,13 +109,18 @@ _(onnx, Transpose) \
 
 #define FORALL_ATTR_EXTRA_SYMBOLS(_) \
 _(attr, Subgraph) \
+_(attr, axes) \
 _(attr, axis) \
 _(attr, broadcast) \
 _(attr, device) \
+_(attr, direction) \
+_(attr, ends) \
 _(attr, inplace) \
+_(attr, input_as_shape) \
 _(attr, is_zero) \
 _(attr, perm) \
 _(attr, sizes) \
+_(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
 /* end */

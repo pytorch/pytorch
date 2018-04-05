@@ -262,7 +262,11 @@ void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
 namespace {
 std::string getNodeStackTraceString(Node* n) {
   std::stringstream ss;
-  n->getSourceLocation()->highlight(ss);
+  if (n->getSourceLocation()) {
+    n->getSourceLocation()->highlight(ss);
+  } else {
+    ss << "<unknown location>";
+  }
   return ss.str();
 }
 } // namespace
