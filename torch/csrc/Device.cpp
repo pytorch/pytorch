@@ -1,4 +1,4 @@
-#include "DeviceSpec.h"
+#include "Device.h"
 
 #include <cstring>
 #include <structmember.h>
@@ -8,12 +8,12 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_strings.h"
 
-PyObject *THPDeviceSpec_New(torch::DeviceType device_type, int64_t device_index, bool is_default)
+PyObject *THPDevice_New(torch::DeviceType device_type, int64_t device_index, bool is_default)
 {
-  auto type = (PyTypeObject*)&THPDeviceSpecType;
+  auto type = (PyTypeObject*)&THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
-  auto self_ = reinterpret_cast<THPDeviceSpec*>(self.get());
+  auto self_ = reinterpret_cast<THPDevice*>(self.get());
   self_->device_type = device_type;
   self_->device_index = device_index;
   self_->is_default = is_default;
@@ -34,10 +34,10 @@ static inline const char* deviceTypeString(torch::DeviceType device_type) {
   }
 }
 
-PyObject *THPDeviceSpec_repr(THPDeviceSpec *self)
+PyObject *THPDevice_repr(THPDevice *self)
 {
   std::ostringstream oss;
-  oss << "DeviceSpec(device_type=\'" << deviceTypeString(self->device_type) << "\'";
+  oss << "Device(device_type=\'" << deviceTypeString(self->device_type) << "\'";
   if (!self->is_default) {
     oss << ", device_index=" << self->device_index;
   }
@@ -45,7 +45,7 @@ PyObject *THPDeviceSpec_repr(THPDeviceSpec *self)
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject *THPDeviceSpec_str(THPDeviceSpec *self)
+PyObject *THPDevice_str(THPDevice*self)
 {
   std::ostringstream oss;
   if (!self->is_default) {
@@ -56,18 +56,18 @@ PyObject *THPDeviceSpec_str(THPDeviceSpec *self)
   return THPUtils_packString(oss.str().c_str());
 }
 
-PyObject *THPDeviceSpec_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
+PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
   static torch::PythonArgParser parser({
-    "DeviceSpec(Device device)",
-    "DeviceSpec(String device_type, int64_t? device_index=-1)"
+    "Device(Device device)",
+    "Device(String device_type, int64_t? device_index=-1)"
   });
   torch::ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto device = r.device(0);
-    return THPDeviceSpec_New(device.device_type, device.device_index, device.is_default);
+    return THPDevice_New(device.device_type, device.device_index, device.is_default);
   } else if (r.idx == 1) {
     auto as_device = r.device(0);  // this works, because device can take strings
     auto device_type = r.string(0);
@@ -79,13 +79,13 @@ PyObject *THPDeviceSpec_pynew(PyTypeObject *type, PyObject *args, PyObject *kwar
     auto device_index = r.toInt64WithDefault(1, -1);
     // make sure this is constructible
     auto device = torch::Device(as_device.device_type, device_index, is_default);
-    return THPDeviceSpec_New(device.device_type, device.device_index, device.is_default);
+    return THPDevice_New(device.device_type, device.device_index, device.is_default);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDeviceSpec_type(THPDeviceSpec *self)
+PyObject *THPDevice_type(THPDevice *self)
 {
   HANDLE_TH_ERRORS
   return THPUtils_packString(deviceTypeString(self->device_type));
@@ -93,7 +93,7 @@ PyObject *THPDeviceSpec_type(THPDeviceSpec *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDeviceSpec_index(THPDeviceSpec *self)
+PyObject *THPDevice_index(THPDevice *self)
 {
   HANDLE_TH_ERRORS
   if (self->is_default) {
@@ -104,7 +104,7 @@ PyObject *THPDeviceSpec_index(THPDeviceSpec *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDeviceSpec_cuda_index(THPDeviceSpec *self)
+PyObject *THPDevice_cuda_index(THPDevice *self)
 {
   HANDLE_TH_ERRORS
   if (self->device_type == torch::DeviceType::CUDA) {
@@ -116,30 +116,30 @@ PyObject *THPDeviceSpec_cuda_index(THPDeviceSpec *self)
   END_HANDLE_TH_ERRORS
 }
 
-static bool THPDeviceSpec_equal(THPDeviceSpec *a, THPDeviceSpec *b) {
+static bool THPDevice_equal(THPDevice *a, THPDevice *b) {
   return a->device_type == b->device_type && a->device_index == b->device_index && a->is_default == b->is_default;
 }
 
-PyObject *THPDeviceSpec_rc(PyObject *a, PyObject *b, int op) {
+PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   HANDLE_TH_ERRORS
-  if (!THPDeviceSpec_Check(a)) {
-    throw torch::TypeError("DeviceSpec can only be compared with DeviceType, got %s", Py_TYPE(a)->tp_name);
+  if (!THPDevice_Check(a)) {
+    throw torch::TypeError("Device can only be compared with DeviceType, got %s", Py_TYPE(a)->tp_name);
   }
-  if (!THPDeviceSpec_Check(b)) {
-    throw torch::TypeError("DeviceSpec can only be compared with DeviceType, got %s", Py_TYPE(b)->tp_name);
+  if (!THPDevice_Check(b)) {
+    throw torch::TypeError("Device can only be compared with DeviceType, got %s", Py_TYPE(b)->tp_name);
   }
-  THPDeviceSpec *da = reinterpret_cast<THPDeviceSpec*>(a);
-  THPDeviceSpec *db = reinterpret_cast<THPDeviceSpec*>(b);
+  THPDevice *da = reinterpret_cast<THPDevice*>(a);
+  THPDevice *db = reinterpret_cast<THPDevice*>(b);
 
   switch(op) {
     case Py_EQ:
-      if (THPDeviceSpec_equal(da, db)) {
+      if (THPDevice_equal(da, db)) {
         Py_RETURN_TRUE;
       } else {
         Py_RETURN_FALSE;
       }
     case Py_NE:
-      if (!THPDeviceSpec_equal(da, db)) {
+      if (!THPDevice_equal(da, db)) {
         Py_RETURN_TRUE;
       } else {
         Py_RETURN_FALSE;
@@ -157,30 +157,30 @@ PyObject *THPDeviceSpec_rc(PyObject *a, PyObject *b, int op) {
 
 typedef PyObject *(*getter)(PyObject *, void *);
 
-static struct PyGetSetDef THPDeviceSpec_properties[] = {
-  {"type",       (getter)THPDeviceSpec_type, nullptr, nullptr, nullptr},
-  {"index",      (getter)THPDeviceSpec_index, nullptr, nullptr, nullptr},
-  {"cuda_index", (getter)THPDeviceSpec_cuda_index, nullptr, nullptr, nullptr},
+static struct PyGetSetDef THPDevice_properties[] = {
+  {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
+  {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
+  {"cuda_index", (getter)THPDevice_cuda_index, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
-PyTypeObject THPDeviceSpecType = {
+PyTypeObject THPDeviceType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
-  "torch.DeviceSpec",                    /* tp_name */
-  sizeof(THPDeviceSpec),                 /* tp_basicsize */
+  "torch.Device",                        /* tp_name */
+  sizeof(THPDevice),                     /* tp_basicsize */
   0,                                     /* tp_itemsize */
   0,                                     /* tp_dealloc */
   0,                                     /* tp_print */
   0,                                     /* tp_getattr */
   0,                                     /* tp_setattr */
   0,                                     /* tp_reserved */
-  (reprfunc)THPDeviceSpec_repr,          /* tp_repr */
+  (reprfunc)THPDevice_repr,              /* tp_repr */
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
   0,                                     /* tp_as_mapping */
   0,                                     /* tp_hash  */
   0,                                     /* tp_call */
-  (reprfunc)THPDeviceSpec_str,           /* tp_str */
+  (reprfunc)THPDevice_str,               /* tp_str */
   0,                                     /* tp_getattro */
   0,                                     /* tp_setattro */
   0,                                     /* tp_as_buffer */
@@ -188,13 +188,13 @@ PyTypeObject THPDeviceSpecType = {
   nullptr,                               /* tp_doc */
   0,                                     /* tp_traverse */
   0,                                     /* tp_clear */
-  (richcmpfunc)THPDeviceSpec_rc,         /* tp_richcompare */
+  (richcmpfunc)THPDevice_rc,             /* tp_richcompare */
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
   0,                                     /* tp_methods */
   0,                                     /* tp_members */
-  THPDeviceSpec_properties,              /* tp_getset */
+  THPDevice_properties,                  /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */
@@ -202,16 +202,16 @@ PyTypeObject THPDeviceSpecType = {
   0,                                     /* tp_dictoffset */
   0,                                     /* tp_init */
   0,                                     /* tp_alloc */
-  THPDeviceSpec_pynew,                   /* tp_new */
+  THPDevice_pynew,                       /* tp_new */
 };
 
-void THPDeviceSpec_init(PyObject *module)
+void THPDevice_init(PyObject *module)
 {
-  if (PyType_Ready(&THPDeviceSpecType) < 0) {
+  if (PyType_Ready(&THPDeviceType) < 0) {
     throw python_error();
   }
-  Py_INCREF(&THPDeviceSpecType);
-  if (PyModule_AddObject(module, "DeviceSpec", (PyObject *)&THPDeviceSpecType) != 0) {
+  Py_INCREF(&THPDeviceType);
+  if (PyModule_AddObject(module, "device", (PyObject *)&THPDeviceType) != 0) {
     throw python_error();
   }
 }

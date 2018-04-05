@@ -571,7 +571,7 @@ main_sources = [
     "torch/csrc/Generator.cpp",
     "torch/csrc/Size.cpp",
     "torch/csrc/Dtype.cpp",
-    "torch/csrc/DeviceSpec.cpp",
+    "torch/csrc/Device.cpp",
     "torch/csrc/Exceptions.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/Storage.cpp",

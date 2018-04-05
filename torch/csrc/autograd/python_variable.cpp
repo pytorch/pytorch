@@ -1,7 +1,7 @@
 #include "torch/csrc/autograd/python_variable.h"
 
 #include "THP.h"
-#include "torch/csrc/DeviceSpec.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/Size.h"
@@ -438,10 +438,10 @@ static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
   if (self_.type().is_cuda()) {
-    return THPDeviceSpec_New(torch::DeviceType::CUDA, self_.get_device(), false);
+    return THPDevice_New(torch::DeviceType::CUDA, self_.get_device(), false);
   }
   else {
-    return THPDeviceSpec_New(torch::DeviceType::CPU, -1, true);
+    return THPDevice_New(torch::DeviceType::CPU, -1, true);
   }
   END_HANDLE_TH_ERRORS
 }

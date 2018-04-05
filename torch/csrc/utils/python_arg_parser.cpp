@@ -114,7 +114,7 @@ bool FunctionParameter::check(PyObject* obj) {
     case ParameterType::DTYPE: return THPDtype_Check(obj);
     case ParameterType::LAYOUT: return THPLayout_Check(obj);
     case ParameterType::DEVICE:
-      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDeviceSpec_Check(obj);
+      return THPUtils_checkLong(obj) || THPUtils_checkString(obj) || THPDevice_Check(obj);
     case ParameterType::STRING: return THPUtils_checkString(obj);
     default: throw std::runtime_error("unknown parameter type");
   }
@@ -134,7 +134,7 @@ std::string FunctionParameter::type_name() const {
     case ParameterType::PYOBJECT: return "object";
     case ParameterType::DTYPE: return "torch.dtype";
     case ParameterType::LAYOUT: return "torch.layout";
-    case ParameterType::DEVICE: return "Device";
+    case ParameterType::DEVICE: return "torch.device";
     case ParameterType::STRING: return "str";
     default: throw std::runtime_error("unknown parameter type");
   }
