@@ -524,6 +524,12 @@ private:
       throw ErrorReport(stmt) << "Iteration variable unpacking is not supported";
     }
 
+    if (targets[0].kind() != TK_VAR) {
+      throw ErrorReport(targets[0]) << "Starred unpacking is currently not"
+          << " supported for for loops.";
+    }
+    auto target = Var(targets[0]).name();
+
     // match range(<expr>) style loops
     // itrs must consist of a single Apply node
     if (itrs[0].kind() == TK_APPLY) {
@@ -531,7 +537,7 @@ private:
       if (range_iterator.callee().kind() == TK_VAR) {
         Var var = Var(range_iterator.callee());
         if (var.name().name() == "range") {
-          return emitForRange(stmt.range(), targets[0], range_iterator.inputs(), body);
+          return emitForRange(stmt.range(), target, range_iterator.inputs(), body);
         }
       }
     }
@@ -540,7 +546,7 @@ private:
     // unrolled
     auto sv = emitSugaredExpr(itrs[0]);
     auto instances = sv->unrolledFor(stmt.range(), method);
-    const std::string& target_name = targets[0].name();
+    const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
     for(auto inst : instances) {
       environment_stack->setSugaredVar(target_name, inst);
