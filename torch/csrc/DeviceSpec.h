@@ -7,7 +7,7 @@ struct THPDeviceSpec {
   PyObject_HEAD
   torch::DeviceType device_type;
   int64_t device_index;
-  bool is_default;
+  bool is_default;  // the default device for the type, i.e. true for 'cuda', but false for 'cuda:0'
 };
 
 extern PyTypeObject THPDeviceSpecType;
