@@ -84,7 +84,7 @@ weights, since you also need to store the gradients.)
 
 My GPU memory isn't freed properly
 -------------------------------------------------------
-PyTorch use a caching memory allocator to speed up memory allocations. As a
+PyTorch uses a caching memory allocator to speed up memory allocations. As a
 result, the values shown in ``nvidia-smi`` usually don't reflect the true
 memory usage. See :ref:`cuda-memory-management` for more details about GPU
 memory management.
