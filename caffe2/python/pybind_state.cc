@@ -1223,8 +1223,8 @@ void addGlobalMethods(py::module& m) {
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
           CAFFE_ENFORCE(def->ParseFromString(proto));
-          nets.push_back(std::move(def));
           nets_ptr.push_back(def.get());
+          nets.push_back(std::move(def));
         }
 
         auto blob_info = InferBlobShapesAndTypesFromWorkspace(gWorkspace, nets_ptr);
@@ -1243,8 +1243,8 @@ void addGlobalMethods(py::module& m) {
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
           CAFFE_ENFORCE(def->ParseFromString(proto));
-          nets.push_back(std::move(def));
           nets_ptr.push_back(def.get());
+          nets.push_back(std::move(def));
         }
 
         auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets_ptr);
