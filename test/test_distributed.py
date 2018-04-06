@@ -64,7 +64,7 @@ def skip_if_no_multigpu(func):
     def wrapper(*args, **kwargs):
         if not torch.cuda.is_available():
             sys.exit(SKIP_IF_NO_CUDA_EXIT_CODE)
-        if torch.cuda.device_count() < 2:
+        if torch.cuda.device_count() < int(os.environ['WORLD_SIZE']):
             sys.exit(SKIP_IF_NO_MULTIGPU_EXIT_CODE)
 
         return func(*args, **kwargs)
@@ -167,6 +167,27 @@ class _DistTestBase(object):
         group_id = dist.group.WORLD
         rank = dist.get_rank()
         return (group, group_id, rank)
+
+    # HELPER FOR MULTIGPU TESTS
+    def _init_multigpu_helper(self):
+        """Multigpu tests are designed to simulate the multi nodes with multi
+        GPUs on each node. Nccl backend requires equal #GPUs in each process.
+        On a single node, all visible GPUs are evenly
+        divided to subsets, each process only uses a subset.
+        """
+        nGPUs = torch.cuda.device_count()
+        world_size = dist.get_world_size()
+        visible_devices = range(nGPUs)
+
+        if BACKEND == 'nccl':
+            apply_hack_for_nccl()
+
+        nGPUs_per_process = int(nGPUs / world_size)
+        rankToGPUMapping = {}
+        for i in range(world_size):
+            rankToGPUMapping[i] = visible_devices[
+                i * nGPUs_per_process: (i + 1) * nGPUs_per_process]
+        return rankToGPUMapping
 
     # GET RANK
     def test_get_rank(self):
@@ -283,7 +304,7 @@ class _DistTestBase(object):
         self._barrier()
 
     # BROADCAST
-    def _test_broadcast_helper(self, group, group_id, rank, cuda=False):
+    def _test_broadcast_helper(self, group, group_id, rank, cuda=False, rankToGPUMapping=None):
         for ttype, value, requires_cuda in [
             ('torch.FloatTensor', -1e-10, False),
             ('torch.DoubleTensor', -1e-100, False),
@@ -298,13 +319,13 @@ class _DistTestBase(object):
             for src in group:
                 expected_tensor = _build_tensor(src + 1, value).type(ttype)
                 if cuda:
-                    expected_tensor = expected_tensor.cuda()
+                    expected_tensor = expected_tensor.cuda(rankToGPUMapping[rank][0])
                 if rank == src:
                     dist.broadcast(expected_tensor, src, group_id)
                 else:
                     tensor = _build_tensor(src + 1, -1).type(ttype)
                     if cuda:
-                        tensor = tensor.cuda()
+                        tensor = tensor.cuda(rankToGPUMapping[rank][0])
                     dist.broadcast(tensor, src, group_id)
                     self.assertEqual(tensor.size(), expected_tensor.size())
                     self.assertEqual(tensor.ne(expected_tensor).max(), 0)
@@ -319,9 +340,11 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != 'gloo' and BACKEND != 'nccl',
                      "Only Gloo and Nccl backend supports CUDA allReduce")
     @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_broadcast_cuda(self):
         group, group_id, rank = self._init_global_test()
-        self._test_broadcast_helper(group, group_id, rank, True)
+        rankToGPUMapping = self._init_multigpu_helper()
+        self._test_broadcast_helper(group, group_id, rank, True, rankToGPUMapping)
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
     @skip_if_small_worldsize
@@ -331,18 +354,18 @@ class _DistTestBase(object):
 
     # REDUCE
     def _test_reduce_helper(self, group, group_id, rank, op, master_value,
-                            worker_value, expected_value, cuda=False):
+                            worker_value, expected_value, cuda=False, rankToGPUMapping=None):
         for src in group:
             if rank == src:
                 tensor = _build_tensor(src + 1).fill_(master_value)
                 if cuda:
-                    tensor = tensor.cuda()
+                    tensor = tensor.cuda(rankToGPUMapping[rank][0])
                 dist.reduce(tensor, src, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
             else:
                 tensor = _build_tensor(src + 1).fill_(worker_value)
                 if cuda:
-                    tensor = tensor.cuda()
+                    tensor = tensor.cuda(rankToGPUMapping[rank][0])
                 dist.reduce(tensor, src, op, group_id)
 
         self._barrier()
@@ -358,11 +381,13 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl', "Only Nccl supports CUDA reduce")
     @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
+        rankToGPUMapping = self._init_multigpu_helper()
         self._test_reduce_helper(
             group, group_id, rank, dist.reduce_op.SUM, 2, 10,
-            2 + 10 * (len(group) - 1), True)
+            2 + 10 * (len(group) - 1), True, rankToGPUMapping)
 
     @unittest.skipIf(BACKEND == 'gloo', "Gloo does not support reduce")
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support CPU tensors")
@@ -428,18 +453,18 @@ class _DistTestBase(object):
 
     # ALL REDUCE
     def _test_all_reduce_helper(self, group, group_id, rank, op, master_value,
-                                worker_value, expected_value, cuda=False):
+                                worker_value, expected_value, cuda=False, rankToGPUMapping=None):
         for src in group:
             if rank == src:
                 tensor = _build_tensor(src + 1).fill_(master_value)
                 if cuda:
-                    tensor = tensor.cuda()
+                    tensor = tensor.cuda(rankToGPUMapping[rank][0])
                 dist.all_reduce(tensor, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
             else:
                 tensor = _build_tensor(src + 1).fill_(worker_value)
                 if cuda:
-                    tensor = tensor.cuda()
+                    tensor = tensor.cuda(rankToGPUMapping[rank][0])
                 dist.all_reduce(tensor, op, group_id)
                 self.assertEqual(tensor, _build_tensor(src + 1, expected_value))
 
@@ -455,10 +480,12 @@ class _DistTestBase(object):
     @unittest.skipIf(BACKEND != 'gloo' and BACKEND != 'nccl',
                      "Only Gloo & Nccl backend support CUDA allReduce")
     @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_all_reduce_sum_cuda(self):
         group, group_id, rank = self._init_global_test()
+        rankToGPUMapping = self._init_multigpu_helper()
         self._test_all_reduce_helper(
-            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1)), True
+            group, group_id, rank, dist.reduce_op.SUM, 2, 10, 2 + (10 * (len(group) - 1)), True, rankToGPUMapping
         )
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support CPU tensors")
@@ -567,13 +594,13 @@ class _DistTestBase(object):
         self._test_gather_helper(group, group_id, rank)
 
     # ALL GATHER
-    def _test_all_gather_helper(self, group, group_id, rank, cuda=False):
+    def _test_all_gather_helper(self, group, group_id, rank, cuda=False, rankToGPUMapping=None):
         for dest in group:
             tensor = _build_tensor(dest + 1, rank)
             tensors = [_build_tensor(dest + 1, -1) for i in group]
             if cuda:
-                tensor = tensor.cuda()
-                tensors = [t.cuda() for t in tensors]
+                tensor = tensor.cuda(rankToGPUMapping[rank][0])
+                tensors = [t.cuda(rankToGPUMapping[rank][0]) for t in tensors]
             dist.all_gather(tensors, tensor, group_id)
 
             expected_tensors = [_build_tensor(dest + 1, i) for i in group]
@@ -589,9 +616,11 @@ class _DistTestBase(object):
 
     @unittest.skipIf(BACKEND != 'nccl', "Only Nccl supports CUDA all gather")
     @skip_if_no_cuda_distributed
+    @skip_if_no_multigpu
     def test_all_gather_cuda(self):
         group, group_id, rank = self._init_global_test()
-        self._test_all_gather_helper(group, group_id, rank, True)
+        rankToGPUMapping = self._init_multigpu_helper()
+        self._test_all_gather_helper(group, group_id, rank, True, rankToGPUMapping)
 
     @unittest.skipIf(BACKEND == 'nccl', "Nccl does not support newGroup")
     @skip_if_small_worldsize
@@ -627,27 +656,6 @@ class _DistTestBase(object):
     def test_barrier_group(self):
         group, group_id, rank = self._init_group_test()
         self._test_barrier_helper(group, group_id, rank)
-
-    # MULTIGPU TESTS
-    def _init_multigpu_helper(self):
-        """Multigpu tests are designed to simulate the multi nodes with multi
-        GPUs on each node. Nccl backend requires equal #GPUs in each process.
-        On a single node, all visible GPUs are evenly
-        divided to subsets, each process only uses a subset.
-        """
-        nGPUs = torch.cuda.device_count()
-        world_size = dist.get_world_size()
-        visible_devices = range(nGPUs)
-
-        if BACKEND == 'nccl':
-            apply_hack_for_nccl()
-
-        nGPUs_per_process = int(nGPUs / world_size)
-        rankToGPUMapping = {}
-        for i in range(world_size):
-            rankToGPUMapping[i] = visible_devices[
-                i * nGPUs_per_process: (i + 1) * nGPUs_per_process]
-        return rankToGPUMapping
 
     def _test_broadcast_multigpu_helper(self, group, group_id,
                                         rank, rankToGPUMapping):
