@@ -167,7 +167,7 @@ if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
   # the package name in meta.yaml based off of these values, we let Caffe2
   # take the CUDA and cuDNN versions that it finds in the build environment,
   # and manually set the package name ourself.
-  CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-cuda${CAFFE2_CUDA_VERSION}-cudnn${CAFFE2_CUDNN_VERSION}"
+  CAFFE2_PACKAGE_NAME="${CAFFE2_PACKAGE_NAME}-cuda${CUDA_VERSION}-cudnn${CUDNN_VERSION}"
 fi
 if [[ "$(uname)" != 'Darwin' ]]; then
   if [[ $GCC_USE_C11 -eq 0 ]]; then
@@ -216,7 +216,7 @@ if [[ -n $CUDA_VERSION ]]; then
   #add_feature $CUDA_FEATURE_NAME
   #add_package $CUDA_FEATURE_NAME
   #add_feature nccl2
-  CAFFE2_CONDA_CHANNEL+=('-c pytorch')
+  #CAFFE2_CONDA_CHANNEL+=('-c pytorch')
 else
   CMAKE_BUILD_ARGS+=("-DUSE_CUDA=OFF")
   CMAKE_BUILD_ARGS+=("-DUSE_NCCL=OFF")
