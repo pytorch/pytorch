@@ -1649,7 +1649,7 @@ def pixel_shuffle(input, upscale_factor):
     ``[*, C, d_{1}, d_{2}, ..., d_{n}]`` to a tensor of shape
     ``[*, C/(r^n), d_{1}*r, d_{2}*r, ..., d_{n}*r]``. Where ``n`` is the
     dimensionality of the data.
-    
+
     See :class:`~torch.nn.PixelShuffle` for details.
 
     Args:
