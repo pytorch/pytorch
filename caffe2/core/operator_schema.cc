@@ -231,7 +231,7 @@ OpSchema& OpSchema::ScalarType(::caffe2::TensorProto_DataType dt) {
       [dt](const OperatorDef& def, const vector<TensorShape>& /*input_types*/) {
         TensorShape shape;
         shape.set_data_type(dt);
-        vector<TensorShape> out(def.output_size(),shape);
+        vector<TensorShape> out(def.output_size(), shape);
         return out;
       });
 }
