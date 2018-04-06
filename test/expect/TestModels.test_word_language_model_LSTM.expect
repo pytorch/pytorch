@@ -1,0 +1,138 @@
+graph torch-jit-export (
+  %0[INT64, 10x5]
+  %1[FLOAT, 5x5x5]
+  %2[FLOAT, 5x5x5]
+  %3[FLOAT, 10x5]
+  %4[FLOAT, 20x5]
+  %5[FLOAT, 20x5]
+  %6[FLOAT, 20]
+  %7[FLOAT, 20]
+  %8[FLOAT, 20x5]
+  %9[FLOAT, 20x5]
+  %10[FLOAT, 20]
+  %11[FLOAT, 20]
+  %12[FLOAT, 20x5]
+  %13[FLOAT, 20x5]
+  %14[FLOAT, 20]
+  %15[FLOAT, 20]
+  %16[FLOAT, 20x5]
+  %17[FLOAT, 20x5]
+  %18[FLOAT, 20]
+  %19[FLOAT, 20]
+  %20[FLOAT, 20x5]
+  %21[FLOAT, 20x5]
+  %22[FLOAT, 20]
+  %23[FLOAT, 20]
+  %24[FLOAT, 10x5]
+  %25[FLOAT, 10]
+) {
+  %26 = Gather(%3, %0)
+  %27, %28 = Dropout[is_test = 1, ratio = 0.200000002980232](%26)
+  %30 = Slice[axes = [0], ends = [5], starts = [0]](%4)
+  %31 = Slice[axes = [0], ends = [20], starts = [15]](%4)
+  %32 = Slice[axes = [0], ends = [15], starts = [5]](%4)
+  %33 = Concat[axis = 0](%30, %31, %32)
+  %34 = Slice[axes = [0], ends = [5], starts = [0]](%5)
+  %35 = Slice[axes = [0], ends = [20], starts = [15]](%5)
+  %36 = Slice[axes = [0], ends = [15], starts = [5]](%5)
+  %37 = Concat[axis = 0](%34, %35, %36)
+  %38 = Slice[axes = [0], ends = [5], starts = [0]](%6)
+  %39 = Slice[axes = [0], ends = [20], starts = [15]](%6)
+  %40 = Slice[axes = [0], ends = [15], starts = [5]](%6)
+  %41 = Concat[axis = 0](%38, %39, %40)
+  %42 = Slice[axes = [0], ends = [5], starts = [0]](%7)
+  %43 = Slice[axes = [0], ends = [20], starts = [15]](%7)
+  %44 = Slice[axes = [0], ends = [15], starts = [5]](%7)
+  %45 = Concat[axis = 0](%42, %43, %44)
+  %46 = Concat[axis = 0](%41, %45)
+  %47 = Slice[axes = [0], ends = [1], starts = [0]](%1)
+  %48 = Slice[axes = [0], ends = [1], starts = [0]](%2)
+  %49, %50, %51 = LSTM[hidden_size = 5](%27, %33, %37, %46, %, %47, %48)
+  %52 = Slice[axes = [0], ends = [5], starts = [0]](%8)
+  %53 = Slice[axes = [0], ends = [20], starts = [15]](%8)
+  %54 = Slice[axes = [0], ends = [15], starts = [5]](%8)
+  %55 = Concat[axis = 0](%52, %53, %54)
+  %56 = Slice[axes = [0], ends = [5], starts = [0]](%9)
+  %57 = Slice[axes = [0], ends = [20], starts = [15]](%9)
+  %58 = Slice[axes = [0], ends = [15], starts = [5]](%9)
+  %59 = Concat[axis = 0](%56, %57, %58)
+  %60 = Slice[axes = [0], ends = [5], starts = [0]](%10)
+  %61 = Slice[axes = [0], ends = [20], starts = [15]](%10)
+  %62 = Slice[axes = [0], ends = [15], starts = [5]](%10)
+  %63 = Concat[axis = 0](%60, %61, %62)
+  %64 = Slice[axes = [0], ends = [5], starts = [0]](%11)
+  %65 = Slice[axes = [0], ends = [20], starts = [15]](%11)
+  %66 = Slice[axes = [0], ends = [15], starts = [5]](%11)
+  %67 = Concat[axis = 0](%64, %65, %66)
+  %68 = Concat[axis = 0](%63, %67)
+  %69 = Slice[axes = [0], ends = [2], starts = [1]](%1)
+  %70 = Slice[axes = [0], ends = [2], starts = [1]](%2)
+  %71, %72, %73 = LSTM[hidden_size = 5](%49, %55, %59, %68, %, %69, %70)
+  %74 = Slice[axes = [0], ends = [5], starts = [0]](%12)
+  %75 = Slice[axes = [0], ends = [20], starts = [15]](%12)
+  %76 = Slice[axes = [0], ends = [15], starts = [5]](%12)
+  %77 = Concat[axis = 0](%74, %75, %76)
+  %78 = Slice[axes = [0], ends = [5], starts = [0]](%13)
+  %79 = Slice[axes = [0], ends = [20], starts = [15]](%13)
+  %80 = Slice[axes = [0], ends = [15], starts = [5]](%13)
+  %81 = Concat[axis = 0](%78, %79, %80)
+  %82 = Slice[axes = [0], ends = [5], starts = [0]](%14)
+  %83 = Slice[axes = [0], ends = [20], starts = [15]](%14)
+  %84 = Slice[axes = [0], ends = [15], starts = [5]](%14)
+  %85 = Concat[axis = 0](%82, %83, %84)
+  %86 = Slice[axes = [0], ends = [5], starts = [0]](%15)
+  %87 = Slice[axes = [0], ends = [20], starts = [15]](%15)
+  %88 = Slice[axes = [0], ends = [15], starts = [5]](%15)
+  %89 = Concat[axis = 0](%86, %87, %88)
+  %90 = Concat[axis = 0](%85, %89)
+  %91 = Slice[axes = [0], ends = [3], starts = [2]](%1)
+  %92 = Slice[axes = [0], ends = [3], starts = [2]](%2)
+  %93, %94, %95 = LSTM[hidden_size = 5](%71, %77, %81, %90, %, %91, %92)
+  %96 = Slice[axes = [0], ends = [5], starts = [0]](%16)
+  %97 = Slice[axes = [0], ends = [20], starts = [15]](%16)
+  %98 = Slice[axes = [0], ends = [15], starts = [5]](%16)
+  %99 = Concat[axis = 0](%96, %97, %98)
+  %100 = Slice[axes = [0], ends = [5], starts = [0]](%17)
+  %101 = Slice[axes = [0], ends = [20], starts = [15]](%17)
+  %102 = Slice[axes = [0], ends = [15], starts = [5]](%17)
+  %103 = Concat[axis = 0](%100, %101, %102)
+  %104 = Slice[axes = [0], ends = [5], starts = [0]](%18)
+  %105 = Slice[axes = [0], ends = [20], starts = [15]](%18)
+  %106 = Slice[axes = [0], ends = [15], starts = [5]](%18)
+  %107 = Concat[axis = 0](%104, %105, %106)
+  %108 = Slice[axes = [0], ends = [5], starts = [0]](%19)
+  %109 = Slice[axes = [0], ends = [20], starts = [15]](%19)
+  %110 = Slice[axes = [0], ends = [15], starts = [5]](%19)
+  %111 = Concat[axis = 0](%108, %109, %110)
+  %112 = Concat[axis = 0](%107, %111)
+  %113 = Slice[axes = [0], ends = [4], starts = [3]](%1)
+  %114 = Slice[axes = [0], ends = [4], starts = [3]](%2)
+  %115, %116, %117 = LSTM[hidden_size = 5](%93, %99, %103, %112, %, %113, %114)
+  %118 = Slice[axes = [0], ends = [5], starts = [0]](%20)
+  %119 = Slice[axes = [0], ends = [20], starts = [15]](%20)
+  %120 = Slice[axes = [0], ends = [15], starts = [5]](%20)
+  %121 = Concat[axis = 0](%118, %119, %120)
+  %122 = Slice[axes = [0], ends = [5], starts = [0]](%21)
+  %123 = Slice[axes = [0], ends = [20], starts = [15]](%21)
+  %124 = Slice[axes = [0], ends = [15], starts = [5]](%21)
+  %125 = Concat[axis = 0](%122, %123, %124)
+  %126 = Slice[axes = [0], ends = [5], starts = [0]](%22)
+  %127 = Slice[axes = [0], ends = [20], starts = [15]](%22)
+  %128 = Slice[axes = [0], ends = [15], starts = [5]](%22)
+  %129 = Concat[axis = 0](%126, %127, %128)
+  %130 = Slice[axes = [0], ends = [5], starts = [0]](%23)
+  %131 = Slice[axes = [0], ends = [20], starts = [15]](%23)
+  %132 = Slice[axes = [0], ends = [15], starts = [5]](%23)
+  %133 = Concat[axis = 0](%130, %131, %132)
+  %134 = Concat[axis = 0](%129, %133)
+  %135 = Slice[axes = [0], ends = [5], starts = [4]](%1)
+  %136 = Slice[axes = [0], ends = [5], starts = [4]](%2)
+  %137, %138, %139 = LSTM[hidden_size = 5](%115, %121, %125, %134, %, %135, %136)
+  %140, %141 = Dropout[is_test = 1, ratio = 0.200000002980232](%137)
+  %142 = Constant[value = <Tensor>]()
+  %143 = Reshape(%140, %142)
+  %144 = Gemm[alpha = 1, beta = 1, broadcast = 1, transB = 1](%143, %24, %25)
+  %145 = Constant[value = <Tensor>]()
+  %146 = Reshape(%144, %145)
+  return %146
+}

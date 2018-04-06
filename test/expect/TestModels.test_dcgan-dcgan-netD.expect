@@ -1,0 +1,37 @@
+graph torch-jit-export (
+  %0[FLOAT, 64x3x64x64]
+  %1[FLOAT, 64x3x4x4]
+  %2[FLOAT, 128x64x4x4]
+  %3[FLOAT, 128]
+  %4[FLOAT, 128]
+  %5[FLOAT, 128]
+  %6[FLOAT, 128]
+  %7[FLOAT, 256x128x4x4]
+  %8[FLOAT, 256]
+  %9[FLOAT, 256]
+  %10[FLOAT, 256]
+  %11[FLOAT, 256]
+  %12[FLOAT, 512x256x4x4]
+  %13[FLOAT, 512]
+  %14[FLOAT, 512]
+  %15[FLOAT, 512]
+  %16[FLOAT, 512]
+  %17[FLOAT, 1x512x4x4]
+) {
+  %18 = Conv[dilations = [1, 1], group = 1, kernel_shape = [4, 4], pads = [1, 1, 1, 1], strides = [2, 2]](%0, %1)
+  %19 = LeakyRelu[alpha = 0.200000002980232](%18)
+  %20 = Conv[dilations = [1, 1], group = 1, kernel_shape = [4, 4], pads = [1, 1, 1, 1], strides = [2, 2]](%19, %2)
+  %21 = BatchNormalization[epsilon = 9.99999974737875e-06, is_test = 1, momentum = 0.899999976158142](%20, %3, %4, %5, %6)
+  %22 = LeakyRelu[alpha = 0.200000002980232](%21)
+  %23 = Conv[dilations = [1, 1], group = 1, kernel_shape = [4, 4], pads = [1, 1, 1, 1], strides = [2, 2]](%22, %7)
+  %24 = BatchNormalization[epsilon = 9.99999974737875e-06, is_test = 1, momentum = 0.899999976158142](%23, %8, %9, %10, %11)
+  %25 = LeakyRelu[alpha = 0.200000002980232](%24)
+  %26 = Conv[dilations = [1, 1], group = 1, kernel_shape = [4, 4], pads = [1, 1, 1, 1], strides = [2, 2]](%25, %12)
+  %27 = BatchNormalization[epsilon = 9.99999974737875e-06, is_test = 1, momentum = 0.899999976158142](%26, %13, %14, %15, %16)
+  %28 = LeakyRelu[alpha = 0.200000002980232](%27)
+  %29 = Conv[dilations = [1, 1], group = 1, kernel_shape = [4, 4], pads = [0, 0, 0, 0], strides = [1, 1]](%28, %17)
+  %30 = Sigmoid(%29)
+  %31 = Constant[value = <Tensor>]()
+  %32 = Reshape(%30, %31)
+  return %32
+}

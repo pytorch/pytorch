@@ -1,0 +1,2201 @@
+ir_version: 2
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "2"
+    input: "0"
+    output: "25"
+    op_type: "Gather"
+  }
+  node {
+    input: "25"
+    output: "26"
+    output: "27"
+    op_type: "Dropout"
+    attribute {
+      name: "is_test"
+      i: 1
+      type: INT
+    }
+    attribute {
+      name: "ratio"
+      f: 0.200000002980232
+      type: FLOAT
+    }
+  }
+  node {
+    input: "3"
+    output: "29"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "3"
+    output: "30"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "3"
+    output: "31"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "29"
+    input: "30"
+    input: "31"
+    output: "32"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "4"
+    output: "33"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "4"
+    output: "34"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "4"
+    output: "35"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "33"
+    input: "34"
+    input: "35"
+    output: "36"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "5"
+    output: "37"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "5"
+    output: "38"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "5"
+    output: "39"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "37"
+    input: "38"
+    input: "39"
+    output: "40"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "6"
+    output: "41"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "6"
+    output: "42"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "6"
+    output: "43"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "41"
+    input: "42"
+    input: "43"
+    output: "44"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "40"
+    input: "44"
+    output: "45"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "1"
+    output: "46"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 1
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "26"
+    input: "32"
+    input: "36"
+    input: "45"
+    input: ""
+    input: "46"
+    output: "47"
+    output: "48"
+    op_type: "GRU"
+    attribute {
+      name: "hidden_size"
+      i: 5
+      type: INT
+    }
+    attribute {
+      name: "linear_before_reset"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "7"
+    output: "49"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "7"
+    output: "50"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "7"
+    output: "51"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "49"
+    input: "50"
+    input: "51"
+    output: "52"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "8"
+    output: "53"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "8"
+    output: "54"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "8"
+    output: "55"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "53"
+    input: "54"
+    input: "55"
+    output: "56"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "9"
+    output: "57"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "9"
+    output: "58"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "9"
+    output: "59"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "57"
+    input: "58"
+    input: "59"
+    output: "60"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "10"
+    output: "61"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "10"
+    output: "62"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "10"
+    output: "63"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "61"
+    input: "62"
+    input: "63"
+    output: "64"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "60"
+    input: "64"
+    output: "65"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "1"
+    output: "66"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 2
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 1
+      type: INTS
+    }
+  }
+  node {
+    input: "47"
+    input: "52"
+    input: "56"
+    input: "65"
+    input: ""
+    input: "66"
+    output: "67"
+    output: "68"
+    op_type: "GRU"
+    attribute {
+      name: "hidden_size"
+      i: 5
+      type: INT
+    }
+    attribute {
+      name: "linear_before_reset"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "11"
+    output: "69"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "11"
+    output: "70"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "11"
+    output: "71"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "69"
+    input: "70"
+    input: "71"
+    output: "72"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "12"
+    output: "73"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "12"
+    output: "74"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "12"
+    output: "75"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "73"
+    input: "74"
+    input: "75"
+    output: "76"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "13"
+    output: "77"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "13"
+    output: "78"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "13"
+    output: "79"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "77"
+    input: "78"
+    input: "79"
+    output: "80"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "14"
+    output: "81"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "14"
+    output: "82"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "14"
+    output: "83"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "81"
+    input: "82"
+    input: "83"
+    output: "84"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "80"
+    input: "84"
+    output: "85"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "1"
+    output: "86"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 3
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 2
+      type: INTS
+    }
+  }
+  node {
+    input: "67"
+    input: "72"
+    input: "76"
+    input: "85"
+    input: ""
+    input: "86"
+    output: "87"
+    output: "88"
+    op_type: "GRU"
+    attribute {
+      name: "hidden_size"
+      i: 5
+      type: INT
+    }
+    attribute {
+      name: "linear_before_reset"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "15"
+    output: "89"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "15"
+    output: "90"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "15"
+    output: "91"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "89"
+    input: "90"
+    input: "91"
+    output: "92"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "16"
+    output: "93"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "16"
+    output: "94"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "16"
+    output: "95"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "93"
+    input: "94"
+    input: "95"
+    output: "96"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "17"
+    output: "97"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "17"
+    output: "98"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "17"
+    output: "99"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "97"
+    input: "98"
+    input: "99"
+    output: "100"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "18"
+    output: "101"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "18"
+    output: "102"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "18"
+    output: "103"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "101"
+    input: "102"
+    input: "103"
+    output: "104"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "100"
+    input: "104"
+    output: "105"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "1"
+    output: "106"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 4
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 3
+      type: INTS
+    }
+  }
+  node {
+    input: "87"
+    input: "92"
+    input: "96"
+    input: "105"
+    input: ""
+    input: "106"
+    output: "107"
+    output: "108"
+    op_type: "GRU"
+    attribute {
+      name: "hidden_size"
+      i: 5
+      type: INT
+    }
+    attribute {
+      name: "linear_before_reset"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "19"
+    output: "109"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "19"
+    output: "110"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "19"
+    output: "111"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "109"
+    input: "110"
+    input: "111"
+    output: "112"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "20"
+    output: "113"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "20"
+    output: "114"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "20"
+    output: "115"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "113"
+    input: "114"
+    input: "115"
+    output: "116"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "21"
+    output: "117"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "21"
+    output: "118"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "21"
+    output: "119"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "117"
+    input: "118"
+    input: "119"
+    output: "120"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "22"
+    output: "121"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 10
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 5
+      type: INTS
+    }
+  }
+  node {
+    input: "22"
+    output: "122"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 0
+      type: INTS
+    }
+  }
+  node {
+    input: "22"
+    output: "123"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 15
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 10
+      type: INTS
+    }
+  }
+  node {
+    input: "121"
+    input: "122"
+    input: "123"
+    output: "124"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "120"
+    input: "124"
+    output: "125"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "1"
+    output: "126"
+    op_type: "Slice"
+    attribute {
+      name: "axes"
+      ints: 0
+      type: INTS
+    }
+    attribute {
+      name: "ends"
+      ints: 5
+      type: INTS
+    }
+    attribute {
+      name: "starts"
+      ints: 4
+      type: INTS
+    }
+  }
+  node {
+    input: "107"
+    input: "112"
+    input: "116"
+    input: "125"
+    input: ""
+    input: "126"
+    output: "127"
+    output: "128"
+    op_type: "GRU"
+    attribute {
+      name: "hidden_size"
+      i: 5
+      type: INT
+    }
+    attribute {
+      name: "linear_before_reset"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    input: "127"
+    output: "129"
+    output: "130"
+    op_type: "Dropout"
+    attribute {
+      name: "is_test"
+      i: 1
+      type: INT
+    }
+    attribute {
+      name: "ratio"
+      f: 0.200000002980232
+      type: FLOAT
+    }
+  }
+  node {
+    output: "131"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 2
+        data_type: INT64
+        raw_data: "2\000\000\000\000\000\000\000\005\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "129"
+    input: "131"
+    output: "132"
+    op_type: "Reshape"
+  }
+  node {
+    input: "132"
+    input: "23"
+    input: "24"
+    output: "133"
+    op_type: "Gemm"
+    attribute {
+      name: "alpha"
+      f: 1
+      type: FLOAT
+    }
+    attribute {
+      name: "beta"
+      f: 1
+      type: FLOAT
+    }
+    attribute {
+      name: "broadcast"
+      i: 1
+      type: INT
+    }
+    attribute {
+      name: "transB"
+      i: 1
+      type: INT
+    }
+  }
+  node {
+    output: "134"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 3
+        data_type: INT64
+        raw_data: "\n\000\000\000\000\000\000\000\005\000\000\000\000\000\000\000\n\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "133"
+    input: "134"
+    output: "135"
+    op_type: "Reshape"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: INT64
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "7"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "8"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "9"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "10"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "11"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "12"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "13"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "14"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "15"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "16"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "17"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "18"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "19"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "20"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "21"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "22"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 15
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "23"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "24"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "135"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
+}

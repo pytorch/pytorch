@@ -1,0 +1,25 @@
+graph torch-jit-export (
+  %0[FLOAT, 2x1x224x224]
+  %1[FLOAT, 64x1x5x5]
+  %2[FLOAT, 64]
+  %3[FLOAT, 64x64x3x3]
+  %4[FLOAT, 64]
+  %5[FLOAT, 32x64x3x3]
+  %6[FLOAT, 32]
+  %7[FLOAT, 9x32x3x3]
+  %8[FLOAT, 9]
+) {
+  %9 = Conv[dilations = [1, 1], group = 1, kernel_shape = [5, 5], pads = [2, 2, 2, 2], strides = [1, 1]](%0, %1, %2)
+  %10 = Relu(%9)
+  %11 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%10, %3, %4)
+  %12 = Relu(%11)
+  %13 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%12, %5, %6)
+  %14 = Relu(%13)
+  %15 = Conv[dilations = [1, 1], group = 1, kernel_shape = [3, 3], pads = [1, 1, 1, 1], strides = [1, 1]](%14, %7, %8)
+  %16 = Constant[value = <Tensor>]()
+  %17 = Reshape(%15, %16)
+  %18 = Transpose[perm = [0, 1, 4, 2, 5, 3]](%17)
+  %19 = Constant[value = <Tensor>]()
+  %20 = Reshape(%18, %19)
+  return %20
+}

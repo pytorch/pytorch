@@ -1,0 +1,7 @@
+graph torch-jit-export (
+  %0[FLOAT, 2x3x224x224]
+  %1[FLOAT, 3]
+) {
+  %2 = PRelu(%0, %1)
+  return %2
+}
