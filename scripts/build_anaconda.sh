@@ -72,11 +72,12 @@ add_feature() {
 #
 CONDA_BUILD_ARGS=()
 CMAKE_BUILD_ARGS=()
+CAFFE2_CONDA_CHANNEL=()
 if [[ $BUILD_ENVIRONMENT == *cuda* ]]; then
-  CUDA_VERSION="$($BUILD_ENVIRONMENT | grep --only-matching '(?<=cuda)[0-9]\.[0-9]')"
+  CUDA_VERSION="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cuda)[0-9]\.[0-9]')"
 fi
 if [[ $BUILD_ENVIRONMENT == *cudnn* ]]; then
-  CUDNN_VERSION="$($BUILD_ENVIRONMENT | grep --only-matching '(?<=cudnn)[0-9](\.[0-9])?')"
+  CUDNN_VERSION="$(echo $BUILD_ENVIRONMENT | grep --only-matching -P '(?<=cudnn)[0-9](\.[0-9])?')"
 fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -207,8 +208,24 @@ add_package leveldb
 add_package lmdb
 add_package opencv
 #
-# Change flags based on target gcc ABI
+# Handle CUDA related flags
+if [[ -n $CUDA_VERSION ]]; then
+  # Only CUDA versions 9.1, 9.0, and 8.0 are supported
+  CMAKE_BUILD_ARGS+=("-DUSE_CUDA=ON")
+  CMAKE_BUILD_ARGS+=("-DUSE_NCCL=ON")
+  #add_feature $CUDA_FEATURE_NAME
+  #add_package $CUDA_FEATURE_NAME
+  #add_feature nccl2
+  CAFFE2_CONDA_CHANNEL+=('-c pytorch')
+else
+  CMAKE_BUILD_ARGS+=("-DUSE_CUDA=OFF")
+  CMAKE_BUILD_ARGS+=("-DUSE_NCCL=OFF")
+  CMAKE_BUILD_ARGS+=("-DBLAS=MKL")
+  add_package 'mkl'
+  add_package 'mkl-include'
+fi
 #
+# Change flags based on target gcc ABI
 if [[ "$(uname)" != 'Darwin' ]]; then
   if [ "$GCC_USE_C11" -eq 0 ]; then
     # opencv 3.3.1 in conda-forge doesn't have imgcodecs, and opencv 3.1.0
@@ -220,25 +237,8 @@ if [[ "$(uname)" != 'Darwin' ]]; then
     # Default conda channels use gcc 7.2 (for recent packages), conda-forge uses
     # gcc 4.8.5
     CMAKE_BUILD_ARGS+=("-DCMAKE_CXX_FLAGS=-D_GLIBCXX_USE_CXX11_ABI=0")
-    CAFFE2_CONDA_CHANNEL='-c conda-forge'
+    CAFFE2_CONDA_CHANNEL+=('-c conda-forge')
   fi
-fi
-#
-# Handle CUDA related flags
-#
-if [[ -n $CUDA_VERSION ]]; then
-  # Only CUDA versions 9.1, 9.0, and 8.0 are supported
-  CMAKE_BUILD_ARGS+=("-DUSE_CUDA=ON")
-  CMAKE_BUILD_ARGS+=("-DUSE_NCCL=ON")
-  #add_feature $CUDA_FEATURE_NAME
-  #add_package $CUDA_FEATURE_NAME
-  #add_feature nccl2
-else
-  CMAKE_BUILD_ARGS+=("-DUSE_CUDA=OFF")
-  CMAKE_BUILD_ARGS+=("-DUSE_NCCL=OFF")
-  CMAKE_BUILD_ARGS+=("-DBLAS=MKL")
-  add_package 'mkl'
-  add_package 'mkl-include'
 fi
 
 
