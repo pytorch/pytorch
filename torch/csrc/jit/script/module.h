@@ -1,8 +1,10 @@
 #pragma once
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
-#include <ATen/optional.h>
+
+#include "torch/csrc/api/include/torch/detail/ordered_dict.h"
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -122,70 +124,9 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-// simple ordered dict used only in Module
-// contains only the minimum necessary functionality for Module
-template<typename T>
-struct OrderedDict {
-  OrderedDict(const char * what)
-  : what(what) {}
-  // note: slight difference from python here.
-  // we do not allow for insertion of an already existing value,
-  // because we not allow allow methods or submodules to be updated
-  // once created
-  T& insert(const std::string& name,  T&& value) {
-    if(index_.count(name) != 0) {
-      std::stringstream ss;
-      ss << "module " << what << "'" << name << "' already defined.";
-      throw std::runtime_error(ss.str());
-    }
-    values_.push_back(std::move(value));
-    index_[name] = values_.size() - 1;
-    return values_.back();
-  }
-  at::optional<T&> find(const std::string& str) {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<T&>(values_.at(it->second));
-  }
-  at::optional<const T&> find(const std::string& str) const {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<const T&>(values_.at(it->second));
-  }
-  T& get(const std::string& name) {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const T& get(const std::string& name) const {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const std::vector<T>& values() const {
-    return values_;
-  }
-private:
-  std::unordered_map<std::string, size_t> index_;
-  std::vector<T> values_;
-  const char * what;
-};
-
 struct Module : public std::enable_shared_from_this<Module> {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
-  Module()
-  : modules("modules")
-  , parameters("parameters")
-  , methods("methods")
-  , optimize(true) {}
+  Module() = default;
 
   // note this doesn't change the flags of existing methods just ones
   // added afterward.
@@ -245,28 +186,28 @@ struct Module : public std::enable_shared_from_this<Module> {
     return methods.values();
   }
 
-
-  at::optional<NamedParameter&> find_parameter(const std::string& name) {
+  NamedParameter* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  at::optional<NamedModule&> find_module(const std::string& name) {
+  NamedModule* find_module(const std::string& name) {
     return modules.find(name);
   }
-  at::optional<Method&> find_method(const std::string& name) {
-    if(auto pm = methods.find(name))
-      return at::optional<Method&>(**pm);
-    return at::nullopt;
+  Method* find_method(const std::string& name) {
+    if (auto method = methods.find(name)) {
+      return method->get();
+    }
+    return nullptr;
   }
 
-private:
+ private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  OrderedDict<NamedModule> modules;
-  OrderedDict<NamedParameter> parameters;
-  OrderedDict<std::unique_ptr<Method>> methods;
+  detail::OrderedDict<NamedModule> modules;
+  detail::OrderedDict<NamedParameter> parameters;
+  detail::OrderedDict<std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/tensor.h>
+#include <torch/detail/ordered_dict.h>
 
 #include <memory>
 #include <string>
@@ -89,15 +90,13 @@ class Module {
 
  protected:
   /// Inserts the parameters into the parameters_ map.
-  void register_parameters(
-      const std::unordered_map<std::string, Tensor>& parameters);
+  void register_parameters(const detail::OrderedDict<Tensor>& parameters);
 
   /// Inserts the buffers into the buffers_ map.
-  void register_buffers(const std::unordered_map<std::string, Tensor>& buffers);
+  void register_buffers(const detail::OrderedDict<Tensor>& buffers);
 
   /// Inserts the modules into the modules_ map.
-  void register_modules(
-      const std::unordered_map<std::string, Module*>& modules);
+  void register_modules(const detail::OrderedDict<Module*>& modules);
 
  private:
   /// The module's name (e.g. "LSTM").
@@ -106,9 +105,9 @@ class Module {
   /// Whether the module is in training mode.
   bool is_training_;
 
-  std::unordered_map<std::string, Module*> children_;
-  std::unordered_map<std::string, Tensor> parameters_;
-  std::unordered_map<std::string, Tensor> buffers_;
+  detail::OrderedDict<Module*> children_;
+  detail::OrderedDict<Tensor> parameters_;
+  detail::OrderedDict<Tensor> buffers_;
 };
 
 /// The `clone()` method in the base `Module` class does not have knowledge of

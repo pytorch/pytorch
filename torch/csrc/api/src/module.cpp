@@ -1,4 +1,5 @@
 #include <torch/nn/module.h>
+#include <torch/detail/ordered_dict.h>
 #include <torch/nn/cursor.h>
 
 #include <torch/csrc/autograd/variable.h>
@@ -77,12 +78,10 @@ const std::string& Module::name() const noexcept {
 }
 
 void Module::register_parameters(
-    const std::unordered_map<std::string, Tensor>& parameters) {}
+    const detail::OrderedDict<Tensor>& parameters) {}
 
-void Module::register_buffers(
-    const std::unordered_map<std::string, Tensor>& buffers) {}
+void Module::register_buffers(const detail::OrderedDict<Tensor>& buffers) {}
 
-void Module::register_modules(
-    const std::unordered_map<std::string, Module*>& modules) {}
+void Module::register_modules(const detail::OrderedDict<Module*>& modules) {}
 
 }} // namespace torch::nn
