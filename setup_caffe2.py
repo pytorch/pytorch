@@ -145,6 +145,7 @@ class cmake_build(Caffe2Command):
                 # prevent crossfire with downstream scripts
                 del os.environ['CMAKE_ARGS']
                 log.info('Extra cmake args: {}'.format(extra_cmake_args))
+                cmake_args.extend(extra_cmake_args)
             cmake_args.append(TOP_DIR)
             subprocess.check_call(cmake_args)
 

@@ -39,7 +39,8 @@ class ComputeHistogramForBlobs(NetModifier):
         self._lower_bound = float(lower_bound)
         self._upper_bound = float(upper_bound)
 
-    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None):
+    def modify_net(self, net, init_net=None, grad_map=None, blob_to_device=None,
+                   modify_output_record=False):
         for blob_name in self._blobs:
             blob = core.BlobReference(blob_name)
             if not net.BlobIsDefined(blob):
@@ -75,18 +76,19 @@ class ComputeHistogramForBlobs(NetModifier):
             if self._logging_frequency >= 1:
                 net.Print(normalized_hist, [], every_n=self._logging_frequency)
 
-            output_field_name = str(blob) + self._field_name_suffix
-            output_scalar = schema.Scalar((np.float32, (self._num_buckets + 2,)),
-                normalized_hist)
+            if modify_output_record:
+                output_field_name = str(blob) + self._field_name_suffix
+                output_scalar = schema.Scalar((np.float32, (self._num_buckets + 2,)),
+                    normalized_hist)
 
-            if net.output_record() is None:
-                net.set_output_record(
-                    schema.Struct((output_field_name, output_scalar))
-                )
-            else:
-                net.AppendOutputRecordField(
-                    output_field_name,
-                    output_scalar)
+                if net.output_record() is None:
+                    net.set_output_record(
+                        schema.Struct((output_field_name, output_scalar))
+                    )
+                else:
+                    net.AppendOutputRecordField(
+                        output_field_name,
+                        output_scalar)
 
     def field_name_suffix(self):
         return self._field_name_suffix

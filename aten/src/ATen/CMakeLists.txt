@@ -8,7 +8,7 @@ IF(POLICY CMP0026)
 ENDIF()
 
 IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-  SET(MSVC_OPT_FLAG "/Ox ")
+  SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
 ELSE()
   SET(MSVC_OPT_FLAG "")
 ENDIF()
@@ -126,10 +126,6 @@ endfunction()
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-  IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under macOS
-    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
-  ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
 # Can be compiled standalone

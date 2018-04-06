@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.0)
 set(CMAKE_MODULE_PATH
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake
-  ${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindCUDA
+  ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/Modules_CUDA_fix
   /usr/lib/x86_64-linux-gnu/
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
   ${CMAKE_MODULE_PATH})
@@ -9,6 +9,9 @@ SET(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 project(ATen)
 
 cmake_policy(SET CMP0012 NEW)
+
+# Polyfill for upstream FindCUDA
+include(CMakeInitializeConfigs)
 
 # RPATH stuff
 # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -73,7 +76,13 @@ endif()
 
 # Detect CUDA architecture and get best NVCC flags
 # finding cuda must be first because other things depend on the result
-IF(NOT CUDA_FOUND)
+#
+# NB: We MUST NOT run this find_package if NO_CUDA is set, because upstream
+# FindCUDA has a bug where it will still attempt to make use of NOTFOUND
+# compiler variables to run various probe tests.  We could try to fix
+# this, but since FindCUDA upstream is subsumed by first-class support
+# for CUDA language, it seemed not worth fixing.
+IF(NOT CUDA_FOUND AND NOT NO_CUDA)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 

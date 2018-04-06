@@ -6,8 +6,6 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_strings.h"
 
-PyObject *THPLayoutClass = NULL;
-
 PyObject *THPLayout_New(bool is_strided, const std::string& name)
 {
   auto type = (PyTypeObject*)&THPLayoutType;
@@ -24,18 +22,6 @@ PyObject *THPLayout_repr(THPLayout *self)
 {
   return THPUtils_packString(self->name);
 }
-
-PyObject *THPLayout_is_cuda(THPLayout *self)
-{
-  Py_RETURN_TRUE;
-}
-
-typedef PyObject *(*getter)(PyObject *, void *);
-
-static struct PyGetSetDef THPLayout_properties[] = {
-  {"is_cuda",      (getter)THPLayout_is_cuda, nullptr, nullptr, nullptr},
-  {nullptr}
-};
 
 PyTypeObject THPLayoutType = {
   PyVarObject_HEAD_INIT(nullptr, 0)
@@ -67,7 +53,7 @@ PyTypeObject THPLayoutType = {
   0,                                     /* tp_iternext */
   0,                                     /* tp_methods */
   0,                                     /* tp_members */
-  THPLayout_properties,                  /* tp_getset */
+  0,                                     /* tp_getset */
   0,                                     /* tp_base */
   0,                                     /* tp_dict */
   0,                                     /* tp_descr_get */

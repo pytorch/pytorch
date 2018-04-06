@@ -12,6 +12,7 @@
 
 namespace at {
 namespace vec256 {
+namespace {
 
 // NOTE: If you specialize on a type, you must define all operations!
 
@@ -102,5 +103,4 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-}
-}
+}}}

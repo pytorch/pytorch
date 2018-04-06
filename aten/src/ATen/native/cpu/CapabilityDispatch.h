@@ -44,6 +44,8 @@ struct DispatchStub {
   }
 
   FnPtr choose_impl() {
+// Do not use cpuinfo on PowerPC as it shows confusing errors when run on ppc
+#ifndef __powerpc__
     if (cpuinfo_initialize()) {
       int avx2 = static_cast<int>(CPUCapability::AVX2);
       if (!std::getenv("ATEN_DISABLE_AVX2") && cpuinfo_has_x86_avx2() && table[avx2]) {
@@ -54,6 +56,7 @@ struct DispatchStub {
         return table[avx];
       }
     }
+#endif
     int def = static_cast<int>(CPUCapability::DEFAULT);
     AT_ASSERT(table[def], "DispatchStub: missing default kernel");
     return table[def];

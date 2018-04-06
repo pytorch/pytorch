@@ -115,7 +115,9 @@ Pointwise Ops
 .. autofunction:: frac
 .. autofunction:: lerp
 .. autofunction:: log
+.. autofunction:: log10
 .. autofunction:: log1p
+.. autofunction:: log2
 .. autofunction:: mul
 .. autofunction:: neg
 .. autofunction:: pow
@@ -135,6 +137,8 @@ Pointwise Ops
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: argmax
+.. autofunction:: argmin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist

@@ -21,6 +21,7 @@ import os
 import shutil
 import tempfile
 
+
 def build_pipeline(node_id):
     with Node('trainer_%d' % node_id):
         with Job.current().init_group, Task():
@@ -62,6 +63,7 @@ class UploadToLocalFile(UploadTaskGroupBuilder):
                                 [src_path, dest_path], {}))([], [])
         return upload_task_group
 
+
 class TestCheckpoint(TestCase):
     def run_with(self, builder):
         with Cluster():
@@ -75,7 +77,7 @@ class TestCheckpoint(TestCase):
 
             session, checkpoint = builder()
             compiled_job = job.compile(LocalSession)
-            num_epochs = JobRunner(compiled_job, checkpoint)(session)
+            num_epochs = JobRunner(compiled_job, checkpoint).train(session)
             self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
             self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
@@ -83,7 +85,8 @@ class TestCheckpoint(TestCase):
                 session, checkpoint = builder()
                 JobRunner(
                     compiled_job,
-                    checkpoint, resume_from_epoch=initial_epoch)(session)
+                    checkpoint, resume_from_epoch=initial_epoch
+                ).train(session)
                 self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
             for epoch in range(1, num_epochs + 1):
@@ -155,7 +158,7 @@ class TestCheckpoint(TestCase):
                         build_pipeline(node_id)
                     compiled_job = job.compile(LocalSession)
                     job_runner = JobRunner(compiled_job, checkpoint)
-                    num_epochs = job_runner(session)
+                    num_epochs = job_runner.train(session)
                 self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
                 # There are 12 global blobs after finishing up the job runner.
@@ -223,7 +226,7 @@ class TestCheckpoint(TestCase):
                     job_runner = JobRunner(
                         compiled_job, checkpoint,
                         upload_task_group_builder=local_upload_builder)
-                    num_epochs = job_runner(session)
+                    num_epochs = job_runner.train(session)
                     self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
 
             # The uploaded files should exist now.
@@ -254,7 +257,7 @@ class TestCheckpoint(TestCase):
                     build_pipeline(node_id)
                 compiled_job = job.compile(LocalSession)
                 job_runner = JobRunner(compiled_job, checkpoint)
-                num_epochs = job_runner(session)
+                num_epochs = job_runner.train(session)
             # make sure all epochs are executed even though saving the checkpoint failed
             # Saving checkpoint failure should not cause job failure
             self.assertEquals(num_epochs, len(EXPECTED_TOTALS))
@@ -294,7 +297,7 @@ class TestCheckpoint(TestCase):
         ws = workspace.C.Workspace()
         session = LocalSession(ws)
         job_runner = JobRunner(job)
-        job_runner(session)
+        job_runner.train(session)
 
         expected_result = np.full(8, 2.0).astype(np.float32)
         self.assertTrue(np.array_equal(expected_result,
@@ -322,11 +325,13 @@ class TestCheckpoint(TestCase):
                 session.run(output_fetcher)
                 return output_fetcher.outputs()[0].fetch()
 
-            num_epochs = JobRunner(compiled_job, checkpoint)(session)
+            num_epochs = JobRunner(compiled_job, checkpoint).train(session)
             for initial_epoch in range(1, num_epochs + 1):
                 JobRunner(
                     compiled_job,
-                    checkpoint, resume_from_epoch=initial_epoch)(session)
+                    checkpoint,
+                    resume_from_epoch=initial_epoch
+                ).train(session)
                 self.assertEquals(fetch_total(session), EXPECTED_TOTALS[-1])
 
         finally:

@@ -104,7 +104,7 @@
 #      CUDA_NVCC_FLAGS_<CONFIG> variables.  For Visual Studio targets,
 #      the host compiler is constructed with one or more visual studio macros
 #      such as $(VCInstallDir), that expands out to the path when
-#      the command is run from withing VS.
+#      the command is run from within VS.
 #
 #   CUDA_NVCC_FLAGS
 #   CUDA_NVCC_FLAGS_<CONFIG>
@@ -175,7 +175,7 @@
 #   -- Same as CUDA_ADD_EXECUTABLE except that a library is created.
 #
 #   CUDA_BUILD_CLEAN_TARGET()
-#   -- Creates a convience target that deletes all the dependency files
+#   -- Creates a convenience target that deletes all the dependency files
 #      generated.  You should make clean after running this target to ensure the
 #      dependency files get regenerated.
 #
@@ -525,7 +525,7 @@ set(CUDA_GENERATED_OUTPUT_DIR "" CACHE PATH "Directory to put all the output fil
 option(CUDA_HOST_COMPILATION_CPP "Generated file extension" ON)
 
 # Extra user settable flags
-set(CUDA_NVCC_FLAGS "" CACHE STRING "Semi-colon delimit multiple arguments.")
+cmake_initialize_per_config_variable(CUDA_NVCC_FLAGS "Semi-colon delimit multiple arguments.")
 
 if(CMAKE_GENERATOR MATCHES "Visual Studio")
   set(_CUDA_MSVC_HOST_COMPILER "$(VCInstallDir)Tools/MSVC/$(VCToolsVersion)/bin/Host$(Platform)/$(PlatformTarget)")
@@ -557,6 +557,13 @@ else()
       set(c_compiler_realpath "")
     endif()
     set(CUDA_HOST_COMPILER "${c_compiler_realpath}" CACHE FILEPATH "Host side compiler used by NVCC")
+  elseif(MSVC AND "${CMAKE_C_COMPILER}" MATCHES "clcache")
+    # NVCC does not think it will work if it is passed clcache.exe as the host
+    # compiler, which means that builds with CC=cl.exe won't work.  Best to just
+    # feed it whatever the actual cl.exe is as the host compiler.
+    #
+    # FYI: clcache works as the match, but clcache.exe does NOT.
+    set(CUDA_HOST_COMPILER "cl.exe" CACHE FILEPATH "Host side compiler used by NVCC")
   else()
     set(CUDA_HOST_COMPILER "${CMAKE_C_COMPILER}"
       CACHE FILEPATH "Host side compiler used by NVCC")
@@ -596,11 +603,6 @@ mark_as_advanced(
 # each configuration-specific set of nvcc flags defined and marked as advanced.
 set(CUDA_configuration_types ${CMAKE_CONFIGURATION_TYPES} ${CMAKE_BUILD_TYPE} Debug MinSizeRel Release RelWithDebInfo)
 list(REMOVE_DUPLICATES CUDA_configuration_types)
-foreach(config ${CUDA_configuration_types})
-    string(TOUPPER ${config} config_upper)
-    set(CUDA_NVCC_FLAGS_${config_upper} "" CACHE STRING "Semi-colon delimit multiple arguments.")
-    mark_as_advanced(CUDA_NVCC_FLAGS_${config_upper})
-endforeach()
 
 ###############################################################################
 ###############################################################################
@@ -738,16 +740,20 @@ endif()
 
 
 # CUDA_NVCC_EXECUTABLE
-cuda_find_host_program(CUDA_NVCC_EXECUTABLE
-  NAMES nvcc
-  PATHS "${CUDA_TOOLKIT_ROOT_DIR}"
-  ENV CUDA_PATH
-  ENV CUDA_BIN_PATH
-  PATH_SUFFIXES bin bin64
-  NO_DEFAULT_PATH
-  )
-# Search default search paths, after we search our own set of paths.
-cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
+if(DEFINED ENV{CUDA_NVCC_EXECUTABLE})
+  set(CUDA_NVCC_EXECUTABLE "$ENV{CUDA_NVCC_EXECUTABLE}" CACHE FILEPATH "The CUDA compiler")
+else()
+  cuda_find_host_program(CUDA_NVCC_EXECUTABLE
+    NAMES nvcc
+    PATHS "${CUDA_TOOLKIT_ROOT_DIR}"
+    ENV CUDA_PATH
+    ENV CUDA_BIN_PATH
+    PATH_SUFFIXES bin bin64
+    NO_DEFAULT_PATH
+    )
+  # Search default search paths, after we search our own set of paths.
+  cuda_find_host_program(CUDA_NVCC_EXECUTABLE nvcc)
+endif()
 mark_as_advanced(CUDA_NVCC_EXECUTABLE)
 
 if(CUDA_NVCC_EXECUTABLE AND NOT CUDA_VERSION)
@@ -1284,6 +1290,11 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
     set(_target_is_phony false)
   endif()
 
+  # If CMake doesn't support separable compilation, complain
+  if(CUDA_SEPARABLE_COMPILATION AND CMAKE_VERSION VERSION_LESS "2.8.10.1")
+    message(SEND_ERROR "CUDA_SEPARABLE_COMPILATION isn't supported for CMake versions less than 2.8.10.1")
+  endif()
+
   # Set up all the command line flags here, so that they can be overridden on a per target basis.
 
   set(nvcc_flags "")
@@ -1564,7 +1575,7 @@ macro(CUDA_WRAP_SRCS cuda_target format generated_files)
       # Bring in the dependencies.  Creates a variable CUDA_NVCC_DEPEND #######
       cuda_include_nvcc_dependencies(${cmake_dependency_file})
 
-      # Convience string for output ###########################################
+      # Convenience string for output #########################################
       if(CUDA_BUILD_EMULATION)
         set(cuda_build_type "Emulation")
       else()
@@ -1975,9 +1986,9 @@ endmacro()
 ###############################################################################
 ###############################################################################
 macro(CUDA_BUILD_CLEAN_TARGET)
-  # Call this after you add all your CUDA targets, and you will get a convience
-  # target.  You should also make clean after running this target to get the
-  # build system to generate all the code again.
+  # Call this after you add all your CUDA targets, and you will get a
+  # convenience target.  You should also make clean after running this target
+  # to get the build system to generate all the code again.
 
   set(cuda_clean_target_name clean_cuda_depends)
   if (CMAKE_GENERATOR MATCHES "Visual Studio")

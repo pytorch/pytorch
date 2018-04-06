@@ -1143,6 +1143,35 @@
     - THTensor* self
 ]]
 [[
+  name: log10_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: log10
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: log10
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
   name: log1p_
   types:
     - floating_point
@@ -1157,6 +1186,35 @@
 ]]
 [[
   name: log1p
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
+  name: log2_
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  cname: log2
+  return: self
+  arguments:
+    - THTensor* self
+    - THTensor* self
+]]
+[[
+  name: log2
   types:
     - floating_point
   backends:

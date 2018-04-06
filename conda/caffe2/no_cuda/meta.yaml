@@ -25,7 +25,6 @@ requirements:
     - mkl-include
     - numpy
     - opencv
-    - protobuf
     - python
     - six
     # other packages here

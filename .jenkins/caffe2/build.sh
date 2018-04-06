@@ -61,13 +61,10 @@ if [[ "${BUILD_ENVIRONMENT}" == conda* ]]; then
   export CONDA_INSTALL_LOCALLY=1
   "${ROOT_DIR}/scripts/build_anaconda.sh" "$@"
 
-  # The tests all need hypothesis, tabulate, and pydot, which aren't included
-  # in the conda packages
-  conda install -y hypothesis tabulate pydot
-
   # This build will be tested against onnx tests, which needs onnx installed.
-  # Onnx should be built against the same protobuf that Caffe2 uses, which is
-  # only installed in the conda environment when Caffe2 is.
+  # At this point the visible protbuf installation will be in conda, since one
+  # of Caffe2's dependencies uses conda, so the correct protobuf include
+  # headers are those in conda as well
   # This path comes from install_anaconda.sh which installs Anaconda into the
   # docker image
   PROTOBUF_INCDIR=/opt/conda/include pip install "${ROOT_DIR}/third_party/onnx"

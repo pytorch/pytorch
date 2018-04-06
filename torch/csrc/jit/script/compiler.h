@@ -44,6 +44,14 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     size_t n_outputs) {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
+
+  // use it in `for i in this: ...`
+  // in this case we will unroll the loop body by assigning i to each of
+  // the SugaredValues returned from this method.
+  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) {
+    throw ErrorReport(loc) << kind() << " is not iterable";
+  }
+
   virtual ~SugaredValue() {}
 };
 
