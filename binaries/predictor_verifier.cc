@@ -40,10 +40,11 @@ void run() {
   // Can be large due to constant fills
   VLOG(1) << "Init net: " << ProtoDebugString(init_net);
   LOG(INFO) << "Predict net: " << ProtoDebugString(predict_net);
-  auto predictor = caffe2::make_unique<Predictor>(init_net, predict_net);
+  auto predictor = std::move(PredictorRegistry()->Create("CPU", init_net, predict_net));
   LOG(INFO) << "Checking that a null forward-pass works";
-  Predictor::TensorVector inputVec, outputVec;
-  predictor->run(inputVec, &outputVec);
+  PredictorBase::TensorVector inputVec;
+  PredictorBase::OutputTensorVector outputVec;
+  predictor->run(inputVec, outputVec);
   CAFFE_ENFORCE_GT(outputVec.size(), 0);
 }
 }
