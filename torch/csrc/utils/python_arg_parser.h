@@ -307,7 +307,7 @@ inline Device PythonArgs::device(int i) {
 
 inline int64_t PythonArgs::deviceInt64(int i) {
   auto dev = device(i);
-  return (dev.is_default || dev.device_type == DeviceType::CPU) ? -1 : dev.device_index;
+  return (dev.is_default || dev.type == DeviceType::CPU) ? -1 : dev.index;
 }
 
 inline std::string PythonArgs::string(int i) {

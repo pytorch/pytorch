@@ -3,18 +3,18 @@
 
 namespace torch {
 
-Device::Device(DeviceType device_type, int64_t device_index, bool is_default)
-    : device_type(device_type), device_index(device_index), is_default(is_default) {
+Device::Device(DeviceType type, int64_t index, bool is_default)
+    : type(type), index(index), is_default(is_default) {
   if (!is_default) {
-    switch (device_type) {
+    switch (type) {
       case DeviceType::CPU:
-        if (device_index != 0) {
-          throw std::runtime_error("cpu device index must be 0, got " + std::to_string(device_index));
+        if (index != 0) {
+          throw std::runtime_error("cpu device index must be 0, got " + std::to_string(index));
         }
         break;
       case DeviceType::CUDA:
-        if (device_index < 0) {
-          throw std::runtime_error("device index must be positive, got " + std::to_string(device_index));
+        if (index < 0) {
+          throw std::runtime_error("device index must be positive, got " + std::to_string(index));
         }
         break;
       default:

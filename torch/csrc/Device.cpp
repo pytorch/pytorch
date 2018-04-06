@@ -67,7 +67,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto device = r.device(0);
-    return THPDevice_New(device.device_type, device.device_index, device.is_default);
+    return THPDevice_New(device.type, device.index, device.is_default);
   } else if (r.idx == 1) {
     auto as_device = r.device(0);  // this works, because device can take strings
     auto device_type = r.string(0);
@@ -79,8 +79,8 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     auto is_default = r.isNone(1);
     auto device_index = r.toInt64WithDefault(1, -1);
     // make sure this is constructible
-    auto device = torch::Device(as_device.device_type, device_index, is_default);
-    return THPDevice_New(device.device_type, device.device_index, device.is_default);
+    auto device = torch::Device(as_device.type, device_index, is_default);
+    return THPDevice_New(device.type, device.index, device.is_default);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

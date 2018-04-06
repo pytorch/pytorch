@@ -7,10 +7,10 @@ namespace torch {
 enum class DeviceType {CPU=0, CUDA=1};
 
 struct Device {
-  const DeviceType device_type;
-  const int64_t device_index;
+  const DeviceType type;
+  const int64_t index;
   const bool is_default;   // is default device for type.
-  Device(DeviceType device_type, int64_t device_index, bool is_default);
+  Device(DeviceType type, int64_t index, bool is_default);
 };
 
 }
