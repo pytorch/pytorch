@@ -13,6 +13,42 @@ getArgumentsFromOperator(caffe2::OperatorDef op) {
   return argMap;
 }
 
+nom::repr::NeuralNetOperator::NNLayout getLayout(std::map<std::string, caffe2::Argument> argMap) {
+  auto arg = argMap.find("order");
+  if (arg != argMap.end()) {
+    auto order = argMap["order"].s();
+    if (order == "NCHW" || order == "nchw") {
+      return nom::repr::NeuralNetOperator::NNLayout::NCHW;
+    } else if (order == "NHWC" || order == "nhwc") {
+      return nom::repr::NeuralNetOperator::NNLayout::NHWC;
+    }
+  }
+  return nom::repr::NeuralNetOperator::NNLayout::Undefined;
+}
+
+std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) {
+  // There are literally three ways to define shapes in Conv in Caffe2
+  std::vector<int> kernelShape;
+  if (argMap.count("kernel")) {
+    assert(argMap["kernel"].has_i() && "Invalid kernel argument");
+    int kernel = static_cast<int>(argMap["kernel"].i());
+    kernelShape = {kernel, kernel};
+  } else if (argMap.count("kernels")) {
+    for (auto i : argMap["kernels"].ints()) {
+      kernelShape.push_back(static_cast<int>(i));
+    }
+  } else if (argMap.count("kernel_h") && argMap.count("kernel_w")) {
+    assert(argMap["kernel_h"].has_i() && "Invalid kernel argument");
+    assert(argMap["kernel_w"].has_i() && "Invalid kernel argument");
+    int kernelH = static_cast<int>(argMap["kernel_h"].i());
+    int kernelW = static_cast<int>(argMap["kernel_w"].i());
+    kernelShape = {kernelH, kernelW};
+  } else {
+    assert(0 && "Could not parse kernel argument");
+  }
+  return kernelShape;
+}
+
 namespace nom {
 namespace converters {
 
@@ -20,37 +56,12 @@ std::unique_ptr<repr::NeuralNetOperator>
 convertOperator(caffe2::OperatorDef op) {
   auto argMap = getArgumentsFromOperator(op);
 
+  std::unique_ptr<repr::NeuralNetOperator> nnOp;
+
   if (op.type() == "Conv") {
-    // There are literally three ways to define shapes in Conv in Caffe2
-    std::vector<int> kernelShape;
-    if (argMap.count("kernel")) {
-      assert(argMap["kernel"].has_i() && "Invalid kernel argument passed to Conv");
-      int kernel = static_cast<int>(argMap["kernel"].i());
-      kernelShape = {kernel, kernel};
-    } else if (argMap.count("kernels")) {
-      for (auto i : argMap["kernels"].ints()) {
-        kernelShape.push_back(static_cast<int>(i));
-      }
-    } else if (argMap.count("kernel_h") && argMap.count("kernel_w")) {
-      assert(argMap["kernel_h"].has_i() && "Invalid kernel argument passed to Conv");
-      assert(argMap["kernel_w"].has_i() && "Invalid kernel argument passed to Conv");
-      int kernelH = static_cast<int>(argMap["kernel_h"].i());
-      int kernelW = static_cast<int>(argMap["kernel_w"].i());
-      kernelShape = {kernelH, kernelW};
-    } else {
-      assert(0);
-    }
-
-    auto c = util::make_unique<repr::Conv>(kernelShape);
-
-    if (argMap.count("order")) {
-      auto order = argMap["order"].s();
-      if (order == "NCHW") {
-        c->setLayout(repr::Conv::NNLayout::NCHW);
-      } else if (order == "NHWC") {
-        c->setLayout(repr::Conv::NNLayout::NHWC);
-      }
-    }
+    auto kernelShape = getKernelShape(argMap);
+    nnOp = util::make_unique<repr::Conv>(kernelShape);
+    auto c = dyn_cast<repr::Conv>(nnOp.get());
 
     // TODO: include all the other ways of adding these args.
     // e.g. strides, stride_h, etc.
@@ -71,16 +82,34 @@ convertOperator(caffe2::OperatorDef op) {
       int dilation = static_cast<int>(argMap["dilation"].i());
       c->setDilations({dilation, dilation});
     }
-
-    return std::move(c);
   }
 
   if (op.type() == "Relu") {
-    auto relu = util::make_unique<repr::Relu>();
-    return std::move(relu);
+    nnOp = util::make_unique<repr::Relu>();
   }
 
-  return util::make_unique<repr::GenericOperator>(op.type());
+  if (op.type() == "AveragePool") {
+    auto kernelShape = getKernelShape(argMap);
+    nnOp = util::make_unique<repr::AveragePool>(kernelShape);
+  }
+
+  if (op.type() == "MaxPool") {
+    auto kernelShape = getKernelShape(argMap);
+    nnOp = util::make_unique<repr::MaxPool>(kernelShape);
+  }
+
+  if (op.type() == "Sum") {
+    nnOp = util::make_unique<repr::Sum>();
+  }
+
+  if (!nnOp) {
+    nnOp = util::make_unique<repr::GenericOperator>(op.type());
+  }
+
+  // Generic attributes associated with Ops here
+  nnOp->setLayout(getLayout(argMap));
+
+  return nnOp;
 }
 
 
@@ -288,6 +317,62 @@ repr::NNModule convertFromCaffe2Proto(const caffe2::NetDef &net, std::unordered_
   return module;
 }
 
+caffe2::OperatorDef convertOperator(repr::NNGraph::NodeRef instrNode) {
+  auto *nnOp = repr::nn::get<repr::NeuralNetOperator>(instrNode);
+  auto *annotation = nnOp->getAnnotation();
+  caffe2::OperatorDef op;
+
+  if (!annotation || !annotation->getSaved()) {
+    using NNKind = repr::NeuralNetOperator::NNKind;
+    switch (nnOp->getKind()) {
+      case NNKind::Send:
+      {
+        auto sendOp = dyn_cast<repr::Send>(nnOp);
+        op.set_type("Placeholder:Send");
+        {
+          auto arg = op.add_arg();
+          arg->set_name("dst_node");
+          arg->set_s(sendOp->getDestination());
+        }
+        {
+          auto out = repr::nn::getOutputs(instrNode).front();
+          auto t = repr::nn::get<repr::Data>(out);
+          auto arg = op.add_arg();
+          arg->set_name("callsite_id");
+          arg->set_i(t->getVersion());
+        }
+        break;
+      }
+      case NNKind::Receive:
+      {
+        auto recvOp = dyn_cast<repr::Receive>(nnOp);
+        op.set_type("Placeholder:Receive");
+        {
+          auto arg = op.add_arg();
+          arg->set_name("src_node");
+          arg->set_s(recvOp->getSource());
+        }
+        {
+          auto out = repr::nn::getOutputs(instrNode).front();
+          auto t = repr::nn::get<repr::Data>(out);
+          auto arg = op.add_arg();
+          arg->set_name("callsite_id");
+          arg->set_i(t->getVersion());
+        }
+        break;
+      }
+      default:
+        op.set_type(nnOp->getName());
+    }
+  } else {
+    op = *reinterpret_cast<caffe2::OperatorDef *>(annotation->getSaved());
+  }
+  // We may have swapped out some of the edges.
+  op.clear_input();
+  op.clear_output();
+  return op;
+}
+
 caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
   auto predictNet = caffe2::NetDef();
 
@@ -301,28 +386,47 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m) {
     }
     auto bb = bbNode->data().get();
     for (const auto &instrNode : bb->getInstructions()) {
-      auto *nnOp = dyn_cast<repr::NeuralNetOperator>(instrNode->data().get());
-      auto *annotation = nnOp->getAnnotation();
-      assert(annotation->getSaved() &&
-             "Generating Caffe2 operators from IR not yet supported.\n");
-      auto *op =
-          reinterpret_cast<caffe2::OperatorDef *>(annotation->getSaved());
+      caffe2::OperatorDef op = convertOperator(instrNode);
 
-      // We may have swapped out some of the edges.
-      op->clear_input();
-      op->clear_output();
       for (const auto &inEdge : instrNode->getInEdges()) {
         auto *tensorNode =
             dyn_cast<repr::NeuralNetData>(inEdge->tail()->data().get());
-        *op->add_input() = tensorNode->getName();
+        *op.add_input() = tensorNode->getName();
       }
       for (const auto &outEdge : instrNode->getOutEdges()) {
         auto *tensorNode =
             dyn_cast<repr::NeuralNetData>(outEdge->head()->data().get());
-        *op->add_output() = tensorNode->getName();
+        *op.add_output() = tensorNode->getName();
       }
+
+      auto *nnOp = repr::nn::get<repr::NeuralNetOperator>(instrNode);
+      if (nnOp->getLayout() != repr::NeuralNetOperator::NNLayout::Undefined) {
+
+        caffe2::Argument* arg = nullptr;
+        for (int i = 0; i < op.arg_size(); ++i) {
+          auto arg_ = op.mutable_arg(i);
+          if (arg_->name() == "order") {
+            arg = arg_;
+            break;
+          }
+        }
+
+        if (!arg) {
+          arg = op.add_arg();
+          arg->set_name("order");
+        }
+
+        auto layout = nnOp->getLayout();
+        if (layout == repr::NeuralNetOperator::NNLayout::NCHW) {
+          arg->set_s("NCHW");
+        }
+        if (layout == repr::NeuralNetOperator::NNLayout::NHWC) {
+          arg->set_s("NHWC");
+        }
+      }
+
       // Save the operator to the net.
-      *predictNet.add_op() = *op;
+      *predictNet.add_op() = op;
     }
   }
 
