@@ -55,10 +55,7 @@ fi
 # Test no-Python build
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   echo "Building libtorch with NO_PYTHON"
-  # NB: Install outside of source directory so that it doesn't get
-  # cleaned away prior to docker push
-  LIBTORCH_INSTALL_PREFIX=`pwd`/../libtorch
-  pushd tools/cpp_build
-  bash build_all.sh "$LIBTORCH_INSTALL_PREFIX"
-  popd
+  # NB: Install outside of source directory (at the same level as the root
+  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
+  tools/cpp_build/build_all.sh "../cpp-build"
 fi
