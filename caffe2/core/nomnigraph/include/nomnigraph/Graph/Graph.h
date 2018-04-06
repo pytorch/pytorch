@@ -263,10 +263,12 @@ public:
   /// related to the node.
   void deleteNode(NodeRef n, bool deleteEdges = true) {
     if (deleteEdges) {
-      for (auto &edge : n->inEdges) {
+      auto inEdges = n->inEdges;
+      for (auto& edge : inEdges) {
         deleteEdge(edge);
       }
-      for (auto &edge : n->outEdges) {
+      auto outEdges = n->outEdges;
+      for (auto& edge : outEdges) {
         deleteEdge(edge);
       }
     }
