@@ -66,7 +66,7 @@ def get_shell_output(command):
 
 def run_test(python, test_module, test_directory, options):
     verbose = '--verbose' if options.verbose else ''
-    return shell('{} {} {}'.format(python, test_module, verbose),
+    return shell('{} -m unittest {} {}'.format(python, verbose, test_module),
                  test_directory)
 
 
@@ -148,6 +148,17 @@ CUSTOM_HANDLERS = {
     'distributed': test_distributed,
 }
 
+def parse_test_module(test):
+    idx = test.find('.')
+    return test[:idx if idx > -1 else None]
+
+
+class TestChoices(list):
+    def __init__(self, *args, **kwargs):
+        super(TestChoices, self).__init__(args[0])
+
+    def __contains__(self, item):
+        return list.__contains__(self, parse_test_module(item))
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -166,10 +177,12 @@ def parse_args():
         '-i',
         '--include',
         nargs='+',
-        choices=TESTS,
+        choices=TestChoices(TESTS),
         default=TESTS,
         metavar='TESTS',
-        help='select a set of tests to include (defaults to ALL tests)')
+        help='select a set of tests to include (defaults to ALL tests).'
+             ' tests can be specified with module name, module.TestClass'
+             ' or module.TestClass.test_method')
     parser.add_argument(
         '-x',
         '--exclude',
@@ -205,26 +218,45 @@ def get_python_command(options):
     else:
         return os.environ.get('PYCMD', 'python')
 
+def find_test_index(test, selected_tests, find_last_index = False):
+    idx = 0
+    found_idx = -1
+    for t in selected_tests:
+        if t.startswith(test):
+            if not find_last_index:
+                return idx
+            else:
+                found_idx = idx
+        idx+=1
+    return found_idx
+
+
+def exclude_tests(exclude_list, tests, exclude_message = None):
+    sel_tests = tests[:]
+    for test in exclude_list:
+        for t in sel_tests:
+            if t.startswith(test):
+                if exclude_message != None:
+                   print_to_stderr(('Excluding {} ' + exclude_message).format(t))
+                tests.remove(t)
+    return tests
+
 
 def get_selected_tests(options):
     selected_tests = options.include
-    for test in options.exclude:
-        if test in selected_tests:
-            selected_tests.remove(test)
 
     if options.first:
-        first_index = selected_tests.index(options.first)
+        first_index = find_test_index(options.first, selected_tests)
         selected_tests = selected_tests[first_index:]
 
     if options.last:
-        last_index = selected_tests.index(options.last)
+        last_index = find_test_index(options.last, selected_tests, True)
         selected_tests = selected_tests[:last_index + 1]
 
+    selected_tests = exclude_tests(options.exclude, selected_tests)
+
     if sys.platform == 'win32' and not options.ignore_win_blacklist:
-        for test in WINDOWS_BLACKLIST:
-            if test in selected_tests:
-                print_to_stderr('Excluding {} on Windows'.format(test))
-                selected_tests.remove(test)
+        selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 
     return selected_tests
 
@@ -234,6 +266,7 @@ def main():
     python = get_python_command(options)
     test_directory = os.path.dirname(os.path.abspath(__file__))
     selected_tests = get_selected_tests(options)
+
     if options.verbose:
         print_to_stderr('Selected tests: {}'.format(', '.join(selected_tests)))
 
@@ -241,11 +274,13 @@ def main():
         shell('coverage erase')
 
     for test in selected_tests:
-        test_module = 'test_{}.py'.format(test)
-        print_to_stderr('Running {} ...'.format(test_module))
-        handler = CUSTOM_HANDLERS.get(test, run_test)
-        if not handler(python, test_module, test_directory, options):
-            raise RuntimeError('{} failed!'.format(test_module))
+        test_name = 'test_{}'.format(test)
+        test_module = parse_test_module(test)
+
+        print_to_stderr('Running {} ...'.format(test_name))
+        handler = CUSTOM_HANDLERS.get(test_module, run_test)
+        if not handler(python, test_name, test_directory, options):
+            raise RuntimeError('{} failed!'.format(test_name))
 
     if options.coverage:
         shell('coverage combine')
