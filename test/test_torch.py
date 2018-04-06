@@ -1442,6 +1442,73 @@ class TestTorch(TestCase):
         cuda_dtypes = [d for d in all_dtypes if d.is_cuda]
         self._test_dtypes(self, cpu_dtypes, cuda_dtypes, torch.strided)
 
+    def test_device(self):
+        cpu = torch.device('cpu')
+        self.assertEqual('cpu', str(cpu))
+        self.assertEqual('cpu', cpu.type)
+        self.assertEqual(None, cpu.index)
+
+        cpu0 = torch.device('cpu:0')
+        self.assertEqual('cpu:0', str(cpu0))
+        self.assertEqual('cpu', cpu0.type)
+        self.assertEqual(0, cpu0.index)
+
+        cpu0 = torch.device('cpu', 0)
+        self.assertEqual('cpu:0', str(cpu0))
+        self.assertEqual('cpu', cpu0.type)
+        self.assertEqual(0, cpu0.index)
+
+        cuda = torch.device('cuda')
+        self.assertEqual('cuda', str(cuda))
+        self.assertEqual('cuda', cuda.type)
+        self.assertEqual(None, cuda.index)
+
+        cuda1 = torch.device('cuda:1')
+        self.assertEqual('cuda:1', str(cuda1))
+        self.assertEqual('cuda', cuda1.type)
+        self.assertEqual(1, cuda1.index)
+
+        cuda1 = torch.device('cuda', 1)
+        self.assertEqual('cuda:1', str(cuda1))
+        self.assertEqual('cuda', cuda1.type)
+        self.assertEqual(1, cuda1.index)
+
+        self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cpu', -1))
+        self.assertRaises(RuntimeError, lambda: torch.device('cpu', 1))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda:-1'))
+        self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
+
+        self.assertRaises(TypeError, lambda: torch.device('other'))
+        self.assertRaises(TypeError, lambda: torch.device('other:0'))
+
+    def test_tensor_device(self):
+        def assertEqual(device_str, fn):
+            self.assertEqual(torch.device(device_str), fn().device)
+            self.assertEqual(device_str, str(fn().device))
+
+        assertEqual('cpu', lambda: torch.tensor(5))
+        assertEqual('cpu', lambda: torch.ones((2, 3), dtype=torch.float32, device='cpu'))
+        # NOTE: 'cpu' is the canonical representation of 'cpu:0', but 'cuda:X' is the canonical
+        # representation of cuda devices.
+        assertEqual('cpu', lambda: torch.ones((2, 3), dtype=torch.float32, device='cpu:0'))
+        if torch.cuda.is_available():
+            assertEqual('cuda:0', lambda: torch.tensor(5).cuda(0))
+            assertEqual('cuda:0', lambda: torch.tensor(5).cuda('cuda:0'))
+            self.assertRaises(RuntimeError, lambda: torch.tensor(5).cuda('cpu'))
+            self.assertRaises(RuntimeError, lambda: torch.tensor(5).cuda('cpu:0'))
+            assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.cuda.int64, device=0))
+            assertEqual('cuda:0', lambda: torch.tensor(5, dtype=torch.cuda.int64, device='cuda:0'))
+            assertEqual('cuda:' + str(torch.cuda.current_device()),
+                        lambda: torch.tensor(5, dtype=torch.cuda.int64, device='cuda'))
+
+            if torch.cuda.device_count() > 1:
+                assertEqual('cuda:1', lambda: torch.tensor(5).cuda(1))
+                assertEqual('cuda:1', lambda: torch.tensor(5).cuda('cuda:1'))
+                assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.cuda.int64, device=1))
+                assertEqual('cuda:1', lambda: torch.tensor(5, dtype=torch.cuda.int64, device='cuda:1'))
+
     @staticmethod
     def _test_empty_full(self, cpu_dtypes, cuda_dtypes, layout):
         dtypes = cpu_dtypes + (cuda_dtypes if torch.cuda.is_available() else [])
