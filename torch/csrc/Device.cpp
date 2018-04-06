@@ -105,11 +105,10 @@ PyObject *THPDevice_index(THPDevice *self)
 
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   HANDLE_TH_ERRORS
-  if (!THPDevice_Check(a)) {
-    Py_RETURN_NOTIMPLEMENTED;
-  }
-  if (!THPDevice_Check(b)) {
-    Py_RETURN_NOTIMPLEMENTED;
+  if (!THPDevice_Check(a) || !THPDevice_Check(b)) {
+    // Py_RETURN_NOTIMPLEMENTED not in python 2.
+    Py_INCREF(Py_NotImplemented);
+    return Py_NotImplemented;
   }
   THPDevice *da = reinterpret_cast<THPDevice*>(a);
   THPDevice *db = reinterpret_cast<THPDevice*>(b);
