@@ -525,10 +525,14 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def script(fn):
-    rcb = createResolutionCallback()
+def _script_graph(fn, frame_id=2):
+    rcb = createResolutionCallback(frame_id)
     ast = get_jit_ast(fn)
-    graph = _jit_script_compile(ast, rcb)
+    return _jit_script_compile(ast, rcb)
+
+
+def script(fn):
+    graph = _script_graph(fn, frame_id=3)
     return torch._C.GraphExecutor(graph, True)
 
 
