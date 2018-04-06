@@ -186,7 +186,7 @@ def hann_window(window_length, periodic=True, dtype=torch.float32):
         window_length (int): the size of returned window
         periodic (bool, optional): If True, returns a window to be used as periodic
             function. If False, return a symmetric window.
-        dtype (torch.dtype, optional): the desired type of returned window.
+        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
             Default: `torch.float32`
 
     Returns:
@@ -228,7 +228,7 @@ def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=to
         window_length (int): the size of returned window
         periodic (bool, optional): If True, returns a window to be used as periodic
             function. If False, return a symmetric window.
-        dtype (torch.dtype, optional): the desired type of returned window.
+        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
             Default: `torch.float32`
 
     Returns:
@@ -278,7 +278,7 @@ def bartlett_window(window_length, periodic=True, dtype=torch.float32):
         window_length (int): the size of returned window
         periodic (bool, optional): If True, returns a window to be used as periodic
             function. If False, return a symmetric window.
-        dtype (torch.dtype, optional): the desired type of returned window.
+        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
             Default: `torch.float32`
 
     Returns:
