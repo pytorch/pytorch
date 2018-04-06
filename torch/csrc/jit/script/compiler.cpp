@@ -19,6 +19,23 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
+// Vector of values. Used to implement tuple return values and unpacking
+struct TupleValue : public SugaredValue {
+  TupleValue(std::vector<Value*> values) : values(std::move(values)) {}
+
+  virtual std::string kind() const override {
+    return "tuple";
+  }
+
+  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m)
+      override {
+    return values;
+  }
+
+ private:
+  std::vector<Value*> values;
+};
+
 // Auxiliary data structure for desugaring variable binding into our always
 // explicitly scoped language as we descend down
 // nested control structures in the frontend (which themselves don't introduce
@@ -608,8 +625,12 @@ private:
     if (stmt.reduction() != '=') {
       if (stmt.lhs().size() != 1) {
         throw ErrorReport(stmt)
-            << "reductions are only allow when there is a single variable "
+            << "reductions are only allowed when there is a single variable "
             << "on the left-hand side.";
+      }
+      if (stmt.lhs()[0].kind() != TK_VAR) {
+        throw ErrorReport(stmt) << "Starred expressions are not allowed on the"
+                                << " lhs of a reduction.";
       }
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
@@ -617,7 +638,7 @@ private:
       outputs = emitExpr(expr, 1);
     } else {
       outputs =
-          emitExpr(stmt.rhs(), num_starred_unpack ? -1 : stmt.lhs().size());
+          emitExpr(stmt.rhs(), num_starred_unpack ? VARARG_OUTPUTS : stmt.lhs().size());
     }
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value

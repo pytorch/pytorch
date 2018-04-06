@@ -12,6 +12,11 @@ namespace torch {
 namespace jit {
 namespace script {
 
+// Value used to indicate that we can accept a variable number of outputs from
+// an expression, for example, when we are packing outputs into a tuple on the
+// lhs of an assignment
+constexpr size_t VARARG_OUTPUTS = std::numeric_limits<size_t>::max();
+
 // The AST can contain nodes like `self`, `self.b` or `python_fn` that
 // are not first-class values in the graph representation, but instead
 // will be desugared based on how they are used in the AST.
@@ -76,23 +81,6 @@ struct SimpleValue : public SugaredValue {
 
 private:
   Value* value;
-};
-
-// Vector of values. Used to implement tuple return values and unpacking
-struct TupleValue : public SugaredValue {
-  TupleValue(std::vector<Value*> values) : values(std::move(values)) {}
-
-  virtual std::string kind() const override {
-    return "tuple";
-  }
-
-  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m)
-      override {
-    return values;
-  }
-
- private:
-  std::vector<Value*> values;
 };
 
 struct BuiltinFunction : public SugaredValue {

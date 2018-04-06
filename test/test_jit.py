@@ -2304,7 +2304,6 @@ class TestScript(TestCase):
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
-
     def test_script_module_star_assign2(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -2328,6 +2327,7 @@ class TestScript(TestCase):
 
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
 
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):

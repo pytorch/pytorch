@@ -186,7 +186,7 @@ class StmtBuilder(Builder):
         if not isinstance(var, Var) and not isinstance(var, Starred):
             raise NotSupportedError(var.range(),
                                     "the only expressions allowed on the left hand side of "
-                                    "assignments are variable names")
+                                    "assignments are variable names and starred expressions")
         return var
 
     @staticmethod
