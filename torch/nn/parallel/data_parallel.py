@@ -45,7 +45,7 @@ class DataParallel(Module):
     See also: :ref:`cuda-nn-dataparallel-instead`
 
     Arbitrary positional and keyword inputs are allowed to be passed into
-    DataParallel EXCEPT Tensors. All variables will be scattered on dim
+    DataParallel EXCEPT Tensors. All tensors will be scattered on dim
     specified (default 0). Primitive types will be broadcasted, but all
     other types will be a shallow copy and can be corrupted if written to in
     the model's forward pass.
@@ -139,7 +139,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
         output_device: GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])
     Returns:
-        a Variable containing the result of module(input) located on
+        a Tensor containing the result of module(input) located on
         output_device
     """
     if not isinstance(inputs, tuple):

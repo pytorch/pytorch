@@ -1,5 +1,4 @@
 import torch
-from torch.autograd import Variable
 import warnings
 from torch.distributions import constraints
 
@@ -146,7 +145,7 @@ class Distribution(object):
         of the result will be `(cardinality,) + batch_shape + event_shape`
         (where `event_shape = ()` for univariate distributions).
 
-        Note that this enumerates over all batched variables in lock-step
+        Note that this enumerates over all batched tensors in lock-step
         `[[0, 0], [1, 1], ...]`. To iterate over the full Cartesian product
         use `itertools.product(m.enumerate_support())`.
 
