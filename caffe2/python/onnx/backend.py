@@ -772,8 +772,7 @@ class Caffe2Backend(Backend):
                 opset_version = 1
 
         # Check whether we have RNN related ops
-        pred_model = ModelProto()
-        pred_model.ParseFromString(cls.optimize_onnx(model.SerializeToString(), predict=True))
+        pred_model = cls.optimize_onnx(model, predict=True)
         rnn_nodes = []
         for node in pred_model.graph.node:
             if node.op_type in {'LSTM', 'GRU', 'RNN'}:
@@ -788,8 +787,7 @@ class Caffe2Backend(Backend):
         if use_cpp_backend:
             c2_rnn_ops = []
             if rnn_nodes:
-                init_model = ModelProto()
-                init_model.ParseFromString(cls.optimize_onnx(model.SerializeToString(), init=True))
+                init_model = cls.optimize_onnx(model, init=True)
                 for node in rnn_nodes:
                     c2ops = cls._onnx_node_to_caffe2_op(
                         init_model, pred_model, node, opset_version)
@@ -932,11 +930,9 @@ class Caffe2Backend(Backend):
     def _onnx_model_to_caffe2_net(cls, onnx_model, device, opset_version, include_initializers):
         device_option = get_device_option(Device(device))
 
-        init_model = ModelProto()
-        init_model.ParseFromString(cls.optimize_onnx(onnx_model.SerializeToString(), init=True))
+        init_model = cls.optimize_onnx(onnx_model, init=True)
 
-        pred_model = ModelProto()
-        pred_model.ParseFromString(cls.optimize_onnx(onnx_model.SerializeToString(), predict=True))
+        pred_model = cls.optimize_onnx(onnx_model, predict=True)
 
         init_net = caffe2_pb2.NetDef()
         pred_net = caffe2_pb2.NetDef()
