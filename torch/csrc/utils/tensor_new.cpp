@@ -386,8 +386,8 @@ Tensor sparse_coo_tensor_ctor(const Type& type, PyObject* args, PyObject* kwargs
   const auto& default_sparse_type = type.toBackend(sparse_backend);
 
   static PythonArgParser parser({
-    "sparse_coo_tensor(PyObject* indices, PyObject* values, *, Dtype dtype=None, device_index? device_index=None, bool requires_grad=False)",
-    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, Dtype dtype=None, device_index? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
+    "sparse_coo_tensor(PyObject* indices, PyObject* values, IntList size, *, Dtype dtype=None, Device? device=None, bool requires_grad=False)",
   });
 
   ParsedArgs<6> parsed_args;
