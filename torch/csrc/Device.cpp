@@ -124,10 +124,10 @@ static bool THPDevice_equal(THPDevice *a, THPDevice *b) {
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   HANDLE_TH_ERRORS
   if (!THPDevice_Check(a)) {
-    throw torch::TypeError("Device can only be compared with DeviceType, got %s", Py_TYPE(a)->tp_name);
+    Py_RETURN_NOTIMPLEMENTED;
   }
   if (!THPDevice_Check(b)) {
-    throw torch::TypeError("Device can only be compared with DeviceType, got %s", Py_TYPE(b)->tp_name);
+    Py_RETURN_NOTIMPLEMENTED;
   }
   THPDevice *da = reinterpret_cast<THPDevice*>(a);
   THPDevice *db = reinterpret_cast<THPDevice*>(b);
