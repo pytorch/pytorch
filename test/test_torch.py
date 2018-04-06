@@ -1308,37 +1308,31 @@ class TestTorch(TestCase):
         self.assertEqual('cpu', str(cpu))
         self.assertEqual('cpu', cpu.type)
         self.assertEqual(None, cpu.index)
-        self.assertRaises(RuntimeError, lambda: cpu.cuda_index)
 
         cpu0 = torch.device('cpu:0')
         self.assertEqual('cpu:0', str(cpu0))
         self.assertEqual('cpu', cpu0.type)
         self.assertEqual(0, cpu0.index)
-        self.assertRaises(RuntimeError, lambda: cpu0.cuda_index)
 
         cpu0 = torch.device('cpu', 0)
         self.assertEqual('cpu:0', str(cpu0))
         self.assertEqual('cpu', cpu0.type)
         self.assertEqual(0, cpu0.index)
-        self.assertRaises(RuntimeError, lambda: cpu0.cuda_index)
 
         cuda = torch.device('cuda')
         self.assertEqual('cuda', str(cuda))
         self.assertEqual('cuda', cuda.type)
         self.assertEqual(None, cuda.index)
-        self.assertEqual(-1, cuda.cuda_index)
 
         cuda1 = torch.device('cuda:1')
         self.assertEqual('cuda:1', str(cuda1))
         self.assertEqual('cuda', cuda1.type)
         self.assertEqual(1, cuda1.index)
-        self.assertEqual(1, cuda1.cuda_index)
 
         cuda1 = torch.device('cuda', 1)
         self.assertEqual('cuda:1', str(cuda1))
         self.assertEqual('cuda', cuda1.type)
         self.assertEqual(1, cuda1.index)
-        self.assertEqual(1, cuda1.cuda_index)
 
         self.assertRaises(RuntimeError, lambda: torch.device('cpu:-1'))
         self.assertRaises(RuntimeError, lambda: torch.device('cpu:1'))

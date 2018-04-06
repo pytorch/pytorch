@@ -103,18 +103,6 @@ PyObject *THPDevice_index(THPDevice *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_cuda_index(THPDevice *self)
-{
-  HANDLE_TH_ERRORS
-  if (self->device.type == torch::DeviceType::CUDA) {
-    return THPUtils_packInt64(self->device.index);
-  }
-  std::ostringstream oss;
-  oss << "cuda_index only supported on cuda device, got: " << deviceTypeString(self->device.type);
-  throw std::runtime_error(oss.str());
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   HANDLE_TH_ERRORS
   if (!THPDevice_Check(a)) {
@@ -155,7 +143,6 @@ typedef PyObject *(*getter)(PyObject *, void *);
 static struct PyGetSetDef THPDevice_properties[] = {
   {"type",       (getter)THPDevice_type, nullptr, nullptr, nullptr},
   {"index",      (getter)THPDevice_index, nullptr, nullptr, nullptr},
-  {"cuda_index", (getter)THPDevice_cuda_index, nullptr, nullptr, nullptr},
   {nullptr}
 };
 
