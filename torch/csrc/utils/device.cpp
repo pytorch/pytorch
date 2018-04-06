@@ -1,5 +1,6 @@
 #include "device.h"
 #include <stdexcept>
+#include <string>
 
 namespace torch {
 
@@ -21,6 +22,10 @@ Device::Device(DeviceType type, int64_t index, bool is_default)
         throw std::runtime_error("unexpected DeviceType");
     }
   }
+}
+
+bool Device::operator==(const Device& rhs) {
+  return this->type == rhs.type && this->index == rhs.index && this->is_default == rhs.is_default;
 }
 
 }

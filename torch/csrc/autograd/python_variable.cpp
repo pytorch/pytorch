@@ -438,10 +438,12 @@ static PyObject * THPVariable_device(THPVariable* self, PyObject* args) {
   HANDLE_TH_ERRORS
   auto& self_ = self->cdata;
   if (self_.type().is_cuda()) {
-    return THPDevice_New(torch::DeviceType::CUDA, self_.get_device(), false);
+    torch::Device device(torch::DeviceType::CUDA, self_.get_device(), false);
+    return THPDevice_New(device);
   }
   else {
-    return THPDevice_New(torch::DeviceType::CPU, -1, true);
+    torch::Device device(torch::DeviceType::CPU, -1, true);
+    return THPDevice_New(device);
   }
   END_HANDLE_TH_ERRORS
 }

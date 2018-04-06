@@ -287,7 +287,7 @@ inline Device PythonArgs::device(int i) {
   if (!args[i]) return Device(DeviceType::CPU, -1, true);  // TODO: use CUDA if default type is a cuda type.
   if (THPDevice_Check(args[i])) {
     auto device = reinterpret_cast<THPDevice*>(args[i]);
-    return Device(device->device_type, device->device_index, device->is_default);
+    return device->device;
   }
   if (THPUtils_checkLong(args[i])) {
     auto index = THPUtils_unpackLong(args[i]);

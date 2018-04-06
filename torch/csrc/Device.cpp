@@ -8,15 +8,13 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_strings.h"
 
-PyObject *THPDevice_New(torch::DeviceType device_type, int64_t device_index, bool is_default)
+PyObject *THPDevice_New(const torch::Device& device)
 {
   auto type = (PyTypeObject*)&THPDeviceType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self) throw python_error();
   auto self_ = reinterpret_cast<THPDevice*>(self.get());
-  self_->device_type = device_type;
-  self_->device_index = device_index;
-  self_->is_default = is_default;
+  self_->device = device;
   return self.release();
 }
 
@@ -37,9 +35,9 @@ static inline const char* deviceTypeString(torch::DeviceType device_type) {
 PyObject *THPDevice_repr(THPDevice *self)
 {
   std::ostringstream oss;
-  oss << "Device(device_type=\'" << deviceTypeString(self->device_type) << "\'";
-  if (!self->is_default) {
-    oss << ", device_index=" << self->device_index;
+  oss << "Device(device_type=\'" << deviceTypeString(self->device.type) << "\'";
+  if (!self->device.is_default) {
+    oss << ", device_index=" << self->device.index;
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -48,10 +46,10 @@ PyObject *THPDevice_repr(THPDevice *self)
 PyObject *THPDevice_str(THPDevice*self)
 {
   std::ostringstream oss;
-  if (!self->is_default) {
-    oss << deviceTypeString(self->device_type) << ":" << self->device_index;
+  if (!self->device.is_default) {
+    oss << deviceTypeString(self->device.type) << ":" << self->device.index;
   } else {
-    oss << deviceTypeString(self->device_type);
+    oss << deviceTypeString(self->device.type);
   }
   return THPUtils_packString(oss.str().c_str());
 }
@@ -67,7 +65,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
     auto device = r.device(0);
-    return THPDevice_New(device.type, device.index, device.is_default);
+    return THPDevice_New(device);
   } else if (r.idx == 1) {
     auto as_device = r.device(0);  // this works, because device can take strings
     auto device_type = r.string(0);
@@ -80,7 +78,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     auto device_index = r.toInt64WithDefault(1, -1);
     // make sure this is constructible
     auto device = torch::Device(as_device.type, device_index, is_default);
-    return THPDevice_New(device.type, device.index, device.is_default);
+    return THPDevice_New(device);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -89,7 +87,7 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 PyObject *THPDevice_type(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packString(deviceTypeString(self->device_type));
+  return THPUtils_packString(deviceTypeString(self->device.type));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -97,10 +95,10 @@ PyObject *THPDevice_type(THPDevice *self)
 PyObject *THPDevice_index(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  if (self->is_default) {
+  if (self->device.is_default) {
     Py_RETURN_NONE;
   } else {
-    return THPUtils_packInt64(self->device_index);
+    return THPUtils_packInt64(self->device.index);
   }
   END_HANDLE_TH_ERRORS
 }
@@ -108,17 +106,13 @@ PyObject *THPDevice_index(THPDevice *self)
 PyObject *THPDevice_cuda_index(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  if (self->device_type == torch::DeviceType::CUDA) {
-    return THPUtils_packInt64(self->device_index);
+  if (self->device.type == torch::DeviceType::CUDA) {
+    return THPUtils_packInt64(self->device.index);
   }
   std::ostringstream oss;
-  oss << "cuda_index only supported on cuda device, got: " << deviceTypeString(self->device_type);
+  oss << "cuda_index only supported on cuda device, got: " << deviceTypeString(self->device.type);
   throw std::runtime_error(oss.str());
   END_HANDLE_TH_ERRORS
-}
-
-static bool THPDevice_equal(THPDevice *a, THPDevice *b) {
-  return a->device_type == b->device_type && a->device_index == b->device_index && a->is_default == b->is_default;
 }
 
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
@@ -134,16 +128,16 @@ PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
 
   switch(op) {
     case Py_EQ:
-      if (THPDevice_equal(da, db)) {
+      if (da->device == db->device) {
         Py_RETURN_TRUE;
       } else {
         Py_RETURN_FALSE;
       }
     case Py_NE:
-      if (!THPDevice_equal(da, db)) {
-        Py_RETURN_TRUE;
-      } else {
+      if (da->device == db->device) {
         Py_RETURN_FALSE;
+      } else {
+        Py_RETURN_TRUE;
       }
     case Py_LT:
     case Py_LE:
