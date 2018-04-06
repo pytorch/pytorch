@@ -158,6 +158,8 @@ class Caffe2Backend {
 
   Caffe2Ops CreateSlice(OnnxNode* onnx_node, int opset_version);
 
+  Caffe2Ops CreateSplit(OnnxNode* onnx_node, int opset_version);
+
   Caffe2Ops CreateReciprocal(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateBatchNormalization(OnnxNode* onnx_node, int opset_version);
