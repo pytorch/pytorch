@@ -4073,41 +4073,6 @@ Example::
 
 """)
 
-add_docstr(torch.randn,
-           r"""
-randn(*sizes, out=None) -> Tensor
-
-Returns a tensor filled with random numbers from a normal distribution
-with zero mean and variance of one (also called the standard normal
-distirbution).
-
-.. math::
-    \text{out}_{i} \sim \mathcal{N}(0, 1)
-
-The shape of the tensor is defined by the variable argument :attr:`sizes`.
-
-Args:
-    sizes (int...): a set of ints defining the shape of the output tensor.
-    out (Tensor, optional): the output tensor
-
-Example::
-
-    >>> torch.randn(4)
-
-    -0.1145
-     0.0094
-    -1.1717
-     0.9846
-    [torch.FloatTensor of size (4,)]
-
-    >>> torch.randn(2, 3)
-
-     1.4339  0.3351 -1.0999
-     1.5458 -0.9643 -0.3558
-    [torch.FloatTensor of size (2,3)]
-
-""")
-
 add_docstr(torch.randint,
            r"""
 randint(low=0, high, sizes, out=None, dtype=torch.float32) -> Tensor
@@ -4144,6 +4109,41 @@ Example::
      6  8
      9  4
     [torch.FloatTensor of size (2,2)]
+
+""")
+
+add_docstr(torch.randn,
+           r"""
+randn(*sizes, out=None) -> Tensor
+
+Returns a tensor filled with random numbers from a normal distribution
+with zero mean and variance of one (also called the standard normal
+distirbution).
+
+.. math::
+    \text{out}_{i} \sim \mathcal{N}(0, 1)
+
+The shape of the tensor is defined by the variable argument :attr:`sizes`.
+
+Args:
+    sizes (int...): a set of ints defining the shape of the output tensor.
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.randn(4)
+
+    -0.1145
+     0.0094
+    -1.1717
+     0.9846
+    [torch.FloatTensor of size (4,)]
+
+    >>> torch.randn(2, 3)
+
+     1.4339  0.3351 -1.0999
+     1.5458 -0.9643 -0.3558
+    [torch.FloatTensor of size (2,3)]
 
 """)
 

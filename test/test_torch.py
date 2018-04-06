@@ -2541,14 +2541,6 @@ class TestTorch(TestCase):
         torch.rand(SIZE, SIZE, out=res2)
         self.assertEqual(res1, res2)
 
-    def test_randn(self):
-        torch.manual_seed(123456)
-        res1 = torch.randn(SIZE, SIZE)
-        res2 = torch.Tensor()
-        torch.manual_seed(123456)
-        torch.randn(SIZE, SIZE, out=res2)
-        self.assertEqual(res1, res2)
-
     def test_randint(self):
         torch.manual_seed(123456)
         res1 = torch.randint(0, 6, (SIZE, SIZE))
@@ -2572,6 +2564,14 @@ class TestTorch(TestCase):
         tensorSize = res1.size()[0]
         assert(tensorSize == high.sum())
         assert(tensorSize == low.sum())
+
+    def test_randn(self):
+        torch.manual_seed(123456)
+        res1 = torch.randn(SIZE, SIZE)
+        res2 = torch.Tensor()
+        torch.manual_seed(123456)
+        torch.randn(SIZE, SIZE, out=res2)
+        self.assertEqual(res1, res2)
 
     def test_slice(self):
         empty = torch.Tensor()

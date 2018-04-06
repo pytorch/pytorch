@@ -483,18 +483,6 @@
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
-- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
-  variants: function
-
-- func: randn_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
-  variants: function
-
-- func: randn_like(Tensor self) -> Tensor
-  variants: function
-
-- func: randn_like(Tensor self, *, Type dtype) -> Tensor
-  variants: function
-
 - func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
 
@@ -517,6 +505,18 @@
   variants: function
 
 - func: randint_like(Tensor self, int64_t low, int64_t high, *, Type dtype) -> Tensor
+  variants: function
+
+- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randn_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+
+- func: randn_like(Tensor self) -> Tensor
+  variants: function
+
+- func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
 
 - func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
