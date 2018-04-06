@@ -186,12 +186,14 @@ IF(NOT AT_LINK_STYLE)
 ENDIF()
 IF(CUDA_FOUND)
   CUDA_ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
-  target_link_libraries(ATen PRIVATE THC)
+  # Huh?  Windows seems to need us to feed in THCRTS manually?  Maybe we should
+  # have used OBJECT instead?
+  target_link_libraries(ATen PRIVATE THCRTS THC)
 ELSE()
   ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
-target_link_libraries(ATen PRIVATE TH)
+target_link_libraries(ATen PRIVATE THRTS TH)
 
 set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
@@ -206,6 +208,11 @@ target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
 # being brought into scope by ATen.  Fix that, then make this PRIVATE.
 target_link_libraries(ATen PUBLIC tbb_static)
 
+# Apparently, if a static library depends on a symbol, and you link that library
+# in, and you give the shared library dependency for it... gcc still concludes
+# that the shared library is unneeded and doesn't included it!  Work around the
+# problem.
+set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
