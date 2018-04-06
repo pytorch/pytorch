@@ -1649,10 +1649,13 @@ def pixel_shuffle(input, upscale_factor):
     ``[*, C, d_{1}, d_{2}, ..., d_{n}]`` to a tensor of shape
     ``[*, C/(r^n), d_{1}*r, d_{2}*r, ..., d_{n}*r]``. Where ``n`` is the
     dimensionality of the data.
+    
     See :class:`~torch.nn.PixelShuffle` for details.
+
     Args:
         input (Variable): Input
         upscale_factor (int): factor to increase spatial resolution by
+
     Examples::
         # 1D example
         >>> ps = nn.PixelShuffle(2)
@@ -1679,14 +1682,14 @@ def pixel_shuffle(input, upscale_factor):
     dimensionality = len(input_size) - 2
 
     input_size[1] //= (upscale_factor ** dimensionality)
-    output_size = [dim*upscale_factor for dim in input_size[2:]]
+    output_size = [dim * upscale_factor for dim in input_size[2:]]
 
     input_view = input.contiguous().view(
         input_size[0], input_size[1],
-        *([upscale_factor]*dimensionality), *(input_size[2:])
+        *(([upscale_factor] * dimensionality) + input_size[2:])
     )
 
-    indicies = list(range(2, 2 + 2*dimensionality))
+    indicies = list(range(2, 2 + 2 * dimensionality))
     indicies = indicies[1::2] + indicies[0::2]
 
     shuffle_out = input_view.permute(0, 1, *(indicies[::-1])).contiguous()
