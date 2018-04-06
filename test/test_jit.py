@@ -2210,7 +2210,7 @@ class TestScript(TestCase):
                 for m in self.mods:
                     print(m)
                 return v
-        with self.assertRaisesRegex(RuntimeError, "is not iterable"):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as tuple"):
             M()
 
     def test_script_star_expr(self):

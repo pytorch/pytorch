@@ -105,9 +105,9 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     }
     return PythonValue::asValue(loc, m);
   }
-  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     if(!py::isinstance<py::tuple>(self))
-      return PythonValue::unrolledFor(loc, m);
+      return PythonValue::asTuple(loc, m);
 
     py::tuple tup = self;
     std::vector<std::shared_ptr<SugaredValue>> result;
@@ -206,10 +206,10 @@ struct ModuleValue : public SugaredValue {
     return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_outputs);
   }
 
-  virtual std::vector<std::shared_ptr<SugaredValue>> unrolledFor(SourceRange loc, Method& m) override {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {
     py::object py_module = py::cast(module);
     if(!py::isinstance(py_module, py::module::import("torch.jit").attr("_ConstModuleList")))
-      return SugaredValue::unrolledFor(loc, m);
+      return SugaredValue::asTuple(loc, m);
     std::vector<std::shared_ptr<SugaredValue>> result;
     for(py::handle module : py_module) {
       py::object obj = py::reinterpret_borrow<py::object>(module);

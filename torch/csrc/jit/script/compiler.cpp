@@ -21,19 +21,19 @@ using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
 // Tuple of values. Used to implement tuple return values and unpacking
 struct TupleValue : public SugaredValue {
-  TupleValue(std::vector<Value*> values) : values(std::move(values)) {}
+  TupleValue(std::vector<std::shared_ptr<SugaredValue>> values) : values(std::move(values)) {}
 
   virtual std::string kind() const override {
     return "tuple";
   }
 
-  virtual const std::vector<Value*>& asTuple(SourceRange loc, Method& m)
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m)
       override {
     return values;
   }
 
  private:
-  std::vector<Value*> values;
+  std::vector<std::shared_ptr<SugaredValue>> values;
 };
 
 // Auxiliary data structure for desugaring variable binding into our always
@@ -566,7 +566,7 @@ private:
     // it isn't a range(<expr>) loop, treat it as a sugared value that maybe can be
     // unrolled
     auto sv = emitSugaredExpr(itrs[0]);
-    auto instances = sv->unrolledFor(stmt.range(), method);
+    auto instances = sv->asTuple(stmt.range(), method);
     const std::string& target_name = target.name();
     pushFrame(environment_stack->block());
     for(auto inst : instances) {
@@ -644,9 +644,17 @@ private:
       outputs =
           emitExpr(stmt.rhs(), num_starred_unpack ? VARARG_OUTPUTS : stmt.lhs().size());
     }
+    auto createSugaredValuesFromOutputs = [](const std::vector<Value*> outputs) {
+      std::vector<SugaredValuePtr> sugared_outputs;
+      sugared_outputs.reserve(outputs.size());
+      for (Value* output : outputs) {
+        sugared_outputs.emplace_back(std::make_shared<SimpleValue>(output));
+      }
+      return sugared_outputs;
+    };
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value
-      SugaredValuePtr tup = std::make_shared<TupleValue>(outputs);
+      SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromOutputs(outputs));
       environment_stack->setSugaredVar(Var(stmt.lhs()[0]).name().name(), tup);
     } else {
       int i = 0;
@@ -657,7 +665,7 @@ private:
         } else if (assignee.kind() == TK_STARRED) {
           std::vector<Value*> starred_slice(
               outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
-          SugaredValuePtr tup = std::make_shared<TupleValue>(starred_slice);
+          SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromOutputs(starred_slice));
           environment_stack->setSugaredVar(
               Var(Starred(assignee).expr()).name().name(), tup);
           i += num_starred_unpack;
@@ -828,7 +836,13 @@ private:
         const auto starred = Starred(tree);
         auto sugared =
             environment_stack->getSugaredVar(Var(starred.expr()).name());
-        return sugared->asTuple(starred.range(), environment_stack->method);
+        auto sugared_retvals = sugared->asTuple(starred.range(), environment_stack->method);
+        std::vector<Value*> retvals;
+        retvals.reserve(sugared_retvals.size());
+        for (auto & val : sugared_retvals) {
+          retvals.push_back(val->asValue(starred.range(), method));
+        }
+        return retvals;
       }
       case TK_APPLY: {
         auto apply = Apply(tree);

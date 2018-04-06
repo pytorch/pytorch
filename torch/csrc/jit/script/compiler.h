@@ -42,7 +42,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
 
   // use it as a vector of values, e.g. a tuple of values as return value from
   // a method invocation
-  virtual const std::vector<Value*>& asTuple(SourceRange loc, Method& m) {
+  virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) {
     throw ErrorReport(loc) << kind() << " cannot be used as tuple";
   }
 
