@@ -9,6 +9,12 @@ InitMethod::Config initFile(std::string argument, rank_type world_size,
                             std::string group_name, int rank);
 InitMethod::Config initEnv(int world_size, std::string group_name, int rank);
 
+#ifdef WITH_THD_FB
+InitMethod::Config initFb(const std::string& runId,
+                          rank_type worldSize,
+                          const std::string& groupName,
+                          int rank);
+#endif
 }
 
 InitMethod::Config getInitConfig(std::string argument, int world_size,
@@ -35,7 +41,15 @@ InitMethod::Config getInitConfig(std::string argument, int world_size,
     } else if (argument.find("file://") == 0) {
       argument.erase(0, 7); // chop "file://"
       config = init::initFile(argument, r_world_size, group_name, rank);
+
+#ifdef WITH_THD_FB
+    } else if (argument.find("fb://") == 0) {
+      argument.erase(0, 5); // chop "fb://"
+      config = init::initFb(argument, r_world_size, group_name, rank);
+#endif
+
     }
+
   }
 
   config.validate();
