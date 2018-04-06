@@ -28,6 +28,7 @@ CAFFE_DECLARE_REGISTRY(
 namespace predictor_details {
 
 const NetDef& getNet(const MetaNetDef& def, const std::string& name);
+const ::google::protobuf::RepeatedPtrField<::std::string>& getBlobs(const MetaNetDef& def, const std::string& name);
 
 template <class TensorType>
 void enforceIsTensor(Workspace* ws, const std::string& name) {
