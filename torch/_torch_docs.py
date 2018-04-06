@@ -4087,7 +4087,7 @@ Args:
     high (int): One above the highest integer to be drawn from the distribution.
     sizes (tuple): a tuple defining the shape of the output tensor.
     out (Tensor, optional): the output tensor
-    dtype (torch.dpython:type, optional) – the desired type of returned Tensor. Default: torch.float32
+    dtype (:class:`torch.dtype`, optional): the desired type of returned Tensor. Default: torch.float32
 
 Example::
 
