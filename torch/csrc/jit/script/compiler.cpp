@@ -713,10 +713,15 @@ private:
   }
 
   template <typename Trees>
-  std::vector<Value*> getValues(const Trees& trees) {
+  std::vector<Value*> getValues(const Trees& trees, bool maybe_unpack=false) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
-      for (Value* v : emitExpr(tree, 1)) {
+      auto outputs = emitExpr(tree, maybe_unpack ? VARARG_OUTPUTS : 1);
+      if (!maybe_unpack && outputs.size() > 1) {
+        throw ErrorReport(tree) << "Expr unexpectly returned more than 1 value."
+                                << " File a bug report.";
+      }
+      for (auto* v : outputs) {
         values.push_back(v);
       }
     }
@@ -727,6 +732,7 @@ private:
       const TreeRef& tree,
       const size_t expected_size,
       const size_t size) {
+      if (expected_size == VARARG_OUTPUTS) return;
     if (expected_size != 0 && expected_size != size) {
       throw ErrorReport(tree)
           << "expected operator to produce " << expected_size
@@ -832,7 +838,6 @@ private:
         return node->outputs();
       }
       case TK_STARRED: {
-        const auto& inputs = tree->trees();
         const auto starred = Starred(tree);
         auto sugared =
             environment_stack->getSugaredVar(Var(starred.expr()).name());
@@ -846,7 +851,7 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        auto inputs = getValues(apply.inputs());
+        auto inputs = getValues(apply.inputs(), true);
         // the apply is directly an identifier 'foo'
         if(apply.callee().kind() == TK_VAR) {
           return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), output_size);
