@@ -278,6 +278,11 @@ inline const THPLayout& PythonArgs::layout(int i) {
   return *reinterpret_cast<THPLayout*>(args[i]);
 }
 
+static std::string cuda_str = "cuda";
+static std::string cpu_str = "cpu";
+static std::string cuda_prefix = "cuda:";
+static std::string cpu_prefix = "cpu:";
+
 inline Device PythonArgs::device(int i) {
   if (!args[i]) return Device(DeviceType::CPU, -1, true);  // TODO: use CUDA if default type is a cuda type.
   if (THPDevice_Check(args[i])) {
@@ -289,11 +294,9 @@ inline Device PythonArgs::device(int i) {
     return Device(DeviceType::CUDA, index, index == -1);
   }
   std::string device_str = THPUtils_unpackString(args[i]);
-  std::string cpu_prefix("cpu:");
-  std::string cuda_prefix("cuda:");
-  if (device_str == "cpu") {
+  if (device_str == cpu_str) {
     return Device(DeviceType::CPU, -1, true);
-  } else if (device_str == "cuda") {
+  } else if (device_str == cuda_str) {
     return Device(DeviceType::CUDA, -1, true);
   } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
     auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
