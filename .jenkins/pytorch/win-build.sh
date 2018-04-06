@@ -69,12 +69,12 @@ set TORCH_CUDA_ARCH_LIST=5.2
 
 set USE_CLCACHE=1
 set CLCACHE_DIR=%cd%\\clcache_tmp
-set CC=%cd%\\clcache\\clcache_main.exe
-set CXX=%cd%\\clcache\\clcache_main.exe
+REM set CC=%cd%\\clcache\\clcache_main.exe
+REM set CXX=%cd%\\clcache\\clcache_main.exe
 
 set DISTUTILS_USE_SDK=1
 
-set CMAKE_GENERATOR=Ninja
+set CMAKE_GENERATOR=Visual Studio 15 2017 Win64
 
 xcopy /Y aten\\src\\ATen\\common_with_cwrap.py tools\\shared\\cwrap_common.py
 
