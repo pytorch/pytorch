@@ -65,7 +65,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
         if self.compiler.compiler_type == 'msvc':
             import distutils.msvccompiler
             import distutils.msvc9compiler
-            if sys.version[0] == '2':
+            if sys.version_info < (3, ):
                 orig_compiler = distutils.msvc9compiler.MSVCCompiler
             else:
                 orig_compiler = distutils._msvccompiler.MSVCCompiler
