@@ -72,7 +72,8 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
     auto as_device = r.device(0);  // this works, because device can take strings
     auto device_type = r.string(0);
     if (!as_device.is_default) {
-      throw std::runtime_error("device_type must not include index because index is passed explicitly " + device_type);
+      throw std::runtime_error("device_type (string) must not include an index because index "
+                                "was passed explicitly: " + device_type);
     }
 
     auto is_default = r.isNone(1);
