@@ -148,6 +148,7 @@ CUSTOM_HANDLERS = {
     'distributed': test_distributed,
 }
 
+
 def parse_test_module(test):
     idx = test.find('.')
     return test[:idx if idx > -1 else None]
@@ -159,6 +160,7 @@ class TestChoices(list):
 
     def __contains__(self, item):
         return list.__contains__(self, parse_test_module(item))
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -218,7 +220,8 @@ def get_python_command(options):
     else:
         return os.environ.get('PYCMD', 'python')
 
-def find_test_index(test, selected_tests, find_last_index = False):
+
+def find_test_index(test, selected_tests, find_last_index=False):
     idx = 0
     found_idx = -1
     for t in selected_tests:
@@ -227,17 +230,17 @@ def find_test_index(test, selected_tests, find_last_index = False):
                 return idx
             else:
                 found_idx = idx
-        idx+=1
+        idx += 1
     return found_idx
 
 
-def exclude_tests(exclude_list, tests, exclude_message = None):
+def exclude_tests(exclude_list, tests, exclude_message=None):
     sel_tests = tests[:]
     for test in exclude_list:
         for t in sel_tests:
             if t.startswith(test):
-                if exclude_message != None:
-                   print_to_stderr(('Excluding {} ' + exclude_message).format(t))
+                if exclude_message is not None:
+                    print_to_stderr(('Excluding {} ' + exclude_message).format(t))
                 tests.remove(t)
     return tests
 
