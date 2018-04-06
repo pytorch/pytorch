@@ -265,7 +265,7 @@ struct Parser {
       }
       default: {
         Expr r = Expr(parseExp());
-        if (r.kind() == TK_VAR && L.cur().kind != TK_NEWLINE) {
+        if (r.kind() == TK_VAR || r.kind() == TK_STARRED && L.cur().kind != TK_NEWLINE) {
           return parseAssign(r);
         } else {
           L.expect(TK_NEWLINE);
