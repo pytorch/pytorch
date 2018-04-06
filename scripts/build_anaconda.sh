@@ -210,7 +210,6 @@ add_package opencv
 #
 # Handle CUDA related flags
 if [[ -n $CUDA_VERSION ]]; then
-  # Only CUDA versions 9.1, 9.0, and 8.0 are supported
   CMAKE_BUILD_ARGS+=("-DUSE_CUDA=ON")
   CMAKE_BUILD_ARGS+=("-DUSE_NCCL=ON")
   #add_feature $CUDA_FEATURE_NAME
@@ -247,7 +246,7 @@ fi
 #
 # If --user and --token are set, then this will also upload the built package
 # to Anaconda.org, provided there were no failures and all the tests passed
-CONDA_CMAKE_BUILD_ARGS="${CMAKE_BUILD_ARGS[@]}" conda build "${CAFFE2_CONDA_BUILD_DIR}" $CAFFE2_CONDA_CHANNEL ${CONDA_BUILD_ARGS[@]} "$@"
+CONDA_CMAKE_BUILD_ARGS=${CMAKE_BUILD_ARGS[@]} conda build "${CAFFE2_CONDA_BUILD_DIR}" $CAFFE2_CONDA_CHANNEL ${CONDA_BUILD_ARGS[@]} "$@"
 
 # Install Caffe2 from the built package into the local conda environment
 if [ -n "$CONDA_INSTALL_LOCALLY" ]; then
