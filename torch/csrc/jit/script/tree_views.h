@@ -29,7 +29,7 @@ namespace script {
 //       -- NB: the only type of Expr's allowed on lhs are Starred and Var
 //       | Assign(List<Expr> lhs, AssignType maybe_reduce, Expr rhs)    TK_ASSIGN
 //       | Return(List<Expr> values)                                    TK_RETURN
-//       | ExprStmt(Expr expr)                                          TK_EXPR_STMT
+//       | ExprStmt(List<Expr> expr)                                    TK_EXPR_STMT
 //
 // Expr  = TernaryIf(Expr cond, Expr true_expr, Expr false_expr)        TK_IF_EXPR
 //       | BinOp(Expr lhs, Expr rhs)
@@ -489,11 +489,11 @@ struct ExprStmt : public Stmt {
   explicit ExprStmt(const TreeRef& tree) : Stmt(tree) {
     tree_->match(TK_EXPR_STMT);
   }
-  Expr expr() {
-    return Expr(subtree(0));
+  List<Expr> exprs() {
+    return List<Expr>(subtree(0));
   }
-  static ExprStmt create(const SourceRange& range, const Expr& value) {
-    return ExprStmt(Compound::create(TK_EXPR_STMT, range, {value}));
+  static ExprStmt create(const SourceRange& range, const List<Expr>& list) {
+    return ExprStmt(Compound::create(TK_EXPR_STMT, range, {list}));
   }
 };
 

@@ -142,8 +142,9 @@ void initTreeViewBindings(PyObject *module) {
         wrap_list(range, std::move(body)));
   }));
   py::class_<ExprStmt, Stmt>(m, "ExprStmt")
-    .def(py::init([](const Expr& expr) {
-      return ExprStmt::create(expr.range(), expr);
+    .def(py::init([](std::vector<Expr>& exprs) {
+      auto r = exprs[0].range();
+      return ExprStmt::create(r, wrap_list(r, std::move(exprs)));
     }));
 
   py::class_<Var, Expr>(m, "Var")

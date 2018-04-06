@@ -19,10 +19,11 @@
           (list)
           (list))))
     (expression statement
-      (apply
-        (variable (ident print))
-        (list (variable (ident q)))
-        (list)))
+      (list
+        (apply
+          (variable (ident print))
+          (list (variable (ident q)))
+          (list))))
     (assign
       (list (variable (ident w)))
       (=)

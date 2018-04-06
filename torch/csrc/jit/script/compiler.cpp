@@ -19,7 +19,7 @@ using ValueTable = std::unordered_map<std::string, SugaredValuePtr>;
 using AttributeMap = std::unordered_map<std::string, Const>;
 using ListAttributeMap = std::unordered_map<std::string, std::vector<Const>>;
 
-// Vector of values. Used to implement tuple return values and unpacking
+// Tuple of values. Used to implement tuple return values and unpacking
 struct TupleValue : public SugaredValue {
   TupleValue(std::vector<Value*> values) : values(std::move(values)) {}
 
@@ -27,7 +27,7 @@ struct TupleValue : public SugaredValue {
     return "tuple";
   }
 
-  virtual const std::vector<Value*>& asValues(SourceRange loc, Method& m)
+  virtual const std::vector<Value*>& asTuple(SourceRange loc, Method& m)
       override {
     return values;
   }
@@ -349,9 +349,13 @@ private:
             environment_stack->setVar(name, graph->addInput(name));
           }
           break;
-        case TK_EXPR_STMT:
-          emitExpr(ExprStmt(stmt).expr(), 0);
-          break;
+        case TK_EXPR_STMT: {
+          auto exprs = ExprStmt(stmt).exprs();
+          for (const auto& expr : exprs) {
+            emitExpr(expr, 0);
+          }
+        }
+        break;
         case TK_RETURN:
           throw ErrorReport(stmt) << "return statements can appear only at the end "
                                   << "of the function body";
@@ -821,11 +825,10 @@ private:
       }
       case TK_STARRED: {
         const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
         const auto starred = Starred(tree);
         auto sugared =
             environment_stack->getSugaredVar(Var(starred.expr()).name());
-        return sugared->asValues(starred.range(), environment_stack->method);
+        return sugared->asTuple(starred.range(), environment_stack->method);
       }
       case TK_APPLY: {
         auto apply = Apply(tree);

@@ -178,7 +178,7 @@ class StmtBuilder(Builder):
 
     @staticmethod
     def build_Expr(ctx, stmt):
-        return ExprStmt(build_expr(ctx, stmt.value))
+        return ExprStmt([build_expr(ctx, stmt.value)])
 
     @staticmethod
     def get_assign_lhs_expr(ctx, expr):
@@ -248,7 +248,7 @@ class StmtBuilder(Builder):
         if stmt.dest:
             raise NotSupportedError(r, "print statements with non-default destinations aren't supported")
         args = [build_expr(ctx, val) for val in stmt.values]
-        return ExprStmt(Apply(Var(Ident(r, "print")), args, []))
+        return ExprStmt([Apply(Var(Ident(r, "print")), args, [])])
 
 
 class ExprBuilder(Builder):
