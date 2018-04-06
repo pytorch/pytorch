@@ -580,7 +580,7 @@ private:
     for (const auto& assignee : lhs) {
       if (assignee.kind() == TK_VAR) {
         num_normal_assign++;
-      } else if (assignee.kind() == '*') {
+      } else if (assignee.kind() == TK_STARRED) {
         num_starred++;
       } else {
         throw ErrorReport(assignee)
@@ -629,7 +629,7 @@ private:
         if (assignee.kind() == TK_VAR) {
           environment_stack->setVar(Var(assignee).name().name(), outputs.at(i));
           i++;
-        } else if (assignee.kind() == '*') {
+        } else if (assignee.kind() == TK_STARRED) {
           std::vector<Value*> starred_slice(
               outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
           SugaredValuePtr tup = std::make_shared<TupleValue>(starred_slice);
@@ -647,15 +647,13 @@ private:
       case '+':
         return aten::add;
       case '-':
-        if (ninputs == 1)
-          return aten::neg;
-        else
-          return aten::sub;
+        return aten::sub;
+      case TK_UNARY_MINUS:
+        return aten::neg;
       case '*':
-        if (ninputs == 1)
-          return prim::Starred;
-        else
-          return aten::mul;
+        return aten::mul;
+      case TK_STARRED:
+        return prim::Starred;
       case '/':
         return aten::div;
       case TK_NE:
@@ -782,26 +780,31 @@ private:
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
-        if (kind != aten::neg)
-          node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
+        return node->outputs();
+      }
+      case TK_UNARY_MINUS: {
+        expectOutputs(tree, output_size, 1);
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
         return node->outputs();
       }
       case '*': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        if (kind == prim::Starred) {
-          const auto starred = Starred(tree);
-          auto sugared =
-              environment_stack->getSugaredVar(Var(starred.expr()).name());
-          return sugared->asValues(starred.range(), environment_stack->method);
-        } else {
-          expectOutputs(tree, output_size, 1);
-          const auto& inputs = tree->trees();
-          auto kind = getNodeKind(tree->kind(), inputs.size());
-          auto* node =
-              emitNode(kind, tree->range(), getValues(inputs), output_size);
-          return node->outputs();
-        }
+        expectOutputs(tree, output_size, 1);
+        auto* node =
+            emitNode(kind, tree->range(), getValues(inputs), output_size);
+        return node->outputs();
+      }
+      case TK_STARRED: {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        const auto starred = Starred(tree);
+        auto sugared =
+            environment_stack->getSugaredVar(Var(starred.expr()).name());
+        return sugared->asValues(starred.range(), environment_stack->method);
       }
       case TK_APPLY: {
         auto apply = Apply(tree);

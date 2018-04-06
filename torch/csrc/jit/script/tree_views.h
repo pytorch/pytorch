@@ -242,7 +242,9 @@ struct Expr : public TreeView {
       case TK_NE:
       case '+':
       case '-':
+      case TK_UNARY_MINUS:
       case '*':
+      case TK_STARRED:
       case '/':
       case TK_NOT:
       /* case '-': - unary minus */
@@ -536,7 +538,7 @@ struct BinOp : public Expr {
 struct UnaryOp : public Expr {
   explicit UnaryOp(const TreeRef& tree) : Expr(tree) {
     switch (tree->kind()) {
-      case '-':
+      case TK_UNARY_MINUS:
       case TK_NOT:
         if (tree->trees().size() != 1)
           throw ErrorReport(tree) << "UnaryOp expected 1 subtree, found " << tree->trees().size();
@@ -546,7 +548,8 @@ struct UnaryOp : public Expr {
     }
   }
   static UnaryOp create(const SourceRange& range, int kind, const Expr& expr) {
-    return UnaryOp(Compound::create(kind, range, {expr}));
+    auto unary_kind = kind == '-' ? TK_UNARY_MINUS : kind;
+    return UnaryOp(Compound::create(unary_kind, range, {expr}));
   }
 };
 
@@ -721,13 +724,13 @@ struct ListLiteral : public Expr {
 
 struct Starred : public Expr {
   explicit Starred(const TreeRef& tree) : Expr(tree) {
-    tree_->match('*');
+    tree_->match(TK_STARRED);
   }
   Expr expr() const {
     return Expr(subtree(0));
   }
   static Starred create(const SourceRange& range, const Expr& expr) {
-    return Starred(Compound::create('*', range, {expr}));
+    return Starred(Compound::create(TK_STARRED, range, {expr}));
   }
 };
 

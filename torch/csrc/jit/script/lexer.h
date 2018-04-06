@@ -81,7 +81,9 @@ namespace script {
   _(TK_NOTHING, "nothing", "")                   \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_FOR, "for", "for")                        \
-  _(TK_IN, "in", "in")
+  _(TK_IN, "in", "in")                           \
+  _(TK_STARRED, "starred", "")                   \
+  _(TK_UNARY_MINUS, "unary minus", "")
 
 static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
 

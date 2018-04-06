@@ -26,7 +26,8 @@
     (assign
       (list (variable (ident w)))
       (=)
-      (- (variable (ident z))))
+      (unary minus
+        (variable (ident z))))
     (if
       (and
         (and

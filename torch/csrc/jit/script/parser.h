@@ -113,7 +113,10 @@ struct Parser {
       auto kind = L.cur().kind;
       auto pos = L.cur().range;
       L.next();
-      prefix = c(kind, pos, {parseExp(unary_prec)});
+      auto unary_kind = kind == '*' ? TK_STARRED :
+                        kind == '-' ? TK_UNARY_MINUS :
+                                      kind;
+      prefix = c(unary_kind, pos, {parseExp(unary_prec)});
     } else {
       prefix = parseBaseExp();
     }
