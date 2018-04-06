@@ -894,21 +894,26 @@ void Caffe2Backend::CheckOpSchemaArguments(
     const caffe2::OpSchema& schema,
     const caffe2::OperatorDef& op) {
   const auto& schema_args = schema.args();
-  std::vector<std::string> argnames;
-  std::transform(
-      schema_args.begin(),
-      schema_args.end(),
-      std::back_inserter(argnames),
-      [](caffe2::OpSchema::Argument elem) { return elem.name(); });
+  if (schema_args.size() > 0){
+    std::vector<std::string> argnames;
+    std::transform(
+        schema_args.begin(),
+        schema_args.end(),
+        std::back_inserter(argnames),
+        [](caffe2::OpSchema::Argument elem) { return elem.name(); });
 
-  for (const auto& arg : op.arg()) {
-    if (std::count(argnames.begin(), argnames.end(), arg.name()) == 0) {
-      CAFFE_THROW(
-          "Don't know how to map unexpected argument ",
-          arg.name(),
-          " (from operator ",
-          op.type(), ")");
+    for (const auto& arg : op.arg()) {
+      if (std::count(argnames.begin(), argnames.end(), arg.name()) == 0) {
+        CAFFE_THROW(
+            "Don't know how to map unexpected argument ",
+            arg.name(),
+            " (from operator ",
+            op.type(), ")");
+      }
     }
+  } else {
+    // A number of C2 operators do not declare proper arguments. Let's log the error
+    VLOG(2) << "Operator " << op.type() << " does not declare arguments in its schema. Please file a Caffe2 issue.";
   }
 }
 
