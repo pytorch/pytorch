@@ -1645,35 +1645,52 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=Tr
 
 
 def pixel_shuffle(input, upscale_factor):
-    r"""Rearranges elements in a tensor of shape :math:`[*, C*r^2, H, W]` to a
-    tensor of shape :math:`[C, H*r, W*r]`.
-
+    r"""Rearranges elements in a tensor of shape
+    ``[*, C, d_{1}, d_{2}, ..., d_{n}]`` to a tensor of shape
+    ``[*, C/(r^n), d_{1}*r, d_{2}*r, ..., d_{n}*r]``. Where ``n`` is the
+    dimensionality of the data.
     See :class:`~torch.nn.PixelShuffle` for details.
-
     Args:
         input (Variable): Input
         upscale_factor (int): factor to increase spatial resolution by
-
     Examples::
-
-        >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.Tensor(1, 9, 4, 4)
+        # 1D example
+        >>> ps = nn.PixelShuffle(2)
+        >>> input = autograd.Variable(torch.Tensor(1, 4, 8))
         >>> output = ps(input)
         >>> print(output.size())
-        torch.Size([1, 1, 12, 12])
-    """
-    batch_size, channels, in_height, in_width = input.size()
-    channels //= upscale_factor ** 2
+        torch.Size([1, 2, 16])
 
-    out_height = in_height * upscale_factor
-    out_width = in_width * upscale_factor
+        # 2D example
+        >>> ps = nn.PixelShuffle(3)
+        >>> input = autograd.Variable(torch.Tensor(1, 9, 8, 8))
+        >>> output = ps(input)
+        >>> print(output.size())
+        torch.Size([1, 1, 24, 24])
+
+        # 3D example
+        >>> ps = nn.PixelShuffle(2)
+        >>> input = autograd.Variable(torch.Tensor(1, 8, 16, 16, 16))
+        >>> output = ps(input)
+        >>> print(output.size())
+        torch.Size([1, 1, 32, 32, 32])
+    """
+    input_size = list(input.size())
+    dimensionality = len(input_size) - 2
+
+    input_size[1] //= (upscale_factor ** dimensionality)
+    output_size = [dim*upscale_factor for dim in input_size[2:]]
 
     input_view = input.contiguous().view(
-        batch_size, channels, upscale_factor, upscale_factor,
-        in_height, in_width)
+        input_size[0], input_size[1],
+        *([upscale_factor]*dimensionality), *(input_size[2:])
+    )
 
-    shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3).contiguous()
-    return shuffle_out.view(batch_size, channels, out_height, out_width)
+    indicies = list(range(2, 2 + 2*dimensionality))
+    indicies = indicies[1::2] + indicies[0::2]
+
+    shuffle_out = input_view.permute(0, 1, *(indicies[::-1])).contiguous()
+    return shuffle_out.view(input_size[0], input_size[1], *output_size)
 
 
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
