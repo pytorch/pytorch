@@ -1,12 +1,12 @@
 import math
 from bisect import bisect_right
 from functools import partial
-
+from copy import deepcopy
 from .optimizer import Optimizer
 
 
 class _LRScheduler(object):
-    def __init__(self, optimizer, last_epoch=-1):
+    def __init__(self, optimizer, last_epoch=-1, **kwargs):
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
@@ -22,6 +22,42 @@ class _LRScheduler(object):
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
+
+        self.state = kwargs
+
+    def __getstate__(self):
+        return {
+            'state': self.state,
+            'last_epoch': self.last_epoch,
+        }
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+
+    def state_dict(self):
+        """Returns the state of the scheduler as a :class:`dict`.
+
+        It contains two entries. One representing all variables passed through 
+        kwargs and second representing the last_epoch:
+
+        * state - a dict holding current scheduler variables. Its content
+            differs between LR Scheduler classes.
+        * last_epoch - the last epoch of trying
+        """
+        state = {key: self.__dict__[key] for key in self.state.keys()}
+        return {'state': state, 'last_epoch': self.last_epoch}
+
+    def load_state_dict(self, state_dict):
+        """Loads the schedulers state.
+
+        Arguments:
+            state_dict (dict): scheduler state. Should be an object returned
+                from a call to :meth:`state_dict`.
+        """
+        state = state_dict['state']
+
+        self.last_epoch = state_dict['last_epoch']
+        self.__dict__.update(state)
 
     def get_lr(self):
         raise NotImplementedError
@@ -100,7 +136,7 @@ class StepLR(_LRScheduler):
     def __init__(self, optimizer, step_size, gamma=0.1, last_epoch=-1):
         self.step_size = step_size
         self.gamma = gamma
-        super(StepLR, self).__init__(optimizer, last_epoch)
+        super(StepLR, self).__init__(optimizer, last_epoch, gamma=self.gamma, step_size=step_size)
 
     def get_lr(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
@@ -137,7 +173,7 @@ class MultiStepLR(_LRScheduler):
                              ' increasing integers. Got {}', milestones)
         self.milestones = milestones
         self.gamma = gamma
-        super(MultiStepLR, self).__init__(optimizer, last_epoch)
+        super(MultiStepLR, self).__init__(optimizer, last_epoch, gamma=self.gamma, milestones=self.milestones)
 
     def get_lr(self):
         return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
@@ -156,7 +192,7 @@ class ExponentialLR(_LRScheduler):
 
     def __init__(self, optimizer, gamma, last_epoch=-1):
         self.gamma = gamma
-        super(ExponentialLR, self).__init__(optimizer, last_epoch)
+        super(ExponentialLR, self).__init__(optimizer, last_epoch, gamma=self.gamma)
 
     def get_lr(self):
         return [base_lr * self.gamma ** self.last_epoch
@@ -192,7 +228,7 @@ class CosineAnnealingLR(_LRScheduler):
     def __init__(self, optimizer, T_max, eta_min=0, last_epoch=-1):
         self.T_max = T_max
         self.eta_min = eta_min
-        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch)
+        super(CosineAnnealingLR, self).__init__(optimizer, last_epoch, T_max=self.T_max, eta_min=self.eta_min)
 
     def get_lr(self):
         return [self.eta_min + (base_lr - self.eta_min) *

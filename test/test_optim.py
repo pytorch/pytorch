@@ -620,6 +620,75 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_step_lr_state_dict(self):
+        epoch = 10
+        gamma = 0.1
+        step_size =3
+        
+        scheduler = StepLR(self.opt, gamma=gamma, step_size=step_size)
+        for _ in range(epoch):
+            scheduler.step()
+        state_dict = scheduler.state_dict()
+        
+        scheduler_copy = StepLR(self.opt, gamma=gamma / 2, step_size=step_size // 2)
+        scheduler_copy.load_state_dict(state_dict)
+
+        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
+        self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
+        self.assertAlmostEqual(scheduler.step_size, scheduler_copy.step_size)
+        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+    
+    def test_multi_step_lr_state_dict(self):
+        epoch = 10
+        gamma = 0.1
+        milestones = [2, 5, 9]
+        faux_milestones = [1, 4, 6]
+
+        scheduler =  MultiStepLR(self.opt, gamma=gamma,milestones=milestones)
+        for _ in range(epoch):
+            scheduler.step()
+        state_dict = scheduler.state_dict()
+        
+        scheduler_copy = MultiStepLR(self.opt, gamma=gamma / 2, milestones=faux_milestones)
+        scheduler_copy.load_state_dict(state_dict)
+
+        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
+        self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
+        self.assertAlmostEqual(scheduler.milestones, scheduler_copy.milestones)
+        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+
+    def test_exp_step_lr_state_dict(self):
+        epoch = 10
+        gamma = 0.1
+
+        scheduler =  ExponentialLR(self.opt, gamma=gamma)
+        for _ in range(epoch):
+            scheduler.step()
+        state_dict = scheduler.state_dict()
+        
+        scheduler_copy = ExponentialLR(self.opt, gamma=gamma / 2)
+        scheduler_copy.load_state_dict(state_dict)
+
+        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
+        self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
+        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+
+    def test_cosine_lr_state_dict(self):
+        epoch = 10
+        eta_min = 1e-10
+        scheduler = CosineAnnealingLR(self.opt, T_max=epoch, eta_min=eta_min)
+        for _ in range(epoch):
+            scheduler.step()
+        state_dict = scheduler.state_dict()
+        
+        scheduler_copy = CosineAnnealingLR(self.opt, T_max=epoch // 2, eta_min=eta_min / 2)
+        scheduler_copy.load_state_dict(state_dict)
+
+        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
+        self.assertAlmostEqual(scheduler.eta_min, scheduler_copy.eta_min)
+        self.assertAlmostEqual(scheduler.T_max, scheduler_copy.T_max)
+        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):
             scheduler.step(epoch)
