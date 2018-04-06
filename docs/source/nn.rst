@@ -40,7 +40,7 @@ Containers
 .. autoclass:: ParameterList
     :members:
 
-Convolution Layers
+Convolution layers
 ----------------------------------
 
 :hidden:`Conv1d`
@@ -81,7 +81,7 @@ Convolution Layers
     :members:
 
 
-Pooling Layers
+Pooling layers
 ----------------------------------
 
 :hidden:`MaxPool1d`
@@ -193,7 +193,7 @@ Pooling Layers
     :members:
 
 
-Padding Layers
+Padding layers
 --------------
 
 :hidden:`ReflectionPad2d`
@@ -227,8 +227,8 @@ Padding Layers
     :members:
 
 
-Non-linear Activations (weighed sum+nonlinearity)
--------------------------------------------------
+Non-linear activations (weighted sum, nonlinearity)
+---------------------------------------------------
 
 :hidden:`ELU`
 ~~~~~~~~~~~~~
@@ -332,7 +332,7 @@ Non-linear Activations (weighed sum+nonlinearity)
 .. autoclass:: Threshold
     :members:
 
-Non-linear Activations (Other)
+Non-linear activations (other)
 ------------------------------
 
 :hidden:`Softmin`
@@ -1164,6 +1164,14 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: affine_grid
+
+DataParallel functions (multi-GPU, distributed)
+--------------------------------------------
+
+:hidden:`data_parallel`
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.parallel.data_parallel
 
 
 torch.nn.init

@@ -3,7 +3,6 @@ from collections import defaultdict
 
 import torch
 from torch._thnn.utils import parse_header, THNN_H_PATH
-from torch.autograd import Variable
 from torch.autograd.function import Function, InplaceFunction, once_differentiable
 from torch._thnn import type2backend
 from .auto_double_backwards import double_backwards_fns

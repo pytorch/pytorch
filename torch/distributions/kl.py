@@ -114,10 +114,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    if isinstance(tensor, Variable):
-        return tensor.new_tensor(float('inf')).expand_as(tensor)
-    else:
-        return tensor.new([float('inf')]).expand_as(tensor)
+    return tensor.new([float('inf')]).expand_as(tensor)
 
 
 def _x_log_x(tensor):

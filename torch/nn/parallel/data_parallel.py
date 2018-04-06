@@ -125,7 +125,7 @@ def data_parallel(module, inputs, device_ids=None, output_device=None, dim=0, mo
         output_device: GPU location of the output  Use -1 to indicate the CPU.
             (default: device_ids[0])
     Returns:
-        a Variable containing the result of module(input) located on
+        a Tensor containing the result of module(input) located on
         output_device
     """
     if not isinstance(inputs, tuple):
