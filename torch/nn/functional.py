@@ -1659,21 +1659,21 @@ def pixel_shuffle(input, upscale_factor):
     Examples::
         # 1D example
         >>> ps = nn.PixelShuffle(2)
-        >>> input = autograd.Variable(torch.Tensor(1, 4, 8))
+        >>> input = torch.Tensor(1, 4, 8)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 2, 16])
 
         # 2D example
         >>> ps = nn.PixelShuffle(3)
-        >>> input = autograd.Variable(torch.Tensor(1, 9, 8, 8))
+        >>> input = torch.Tensor(1, 9, 8, 8)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 24, 24])
 
         # 3D example
         >>> ps = nn.PixelShuffle(2)
-        >>> input = autograd.Variable(torch.Tensor(1, 8, 16, 16, 16))
+        >>> input = torch.Tensor(1, 8, 16, 16, 16)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 32, 32, 32])
