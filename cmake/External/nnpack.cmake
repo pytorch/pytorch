@@ -7,16 +7,10 @@ if (NOT USE_NNPACK)
   return()
 endif()
 
-# try any external nnpack first
-find_package(NNPACK)
-
-if (NNPACK_FOUND)
-  message(INFO "Found external NNPACK installation.")
-  return()
-endif()
-
 ##############################################################################
-# Custom build rules to build nnpack, if external dependency is not found 
+# NNPACK is built together with Caffe2
+# By default, it builds code from third-party/NNPACK submodule.
+# Define NNPACK_SOURCE_DIR to build with a different version.
 ##############################################################################
 
 ##############################################################################
