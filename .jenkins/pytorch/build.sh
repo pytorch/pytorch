@@ -4,6 +4,9 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
 
+# Add nccl2 for distributed test.
+apt-get install libnccl-dev libnccl2
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
