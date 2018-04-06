@@ -336,6 +336,7 @@ Caffe2Backend::get_special_operators() const {
               {"Concat", &Caffe2Backend::CreateConcat},
               {"LogSoftmax", &Caffe2Backend::CreateLogSoftmax},
               {"Slice", &Caffe2Backend::CreateSlice},
+              {"Split", &Caffe2Backend::CreateSplit},
               {"Reciprocal", &Caffe2Backend::CreateReciprocal},
               {"BatchNormalization", &Caffe2Backend::CreateBatchNormalization},
               {"MatMul", &Caffe2Backend::CreateMatMul}};
@@ -541,7 +542,6 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
 }
 
 Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
-  const auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
   ::google::protobuf::RepeatedField<::google::protobuf::int64> pads;
   std::string pad_name = opset_version < 2 ? "paddings" : "pads";
@@ -768,10 +768,21 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
 Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     OnnxNode* onnx_node,
     int opset_version) {
-  const auto& node = onnx_node->node;
   if (opset_version < 6) {
     auto& attributes = onnx_node->attributes;
     attributes.remove("consumed_inputs");
+  }
+
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+}
+
+Caffe2Ops Caffe2Backend::CreateSplit(
+    OnnxNode* onnx_node,
+    int opset_version) {
+  auto& attributes = onnx_node->attributes;
+  if (!attributes.HasAttribute("axis")) {
+    auto* attr = attributes.AddRewrittenAttibute("axis");
+    attr->set_i(0);
   }
 
   return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
