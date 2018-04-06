@@ -653,9 +653,10 @@ void addObjectMethods(py::module& m) {
       .def(
           "run",
           [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::map<std::string, py::object> inputs)
+             std::map<std::string, py::object> inputs,
+             bool threadsafe)
               -> std::vector<py::object> {
-            Predictor::TensorMap tensors;
+            PredictorBase::TensorMap tensors;
             std::map<std::string, TensorCPU> tensors_data{};
             for (const auto pair : inputs) {
               const auto& name = pair.first;
@@ -670,22 +671,24 @@ void addObjectMethods(py::module& m) {
               tensors.insert(std::make_pair(name, &tensors_data[name]));
             }
 
-
-            std::vector<TensorCPU*> out;
-            instance.RunMap(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            instance.RunMap(tensors, out, threadsafe);
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          })
+          },
+          py::arg("inputs"),
+          py::arg("threadsafe") = false)
       .def(
           "run",
           [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::vector<py::object> inputs)
+             std::vector<py::object> inputs,
+             bool threadsafe)
               -> std::vector<py::object> {
-            Predictor::TensorVector tensors;
+            PredictorBase::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
@@ -698,76 +701,17 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &(tensors_data[i]));
               tensors.push_back(&(tensors_data[i]));
             }
-            std::vector<TensorCPU*> out;
-            instance.Run(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            instance.Run(tensors, out, threadsafe);
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          })
-      .def(
-          "run_in_new_workspace",
-          [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::map<std::string, py::object> inputs)
-              -> std::vector<py::object> {
-            Predictor::TensorMap tensors;
-            std::map<std::string, TensorCPU> tensors_data{};
-            for (const auto pair : inputs) {
-              const auto& name = pair.first;
-              const auto& input = pair.second;
-              CAFFE_ENFORCE(
-                  PyArray_Check(input.ptr()),
-                  "Input must be of type numpy array.");
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(input.ptr());
-              TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &tensors_data[name]);
-              tensors.insert(std::make_pair(name, &tensors_data[name]));
-            }
-            std::vector<std::shared_ptr<caffe2::TensorCPU>> out;
-            {
-              py::gil_scoped_release g;
-              instance.RunMapInNewWorkspace(tensors, out);
-            }
-            std::vector<py::object> pyout;
-            for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
-            }
-            return pyout;
-          })
-      .def(
-          "run_in_new_workspace",
-          [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::vector<py::object> inputs)
-              -> std::vector<py::object> {
-            Predictor::TensorVector tensors;
-            std::vector<TensorCPU> tensors_data(inputs.size());
-            for (auto i = 0; i < inputs.size(); ++i) {
-              auto input = inputs[i];
-              CAFFE_ENFORCE(
-                  PyArray_Check(input.ptr()),
-                  "Input must be of type numpy array.");
-              PyArrayObject* array =
-                  reinterpret_cast<PyArrayObject*>(input.ptr());
-              TensorFeeder<CPUContext>().FeedTensor(
-                  DeviceOption(), array, &(tensors_data[i]));
-              tensors.push_back(&(tensors_data[i]));
-            }
-            std::vector<std::shared_ptr<caffe2::TensorCPU>> out;
-            {
-              py::gil_scoped_release g;
-              instance.RunInNewWorkspace(tensors, out);
-            }
-            std::vector<py::object> pyout;
-            for (auto t : out) {
-              pyout.push_back(
-                  TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
-            }
-            return pyout;
-          });
+          },
+          py::arg("inputs"),
+          py::arg("threadsafe") = false);
 
   py::class_<caffe2::onnx::Caffe2Backend>(m, "Caffe2Backend")
       .def(py::init<>())
@@ -814,22 +758,26 @@ void addObjectMethods(py::module& m) {
             return vals;
           });
 
-  py::class_<Predictor>(m, "Predictor")
+  py::class_<PredictorBase>(m, "Predictor")
       .def(
-          py::init([](py::bytes init_net, py::bytes predict_net) {
+          py::init([](py::bytes init_net, py::bytes predict_net, const std::string& type) {
             CAFFE_ENFORCE(gWorkspace);
             NetDef init_net_, predict_net_;
             CAFFE_ENFORCE(ParseProtoFromLargeString(
                 init_net.cast<std::string>(), &init_net_));
             CAFFE_ENFORCE(ParseProtoFromLargeString(
                 predict_net.cast<std::string>(), &predict_net_));
-            return new Predictor(init_net_, predict_net_, gWorkspace);
-          }))
+            return PredictorRegistry()->Create(type, init_net_, predict_net_, gWorkspace).release();
+          }),
+          py::arg("init_net"),
+          py::arg("predict_net"),
+          py::arg("type") = "CPU")
       .def(
           "run",
-          [](Predictor& instance,
-             std::vector<py::object> inputs) -> std::vector<py::object> {
-            Predictor::TensorVector tensors;
+          [](PredictorBase& instance,
+             std::vector<py::object> inputs,
+             bool threadsafe) -> std::vector<py::object> {
+            PredictorBase::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
               auto input = inputs[i];
@@ -842,20 +790,24 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &(tensors_data[i]));
               tensors.push_back(&(tensors_data[i]));
             }
-            std::vector<TensorCPU*> out;
-            instance.run(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            instance.run(tensors, out, threadsafe);
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          })
+          },
+          py::arg("inputs"),
+          py::arg("threadsafe") = false)
       .def(
           "run",
-          [](Predictor& instance, std::map<std::string, py::object> inputs)
+          [](PredictorBase& instance,
+            std::map<std::string, py::object> inputs,
+            bool threadsafe)
               -> std::vector<py::object> {
-            Predictor::TensorMap tensors;
+            PredictorBase::TensorMap tensors;
             std::map<std::string, TensorCPU> tensors_data{};
             for (const auto pair : inputs) {
               const auto& name = pair.first;
@@ -869,15 +821,17 @@ void addObjectMethods(py::module& m) {
                   DeviceOption(), array, &tensors_data[name]);
               tensors.insert(std::make_pair(name, &tensors_data[name]));
             }
-            std::vector<TensorCPU*> out;
-            instance.run_map(tensors, &out);
+            PredictorBase::OutputTensorVector out;
+            instance.run_map(tensors, out, threadsafe);
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
                   TensorFetcher<CPUContext>().FetchTensor(*t, true).obj);
             }
             return pyout;
-          });
+          },
+          py::arg("inputs"),
+          py::arg("threadsafe") = false);
 
   py::class_<script::CompilationUnit>(m, "CompilationUnit")
       .def(py::init<>())

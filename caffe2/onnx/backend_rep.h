@@ -11,18 +11,12 @@
 namespace caffe2 { namespace onnx {
 class Caffe2BackendRep {
  public:
-  void Run(
-      const caffe2::Predictor::TensorVector& inputs,
-      caffe2::Predictor::TensorVector* outputs);
-  void RunMap(
-      const caffe2::Predictor::TensorMap& inputs,
-      caffe2::Predictor::TensorVector* outputs);
-  void RunInNewWorkspace(
-      const caffe2::Predictor::TensorVector& inputs,
-      std::vector<std::shared_ptr<caffe2::TensorCPU>> &outputs);
-  void RunMapInNewWorkspace(
-      const caffe2::Predictor::TensorMap& inputs,
-      std::vector<std::shared_ptr<caffe2::TensorCPU>> &outputs);
+  using TensorVector = caffe2::PredictorBase::TensorVector;
+  using TensorMap = caffe2::PredictorBase::TensorMap;
+  using OutputTensorVector = caffe2::PredictorBase::OutputTensorVector;
+
+  void Run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe = false);
+  void RunMap(const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe = false);
 
   caffe2::NetDef& init_net() {
     return init_net_;
@@ -50,7 +44,7 @@ class Caffe2BackendRep {
   caffe2::NetDef init_net_;
   caffe2::NetDef pred_net_;
   std::vector<std::string> uninitialized_inputs_;
-  std::unique_ptr<caffe2::Predictor> predictor_{nullptr};
+  std::unique_ptr<caffe2::PredictorBase> predictor_{nullptr};
   std::mutex mutex_;
 };
 }}
