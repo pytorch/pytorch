@@ -82,10 +82,6 @@ struct GraphTask {
   std::atomic<uint64_t> outstanding_tasks;
   bool keep_graph;
   bool grad_mode;
-  // check whether the user passes inputs for which grad is to be calculated.
-  // if torch.autograd.backward() is called, it is imperative.
-  // if torch.autograd.grad() is called, it is not imperative.
-  bool is_imperative_backward;
 
   std::mutex mutex;
   // Notified when a task finishes executing.  Check outstanding_tasks to see
@@ -112,6 +108,7 @@ struct GraphTask {
   // run in a "default" mode, which means that all next_edges we encounter should
   // get executed. If it's not empty, only functions that have an entry and this entry
   // has needed == True should be executed.
+  // exec_info.empty() means it's .backward(), otherwise it's .grad().
   std::unordered_map<Function*, ExecInfo> exec_info;
   std::vector<Variable> captured_vars;
 
@@ -125,7 +122,6 @@ struct GraphTask {
     , outstanding_tasks(0)
     , keep_graph(keep_graph)
     , grad_mode(grad_mode)
-    , is_imperative_backward(true)
     , mutex()
     , not_done()
     , not_ready()
@@ -239,7 +235,9 @@ static variable_list call_post_hooks(Function& fn, variable_list outputs, variab
 
 static variable_list call_function(FunctionTask& task) {
   bool prev_checkpoint_valid_state = checkpoint_valid;
-  checkpoint_valid = task.base->is_imperative_backward && prev_checkpoint_valid_state;
+  auto & exec_info = task.base->exec_info;
+  // exec_info.empty() means it's .backward(), otherwise it's .grad()
+  checkpoint_valid = exec_info.empty() && prev_checkpoint_valid_state;
   auto& fn = *task.fn;
   auto inputs = call_pre_hooks(fn, InputBuffer::variables(std::move(task.inputs)));
 
@@ -385,7 +383,6 @@ auto Engine::execute(const edge_list& input_roots,
   auto graph_root = std::make_shared<GraphRoot>(input_roots, inputs);
   compute_dependencies(graph_root.get(), graph_task);
   if (!outputs.empty()) {
-    graph_task.is_imperative_backward = false;
     graph_task.init_to_execute(*graph_root, outputs);
   }
   ready_queue(-1).push(FunctionTask(&graph_task, std::move(graph_root), InputBuffer(0)));

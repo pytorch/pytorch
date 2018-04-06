@@ -14,7 +14,7 @@ import torch.utils.data
 import torch.cuda
 import warnings
 from torch.autograd import Variable
-from torch.utils.checkpoint import checkpoint_sequential
+from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.trainer import Trainer
 from torch.utils.trainer.plugins import *
 from torch.utils.trainer.plugins.plugin import Plugin
@@ -116,6 +116,30 @@ class DatasetMock(object):
 
 class TestCheckpoint(TestCase):
 
+    # Test whether checkpoint is being triggered or not. For this, we check
+    # the number of times forward pass happens
+    def test_checkpoint_trigger(self):
+
+        class Net(nn.Module):
+
+            def __init__(self):
+                super(Net, self).__init__()
+                self.count = 0
+
+            def forward(self, input_var):
+                self.count += 1
+                return input_var
+
+        # checkpointed
+        chunks = 2
+        module1, module2 = Net(), Net()
+        assert(module1.count == 0)
+        modules = [module1, module2]
+        input_var = torch.randn(3, 4, requires_grad=True)
+        out = checkpoint_sequential(modules, chunks, input_var)
+        out.sum().backward()
+        assert (module1.count == 2)
+
     def test_checkpoint_valid(self):
         model = nn.Sequential(
             nn.Linear(100, 50),
@@ -130,7 +154,7 @@ class TestCheckpoint(TestCase):
 
         # checkpointed
         chunks = 2
-        modules = [module for k, module in model._modules.items()]
+        modules = list(model.children())
         out = checkpoint_sequential(modules, chunks, input_var)
         with self.assertRaisesRegex(RuntimeError, "Checkpointing is not compatible"):
             torch.autograd.grad(
@@ -147,7 +171,7 @@ class TestCheckpoint(TestCase):
             nn.ReLU()
         )
 
-        x = Variable(torch.randn(1, 100), requires_grad=True)
+        x = torch.randn(1, 100, requires_grad=True)
 
         # not checkpointed
         out = model(x)
@@ -161,15 +185,17 @@ class TestCheckpoint(TestCase):
 
         # checkpointed
         chunks = 2
-        modules = [module for k, module in model._modules.items()]
-        out = checkpoint_sequential(modules, chunks, x)
+        modules = list(model.children())
+        input_var = x.detach()
+        input_var.requires_grad = True
+        out = checkpoint_sequential(modules, chunks, input_var)
         out_checkpointed = out.data.clone()
         model.zero_grad()
         out.sum().backward()
         grad_checkpointed = {}
         for name, param in model.named_parameters():
             grad_checkpointed[name] = param.grad.data.clone()
-        checkpoint_input_grad = x.grad.data.clone()
+        checkpoint_input_grad = input_var.grad.data.clone()
 
         # compare the output, input and parameters gradients
         self.assertEqual(out_checkpointed, out_not_checkpointed)
