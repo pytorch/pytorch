@@ -512,6 +512,9 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   const auto& b = def.input(2);
   const auto& y = def.output(0);
   const auto& x_shape = shapes.at(x);
+  const auto& w_shape = shapes.at(w);
+  CAFFE_ENFORCE_GE(x_shape.dims().size(), 2);
+  CAFFE_ENFORCE_GE(w_shape.dims().size(), 2);
 
   ConvertedResult result;
   auto& nodes = result.first;
@@ -522,10 +525,13 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   }
 
   auto it = args.find("axis");
+  int64_t axis = 1;
   bool has_axis = (it != args.end());
-  int64_t axis = 0;
   if (has_axis) {
     axis = it->second->i();
+  }
+  if (x_shape.dims().size() > 2) {
+    // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(x_shape, 0, axis);
     auto inner = DimProd(x_shape, axis, x_shape.dims().size());
     std::vector<int64_t> dims = {outer, inner};
@@ -537,9 +543,12 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   }
 
   it = args.find("axis_w");
+  int64_t axis_w = 1;
   if (it != args.end()) {
-    auto axis_w = it->second->i();
-    const auto& w_shape = shapes.at(w);
+    axis_w = it->second->i();
+  }
+  if (w_shape.dims().size() > 2) {
+    // we need to reshape only when dimension is higher than 2
     auto outer = DimProd(w_shape, 0, axis_w);
     auto inner = DimProd(w_shape, axis_w, w_shape.dims().size());
     std::vector<int64_t> dims = {outer, inner};
