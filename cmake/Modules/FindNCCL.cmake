@@ -24,8 +24,15 @@ find_path(NCCL_INCLUDE_DIRS
   ${NCCL_ROOT_DIR}/include
   ${CUDA_TOOLKIT_ROOT_DIR}/include)
 
+IF ($ENV{USE_STATIC_NCCL})
+  MESSAGE(STATUS "USE_STATIC_NCCL detected. Linking against static NCCL library")
+  SET(NCCL_LIBNAME "libnccl_static.a")
+ELSE()
+  SET(NCCL_LIBNAME "nccl")
+ENDIF()
+
 find_library(NCCL_LIBRARIES
-  NAMES nccl
+  NAMES ${NCCL_LIBNAME}
   HINTS
   ${NCCL_LIB_DIR}
   ${NCCL_ROOT_DIR}
