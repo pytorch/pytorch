@@ -31,7 +31,7 @@ bool GlobalInit(int* pargc, char*** pargv) {
   success &= ParseCaffeCommandLineFlags(pargc, pargv);
   success &= InitCaffeLogging(pargc, *pargv);
   // Print out the current build version. Using cerr as LOG(INFO) might be off
-  if (VLOG_IS_ON(1) || FLAGS_caffe2_version) {
+  if (FLAGS_caffe2_version) {
     std::cerr << "Caffe2 build configuration: " << std::endl;
     for (const auto& it : GetBuildOptions()) {
       std::cerr << "  " << std::setw(25) << std::left << it.first << " : "

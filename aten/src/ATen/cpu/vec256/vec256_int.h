@@ -5,6 +5,7 @@
 
 namespace at {
 namespace vec256 {
+namespace {
 
 #ifdef __AVX2__
 
@@ -154,4 +155,4 @@ Vec256<int16_t> inline operator*(const Vec256<int16_t>& a, const Vec256<int16_t>
 }
 #endif
 
-}}
+}}}

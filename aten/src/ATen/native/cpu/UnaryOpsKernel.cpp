@@ -7,7 +7,7 @@
 #include "ATen/cpu/vec256/vec256.h"
 #include "ATen/native/cpu/CapabilityDispatch.h"
 
-namespace at { namespace native {
+namespace at { namespace native { namespace {
 
 using namespace vec256;
 
@@ -129,6 +129,8 @@ static void trunc_kernel(Tensor& result, const Tensor& self) {
     });
   });
 }
+
+}  // anonymous namespace
 
 REGISTER_DISPATCH(absImpl, &abs_kernel);
 REGISTER_DISPATCH(ceilImpl, &ceil_kernel);

@@ -12,6 +12,7 @@ import unittest
 import warnings
 import pickle
 from torch.utils.dlpack import from_dlpack, to_dlpack
+from torch._utils import _rebuild_tensor
 from itertools import product, combinations
 from functools import reduce
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
@@ -373,6 +374,36 @@ class TestTorch(TestCase):
                 return float('nan')
             return math.log(x)
         self._test_math(torch.log, log)
+
+    def test_log10(self):
+        def log10(x):
+            if x == 0:
+                return float('-inf')
+            elif x < 0:
+                return float('nan')
+            return math.log10(x)
+        self._test_math(torch.log10, log10)
+
+    def test_log1p(self):
+        def log1p(x):
+            if x == -1:
+                return float('-inf')
+            elif x < -1:
+                return float('nan')
+            return math.log1p(x)
+        self._test_math(torch.log1p, log1p)
+
+    def test_log2(self):
+        def log2(x):
+            if x == 0:
+                return float('-inf')
+            elif x < 0:
+                return float('nan')
+            try:
+                return math.log2(x)
+            except AttributeError:
+                return math.log(x, 2)
+        self._test_math(torch.log2, log2)
 
     def test_sqrt(self):
         self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else float('nan'))
@@ -5491,6 +5522,37 @@ class TestTorch(TestCase):
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
         self.assertEqual(c[4][1:4], c[5], 0)
+
+        # test some old tensor serialization mechanism
+        class OldTensorBase(object):
+            def __init__(self, new_tensor):
+                self.new_tensor = new_tensor
+
+            def __getstate__(self):
+                return (self.new_tensor.storage(),
+                        self.new_tensor.storage_offset(),
+                        tuple(self.new_tensor.size()),
+                        self.new_tensor.stride())
+
+        class OldTensorV1(OldTensorBase):
+            def __reduce__(self):
+                return (torch.Tensor, (), self.__getstate__())
+
+        class OldTensorV2(OldTensorBase):
+            def __reduce__(self):
+                return (_rebuild_tensor, self.__getstate__())
+
+        x = torch.randn(30).as_strided([2, 3], [9, 3], 2)
+        for old_cls in [OldTensorV1, OldTensorV2]:
+            with tempfile.NamedTemporaryFile() as f:
+                old_x = old_cls(x)
+                torch.save(old_x, f)
+                f.seek(0)
+                load_x = torch.load(f)
+                self.assertEqual(x.storage(), load_x.storage())
+                self.assertEqual(x.storage_offset(), load_x.storage_offset())
+                self.assertEqual(x.size(), load_x.size())
+                self.assertEqual(x.stride(), load_x.stride())
 
     # unique_key is necessary because on Python 2.7, if a warning passed to
     # the warning module is the same, it is not raised again.

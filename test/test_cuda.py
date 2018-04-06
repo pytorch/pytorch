@@ -450,7 +450,9 @@ custom_half_precision = {
     'lerp': 1e-2,
     'lgamma': 1e-2,
     'log': 1e-2,
+    'log10': 1e-2,
     'log1p': 1e-3,
+    'log2': 1e-2,
     'mean': 1e-3,
     'mul': 1e-2,
     'norm': 1e-1,
@@ -482,7 +484,9 @@ for fn in simple_pointwise:
 
 simple_pointwise_float = [
     'log',
+    'log10',
     'log1p',
+    'log2',
     'sigmoid',
     'sin',
     'sqrt',
