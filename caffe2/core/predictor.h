@@ -70,10 +70,10 @@ class PredictorBase {
   //   outputs->size() == run_net.external_inputs.size()
 
   // Returns true on success
-  virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool mulithread) = 0;
+  virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool mulithread = false) = 0;
 
   // Similar to run, but consumes a map of name to tensor as input
-  virtual bool run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool mulithread) = 0;
+  virtual bool run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool mulithread = false) = 0;
 
   const NetDef& def() const {
     return run_net_;

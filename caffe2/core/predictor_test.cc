@@ -164,7 +164,7 @@ class PredictorTest : public testing::Test {
     op.set_random_seed(1701);
     ctx_ = caffe2::make_unique<CPUContext>(op);
     NetDef init, run;
-    p_ = std::move(caffe2::PredictorRegistry()->Create("CPU", parseNetDef(initSpec), parseNetDef(predictSpec)));
+    p_ = std::move(caffe2::PredictorRegistry()->Create("CPU", parseNetDef(initSpec), parseNetDef(predictSpec), nullptr));
   }
 
   std::unique_ptr<CPUContext> ctx_;

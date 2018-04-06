@@ -40,7 +40,7 @@ void run() {
   // Can be large due to constant fills
   VLOG(1) << "Init net: " << ProtoDebugString(init_net);
   LOG(INFO) << "Predict net: " << ProtoDebugString(predict_net);
-  auto predictor = std::move(PredictorRegistry()->Create("CPU", init_net, predict_net));
+  auto predictor = std::move(PredictorRegistry()->Create("CPU", init_net, predict_net, nullptr));
   LOG(INFO) << "Checking that a null forward-pass works";
   PredictorBase::TensorVector inputVec;
   PredictorBase::OutputTensorVector outputVec;
