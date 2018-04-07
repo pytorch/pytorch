@@ -2328,7 +2328,6 @@ class TestScript(TestCase):
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
-
     def test_script_module_star_assign_fail_pythonop(self):
 
         with self.assertRaisesRegex(RuntimeError, "Vararg outputs are currently not supported for PythonOp"):

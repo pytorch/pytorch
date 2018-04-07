@@ -601,7 +601,7 @@ private:
   // 3) A Starred node can only appear when there is another non-Starred lhs Expr
   //    Concretely this means that `*abc = func()` is illegal. Unpacking all
   //    outputs into a tuple is covered by `abc = func()`.
-  size_t calcNumStarredUnpack(const List<Expr>& lhs, const Assign& stmt) {
+  size_t calcNumStarredUnpack(const List<Expr>& lhs, const SourceRange& r) {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
@@ -616,12 +616,12 @@ private:
     }
 
     if (num_starred > 1) {
-      throw ErrorReport(stmt)
+      throw ErrorReport(r)
           << "Only one starred expression is allowed on the lhs.";
     }
 
     if (num_starred > 0 && num_normal_assign == 0) {
-      throw ErrorReport(stmt) << "A Starred expression may only appear on the "
+      throw ErrorReport(r) << "A Starred expression may only appear on the "
                               << "lhs within the presence of another non-starred"
                               << " expression.";
     }
@@ -629,18 +629,23 @@ private:
     return num_starred;
   }
 
+  std::vector<SugaredValuePtr> createSugaredValuesFromValues(const std::vector<Value*> values) {
+    std::vector<SugaredValuePtr> sugared_outputs;
+    sugared_outputs.reserve(values.size());
+    for (Value* output : values) {
+      sugared_outputs.emplace_back(std::make_shared<SimpleValue>(output));
+    }
+    return sugared_outputs;
+  }
+
   std::vector<Value*> emitAssignment(const Assign& stmt) {
     std::vector<Value*> outputs{stmt.lhs().size()};
-    size_t num_starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt);
+    size_t num_starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
     if (stmt.reduction() != '=') {
       if (stmt.lhs().size() != 1) {
         throw ErrorReport(stmt)
             << "reductions are only allowed when there is a single variable "
             << "on the left-hand side.";
-      }
-      if (stmt.lhs()[0].kind() != TK_VAR) {
-        throw ErrorReport(stmt) << "Starred expressions are not allowed on the"
-                                << " lhs of a reduction.";
       }
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
@@ -651,17 +656,9 @@ private:
       outputs =
           emitExpr(stmt.rhs(), cd);
     }
-    auto createSugaredValuesFromOutputs = [](const std::vector<Value*> outputs) {
-      std::vector<SugaredValuePtr> sugared_outputs;
-      sugared_outputs.reserve(outputs.size());
-      for (Value* output : outputs) {
-        sugared_outputs.emplace_back(std::make_shared<SimpleValue>(output));
-      }
-      return sugared_outputs;
-    };
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value
-      SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromOutputs(outputs));
+      SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(outputs));
       environment_stack->setSugaredVar(Var(stmt.lhs()[0]).name().name(), tup);
     } else {
       int i = 0;
@@ -672,7 +669,7 @@ private:
         } else if (assignee.kind() == TK_STARRED) {
           std::vector<Value*> starred_slice(
               outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
-          SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromOutputs(starred_slice));
+          SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(starred_slice));
           environment_stack->setSugaredVar(
               Var(Starred(assignee).expr()).name().name(), tup);
           i += num_starred_unpack;
@@ -726,7 +723,7 @@ private:
       CallsiteDescriptor cd{1, maybe_unpack};
       auto outputs = emitExpr(tree, cd);
       if (!maybe_unpack && outputs.size() > 1) {
-        throw ErrorReport(tree) << "Expr unexpectly returned more than 1 value."
+        throw ErrorReport(tree) << "Expr unexpectedly returned more than 1 value."
                                 << " File a bug report.";
       }
       for (auto* v : outputs) {
@@ -819,10 +816,12 @@ private:
       case '>':
       case TK_LE:
       case TK_GE:
+      case '*':
       case '/':
       case TK_AND:
       case TK_OR:
-      case TK_NOT: {
+      case TK_NOT:
+      case TK_UNARY_MINUS: {
         expectOutputs(tree, cd.n_outputs, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
@@ -837,25 +836,9 @@ private:
         node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
-      case TK_UNARY_MINUS: {
-        expectOutputs(tree, cd.n_outputs, 1);
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), cd);
-        return node->outputs();
-      }
-      case '*': {
-        const auto& inputs = tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        expectOutputs(tree, cd.n_outputs, 1);
-        auto* node =
-            emitNode(kind, tree->range(), getValues(inputs), cd);
-        return node->outputs();
-      }
       case TK_STARRED: {
         const auto starred = Starred(tree);
-        auto sugared =
-            environment_stack->getSugaredVar(Var(starred.expr()).name());
+        auto sugared = emitSugaredExpr(starred.expr());
         auto sugared_retvals = sugared->asTuple(starred.range(), environment_stack->method);
         std::vector<Value*> retvals;
         retvals.reserve(sugared_retvals.size());
