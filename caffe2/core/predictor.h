@@ -116,12 +116,11 @@ class Predictor : public PredictorBase {
     context_ = std::make_shared<Context>(run_net.device_option());
     for (const auto& name : run_net.external_input()) {
       if (!initialized_.count(name)) {
-        auto* blob = ws_.CreateBlob(name);
+        auto* blob = ws_.GetBlob(name);
         CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
         blob->template GetMutable<Tensor<Context>>();
       }
     }
-    CAFFE_ENFORCE(ws_.CreateNet(run_net));
   }
 
   virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe = false) override;

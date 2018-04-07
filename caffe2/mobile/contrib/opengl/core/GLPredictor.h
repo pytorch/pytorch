@@ -6,8 +6,12 @@
 #include "caffe2/core/predictor.h"
 
 namespace caffe2 {
-class GLPredictor : public Predictor {
+class GLPredictor : public PredictorBase {
  public:
+  using TensorVector = PredictorBase::TensorVector;
+  using TensorMap = PredictorBase::TensorMap;
+  using OutputTensorVector = PredictorBase::OutputTensorVector;
+
   GLPredictor(const NetDef& init_net,
               const NetDef& run_net,
               bool use_texture_input = false,
@@ -15,6 +19,10 @@ class GLPredictor : public Predictor {
 
   template <class T>
   bool run(std::vector<GLImageVector<T>*>& inputs, std::vector<const GLImageVector<T>*>* outputs);
+
+  virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe = false) { return false; }
+  virtual bool run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe = false) { return false; }
+
 
   ~GLPredictor();
 };

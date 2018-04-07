@@ -83,6 +83,12 @@ PredictorBase::PredictorBase(
   const auto& initialized_vec = ws_.Blobs();
   initialized_ = std::unordered_set<std::string>{initialized_vec.begin(),
                                                  initialized_vec.end()};
+  for (const auto& name : run_net.external_input()) {
+    if (!initialized_.count(name)) {
+      auto* blob = ws_.CreateBlob(name);
+    }
+  }
+  CAFFE_ENFORCE(ws_.CreateNet(run_net));
 }
 
 PredictorBase::~PredictorBase() {}
