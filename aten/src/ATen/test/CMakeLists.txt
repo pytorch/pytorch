@@ -1,3 +1,7 @@
+IF (MSVC AND MSVC_VERSION < 1911)
+  return()
+ENDIF()
+
 ADD_EXECUTABLE(scalar_test scalar_test.cpp)
 target_link_libraries(scalar_test ATen)
 
