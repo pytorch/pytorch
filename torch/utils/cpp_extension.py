@@ -385,7 +385,7 @@ def load(name,
     By default, the directory to which the build file is emitted and the
     resulting library compiled to is ``<tmp>/torch_extensions/<name>``, where
     ``<tmp>`` is the temporary folder on the current platform and ``<name>``
-    the name of the extension. This location can be overriden in two ways.
+    the name of the extension. This location can be overridden in two ways.
     First, if the ``TORCH_EXTENSIONS_DIR`` environment variable is set, it
     replaces ``<tmp>/torch_extensions`` and all extensions will be compiled
     into subfolders of this directory. Second, if the ``build_directory``
@@ -393,7 +393,7 @@ def load(name,
     the library will be compiled into that folder directly.
 
     To compile the sources, the default system compiler (``c++``) is used,
-    which can be overriden by setting the ``CXX`` environment variable. To pass
+    which can be overridden by setting the ``CXX`` environment variable. To pass
     additional arguments to the compilation process, ``extra_cflags`` or
     ``extra_ldflags`` can be provided. For example, to compile your extension
     with optimizations, pass ``extra_cflags=['-O3']``. You can also use

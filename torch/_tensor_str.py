@@ -33,7 +33,7 @@ def set_printoptions(
         edgeitems: Number of array items in summary at beginning and end of
             each dimension (default = 3).
         linewidth: The number of characters per line for the purpose of
-            inserting line breaks (default = 80). Thresholded matricies will
+            inserting line breaks (default = 80). Thresholded matrices will
             ignore this parameter.
         profile: Sane defaults for pretty printing. Can override with any of
             the above options. (any one of `default`, `short`, `full`)

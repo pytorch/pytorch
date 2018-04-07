@@ -625,7 +625,7 @@ def relu(input, inplace=False):
 relu_ = _add_docstr(torch.relu_, r"""
 relu_(input) -> Tensor
 
-In-place verison of :func:`~relu`.
+In-place version of :func:`~relu`.
 """)
 
 
@@ -695,7 +695,7 @@ def elu(input, alpha=1., inplace=False):
 elu_ = _add_docstr(torch._C._nn.elu_, r"""
 elu_(input, alpha=1.) -> Tensor
 
-In-place verison of :func:`~elu`.
+In-place version of :func:`~elu`.
 """)
 
 
@@ -716,7 +716,7 @@ def selu(input, inplace=False):
 selu_ = _add_docstr(torch.selu_, r"""
 selu_(input) -> Tensor
 
-In-place verison of :func:`~selu`.
+In-place version of :func:`~selu`.
 """)
 
 
@@ -1843,7 +1843,7 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
 
     For each output location, :attr:`grid` has `x`, `y`
     input pixel locations which are used to compute output.
-    In the case of 5D inputes, :attr:`grid` has `x`, `y`, `z` pixel locations.
+    In the case of 5D inputs, :attr:`grid` has `x`, `y`, `z` pixel locations.
 
     .. Note::
         To avoid confusion in notation, let's note that `x` corresponds to the `width` dimension `IW`,
@@ -1895,7 +1895,7 @@ def pad(input, pad, mode='constant', value=0):
     r"""Pads tensor.
 
     `Nd` constant padding:  The number of dimensions to pad is
-        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that gets padded begins with the
+        :math:`\left\lfloor\frac{len(padding)}{2}\right\rfloor` and the dimensions that get padded begins with the
         last dimension and moves forward. See below for examples.
 
     `1D`, `2D` and `3D` "reflect" / "replicate" padding:

@@ -118,7 +118,7 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         LU_data (Tensor): the packed LU factorization data
         LU_pivots (Tensor): the packed LU factorization pivots
         unpack_data (bool): flag indicating if the data should be unpacked
-        unpack_pivots (bool): tlag indicating if the pivots should be unpacked
+        unpack_pivots (bool): flag indicating if the pivots should be unpacked
 
     Example::
 

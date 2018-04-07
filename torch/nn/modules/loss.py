@@ -213,7 +213,7 @@ class PoissonNLLLoss(_Loss):
         \text{loss}(\text{input}, \text{target}) = \text{input} - \text{target} * \log(\text{input})
                                     + \log(\text{target!})
 
-    The last term can be omitted or approximised with Stirling formula. The
+    The last term can be omitted or approximated with Stirling formula. The
     approximation is used for target values more than 1. For targets less or
     equal to 1 zeros are added to the loss.
 
@@ -787,7 +787,7 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
 
 
 class CosineEmbeddingLoss(_Loss):
-    r"""Creates a criterion that measures the loss given  an input tensors
+    r"""Creates a criterion that measures the loss given input tensors
     :math:`x_1`, :math:`x_2` and a `Tensor` label `y` with values 1 or -1.
     This is used for measuring whether two inputs are similar or dissimilar,
     using the cosine distance, and is typically used for learning nonlinear
