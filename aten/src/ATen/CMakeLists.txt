@@ -2,6 +2,11 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
+# This is awful and bad and lets see if it works
+if (MSVC)
+  set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
+
 FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
 
 LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
@@ -212,7 +217,9 @@ target_link_libraries(ATen PUBLIC tbb_static)
 # in, and you give the shared library dependency for it... gcc still concludes
 # that the shared library is unneeded and doesn't included it!  Work around the
 # problem.
-set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+if(NOT APPLE)
+  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+endif()
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
