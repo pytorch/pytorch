@@ -1775,10 +1775,12 @@ class TestLayers(LayersTestCase):
         # ensure: quad_life > 2 * half_life
         half_life = int(np.random.random() * 1e2 + 1)
         quad_life = int(np.random.random() * 1e3 + 2 * half_life + 1)
+        min_weight = np.random.random()
+        max_weight = np.random.random() + min_weight + 1e-5
         result = self.model.HomotopyWeight(
             input_record,
-            min_weight=0.,
-            max_weight=1.,
+            min_weight=min_weight,
+            max_weight=max_weight,
             half_life=half_life,
             quad_life=quad_life,
         )
@@ -1789,8 +1791,13 @@ class TestLayers(LayersTestCase):
         half_life_result = workspace.FetchBlob(result())
         workspace.RunNet(train_net.Name(), num_iter=quad_life - half_life)
         quad_life_result = workspace.FetchBlob(result())
-        expected_half_life_result = 0.5 * data[0] + 0.5 * data[1]
-        expected_quad_life_result = 0.25 * data[0] + 0.75 * data[1]
+
+        alpha = (min_weight + max_weight) / 2.
+        beta = (min_weight + max_weight) / 2.
+        expected_half_life_result = alpha * data[0] + beta * data[1]
+        alpha = (3 * min_weight + max_weight) / 4.
+        beta = (min_weight + 3 * max_weight) / 4.
+        expected_quad_life_result = alpha * data[0] + beta * data[1]
         npt.assert_allclose(
             expected_half_life_result, half_life_result, atol=1e-2, rtol=1e-2
         )
