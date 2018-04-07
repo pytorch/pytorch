@@ -56,7 +56,7 @@ void Caffe2IOSPredictor::run(const Tensor& inData, Tensor& outData, std::string&
   caffe2::PredictorBase::TensorVector input_vec{&input};
   caffe2::PredictorBase::OutputTensorVector output_vec;
   try {
-    predictor_.run(input_vec, output_vec);
+    predictor_.run(input_vec, &output_vec);
   } catch (const caffe2::EnforceNotMet& e) {
     std::string error = e.msg();
     errorMessage.swap(error);
