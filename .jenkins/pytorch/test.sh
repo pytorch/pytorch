@@ -40,13 +40,10 @@ popd
 
 if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
    echo "Testing libtorch with NO_PYTHON"
-   LIBTORCH_INSTALL_PREFIX=`pwd`/../libtorch
-   pushd tools/cpp_build
-
+   CPP_BUILD="$PWD/../cpp-build"
    if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-     "$LIBTORCH_INSTALL_PREFIX"/bin/test_jit
+     "$CPP_BUILD"/libtorch/bin/test_jit
    else
-     "$LIBTORCH_INSTALL_PREFIX"/bin/test_jit "[cpu]"
+     "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
    fi
-   popd
 fi
