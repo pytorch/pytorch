@@ -38,17 +38,17 @@ void GenerateStylizedImage(std::vector<float>& originalImage,
   caffe2::NetDef init_net, predict_net;
   init_net.ParseFromString(init_net_str);
   predict_net.ParseFromString(predict_net_str);
-  caffe2::Predictor p(init_net, predict_net);
+  caffe2::Predictor<caffe2::CPUContext> p(init_net, predict_net);
 
   std::vector<int> dims({1, 3, height, width});
   caffe2::TensorCPU input;
   input.Resize(dims);
   input.ShareExternalPointer(originalImage.data());
-  caffe2::Predictor::TensorVector input_vec{&input};
-  caffe2::Predictor::TensorVector output_vec;
-  p.run(input_vec, &output_vec);
+  caffe2::PredictorBase::TensorVector input_vec{&input};
+  caffe2::PredictorBase::OutputTensorVector output_vec;
+  p.run(input_vec, output_vec);
   assert(output_vec.size() == 1);
-  caffe2::TensorCPU* output = output_vec.front();
+  std::shared_ptr<caffe2::TensorCPU> output = output_vec.front();
   // output is our styled image
   float* outputArray = output->mutable_data<float>();
   dataOut.assign(outputArray, outputArray + output->size());
