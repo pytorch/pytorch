@@ -51,6 +51,7 @@ class ReservoirSampling(ModelLayer):
         if 'object_id' in input_record:
             object_to_pos = self.create_param(
                 param_name='object_to_pos',
+                shape=None,
                 initializer=('CreateMap', {
                     'key_dtype': core.DataType.INT64,
                     'valued_dtype': core.DataType.INT32,
