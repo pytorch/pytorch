@@ -430,6 +430,20 @@ class TestSegmentOps(hu.HypothesisTestCase):
     def test_lengths_sum(self, inputs, gc, dc):
         X, Y = inputs
         op = core.CreateOperator("LengthsSum", ["X", "Y"], "out")
+
+        def ref(D, L):
+            R = np.zeros(shape=(L.size, ) + D.shape[1:], dtype=D.dtype)
+            line = 0
+            for g in range(L.size):
+                for _ in range(L[g]):
+                    if len(D.shape) > 1:
+                        R[g, :] += D[line, :]
+                    else:
+                        R[g] += D[line]
+                    line += 1
+            return [R]
+
+        self.assertReferenceChecks(gc, op, [X, Y], ref)
         self.assertDeviceChecks(dc, op, [X, Y], [0])
         self.assertGradientChecks(gc, op, [X, Y], 0, [0])
 
@@ -445,6 +459,20 @@ class TestSegmentOps(hu.HypothesisTestCase):
     def test_sparse_lengths_sum(self, inputs, gc, dc):
         X, Y, Z = inputs
         op = core.CreateOperator("SparseLengthsSum", ["X", "Y", "Z"], "out")
+
+        def ref(D, I, L):
+            R = np.zeros(shape=(L.size, ) + D.shape[1:], dtype=D.dtype)
+            line = 0
+            for g in range(L.size):
+                for _ in range(L[g]):
+                    if len(D.shape) > 1:
+                        R[g, :] += D[I[line], :]
+                    else:
+                        R[g] += D[I[line]]
+                    line += 1
+            return [R]
+
+        self.assertReferenceChecks(gc, op, [X, Y, Z], ref)
         self.assertDeviceChecks(dc, op, [X, Y, Z], [0])
         self.assertGradientChecks(gc, op, [X, Y, Z], 0, [0])
 
@@ -456,11 +484,15 @@ class TestSegmentOps(hu.HypothesisTestCase):
             max_value=5,
             allow_empty=True
         ),
+        seed=st.integers(min_value=0, max_value=100),
         **hu.gcs
     )
     def test_sparse_lengths_weighted_sum(
-            self, grad_on_weights, inputs, gc, dc):
+            self, grad_on_weights, inputs, seed, gc, dc):
         D, I, L = inputs
+
+        np.random.seed(int(seed))
+
         W = np.random.rand(I.size).astype(np.float32)
         op = core.CreateOperator(
             "SparseLengthsWeightedSum",
