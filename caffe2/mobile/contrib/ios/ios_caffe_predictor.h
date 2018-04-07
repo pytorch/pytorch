@@ -32,5 +32,5 @@ class IOS_CAFFE_EXPORT Caffe2IOSPredictor final {
                      const caffe2::NetDef& predict_net,
                      bool disableMultithreadProcessing,
                      bool usingMetalOperators);
-  caffe2::Predictor predictor_;
+  caffe2::Predictor<CPUContext> predictor_;
 };
