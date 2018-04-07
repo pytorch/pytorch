@@ -30,9 +30,15 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   : self(std::move(self)) {}
 
   // call it like a function, e.g. `outputs = this(inputs)`
-  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & m, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
     if (attributes.size() > 0)
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
+    // TODO: remove when we support tuple packing for PythonOp
+    if (cd.allow_varargs && cd.n_outputs == 1) {
+      cd.allow_varargs = false;
+    }
+    if (cd.allow_varargs)
+      throw ErrorReport(loc) << "Vararg outputs are currently not supported for PythonOp.";
     // Release the function object so we can wrap it in a PythonOp
     Graph& g = *m.graph();
     py::object func = self;
@@ -43,7 +49,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for(auto i : inputs)
       new_node->addInput(i);
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < n_outputs; ++i)
+    for(size_t i = 0; i < cd.n_outputs; ++i)
       outputs.push_back(new_node->addOutput());
     return outputs;
   }
@@ -150,15 +156,15 @@ struct MethodValue : public SugaredValue {
   std::string kind() const override {
     return "method";
   }
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
     if(attributes.size() != 0) {
       throw ErrorReport(loc) << "not yet implemented - calls to python functions using keyword arguments";
     }
     ensureSizeMatches(loc, method.num_inputs(), inputs.size(), "inputs");
     auto outputs = caller.emit_call_to(method, inputs);
     // Allow for tuples. TODO: starred exprs?
-    if (n_outputs != 1 && n_outputs != VARARG_OUTPUTS) {
-      ensureSizeMatches(loc, outputs.size(), n_outputs, "outputs");
+    if (!cd.allow_varargs) {
+      ensureSizeMatches(loc, outputs.size(), cd.n_outputs, "outputs");
     }
     return outputs;
   }
@@ -202,8 +208,8 @@ struct ModuleValue : public SugaredValue {
     throw ErrorReport(loc) << "module has no attribute '" << field << "'";
   }
   // call module.forward
-  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, size_t n_outputs) override {
-    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, n_outputs);
+  virtual std::vector<Value*> call(SourceRange loc, Method & caller, at::ArrayRef<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) override {
+    return attr(loc, caller, "forward")->call(loc, caller, inputs, attributes, cd);
   }
 
   virtual std::vector<std::shared_ptr<SugaredValue>> asTuple(SourceRange loc, Method& m) override {

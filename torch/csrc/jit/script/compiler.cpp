@@ -201,11 +201,10 @@ Node* emitBuiltinCall(
   const std::string & name,
   at::ArrayRef<Value*> inputs,
   List<Attribute> attributes,
-  size_t n_outputs) {
-
+  CallsiteDescriptor cd) {
   NodeKind kind(Symbol::aten(name)); // TODO: this is a guess; could it be jit?
   auto graph = method.graph();
-  auto n = graph->insertNode(graph->create(kind, inputs, n_outputs))
+  auto n = graph->insertNode(graph->create(kind, inputs, cd.n_outputs))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
 
   for (const auto& attr : attributes) {
@@ -247,13 +246,20 @@ std::vector<Value*> BuiltinFunction::call(
     Method & m,
     at::ArrayRef<Value*> inputs_,
     List<Attribute> attributes,
-    size_t n_outputs) {
+    CallsiteDescriptor cd) {
   std::vector<Value*> inputs;
   if (value) inputs.push_back(value);
   inputs.insert(inputs.end(), inputs_.begin(), inputs_.end());
-  Node * n = emitBuiltinCall(loc, m, name, inputs, attributes, n_outputs);
+  // TODO: remove when we support tuple packing for builtins.
+  if (cd.allow_varargs && cd.n_outputs == 1) {
+    cd.allow_varargs = false;
+  }
+  Node * n = emitBuiltinCall(loc, m, name, inputs, attributes, cd);
   if (!hasTensorOp(n)) {
     throw ErrorReport(loc) << "unknown builtin op";
+  }
+  if (cd.n_outputs != 1 && cd.allow_varargs) {
+    throw ErrorReport(loc) << "Varargs outputs are not currently supported for builtins.";
   }
   return n->outputs();
 }
@@ -300,7 +306,7 @@ struct to_ir {
     // outputs
     if (has_return) {
       for (auto output : Return(*stmts_end).values()) {
-        graph->registerOutput(emitExpr(output, 1)[0]);
+        graph->registerOutput(emitExpr(output, {1, false})[0]);
       }
     }
   }
@@ -352,7 +358,7 @@ private:
         case TK_EXPR_STMT: {
           auto exprs = ExprStmt(stmt).exprs();
           for (const auto& expr : exprs) {
-            emitExpr(expr, 0);
+            emitExpr(expr, {0, false});
           }
         }
         break;
@@ -380,16 +386,16 @@ private:
     return popFrame();
   }
 
-  Node* create(Symbol kind, const SourceRange& loc,  size_t num_outputs) {
+  Node* create(Symbol kind, const SourceRange& loc,  CallsiteDescriptor cd) {
     return graph
-             ->create(kind, num_outputs)
+             ->create(kind, cd.n_outputs)
              ->setSourceLocation(std::make_shared<SourceRange>(loc));
   }
 
   std::vector<Value*> emitTernaryIf(const TernaryIf& expr) {
-    Value* cond_value = emitExpr(expr.cond(), 1)[0];
+    Value* cond_value = emitExpr(expr.cond(), {1, false})[0];
 
-    Node* n = graph->insertNode(create(prim::If, expr.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, expr.range(), {0, false}));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -397,7 +403,7 @@ private:
     auto emit_if_expr = [this](Block* b, const Expr& expr) {
       pushFrame(b);
       WithInsertPoint guard(b);
-      Value* out_val = emitExpr(expr, 1)[0];
+      Value* out_val = emitExpr(expr, {1, false})[0];
       b->registerOutput(out_val);
       popFrame();
     };
@@ -412,9 +418,9 @@ private:
   }
 
   void emitIf(const If& stmt) {
-    Value* cond_value = emitExpr(stmt.cond(), 1)[0];
+    Value* cond_value = emitExpr(stmt.cond(), {1, false})[0];
 
-    Node* n = graph->insertNode(create(prim::If, stmt.range(), 0));
+    Node* n = graph->insertNode(create(prim::If, stmt.range(), {0, false}));
     n->addInput(cond_value);
     auto* true_block = n->addBlock();
     auto* false_block = n->addBlock();
@@ -467,18 +473,18 @@ private:
       at::optional<Expr> cond,
       const List<Stmt>& body,
       at::optional<Ident> itr_ident) {
-    Node* n = graph->insertNode(create(prim::Loop, range, 0));
+    Node* n = graph->insertNode(create(prim::Loop, range, {0, false}));
     Value *max_trip_count_val, *cond_val;
     {
       WithInsertPoint guard(n);
       if (max_trip_count) {
-        max_trip_count_val = emitExpr(max_trip_count.value(), 1)[0];
+        max_trip_count_val = emitExpr(max_trip_count.value(), {1, false})[0];
       } else {
         max_trip_count_val =
             emitConst(Const::create(range, std::to_string(INT_MAX)))[0];
       }
       if (cond) {
-        cond_val = emitExpr(cond.value(), 1)[0];
+        cond_val = emitExpr(cond.value(), {1, false})[0];
       } else {
         cond_val = emitBooleanConst(range, true)[0];
       }
@@ -499,7 +505,7 @@ private:
 
       // Also emit the conditional
       if (cond) {
-        Value* body_cond_value = emitExpr(cond.value(), 1)[0];
+        Value* body_cond_value = emitExpr(cond.value(), {1, false})[0];
         body_block->registerOutput(body_cond_value);
       } else {
         Value* cond_value_dummy = emitBooleanConst(range, true)[0];
@@ -639,10 +645,11 @@ private:
       Ident lhs = Var(stmt.lhs()[0]).name();
       Expr expr = BinOp::create(stmt.range(), stmt.reduction(),
                                 Var::create(lhs.range(), lhs), stmt.rhs());
-      outputs = emitExpr(expr, 1);
+      outputs = emitExpr(expr, {1, false});
     } else {
+      CallsiteDescriptor cd{stmt.lhs().size(), !!num_starred_unpack || stmt.lhs().size() == 1};
       outputs =
-          emitExpr(stmt.rhs(), num_starred_unpack ? VARARG_OUTPUTS : stmt.lhs().size());
+          emitExpr(stmt.rhs(), cd);
     }
     auto createSugaredValuesFromOutputs = [](const std::vector<Value*> outputs) {
       std::vector<SugaredValuePtr> sugared_outputs;
@@ -716,7 +723,8 @@ private:
   std::vector<Value*> getValues(const Trees& trees, bool maybe_unpack=false) {
     std::vector<Value*> values;
     for (const auto& tree : trees) {
-      auto outputs = emitExpr(tree, maybe_unpack ? VARARG_OUTPUTS : 1);
+      CallsiteDescriptor cd{1, maybe_unpack};
+      auto outputs = emitExpr(tree, cd);
       if (!maybe_unpack && outputs.size() > 1) {
         throw ErrorReport(tree) << "Expr unexpectly returned more than 1 value."
                                 << " File a bug report.";
@@ -732,7 +740,6 @@ private:
       const TreeRef& tree,
       const size_t expected_size,
       const size_t size) {
-      if (expected_size == VARARG_OUTPUTS) return;
     if (expected_size != 0 && expected_size != size) {
       throw ErrorReport(tree)
           << "expected operator to produce " << expected_size
@@ -741,33 +748,41 @@ private:
   }
 
   // special rules apply when we directly call foo(a,b) when foo is an ident
-  std::vector<Value*> emitApplyIdent(Ident ident, std::vector<Value*> inputs, List<Attribute> attributes, size_t output_size) {
+  std::vector<Value*> emitApplyIdent(Ident ident, std::vector<Value*> inputs, List<Attribute> attributes, CallsiteDescriptor cd) {
     auto it = function_table.find(ident.name());
     if (it != function_table.end()) {
       if(inputs.size() != it->second.num_inputs())
         throw ErrorReport(ident) << "expected " << it->second.num_inputs() << " but found " << inputs.size();
       auto outputs = method.emit_call_to(it->second, inputs);
-      expectOutputs(ident, output_size, outputs.size());
+      if (!cd.allow_varargs)
+        expectOutputs(ident, cd.n_outputs, outputs.size());
       return outputs;
     } else if (ident.name() == "print") {
-      expectOutputs(ident, output_size, 0);
+      expectOutputs(ident, cd.n_outputs, 0);
       if (!attributes.empty())
         throw ErrorReport(ident) << "print doesn't accept any keyword arguments";
-      return emitNode(prim::Print, ident.range(), inputs, 0 )->outputs();
+      return emitNode(prim::Print, ident.range(), inputs, {0, false})->outputs();
     }
-    Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, output_size);
+    // TODO: remove when we can support tuple packing for builtins.
+    if (cd.allow_varargs && cd.n_outputs == 1) {
+      cd.allow_varargs = false;
+    }
+    Node* builtin = emitBuiltinCall(ident.range(), method, ident.name(), inputs, attributes, cd);
     if (hasTensorOp(builtin)) {
+      if (cd.allow_varargs) {
+        throw ErrorReport(ident.range()) << "Starred assignment isn't supported on builtins.";
+      }
       return builtin->outputs();
     }
     builtin->destroy();
     // it wasn't known built in, so treat it like standard apply
-    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, output_size);
+    return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, cd);
   }
 
-  std::vector<Value*> emitApplyExpr(Expr callee, const std::vector<Value*>& inputs, List<Attribute> attributes, size_t output_size) {
+  std::vector<Value*> emitApplyExpr(Expr callee, const std::vector<Value*>& inputs, List<Attribute> attributes, CallsiteDescriptor cd) {
     // otherwise we evaluate the callee and then desugar it
     auto sv = emitSugaredExpr(callee);
-    return sv->call(callee.range(), method, inputs, attributes, output_size);
+    return sv->call(callee.range(), method, inputs, attributes, cd);
   }
 
   // any expression that can produce a SugaredValue is handled here
@@ -784,13 +799,13 @@ private:
         return sv->attr(select.range(), method, select.selector().name());
       }
       default:
-        return std::make_shared<SimpleValue>(emitExpr(tree, 1)[0]);
+        return std::make_shared<SimpleValue>(emitExpr(tree, {1, false})[0]);
     }
   }
 
   std::vector<Value*> emitExpr(
       const TreeRef& tree,
-      const size_t output_size = 0) {
+      CallsiteDescriptor cd) {
     switch (tree->kind()) {
       // the expressions have special handling because they may operate
       // on sugared values
@@ -808,33 +823,33 @@ private:
       case TK_AND:
       case TK_OR:
       case TK_NOT: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        return emitNode(kind, tree->range(), getValues(inputs), output_size)->outputs();
+        return emitNode(kind, tree->range(), getValues(inputs), cd)->outputs();
       } break;
       case '+':
       case '-': {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
+        auto* node = emitNode(kind, tree->range(), getValues(inputs), cd);
         node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
         return node->outputs();
       }
       case TK_UNARY_MINUS: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), output_size);
+        auto* node = emitNode(kind, tree->range(), getValues(inputs), cd);
         return node->outputs();
       }
       case '*': {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         auto* node =
-            emitNode(kind, tree->range(), getValues(inputs), output_size);
+            emitNode(kind, tree->range(), getValues(inputs), cd);
         return node->outputs();
       }
       case TK_STARRED: {
@@ -854,17 +869,17 @@ private:
         auto inputs = getValues(apply.inputs(), true);
         // the apply is directly an identifier 'foo'
         if(apply.callee().kind() == TK_VAR) {
-          return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), output_size);
+          return emitApplyIdent(Var(apply.callee()).name(), inputs, apply.attributes(), cd);
         }
-        return emitApplyExpr(apply.callee(), inputs, apply.attributes(), output_size);
+        return emitApplyExpr(apply.callee(), inputs, apply.attributes(), cd);
       } break;
       case TK_CAST: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         const auto cast = Cast(tree);
         return emitCast(cast.input(), cast.type());
       } break;
       case TK_CONST: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         return emitConst(Const(tree));
       } break;
       case TK_TRUE: {
@@ -874,21 +889,21 @@ private:
         return emitBooleanConst(tree->range(), false);
       } break;
       case TK_SLICE: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         const auto slice = Slice(tree);
         return emitSlice(
             slice.range(),
             {slice.value(), slice.startOr(0), slice.endOr(-1)},
-            output_size);
+            cd);
       } break;
       case TK_GATHER: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         const auto gather = Gather(tree);
         return emitGather(
-            gather.range(), {gather.value(), gather.indices()}, output_size);
+            gather.range(), {gather.value(), gather.indices()}, cd);
       } break;
       case TK_IF_EXPR: {
-        expectOutputs(tree, output_size, 1);
+        expectOutputs(tree, cd.n_outputs, 1);
         return emitTernaryIf(TernaryIf(tree));
       } break;
       default:
@@ -918,8 +933,8 @@ private:
     return emitNode(
                Symbol::aten("type_as"),
                input->range(),
-               {emitExpr(input, 1)[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
-               1)
+               {emitExpr(input, {1, false})[0], createConstant(input->range(), at::ones(at::CPU(t), {1}))},
+               {1, false})
         ->outputs();
   }
 
@@ -939,8 +954,8 @@ private:
       NodeKind kind,
       const SourceRange& loc,
       const std::vector<Value*> inputs,
-      const size_t output_size) {
-    Node* n = graph->insertNode(create(kind, loc, output_size));
+      CallsiteDescriptor cs) {
+    Node* n = graph->insertNode(create(kind, loc, cs));
     for (auto* input_value : inputs) {
       n->addInput(input_value);
     }
@@ -952,7 +967,7 @@ private:
   std::vector<Value*> emitSlice(
       const SourceRange& loc,
       TreeList&& inputs,
-      const size_t output_size) {
+      CallsiteDescriptor cs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
@@ -963,7 +978,7 @@ private:
                Symbol::aten("slice"),
                loc,
                {tensor},
-               output_size)
+               cs)
                ->i_(attr::dim, 0)
                ->i_(attr::step, 1)
                ->i_(attr::start, begin)
@@ -974,7 +989,7 @@ private:
   std::vector<Value*> emitGather(
       const SourceRange& loc,
       TreeList&& inputs,
-      const size_t output_size) {
+      CallsiteDescriptor cs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
     const auto input_values = getValues(applyInputs->trees());
@@ -984,7 +999,7 @@ private:
                Symbol::aten("select"),
                loc,
                {tensor},
-               output_size)
+               cs)
                ->i_(attr::dim, 0)
                ->i_(attr::index, idx)
                ->outputs();

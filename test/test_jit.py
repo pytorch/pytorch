@@ -2329,6 +2329,41 @@ class TestScript(TestCase):
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
 
+    def test_script_module_star_assign_fail_pythonop(self):
+
+        with self.assertRaisesRegex(RuntimeError, "Vararg outputs are currently not supported for PythonOp"):
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__(True)
+
+                    def myfunc():
+                        return torch.zeros(1, 2, 3), torch.zeros(1, 2, 3)
+
+                    self.define('''
+                def forward(self, rep):
+                    a, *b = myfunc()
+                    return a
+                    ''')
+
+            m = M2()
+            self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+    def test_script_module_star_assign_fail_builtin(self):
+        with self.assertRaisesRegex(RuntimeError, "Varargs outputs are not currently supported for builtins."):
+            class M2(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(M2, self).__init__(True)
+
+                    self.define('''
+                def forward(self, rep):
+                    a, *b = torch.neg(rep)
+                    return a
+                    ''')
+
+            m = M2()
+            self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+
+
 # Smoke tests for export methods
 class TestPytorchExportModes(unittest.TestCase):
     class MyModel(nn.Module):

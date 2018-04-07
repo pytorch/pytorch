@@ -17,6 +17,12 @@ namespace script {
 // lhs of an assignment
 constexpr size_t VARARG_OUTPUTS = std::numeric_limits<size_t>::max();
 
+struct CallsiteDescriptor {
+  size_t n_outputs;
+  bool allow_varargs;
+};
+
+
 // The AST can contain nodes like `self`, `self.b` or `python_fn` that
 // are not first-class values in the graph representation, but instead
 // will be desugared based on how they are used in the AST.
@@ -52,7 +58,7 @@ struct SugaredValue : public std::enable_shared_from_this<SugaredValue> {
     Method & m,
     at::ArrayRef<Value*> inputs,
     List<Attribute> attributes,
-    size_t n_outputs) {
+    CallsiteDescriptor cd) {
     throw ErrorReport(loc) << "cannot call a " << kind();
   }
 
@@ -97,7 +103,7 @@ struct BuiltinFunction : public SugaredValue {
     Method & m,
     at::ArrayRef<Value*> inputs_,
     List<Attribute> attributes,
-    size_t n_outputs) override;
+    CallsiteDescriptor cd) override;
 };
 
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
