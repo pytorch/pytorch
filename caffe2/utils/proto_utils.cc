@@ -62,7 +62,20 @@ std::string DeviceTypeName(const int32_t& d) {
       // warnings.
       return "";
   }
-};
+}
+
+int DeviceId(const DeviceOption& option) {
+  switch (option.device_type()) {
+    case CPU:
+      return option.numa_node_id();
+    case CUDA:
+      return option.cuda_gpu_id();
+    case MKLDNN:
+      return option.numa_node_id();
+    default:
+      CAFFE_THROW("Unknown device id for device type: ", option.device_type());
+  }
+}
 
 bool IsSameDevice(const DeviceOption& lhs, const DeviceOption& rhs) {
   return (
