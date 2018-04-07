@@ -44,7 +44,7 @@ void run() {
   LOG(INFO) << "Checking that a null forward-pass works";
   PredictorBase::TensorVector inputVec;
   PredictorBase::OutputTensorVector outputVec;
-  predictor->run(inputVec, outputVec);
+  predictor->run(inputVec, &outputVec);
   CAFFE_ENFORCE_GT(outputVec.size(), 0);
 }
 }
