@@ -1208,45 +1208,6 @@ class LengthsGatherOp : public Operator<Context> {
   INPUT_TAGS(ITEMS, LENGTHS, INDICES);
 };
 
-// Since we just do copying, consider untemplating it on T and using raw_data()
-/**
- * Deduplicates input indices vector and optionally produces reverse remapping.
- * Current implementation produces a sorted list but it's not guaranteed in
- * general.
- */
-template <class Context>
-class UniqueOp : public Operator<Context> {
- public:
-  USE_OPERATOR_CONTEXT_FUNCTIONS;
-  USE_SIMPLE_CTOR_DTOR(UniqueOp);
-
-  bool RunOnDevice() override {
-    // Use run-time polymorphism
-    auto& input = Input(0);
-    if (input.template IsType<int32_t>()) {
-      DoRun<int32_t>();
-    } else if (input.template IsType<int64_t>()) {
-      DoRun<int64_t>();
-    } else {
-      LOG(FATAL) << "Unsupported type of input in Unique: "
-                 << input.meta().name();
-    }
-    return true;
-  }
-
- private:
-  vector<int> order_;
-  Tensor<Context> thrust_unique_buffer_;
-  Tensor<Context> cuda_order_buffer_;
-  Tensor<Context> second_order_buffer_;
-
-  template <typename T>
-  void DoRun();
-
- public:
-  OUTPUT_TAGS(UNIQUE, REMAPPING);
-};
-
 template <class Context>
 class UnsafeCoalesceOp final : public Operator<Context> {
  public:
