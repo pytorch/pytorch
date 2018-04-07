@@ -27,6 +27,7 @@ class BatchLRLoss(ModelLayer):
         pos_label_target=1.0,
         neg_label_target=0.0,
         homotopy_weighting=False,
+        log_D_trick=False,
         **kwargs
     ):
         super(BatchLRLoss, self).__init__(model, name, input_record, **kwargs)
@@ -54,6 +55,8 @@ class BatchLRLoss(ModelLayer):
         assert pos_label_target >= neg_label_target
         self.pos_label_target = pos_label_target
         self.neg_label_target = neg_label_target
+
+        self.log_D_trick = log_D_trick
 
         self.tags.update([Tags.EXCLUDE_FROM_PREDICTION])
 
@@ -147,6 +150,7 @@ class BatchLRLoss(ModelLayer):
         xent = net.SigmoidCrossEntropyWithLogits(
             [self.input_record.logit(), label],
             net.NextScopedBlob('cross_entropy'),
+            log_D_trick=self.log_D_trick
         )
         # fuse with JSD
         if self.jsd_fuse:
