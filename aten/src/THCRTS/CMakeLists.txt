@@ -13,7 +13,7 @@ set(SRC
   THCStream.cpp
   THCCachingAllocator.cpp
   THCCachingHostAllocator.cpp
-  THCAllocator.c
+  THCAllocator.cpp
   THCThreadLocal.cpp
 )
 

@@ -18,7 +18,7 @@ set(SRC
   THCTensor.cpp
   THCTensorCopy.cpp
   THCTensorRandom.cpp
-  THCStorage.c
+  THCStorage.cpp
 
   THCReduceApplyUtils.cu
   THCBlas.cu
