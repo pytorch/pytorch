@@ -34,7 +34,7 @@ GLPredictor::GLPredictor(const NetDef& init_net,
                          const NetDef& run_net,
                          bool use_texture_input,
                          Workspace* parent)
-    : PredictorBase(init_net, create_gl_run_net(init_net, run_net, use_texture_input), parent) {
+    : Predictor<CPUContext>(init_net, create_gl_run_net(init_net, run_net, use_texture_input), parent) {
   for (const auto& name : run_net_.external_input()) {
     if (!initialized_.count(name)) {
       auto* blob = ws_.GetBlob(name);
