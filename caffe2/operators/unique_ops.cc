@@ -17,7 +17,6 @@
 #include "caffe2/operators/unique_ops.h"
 
 #include <cmath>
-#include <google/dense_hash_map>
 
 namespace caffe2 {
 
@@ -64,28 +63,14 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
   return true;
 }
 
-template <>
-template <typename T>
-bool SparseHashUniqueOp<CPUContext>::DoRunWithType() {
-  Tensor<CPUContext>* remapping_ptr =
-      REMAPPING < OutputSize() ? Output(REMAPPING) : nullptr;
-
-  return RunOnCPU<T>(Input(0), Output(UNIQUE), remapping_ptr);
-}
-
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
-REGISTER_CPU_OPERATOR_WITH_ENGINE(
-    Unique,
-    SparseHash,
-    SparseHashUniqueOp<CPUContext>);
 
 OPERATOR_SCHEMA(Unique)
     .NumInputs(1)
     .NumOutputs(1, 2)
     .SetDoc(R"DOC(
 Deduplicates input indices vector and optionally produces reverse remapping.
-There's no guarantees on the ordering of the output indices. When `SparseHash`
-Engine is used, the input indices need to be non-negative.
+There's no guarantees on the ordering of the output indices.
 )DOC")
     .Input(0, "indices", "1D tensor of int32 or int64 indices.")
     .Output(0, "unique_indices", "1D tensor of deduped entries.")

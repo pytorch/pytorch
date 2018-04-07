@@ -67,39 +67,3 @@ class TestUniqueOps(hu.HypothesisTestCase):
             inputs=[X],
             reference=partial(_unique_ref, return_inverse=return_remapping),
         )
-
-    @given(
-        X=hu.tensor1d(
-            # allow empty
-            min_len=0,
-            dtype=np.int32,
-            # disallow negative
-            elements=st.integers(min_value=0, max_value=10)),
-        return_remapping=st.booleans(),
-        # sparse hash unique op only has cpu impl.
-        **hu.gcs
-    )
-    def test_sparse_hash_unique_op(self, X, return_remapping, gc, dc):
-        # impl of unique op does not guarantees return order, sort the input
-        # so different impl return same outputs
-        X = np.sort(X)
-
-        assert core.IsOperator('Unique_ENGINE_SparseHash')
-        op = core.CreateOperator(
-            "Unique",
-            ["X"],
-            ["U", "remap"] if return_remapping else ["U"],
-            engine="SparseHash"
-        )
-        self.assertDeviceChecks(
-            device_options=dc,
-            op=op,
-            inputs=[X],
-            outputs_to_check=[0, 1] if return_remapping else [0]
-        )
-        self.assertReferenceChecks(
-            device_option=gc,
-            op=op,
-            inputs=[X],
-            reference=partial(_unique_ref, return_inverse=return_remapping),
-        )
