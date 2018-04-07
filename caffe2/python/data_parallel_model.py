@@ -42,6 +42,7 @@ def Parallelize(
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
     post_sync_builder_fun=None,
+    net_transformer_fun=None,
     devices=None,
     rendezvous=None,
     net_type='dag',
@@ -80,6 +81,13 @@ def Parallelize(
                         Alternative to param_update_builder_fun, allows one
                         to add an optimizer for the whole model. Called only
                         once, without name or devicescope.
+      net_transformer_fun:
+                        Optional function to transform the network after the
+                        network is built. It will be called once (NOT once per
+                        GPU.)
+                        Signature:
+                        net_transformer_fun(
+                            model, num_devices, device_prefix, device_type)
       post_sync_builder_fun:
                         Function applied after initial parameter sync has been
                         completed, such as keeping multi-precision parameters
@@ -218,13 +226,21 @@ def Parallelize(
     model_helper_obj._computed_param_names =\
         list(viewkeys(computed_params_grouped))
 
+    if has_parameter_updates:
+        log.info("Adding gradient operators")
+        _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
+
+    if net_transformer_fun:
+        net_transformer_fun(
+            model_helper_obj,
+            len(devices),
+            model_helper_obj._device_prefix,
+            model_helper_obj._device_type)
+
     if not has_parameter_updates:
         log.info("Parameter update function not defined --> only forward")
         _InferBlobDevice(model_helper_obj)
         return
-
-    log.info("Adding gradient operators")
-    _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
 
     if combine_spatial_bn:
         assert(cpu_device), \
