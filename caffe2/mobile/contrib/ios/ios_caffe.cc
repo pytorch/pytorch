@@ -46,7 +46,7 @@ void GenerateStylizedImage(std::vector<float>& originalImage,
   input.ShareExternalPointer(originalImage.data());
   caffe2::PredictorBase::TensorVector input_vec{&input};
   caffe2::PredictorBase::OutputTensorVector output_vec;
-  p.run(input_vec, output_vec);
+  p.run(input_vec, &output_vec);
   assert(output_vec.size() == 1);
   std::shared_ptr<caffe2::TensorCPU> output = output_vec.front();
   // output is our styled image
