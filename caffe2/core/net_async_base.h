@@ -3,6 +3,7 @@
 
 #include "caffe2/core/common.h"
 #include "caffe2/core/net.h"
+#include "caffe2/core/net_async_base.h"
 #include "caffe2/core/net_dag_utils.h"
 #include "caffe2/core/registry.h"
 #include "caffe2/core/stats.h"
@@ -15,6 +16,10 @@
 namespace caffe2 {
 
 class AsyncNetExecutorHelper;
+
+namespace tracing {
+class Tracer;
+}
 
 class AsyncNetBase : public NetBase {
  public:
@@ -29,6 +34,8 @@ class AsyncNetBase : public NetBase {
     return operators_;
   }
 
+  bool RunAsync() override;
+
  protected:
   bool canSchedule(
       int chain_id,
@@ -39,6 +46,7 @@ class AsyncNetBase : public NetBase {
   EventStatus query(int task_id) const;
   const std::vector<int>& children(int task_id) const;
   const std::vector<int>& parents(int task_id) const;
+  int num_ops(int task_id) const;
   void asyncWait(
       int task_id,
       int stream_id,
@@ -70,15 +78,26 @@ class AsyncNetBase : public NetBase {
   static thread_local std::vector<int> stream_counters_;
   int num_workers_;
 
+  // Tracing
+  void initTracer(const std::shared_ptr<const NetDef>& net_def);
+  Timer timer_;
+  bool trace_net_;
+  bool trace_batch_;
+  int batch_iter_;
+  std::unique_ptr<tracing::Tracer> tracer_;
+
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 
  private:
+  OperatorBase* op(int op_idx) const;
+
   std::shared_ptr<TaskThreadPool>
   pool_getter(PoolsMap& pools, int device_type, int device_id, int pool_size);
 
   std::unique_ptr<AsyncNetExecutorHelper> helper_;
 
   friend class AsyncNetExecutorHelper;
+  friend class tracing::Tracer;
 };
 
 CAFFE_DECLARE_SHARED_REGISTRY(ThreadPoolRegistry, TaskThreadPool, int, int);

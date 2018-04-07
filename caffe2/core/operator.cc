@@ -48,6 +48,8 @@ OperatorBase::OperatorBase(const OperatorDef& operator_def, Workspace* ws)
   for (const string& output_str : operator_def.output()) {
     outputs_.push_back(CHECK_NOTNULL(ws->CreateBlob(output_str)));
   }
+
+  type_ = operator_def.type();
 }
 
 vector<TensorShape> OperatorBase::InputTensorShapes() {
