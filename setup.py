@@ -581,6 +581,7 @@ main_sources = [
     "torch/csrc/byte_order.cpp",
     "torch/csrc/torch.cpp",
     "torch/csrc/utils.cpp",
+    "torch/csrc/utils/auto_gpu.cpp",
     "torch/csrc/utils/cuda_lazy_init.cpp",
     "torch/csrc/utils/device.cpp",
     "torch/csrc/utils/invalid_arguments.cpp",
