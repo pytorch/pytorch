@@ -1219,13 +1219,15 @@ void addGlobalMethods(py::module& m) {
 
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        std::vector<caffe2::NetDef*> nets_ptr;
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
-          CAFFE_ENFORCE(def.get()->ParseFromString(proto));
+          CAFFE_ENFORCE(def->ParseFromString(proto));
+          nets_ptr.push_back(def.get());
           nets.push_back(std::move(def));
         }
 
-        auto blob_info = InferBlobShapesAndTypesFromWorkspace(gWorkspace, nets);
+        auto blob_info = InferBlobShapesAndTypesFromWorkspace(gWorkspace, nets_ptr);
 
         std::string protob;
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
@@ -1237,13 +1239,15 @@ void addGlobalMethods(py::module& m) {
          const std::map<std::string, std::vector<TIndex>> blob_dimensions) {
         // Parse protobuffers to NetDefs
         std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        std::vector<caffe2::NetDef*> nets_ptr;
         for (auto proto : net_protos) {
           std::unique_ptr<NetDef> def(new NetDef());
-          CAFFE_ENFORCE(def.get()->ParseFromString(proto));
+          CAFFE_ENFORCE(def->ParseFromString(proto));
+          nets_ptr.push_back(def.get());
           nets.push_back(std::move(def));
         }
 
-        auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets);
+        auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets_ptr);
 
         std::string protob;
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));

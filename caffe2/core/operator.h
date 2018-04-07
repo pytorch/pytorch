@@ -847,11 +847,11 @@ TensorShape GetTensorShapeOfBlob(const Blob* b);
 
 TensorShapes InferBlobShapesAndTypesFromWorkspace(
     Workspace* ws,
-    const vector<std::unique_ptr<NetDef>>& nets);
+    const vector<NetDef*>& nets);
 
 TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
-    const vector<std::unique_ptr<NetDef>>& nets);
+    const vector<NetDef*>& nets);
 
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,
