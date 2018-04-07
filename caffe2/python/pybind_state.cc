@@ -674,7 +674,7 @@ void addObjectMethods(py::module& m) {
             PredictorBase::OutputTensorVector out;
             {
               py::gil_scoped_release g;
-              instance.RunMap(tensors, out, threadsafe);
+              instance.RunMap(tensors, &out, threadsafe);
             }
             std::vector<py::object> pyout;
             for (auto t : out) {
@@ -707,7 +707,7 @@ void addObjectMethods(py::module& m) {
             PredictorBase::OutputTensorVector out;
             {
               py::gil_scoped_release g;
-              instance.Run(tensors, out, threadsafe);
+              instance.Run(tensors, &out, threadsafe);
             }
             std::vector<py::object> pyout;
             for (auto t : out) {
@@ -797,7 +797,10 @@ void addObjectMethods(py::module& m) {
               tensors.push_back(&(tensors_data[i]));
             }
             PredictorBase::OutputTensorVector out;
-            instance.run(tensors, out, threadsafe);
+            {
+              py::gil_scoped_release g;
+              instance.run(tensors, &out, threadsafe);
+            }
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(
@@ -828,7 +831,10 @@ void addObjectMethods(py::module& m) {
               tensors.insert(std::make_pair(name, &tensors_data[name]));
             }
             PredictorBase::OutputTensorVector out;
-            instance.run_map(tensors, out, threadsafe);
+            {
+              py::gil_scoped_release g;
+              instance.run_map(tensors, &out, threadsafe);
+            }
             std::vector<py::object> pyout;
             for (auto t : out) {
               pyout.push_back(

@@ -15,8 +15,8 @@ class Caffe2BackendRep {
   using TensorMap = caffe2::PredictorBase::TensorMap;
   using OutputTensorVector = caffe2::PredictorBase::OutputTensorVector;
 
-  void Run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe = false);
-  void RunMap(const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe = false);
+  void Run(const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe = false);
+  void RunMap(const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe = false);
 
   caffe2::NetDef& init_net() {
     return init_net_;

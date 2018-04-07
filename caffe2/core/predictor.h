@@ -27,8 +27,8 @@ CAFFE_DECLARE_REGISTRY(
 
 namespace predictor_details {
 
-const NetDef& getNet(const MetaNetDef& def, const std::string& name);
-const ::google::protobuf::RepeatedPtrField<::std::string>& getBlobs(const MetaNetDef& def, const std::string& name);
+const NetDef& GetNet(const MetaNetDef& def, const std::string& name);
+const ::google::protobuf::RepeatedPtrField<::std::string>& GetBlobs(const MetaNetDef& def, const std::string& name);
 
 template <class TensorType>
 void enforceIsTensor(Workspace* ws, const std::string& name) {
@@ -70,10 +70,10 @@ class PredictorBase {
   //   outputs->size() == run_net.external_inputs.size()
 
   // Returns true on success
-  virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool mulithread = false) = 0;
+  virtual bool run(const TensorVector& inputs, OutputTensorVector* outputs, bool mulithread = false) = 0;
 
   // Similar to run, but consumes a map of name to tensor as input
-  virtual bool run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool mulithread = false) = 0;
+  virtual bool run_map(const TensorMap& inputs, OutputTensorVector* outputs, bool mulithread = false) = 0;
 
   const NetDef& def() const {
     return run_net_;
@@ -97,11 +97,11 @@ class Predictor : public PredictorBase {
 
   Predictor(const MetaNetDef& def, Workspace* parent = nullptr)
   : Predictor(
-      predictor_details::getNet(def, PredictorConsts::default_instance().global_init_net_type()),
-      predictor_details::getNet(def, PredictorConsts::default_instance().predict_net_type()),
+      predictor_details::GetNet(def, PredictorConsts::default_instance().global_init_net_type()),
+      predictor_details::GetNet(def, PredictorConsts::default_instance().predict_net_type()),
       parent) {
     const auto& inputs =
-        predictor_details::getBlobs(def, PredictorConsts::default_instance().inputs_blob_type());
+        predictor_details::GetBlobs(def, PredictorConsts::default_instance().inputs_blob_type());
     for (const auto& input : inputs) {
       inputNames_.insert(input);
     }
@@ -116,22 +116,23 @@ class Predictor : public PredictorBase {
     context_ = std::make_shared<Context>(run_net.device_option());
     for (const auto& name : run_net.external_input()) {
       if (!initialized_.count(name)) {
-        auto* blob = ws_.GetBlob(name);
+        auto* blob = ws_.CreateBlob(name);
         CAFFE_ENFORCE(blob, "Blob: ", name, " does not exist");
         blob->template GetMutable<Tensor<Context>>();
       }
     }
+    CAFFE_ENFORCE(ws_.CreateNet(run_net));
   }
 
-  virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe = false) override;
-  virtual bool run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe = false) override;
+  virtual bool run(const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe = false) override;
+  virtual bool run_map(const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe = false) override;
 
  private:
   std::shared_ptr<Context> context_;
 };
 
 template <class Context>
-bool Predictor<Context>::run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe) {
+bool Predictor<Context>::run(const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe) {
   TensorMap input_map;
   CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
   for (auto i = 0; i < inputs.size(); ++i) {

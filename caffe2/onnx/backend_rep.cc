@@ -13,10 +13,10 @@ void Caffe2BackendRep::CheckInit() {
   if (!predictor_) {
     switch (pred_net_.device_option().device_type()) {
       case caffe2::DeviceType::CPU:
-        predictor_ = std::move(caffe2::PredictorRegistry()->Create("CPU", init_net_, pred_net_, nullptr));
+        predictor_ = caffe2::PredictorRegistry()->Create("CPU", init_net_, pred_net_, nullptr);
         break;
       case caffe2::DeviceType::CUDA:
-        predictor_ = std::move(caffe2::PredictorRegistry()->Create("CUDA", init_net_, pred_net_, nullptr));
+        predictor_ = caffe2::PredictorRegistry()->Create("CUDA", init_net_, pred_net_, nullptr);
         break;
       default:
         CAFFE_THROW("Unsupported device type");
@@ -27,13 +27,13 @@ void Caffe2BackendRep::CheckInit() {
 }
 
 void Caffe2BackendRep::Run(
-    const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe) {
+    const TensorVector& inputs, OutputTensorVector* outputs, bool threadsafe) {
   CheckInit();
   predictor_->run(inputs, outputs, threadsafe);
 }
 
 void Caffe2BackendRep::RunMap(
-    const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe) {
+    const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe) {
   CheckInit();
   predictor_->run_map(inputs, outputs, threadsafe);
 }

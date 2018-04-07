@@ -780,8 +780,7 @@ class Caffe2Backend(Backend):
                 rnn_nodes.append(node)
 
         # Build the C++ backend
-        # TODO: build a predictor that supports GPU
-        #       And for RNN nets, we need to avoid adding init_net
+        #       For RNN nets, we need to avoid adding init_net
         use_cpp_backend = not rnn_nodes
         # use python backend for now
         use_cpp_backend = False

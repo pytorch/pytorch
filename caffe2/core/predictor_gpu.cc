@@ -5,12 +5,7 @@ namespace caffe2 {
 
 namespace predictor_details {
 
-std::shared_ptr<TensorCPU> copyOutputTensor(
-    Workspace* ws,
-    const std::string& name,
-    CUDAContext *context);
-
-void copyInputTensor(
+void CopyInputTensor(
     Workspace* ws,
     const std::string& name,
     TensorCPU* input,
@@ -22,7 +17,7 @@ void copyInputTensor(
   tensor->CopyFrom(*input, context);
 }
 
-std::shared_ptr<TensorCPU> copyOutputTensor(
+std::shared_ptr<TensorCPU> CopyOutputTensor(
     Workspace* ws,
     const std::string& name,
     CUDAContext *context) {
@@ -38,7 +33,7 @@ std::shared_ptr<TensorCPU> copyOutputTensor(
 } // namespace predictor_details
 
 template <>
-bool Predictor<CUDAContext>::run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe) {
+bool Predictor<CUDAContext>::run_map(const TensorMap& inputs, OutputTensorVector* outputs, bool threadsafe) {
   if (!inputNames_.empty()) {
     CAFFE_ENFORCE_EQ(inputs.size(), inputNames_.size());
   }
@@ -48,16 +43,16 @@ bool Predictor<CUDAContext>::run_map(const TensorMap& inputs, OutputTensorVector
       if (!inputNames_.empty()) {
         CAFFE_ENFORCE_GT(inputNames_.count(input.first), 0);
       }
-      predictor_details::copyInputTensor(&ws_, input.first, input.second, context_.get());
+      predictor_details::CopyInputTensor(&ws_, input.first, input.second, context_.get());
     }
 
     if (!ws_.RunNet(run_net_.name())) {
       return false;
     }
 
-    outputs.resize(run_net_.external_output_size());
-    for (auto i = 0; i < outputs.size(); ++i) {
-      outputs[i] = predictor_details::copyOutputTensor(&ws_, run_net_.external_output(i), context_.get());
+    outputs->resize(run_net_.external_output_size());
+    for (auto i = 0; i < outputs->size(); ++i) {
+      (*outputs)[i] = predictor_details::CopyOutputTensor(&ws_, run_net_.external_output(i), context_.get());
     }
   } else {
     // If threadsafe is true, we create a temporary new workspace and load the network to the new workspace
@@ -80,16 +75,16 @@ bool Predictor<CUDAContext>::run_map(const TensorMap& inputs, OutputTensorVector
       auto *blob = ws.CreateLocalBlob(input.first);
       CAFFE_ENFORCE(blob, "Blob: ", input.first, " does not exist");
       blob->template GetMutable<TensorCUDA>();
-      predictor_details::copyInputTensor(&ws, input.first, input.second, context_.get());
+      predictor_details::CopyInputTensor(&ws, input.first, input.second, context_.get());
     }
 
     if (!ws.RunNetOnce(run_net_)) {
       return false;
     }
 
-    outputs.resize(run_net_.external_output_size());
-    for (auto i = 0; i < outputs.size(); ++i) {
-      outputs[i] = predictor_details::copyOutputTensor(&ws, run_net_.external_output(i), context_.get());
+    (*outputs).resize(run_net_.external_output_size());
+    for (auto i = 0; i < (*outputs).size(); ++i) {
+      (*outputs)[i] = predictor_details::CopyOutputTensor(&ws, run_net_.external_output(i), context_.get());
     }
   }
   context_->FinishDeviceComputation();

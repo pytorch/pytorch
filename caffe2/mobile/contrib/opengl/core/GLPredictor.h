@@ -4,9 +4,10 @@
 #include "GLImage.h"
 #include "caffe2/core/net.h"
 #include "caffe2/core/predictor.h"
+#include "caffe2/core/context.h"
 
 namespace caffe2 {
-class GLPredictor : public PredictorBase {
+class GLPredictor : public Predictor<CPUContext> {
  public:
   using TensorVector = PredictorBase::TensorVector;
   using TensorMap = PredictorBase::TensorMap;
@@ -19,10 +20,6 @@ class GLPredictor : public PredictorBase {
 
   template <class T>
   bool run(std::vector<GLImageVector<T>*>& inputs, std::vector<const GLImageVector<T>*>* outputs);
-
-  virtual bool run(const TensorVector& inputs, OutputTensorVector& outputs, bool threadsafe = false) { return false; }
-  virtual bool run_map(const TensorMap& inputs, OutputTensorVector& outputs, bool threadsafe = false) { return false; }
-
 
   ~GLPredictor();
 };

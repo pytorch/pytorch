@@ -175,7 +175,7 @@ TEST_F(PredictorTest, SimpleBatchSized) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
   PredictorBase::TensorVector input{inputData->template GetMutable<TensorCPU>()};
   PredictorBase::OutputTensorVector output;
-  p_->run(input, output);
+  p_->run(input, &output);
   EXPECT_EQ(output.size(), 1);
   EXPECT_TRUE(output.front()->dims().size() == 2);
   EXPECT_TRUE(output.front()->dim(0) == 1);
@@ -188,7 +188,7 @@ TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   PredictorBase::TensorMap input{
       {"data", inputData->template GetMutable<TensorCPU>()}};
   PredictorBase::OutputTensorVector output;
-  p_->run_map(input, output);
+  p_->run_map(input, &output);
   EXPECT_EQ(output.size(), 1);
   EXPECT_TRUE(output.front()->dims().size() == 2);
   EXPECT_TRUE(output.front()->dim(0) == 1);
@@ -214,7 +214,7 @@ TEST_F(PredictorMetaNetDefTest, SimpleMetaNetDefInitializer) {
   PredictorBase::TensorMap input{
       {"data", inputData->template GetMutable<TensorCPU>()}};
   PredictorBase::OutputTensorVector output;
-  p_->run_map(input, output);
+  p_->run_map(input, &output);
   EXPECT_EQ(output.size(), 1);
   EXPECT_TRUE(output.front()->dims().size() == 2);
   EXPECT_TRUE(output.front()->dim(0) == 1);
