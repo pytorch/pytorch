@@ -114,7 +114,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     shortest one.
 
     Note:
-        This function accept any input that has at least two dimensions. You
+        This function accepts any input that has at least two dimensions. You
         can apply it to pack the labels, and use the output of the RNN with
         them to compute the loss directly. A Variable can be retrieved from
         a :class:`PackedSequence` object by accessing its ``.data`` attribute.

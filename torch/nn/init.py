@@ -177,7 +177,7 @@ def xavier_uniform_(tensor, gain=1):
     .. math::
         a = \text{gain} \times \sqrt{\frac{6}{\text{fan_in} + \text{fan_out}}}
 
-    Also known as Glorot initialisation.
+    Also known as Glorot initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -204,7 +204,7 @@ def xavier_normal_(tensor, gain=1):
     .. math::
         \text{std} = \text{gain} \times \sqrt{\frac{2}{\text{fan_in} + \text{fan_out}}}
 
-    Also known as Glorot initialisation.
+    Also known as Glorot initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -240,7 +240,7 @@ def kaiming_uniform_(tensor, a=0, mode='fan_in'):
     .. math::
         \text{bound} = \sqrt{\frac{6}{(1 + a^2) \times \text{fan_in}}}
 
-    Also known as He initialisation.
+    Also known as He initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`
@@ -273,7 +273,7 @@ def kaiming_normal_(tensor, a=0, mode='fan_in'):
     .. math::
         \text{std} = \sqrt{\frac{2}{(1 + a^2) \times \text{fan_in}}}
 
-    Also known as He initialisation.
+    Also known as He initialization.
 
     Args:
         tensor: an n-dimensional `torch.Tensor`

@@ -1219,7 +1219,7 @@ it were a 1-D tensor.
 
 If :attr:`accumulate` is ``True``, the elements in :attr:`tensor` are added to
 :attr:`self`. If accumulate is ``False``, the behavior is undefined if indices
-contains duplicate elements.
+contain duplicate elements.
 
 Args:
     indices (LongTensor): the indices into self

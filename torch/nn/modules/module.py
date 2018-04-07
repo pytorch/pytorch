@@ -60,7 +60,7 @@ class Module(object):
     def forward(self, *input):
         r"""Defines the computation performed at every call.
 
-        Should be overriden by all subclasses.
+        Should be overridden by all subclasses.
 
         .. note::
             Although the recipe for forward pass needs to be defined within
