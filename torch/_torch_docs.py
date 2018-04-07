@@ -4152,7 +4152,7 @@ randn(*sizes, out=None) -> Tensor
 
 Returns a tensor filled with random numbers from a normal distribution
 with zero mean and variance of one (also called the standard normal
-distirbution).
+distribution).
 
 .. math::
     \text{out}_{i} \sim \mathcal{N}(0, 1)
@@ -5880,7 +5880,7 @@ Arguments:
 Returns:
     Tensor: A tensor of shape equal to the broadcasted shape of :attr:`condition`, :attr:`x`, :attr:`y`
 
-Excemple::
+Example::
 
     >>> x = torch.randn(3, 2)
     >>> y = torch.ones(3, 2)

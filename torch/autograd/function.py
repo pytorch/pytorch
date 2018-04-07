@@ -152,7 +152,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     def forward(ctx, *args, **kwargs):
         """Performs the operation.
 
-        This function is to be overriden by all subclasses.
+        This function is to be overridden by all subclasses.
 
         It must accept a context ctx as the first argument, followed by any
         number of arguments (tensors or other types).
@@ -166,7 +166,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     def backward(ctx, *grad_outputs):
         """Defines a formula for differentiating the operation.
 
-        This function is to be overriden by all subclasses.
+        This function is to be overridden by all subclasses.
 
         It must accept a context ctx as the first argument, followed by as many
         outputs did :func:`forward` return, and it should return as many
