@@ -659,6 +659,9 @@ private:
     if (stmt.lhs().size() == 1 && outputs.size() != 1) {
       // Pack up a tuple sugared value
       SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(outputs));
+      if (stmt.lhs()[0].kind() != TK_VAR) {
+        throw ErrorReport(stmt.lhs()[0]) << "Cannot pack a tuple into a non-variable.";
+      }
       environment_stack->setSugaredVar(Var(stmt.lhs()[0]).name().name(), tup);
     } else {
       int i = 0;
@@ -667,6 +670,10 @@ private:
           environment_stack->setVar(Var(assignee).name().name(), outputs.at(i));
           i++;
         } else if (assignee.kind() == TK_STARRED) {
+          auto var = Starred(assignee).expr();
+          if (var.kind() != TK_VAR) {
+            throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
+          }
           std::vector<Value*> starred_slice(
               outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
           SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(starred_slice));
