@@ -166,11 +166,8 @@ def _vector_str(self, indent, fmt, scale, sz):
 
 
 def _tensor_str(self, indent, fmt, scale, sz):
-    empty = self.numel() == 0
     dim = self.dim()
 
-    if empty:
-        return '[]'
     if dim == 0:
         return _scalar_str(self)
     if dim == 1:
@@ -202,8 +199,12 @@ def _str(self):
     else:
         suffix = ')'
 
-    fmt, scale, sz = _number_format(self)
-    if scale != 1:
-        prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
+    if self.numel() == 0:
+        tensor_str = '[]'
+    else:
+        fmt, scale, sz = _number_format(self)
+        if scale != 1:
+            prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
+        tensor_str = _tensor_str(self, indent, fmt, scale, sz)
 
-    return prefix + _tensor_str(self, indent, fmt, scale, sz) + suffix
+    return prefix + tensor_str + suffix
