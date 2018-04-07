@@ -153,9 +153,20 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
 } // anonymous namespace
 
 
+InitMethod::Config initFile(std::string argument,
+                            int world_size_r,
+                            std::string group_name,
+                            int assigned_rank) {
 
-InitMethod::Config initFile(std::string file_path, rank_type world_size,
-                            std::string group_name, int assigned_rank) {
+  group_name.append("#"); // To make sure it's not empty
+  std::string file_path = argument.substr(7); // chop "file://"
+  rank_type world_size;
+  try {
+    world_size = convertToRank(world_size_r);
+  } catch(std::exception& e) {
+    throw std::invalid_argument("invalid world_size");
+  }
+
   InitMethod::Config config;
   int fd;
   std::size_t order;
