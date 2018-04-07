@@ -195,6 +195,11 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CUDAContext>::RunOnDevice() {
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
 
+  if (logits.size() <= 0) {
+    // nothing to do, not even launching kernel
+    return true;
+  }
+
   SigmoidCrossEntropyWithLogitsKernel<<<
       outer_size,
       CAFFE_CUDA_NUM_THREADS,
