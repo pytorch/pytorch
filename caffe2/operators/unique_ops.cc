@@ -67,42 +67,10 @@ bool UniqueOp<CPUContext>::DoRunWithType() {
 template <>
 template <typename T>
 bool SparseHashUniqueOp<CPUContext>::DoRunWithType() {
-  auto& inputTensor = Input(0);
-  // use dim32 to enforce that it's fine to have remapping of type int
-  int N = inputTensor.dim32(0);
-  CAFFE_ENFORCE_EQ(inputTensor.ndim(), 1, "Input should be a vector");
-  auto* uniqueTensor = Output(UNIQUE);
+  Tensor<CPUContext>* remapping_ptr =
+      REMAPPING < OutputSize() ? Output(REMAPPING) : nullptr;
 
-  int* remapping = nullptr;
-  if (REMAPPING < OutputSize()) {
-    auto* remappingTensor = Output(REMAPPING);
-    remappingTensor->ResizeLike(inputTensor);
-    remapping = remappingTensor->template mutable_data<int>();
-  }
-
-  auto* input = inputTensor.template data<T>();
-  google::dense_hash_map<T, int> hashMap(N);
-
-  // We assume input tensor only contains positive values
-  hashMap.set_empty_key(-1);
-  int K = 0;
-  for (int i = 0; i < N; ++i) {
-    CAFFE_ENFORCE_GE(
-        input[i], 0, "SparseHashUnique assumes inputs are positive numbers");
-    auto p = hashMap.insert(std::make_pair(input[i], K));
-    if (p.second) {
-      ++K;
-    }
-    if (remapping) {
-      remapping[i] = p.first->second;
-    }
-  }
-  uniqueTensor->Resize(K);
-  auto* unique = uniqueTensor->template mutable_data<T>();
-  for (auto p : hashMap) {
-    unique[p.second] = p.first;
-  }
-  return true;
+  return RunOnCPU<T>(Input(0), Output(UNIQUE), remapping_ptr);
 }
 
 REGISTER_CPU_OPERATOR(Unique, UniqueOp<CPUContext>);
