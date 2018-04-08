@@ -100,8 +100,9 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     # Cannot find src or obj, revert back to original style
                     return orig_spawn(cmd)
 
-                from distutils.spawn import _nt_quote_args
-                cmd = _nt_quote_args(cmd)
+                for i, arg in enumerate(cmd):
+                    if ' ' in arg and not '"' in arg:
+                        cmd[i] = '"%s"' % arg
 
                 builder.writer.build(
                     [obj], 'compile', [src],
