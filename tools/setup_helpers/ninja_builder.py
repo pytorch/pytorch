@@ -101,7 +101,7 @@ class ninja_build_ext(setuptools.command.build_ext.build_ext):
                     return orig_spawn(cmd)
 
                 for i, arg in enumerate(cmd):
-                    if ' ' in arg and not '"' in arg:
+                    if ' ' in arg and '"' not in arg:
                         cmd[i] = '"%s"' % arg
 
                 builder.writer.build(
