@@ -138,6 +138,9 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
 
 def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0, total_length=None):
+    if total_length is not None:
+        raise ValueError("_symbolic_pad_packed_sequence only supports "
+                         "_symbolic_pad_packed_sequence=None")
     # See comment on _symbolic_pack_padded_sequence
     data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
     if batch_first:
@@ -156,6 +159,13 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_le
     the data will be transposed into ``B x T x *`` format.
 
     Batch elements will be ordered decreasingly by their length.
+
+    .. note::
+        :attr:`total_length` is useful to implement the
+        ``pack sequence -> recurrent network -> unpack sequence`` pattern in a
+        :class:`~torch.nn.Module` wrapped in :class:`~torch.nn.DataParallel`.
+        See :ref:`this FAQ section <pack-rnn-unpack-with-data-parallelism>` for
+        details.
 
     Arguments:
         sequence (PackedSequence): batch to pad
