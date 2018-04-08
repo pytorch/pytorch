@@ -87,7 +87,7 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
 }
 
 
-Tensor einsum(std::string eqn, TensorList tensors) {
+Tensor einsum(String eqn, TensorList tensors) {
   std::string in_eqn;
   size_t pos;
   std::vector<std::int64_t> number_of_occurences(26, 0);

@@ -282,7 +282,7 @@
 
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
-- func: einsum(std::string equation, TensorList tensors) -> Tensor
+- func: einsum(String equation, TensorList tensors) -> Tensor
   variants: function
 
 - func: embedding(Tensor weight, IndexTensor indices, int64_t padding_idx=-1, bool scale_grad_by_freq=false, bool sparse=false) -> Tensor

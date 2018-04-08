@@ -143,5 +143,6 @@ static inline ScalarType promoteTypes(ScalarType a, ScalarType b) {
 struct Tensor;
 typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
+typedef std::string String;
 
 } // namespace at
