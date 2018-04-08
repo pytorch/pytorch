@@ -139,8 +139,7 @@ def pack_padded_sequence(input, lengths, batch_first=False):
 
 def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0, total_length=None):
     if total_length is not None:
-        raise ValueError("_symbolic_pad_packed_sequence only supports "
-                         "_symbolic_pad_packed_sequence=None")
+        raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
     # See comment on _symbolic_pack_padded_sequence
     data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
     if batch_first:
