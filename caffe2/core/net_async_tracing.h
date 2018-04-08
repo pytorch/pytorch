@@ -331,7 +331,7 @@ class TracerGuard {
         event_.tid_ = std::this_thread::get_id();
       }
       event_.is_beginning_ = true;
-      event_.timestamp_ = (long)std::round(timer_->MicroSeconds());
+      event_.timestamp_ = (long)(timer_->MicroSeconds());
       tracer_->recordEvent(event_);
     }
   }
@@ -339,7 +339,7 @@ class TracerGuard {
   virtual ~TracerGuard() {
     if (enabled_) {
       event_.is_beginning_ = false;
-      event_.timestamp_ = (long)std::round(timer_->MicroSeconds());
+      event_.timestamp_ = (long)(timer_->MicroSeconds());
       tracer_->recordEvent(event_);
     }
   }
