@@ -83,7 +83,6 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
   return std::make_pair(master_address, my_address);
 }
 
-// Get the rank based on the order of writing, helper for file:// init method
 rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
                   std::size_t order) {
   if (assigned_rank >= 0) {

@@ -306,6 +306,10 @@ InitMethod::Config initTCP(std::string argument, int world_size_r,
   try {
     world_size = convertToRank(world_size_r);
   } catch(std::exception& e) {
+    if (world_size_r == -1) {
+      throw std::invalid_argument("world_size is not set - it is required for "
+                                  "`tcp://` init methods with this backend");
+    }
     throw std::invalid_argument("invalid world_size");
   }
 

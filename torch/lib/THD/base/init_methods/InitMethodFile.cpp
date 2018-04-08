@@ -164,6 +164,10 @@ InitMethod::Config initFile(std::string argument,
   try {
     world_size = convertToRank(world_size_r);
   } catch(std::exception& e) {
+    if (world_size_r == -1) {
+      throw std::invalid_argument("world_size is not set - it is required for "
+                                  "`file://` init methods with this backend");
+    }
     throw std::invalid_argument("invalid world_size");
   }
 
