@@ -1,7 +1,6 @@
 import math
 from bisect import bisect_right
 from functools import partial
-from copy import deepcopy
 from .optimizer import Optimizer
 
 
@@ -37,7 +36,7 @@ class _LRScheduler(object):
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
 
-        It contains two entries. One representing all variables passed through 
+        It contains two entries. One representing all variables passed through
         kwargs and second representing the last_epoch:
 
         * state - a dict holding current scheduler variables. Its content
@@ -91,6 +90,7 @@ class LambdaLR(_LRScheduler):
         >>>     train(...)
         >>>     validate(...)
     """
+
     def __init__(self, optimizer, lr_lambda, last_epoch=-1):
         self.optimizer = optimizer
         if not isinstance(lr_lambda, list) and not isinstance(lr_lambda, tuple):

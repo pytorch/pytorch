@@ -623,13 +623,13 @@ class TestLRScheduler(TestCase):
     def test_step_lr_state_dict(self):
         epoch = 10
         gamma = 0.1
-        step_size =3
-        
+        step_size = 3
+
         scheduler = StepLR(self.opt, gamma=gamma, step_size=step_size)
         for _ in range(epoch):
             scheduler.step()
         state_dict = scheduler.state_dict()
-        
+
         scheduler_copy = StepLR(self.opt, gamma=gamma / 2, step_size=step_size // 2)
         scheduler_copy.load_state_dict(state_dict)
 
@@ -637,18 +637,18 @@ class TestLRScheduler(TestCase):
         self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
         self.assertAlmostEqual(scheduler.step_size, scheduler_copy.step_size)
         self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
-    
+
     def test_multi_step_lr_state_dict(self):
         epoch = 10
         gamma = 0.1
         milestones = [2, 5, 9]
         faux_milestones = [1, 4, 6]
 
-        scheduler =  MultiStepLR(self.opt, gamma=gamma,milestones=milestones)
+        scheduler = MultiStepLR(self.opt, gamma=gamma, milestones=milestones)
         for _ in range(epoch):
             scheduler.step()
         state_dict = scheduler.state_dict()
-        
+
         scheduler_copy = MultiStepLR(self.opt, gamma=gamma / 2, milestones=faux_milestones)
         scheduler_copy.load_state_dict(state_dict)
 
@@ -661,11 +661,11 @@ class TestLRScheduler(TestCase):
         epoch = 10
         gamma = 0.1
 
-        scheduler =  ExponentialLR(self.opt, gamma=gamma)
+        scheduler = ExponentialLR(self.opt, gamma=gamma)
         for _ in range(epoch):
             scheduler.step()
         state_dict = scheduler.state_dict()
-        
+
         scheduler_copy = ExponentialLR(self.opt, gamma=gamma / 2)
         scheduler_copy.load_state_dict(state_dict)
 
@@ -680,7 +680,7 @@ class TestLRScheduler(TestCase):
         for _ in range(epoch):
             scheduler.step()
         state_dict = scheduler.state_dict()
-        
+
         scheduler_copy = CosineAnnealingLR(self.opt, T_max=epoch // 2, eta_min=eta_min / 2)
         scheduler_copy.load_state_dict(state_dict)
 
