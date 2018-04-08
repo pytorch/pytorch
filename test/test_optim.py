@@ -621,72 +621,37 @@ class TestLRScheduler(TestCase):
         self._test(scheduler, targets, epochs)
 
     def test_step_lr_state_dict(self):
-        epoch = 10
-        gamma = 0.1
-        step_size = 3
-
-        scheduler = StepLR(self.opt, gamma=gamma, step_size=step_size)
-        for _ in range(epoch):
-            scheduler.step()
-        state_dict = scheduler.state_dict()
-
-        scheduler_copy = StepLR(self.opt, gamma=gamma / 2, step_size=step_size // 2)
-        scheduler_copy.load_state_dict(state_dict)
-
-        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
-        self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
-        self.assertAlmostEqual(scheduler.step_size, scheduler_copy.step_size)
-        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+        self._check_scheduler_state_dict(
+            lambda: StepLR(self.opt, gamma=0.1, step_size=3),
+            lambda: StepLR(self.opt, gamma=0.01 / 2, step_size=1))
 
     def test_multi_step_lr_state_dict(self):
-        epoch = 10
-        gamma = 0.1
-        milestones = [2, 5, 9]
-        faux_milestones = [1, 4, 6]
-
-        scheduler = MultiStepLR(self.opt, gamma=gamma, milestones=milestones)
-        for _ in range(epoch):
-            scheduler.step()
-        state_dict = scheduler.state_dict()
-
-        scheduler_copy = MultiStepLR(self.opt, gamma=gamma / 2, milestones=faux_milestones)
-        scheduler_copy.load_state_dict(state_dict)
-
-        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
-        self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
-        self.assertAlmostEqual(scheduler.milestones, scheduler_copy.milestones)
-        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+        self._check_scheduler_state_dict(
+            lambda: MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9]),
+            lambda: MultiStepLR(self.opt, gamma=0.01, milestones=[1, 4, 6]))
 
     def test_exp_step_lr_state_dict(self):
-        epoch = 10
-        gamma = 0.1
-
-        scheduler = ExponentialLR(self.opt, gamma=gamma)
-        for _ in range(epoch):
-            scheduler.step()
-        state_dict = scheduler.state_dict()
-
-        scheduler_copy = ExponentialLR(self.opt, gamma=gamma / 2)
-        scheduler_copy.load_state_dict(state_dict)
-
-        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
-        self.assertAlmostEqual(scheduler.gamma, scheduler_copy.gamma)
-        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
+        self._check_scheduler_state_dict(
+            lambda: ExponentialLR(self.opt, gamma=0.1),
+            lambda: ExponentialLR(self.opt, gamma=0.01))
 
     def test_cosine_lr_state_dict(self):
-        epoch = 10
+        epochs = 10
         eta_min = 1e-10
-        scheduler = CosineAnnealingLR(self.opt, T_max=epoch, eta_min=eta_min)
-        for _ in range(epoch):
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min),
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
+            epochs=epochs)
+
+    def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
+        scheduler = constr()
+        for _ in range(epochs):
             scheduler.step()
-        state_dict = scheduler.state_dict()
-
-        scheduler_copy = CosineAnnealingLR(self.opt, T_max=epoch // 2, eta_min=eta_min / 2)
-        scheduler_copy.load_state_dict(state_dict)
-
-        self.assertAlmostEqual(scheduler.last_epoch, scheduler_copy.last_epoch)
-        self.assertAlmostEqual(scheduler.eta_min, scheduler_copy.eta_min)
-        self.assertAlmostEqual(scheduler.T_max, scheduler_copy.T_max)
+        scheduler_copy = constr2()
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__.keys():
+            if key != 'optimizer':
+                self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
         self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
 
     def _test(self, scheduler, targets, epochs=10):
