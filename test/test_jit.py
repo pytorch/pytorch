@@ -2223,7 +2223,6 @@ class TestScript(TestCase):
                 output += inputs[i]
             return output
 
-
     class StarTestReturnThree(torch.nn.Module):
         def __init__(self):
             super(TestScript.StarTestReturnThree, self).__init__()
@@ -2293,8 +2292,11 @@ class TestScript(TestCase):
         class M2(torch.jit.ScriptModule):
             def __init__(self):
                 super(M2, self).__init__(True)
-                self.g = torch.jit.trace(torch.ones(4, 3), torch.ones(4, 3),
-                    torch.ones(4, 3))(TestScript.StarTestSumAndReturnThree())
+                self.g = torch.jit.trace(
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3)
+                )(
+                    TestScript.StarTestSumAndReturnThree()
+                )
                 self.define('''
             def forward(self, rep):
                 *head, tail = self.g(rep, rep, rep)
