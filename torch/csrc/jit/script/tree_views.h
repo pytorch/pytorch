@@ -546,7 +546,6 @@ struct UnaryOp : public Expr {
     }
   }
   static UnaryOp create(const SourceRange& range, int kind, const Expr& expr) {
-    kind = kind == '-' ? TK_UNARY_MINUS : kind;
     return UnaryOp(Compound::create(kind, range, {expr}));
   }
 };
