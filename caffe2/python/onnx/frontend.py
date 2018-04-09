@@ -74,6 +74,22 @@ class Caffe2Frontend(object):
 
     _special_operators = {}
 
+    # DummyName factory
+    @classmethod
+    def __init__(cls):
+        cls._check_dummy_name_factory()
+
+    @classmethod
+    def _check_dummy_name_factory(cls):
+        try:
+            cls._dummy_name_factory
+        except AttributeError:
+            cls._dummy_name_factory = C.DummyName()
+
+    @classmethod
+    def _dummy_name(cls):
+        dummy_name(cls._dummy_name_factory)
+ 
     @classmethod
     def _common_caffe2_arg_to_onnx_attr(cls, op_def, arg):
         # name
@@ -179,6 +195,7 @@ class Caffe2Frontend(object):
                                  predict_net,
                                  init_net=None,
                                  value_info=None):
+        cls._check_dummy_name_factory()
         if value_info is None:
             value_info = {}
         if not isinstance(value_info, dict):
@@ -230,7 +247,7 @@ class Caffe2Frontend(object):
                 shape=value_info[name][1])
             for name in predict_net.external_input)
 
-        dummy_name(cls._all_names_in_net(predict_net) |
+        dummy_name(cls._dummy_name_factory, cls._all_names_in_net(predict_net) |
                    cls._all_names_in_net(init_net))
 
         for op in predict_net.op:
@@ -264,6 +281,7 @@ class Caffe2Frontend(object):
 
     @classmethod
     def caffe2_init_net_to_initializer(cls, init_net):
+        cls._check_dummy_name_factory()
         initializer = []
         for op in init_net.op:
             assert not op.input
@@ -344,6 +362,7 @@ class Caffe2Frontend(object):
 
     @classmethod
     def caffe2_net_to_onnx_model(cls, *args, **kwargs):
+        cls._check_dummy_name_factory()
         opset_id = OperatorSetIdProto()
         opset_id.domain = ''  # ONNX default domain
         opset_id.version = cls.target_opset_version

@@ -2,6 +2,7 @@
 
 #include "caffe2/onnx/backend_rep.h"
 #include "caffe2/onnx/device.h"
+#include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "onnx/onnx_pb.h"
 
@@ -104,6 +105,14 @@ struct OnnxNode {
 
 class Caffe2Backend {
  public:
+  Caffe2Backend(DummyName* dummy = nullptr) {
+    if (dummy) {
+      dummy_ = std::shared_ptr<DummyName>(dummy, [](DummyName *){});
+    } else {
+      dummy_ = std::make_shared<DummyName>();
+    }
+  }
+
   Caffe2BackendRep* Prepare(
       const std::string& onnx_model_str,
       const std::string& device,
@@ -179,6 +188,9 @@ class Caffe2Backend {
       get_per_op_renamed_attrs() const;
   const std::unordered_map<std::string, Caffe2Backend::SpecialOpConverter>&
   get_special_operators() const;
+
+  // Dummy name generator
+  std::shared_ptr<DummyName> dummy_;
 };
 
 } // namespace onnx

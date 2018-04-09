@@ -32,8 +32,9 @@ import caffe2.python._import_c_extension as C
 
 class TestCaffe2Basic(TestCase):
     def test_dummy_name(self):
-        n1 = dummy_name()
-        n2 = dummy_name()
+        g = C.DummyName()
+        n1 = g.new_dummy_name()
+        n2 = g.new_dummy_name()
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
     def test_check_arguments(self):

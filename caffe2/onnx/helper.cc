@@ -5,8 +5,6 @@
 
 namespace caffe2 { namespace onnx  {
 
-size_t DummyName::counter_ = 0;
-
 std::unordered_set<std::string>& DummyName::get_used_names() {
   static std::unordered_set<std::string> used_names;
   return used_names;

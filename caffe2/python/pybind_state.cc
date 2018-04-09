@@ -608,6 +608,21 @@ void addObjectMethods(py::module& m) {
         return c2ops;
       }));
 
+  py::class_<caffe2::onnx::DummyName>(m, "DummyName")
+      .def(py::init<>())
+      .def(
+          "reset_dummy_name",
+          [](caffe2::onnx::DummyName& instance,
+             const std::unordered_set<std::string>& args) -> std::string {
+            instance.Reset(args);
+            return "";
+          })
+      .def(
+          "new_dummy_name",
+          [](caffe2::onnx::DummyName& instance) -> std::string {
+            return instance.NewDummyName();
+          });
+
   py::class_<caffe2::onnx::Caffe2BackendRep>(m, "Caffe2BackenRep")
       .def(py::init<>())
       .def(
@@ -683,8 +698,7 @@ void addObjectMethods(py::module& m) {
       .def(
           "run",
           [](caffe2::onnx::Caffe2BackendRep& instance,
-             std::vector<py::object> inputs)
-              -> std::vector<py::object> {
+             std::vector<py::object> inputs) -> std::vector<py::object> {
             Predictor::TensorVector tensors;
             std::vector<TensorCPU> tensors_data(inputs.size());
             for (auto i = 0; i < inputs.size(); ++i) {
@@ -710,6 +724,7 @@ void addObjectMethods(py::module& m) {
 
   py::class_<caffe2::onnx::Caffe2Backend>(m, "Caffe2Backend")
       .def(py::init<>())
+      .def(py::init<caffe2::onnx::DummyName*>())
       .def(
           "support_onnx_import",
           [](caffe2::onnx::Caffe2Backend& instance,
@@ -1372,15 +1387,6 @@ void addGlobalMethods(py::module& m) {
     const void* raw_data = tensor.raw_data();
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
-  });
-  m.def(
-      "reset_dummy_name",
-      [](const std::unordered_set<std::string>& args) -> std::string {
-        caffe2::onnx::DummyName::Reset(args);
-        return "";
-      });
-  m.def("new_dummy_name", []() -> std::string {
-    return caffe2::onnx::DummyName::NewDummyName();
   });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
