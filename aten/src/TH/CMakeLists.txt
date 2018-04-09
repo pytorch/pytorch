@@ -1,66 +1,91 @@
-set(extra_src)
+cmake_minimum_required(VERSION 3.0)
+project(TH)
+
+set(SRC
+  THGeneral.c
+  THAtomic.c
+  THAllocator.c
+  THHalf.c
+  THSize.c
+  THStorage.c
+  THTensor.cpp
+  THBlas.c
+  THLapack.cpp
+  THLogAdd.c
+  THRandom.cpp
+  THFile.c
+  THDiskFile.c
+  THMemoryFile.c
+  THVector.cpp
+)
+
+configure_file(THGeneral.h.in THGeneral.h)
 
 # IF ANY SIMD FOUND
-IF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve.c)
-ENDIF(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
+if(C_AVX2_FOUND OR C_AVX_FOUND OR C_SSE4_2_FOUND OR C_SSE4_1_FOUND)
+  list(APPEND SRC generic/simd/convolve.c)
+endif()
 
 # IF SSE4 FOUND
-IF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve5x5_sse.c)
-ENDIF(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
+if(C_SSE4_1_FOUND OR C_SSE4_2_FOUND)
+  list(APPEND SRC generic/simd/convolve5x5_sse.c)
+
+  if(MSVC)
+    set_source_files_properties(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
+  else()
+    set_source_files_properties(generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
+  endif(MSVC)
+endif()
 
 # IF AVX FOUND
-IF(C_AVX_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX.c)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/generic/simd/convolve5x5_avx.c)
-ENDIF(C_AVX_FOUND)
+if(C_AVX_FOUND)
+  list(APPEND SRC vector/AVX.c)
+  list(APPEND SRC generic/simd/convolve5x5_avx.c)
 
-IF(C_AVX2_FOUND)
-  LIST(APPEND extra_src ${CMAKE_CURRENT_SOURCE_DIR}/vector/AVX2.cpp)
-ENDIF(C_AVX2_FOUND)
+  if(MSVC)
+    set_source_files_properties(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${C_AVX_FLAGS}")
+    set_source_files_properties(vector/AVX.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${C_AVX_FLAGS}")
+  else()
+    set_source_files_properties(generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${C_AVX_FLAGS}")
+    set_source_files_properties(vector/AVX.c PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX_FLAGS}")
+  endif()
+endif()
 
-SET(hdr
-  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THTensor.h THTensorApply.h THBlas.h THMath.h
-  THLapack.h THLogAdd.h THRandom.h THVector.h THAtomic.h )
+if(C_AVX2_FOUND)
+  list(APPEND SRC vector/AVX2.cpp)
 
-set(ATen_CPU_SRCS ${ATen_CPU_SRCS}
-  ${CMAKE_CURRENT_SOURCE_DIR}/THGeneral.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THHalf.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THSize.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THStorage.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THLogAdd.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THRandom.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THFile.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THDiskFile.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THMemoryFile.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THAtomic.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/THVector.cpp
-  ${extra_src}
-PARENT_SCOPE)
-######################################################
+  if(MSVC)
+    set_source_files_properties(vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${C_AVX2_FLAGS}")
+  else()
+    set_source_files_properties(vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX2_FLAGS}")
+  endif()
+endif()
 
+if(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
+  set_source_files_properties(THAtomic.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
+  set_source_files_properties(THAllocator.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
+endif()
 
-set(ATen_CPU_INCLUDE ${ATen_CPU_INCLUDE}
-  "${CMAKE_CURRENT_BINARY_DIR}"
-PARENT_SCOPE)
+add_library(${PROJECT_NAME}_static STATIC ${SRC})
+target_link_libraries(${PROJECT_NAME}_static PUBLIC avx_mathfun)
+# TODO: Add RT, BLAS and LAPACK dependencies
+target_include_directories(${PROJECT_NAME}_static PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+  $<INSTALL_INTERFACE:${ATEN_INSTALL_INCLUDE_SUBDIR}>
+  )
+caffe2_interface_library(${PROJECT_NAME}_static ${PROJECT_NAME})
 
-CONFIGURE_FILE(THGeneral.h.in "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h")
-
-
-INSTALL(FILES
-  TH.h
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h"
+  THAtomic.h
   THAllocator.h
+  TH.h
   THMath.h
   THBlas.h
   THDiskFile.h
   THFile.h
   THFilePrivate.h
-  ${CMAKE_CURRENT_BINARY_DIR}/THGeneral.h
   THGenerateAllTypes.h
   THGenerateDoubleType.h
   THGenerateFloatType.h
@@ -83,16 +108,15 @@ INSTALL(FILES
   THTensorDimApply.h
   THTensorMacros.h
   THVector.h
-  THAtomic.h
   THHalf.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")
 
-INSTALL(FILES
+install(FILES
   vector/AVX.h
   vector/AVX2.h
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH/vector")
 
-INSTALL(FILES
+install(FILES
   generic/THBlas.c
   generic/THBlas.h
   generic/THLapack.cpp
