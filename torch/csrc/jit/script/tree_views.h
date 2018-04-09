@@ -247,8 +247,6 @@ struct Expr : public TreeView {
       case TK_STARRED:
       case '/':
       case TK_NOT:
-      /* case '-': - unary minus */
-      /* case '*': - unary starred */
       case TK_CONST:
       case TK_TRUE:
       case TK_FALSE:
@@ -548,8 +546,8 @@ struct UnaryOp : public Expr {
     }
   }
   static UnaryOp create(const SourceRange& range, int kind, const Expr& expr) {
-    auto unary_kind = kind == '-' ? TK_UNARY_MINUS : kind;
-    return UnaryOp(Compound::create(unary_kind, range, {expr}));
+    kind = kind == '-' ? TK_UNARY_MINUS : kind;
+    return UnaryOp(Compound::create(kind, range, {expr}));
   }
 };
 

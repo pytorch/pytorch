@@ -159,7 +159,9 @@ void initTreeViewBindings(PyObject *module) {
   // NB: we take range here, because unary ops precede their exprs, so we need to include them
   py::class_<UnaryOp, Expr>(m, "UnaryOp")
     .def(py::init([](const SourceRange& range, std::string kind, const Expr& expr) {
-      return UnaryOp::create(range, stringToKind(kind), expr);
+      auto resolved_kind = stringToKind(kind);
+      resolved_kind = resolved_kind == '-' ? TK_UNARY_MINUS : resolved_kind;
+      return UnaryOp::create(range, resolved_kind, expr);
     }));
   py::class_<Const, Expr>(m, "Const")
     .def(py::init([](const SourceRange& range, std::string value) {

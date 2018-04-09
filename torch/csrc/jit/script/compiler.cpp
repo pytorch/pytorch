@@ -258,8 +258,8 @@ std::vector<Value*> BuiltinFunction::call(
   if (!hasTensorOp(n)) {
     throw ErrorReport(loc) << "unknown builtin op";
   }
-  if (cd.n_outputs != 1 && cd.allow_varargs) {
-    throw ErrorReport(loc) << "Varargs outputs are not currently supported for builtins.";
+  if (cd.allow_varargs) {
+    throw ErrorReport(loc) << "Starred packing for the output of a builtin is not supported.";
   }
   return n->outputs();
 }
@@ -601,7 +601,7 @@ private:
   // 3) A Starred node can only appear when there is another non-Starred lhs Expr
   //    Concretely this means that `*abc = func()` is illegal. Unpacking all
   //    outputs into a tuple is covered by `abc = func()`.
-  size_t calcNumStarredUnpack(const List<Expr>& lhs, const SourceRange& r) {
+  bool calcNumStarredUnpack(const List<Expr>& lhs, const SourceRange& r) {
     size_t num_normal_assign = 0;
     size_t num_starred = 0;
     for (const auto& assignee : lhs) {
@@ -640,7 +640,7 @@ private:
 
   std::vector<Value*> emitAssignment(const Assign& stmt) {
     std::vector<Value*> outputs{stmt.lhs().size()};
-    size_t num_starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
+    bool starred_unpack = calcNumStarredUnpack(stmt.lhs(), stmt.range());
     if (stmt.reduction() != '=') {
       if (stmt.lhs().size() != 1) {
         throw ErrorReport(stmt)
@@ -652,7 +652,7 @@ private:
                                 Var::create(lhs.range(), lhs), stmt.rhs());
       outputs = emitExpr(expr, {1, false});
     } else {
-      CallsiteDescriptor cd{stmt.lhs().size(), !!num_starred_unpack || stmt.lhs().size() == 1};
+      CallsiteDescriptor cd{stmt.lhs().size(), starred_unpack || stmt.lhs().size() == 1};
       outputs =
           emitExpr(stmt.rhs(), cd);
     }
@@ -675,11 +675,11 @@ private:
             throw ErrorReport(var) << "Cannot pack a tuple into a non-variable.";
           }
           std::vector<Value*> starred_slice(
-              outputs.begin() + i, outputs.begin() + i + num_starred_unpack);
+              outputs.begin() + i, outputs.begin() + i + (starred_unpack ? 1 : 0));
           SugaredValuePtr tup = std::make_shared<TupleValue>(createSugaredValuesFromValues(starred_slice));
           environment_stack->setSugaredVar(
               Var(Starred(assignee).expr()).name().name(), tup);
-          i += num_starred_unpack;
+          i += starred_unpack ? 1 : 0;
         }
       }
     }

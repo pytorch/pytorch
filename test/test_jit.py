@@ -2213,30 +2213,32 @@ class TestScript(TestCase):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as tuple"):
             M()
 
+    class StarTestSumStarred(torch.nn.Module):
+        def __init__(self):
+            super(TestScript.StarTestSumStarred, self).__init__()
+
+        def forward(self, *inputs):
+            output = inputs[0]
+            for i in range(1, len(inputs)):
+                output += inputs[i]
+            return output
+
+
+    class StarTestReturnThree(torch.nn.Module):
+        def __init__(self):
+            super(TestScript.StarTestReturnThree, self).__init__()
+
+        def forward(self, rep):
+            return rep, rep, rep
+
     def test_script_star_expr(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, *inputs):
-                output = inputs[0]
-                for i in range(1, len(inputs)):
-                    output += inputs[i]
-                return output
-
-        class Mult(torch.nn.Module):
-            def __init__(self):
-                super(Mult, self).__init__()
-
-            def forward(self, rep):
-                return rep, rep, rep
 
         class M2(torch.jit.ScriptModule):
             def __init__(self):
                 super(M2, self).__init__(True)
                 self.m = torch.jit.trace(
-                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(M())
-                self.g = torch.jit.trace(torch.ones(4, 3))(Mult())
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(TestScript.StarTestSumStarred())
+                self.g = torch.jit.trace(torch.ones(4, 3))(TestScript.StarTestReturnThree())
 
             @torch.jit.script_method
             def forward(self, rep):
@@ -2247,29 +2249,12 @@ class TestScript(TestCase):
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
     def test_script_star_expr_string(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, *inputs):
-                output = inputs[0]
-                for i in range(1, len(inputs)):
-                    output += inputs[i]
-                return output
-
-        class Mult(torch.nn.Module):
-            def __init__(self):
-                super(Mult, self).__init__()
-
-            def forward(self, rep):
-                return rep, rep, rep
-
         class M2(torch.jit.ScriptModule):
             def __init__(self):
                 super(M2, self).__init__(True)
                 self.m = torch.jit.trace(
-                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(M())
-                self.g = torch.jit.trace(torch.ones(4, 3))(Mult())
+                    torch.ones(4, 3), torch.ones(4, 3), torch.ones(4, 3))(TestScript.StarTestSumStarred())
+                self.g = torch.jit.trace(torch.ones(4, 3))(TestScript.StarTestReturnThree())
 
                 self.define('''
             def forward(self, rep):
@@ -2280,21 +2265,21 @@ class TestScript(TestCase):
         m = M2()
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
+    class StarTestSumAndReturnThree(torch.nn.Module):
+        def __init__(self):
+            super(TestScript.StarTestSumAndReturnThree, self).__init__()
+
+        def forward(self, *inputs):
+            output = inputs[0]
+            for i in range(1, len(inputs)):
+                output += inputs[i]
+            return output, output, output
+
     def test_script_star_assign(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, *inputs):
-                output = inputs[0]
-                for i in range(1, len(inputs)):
-                    output += inputs[i]
-                return output, output, output
-
         class M2(torch.jit.ScriptModule):
             def __init__(self):
                 super(M2, self).__init__(True)
-                self.g = torch.jit.trace(torch.ones(4, 3))(M())
+                self.g = torch.jit.trace(torch.ones(4, 3))(TestScript.StarTestSumAndReturnThree())
                 self.define('''
             def forward(self, rep):
                 head, *tail = self.g(rep)
@@ -2305,28 +2290,19 @@ class TestScript(TestCase):
         self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
 
     def test_script_module_star_assign2(self):
-        class M(torch.nn.Module):
-            def __init__(self):
-                super(M, self).__init__()
-
-            def forward(self, *inputs):
-                output = inputs[0]
-                for i in range(1, len(inputs)):
-                    output += inputs[i]
-                return output, output, output
-
         class M2(torch.jit.ScriptModule):
             def __init__(self):
                 super(M2, self).__init__(True)
-                self.g = torch.jit.trace(torch.ones(4, 3))(M())
+                self.g = torch.jit.trace(torch.ones(4, 3), torch.ones(4, 3),
+                    torch.ones(4, 3))(TestScript.StarTestSumAndReturnThree())
                 self.define('''
             def forward(self, rep):
-                *head, tail = self.g(rep)
+                *head, tail = self.g(rep, rep, rep)
                 return tail
                 ''')
 
         m = M2()
-        self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+        self.assertEqual(m(torch.ones(4, 3)), 3 * torch.ones(4, 3))
 
     def test_script_module_star_assign_fail_pythonop(self):
 
@@ -2345,10 +2321,10 @@ class TestScript(TestCase):
                     ''')
 
             m = M2()
-            self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+            m(torch.zeros(4, 3))
 
     def test_script_module_star_assign_fail_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, "Varargs outputs are not currently supported for builtins."):
+        with self.assertRaisesRegex(RuntimeError, "Starred packing for the output of a builtin is not supported."):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
                     super(M2, self).__init__(True)
@@ -2360,7 +2336,7 @@ class TestScript(TestCase):
                     ''')
 
             m = M2()
-            self.assertEqual(m(torch.zeros(4, 3)), 3 * torch.zeros(4, 3))
+            m(torch.zeros(4, 3))
 
 
 # Smoke tests for export methods
