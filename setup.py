@@ -535,7 +535,6 @@ else:
         '-Wno-write-strings',
         '-Wno-zero-length-array',
         '-Wno-return-type-c-linkage',
-        '-Wc++14-extensions',  # prevents use of C++14 features
         # Python 2.6 requires -fno-strict-aliasing, see
         # http://legacy.python.org/dev/peps/pep-3123/
         '-fno-strict-aliasing',
