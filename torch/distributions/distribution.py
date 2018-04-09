@@ -163,10 +163,13 @@ class Distribution(object):
             Tensor of shape batch_shape.
         """
         raise NotImplementedError
-        
+
     def perplexity(self):
         """
-        Returns perplexity of distribution
+        Returns perplexity of distribution, batched over batch_shape.
+
+        Returns:
+            Tensor of shape batch_shape.
         """
         return torch.exp(self.entropy())
 
