@@ -42,6 +42,47 @@ class IDEEPDropoutOp final : public IDEEPOperator {
   OUTPUT_TAGS(OUTPUT, MASK);
 };
 
+class IDEEPDropoutGradientOp final : public IDEEPOperator {
+ public:
+  USE_IDEEP_DEF_ALIASES();
+  USE_IDEEP_OPERATOR_FUNCTIONS();
+
+  IDEEPDropoutGradientOp(const OperatorDef& operator_def, Workspace* ws)
+      : IDEEPOperator(operator_def, ws),
+        ratio_(OperatorBase::GetSingleArgument<float>("ratio", 0.5)),
+        is_test_(
+            OperatorBase::GetSingleArgument<int>(OpSchema::Arg_IsTest, 0)) {
+    CAFFE_ENFORCE_GE(ratio_, 0);
+    CAFFE_ENFORCE_LT(ratio_, 1);
+  }
+  virtual ~IDEEPDropoutGradientOp() {}
+
+  bool RunOnDevice() override {
+    const auto& dY = Input(OUTPUT_GRAD);
+    auto* dX = Output(INPUT_GRAD);
+
+    if (is_test_) {
+      if (dX != &dY) {
+        ideep::direct_copy::compute(dY, *dX);
+      }
+      return true;
+    }
+
+    const auto& mask = Input(MASK);
+    ideep::dropout_backward::compute(mask, dY, *dX);
+
+    return true;
+  }
+
+ protected:
+  float ratio_;
+  bool is_test_;
+
+  INPUT_TAGS(OUTPUT_GRAD , MASK);
+  OUTPUT_TAGS(INPUT_GRAD);
+};
+
 REGISTER_IDEEP_OPERATOR(Dropout, IDEEPDropoutOp);
+REGISTER_IDEEP_OPERATOR(DropoutGrad, IDEEPDropoutGradientOp);
 
 } // namespace caffe2
