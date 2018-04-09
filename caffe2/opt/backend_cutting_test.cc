@@ -13,14 +13,27 @@ namespace {
     op->add_output("N" + caffe2::to_string(tick+1));
   }
 
+  bool StartsWith(const std::string& str, const std::string& prefix) {
+    return std::mismatch(prefix.begin(), prefix.end(), str.begin()).first ==
+        prefix.end();
+  }
+
+  bool Supports(const caffe2::OperatorDef& op) {
+    return StartsWith(op.type(), "MyConv") || StartsWith(op.type(), "MyRelu") ||
+        StartsWith(op.type(), "Concat");
+  }
+
   caffe2::NetDef Transform(const caffe2::NetDef& net) {
     caffe2::NetDef net_opt;
     auto * op = net_opt.add_op();
     op->set_type("BigOpt");
 
     for (const auto& i: net.external_input()) {
-      net_opt.add_external_input(i);
-      op->add_input(i);
+      // Absorb the weights and bias
+      if (!StartsWith(i, "W") && !StartsWith(i, "b")) {
+        net_opt.add_external_input(i);
+        op->add_input(i);
+      }
     }
     for (const auto& i: net.external_output()) {
       net_opt.add_external_output(i);
@@ -47,10 +60,8 @@ TEST(BackendCuttingTest, line) {
   op->add_input("N2");
   op->add_output("Y");
 
-  auto supports = [](const caffe2::OperatorDef& op){
-    return op.type() == "MyConv";
-  };
-  auto net_opt = caffe2::opt::OptimizeForBackend(net, supports, Transform);
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
+  EXPECT_EQ(3, net_opt.op_size());
 }
 
 //  X0 -> CopyIn -> MyConv -\
@@ -83,11 +94,8 @@ TEST(BackendCuttingTest, convergedPaths) {
   op->add_input("N5");
   op->add_output("Y");
 
-  auto supports = [](const caffe2::OperatorDef& op) {
-    return op.type() == "MyConv" || op.type() == "MyRelu" ||
-        op.type() == "Concat";
-  };
-  auto net_opt = caffe2::opt::OptimizeForBackend(net, supports, Transform);
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
+  EXPECT_EQ(3, net_opt.op_size());
 };
 
 //                -> Random -> Relu -> MyConv4
@@ -122,9 +130,6 @@ TEST(BackendCuttingTest, skipPath) {
   op->add_input("N7");
   op->add_output("Y");
 
-  auto supports = [](const caffe2::OperatorDef& op) {
-    return op.type() == "MyConv" || op.type() == "MyRelu" ||
-        op.type() == "Concat";
-  };
-  auto net_opt = caffe2::opt::OptimizeForBackend(net, supports, Transform);
+  auto net_opt = caffe2::opt::OptimizeForBackend(net, Supports, Transform);
+  EXPECT_EQ(4, net_opt.op_size());
 }

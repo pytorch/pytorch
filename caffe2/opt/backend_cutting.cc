@@ -13,8 +13,9 @@ namespace opt {
 
 namespace {
 
-using NodeRef = nom::repr::NNGraph::NodeRef;
-using EdgeRef = nom::repr::NNGraph::EdgeRef;
+using namespace nom::repr;
+using NodeRef = NNGraph::NodeRef;
+using EdgeRef = NNGraph::EdgeRef;
 
 class GroupAnnotation {
  public:
@@ -37,12 +38,11 @@ struct VisitorContext {
 };
 
 std::string ShowNode(NodeRef node) {
-  auto* node_data = node->data().get();
-  if (isa<nom::repr::NeuralNetData>(node_data)) {
-    const auto* nn_tensor = dyn_cast<const nom::repr::NeuralNetData>(node_data);
+  if (nn::is<NeuralNetData>(node)) {
+    const auto* nn_tensor = nn::get<NeuralNetData>(node); 
     return MakeString("Tensor: ", nn_tensor->getName());
-  } else if (isa<nom::repr::NeuralNetOperator>(node_data)) {
-    const auto* nn_op = dyn_cast<const nom::repr::NeuralNetOperator>(node_data);
+  } else if (nn::is<NeuralNetOperator>(node)) {
+    const auto* nn_op = nn::get<NeuralNetOperator>(node); 
     const auto* op_def = reinterpret_cast<const caffe2::OperatorDef*>(
         nn_op->getAnnotation()->getSaved());
     CAFFE_ENFORCE(op_def);
@@ -52,18 +52,18 @@ std::string ShowNode(NodeRef node) {
   }
 }
 
-void DumpGraph(nom::repr::NNGraph* g) {
-  auto nnprinter = [](typename nom::repr::NNGraph::NodeRef node) {
+void DumpGraph(NNGraph* g) {
+  auto nnprinter = [](typename NNGraph::NodeRef node) {
     std::map<std::string, std::string> labelMap;
     assert(node->data() && "Node doesn't have data, can't render it");
-    if (isa<nom::repr::NeuralNetOperator>(node->data())) {
-      auto* op = dyn_cast<nom::repr::NeuralNetOperator>(node->data().get());
+    if (isa<NeuralNetOperator>(node->data())) {
+      auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
       labelMap["label"] =
           op->getName() + " (" + std::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
-      if (annotation && isa<nom::repr::DeviceAnnotation>(annotation)) {
+      if (annotation && isa<DeviceAnnotation>(annotation)) {
         auto device_annotation =
-            dyn_cast<nom::repr::DeviceAnnotation>(annotation);
+            dyn_cast<DeviceAnnotation>(annotation);
         labelMap["label"] += "\\n[" + device_annotation->getDevice() + "]";
         auto hash = std::hash<std::string>{}(device_annotation->getDevice());
         std::stringstream hex_stream;
@@ -72,8 +72,8 @@ void DumpGraph(nom::repr::NNGraph* g) {
         labelMap["fontcolor"] = labelMap["color"];
       }
       labelMap["shape"] = "box";
-    } else if (isa<nom::repr::Data>(node->data())) {
-      auto tensor = dyn_cast<nom::repr::NeuralNetData>(node->data().get());
+    } else if (isa<Data>(node->data())) {
+      auto tensor = dyn_cast<NeuralNetData>(node->data().get());
       labelMap["label"] = tensor->getName();
       labelMap["label"] += "_" + std::to_string(tensor->getVersion()) + " " +
           std::to_string((unsigned long long)node);
@@ -104,10 +104,9 @@ void Explore(
     auto& info = context->infos.at(node);
 
     // Check if the node is supported, stop exploring further if not supported
-    auto* node_data = node->data().get();
-    if (isa<nom::repr::NeuralNetOperator>(node_data)) {
+    if (nn::is<NeuralNetOperator>(node)) {
       const auto* nn_op =
-          dyn_cast<const nom::repr::NeuralNetOperator>(node_data);
+        nn::get<NeuralNetOperator>(node);
       const auto* op_def = reinterpret_cast<const caffe2::OperatorDef*>(
           nn_op->getAnnotation()->getSaved());
       bool wanted = context->predicate(*op_def);
@@ -185,24 +184,13 @@ struct TransformSubgraph {
   bool needed{true};
 };
 
-// Merge subgraph
-// Precondition: subgraphs appear in topological order in the list
-void MergeSubgraph(
-    std::vector<TransformSubgraph>* subs,
-    std::unordered_map<NodeRef, GroupAnnotation>* infos) {
-
-
-}
-
 caffe2::NetDef ConvertToC2Net(
     const TransformSubgraph& sub,
     const std::unordered_map<NodeRef, GroupAnnotation>& infos) {
   caffe2::NetDef net;
   for (auto node : sub.nodes) {
-    auto* node_data = node->data().get();
-    if (isa<nom::repr::NeuralNetOperator>(node_data)) {
-      const auto* nn_op =
-          dyn_cast<const nom::repr::NeuralNetOperator>(node_data);
+    if (nn::is<NeuralNetOperator>(node)) {
+      const auto* nn_op = nn::get<NeuralNetOperator>(node);
       const auto* op_def = reinterpret_cast<const caffe2::OperatorDef*>(
           nn_op->getAnnotation()->getSaved());
       net.add_op()->CopyFrom(*op_def);
@@ -210,11 +198,11 @@ caffe2::NetDef ConvertToC2Net(
   }
   for (const auto kv : sub.external_input_refs) {
     net.add_external_input(kv.first);
-    LOG(INFO) << "Adding external input: " << kv.first;
+    VLOG(2) << "Adding external input: " << kv.first;
   }
   for (const auto& kv : sub.external_output_refs) {
     net.add_external_output(kv.first);
-    LOG(INFO) << "Adding external output: " << kv.first;
+    VLOG(2) << "Adding external output: " << kv.first;
   }
 
   return net;
@@ -224,31 +212,26 @@ void DetectBoundaryReferences(
     TransformSubgraph* subgraph,
     const std::unordered_map<NodeRef, GroupAnnotation>& infos) {
   for (auto node: subgraph->nodes) {
-    auto* node_data = node->data().get();
     // inputs
     for (auto in_edge : node->getInEdges()) {
       auto parent_node = in_edge->tail();
       const auto& info = infos.at(parent_node);
-      auto* parent_node_data = parent_node->data().get();
       if (info.group != subgraph->group_id &&
-          isa<nom::repr::NeuralNetData>(parent_node_data)) {
-        const auto* nn_tensor =
-            dyn_cast<const nom::repr::NeuralNetData>(parent_node_data);
+          nn::is<NeuralNetData>(parent_node)) {
+        const auto* nn_tensor = nn::get<const NeuralNetData>(parent_node); 
         subgraph->external_input_refs.emplace(
             nn_tensor->getName(), parent_node);
       }
     }
 
     // outputs
-    if (!isa<nom::repr::NeuralNetData>(node_data)) {
+    if (!nn::is<NeuralNetData>(node)) {
       continue;
     }
-    for (auto out_edge : node->getOutEdges()) {
-      auto child_node = out_edge->head();
+    for (auto child_node : nn::getConsumers(node)) {
       const auto& info = infos.at(child_node);
       if (info.group != subgraph->group_id) {
-        const auto* nn_tensor =
-            dyn_cast<const nom::repr::NeuralNetData>(node_data);
+        const auto* nn_tensor = nn::get<const NeuralNetData>(node);
         subgraph->external_output_refs.emplace(nn_tensor->getName(), node);
         break;
       }
@@ -259,19 +242,18 @@ void DetectBoundaryReferences(
 void ReplaceSubgraph(
     const TransformSubgraph& subgraph,
     const caffe2::NetDef& net_opt,
-    nom::repr::NNGraph* g) {
+    NNGraph* g) {
   // Delete the old subgraph starting from the input nodes until we hit boundary
   // tensors
   for (auto node : subgraph.nodes) {
-    auto* node_data = node->data().get();
-    if (isa<nom::repr::NeuralNetData>(node_data) &&
+    if (nn::is<NeuralNetData>(node) &&
         subgraph.external_output_refs.find(
-            dyn_cast<const nom::repr::NeuralNetData>(node_data)->getName()) !=
+            nn::get<const NeuralNetData>(node)->getName()) !=
             subgraph.external_output_refs.end()) {
-      LOG(INFO) << "Keeping " << ShowNode(node);
+      VLOG(2) << "Keeping " << ShowNode(node);
       continue;
     }
-    LOG(INFO) << "Deleting " << ShowNode(node);
+    VLOG(2) << "Deleting " << ShowNode(node);
     g->deleteNode(node);
   }
 
@@ -287,9 +269,7 @@ void ReplaceSubgraph(
     auto op_node = g->createNode();
     for (const auto& input : op.input()) {
       if (!tensor_map.count(input)) {
-        auto tensor = caffe2::make_unique<nom::repr::Tensor>(input);
-        tensor_map[input] =
-            g->createNode(unique_dyn_cast<nom::repr::NeuralNetData>(tensor));
+        tensor_map[input] = g->createNode(caffe2::make_unique<Tensor>(input));
       }
 
       auto tensor_node = tensor_map[input];
@@ -298,33 +278,31 @@ void ReplaceSubgraph(
 
     for (const auto& output : op.output()) {
       if (!tensor_map.count(output)) {
-        auto tensor = caffe2::make_unique<nom::repr::Tensor>(output);
-        tensor_map[output] =
-            g->createNode(unique_dyn_cast<nom::repr::NeuralNetData>(tensor));
+        tensor_map[output] = g->createNode(caffe2::make_unique<Tensor>(output));
       }
       auto tensor_node = tensor_map[output];
       g->createEdge(op_node, tensor_node);
     }
 
     op_node->resetData(nom::converters::convertOperator(op));
-    auto op_ref = dyn_cast<nom::repr::NeuralNetOperator>(op_node->data().get());
+    auto op_ref = dyn_cast<NeuralNetOperator>(op_node->data().get());
     CAFFE_ENFORCE(op_node->data());
     auto device_name = op.device_option().node_name();
     if (device_name != "") {
-      auto device = caffe2::make_unique<nom::repr::DeviceAnnotation>(device_name);
+      auto device = caffe2::make_unique<DeviceAnnotation>(device_name);
       op_ref->setAnnotation(std::move(device));
     } else {
-      op_ref->setAnnotation(caffe2::make_unique<nom::repr::Annotation>());
+      op_ref->setAnnotation(caffe2::make_unique<Annotation>());
     }
     op_ref->getMutableAnnotation()->setSaved((void *)&op);
   }
 }
 
-void PruneUnrefereredNodes(nom::repr::NNGraph* g) {
+void PruneUnrefereredNodes(NNGraph* g) {
   std::vector<NodeRef> to_delete;
   for (auto node : g->getMutableNodes()) {
-    if (!nom::repr::nn::hasProducer(node) &&
-        !nom::repr::nn::hasConsumer(node)) {
+    if (!nn::hasProducer(node) &&
+        !nn::hasConsumer(node)) {
       to_delete.push_back(node);
     }
   }
@@ -347,17 +325,16 @@ caffe2::NetDef OptimizeForBackend(
   std::vector<NodeRef> external_inputs;
   std::vector<NodeRef> external_outputs;
   for (auto node : dfg.getMutableNodes()) {
-    auto* node_data = node->data().get();
     context.infos.emplace(
         std::piecewise_construct,
         std::forward_as_tuple(node),
         std::forward_as_tuple(node->getInEdges().size(), -1));
 
-    if (!isa<nom::repr::NeuralNetOperator>(node_data)) {
-      if (!nom::repr::nn::hasProducer(node)) {
+    if (!nn::is<NeuralNetOperator>(node)) {
+      if (!nn::hasProducer(node)) {
         external_inputs.push_back(node);
       }
-      if (!nom::repr::nn::hasConsumer(node)) {
+      if (!nn::hasConsumer(node)) {
         external_outputs.push_back(node);
       }
     }
@@ -394,7 +371,6 @@ caffe2::NetDef OptimizeForBackend(
     // Generate boundary input/output edges
     DetectBoundaryReferences(&g, context.infos);
 
-    g.Print();
     caffe2::NetDef subnet = ConvertToC2Net(g, context.infos);
     // Transform the subgraph protobuf def, note that we can have less external
     // inputs/outputs but not more
@@ -406,8 +382,6 @@ caffe2::NetDef OptimizeForBackend(
   // Prune dangling nodes, because after transformation, some weights might be
   // absorbed
   PruneUnrefereredNodes(&dfg);
-
-  //DumpGraph(&dfg);
 
   return nom::converters::convertToCaffe2Proto(nn);
 }
