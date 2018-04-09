@@ -1564,6 +1564,16 @@ class TestScript(TestCase):
         x = torch.rand(10, dtype=torch.float, requires_grad=True)
         self.checkScript(func, [x], optimize=True)
 
+    def test_keyword(self):
+        @torch.jit.script
+        def func(x):
+            return torch.sum(x, dim=0, keepdim=True)
+
+        x = torch.rand(10, dtype=torch.float, requires_grad=True)
+        y = func(x)
+        y2 = torch.sum(x, dim=0, keepdim=True)
+        self.assertEqual(y, y2)
+
     def test_func_call(self):
         script = '''
         def add(a, b):
@@ -2210,7 +2220,7 @@ class TestScript(TestCase):
                 for m in self.mods:
                     print(m)
                 return v
-        with self.assertRaisesRegex(RuntimeError, "cannot be used as tuple"):
+        with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
     class StarTestSumStarred(torch.nn.Module):
@@ -2308,7 +2318,7 @@ class TestScript(TestCase):
 
     def test_script_module_star_assign_fail_pythonop(self):
 
-        with self.assertRaisesRegex(RuntimeError, "Vararg outputs are currently not supported for PythonOp"):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be used as a tuple"):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
                     super(M2, self).__init__(True)
@@ -2326,7 +2336,7 @@ class TestScript(TestCase):
             m(torch.zeros(4, 3))
 
     def test_script_module_star_assign_fail_builtin(self):
-        with self.assertRaisesRegex(RuntimeError, "Starred packing for the output of a builtin is not supported."):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be used as a tuple"):
             class M2(torch.jit.ScriptModule):
                 def __init__(self):
                     super(M2, self).__init__(True)
@@ -2382,6 +2392,27 @@ class TestScript(TestCase):
 
         f = io.BytesIO()
         torch.onnx._export(m, (x, seq_lens), f, verbose=False)
+
+    def test_script_outputs(self):
+        with self.assertRaisesRegex(RuntimeError, "value cannot be used as a tuple"):
+            @torch.jit.script
+            def foo(a):
+                c, d = a + a
+                return c + d
+
+    def test_script_chunk(self):
+        @torch.jit.script
+        def foo(a):
+            b, c = torch.chunk(a, dim=0, chunks=2)
+            return b
+        v = torch.rand(10, 3)
+        self.assertEqual(torch.chunk(v, dim=0, chunks=2)[0], foo(v))
+
+        with self.assertRaisesRegex(RuntimeError, "too many values to unpack"):
+            @torch.jit.script
+            def foo(a):
+                b, c = torch.chunk(a, dim=0, chunks=3)
+                return b
 
 
 # Smoke tests for export methods

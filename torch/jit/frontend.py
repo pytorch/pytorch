@@ -313,6 +313,10 @@ class ExprBuilder(Builder):
         if expr.id.startswith(_reserved_prefix):
             raise NotSupportedError(r, "names of variables used in JIT-ed functions "
                                        "can't start with " + _reserved_prefix)
+        if expr.id == "True":
+            return TrueLiteral(r)
+        elif expr.id == "False":
+            return FalseLiteral(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod
