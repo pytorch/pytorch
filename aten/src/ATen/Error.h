@@ -21,6 +21,10 @@
 #include <execinfo.h>
 #endif // !defined(_WIN32)
 
+#if defined(_MSC_VER) && _MSC_VER <= 1900
+#define __func__ __FUNCTION__
+#endif
+
 namespace at {
 namespace detail {
 
