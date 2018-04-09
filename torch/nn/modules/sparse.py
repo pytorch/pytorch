@@ -42,7 +42,8 @@ class Embedding(Module):
         :attr:`padding_idx` is initialized to all zeros. However, note that this
         vector can be modified afterwards, e.g., using a customized
         initialization method, and thus changing the vector used to pad the
-        output.
+        output. The gradient for this vector from :class:`~torch.nn.Embedding`
+        is always zero.
 
     Examples::
 
