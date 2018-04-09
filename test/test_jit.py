@@ -2357,16 +2357,15 @@ class TestScript(TestCase):
         seq_lens = torch.ones(B, dtype=torch.int32)
         m = PadPackedWrapper()
         m_traced = torch.jit.trace(x, seq_lens)(m)
-        criterion = nn.MSELoss()
 
         y = m(x, seq_lens)
-        loss = criterion(y, torch.zeros_like(y))
+        loss = torch.sum(y)
         loss.backward()
         grad = x.grad.clone()
         x.grad.zero_()
 
         y_traced = m_traced(x, seq_lens)
-        loss_traced = criterion(y_traced, torch.zeros_like(y_traced))
+        loss_traced = torch.sum(y_traced)
         loss_traced.backward()
         grad_traced = x.grad.clone()
 

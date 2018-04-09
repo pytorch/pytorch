@@ -127,15 +127,9 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     return PackedSequence(data, batch_sizes)
 
 
-def _onnx_symbolic_pack_padded_sequence(g, input, lengths):
-    return g.op("prim::PackPadded", input, lengths, outputs=2)
-
-
 def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False, padding_value=0.0, total_length=None):
     if total_length is not None:
         raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
-    if batch_first:
-        input = g.op('Transpose', input, perm_i=[1, 0, 2])
     # There currently is no PackPadded operator in ONNX. We rely on an
     # optimization pass to remove this later. It is an error if all
     # PackPadded operators cannot be optimized out.
