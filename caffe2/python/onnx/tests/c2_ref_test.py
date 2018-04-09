@@ -27,12 +27,30 @@ from caffe2.python.models.download import downloadFromURLToFile, getURLFromName,
 from caffe2.python.onnx.helper import dummy_name
 from caffe2.python.onnx.tests.test_utils import TestCase
 
+import caffe2.python._import_c_extension as C
+
 
 class TestCaffe2Basic(TestCase):
     def test_dummy_name(self):
         n1 = dummy_name()
         n2 = dummy_name()
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
+
+    def test_check_arguments(self):
+        X = np.random.randn(3, 2).astype(np.float32)
+        Y = np.random.randn(3, 2).astype(np.float32)
+        Z = np.zeros((3, 2)).astype(np.float32)
+
+        b2 = C.Caffe2Backend()
+
+        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], broadcast = 0)
+        output = b2.convert_node(node_def.SerializeToString(), 6)
+
+        bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
+        with self.assertRaisesRegexp(
+            RuntimeError,
+            ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
+            output = b2.convert_node(bad_node_def.SerializeToString(), 6)
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)

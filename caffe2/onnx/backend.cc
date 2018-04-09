@@ -901,17 +901,55 @@ Caffe2Ops Caffe2Backend::ConvertNode(
   return OnnxNodeToCaffe2Ops(init_model, pred_model, &onnx_node, opset_version);
 }
 
+void Caffe2Backend::CheckOpSchemaArguments(
+    const caffe2::OpSchema& schema,
+    const caffe2::OperatorDef& op) {
+  const auto& schema_args = schema.args();
+  if (schema_args.size() > 0){
+    std::vector<std::string> argnames;
+    std::transform(
+        schema_args.begin(),
+        schema_args.end(),
+        std::back_inserter(argnames),
+        [](caffe2::OpSchema::Argument elem) { return elem.name(); });
+
+    for (const auto& arg : op.arg()) {
+      if (std::count(argnames.begin(), argnames.end(), arg.name()) == 0) {
+        CAFFE_THROW(
+            "Don't know how to map unexpected argument ",
+            arg.name(),
+            " (from operator ",
+            op.type(), ")");
+      }
+    }
+  } else {
+    // A number of C2 operators do not declare proper arguments. Let's log the error
+    VLOG(2) << "Operator " << op.type() << " does not declare arguments in its schema. Please file a Caffe2 issue.";
+  }
+}
+
 Caffe2Ops Caffe2Backend::OnnxNodeToCaffe2Ops(
     const ModelProto& init_model,
     const ModelProto& pred_model,
     OnnxNode* onnx_node,
     int opset_version) {
+  Caffe2Ops res;
   if (get_special_operators().count(onnx_node->node.op_type())) {
-    return (this->*get_special_operators().at(onnx_node->node.op_type()))(
+    res = (this->*get_special_operators().at(onnx_node->node.op_type()))(
         onnx_node, opset_version);
   } else {
-    return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    res = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
   }
+
+  for (const auto& result_op: res.ops){
+    const auto* schema = OpSchemaRegistry::Schema(result_op.type());
+    if (schema) {
+      CheckOpSchemaArguments(*schema, result_op);
+    } else {
+      CAFFE_THROW("Caffe2 has no such operator, could not find schema for ", result_op.type());
+    }
+  }
+  return res;
 }
 
 void Caffe2Backend::OnnxToCaffe2(
