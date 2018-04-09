@@ -233,6 +233,7 @@ IF(CUDA_FOUND)
 ELSE()
   ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
 ENDIF()
+target_link_libraries(ATen avx_mathfun)
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
 set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
