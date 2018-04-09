@@ -83,6 +83,10 @@ endif()
 # this, but since FindCUDA upstream is subsumed by first-class support
 # for CUDA language, it seemed not worth fixing.
 IF(NOT CUDA_FOUND AND NOT NO_CUDA)
+  # We set this so that we can use new-style keyword based link libraries
+  # with explicit PUBLIC and PRIVATE, so we can control visibility of
+  # static libraries we link against.
+  set(CUDA_LINK_LIBRARIES_KEYWORD PUBLIC)
   FIND_PACKAGE(CUDA 5.5)
 ENDIF()
 
