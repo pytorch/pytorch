@@ -43,40 +43,38 @@ static void check_out_type_matches(Tensor result, const THPDtype &dtype, const T
   }
 }
 
-static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp(min, max);
-}
-static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_min(min);
-}
-static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_max(max);
-}
-
 // The Python clamp() syntax has to be mapped to one of three C++ functions
 static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "clamp(Tensor input, Scalar min=None, Scalar max=None)",
+    "clamp(Tensor input, Scalar min=None, Scalar max=None, *, Tensor out=None)",
   });
-  ParsedArgs<3> parsed_args;
+
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(1) && !r.isNone(2)) {
-    return THPVariable_Wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
+    if (!r.isNone(3)) {
+        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2), r.tensor(3)));
+    } else {
+        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
+    }
   } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
+    if (!r.isNone(3)) {
+        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1), r.tensor(3)));
+    } else {
+        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
+    }
   } else if (!r.isNone(2)) {
-    return THPVariable_Wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
+    if (!r.isNone(3)) {
+        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2), r.tensor(3)));
+    } else {
+        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
+    }
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");
   }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 

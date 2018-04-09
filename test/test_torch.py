@@ -1161,17 +1161,27 @@ class TestTorch(TestCase):
             res2[i] = max(min_val, min(max_val, res2[i]))
         self.assertEqual(res1, res2)
 
+        out = m1.clone()
+        torch.clamp(m1, min=min_val, max=max_val, out=out)
+        self.assertEqual(out, res1)
+
         res1 = torch.clamp(m1, min=min_val)
         res2 = m1.clone()
         for i in iter_indices(res2):
             res2[i] = max(min_val, res2[i])
         self.assertEqual(res1, res2)
 
+        torch.clamp(m1, min=min_val, out=out)
+        self.assertEqual(out, res1)
+
         res1 = torch.clamp(m1, max=max_val)
         res2 = m1.clone()
         for i in iter_indices(res2):
             res2[i] = min(max_val, res2[i])
         self.assertEqual(res1, res2)
+
+        torch.clamp(m1, max=max_val, out=out)
+        self.assertEqual(out, res1)
 
     def test_pow(self):
         # [res] torch.pow([res,] x)
