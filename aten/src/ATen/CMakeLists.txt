@@ -246,8 +246,6 @@ set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
 target_link_libraries(ATen tbb_static)
 
-SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
-
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET ATen PROPERTY CXX_STANDARD 11)
 endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
