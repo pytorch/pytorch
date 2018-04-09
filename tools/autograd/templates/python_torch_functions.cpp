@@ -54,19 +54,19 @@ static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* 
   ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(1) && !r.isNone(2)) {
-    if ( !r.isNone(3)) {
+    if (!r.isNone(3)) {
         return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2), r.tensor(3)));
     } else {
         return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
     }
   } else if (!r.isNone(1)) {
-    if ( !r.isNone(3)) {
+    if (!r.isNone(3)) {
         return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1), r.tensor(3)));
     } else {
         return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
     }
   } else if (!r.isNone(2)) {
-    if ( !r.isNone(3)) {
+    if (!r.isNone(3)) {
         return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2), r.tensor(3)));
     } else {
         return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
