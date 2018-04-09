@@ -64,9 +64,12 @@ void DataChannelGloo::RequestGloo::wait() {
   _request.wait();
 }
 
-DataChannelGloo::Group::Group(const std::string& addr, port_type port,
-                                      std::vector<rank_type> ranks, rank_type max_rank,
-                                      int store_socket)
+
+DataChannelGloo::Group::Group(const std::string& addr,
+                              port_type port,
+                              std::vector<rank_type> ranks,
+                              rank_type max_rank,
+                              int store_socket)
   : DataChannel::Group(std::move(ranks), max_rank)
   , _store(new Store(addr, port, store_socket)) {}
 
