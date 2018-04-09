@@ -105,17 +105,6 @@ import json
 import glob
 import importlib
 
-
-# Use copies instead of symbolic files.
-# Windows has very poor support for them.
-sym_files = ['tools/shared/cwrap_common.py']
-orig_files = ['aten/src/ATen/common_with_cwrap.py']
-for sym_file, orig_file in zip(sym_files, orig_files):
-    if os.path.exists(sym_file):
-        os.remove(sym_file)
-    shutil.copyfile(orig_file, sym_file)
-
-
 from tools.setup_helpers.env import check_env_flag
 from tools.setup_helpers.cuda import WITH_CUDA, CUDA_HOME, CUDA_VERSION
 from tools.setup_helpers.cudnn import (WITH_CUDNN, CUDNN_LIBRARY,
@@ -303,6 +292,15 @@ class build_deps(Command):
                 libs += ['gloo']
             libs += ['THD']
         build_libs(libs)
+
+        # Use copies instead of symbolic files.
+        # Windows has very poor support for them.
+        sym_files = ['tools/shared/cwrap_common.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        for sym_file, orig_file in zip(sym_files, orig_files):
+            if os.path.exists(sym_file):
+                os.remove(sym_file)
+            shutil.copyfile(orig_file, sym_file)
 
         # Copy headers necessary to compile C++ extensions.
         #
