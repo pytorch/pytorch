@@ -3817,7 +3817,7 @@ class TestNN(NNTestCase):
         input.grad.data.zero_()
 
         output.backward(grad.contiguous())
-        self.assertEqual(result, input.grad.data)
+        self.assertEqual(result, input.grad.data, type2prec[dtype.__name__])
 
     def test_pixel_shuffle(self):
         batch_size = random.randint(1, 3)
