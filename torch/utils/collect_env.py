@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 import datetime
+import os
 from collections import namedtuple
 
 import torch
@@ -100,8 +101,17 @@ def get_cudnn_version(run_lambda):
     return 'Probably one of the following: \n{}'.format(out)
 
 
-def get_uname(run_lambda):
-    return run_and_read_all(run_lambda, 'uname -s')
+def get_platform():
+    if sys.platform.startswith('linux'):
+        return 'linux'
+    elif sys.platform.startswith('win32'):
+        return 'win32'
+    elif sys.platform.startswith('cygwin'):
+        return 'cygwin'
+    elif sys.platform.startswith('darwin'):
+        return 'darwin'
+    else:
+        return sys.platform
 
 
 def get_mac_version(run_lambda):
@@ -122,19 +132,18 @@ def check_release_file(run_lambda):
 
 
 def get_os(run_lambda):
-    uname = get_uname(run_lambda)
+    platform = get_platform()
 
-    # No uname is a sign of no Linux. Try to get a windows version.
-    if uname is None:
+    if platform is 'win32' or platform is 'cygwin':
         return get_windows_version(run_lambda)
 
-    if uname == 'Darwin':
+    if platform == 'darwin':
         version = get_mac_version(run_lambda)
         if version is None:
             return None
         return 'Mac OSX {}'.format(version)
 
-    if uname == 'Linux':
+    if platform == 'linux':
         # Ubuntu/Debian based
         desc = get_lsb_version(run_lambda)
         if desc is not None:
@@ -145,10 +154,10 @@ def get_os(run_lambda):
         if desc is not None:
             return desc
 
-        return uname
+        return platform
 
-    # Unknown uname
-    return None
+    # Unknown platform
+    return platform
 
 
 def get_pip_packages(run_lambda):
@@ -201,8 +210,8 @@ def get_env_info():
 
 env_info_fmt = """
 PyTorch version: {torch_version}
-Debug build: {is_debug_build}
-PyTorch compiled with CUDA: {cuda_compiled_version}
+Is debug build: {is_debug_build}
+CUDA used to build PyTorch: {cuda_compiled_version}
 How you installed PyTorch: Unknown
 
 OS: {os}
@@ -210,11 +219,9 @@ GCC version: {gcc_version}
 CMake version: {cmake_version}
 
 Python version: {python_version}
-CUDA available: {is_cuda_available}
+Is CUDA available: {is_cuda_available}
 CUDA runtime version: {cuda_runtime_version}
-GPU models and configuration:
-{nvidia_gpu_models}
-
+GPU models and configuration: {nvidia_gpu_models}
 Nvidia driver version: {nvidia_driver_version}
 cuDNN version: {cudnn_version}
 
@@ -238,12 +245,10 @@ def pretty_str(envinfo):
         return '\n'.join(updated_lines)
 
     mutable_dict = envinfo._asdict()
-    if mutable_dict['pip_packages'] is not None:
-        mutable_dict['pip_packages'] = prepend(mutable_dict['pip_packages'],
-                                               '[{}] '.format(envinfo.pip_version))
-    if mutable_dict['conda_packages'] is not None:
-        mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
-                                                 '[conda] ')
+
+    # If nvidia_gpu_models is multiline, start on the next line
+    if envinfo.nvidia_gpu_models is not None and len(envinfo.nvidia_gpu_models.split('\n')) > 1:
+        mutable_dict['nvidia_gpu_models'] = '\n{}\n'.format(envinfo.nvidia_gpu_models)
 
     # If the machine doesn't have CUDA, report some fields as 'Unavailable'
     dynamic_cuda_fields = [
@@ -253,7 +258,6 @@ def pretty_str(envinfo):
     ]
     all_cuda_fields = list(dynamic_cuda_fields)
     all_cuda_fields.append('cudnn_version')
-
     no_dynamic_cuda = all(mutable_dict[field] is None for field in dynamic_cuda_fields)
     if not torch.cuda.is_available() and no_dynamic_cuda:
         for field in all_cuda_fields:
@@ -261,7 +265,17 @@ def pretty_str(envinfo):
         if envinfo.cuda_compiled_version is None:
             mutable_dict['cuda_compiled_version'] = 'None'
 
+    # Replace all None objects with 'Unknown'
     mutable_dict = replace_nones(mutable_dict)
+
+    # Tag conda and pip packages with a prefix
+    # If they were previously None, they'll show up as ie '[conda] Unknown'
+    if mutable_dict['pip_packages']:
+        mutable_dict['pip_packages'] = prepend(mutable_dict['pip_packages'],
+                                               '[{}] '.format(envinfo.pip_version))
+    if mutable_dict['conda_packages']:
+        mutable_dict['conda_packages'] = prepend(mutable_dict['conda_packages'],
+                                                 '[conda] ')
     return env_info_fmt.format(**mutable_dict)
 
 
@@ -270,13 +284,9 @@ def get_pretty_env_info():
 
 
 def main():
-    timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%d--%H-%M-%S')
-    outfile = 'env-{}.out'.format(timestamp)
     print("Collecting environment information...")
     output = get_pretty_env_info()
-    with open(outfile, 'a') as f:
-        f.write(output)
-    print('Done. Summary written to {}'.format(outfile))
+    print(output)
 
 
 if __name__ == '__main__':
