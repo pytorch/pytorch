@@ -59,7 +59,7 @@ void DumpGraph(NNGraph* g) {
     if (isa<NeuralNetOperator>(node->data())) {
       auto* op = dyn_cast<NeuralNetOperator>(node->data().get());
       labelMap["label"] =
-          op->getName() + " (" + std::to_string((unsigned long long)node) + ")";
+          op->getName() + " (" + caffe2::to_string((unsigned long long)node) + ")";
       auto* annotation = op->getAnnotation();
       if (annotation && isa<DeviceAnnotation>(annotation)) {
         auto device_annotation =
