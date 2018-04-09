@@ -785,7 +785,7 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools', 'tools.*',))
+packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,
