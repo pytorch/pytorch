@@ -1444,6 +1444,15 @@ void addGlobalMethods(py::module& m) {
     return py::bytes(out);
   });
 
+  m.def("transform_fuseNNPACKConvRelu", [](py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto new_proto = opt::fuseNNPACKConvRelu(proto);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+
   auto initialize = [&]() {
     // Initialization of the module
     ([]() -> void {

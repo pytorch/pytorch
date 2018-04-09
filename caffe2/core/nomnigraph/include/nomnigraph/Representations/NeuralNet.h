@@ -196,6 +196,12 @@ private:
 #define NOMNIGRAPH_DEFINE_NN_RTTI(op)                                          \
   static bool classof(const NeuralNetOperator *N) {                            \
     return N->getKind() == NNKind::op;                                         \
+  }                                                                            \
+  static bool classof(const Value *N) {                                        \
+    if (isa<NeuralNetOperator>(N)) {                                           \
+      return dyn_cast<NeuralNetOperator>(N)->getKind() == NNKind::op;          \
+    }                                                                          \
+    return false;                                                              \
   }
 
 #include "nomnigraph/Generated/OpClasses.h"
