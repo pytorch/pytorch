@@ -529,7 +529,6 @@ else:
         '-std=c++11',
         '-Wall',
         '-Wextra',
-        '-pedantic',
         '-Wno-unused-parameter',
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',
@@ -555,14 +554,12 @@ tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
+    third_party_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
 ]
-# -isystem treats the include as a system header, which prevents warnings from
-# surfacing.
-extra_compile_args.append('-isystem ' + third_party_path + "/pybind11/include")
 
 library_dirs.append(lib_path)
 
@@ -692,9 +689,7 @@ main_sources = [
 
 try:
     import numpy as np
-    # -isystem treats the include as a system header, which prevents warnings
-    # from surfacing.
-    extra_compile_args.append('-isystem ' + np.get_include())
+    include_dirs.append(np.get_include())
     extra_compile_args.append('-DWITH_NUMPY')
     WITH_NUMPY = True
 except ImportError:
