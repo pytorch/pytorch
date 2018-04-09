@@ -4,6 +4,9 @@
 
 namespace at { namespace native {
 
+// sumproduct_pair computes `(left*right).sum(sumdims)` by means of permutation and
+// batch matrix multiplication // its main purpose is to provide a pairwise
+// reduction for einsum
 Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_dims_, bool keepdim) {
   // assumes that tensors have been pre-unsqueezed
   AT_ASSERT(left_.dim()==right_.dim(), "number of dimensions must match");
@@ -85,6 +88,10 @@ Tensor sumproduct_pair(const Tensor& left_, const Tensor& right_, IntList sum_di
   return result;
 }
 
+// _trilinear computes a trilinear einstein sum with an unrolled dimension
+// the result is `(i1.unsqueeze(expand1)*i2.unsqueeze(expand2)*i2.unsqueeze(expand3)).sum(sumdim)`
+// the computation is unrolled in the unroll_dim dimension
+// its main purpose is to unify the computations in bilinear and bilinear_backward
 Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
 		  IntList expand1_, IntList expand2_, IntList expand3_,
 		  IntList sumdim_, int64_t unroll_dim) {
