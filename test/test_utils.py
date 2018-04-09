@@ -406,12 +406,9 @@ class TestBottleneck(TestCase):
         curdir = os.path.dirname(os.path.abspath(__file__))
         filepath = '{}/{}'.format(curdir, test_file)
         if scriptargs != '':
-            mark = '-- '
             scriptargs = ' {}'.format(scriptargs)
-        else:
-            mark = ''
         rc, out, err = self._run(
-            'python -m torch.utils.bottleneck {}{}{}'.format(mark, filepath, scriptargs))
+            'python -m torch.utils.bottleneck {}{}'.format(filepath, scriptargs))
         return rc, out, err
 
     def _check_run_args(self):
@@ -463,7 +460,7 @@ class TestBottleneck(TestCase):
             self.assertIsNone(results, self._fail_msg('Should not tell users about CUDA', output))
 
     @unittest.skipIf(torch.cuda.is_available(), 'CPU-only test')
-    def test_cpu_only(self):
+    def test_bottleneck_cpu_only(self):
         rc, out, err = self._run_bottleneck('bottleneck/test.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
@@ -475,7 +472,7 @@ class TestBottleneck(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     @unittest.skipIf(not torch.cuda.is_available(), 'No CUDA')
-    def test_cuda(self):
+    def test_bottleneck_cuda(self):
         rc, out, err = self._run_bottleneck('bottleneck/test_cuda.py')
         self.assertEqual(rc, 0, 'Run failed with\n{}'.format(err))
 
