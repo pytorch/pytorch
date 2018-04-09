@@ -75,8 +75,8 @@ void DumpGraph(NNGraph* g) {
     } else if (isa<Data>(node->data())) {
       auto tensor = dyn_cast<NeuralNetData>(node->data().get());
       labelMap["label"] = tensor->getName();
-      labelMap["label"] += "_" + std::to_string(tensor->getVersion()) + " " +
-          std::to_string((unsigned long long)node);
+      labelMap["label"] += "_" + caffe2::to_string(tensor->getVersion()) + " " +
+          caffe2::to_string((unsigned long long)node);
     }
     return labelMap;
   };
