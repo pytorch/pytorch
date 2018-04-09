@@ -104,6 +104,11 @@ static Variable sequenceToVariable(const Type& type, PyObject* seq) {
   return torch::utils::legacy_new_from_data(idx_type, -1, seq);
 }
 
+static bool is_integral(const Tensor& t) {
+  auto scalar_type = t.type().scalarType();
+  return scalar_type == at::kLong || scalar_type == at::kInt || scalar_type == at::kShort;
+}
+
 static Variable valueToTensor(const Type & type, PyObject* value) {
   if (THPVariable_Check(value)) {
     return reinterpret_cast<THPVariable*>(value)->cdata;
@@ -147,7 +152,12 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = result.unsqueeze(dim);
       dim++;
     } else if (THPVariable_Check(obj)) {
-      handle_var(reinterpret_cast<THPVariable*>(obj)->cdata);
+      auto& var = THPVariable_Unpack(obj);
+      if (var.dim() == 0 && is_integral(var)) {
+        result = applySelect(result, dim, THPUtils_unpackLong(obj));
+      } else {
+        handle_var(var);
+      }
     } else if (PySequence_Check(obj)) {
       handle_var(sequenceToVariable(self.type(), obj));
     } else {
