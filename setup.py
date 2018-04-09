@@ -293,6 +293,15 @@ class build_deps(Command):
             libs += ['THD']
         build_libs(libs)
 
+        # Use copies instead of symbolic files.
+        # Windows has very poor support for them.
+        sym_files = ['tools/shared/cwrap_common.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        for sym_file, orig_file in zip(sym_files, orig_files):
+            if os.path.exists(sym_file):
+                os.remove(sym_file)
+            shutil.copyfile(orig_file, sym_file)
+
         # Copy headers necessary to compile C++ extensions.
         #
         # This is not perfect solution as build does not depend on any of
