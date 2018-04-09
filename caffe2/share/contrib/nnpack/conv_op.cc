@@ -36,6 +36,7 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
       : ConvPoolOpBase<CPUContext>(operator_def, ws),
         algorithm_(getConvolutionAlgorithm()),
         transformStrategy_(getConvolutionTransformStrategy()),
+        activation_(getActivationType()),
         ws_(ws) {
     OPERATOR_NEEDS_FEATURE(
         this->order_ == StorageOrder::NCHW,
@@ -58,8 +59,10 @@ class NNPACKConvOp final : public ConvPoolOpBase<CPUContext> {
  private:
   nnp_convolution_algorithm getConvolutionAlgorithm() const;
   nnp_convolution_transform_strategy getConvolutionTransformStrategy() const;
+  nnp_activation getActivationType() const;
 
   const nnp_convolution_algorithm algorithm_;
+  const nnp_activation activation_;
   // Modified after precomputing the kernels. State transitions are:
   // - precompute -> (first call to Run()) -> reuse (on successful precompute)
   //                                       -> compute (on failing precompute)
@@ -127,6 +130,19 @@ NNPACKConvOp::getConvolutionTransformStrategy() const {
   }
   // Default to computing each time.
   return nnp_convolution_transform_strategy_compute;
+}
+
+nnp_activation
+NNPACKConvOp::getActivationType() const {
+  auto activation = OperatorBase::GetSingleArgument<std::string>(
+    "activation", "identity");
+  if (activation == "identity") {
+    return nnp_activation_identity;
+  } else if (activation == "Relu") {
+    return nnp_activation_relu;
+  } else {
+    CAFFE_THROW("unsupported activation type \"", activation, "\"");
+  }
 }
 
 bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
@@ -298,7 +314,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                 g * oH * oW * (M / group_),
             static_cast<void*>(buffer->template mutable_data<float>()),
             &workspaceSize,
-            nnp_activation_identity,
+            activation_,
             nullptr /* activation parameter */,
             &pool,
             FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
@@ -319,7 +335,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
               nullptr /* output */,
               nullptr /* workspace buffer */,
               &workspaceSize,
-              nnp_activation_identity,
+              activation_,
               nullptr /* activation parameter */,
               &pool,
               nullptr /* profile */);
@@ -352,7 +368,7 @@ bool NNPACKConvOp::RunOnDeviceWithOrderNCHW() {
                     g * oH * oW * (M / group_),
                 static_cast<void*>(buffer->template mutable_data<float>()),
                 &workspaceSize,
-                nnp_activation_identity,
+                activation_,
                 nullptr /* activation parameter */,
                 &pool,
                 FLAGS_caffe2_profile_nnpack ? &profile : nullptr);
