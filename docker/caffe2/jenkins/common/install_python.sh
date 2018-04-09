@@ -151,6 +151,7 @@ pip install --no-cache-dir \
     scikit-image \
     tabulate \
     virtualenv \
+    mock \
     typing \
     typing-extensions
 
