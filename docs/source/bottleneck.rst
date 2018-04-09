@@ -11,7 +11,7 @@ Run it on the command line with
 
 ::
 
-    python -m torch.utils.bottleneck -- /path/to/source/script.py [args]
+    python -m torch.utils.bottleneck /path/to/source/script.py [args]
 
 where [args] are any number of arguments to `script.py`, or run
 ``python -m torch.utils.bottleneck -h`` for more usage instructions.
