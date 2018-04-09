@@ -332,12 +332,23 @@ ENDIF()
 TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(ATen
-    ${CUDA_LIBRARIES}
-    ${CUDA_cusparse_LIBRARY}
-    ${CUDA_curand_LIBRARY})
-  CUDA_ADD_CUBLAS_TO_TARGET(ATen)
-  CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  IF ($ENV{ATEN_STATIC_CUDA})
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcusparse_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcurand_static.a
+      ${CUDA_TOOLKIT_ROOT_DIR}/lib64/libcublas_static.a
+      ${CUFFT_STATIC_LIB}
+      )
+    CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  ELSE()
+    TARGET_LINK_LIBRARIES(ATen
+      ${CUDA_LIBRARIES}
+      ${CUDA_cusparse_LIBRARY}
+      ${CUDA_curand_LIBRARY})
+    CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+    CUDA_ADD_CUFFT_TO_TARGET(ATen)
+  ENDIF()
 
   if(CUDNN_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})
