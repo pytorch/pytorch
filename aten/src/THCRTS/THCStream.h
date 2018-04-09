@@ -2,7 +2,7 @@
 #define THC_STREAM_INC
 
 #include <cuda_runtime_api.h>
-#include "THCGeneral.h"
+#include "THCRTSGeneral.h"
 
 struct THCStream
 {

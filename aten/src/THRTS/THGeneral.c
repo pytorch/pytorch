@@ -6,6 +6,7 @@
 #endif
 
 #ifndef TH_HAVE_THREAD
+#warn "__thread not available; building thread-unsafe TH (this is probably a cmake misconfiguration!)"
 #define __thread
 #elif _MSC_VER
 #define __thread __declspec( thread )

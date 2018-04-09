@@ -1,5 +1,5 @@
 #include "THCThreadLocal.h"
-#include "THCGeneral.h"
+#include "THCRTSGeneral.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif

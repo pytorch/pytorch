@@ -5,7 +5,7 @@
 #include <mutex>
 #endif
 
-#include "THCGeneral.h"
+#include "THCRTSGeneral.h"
 #include "THCStream.h"
 
 THC_API THCDeviceAllocator* THCCachingAllocator_get(void);

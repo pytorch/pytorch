@@ -2,50 +2,6 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
 SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 
-# avoid some cmake warnings
-IF(POLICY CMP0026)
- CMAKE_POLICY(SET CMP0026 OLD)
-ENDIF()
-
-IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-  SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
-ELSE()
-  SET(MSVC_OPT_FLAG "")
-ENDIF()
-
-########################
-# SET_SOURCE_FILES_PROPERTIES must be in the same CMakeLists.txt file as the target that includes the file
-# so we need to set these commands here rather than in src/TH
-IF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_sse.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math")
-  ENDIF(MSVC)
-ENDIF(C_SSE4_1_FOUND AND C_SSE4_2_FOUND)
-IF(C_AVX_FOUND)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/fp:fast ${C_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.c PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX ${C_AVX_FLAGS}")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/generic/simd/convolve5x5_avx.c PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${C_AVX_FLAGS}")
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX.c PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX_FLAGS}")
-  ENDIF(MSVC)
-ENDIF(C_AVX_FOUND)
-
-IF(C_AVX2_FOUND)
-  IF(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2 ${C_AVX2_FLAGS}")
-  ELSE(MSVC)
-    SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/vector/AVX2.cpp PROPERTIES COMPILE_FLAGS "-O3 ${C_AVX2_FLAGS}")
-  ENDIF(MSVC)
-ENDIF(C_AVX2_FOUND)
-
-IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
-  SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAtomic.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
-  SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
-ENDIF()
-
 FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
 
 LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
@@ -230,10 +186,14 @@ IF(NOT AT_LINK_STYLE)
 ENDIF()
 IF(CUDA_FOUND)
   CUDA_ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
+  # Huh?  Windows seems to need us to feed in THCRTS manually?  Maybe we should
+  # have used OBJECT instead?
+  target_link_libraries(ATen PRIVATE THCRTS THC)
 ELSE()
   ADD_LIBRARY(ATen ${AT_LINK_STYLE} ${all_cpp})
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
+target_link_libraries(ATen PRIVATE THRTS TH)
 
 set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
 set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
@@ -244,8 +204,17 @@ set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
 set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
 target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
-target_link_libraries(ATen tbb_static)
+# Blegh.  This should be PRIVATE but some code directly depends on tbb headers
+# being brought into scope by ATen.  Fix that, then make this PRIVATE.
+target_link_libraries(ATen PUBLIC tbb_static)
 
+# Apparently, if a static library depends on a symbol, and you link that library
+# in, and you give the shared library dependency for it... gcc still concludes
+# that the shared library is unneeded and doesn't included it!  Work around the
+# problem.
+if(NOT APPLE)
+  set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--no-as-needed")
+endif()
 SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
@@ -255,66 +224,26 @@ endif(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
-    TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+    target_link_libraries(ATen PRIVATE "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
   ELSE ($ENV{TH_BINARY_BUILD})
-    TARGET_LINK_LIBRARIES(ATen ${BLAS_LIBRARIES})
+    target_link_libraries(ATen PUBLIC ${BLAS_LIBRARIES})
   ENDIF ($ENV{TH_BINARY_BUILD})
 ENDIF(BLAS_FOUND)
 
 IF(LAPACK_FOUND)
-  TARGET_LINK_LIBRARIES(ATen ${LAPACK_LIBRARIES})
+  target_link_libraries(ATen PUBLIC ${LAPACK_LIBRARIES})
 ENDIF(LAPACK_FOUND)
 
-IF (UNIX AND NOT APPLE)
-   INCLUDE(CheckLibraryExists)
-   # https://github.com/libgit2/libgit2/issues/2128#issuecomment-35649830
-   CHECK_LIBRARY_EXISTS(rt clock_gettime "time.h" NEED_LIBRT)
-   IF(NEED_LIBRT)
-     TARGET_LINK_LIBRARIES(ATen rt)
-     SET(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} rt)
-   ENDIF(NEED_LIBRT)
-ENDIF(UNIX AND NOT APPLE)
-
-IF(UNIX)
-  SET(CMAKE_EXTRA_INCLUDE_FILES "sys/mman.h")
-  CHECK_FUNCTION_EXISTS(mmap HAVE_MMAP)
-  IF(HAVE_MMAP)
-    ADD_DEFINITIONS(-DHAVE_MMAP=1)
-  ENDIF(HAVE_MMAP)
-  # done for lseek: https://www.gnu.org/software/libc/manual/html_node/File-Position-Primitive.html
-  ADD_DEFINITIONS(-D_FILE_OFFSET_BITS=64)
-  CHECK_FUNCTION_EXISTS(shm_open HAVE_SHM_OPEN)
-  IF(HAVE_SHM_OPEN)
-    ADD_DEFINITIONS(-DHAVE_SHM_OPEN=1)
-  ENDIF(HAVE_SHM_OPEN)
-  CHECK_FUNCTION_EXISTS(shm_unlink HAVE_SHM_UNLINK)
-  IF(HAVE_SHM_UNLINK)
-    ADD_DEFINITIONS(-DHAVE_SHM_UNLINK=1)
-  ENDIF(HAVE_SHM_UNLINK)
-  CHECK_FUNCTION_EXISTS(malloc_usable_size HAVE_MALLOC_USABLE_SIZE)
-  IF(HAVE_MALLOC_USABLE_SIZE)
-    ADD_DEFINITIONS(-DHAVE_MALLOC_USABLE_SIZE=1)
-  ENDIF(HAVE_MALLOC_USABLE_SIZE)
-ENDIF(UNIX)
+if(NEED_LIBRT)
+  target_link_libraries(ATen PUBLIC rt)
+endif()
 
 IF(NOT MSVC)
-  TARGET_LINK_LIBRARIES(ATen m)
+  target_link_libraries(ATen PUBLIC m)
 ENDIF(NOT MSVC)
-
-# Is __thread supported?
-IF(NOT MSVC)
-  CHECK_C_SOURCE_COMPILES("static __thread int x = 1; int main() { return x; }" C_HAS_THREAD)
-ELSE(NOT MSVC)
-  CHECK_C_SOURCE_COMPILES("static __declspec( thread ) int x = 1; int main() { return x; }" C_HAS_THREAD)
-ENDIF(NOT MSVC)
-IF(NOT C_HAS_THREAD)
-  MESSAGE(STATUS "Warning: __thread is not supported, generating thread-unsafe code")
-ELSE(NOT C_HAS_THREAD)
-  SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DTH_HAVE_THREAD")
-ENDIF(NOT C_HAS_THREAD)
 
 if(MKLDNN_FOUND)
-  target_link_libraries(ATen ${MKLDNN_LIBRARIES})
+  target_link_libraries(ATen PUBLIC ${MKLDNN_LIBRARIES})
 endif(MKLDNN_FOUND)
 
 # ---[ Configure cpuinfo
@@ -325,10 +254,11 @@ IF(NOT TARGET cpuinfo)
   SET(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
   ADD_SUBDIRECTORY("cpu/cpuinfo")
 ENDIF()
-TARGET_LINK_LIBRARIES(ATen cpuinfo)
+target_link_libraries(ATen PRIVATE cpuinfo)
 
 IF(CUDA_FOUND)
-  TARGET_LINK_LIBRARIES(ATen
+  target_link_libraries(ATen
+    PUBLIC
     ${CUDA_LIBRARIES}
     ${CUDA_cusparse_LIBRARY}
     ${CUDA_curand_LIBRARY})
@@ -336,11 +266,11 @@ IF(CUDA_FOUND)
   CUDA_ADD_CUFFT_TO_TARGET(ATen)
 
   if(CUDNN_FOUND)
-    target_link_libraries(ATen ${CUDNN_LIBRARIES})
+    target_link_libraries(ATen PUBLIC ${CUDNN_LIBRARIES})
   endif(CUDNN_FOUND)
 
   IF(USE_MAGMA)
-    TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
+    target_link_libraries(ATen PRIVATE ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})
       # because magma is linked statically and it wants a BLAS,
       # we need to link the BLAS lib against THC. Usually TH will
@@ -351,7 +281,7 @@ IF(CUDA_FOUND)
       SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../TH/cmake ${CMAKE_MODULE_PATH})
       FIND_PACKAGE(BLAS)
       IF(BLAS_FOUND)
-        TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
+        target_link_libraries(ATen PRIVATE "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
       ELSE(BLAS_FOUND)
         MESSAGE(FATAL_ERROR "Binary build needs blas to be found here")
       ENDIF(BLAS_FOUND)
