@@ -4,6 +4,7 @@ import torch.distributed as dist
 from torch.nn.modules import Module
 from collections import defaultdict
 
+
 class DistributedDataParallelCPU(Module):
     r"""Implements distributed data parallelism for CPU at the module level.
 
