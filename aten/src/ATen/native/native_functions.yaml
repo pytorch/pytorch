@@ -310,6 +310,8 @@
 
 - func: empty_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: exp(Tensor self) -> Tensor
 
@@ -357,6 +359,8 @@
 
 - func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
@@ -470,6 +474,8 @@
 
 - func: ones_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
@@ -490,6 +496,9 @@
 
 - func: rand_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
+
 
 - func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
@@ -502,6 +511,8 @@
 
 - func: randn_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
@@ -708,6 +719,8 @@
 
 - func: zeros_like(Tensor self, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:

@@ -35,7 +35,7 @@ def is_floating(t):
 
 def is_half(t):
     if isinstance(t, torch.Tensor):
-        return t.dtype in [torch.float16, torch.cuda.float16]
+        return t.dtype == torch.float16
     assert isinstance(t, type)
     assert t != torch.autograd.Variable
     return t in [torch.HalfTensor, torch.cuda.HalfTensor]
@@ -1069,7 +1069,7 @@ class TestCuda(TestCase):
         TestTorch._test_cat_empty(self, use_cuda=True)
 
     def test_bernoulli(self):
-        x = torch.tensor([0, 1], dtype=torch.cuda.float32)
+        x = torch.tensor([0, 1], dtype=torch.float32, device='cuda')
         self.assertEqual(x.bernoulli().tolist(), [0, 1])
 
     def test_cat_bad_input_sizes(self):
@@ -1432,7 +1432,7 @@ class TestCuda(TestCase):
         TestTorch._test_int_pow(self, lambda x: x.cuda())
 
     def test_remainder_overflow(self):
-        TestTorch._test_remainder_overflow(self, dtype=torch.cuda.int64)
+        TestTorch._test_remainder_overflow(self, dtype=torch.int64, device='cuda')
 
     def test_var(self):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -1541,10 +1541,10 @@ class TestCuda(TestCase):
             self.assertEqual(a, b.cuda())
 
     def test_diagonal(self):
-        TestTorch._test_diagonal(self, dtype=torch.cuda.float32)
+        TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')
 
     def test_diagflat(self):
-        TestTorch._test_diagflat(self, dtype=torch.cuda.float32)
+        TestTorch._test_diagflat(self, dtype=torch.float32, device='cuda')
 
     @unittest.skipIf(torch.cuda.device_count() < 2, "only one GPU detected")
     def test_get_set_rng_state_all(self):
