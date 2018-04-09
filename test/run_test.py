@@ -6,6 +6,7 @@ import argparse
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -81,7 +82,8 @@ def test_cpp_extensions(python, test_module, test_directory, options):
         if sys.platform == 'win32':
             install_directory = os.path.join(cpp_extensions, 'install')
             install_directories = get_shell_output(
-                "where -r \"{}\" *.pyd".format(install_directory)).split('\r\n')
+                'where -r \"{}\" *.pyd'.format(install_directory)).split(
+                    '\r\n')
 
             assert install_directories, 'install_directory must not be empty'
 
@@ -92,14 +94,13 @@ def test_cpp_extensions(python, test_module, test_directory, options):
             split_char = ';'
         else:
             install_directory = get_shell_output(
-                "find {}/install -name *-packages".format(cpp_extensions))
+                'find {}/install -name *-packages'.format(cpp_extensions))
             split_char = ':'
 
         assert install_directory, 'install_directory must not be empty'
         install_directory = os.path.join(test_directory, install_directory)
         os.environ['PYTHONPATH'] = '{}{}{}'.format(install_directory,
-                                                   split_char,
-                                                   python_path)
+                                                   split_char, python_path)
         return run_test(python, test_module, test_directory, options)
     finally:
         os.environ['PYTHONPATH'] = python_path
@@ -229,6 +230,10 @@ def get_selected_tests(options):
     return selected_tests
 
 
+def signal_handler(signal, frame):
+    print('run_test.py received SIGCHLD! A test probably segfaulted.')
+
+
 def main():
     options = parse_args()
     python = get_python_command(options)
@@ -239,6 +244,8 @@ def main():
 
     if options.coverage:
         shell('coverage erase')
+
+    signal.signal(signal.SIGCHLD, signal_handler)
 
     for test in selected_tests:
         test_module = 'test_{}.py'.format(test)
