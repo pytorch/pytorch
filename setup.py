@@ -525,14 +525,27 @@ if IS_WINDOWS:
         # against libaries in Python 2.7 under Windows
         extra_compile_args.append('/bigobj')
 else:
-    extra_compile_args = ['-std=c++11', '-Wno-write-strings',
-                          # Python 2.6 requires -fno-strict-aliasing, see
-                          # http://legacy.python.org/dev/peps/pep-3123/
-                          '-fno-strict-aliasing',
-                          # Clang has an unfixed bug leading to spurious missing
-                          # braces warnings, see
-                          # https://bugs.llvm.org/show_bug.cgi?id=21629
-                          '-Wno-missing-braces']
+    extra_compile_args = [
+        '-std=c++11',
+        '-Wall',
+        '-Wextra',
+        '-pedantic',
+        '-Wno-unused-parameter',
+        '-Wno-missing-field-initializers',
+        '-Wno-write-strings',
+        '-Wno-zero-length-array',
+        '-Wno-return-type-c-linkage',
+        '-Wc++14-extensions',  # prevents use of C++14 features
+        # Python 2.6 requires -fno-strict-aliasing, see
+        # http://legacy.python.org/dev/peps/pep-3123/
+        '-fno-strict-aliasing',
+        # Clang has an unfixed bug leading to spurious missing
+        # braces warnings, see
+        # https://bugs.llvm.org/show_bug.cgi?id=21629
+        '-Wno-missing-braces'
+    ]
+    if os.getenv('WERROR'):
+        extra_compile_args.append('-Werror')
 
 cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
@@ -543,12 +556,14 @@ tmp_install_path = lib_path + "/tmp_install"
 include_dirs += [
     cwd,
     os.path.join(cwd, "torch", "csrc"),
-    third_party_path + "/pybind11/include",
     tmp_install_path + "/include",
     tmp_install_path + "/include/TH",
     tmp_install_path + "/include/THNN",
     tmp_install_path + "/include/ATen",
 ]
+# -isystem treats the include as a system header, which prevents warnings from
+# surfacing.
+extra_compile_args.append('-isystem ' + third_party_path + "/pybind11/include")
 
 library_dirs.append(lib_path)
 
@@ -678,8 +693,10 @@ main_sources = [
 
 try:
     import numpy as np
-    include_dirs += [np.get_include()]
-    extra_compile_args += ['-DWITH_NUMPY']
+    # -isystem treats the include as a system header, which prevents warnings
+    # from surfacing.
+    extra_compile_args.append('-isystem ' + np.get_include())
+    extra_compile_args.append('-DWITH_NUMPY')
     WITH_NUMPY = True
 except ImportError:
     WITH_NUMPY = False

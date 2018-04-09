@@ -213,7 +213,7 @@ void initPythonIRBindings(PyObject * module_) {
       return variables;
     })
     .def("z_",[](Node & n, const char * name, at::Tensor v) {
-        return n.t_(Symbol::attr(name), std::move(v.view({})));
+        return n.t_(Symbol::attr(name), v.view({}));
     })
     .def("z",[](Node & n, const char * name) {
         return n.t(Symbol::attr(name));
