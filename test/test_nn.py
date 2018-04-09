@@ -1926,9 +1926,9 @@ class TestNN(NNTestCase):
         # assert that relfection padding errors when pad >= input size
         expected_err_msg = r"Padding size should be less than the corresponding input dimension"
         self.assertRaisesRegex(RuntimeError, expected_err_msg,
-                               lambda : F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
+                               lambda: F.pad(torch.randn(1, 1, 2, 3), (1, 1, 3, 0), mode='reflect'))
         self.assertRaisesRegex(RuntimeError, expected_err_msg,
-                               lambda : F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
+                               lambda: F.pad(torch.randn(1, 1, 2), (2, 1), mode='reflect'))
 
     def test_pad_scalar_error(self):
         inputs = torch.tensor(0, requires_grad=True)
