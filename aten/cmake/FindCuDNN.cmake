@@ -23,10 +23,17 @@ else($ENV{CUDNN_INCLUDE_DIR})
     PATH_SUFFIXES cuda/include include)
 endif($ENV{CUDNN_INCLUDE_DIR})
 
+IF ($ENV{USE_STATIC_CUDNN})
+  MESSAGE(STATUS "USE_STATIC_CUDNN detected. Linking against static CUDNN library")
+  SET(CUDNN_LIBNAME "libcudnn_static.a")
+ELSE()
+  SET(CUDNN_LIBNAME "cudnn")
+ENDIF()
+
 if($ENV{CUDNN_LIBRARY})
   SET(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
 else($ENV{CUDNN_LIBRARY})
-  find_library(CUDNN_LIBRARY cudnn
+  find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_LIB_DIR} ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
 endif($ENV{CUDNN_LIBRARY})
