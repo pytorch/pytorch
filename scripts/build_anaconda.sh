@@ -39,44 +39,54 @@ set -ex
 # alter conda-build files such as the meta.yaml. It always adds the inplace
 # flag
 #   portable_sed <full regex string> <file>
-portable_sed () {
-  if [ "$(uname)" == 'Darwin' ]; then
+if [ "$(uname)" == 'Darwin' ]; then
+  portable_sed () {
     sed -i '' "$1" "$2"
-  else
+  }
+else
+  portable_sed () {
     sed -i "$1" "$2"
-  fi
-}
+  }
+fi
 
-# remove_package: Given a string, removes any line that mentions that line from
+# remove_lines_with: Given a string, removes any line that mentions that line from
 # the meta.yaml
-remove_package () {
+remove_lines_with () {
   portable_sed "/$1/d" "${META_YAML}"
 }
 
-# add_package: Takes a package name and a version and finagles the
-# meta.yaml to ask for that version specifically.
-# NOTE: this assumes that $META_YAML has already been set
-# The \\"$'\n' is a properly escaped new line
-# Those 4 spaces are there to properly indent the comment
-add_package_section () {
-  local _M_STR='# ${1} packages here'
-  portable_sed "s/$_M_STR/- ${2} ${3}\\"$'\n'"    $_M_STR/" "${META_YAML}"
+# add_before <some marker> <some insertion> <in this file>
+# essentially replaces
+#
+#    <some marker>
+#
+# with
+#
+#    <some insertion>
+#    <some marker>
+#
+# ( *)     captured whitespace before match == the indentation in the meta.yaml
+# ${1}     the marker to insert before
+# '\1'     captured whitespace == correct indentation
+# ${2}     the string to insert
+# \\"$'\n' escaped newline
+# \1'      captured whitespace == correct indentation
+# ${1}     put the marker back
+add_before () {
+  portable_sed "s/${1}/i \
+${2}\
+${1}" $3
+  #portable_sed "s/( *)${1}/"'\1'"${2}\\"$'\n\1'"${1}/" $3
 }
+append_to_section () {
+  add_before "# ${1} section here" "- ${2} ${3}" $META_YAML
+}
+# add_package <package_name> <optional package version specifier>
+# Takes a package name and version and finagles the meta.yaml to specify that
 add_package () {
-  remove_package $1
-  add_package_section 'build' $1 $2
-  add_package_section 'run' $1 $2
-}
-
-# add_feature: Adds a given feature tag to the build section. Takes care to
-# only add the feature section once. Assumes that no feature section exists yet
-add_feature() {
-  local _M_STR='# features go here'
-  if [[ -z $ADDED_A_FEATURE ]]; then
-    portable_sed "s/$_M_STR/features:\\"$'\n'"      $_M_STR/" "${META_YAML}"
-    ADDED_A_FEATURE=YES
-  fi
-  portable_sed "s/$_M_STR/- ${1}\\"$'\n'"      $_M_STR/" "${META_YAML}"
+  remove_lines_with $1
+  append_to_section 'build' $1 $2
+  append_to_section 'run' $1 $2
 }
 
 
@@ -181,6 +191,7 @@ else
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/normal"
 fi
 META_YAML="${CONDA_BUILD_DIR}/meta.yaml"
+portable_sed 's#path:  \.\..*#path: $PYTORCH_ROOT#'
 
 
 ###########################################################
@@ -202,7 +213,7 @@ if [[ -n $CUDA_VERSION ]]; then
 else
   BUILD_STRING="${BUILD_STRING}_cpu"
 fi
-if [[ "$(uname)" != 'Darwin' -a $GCC_USE_C11 -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && $GCC_USE_C11 -eq 0 ]]; then
   # gcc compatibility is not tracked by conda-forge, so we track it ourselves
   PACKAGE_NAME="${PACKAGE_NAME}-gcc${GCC_VERSION:0:3}"
   BUILD_STRING="${BUILD_STRING}_gcc${GCC_VERSION:0:3}"
@@ -219,11 +230,19 @@ portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
 # Handle tests
 ###########################################################
 if [[ -n $SKIP_CONDA_TESTS ]]; then
-  portable_sed '/test:/d' "${META_YAML}"
-  portable_sed '/imports:/d' "${META_YAML}"
-  portable_sed '/caffe2.python.core/d' "${META_YAML}"
-#elif [[ -n $BUILD_INTEGRATED ]]; then
-# TODO handle test section for pytorch
+  remove_lines_with '/test:/d'
+  remove_lines_with '/imports:/d'
+  remove_lines_with '/caffe2.python.core/d'
+elif [[ -n $BUILD_INTEGRATED ]]; then
+  if [[ -n $CUDA_VERSION ]]; then
+    append_to_section 'test' 'requires:'
+    append_to_section 'test' "  - $CUDA_FEATURE_NAME"
+    append_to_section 'test' '  - nccl2'
+  fi
+  append_to_section 'test' 'source_files:'
+  append_to_section 'test' '  - test'
+  append_to_section 'test' 'commands:'
+  append_to_section 'test' '  - OMP_NUM_THREADS=4 ./test/run_test.sh || true'
 fi
 
 
@@ -239,20 +258,21 @@ add_package opencv
 
 # Add packages required for pytorch
 if [[ -n $BUILD_INTEGRATED ]]; then
-  remove_package numpy
-  add_package_section 'build' numpy 1.11.*
-  add_package_section 'run' numpy >=1.11
+  remove_lines_with 'numpy'
+  append_to_section 'build' numpy 1.11.*
+  append_to_section 'run' numpy >=1.11
   add_package cffi
-  add_package_section 'build' pyyaml
-  add_package_section 'build' setuptools
-  add_package_section 'build' mkl
-  add_package_section 'build' mkl-include
-  add_package_section 'run' mkl >=2018
+  append_to_section 'build' pyyaml
+  append_to_section 'build' setuptools
+  append_to_section 'build' mkl
+  append_to_section 'build' mkl-include
+  append_to_section 'run' mkl >=2018
   CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
   if [[ -n $CUDA_VERSION ]]; then
-    add_feature $CUDA_FEATURE_NAME
+    append_to_section 'feature' feature:
+    append_to_section '  $CUDA_FEATURE_NAME'
+    append_to_section '  nccl2'
     add_package $CUDA_FEATURE_NAME
-    add_feature nccl2
     CONDA_CHANNEL+=('-c pytorch')
   fi
 fi
@@ -274,7 +294,7 @@ else
 fi
 
 # Change flags based on target gcc ABI
-if [[ "$(uname)" != 'Darwin' -a "$GCC_USE_C11" -eq 0 ]]; then
+if [[ "$(uname)" != 'Darwin' && "$GCC_USE_C11" -eq 0 ]]; then
   # opencv 3.3.1 in conda-forge doesn't have imgcodecs, and opencv 3.1.0
   # requires numpy 1.12
   add_package 'opencv' '==3.1.0'
@@ -291,7 +311,7 @@ fi
 # Upload to Anaconda.org if needed. This is only allowed if testing is
 # enabled
 ###########################################################
-if [[ -z $SKIP_CONDA_TESTS -a -n $UPLOAD_TO_CONDA ]]; then
+if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --user ${ANACONDA_USERNAME}")
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
 fi

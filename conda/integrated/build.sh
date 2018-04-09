@@ -79,16 +79,16 @@ fi
 
 # Rename .so files with their hashes included
 fname_with_sha256() {
-    HASH=$(sha256sum $1 | cut -c1-8)
-    DIRNAME=$(dirname $1)
-    BASENAME=$(basename $1)
-    if [[ $BASENAME == "libnvrtc-builtins.so" ]]; then
-	echo $1
-    else
-	INITNAME=$(echo $BASENAME | cut -f1 -d".")
-	ENDNAME=$(echo $BASENAME | cut -f 2- -d".")
-	echo "$DIRNAME/$INITNAME-$HASH.$ENDNAME"
-    fi
+  HASH=$(sha256sum $1 | cut -c1-8)
+  DIRNAME=$(dirname $1)
+  BASENAME=$(basename $1)
+  if [[ $BASENAME == "libnvrtc-builtins.so" ]]; then
+	  echo $1
+  else
+	  INITNAME=$(echo $BASENAME | cut -f1 -d".")
+	  ENDNAME=$(echo $BASENAME | cut -f 2- -d".")
+	  echo "$DIRNAME/$INITNAME-$HASH.$ENDNAME"
+  fi
 }
 
 # for some reason if we use exact version numbers for CUDA9 .so files 

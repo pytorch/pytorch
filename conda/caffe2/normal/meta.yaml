@@ -14,6 +14,7 @@ build:
   script_env:
     - CONDA_CAFFE2_CMAKE_ARGS
     - BUILD_WITH_CUDA
+  # feature section here
 
 requirements:
   build:
@@ -22,17 +23,17 @@ requirements:
     - numpy
     - python
     - six
-    # build packages here
+    # build section here
   run:
     - future
     - numpy
     - protobuf
     - python
     - six
-    # run packages here
+    # run section here
 
 test:
-  # test packages here
+  # test section here
   imports:
     - caffe2.python.core
 
