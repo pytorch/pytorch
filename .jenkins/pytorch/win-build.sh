@@ -76,8 +76,6 @@ set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-xcopy /Y aten\\src\\ATen\\common_with_cwrap.py tools\\shared\\cwrap_common.py
-
 set NO_CUDA=1
 
 python setup.py install
