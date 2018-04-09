@@ -2,10 +2,12 @@ import torch
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 import torch.distributed as dist
 from torch.nn.modules import Module
-
+from collections import defaultdict
 
 class DistributedDataParallelCPU(Module):
     r"""Implements distributed data parallelism for CPU at the module level.
+
+    This module support the ``mpi``, ``gloo``, ``tcp`` backends.
 
     This container parallelizes the application of the given module by
     splitting the input across the specified devices by chunking in the batch
@@ -27,10 +29,6 @@ class DistributedDataParallelCPU(Module):
     (see :func:`torch.distributed.init_process_group`).
 
     .. warning::
-        This module works only with the ``mpi`` backends.
-        The other backends like ``gloo``, ``tcp`` are not tested yet.
-
-    .. warning::
         Constructor, forward method, and differentiation of the output (or a
         function of the output of this module) is a distributed synchronization
         point. Take that into account in case different processes might be
@@ -49,7 +47,7 @@ class DistributedDataParallelCPU(Module):
         parameters).
 
     .. note::
-        Parameters are broadcast between nodes in the first forward. The
+        Parameters are broadcast between nodes in the __init__() function. The
         module performs an all-reduce step on gradients and assumes that they
         will be modified by the optimizer in all processes in the same way.
 
@@ -70,21 +68,18 @@ class DistributedDataParallelCPU(Module):
     def __init__(self, module):
         super(DistributedDataParallelCPU, self).__init__()
         self.module = module
-        self.first_call = True
+        self.weight_broadcast()
 
         def allreduce_params():
-            if (self.needs_reduction):
+            if self.needs_reduction:
                 self.needs_reduction = False
-                buckets = {}
+                buckets = defaultdict(list)
                 for param in self.module.parameters():
                     if param.requires_grad and param.grad is not None:
                         tp = type(param.data)
-                        if tp not in buckets:
-                            buckets[tp] = []
                         buckets[tp].append(param)
 
-                for tp in buckets:
-                    bucket = buckets[tp]
+                for bucket in buckets.values():
                     grads = [param.grad.data for param in bucket]
                     coalesced = _flatten_dense_tensors(grads)
                     dist.all_reduce(coalesced)
@@ -100,13 +95,10 @@ class DistributedDataParallelCPU(Module):
                 param.register_hook(allreduce_hook)
 
     def weight_broadcast(self):
-        # broadcase the wight in the first call
+        # broadcase the wight in the __init__ function
         for param in self.module.parameters():
             dist.broadcast(param.data, 0)
 
     def forward(self, *inputs, **kwargs):
-        if self.first_call:
-            self.weight_broadcast()
-            self.first_call = False
         self.needs_reduction = True
         return self.module(*inputs, **kwargs)

@@ -843,6 +843,78 @@ class _DistTestBase(object):
 
         self._barrier()
 
+    @unittest.skipIf(BACKEND == 'nccl', "nccl does not support DistributedDataParallelCPU")
+    def test_DistributedDataParallelCPU(self):
+        # Run a simple end to end DDP-CPU model, use result of single node
+        # model as baseline
+        group, group_id, rank = self._init_global_test()
+
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.fc1 = nn.Linear(2, 10, bias=False)
+                self.fc2 = nn.Linear(10, 50, bias=False)
+                self.fc3 = nn.Linear(50, 4, bias=False)
+                self.relu = nn.ReLU()
+
+            def forward(self, x):
+                x = self.relu(self.fc1(x))
+                x = self.relu(self.fc2(x))
+                x = self.fc3(x)
+                return F.softmax(x, dim=1)
+
+        def model_step(model):
+            for param in model.parameters():
+                param.data += param.grad
+                param.grad = None
+
+        def assert_equal_param(param_gpu, param_DDP):
+            self.assertEqual(len(param_gpu), len(param_DDP))
+            for p_gpu, p_DDP in zip(param_gpu, param_DDP):
+                self.assertEqual(p_gpu, p_DDP)
+
+        # cpu training setup
+        model = Net()
+
+        # single cpu training setup
+        model_single = copy.deepcopy(model)
+
+        # DDP-MPI training setup
+        model_DDP = copy.deepcopy(model)
+        model_DDP = nn.parallel.DistributedDataParallelCPU(model_DDP)
+
+        # batch_size for DDP should be divisible by WORLD_SIZE
+        local_bs = 10
+        global_bs = int(WORLD_SIZE) * local_bs
+        input_cpu = torch.randn(global_bs, 2)
+        target = torch.randn(global_bs, 4)
+        loss = nn.MSELoss()
+
+        for i in range(2):
+            # single cpu training
+            self._test_DDP_helper(model_single,
+                                  input_cpu,
+                                  target,
+                                  loss)
+
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            self._test_DDP_helper(model_DDP,
+                                  input_cpu[rank * local_bs: (rank + 1) * local_bs],
+                                  target[rank * local_bs: (rank + 1) * local_bs],
+                                  loss)
+
+            # Update weights and run a second iteration to shake out errors
+            model_step(model_single)
+            model_step(model_DDP)
+
+            assert_equal_param(list(model_single.parameters()), list(model_DDP.module.parameters()))
+
+            # Shuffle the input so that DDP input is different
+            input_cpu = input_cpu[torch.randperm(global_bs)]
+
+        self._barrier()
+
+
 if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
@@ -933,6 +1005,7 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
                     raise unittest.SkipTest("worldsize is too small to run group tests")
 
 elif BACKEND == 'mpi':
+    WORLD_SIZE = os.environ['WORLD_SIZE']
     dist.init_process_group(init_method=INIT_METHOD, backend='mpi')
 
     class TestMPI(TestCase, _DistTestBase):
