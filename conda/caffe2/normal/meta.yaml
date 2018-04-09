@@ -9,9 +9,11 @@ source:
 
 build:
   number: 0
+  string: py{{py}}
   skip: True  # [win]
   script_env:
-    - CONDA_CMAKE_BUILD_ARGS
+    - CONDA_CAFFE2_CMAKE_ARGS
+    - BUILD_WITH_CUDA
 
 requirements:
   build:
@@ -20,16 +22,17 @@ requirements:
     - numpy
     - python
     - six
-    # other packages here
+    # build packages here
   run:
     - future
     - numpy
     - protobuf
     - python
     - six
-    # other packages here
+    # run packages here
 
 test:
+  # test packages here
   imports:
     - caffe2.python.core
 
