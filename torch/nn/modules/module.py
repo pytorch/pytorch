@@ -211,17 +211,11 @@ class Module(object):
             >>> net = nn.Sequential(nn.Linear(2, 2), nn.Linear(2, 2))
             >>> net.apply(init_weights)
             Linear(in_features=2, out_features=2, bias=True)
-
-             1  1
-             1  1
-            [torch.FloatTensor of size (2,2)]
-
+            tensor([[ 1, 1],
+                    [ 1, 1]])
             Linear(in_features=2, out_features=2, bias=True)
-
-             1  1
-             1  1
-            [torch.FloatTensor of size (2,2)]
-
+            tensor([[ 1, 1],
+                    [ 1, 1]])
             Sequential(
               (0): Linear(in_features=2, out_features=2, bias=True)
               (1): Linear(in_features=2, out_features=2, bias=True)

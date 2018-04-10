@@ -72,24 +72,16 @@ def btrifact(A, info=None, pivot=True):
         >>> A = torch.randn(2, 3, 3)
         >>> A_LU, pivots = torch.btrifact(A)
         >>> A_LU
+        tensor([[[ 0.4749, 0.7413, 0.4480],
+                 [-0.3632,-1.3617,-0.0797],
+                 [ 0.7566, 0.4899,-1.1700]],
 
-        (0 ,.,.) =
-          0.7908 -0.0854  0.1522
-          0.2757 -1.2942 -1.3715
-         -0.6029  0.3609  0.3210
-
-        (1 ,.,.) =
-          0.9091  0.1719  0.7741
-          0.1625  0.6720  0.1687
-         -0.1927 -0.9420 -0.4891
-        [torch.FloatTensor of size (2,3,3)]
-
+                [[ 1.3701,-0.8854,-0.3804],
+                 [ 0.9257, 0.9282, 0.4508],
+                 [-0.8907,-0.7186,-0.1126]]])
         >>> pivots
-
-         2  2  3
-         1  3  3
-        [torch.IntTensor of size (2,3)]
-
+        tensor([[ 3, 3, 3],
+                [ 2, 3, 3]], dtype=torch.int32)
     """
     # Overwriting reason:
     # `info` is being deprecated in favor of `btrifact_with_info`. This warning
@@ -346,43 +338,21 @@ def unique(input, sorted=False, return_inverse=False):
 
         >>>> output = torch.unique(torch.LongTensor([1, 3, 2, 3]))
         >>>> output
-
-         2
-         3
-         1
-        [torch.LongTensor of size (3,)]
-
+        tensor([ 2, 3, 1])
         >>>> output, inverse_indices = torch.unique(
                  torch.LongTensor([1, 3, 2, 3]), sorted=True, return_inverse=True)
         >>>> output
-
-         1
-         2
-         3
-        [torch.LongTensor of size (3,)]
-
+        tensor([ 1, 2, 3])
         >>>> inverse_indices
-
-         0
-         2
-         1
-         2
-        [torch.LongTensor of size (4,)]
+        tensor([ 0, 2, 1, 2])
 
         >>>> output, inverse_indices = torch.unique(
                  torch.LongTensor([[1, 3], [2, 3]]), sorted=True, return_inverse=True)
         >>>> output
-
-         1
-         2
-         3
-        [torch.LongTensor of size (3,)]
-
+        tensor([ 1, 2, 3])
         >>>> inverse_indices
-
-         0  2
-         1  2
-        [torch.LongTensor of size (2,2)]
+        tensor([[ 0, 2],
+                [ 1, 2]])
     """
     output, inverse_indices = torch._unique(
         input,

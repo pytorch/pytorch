@@ -19,11 +19,7 @@ class LogisticNormal(TransformedDistribution):
         >>> m = LogisticNormal(torch.Tensor([0.0] * 3), torch.Tensor([1.0] * 3))
         >>> m.sample()  # logistic-normal distributed with mean=(0, 0, 0) and
                         # stddev=(1, 1, 1) of the base Normal distribution
-         0.4163
-         0.1386
-         0.3539
-         0.0912
-        [torch.FloatTensor of size (4,)]
+        tensor([ 0.0316, 0.2036, 0.3598, 0.4051])
 
     Args:
         loc (float or Tensor): mean of the base distribution
