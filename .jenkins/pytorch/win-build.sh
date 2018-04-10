@@ -46,7 +46,7 @@ call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
 call conda install -y -q mkl mkl-include numpy cffi pyyaml boto3
 
 :: Install MKL Static
-conda install -y mkl-static -c intel --no-update-deps --no-deps
+call conda install -y mkl-static -c intel --no-update-deps --no-deps
 set "LIB=C:\\Jenkins\\Miniconda3\\Library\\lib;%LIB%"
 
 :: Install ninja
