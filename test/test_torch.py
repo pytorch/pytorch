@@ -3478,6 +3478,9 @@ class TestTorch(TestCase):
                 res = x.fft(signal_ndim, normalized=normalized)
                 rec = res.ifft(signal_ndim, normalized=normalized)
                 self.assertEqual(x, rec, 1e-8, 'fft and ifft')
+                res = x.ifft(signal_ndim, normalized=normalized)
+                rec = res.fft(signal_ndim, normalized=normalized)
+                self.assertEqual(x, rec, 1e-8, 'ifft and fft')
 
         def _test_real(sizes, signal_ndim, prepro_fn=lambda x: x):
             x = prepro_fn(build_fn(*sizes))
@@ -3542,11 +3545,19 @@ class TestTorch(TestCase):
         _test_real((30, 20, 50, 25), 3, lambda x: x.transpose(1, 2).transpose(2, 3))
 
         _test_complex((2, 100), 1, lambda x: x.t())
-        _test_complex((100, 3, 100, 2), 1, lambda x: x[:, 1].transpose(0, 1))
-        _test_complex((300, 200, 2), 2, lambda x: x[:100, :100])
+        _test_complex((100, 2), 1, lambda x: x.expand(100, 100, 2))
+        _test_complex((300, 200, 3), 2, lambda x: x[:100, :100, 1:])  # input is not aligned to complex type
         _test_complex((20, 90, 110, 2), 2, lambda x: x[:, 5:85].narrow(2, 5, 100))
         _test_complex((40, 60, 3, 80, 2), 3, lambda x: x.transpose(2, 0).select(0, 2)[5:55, :, 10:])
         _test_complex((30, 55, 50, 22, 2), 3, lambda x: x[:, 3:53, 15:40, 1:21])
+
+        # non-contiguous with strides not representable as aligned with complex type
+        _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [3, 2, 1]))
+        _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [4, 2, 2]))
+        _test_complex((50,), 1, lambda x: x.as_strided([5, 5, 2], [4, 3, 1]))
+        _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [3, 3, 1]))
+        _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [4, 2, 2]))
+        _test_complex((50,), 2, lambda x: x.as_strided([5, 5, 2], [4, 3, 1]))
 
     @unittest.skipIf(not TEST_MKL, "PyTorch is built without MKL support")
     def test_fft_ifft_rfft_irfft(self):
@@ -3558,20 +3569,15 @@ class TestTorch(TestCase):
     def _test_stft(self, build_fn):
         # the conv_fn to convert tensors can be slow in cuda tests, so we use
         # a build_fn: sizes => tensor
-        Variable = torch.autograd.Variable
 
         def naive_stft(x, frame_length, hop, fft_size=None, normalized=False,
                        onesided=True, window=None, pad_end=0):
             if fft_size is None:
                 fft_size = frame_length
-            if isinstance(x, Variable):
-                x = x.data
             x = x.clone()
             if window is None:
                 window = x.new(frame_length).fill_(1)
             else:
-                if isinstance(window, Variable):
-                    window = window.data
                 window = window.clone()
             input_1d = x.dim() == 1
             if input_1d:
@@ -3619,9 +3625,9 @@ class TestTorch(TestCase):
 
         def _test(sizes, frame_length, hop, fft_size=None, normalized=False,
                   onesided=True, window_sizes=None, pad_end=0, expected_error=None):
-            x = Variable(build_fn(*sizes))
+            x = build_fn(*sizes)
             if window_sizes is not None:
-                window = Variable(build_fn(*window_sizes))
+                window = build_fn(*window_sizes)
             else:
                 window = None
             if expected_error is None:
