@@ -62,12 +62,7 @@ Args:
 Example::
 
     >>> torch.abs(torch.FloatTensor([-1, -2, 3]))
-
-     1
-     2
-     3
-    [torch.FloatTensor of size (3,)]
-
+    tensor([ 1, 2, 3])
 """)
 
 add_docstr(torch.acos,
@@ -87,21 +82,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.3906, 0.2763,-0.2275,-0.0471])
     >>> torch.acos(a)
-
-     2.2608
-     1.2956
-     1.1075
-        nan
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.1695, 1.2908, 1.8003, 1.6179])
 """)
 
 add_docstr(torch.add,
@@ -128,22 +111,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     0.4050
-    -1.2227
-     1.8688
-    -0.4185
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.7658,-1.1491,-0.1474, 0.9150])
     >>> torch.add(a, 20)
-
-     20.4050
-     18.7773
-     21.8688
-     19.5815
-    [torch.FloatTensor of size (4,)]
-
-
+    tensor([ 20.7658, 18.8509, 19.8526, 20.9150])
 
 .. function:: add(input, value=1, other, out=None)
 
@@ -170,31 +140,20 @@ Keyword arguments:
 
 Example::
 
-    >>> import torch
     >>> a = torch.randn(4)
     >>> a
-
-    -0.9310
-     2.0330
-     0.0852
-    -0.2941
-    [torch.FloatTensor of size (4,)]
-
-    >>> b = torch.randn(2, 2)
+    tensor([-0.9135,-0.7008, 1.1941,-0.4501])
+    >>> b = torch.randn(4, 1)
     >>> b
-
-     1.0663  0.2544
-    -0.1513  0.0749
-    [torch.FloatTensor of size (2,2)]
-
+    tensor([[-1.4411],
+            [ 0.5268],
+            [-0.3662],
+            [ 1.8314]])
     >>> torch.add(a, 10, b)
-     9.7322
-     4.5770
-    -1.4279
-     0.4552
-    [torch.FloatTensor of size (4,)]
-
-
+    tensor([[-15.3246,-15.1119,-13.2170,-14.8611],
+            [  4.3544,  4.5671,  6.4621,  4.8179],
+            [ -4.5754, -4.3627, -2.4677, -4.1119],
+            [ 17.4004, 17.6131, 19.5080, 17.8638]])
 """)
 
 add_docstr(torch.addbmm,
@@ -235,11 +194,9 @@ Example::
     >>> batch1 = torch.randn(10, 3, 4)
     >>> batch2 = torch.randn(10, 4, 5)
     >>> torch.addbmm(M, batch1, batch2)
-
-     -3.1162  11.0071   7.3102   0.1824  -7.6892
-      1.8265   6.0739   0.4589  -0.5641  -5.4283
-     -9.3387  -0.1794  -1.2318  -6.8841  -4.7239
-    [torch.FloatTensor of size (3,5)]
+    tensor([[  7.6009, -4.1849,  5.5325, -0.7284, -4.8047],
+            [ -6.8655, -0.3794,  1.1557,  3.8305, -7.7070],
+            [ -3.3098, 12.9262,  6.4759, 11.3161, 17.1388]])
 """)
 
 add_docstr(torch.addcdiv,
@@ -267,14 +224,13 @@ Args:
 
 Example::
 
-    >>> t = torch.randn(2, 3)
-    >>> t1 = torch.randn(1, 6)
-    >>> t2 = torch.randn(6, 1)
+    >>> t = torch.randn(1, 3)
+    >>> t1 = torch.randn(3, 1)
+    >>> t2 = torch.randn(1, 3)
     >>> torch.addcdiv(t, 0.1, t1, t2)
-
-     0.0122 -0.0188 -0.2354
-     0.7396 -1.5721  1.2878
-    [torch.FloatTensor of size (2,3)]
+    tensor([[ 0.4436, 1.1617, 0.9552],
+            [-0.6735, 0.6466, 1.1484],
+            [-0.2626, 0.8361, 1.0773]])
 """)
 
 add_docstr(torch.addcmul,
@@ -303,14 +259,13 @@ Args:
 
 Example::
 
-    >>> t = torch.randn(2, 3)
-    >>> t1 = torch.randn(1, 6)
-    >>> t2 = torch.randn(6, 1)
+    >>> t = torch.randn(1, 3)
+    >>> t1 = torch.randn(3, 1)
+    >>> t2 = torch.randn(1, 3)
     >>> torch.addcmul(t, 0.1, t1, t2)
-
-     0.0122 -0.0188 -0.2354
-     0.7396 -1.5721  1.2878
-    [torch.FloatTensor of size (2,3)]
+    tensor([[-2.0471, 0.7157,-0.6061],
+            [-2.2083, 0.6730,-0.4377],
+            [-2.0387, 0.7179,-0.6149]])
 """)
 
 add_docstr(torch.addmm,
@@ -348,10 +303,8 @@ Example::
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
     >>> torch.addmm(M, mat1, mat2)
-
-    -0.4095 -1.9703  1.3561
-     5.7674 -4.9760  2.7378
-    [torch.FloatTensor of size (2,3)]
+    tensor([[-2.7132,-0.0868, 1.5803],
+            [-1.3038,-0.1654,-0.4448]])
 """)
 
 add_docstr(torch.addmv,
@@ -390,10 +343,7 @@ Example::
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
     >>> torch.addmv(M, mat, vec)
-
-    -2.0939
-    -2.2950
-    [torch.FloatTensor of size (2,)]
+    tensor([-0.5309, 4.6267])
 """)
 
 add_docstr(torch.addr,
@@ -433,11 +383,9 @@ Example::
     >>> vec2 = torch.arange(1, 3)
     >>> M = torch.zeros(3, 2)
     >>> torch.addr(M, vec1, vec2)
-
-     1  2
-     2  4
-     3  6
-    [torch.FloatTensor of size (3,2)]
+    tensor([[ 1, 2],
+            [ 2, 4],
+            [ 3, 6]])
 """)
 
 add_docstr(torch.asin,
@@ -457,20 +405,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.1343,-0.3537, 1.2004,-0.9622])
     >>> torch.asin(a)
-
-    -0.6900
-     0.2752
-     0.4633
-        nan
-    [torch.FloatTensor of size (4,)]
+    tensor([    nan,-0.3615,    nan,-1.2950])
 """)
 
 add_docstr(torch.atan,
@@ -490,20 +427,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9968,-0.2481, 0.0311, 0.4792])
     >>> torch.atan(a)
-
-    -0.5669
-     0.2653
-     0.4203
-     0.9196
-    [torch.FloatTensor of size (4,)]
+    tensor([-0.7838,-0.2432, 0.0310, 0.4468])
 """)
 
 add_docstr(torch.atan2,
@@ -525,20 +451,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.0560,-1.3053, 0.4180, 0.2082])
     >>> torch.atan2(a, torch.randn(4))
-
-    -2.4167
-     2.9755
-     0.9363
-     1.6613
-    [torch.FloatTensor of size (4,)]
+    tensor([-0.0585,-0.7911, 0.4375, 0.4855])
 """)
 
 add_docstr(torch.baddbmm,
@@ -611,35 +526,24 @@ Example::
 
     >>> a = torch.Tensor(3, 3).uniform_(0, 1) # generate a uniform random matrix with range [0, 1]
     >>> a
-
-     0.7544  0.8140  0.9842
-     0.5282  0.0595  0.6445
-     0.1925  0.9553  0.9732
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 0.5379, 0.7415, 0.6082],
+            [ 0.3314, 0.3347, 0.4989],
+            [ 0.3050, 0.5681, 0.4502]])
     >>> torch.bernoulli(a)
-
-     1  1  1
-     0  0  1
-     0  1  1
-    [torch.FloatTensor of size (3,3)]
+    tensor([[ 0, 0, 0],
+            [ 1, 0, 1],
+            [ 0, 0, 0]])
 
     >>> a = torch.ones(3, 3) # probability of drawing "1" is 1
     >>> torch.bernoulli(a)
-
-     1  1  1
-     1  1  1
-     1  1  1
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1, 1, 1],
+            [ 1, 1, 1],
+            [ 1, 1, 1]])
     >>> a = torch.zeros(3, 3) # probability of drawing "1" is 0
     >>> torch.bernoulli(a)
-
-     0  0  0
-     0  0  0
-     0  0  0
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 0, 0, 0],
+            [ 0, 0, 0],
+            [ 0, 0, 0]])
 """)
 
 add_docstr(torch.bmm,
@@ -730,27 +634,20 @@ Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
-
-     0.5983 -0.0341  2.4918
-     1.5981 -0.5265 -0.8735
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 1.0581, 1.7074, 0.2351],
+            [-1.5060, 0.0921,-1.6425]])
     >>> torch.cat((x, x, x), 0)
-
-     0.5983 -0.0341  2.4918
-     1.5981 -0.5265 -0.8735
-     0.5983 -0.0341  2.4918
-     1.5981 -0.5265 -0.8735
-     0.5983 -0.0341  2.4918
-     1.5981 -0.5265 -0.8735
-    [torch.FloatTensor of size (6,3)]
-
+    tensor([[ 1.0581, 1.7074, 0.2351],
+            [-1.5060, 0.0921,-1.6425],
+            [ 1.0581, 1.7074, 0.2351],
+            [-1.5060, 0.0921,-1.6425],
+            [ 1.0581, 1.7074, 0.2351],
+            [-1.5060, 0.0921,-1.6425]])
     >>> torch.cat((x, x, x), 1)
-
-     0.5983 -0.0341  2.4918  0.5983 -0.0341  2.4918  0.5983 -0.0341  2.4918
-     1.5981 -0.5265 -0.8735  1.5981 -0.5265 -0.8735  1.5981 -0.5265 -0.8735
-    [torch.FloatTensor of size (2,9)]
-
+    tensor([[ 1.0581, 1.7074, 0.2351, 1.0581, 1.7074, 0.2351, 1.0581, 1.7074,
+              0.2351],
+            [-1.5060, 0.0921,-1.6425,-1.5060, 0.0921,-1.6425,-1.5060, 0.0921,
+             -1.6425]])
 """)
 
 add_docstr(torch.ceil,
@@ -771,21 +668,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9522,-0.6057,-0.7456, 0.2557])
     >>> torch.ceil(a)
-
-     2
-     1
-    -0
-    -0
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0,-0,-0, 1])
 """)
 
 add_docstr(torch.reciprocal,
@@ -805,21 +690,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.6658,-0.4785, 2.2180,-1.5717])
     >>> torch.reciprocal(a)
-
-     0.7210
-     2.5565
-    -1.1583
-    -1.8289
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.5020,-2.0898, 0.4509,-0.6363])
 """)
 
 add_docstr(torch.clamp,
@@ -849,20 +722,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.0626, 0.6109,-1.0804, 1.9564])
     >>> torch.clamp(a, min=-0.5, max=0.5)
-
-     0.5000
-     0.3912
-    -0.5000
-    -0.5000
-    [torch.FloatTensor of size (4,)]
+    tensor([ 0.0626, 0.5000,-0.5000, 0.5000])
 
 .. function:: clamp(input, *, min, out=None) -> Tensor
 
@@ -880,20 +742,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.0167, 0.7942,-0.2998, 0.3292])
     >>> torch.clamp(a, min=0.5)
-
-     1.3869
-     0.5000
-     0.5000
-     0.5000
-    [torch.FloatTensor of size (4,)]
+    tensor([ 0.5000, 0.7942, 0.5000, 0.5000])
 
 .. function:: clamp(input, *, max, out=None) -> Tensor
 
@@ -911,21 +762,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.3733, 1.5981, 1.0664,-1.4917])
     >>> torch.clamp(a, max=0.5)
-
-     0.5000
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.3733, 0.5000, 0.5000,-1.4917])
 """)
 
 add_docstr(torch.cos,
@@ -945,18 +784,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9053, 1.3221,-2.6437,-0.9008])
     >>> torch.cos(a)
-     0.8041
-     0.9633
-     0.9018
-     0.2557
-    [torch.FloatTensor of size (4,)]
+    tensor([ 0.6174, 0.2462,-0.8786, 0.6210])
 """)
 
 add_docstr(torch.cosh,
@@ -977,18 +807,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.0668,-1.9212, 0.7474,-0.3174])
     >>> torch.cosh(a)
-     1.2095
-     1.0372
-     1.1015
-     1.9917
-    [torch.FloatTensor of size (4,)]
+    tensor([ 1.0022, 3.4877, 1.2925, 1.0508])
 """)
 
 add_docstr(torch.cross,
@@ -1015,37 +836,26 @@ Example::
 
     >>> a = torch.randn(4, 3)
     >>> a
-
-    -0.6652 -1.0116 -0.6857
-     0.2286  0.4446 -0.5272
-     0.0476  0.2321  1.9991
-     0.6199  1.1924 -0.9397
-    [torch.FloatTensor of size (4,3)]
-
+    tensor([[-0.4937, 0.2228,-1.3625],
+            [-0.0386, 0.3169, 1.6218],
+            [-0.4441, 1.1493, 1.1233],
+            [ 0.0975,-2.3148,-0.7907]])
     >>> b = torch.randn(4, 3)
     >>> b
-
-    -0.1042 -1.1156  0.1947
-     0.9947  0.1149  0.4701
-    -1.0108  0.8319 -0.0750
-     0.9045 -1.3754  1.0976
-    [torch.FloatTensor of size (4,3)]
-
+    tensor([[-1.4122,-1.4006,-0.3188],
+            [ 0.7371, 0.1583,-2.7091],
+            [ 0.7522, 1.4839, 1.9053],
+            [-0.6181, 0.6012, 0.6139]])
     >>> torch.cross(a, b, dim=1)
-
-    -0.9619  0.2009  0.6367
-     0.2696 -0.6318 -0.4160
-    -1.6805 -2.0171  0.2741
-     0.0163 -1.5304 -1.9311
-    [torch.FloatTensor of size (4,3)]
-
+    tensor([[-1.9794, 1.7668, 1.0061],
+            [-1.1152, 1.0908,-0.2397],
+            [ 0.5230, 1.6911,-1.5235],
+            [-0.9456, 0.4289,-1.3721]])
     >>> torch.cross(a, b)
-
-    -0.9619  0.2009  0.6367
-     0.2696 -0.6318 -0.4160
-    -1.6805 -2.0171  0.2741
-     0.0163 -1.5304 -1.9311
-    [torch.FloatTensor of size (4,3)]
+    tensor([[-1.9794, 1.7668, 1.0061],
+            [-1.1152, 1.0908,-0.2397],
+            [ 0.5230, 1.6911,-1.5235],
+            [-0.9456, 0.4289,-1.3721]])
 """)
 
 add_docstr(torch.cumprod,
@@ -1070,48 +880,16 @@ Example::
 
     >>> a = torch.randn(10)
     >>> a
-
-     1.1148
-     1.8423
-     1.4143
-    -0.4403
-     1.2859
-    -1.2514
-    -0.4748
-     1.1735
-    -1.6332
-    -0.4272
-    [torch.FloatTensor of size (10,)]
-
+    tensor([ 0.4441, 0.8878, 1.3012, 0.1639,-0.2675,-0.2023, 0.4410, 0.0430,
+            -0.5607, 0.9633])
     >>> torch.cumprod(a, dim=0)
-
-     1.1148
-     2.0537
-     2.9045
-    -1.2788
-    -1.6444
-     2.0578
-    -0.9770
-    -1.1466
-     1.8726
-    -0.8000
-    [torch.FloatTensor of size (10,)]
+    tensor([ 0.4441, 0.3943, 0.5131, 0.0841,-0.0225, 0.0045, 0.0020, 0.0001,
+            -0.0000,-0.0000])
 
     >>> a[5] = 0.0
     >>> torch.cumprod(a, dim=0)
-
-     1.1148
-     2.0537
-     2.9045
-    -1.2788
-    -1.6444
-    -0.0000
-     0.0000
-     0.0000
-    -0.0000
-     0.0000
-    [torch.FloatTensor of size (10,)]
-
+    tensor([ 0.4441, 0.3943, 0.5131, 0.0841,-0.0225,-0.0000,-0.0000,-0.0000,
+             0.0000, 0.0000])
 """)
 
 add_docstr(torch.cumsum,
@@ -1136,34 +914,11 @@ Example::
 
     >>> a = torch.randn(10)
     >>> a
-
-    -0.6039
-    -0.2214
-    -0.3705
-    -0.0169
-     1.3415
-    -0.1230
-     0.9719
-     0.6081
-    -0.1286
-     1.0947
-    [torch.FloatTensor of size (10,)]
-
+    tensor([ 0.4441, 0.8878, 1.3012, 0.1639,-0.2675, 0.0000, 0.4410, 0.0430,
+            -0.5607, 0.9633])
     >>> torch.cumsum(a, dim=0)
-
-    -0.6039
-    -0.8253
-    -1.1958
-    -1.2127
-     0.1288
-     0.0058
-     0.9777
-     1.5858
-     1.4572
-     2.5519
-    [torch.FloatTensor of size (10,)]
-
-
+    tensor([ 0.4441, 1.3319, 2.6331, 2.7970, 2.5295, 2.5295, 2.9705, 3.0135,
+             2.4529, 3.4162])
 """)
 
 add_docstr(torch.diag,
@@ -1199,51 +954,28 @@ Get the square matrix where the input vector is the diagonal::
 
     >>> a = torch.randn(3)
     >>> a
-
-     1.0480
-    -2.3405
-    -1.1138
-    [torch.FloatTensor of size (3,)]
-
+    tensor([ 0.5950,-0.0872, 2.3298])
     >>> torch.diag(a)
-
-     1.0480  0.0000  0.0000
-     0.0000 -2.3405  0.0000
-     0.0000  0.0000 -1.1138
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 0.5950, 0.0000, 0.0000],
+            [ 0.0000,-0.0872, 0.0000],
+            [ 0.0000, 0.0000, 2.3298]])
     >>> torch.diag(a, 1)
-
-     0.0000  1.0480  0.0000  0.0000
-     0.0000  0.0000 -2.3405  0.0000
-     0.0000  0.0000  0.0000 -1.1138
-     0.0000  0.0000  0.0000  0.0000
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[ 0.0000, 0.5950, 0.0000, 0.0000],
+            [ 0.0000, 0.0000,-0.0872, 0.0000],
+            [ 0.0000, 0.0000, 0.0000, 2.3298],
+            [ 0.0000, 0.0000, 0.0000, 0.0000]])
 
 Get the k-th diagonal of a given matrix::
 
     >>> a = torch.randn(3, 3)
     >>> a
-
-    -1.5328 -1.3210 -1.5204
-     0.8596  0.0471 -0.2239
-    -0.6617  0.0146 -1.0817
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[-0.4264, 0.0255,-0.1064],
+            [ 0.8795,-0.2429, 0.1374],
+            [ 0.1029,-0.6482,-1.6300]])
     >>> torch.diag(a, 0)
-
-    -1.5328
-     0.0471
-    -1.0817
-    [torch.FloatTensor of size (3,)]
-
+    tensor([-0.4264,-0.2429,-1.6300])
     >>> torch.diag(a, 1)
-
-    -1.3210
-    -0.2239
-    [torch.FloatTensor of size (2,)]
-
+    tensor([ 0.0255, 0.1374])
 """)
 
 add_docstr(torch.diagflat,
@@ -1270,42 +1002,26 @@ Examples::
 
     >>> a = torch.randn(3)
     >>> a
-
-     1.0480
-    -2.3405
-    -1.1138
-    [torch.FloatTensor of size 3]
-
+    tensor([-0.5356,-1.4304, 1.1335])
     >>> torch.diagflat(a)
-
-     1.0480  0.0000  0.0000
-     0.0000 -2.3405  0.0000
-     0.0000  0.0000 -1.1138
-    [torch.FloatTensor of size 3x3]
-
+    tensor([[-0.5356, 0.0000, 0.0000],
+            [ 0.0000,-1.4304, 0.0000],
+            [ 0.0000, 0.0000, 1.1335]])
     >>> torch.diagflat(a, 1)
-
-     0.0000  1.0480  0.0000  0.0000
-     0.0000  0.0000 -2.3405  0.0000
-     0.0000  0.0000  0.0000 -1.1138
-     0.0000  0.0000  0.0000  0.0000
-    [torch.FloatTensor of size 4x4]
+    tensor([[ 0.0000,-0.5356, 0.0000, 0.0000],
+            [ 0.0000, 0.0000,-1.4304, 0.0000],
+            [ 0.0000, 0.0000, 0.0000, 1.1335],
+            [ 0.0000, 0.0000, 0.0000, 0.0000]])
 
     >>> a = torch.randn(2, 2)
     >>> a
-
-     0.1761 -0.9121
-    -0.5722  1.5219
-    [torch.FloatTensor of size (2,2)]
-
+    tensor([[-0.4536,-0.6428],
+            [-1.3136, 1.6635]])
     >>> torch.diagflat(a)
-
-     0.1761  0.0000  0.0000  0.0000
-     0.0000 -0.9121  0.0000  0.0000
-     0.0000  0.0000 -0.5722  0.0000
-     0.0000  0.0000  0.0000  1.5219
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[-0.4536, 0.0000, 0.0000, 0.0000],
+            [ 0.0000,-0.6428, 0.0000, 0.0000],
+            [ 0.0000, 0.0000,-1.3136, 0.0000],
+            [ 0.0000, 0.0000, 0.0000, 1.6635]])
 """)
 
 add_docstr(torch.diagonal,
@@ -1368,43 +1084,18 @@ Example::
 
     >>> x = torch.randn(4)
     >>> x
-
-    -1.5474
-    -0.4649
-     0.5954
-    -0.8610
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.1600, 0.2983,-0.0904, 0.9539])
     >>> y = torch.randn(4)
     >>> y
-
-     1.7141
-     0.3274
-    -1.2772
-    -0.4725
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.5071,-0.6619, 0.8685,-0.2276])
     >>> torch.dist(x, y, 3.5)
-
-     3.3953
-    [torch.FloatTensor of size ()]
-
+    tensor(1.4360)
     >>> torch.dist(x, y, 3)
-
-     3.4710
-    [torch.FloatTensor of size ()]
-
+    tensor(1.5123)
     >>> torch.dist(x, y, 0)
-
-    inf
-    [torch.FloatTensor of size ()]
-
+    tensor(inf)
     >>> torch.dist(x, y, 1)
-
-     6.3150
-    [torch.FloatTensor of size ()]
-
-
+    tensor(3.4478)
 """)
 
 add_docstr(torch.div,
@@ -1429,23 +1120,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-
-    -0.6147
-    -1.1237
-    -0.1604
-    -0.6853
-     0.1063
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-1.0074, 0.6970, 1.2074,-0.4629,-0.1858])
     >>> torch.div(a, 0.5)
-
-    -1.2294
-    -2.2474
-    -0.3208
-    -1.3706
-     0.2126
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-2.0148, 1.3940, 2.4148,-0.9258,-0.3717])
 
 .. function:: div(input, other, out=None) -> Tensor
 
@@ -1466,35 +1143,18 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-
-    -0.1810  0.4017  0.2863 -0.1013
-     0.6183  2.0696  0.9012 -1.5933
-     0.5679  0.4743 -0.0117 -0.1266
-    -0.1213  0.9629  0.2682  1.5968
-    [torch.FloatTensor of size (4,4)]
-
-    >>> b = torch.randn(8, 2)
+    tensor([[-0.4578, 0.1443, 0.1273,-0.1206],
+            [ 0.2573, 0.7281, 2.2604,-0.4029],
+            [-0.7784,-1.9844, 1.0408,-0.4455],
+            [-0.7651, 1.5582, 0.6748,-0.0783]])
+    >>> b = torch.randn(4)
     >>> b
-
-     0.8774  0.7650
-     0.8866  1.4805
-    -0.6490  1.1172
-     1.4259 -0.8146
-     1.4633 -0.1228
-     0.4643 -0.6029
-     0.3492  1.5270
-     1.6103 -0.6291
-    [torch.FloatTensor of size (8,2)]
-
+    tensor([-0.1524,-0.8642, 0.0414,-0.5184])
     >>> torch.div(a, b)
-
-    -0.2062  0.5251  0.3229 -0.0684
-    -0.9528  1.8525  0.6320  1.9559
-     0.3881 -3.8625 -0.0253  0.2099
-    -0.3473  0.6306  0.1666 -2.5381
-    [torch.FloatTensor of size (4,4)]
-
-
+    tensor([[  3.0047, -0.1670,  3.0750,  0.2326],
+            [ -1.6889, -0.8426, 54.5865,  0.7773],
+            [  5.1093,  2.2963, 25.1333,  0.8594],
+            [  5.0215, -1.8031, 16.2964,  0.1511]])
 """)
 
 add_docstr(torch.dot,
@@ -1508,9 +1168,7 @@ Computes the dot product (inner product) of two tensors.
 Example::
 
     >>> torch.dot(torch.Tensor([2, 3]), torch.Tensor([2, 1]))
-
-     7
-    [torch.FloatTensor of size ()]
+    tensor(7)
 """)
 
 add_docstr(torch.eig,
@@ -1613,10 +1271,8 @@ Returns:
 Example::
 
     >>> torch.eq(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
-
-    1  0
-    0  1
-    [torch.ByteTensor of size (2,2)]
+    tensor([[ 1, 0],
+            [ 0, 1]], dtype=torch.uint8)
 """)
 
 add_docstr(torch.equal,
@@ -1647,11 +1303,7 @@ Args:
 Example::
 
     >>> torch.erf(torch.Tensor([0, -1., 10.]))
-
-     0.0000
-    -0.8427
-     1.0000
-    [torch.FloatTensor of size (3,)]
+    tensor([ 0.0000,-0.8427, 1.0000])
 """)
 
 add_docstr(torch.erfinv,
@@ -1671,11 +1323,7 @@ Args:
 Example::
 
     >>> torch.erfinv(torch.Tensor([0, 0.5, -1.]))
-
-     0.0000
-     0.4769
-       -inf
-    [torch.FloatTensor of size (3,)]
+    tensor([ 0.0000, 0.4769,   -inf])
 """)
 
 add_docstr(torch.exp,
@@ -1699,10 +1347,7 @@ Args:
 Example::
 
     >>> torch.exp(torch.Tensor([0, math.log(2)]))
-
-     1
-     2
-    [torch.FloatTensor of size (2,)]
+    tensor([ 1, 2])
 """)
 
 add_docstr(torch.expm1,
@@ -1726,10 +1371,7 @@ Args:
 Example::
 
     >>> torch.expm1(torch.Tensor([0, math.log(2)]))
-
-     0
-     1
-    [torch.FloatTensor of size (2,)]
+    tensor([ 0, 1])
 """)
 
 add_docstr(torch.eye,
@@ -1753,12 +1395,9 @@ Returns:
 Example::
 
     >>> torch.eye(3)
-
-     1  0  0
-     0  1  0
-     0  0  1
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1, 0, 0],
+            [ 0, 1, 0],
+            [ 0, 0, 1]])
 """.format(**factory_common_args))
 
 add_docstr(torch.floor,
@@ -1779,22 +1418,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.1497, 0.2369,-0.1407,-1.0828])
     >>> torch.floor(a)
-
-     1
-     0
-    -1
-    -1
-    [torch.FloatTensor of size (4,)]
-
-
+    tensor([ 0, 0,-1,-2])
 """)
 
 add_docstr(torch.fmod,
@@ -1817,23 +1443,9 @@ Args:
 Example::
 
     >>> torch.fmod(torch.Tensor([-3, -2, -1, 1, 2, 3]), 2)
-
-    -1
-    -0
-    -1
-     1
-     0
-     1
-    [torch.FloatTensor of size (6,)]
-
+    tensor([-1,-0,-1, 1, 0, 1])
     >>> torch.fmod(torch.Tensor([1, 2, 3, 4, 5]), 1.5)
-
-     1.0000
-     0.5000
-     0.0000
-     1.0000
-     0.5000
-    [torch.FloatTensor of size (5,)]
+    tensor([ 1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
 .. seealso::
 
@@ -1853,11 +1465,7 @@ Computes the fractional portion of each element in :attr:`tensor`.
 Example::
 
     >>> torch.frac(torch.Tensor([1, 2.5, -3.2]))
-
-     0.0000
-     0.5000
-    -0.2000
-    [torch.FloatTensor of size (3,)]
+    tensor([ 0.0000, 0.5000,-0.2000])
 """)
 
 add_docstr(torch.from_numpy,
@@ -1875,12 +1483,7 @@ Example::
     >>> a = numpy.array([1, 2, 3])
     >>> t = torch.from_numpy(a)
     >>> t
-
-     1
-     2
-     3
-    [torch.LongTensor of size (3,)]
-
+    tensor([ 1, 2, 3])
     >>> t[0] = -1
     >>> a
     array([-1,  2,  3])
@@ -1914,10 +1517,8 @@ Example::
 
     >>> t = torch.Tensor([[1,2],[3,4]])
     >>> torch.gather(t, 1, torch.LongTensor([[0,0],[1,0]]))
-
-     1  1
-     4  3
-    [torch.FloatTensor of size (2,2)]
+    tensor([[ 1, 1],
+            [ 4, 3]])
 """)
 
 add_docstr(torch.ge,
@@ -1940,10 +1541,8 @@ Returns:
 Example::
 
     >>> torch.ge(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
-
-     1  1
-     0  1
-    [torch.ByteTensor of size (2,2)]
+    tensor([[ 1, 1],
+            [ 0, 1]], dtype=torch.uint8)
 """)
 
 add_docstr(torch.gels,
@@ -2007,13 +1606,11 @@ Example::
                           [ 18, 16]])
     >>> X, _ = torch.gels(B, A)
     >>> X
-
-      2.0000   1.0000
-      1.0000   1.0000
-      1.0000   2.0000
-     10.9635   4.8501
-      8.9332   5.2418
-    [torch.FloatTensor of size (5,2)]
+    tensor([[  2.0000,  1.0000],
+            [  1.0000,  1.0000],
+            [  1.0000,  2.0000],
+            [ 10.9635,  4.8501],
+            [  8.9332,  5.2418]])
 """)
 
 add_docstr(torch.geqrf,
@@ -2061,13 +1658,10 @@ Example::
     >>> v1 = torch.arange(1, 5)
     >>> v2 = torch.arange(1, 4)
     >>> torch.ger(v1, v2)
-
-      1   2   3
-      2   4   6
-      3   6   9
-      4   8  12
-    [torch.FloatTensor of size (4,3)]
-
+    tensor([[  1,  2,  3],
+            [  2,  4,  6],
+            [  3,  6,  9],
+            [  4,  8, 12]])
 """)
 
 add_docstr(torch.gesv,
@@ -2108,11 +1702,8 @@ Example::
                           [9.81, -4.09, -4.57, -8.61,  8.99]]).t()
     >>> X, LU = torch.gesv(B, A)
     >>> torch.dist(B, torch.mm(A, X))
-
-    1.00000e-06 *
-      7.0977
-    [torch.FloatTensor of size ()]
-
+    tensor(1.00000e-06 *
+           7.0977)
 """)
 
 add_docstr(torch.get_num_threads,
@@ -2142,10 +1733,8 @@ Returns:
 Example::
 
     >>> torch.gt(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
-
-     0  1
-     0  0
-    [torch.ByteTensor of size (2,2)]
+    tensor([[ 0, 1],
+            [ 0, 0]], dtype=torch.uint8)
 """)
 
 add_docstr(torch.histc,
@@ -2171,14 +1760,7 @@ Returns:
 Example::
 
     >>> torch.histc(torch.FloatTensor([1, 2, 1]), bins=4, min=0, max=3)
-
-     0
-     2
-     1
-     0
-    [torch.FloatTensor of size (4,)]
-
-
+    tensor([ 0, 2, 1, 0])
 """)
 
 add_docstr(torch.index_select,
@@ -2207,26 +1789,17 @@ Example::
 
     >>> x = torch.randn(3, 4)
     >>> x
-
-     1.2045  2.4084  0.4001  1.1372
-     0.5596  1.5677  0.6219 -0.7954
-     1.3635 -1.2313 -0.5414 -1.8478
-    [torch.FloatTensor of size (3,4)]
-
+    tensor([[ 0.4037, 1.8675,-0.9782,-2.3837],
+            [ 1.1438,-1.0205,-0.2867,-1.0336],
+            [ 1.0940,-0.3506, 0.0318,-0.1030]])
     >>> indices = torch.LongTensor([0, 2])
     >>> torch.index_select(x, 0, indices)
-
-     1.2045  2.4084  0.4001  1.1372
-     1.3635 -1.2313 -0.5414 -1.8478
-    [torch.FloatTensor of size (2,4)]
-
+    tensor([[ 0.4037, 1.8675,-0.9782,-2.3837],
+            [ 1.0940,-0.3506, 0.0318,-0.1030]])
     >>> torch.index_select(x, 1, indices)
-
-     1.2045  0.4001
-     0.5596  0.6219
-     1.3635 -0.5414
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.4037,-0.9782],
+            [ 1.1438,-0.2867],
+            [ 1.0940, 0.0318]])
 """)
 
 add_docstr(torch.inverse,
@@ -2250,25 +1823,29 @@ Example::
     >>> y = torch.inverse(x)
     >>> z = torch.mm(x, y)
     >>> z
-
-     1.0000  0.0000  0.0000 -0.0000  0.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000
-     0.0000  1.0000 -0.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000 -0.0000 -0.0000
-     0.0000  0.0000  1.0000 -0.0000 -0.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000
-     0.0000  0.0000  0.0000  1.0000  0.0000  0.0000  0.0000 -0.0000 -0.0000  0.0000
-     0.0000  0.0000 -0.0000 -0.0000  1.0000  0.0000  0.0000 -0.0000 -0.0000 -0.0000
-     0.0000  0.0000  0.0000 -0.0000  0.0000  1.0000 -0.0000 -0.0000 -0.0000 -0.0000
-     0.0000  0.0000  0.0000 -0.0000  0.0000  0.0000  1.0000  0.0000 -0.0000  0.0000
-     0.0000  0.0000 -0.0000 -0.0000  0.0000  0.0000 -0.0000  1.0000 -0.0000  0.0000
-    -0.0000  0.0000 -0.0000 -0.0000  0.0000  0.0000 -0.0000 -0.0000  1.0000 -0.0000
-    -0.0000  0.0000 -0.0000 -0.0000 -0.0000  0.0000 -0.0000 -0.0000  0.0000  1.0000
-    [torch.FloatTensor of size (10,10)]
-
+    tensor([[ 1.0000, 0.0000, 0.0000, 0.0000,-0.0000, 0.0000,-0.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 1.0000, 0.0000, 0.0000,-0.0000, 0.0000, 0.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000, 1.0000,-0.0000,-0.0000, 0.0000, 0.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000, 0.0000, 1.0000,-0.0000, 0.0000,-0.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000, 0.0000, 0.0000, 1.0000, 0.0000, 0.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000, 0.0000,-0.0000,-0.0000, 1.0000, 0.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000, 0.0000,-0.0000, 0.0000, 0.0000, 1.0000,-0.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000, 0.0000,-0.0000,-0.0000, 0.0000,-0.0000, 1.0000,
+         -0.0000,-0.0000],
+        [ 0.0000, 0.0000,-0.0000,-0.0000, 0.0000, 0.0000, 0.0000,-0.0000,
+          1.0000, 0.0000],
+        [ 0.0000, 0.0000, 0.0000,-0.0000,-0.0000, 0.0000,-0.0000,-0.0000,
+          0.0000, 1.0000]])
     >>> torch.max(torch.abs(z - torch.eye(10))) # Max nonzero
-
-    1.00000e-07 *
-      5.0967
-    [torch.FloatTensor of size ()]
-
+    tensor(1.00000e-07 *
+           5.9605)
 """)
 
 add_docstr(torch.kthvalue,
@@ -2301,38 +1878,16 @@ Example::
 
     >>> x = torch.arange(1, 6)
     >>> x
-
-     1
-     2
-     3
-     4
-     5
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 1, 2, 3, 4, 5])
     >>> torch.kthvalue(x, 4)
-    (
-     4
-    [torch.FloatTensor of size (1,)]
-    ,
-     3
-    [torch.LongTensor of size (1,)]
-    )
+    (tensor(4), tensor(3))
 
     >>> x=torch.arange(1,7).resize_(2,3)
     >>> x
-
-    1  2  3
-    4  5  6
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 1, 2, 3],
+            [ 4, 5, 6]])
     >>> torch.kthvalue(x,2,0,True)
-    (
-    4  5  6
-    [torch.FloatTensor of size (1,3)]
-           ,
-    1  1  1
-    [torch.LongTensor of size (1,3)]
-    )
+    (tensor([[ 4, 5, 6]]), tensor([[ 1, 1, 1]]))
 """)
 
 add_docstr(torch.le,
@@ -2355,10 +1910,8 @@ Returns:
 Example::
 
     >>> torch.le(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
-
-     1  0
-     1  1
-    [torch.ByteTensor of size (2,2)]
+    tensor([[ 1, 0],
+            [ 1, 1]], dtype=torch.uint8)
 """)
 
 add_docstr(torch.lerp,
@@ -2385,29 +1938,11 @@ Example::
     >>> start = torch.arange(1, 5)
     >>> end = torch.Tensor(4).fill_(10)
     >>> start
-
-     1
-     2
-     3
-     4
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 2, 3, 4])
     >>> end
-
-     10
-     10
-     10
-     10
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 10, 10, 10, 10])
     >>> torch.lerp(start, end, 0.5)
-
-     5.5000
-     6.0000
-     6.5000
-     7.0000
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 5.5000, 6.0000, 6.5000, 7.0000])
 """)
 
 add_docstr(torch.linspace,
@@ -2434,32 +1969,11 @@ Args:
 Example::
 
     >>> torch.linspace(3, 10, steps=5)
-
-      3.0000
-      4.7500
-      6.5000
-      8.2500
-     10.0000
-    [torch.FloatTensor of size (5,)]
-
+    tensor([  3.0000,  4.7500,  6.5000,  8.2500, 10.0000])
     >>> torch.linspace(-10, 10, steps=5)
-
-    -10
-     -5
-      0
-      5
-     10
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-10, -5,  0,  5, 10])
     >>> torch.linspace(start=-10, end=10, steps=5)
-
-    -10
-     -5
-      0
-      5
-     10
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-10, -5,  0,  5, 10])
 """.format(**factory_common_args))
 
 add_docstr(torch.log,
@@ -2480,23 +1994,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-
-    -0.4183
-     0.3722
-    -0.3091
-     0.4149
-     0.5857
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-1.1353, 1.1949, 1.3203,-0.8589, 0.7961])
     >>> torch.log(a)
-
-        nan
-    -0.9883
-        nan
-    -0.8797
-    -0.5349
-    [torch.FloatTensor of size (5,)]
-
+    tensor([    nan, 0.1781, 0.2778,    nan,-0.2281])
 """)
 
 add_docstr(torch.log10,
@@ -2555,23 +2055,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-
-    -0.4183
-     0.3722
-    -0.3091
-     0.4149
-     0.5857
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-1.1579,-0.1084, 2.0928,-0.2199,-0.5035])
     >>> torch.log1p(a)
-
-    -0.5418
-     0.3164
-    -0.3697
-     0.3471
-     0.4611
-    [torch.FloatTensor of size (5,)]
-
+    tensor([    nan,-0.1148, 1.1291,-0.2484,-0.7002])
 """)
 
 add_docstr(torch.log2,
@@ -2633,23 +2119,9 @@ Args:
 Example::
 
     >>> torch.logspace(start=-10, end=10, steps=5)
-
-     1.0000e-10
-     1.0000e-05
-     1.0000e+00
-     1.0000e+05
-     1.0000e+10
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 1.0000e-10, 1.0000e-05, 1.0000e+00, 1.0000e+05, 1.0000e+10])
     >>> torch.logspace(start=0.1, end=1.0, steps=5)
-
-      1.2589
-      2.1135
-      3.5481
-      5.9566
-     10.0000
-    [torch.FloatTensor of size (5,)]
-
+    tensor([  1.2589,  2.1135,  3.5481,  5.9566, 10.0000])
 """.format(**factory_common_args))
 
 add_docstr(torch.lt,
@@ -2672,10 +2144,8 @@ Returns:
 Example::
 
     >>> torch.lt(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
-
-     0  0
-     1  0
-    [torch.ByteTensor of size (2,2)]
+    tensor([[ 0, 0],
+            [ 1, 0]], dtype=torch.uint8)
 """)
 
 add_docstr(torch.masked_select,
@@ -2700,31 +2170,16 @@ Example::
 
     >>> x = torch.randn(3, 4)
     >>> x
-
-     1.2045  2.4084  0.4001  1.1372
-     0.5596  1.5677  0.6219 -0.7954
-     1.3635 -1.2313 -0.5414 -1.8478
-    [torch.FloatTensor of size (3,4)]
-
+    tensor([[ 0.7405, 0.2234,-0.6699, 0.5457],
+            [ 2.8414, 1.0496, 2.4900,-0.4039],
+            [ 0.0343,-2.3400, 0.6055,-0.0396]])
     >>> mask = x.ge(0.5)
     >>> mask
-
-     1  1  0  1
-     1  1  1  0
-     1  0  0  0
-    [torch.ByteTensor of size (3,4)]
-
+    tensor([[ 1, 0, 0, 1],
+            [ 1, 1, 1, 0],
+            [ 0, 0, 1, 0]], dtype=torch.uint8)
     >>> torch.masked_select(x, mask)
-
-     1.2045
-     2.4084
-     1.1372
-     0.5596
-     1.5677
-     0.6219
-     1.3635
-    [torch.FloatTensor of size (7,)]
-
+    tensor([ 0.7405, 0.5457, 2.8414, 1.0496, 2.4900, 0.6055])
 """)
 
 add_docstr(torch.max,
@@ -2740,15 +2195,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     0.4729 -0.2266 -0.2085
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[ 1.5973,-0.5320, 0.9084]])
     >>> torch.max(a)
-
-     0.4729
-    [torch.FloatTensor of size ()]
-
+    tensor(1.5973)
 
 .. function:: max(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
@@ -2771,27 +2220,12 @@ Example::
 
     >> a = torch.randn(4, 4)
     >> a
-
-    0.0692  0.3142  1.2513 -0.5428
-    0.9288  0.8552 -0.2073  0.6409
-    1.0695 -0.0101 -2.4507 -1.2230
-    0.7426 -0.7666  0.4862 -0.6628
-    torch.FloatTensor of size (4,4)]
-
+    tensor([[-1.7608,-0.3561,-0.1254, 1.3240],
+            [-0.2778,-0.0226,-0.1259, 0.0181],
+            [-0.9744, 0.8763,-1.8318,-0.5971],
+            [ 0.8026,-0.8343, 0.2392,-0.8229]])
     >>> torch.max(a, 1)
-    (
-     1.2513
-     0.9288
-     1.0695
-     0.7426
-    [torch.FloatTensor of size (4,)]
-    ,
-     2
-     0
-     0
-     0
-    [torch.LongTensor of size (4,)]
-    )
+    (tensor([ 1.3240, 0.0181, 0.8763, 0.8026]), tensor([ 3, 3, 1, 0]))
 
 .. function:: max(input, other, out=None) -> Tensor
 
@@ -2816,30 +2250,12 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.9481, 0.3133, 0.8219, 0.4247])
     >>> b = torch.randn(4)
     >>> b
-
-     1.0067
-    -0.8010
-     0.6258
-     0.3627
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.8738,-1.8929, 2.3035, 0.9652])
     >>> torch.max(a, b)
-
-     1.3869
-     0.3912
-     0.6258
-     0.3627
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.9481, 0.3133, 2.3035, 0.9652])
 """)
 
 add_docstr(torch.mean,
@@ -2855,15 +2271,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-    -1.4550  0.8839 -1.3408
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[-0.2263,-0.4220, 2.3999]])
     >>> torch.mean(a)
-
-    -0.6373
-    [torch.FloatTensor of size ()]
-
+    tensor(0.5839)
 
 .. function:: mean(input, dim, keepdim=False, out=None) -> Tensor
 
@@ -2885,29 +2295,17 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-
-    -1.2738 -0.3058  0.1230 -1.9615
-     0.8771 -0.5430 -0.9233  0.9879
-     1.4107  0.0317 -0.6823  0.2255
-    -1.3854  0.4953 -0.2160  0.2435
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[ 0.6013,-0.6623, 0.2853,-1.2592],
+            [-0.2269,-0.8829, 1.5384, 0.2591],
+            [ 2.4338, 0.7835,-1.4751,-2.0331],
+            [-0.2551,-1.7995, 0.5267, 2.7765]])
     >>> torch.mean(a, 1)
-
-    -0.8545
-     0.0997
-     0.2464
-    -0.2157
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.2587, 0.1719,-0.0727, 0.3122])
     >>> torch.mean(a, 1, True)
-
-    -0.8545
-     0.0997
-     0.2464
-    -0.2157
-    [torch.FloatTensor of size (4,1)]
-
+    tensor([[-0.2587],
+            [ 0.1719],
+            [-0.0727],
+            [ 0.3122]])
 """)
 
 add_docstr(torch.median,
@@ -2923,15 +2321,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     0.5749 -0.2804 -0.7931
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[-0.2671,-2.2285, 0.5177]])
     >>> torch.median(a)
-
-    -0.2804
-    [torch.FloatTensor of size ()]
-
+    tensor(-0.2671)
 
 .. function:: median(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
@@ -2955,38 +2347,14 @@ Args:
 
 Example::
 
-    >>> a
-
-     -0.6891 -0.6662
-     0.2697  0.7412
-     0.5254 -0.7402
-     0.5528 -0.2399
-    [torch.FloatTensor of size (4,2)]
-
     >>> a = torch.randn(4, 5)
     >>> a
-
-     0.4056 -0.3372  1.0973 -2.4884  0.4334
-     2.1336  0.3841  0.1404 -0.1821 -0.7646
-    -0.2403  1.3975 -2.0068  0.1298  0.0212
-    -1.5371 -0.7257 -0.4871 -0.2359 -1.1724
-    [torch.FloatTensor of size (4,5)]
-
+    tensor([[ 0.3718, 0.0921,-0.3169,-0.1628, 0.1178],
+            [ 1.3065, 0.0536, 0.1649, 0.2949, 0.3367],
+            [ 0.2020,-0.1723,-0.9564,-0.8395, 1.3727],
+            [-1.0800, 0.6428, 0.2802, 0.2860, 0.4175]])
     >>> torch.median(a, 1)
-    (
-     0.4056
-     0.1404
-     0.0212
-    -0.7257
-    [torch.FloatTensor of size (4,)]
-    ,
-     0
-     2
-     4
-     1
-    [torch.LongTensor of size (4,)]
-    )
-
+    (tensor([ 0.0921, 0.2949,-0.1723, 0.2860]), tensor([ 1, 3, 1, 3]))
 """)
 
 add_docstr(torch.min,
@@ -3002,13 +2370,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     0.4729 -0.2266 -0.2085
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[ 0.0453,-0.3753,-1.5418]])
     >>> torch.min(a)
-    -0.22663167119026184
-
+    tensor(-1.5418)
 
 .. function:: min(input, dim, keepdim=False, out=None) -> (Tensor, LongTensor)
 
@@ -3031,26 +2395,12 @@ Example::
 
     >> a = torch.randn(4, 4)
     >> a
-
-    0.0692  0.3142  1.2513 -0.5428
-    0.9288  0.8552 -0.2073  0.6409
-    1.0695 -0.0101 -2.4507 -1.2230
-    0.7426 -0.7666  0.4862 -0.6628
-    torch.FloatTensor of size (4,4)]
-
+    tensor([[ 1.5012,-1.4460, 0.2291,-0.4036],
+            [-1.1256, 1.3057, 1.0066,-1.0184],
+            [-0.3695, 0.1606,-0.8544,-1.0653],
+            [ 0.0326, 0.5236,-0.8850, 1.0415]])
     >> torch.min(a, 1)
-
-    0.5428
-    0.2073
-    2.4507
-    0.7666
-    torch.FloatTensor of size (4,)]
-
-    3
-    2
-    2
-    1
-    torch.LongTensor of size (4,)]
+    (tensor([-1.4460,-1.1256,-1.0653,-0.8850]), tensor([ 1, 0, 3, 2]))
 
 .. function:: min(input, other, out=None) -> Tensor
 
@@ -3076,30 +2426,12 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.3869
-     0.3912
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9684,-0.0347, 0.1040,-1.3949])
     >>> b = torch.randn(4)
     >>> b
-
-     1.0067
-    -0.8010
-     0.6258
-     0.3627
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.9913,-0.4859,-0.6452,-1.7101])
     >>> torch.min(a, b)
-
-     1.0067
-    -0.8010
-    -0.8634
-    -0.5468
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9684,-0.4859,-0.6452,-1.7101])
 """)
 
 add_docstr(torch.mm,
@@ -3124,10 +2456,8 @@ Example::
     >>> mat1 = torch.randn(2, 3)
     >>> mat2 = torch.randn(3, 3)
     >>> torch.mm(mat1, mat2)
-
-     0.0519 -0.3304  1.2232
-     4.3910 -5.1498  2.7571
-    [torch.FloatTensor of size (2,3)]
+    tensor([[-1.7943, 2.1652,-3.2621],
+            [ 1.8371,-1.1630,-1.9778]])
 """)
 
 add_docstr(torch.matmul,
@@ -3170,10 +2500,7 @@ Example::
     >>> tensor1 = torch.randn(3)
     >>> tensor2 = torch.randn(3)
     >>> torch.matmul(tensor1, tensor2).size()
-
-    -0.4334
-    [torch.FloatTensor of size ()]
-
+    torch.Size([])
     >>> # matrix x vector
     >>> tensor1 = torch.randn(3, 4)
     >>> tensor2 = torch.randn(4)
@@ -3223,38 +2550,14 @@ Args:
 
 Example::
 
-    >>> a
-
-     -0.6891 -0.6662
-     0.2697  0.7412
-     0.5254 -0.7402
-     0.5528 -0.2399
-    [torch.FloatTensor of size (4,2)]
-
     >>> a = torch.randn(4, 5)
     >>> a
-
-     0.4056 -0.3372  1.0973 -2.4884  0.4334
-     2.1336  0.3841  0.1404 -0.1821 -0.7646
-    -0.2403  1.3975 -2.0068  0.1298  0.0212
-    -1.5371 -0.7257 -0.4871 -0.2359 -1.1724
-    [torch.FloatTensor of size (4,5)]
-
+    tensor([[ 1.0841, 1.6259,-0.2743, 2.2201,-0.3810],
+            [-0.2452, 1.4076,-0.1736, 0.7474,-0.7053],
+            [ 0.7008, 0.5506,-0.5612,-0.1288,-1.5737],
+            [ 0.7850, 1.7966, 0.9391, 1.7264,-0.2073]])
     >>> torch.mode(a, 1)
-    (
-    -2.4884
-    -0.7646
-    -2.0068
-    -1.5371
-    [torch.FloatTensor of size (4,)]
-    ,
-     3
-     4
-     2
-     0
-    [torch.LongTensor of size (4,)]
-    )
-
+    (tensor([-0.3810,-0.7053,-1.5737,-0.2073]), tensor([ 4, 4, 4, 4]))
 """)
 
 add_docstr(torch.mul,
@@ -3279,19 +2582,9 @@ Example::
 
     >>> a = torch.randn(3)
     >>> a
-
-    -0.9374
-    -0.5254
-    -0.6069
-    [torch.FloatTensor of size (3,)]
-
+    tensor([ 0.1462, 2.2107,-1.1111])
     >>> torch.mul(a, 100)
-
-    -93.7411
-    -52.5374
-    -60.6908
-    [torch.FloatTensor of size (3,)]
-
+    tensor([  14.6202, 221.0680,-111.1058])
 
 .. function:: mul(input, other, out=None)
 
@@ -3311,30 +2604,20 @@ Args:
 
 Example::
 
-    >>> a = torch.randn(4, 4)
+    >>> a = torch.randn(4, 1)
     >>> a
-
-    -0.7280  0.0598 -1.4327 -0.5825
-    -0.1427 -0.0690  0.0821 -0.3270
-    -0.9241  0.5110  0.4070 -1.1188
-    -0.8308  0.7426 -0.6240 -1.1582
-    [torch.FloatTensor of size (4,4)]
-
-    >>> b = torch.randn(2, 8)
+    tensor([[ 2.6892],
+            [ 0.6134],
+            [-0.6375],
+            [-1.3919]])
+    >>> b = torch.randn(1, 4)
     >>> b
-
-     0.0430 -1.0775  0.6015  1.1647 -0.6549  0.0308 -0.1670  1.0742
-    -1.2593  0.0292 -0.0849  0.4530  1.2404 -0.4659 -0.1840  0.5974
-    [torch.FloatTensor of size (2,8)]
-
+    tensor([[ 0.0385, 0.2034, 1.1616, 2.2752]])
     >>> torch.mul(a, b)
-
-    -0.0313 -0.0645 -0.8618 -0.6784
-     0.0934 -0.0021 -0.0137 -0.3513
-     1.1638  0.0149 -0.0346 -0.5068
-    -1.0304 -0.3460  0.1148 -0.6919
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[ 0.1036, 0.5470, 3.1238, 6.1183],
+            [ 0.0236, 0.1248, 0.7125, 1.3955],
+            [-0.0245,-0.1297,-0.7405,-1.4504],
+            [-0.0536,-0.2831,-1.6169,-3.1668]])
 """)
 
 add_docstr(torch.multinomial,
@@ -3375,21 +2658,9 @@ Example::
 
     >>> weights = torch.Tensor([0, 10, 3, 0]) # create a tensor of weights
     >>> torch.multinomial(weights, 4)
-
-     1
-     2
-     0
-     0
-    [torch.LongTensor of size (4,)]
-
+    tensor([ 1, 2, 0, 0])
     >>> torch.multinomial(weights, 4, replacement=True)
-
-     1
-     2
-     1
-     2
-    [torch.LongTensor of size (4,)]
-
+    tensor([ 1, 1, 2, 1])
 """)
 
 add_docstr(torch.mv,
@@ -3414,11 +2685,7 @@ Example::
     >>> mat = torch.randn(2, 3)
     >>> vec = torch.randn(3)
     >>> torch.mv(mat, vec)
-
-    -2.0939
-    -2.2950
-    [torch.FloatTensor of size (2,)]
-
+    tensor([-1.6676,-1.2230])
 """)
 
 add_docstr(torch.ne,
@@ -3441,11 +2708,8 @@ Returns:
 Example::
 
     >>> torch.ne(torch.Tensor([[1, 2], [3, 4]]), torch.Tensor([[1, 1], [4, 4]]))
-
-     0  1
-     1  0
-    [torch.ByteTensor of size (2,2)]
-
+    tensor([[ 0, 1],
+            [ 1, 0]], dtype=torch.uint8)
 """)
 
 add_docstr(torch.neg,
@@ -3465,23 +2729,9 @@ Example::
 
     >>> a = torch.randn(5)
     >>> a
-
-    -0.4430
-     1.1690
-    -0.8836
-    -0.4565
-     0.2968
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-1.2707,-0.5451,-0.3920, 1.9804,-1.5114])
     >>> torch.neg(a)
-
-     0.4430
-    -1.1690
-     0.8836
-     0.4565
-    -0.2968
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 1.2707, 0.5451, 0.3920,-1.9804, 1.5114])
 """)
 
 add_docstr(torch.nonzero,
@@ -3503,24 +2753,18 @@ Args:
 Example::
 
     >>> torch.nonzero(torch.Tensor([1, 1, 1, 0, 1]))
-
-     0
-     1
-     2
-     4
-    [torch.LongTensor of size (4,1)]
-
+    tensor([[ 0],
+            [ 1],
+            [ 2],
+            [ 4]])
     >>> torch.nonzero(torch.Tensor([[0.6, 0.0, 0.0, 0.0],
                                     [0.0, 0.4, 0.0, 0.0],
                                     [0.0, 0.0, 1.2, 0.0],
                                     [0.0, 0.0, 0.0,-0.4]]))
-
-     0  0
-     1  1
-     2  2
-     3  3
-    [torch.LongTensor of size (4,2)]
-
+    tensor([[ 0, 0],
+            [ 1, 1],
+            [ 2, 2],
+            [ 3, 3]])
 """)
 
 add_docstr(torch.norm,
@@ -3539,16 +2783,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     0.1628  0.1210 -0.9801
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[-0.9607, 1.0152, 0.5664]])
     >>> torch.norm(a, 3)
-
-     0.9822
-    [torch.FloatTensor of size ()]
-
-
+    tensor(1.2836)
 
 .. function:: norm(input, p, dim, keepdim=False, out=None) -> Tensor
 
@@ -3571,70 +2808,48 @@ Example::
 
     >>> a = torch.randn(4, 2)
     >>> a
-
-    -0.6891 -0.6662
-     0.2697  0.7412
-     0.5254 -0.7402
-     0.5528 -0.2399
-    [torch.FloatTensor of size (4,2)]
-
+    tensor([[ 0.0783,-1.1979],
+            [ 0.5470,-0.1743],
+            [ 0.6717, 0.0478],
+            [-0.7142,-1.7004]])
     >>> torch.norm(a, 2, 1)
-
-     0.9585
-     0.7888
-     0.9077
-     0.6026
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.2004, 0.5741, 0.6733, 1.8442])
     >>> torch.norm(a, 0, 1, True)
-
-     2
-     2
-     2
-     2
-    [torch.FloatTensor of size (4,1)]
-
+    tensor([[ 2],
+            [ 2],
+            [ 2],
+            [ 2]])
 """)
 
 add_docstr(torch.normal,
            r"""
-.. function:: normal(means, std, out=None) -> Tensor
+.. function:: normal(mean, std, out=None) -> Tensor
 
 Returns a tensor of random numbers drawn from separate normal distributions
 whose mean and standard deviation are given.
 
-The :attr:`means` is a tensor with the mean of
+The :attr:`mean` is a tensor with the mean of
 each output element's normal distribution
 
 The :attr:`std` is a tensor with the standard deviation of
 each output element's normal distribution
 
-The shapes of :attr:`means` and :attr:`std` don't need to match, but the
+The shapes of :attr:`mean` and :attr:`std` don't need to match, but the
 total number of elements in each tensor need to be the same.
 
-.. note:: When the shapes do not match, the shape of :attr:`means`
+.. note:: When the shapes do not match, the shape of :attr:`mean`
           is used as the shape for the returned output tensor
 
 Args:
-    means (Tensor): the tensor of per-element means
+    mean (Tensor): the tensor of per-element means
     std (Tensor): the tensor of per-element standard deviations
     out (Tensor, optional): the output tensor
 
 Example::
 
-    >>> torch.normal(means=torch.arange(1, 11), std=torch.arange(1, 0, -0.1))
-
-     1.5104
-     1.6955
-     2.4895
-     4.9185
-     4.9895
-     6.9155
-     7.3683
-     8.1836
-     8.7164
-     9.8916
-    [torch.FloatTensor of size (10,)]
+    >>> torch.normal(mean=torch.arange(1, 11), std=torch.arange(1, 0, -0.1))
+    tensor([  2.2030,  1.3882,  2.2045,  3.8190,  4.6817,  5.9467,  7.6181,
+              8.3806,  8.9134, 10.0545])
 
 .. function:: normal(mean=0.0, std, out=None) -> Tensor
 
@@ -3642,42 +2857,29 @@ Similar to the function above, but the means are shared among all drawn
 elements.
 
 Args:
-    means (float, optional): the mean for all distributions
+    mean (float, optional): the mean for all distributions
     std (Tensor): the tensor of per-element standard deviations
     out (Tensor, optional): the output tensor
 
 Example::
 
     >>> torch.normal(mean=0.5, std=torch.arange(1, 6))
+    tensor([ 1.2191,-7.2879, 0.7551, 2.9659, 2.8903])
 
-      0.5723
-      0.0871
-     -0.3783
-     -2.5689
-     10.7893
-    [torch.FloatTensor of size (5,)]
-
-.. function:: normal(means, std=1.0, out=None) -> Tensor
+.. function:: normal(mean, std=1.0, out=None) -> Tensor
 
 Similar to the function above, but the standard-deviations are shared among
 all drawn elements.
 
 Args:
-    means (Tensor): the tensor of per-element means
+    mean (Tensor): the tensor of per-element means
     std (float, optional): the standard deviation for all distributions
     out (Tensor, optional): the output tensor
 
 Example::
 
-    >>> torch.normal(means=torch.arange(1, 6))
-
-     1.1681
-     2.8884
-     3.7718
-     2.5616
-     4.2500
-    [torch.FloatTensor of size (5,)]
-
+    >>> torch.normal(mean=torch.arange(1, 6))
+    tensor([ 2.8338, 1.6690, 3.4858, 5.2198, 6.1458])
 """)
 
 add_docstr(torch.numel,
@@ -3719,20 +2921,11 @@ Args:
 Example::
 
     >>> torch.ones(2, 3)
-
-     1  1  1
-     1  1  1
-    [torch.FloatTensor of size (2,3)]
+    tensor([[ 1, 1, 1],
+            [ 1, 1, 1]])
 
     >>> torch.ones(5)
-
-     1
-     1
-     1
-     1
-     1
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 1, 1, 1, 1, 1])
 """.format(**factory_common_args))
 
 add_docstr(torch.ones_like,
@@ -3759,10 +2952,8 @@ Example::
 
     >>> input = torch.FloatTensor(2, 3)
     >>> torch.ones_like(input)
-
-     1  1  1
-     1  1  1
-    [torch.FloatTensor of size (2,3)]
+    tensor([[ 1, 1, 1],
+            [ 1, 1, 1]])
 """.format(**factory_like_common_args))
 
 add_docstr(torch.orgqr,
@@ -3836,26 +3027,17 @@ Example::
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
-
-     2.3563  3.2318 -0.9406
-     3.2318  4.9557 -2.1618
-    -0.9406 -2.1618  2.2443
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 3.4121,-1.6959,-0.2661],
+            [-1.6959, 1.6187, 0.0317],
+            [-0.2661, 0.0317, 0.0820]])
     >>> u
-
-     1.5350  2.1054 -0.6127
-     0.0000  0.7233 -1.2053
-     0.0000  0.0000  0.6451
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1.8472,-0.9181,-0.1441],
+            [ 0.0000, 0.8808,-0.1142],
+            [ 0.0000, 0.0000, 0.2197]])
     >>> torch.mm(u.t(), u)
-
-     2.3563  3.2318 -0.9406
-     3.2318  4.9557 -2.1618
-    -0.9406 -2.1618  2.2443
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 3.4121,-1.6959,-0.2661],
+            [-1.6959, 1.6187, 0.0317],
+            [-0.2661, 0.0317, 0.0820]])
 """)
 
 add_docstr(torch.potri, r"""
@@ -3888,26 +3070,17 @@ Example::
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
-
-     2.3563  3.2318 -0.9406
-     3.2318  4.9557 -2.1618
-    -0.9406 -2.1618  2.2443
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 0.4790,-1.5444,-0.4537],
+            [-1.5444, 5.5597, 1.4664],
+            [-0.4537, 1.4664, 0.4879]])
     >>> torch.potri(u)
-
-     12.5724 -10.1765  -4.5333
-    -10.1765   8.5852   4.0047
-     -4.5333   4.0047   2.4031
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 34.7410,  5.4512, 15.9213],
+            [  5.4512,  1.7226, -0.1081],
+            [ 15.9213, -0.1081, 17.1781]])
     >>> a.inverse()
-
-     12.5723 -10.1765  -4.5333
-    -10.1765   8.5852   4.0047
-     -4.5333   4.0047   2.4031
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 34.7410,  5.4512, 15.9213],
+            [  5.4512,  1.7226, -0.1081],
+            [ 15.9213, -0.1081, 17.1781]])
 """)
 
 add_docstr(torch.potrs, r"""
@@ -3942,34 +3115,22 @@ Example::
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> u = torch.potrf(a)
     >>> a
-
-     2.3563  3.2318 -0.9406
-     3.2318  4.9557 -2.1618
-    -0.9406 -2.1618  2.2443
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 7.3514, 1.8807, 2.7778],
+            [ 1.8807, 3.6215, 2.1190],
+            [ 2.7778, 2.1190, 2.5734]])
     >>> b = torch.randn(3, 2)
     >>> b
-
-    -0.3119 -1.8224
-    -0.2798  0.1789
-    -0.3735  1.7451
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 1.3743,-0.2440],
+            [ 2.4246, 0.0105],
+            [-0.1300, 2.1603]])
     >>> torch.potrs(b,u)
-
-     0.6187 -32.6438
-    -0.7234  27.0703
-    -0.6039  13.1717
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.4838,-0.6938],
+            [ 1.4539,-1.0927],
+            [-1.7699, 2.4881]])
     >>> torch.mm(a.inverse(),b)
-
-     0.6187 -32.6436
-    -0.7234  27.0702
-    -0.6039  13.1717
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.4838,-0.6938],
+            [ 1.4539,-1.0927],
+            [-1.7699, 2.4881]])
 """)
 
 add_docstr(torch.pow,
@@ -4004,47 +3165,18 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.5274
-    -0.8232
-    -2.1128
-     1.7558
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.1416,-0.7198,-0.4030, 0.0315])
     >>> torch.pow(a, 2)
-
-     0.2781
-     0.6776
-     4.4640
-     3.0829
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.0200, 0.5181, 0.1624, 0.0010])a = torch.arange(1, 5)
     >>> exp = torch.arange(1, 5)
+
     >>> a = torch.arange(1, 5)
     >>> a
-
-     1
-     2
-     3
-     4
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 2, 3, 4])
     >>> exp
-
-     1
-     2
-     3
-     4
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 2, 3, 4])
     >>> torch.pow(a, exp)
-
-       1
-       4
-      27
-     256
-    [torch.FloatTensor of size (4,)]
-
+    tensor([   1,   4,  27, 256])
 
 .. function:: pow(base, input, out=None) -> Tensor
 
@@ -4066,13 +3198,7 @@ Example::
     >>> exp = torch.arange(1, 5)
     >>> base = 2
     >>> torch.pow(base, exp)
-
-      2
-      4
-      8
-     16
-    [torch.FloatTensor of size (4,)]
-
+    tensor([  2,  4,  8, 16])
 """)
 
 add_docstr(torch.prod,
@@ -4088,16 +3214,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     0.7624 -0.4892 -0.1841
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[-1.5970, 2.0814,-0.0368]])
     >>> torch.prod(a)
-
-    1.00000e-02 *
-      6.8676
-    [torch.FloatTensor of size ()]
-
+    tensor(0.1222)
 
 .. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
 
@@ -4119,21 +3238,12 @@ Example::
 
     >>> a = torch.randn(4, 2)
     >>> a
-
-     0.1598 -0.6884
-    -0.1831 -0.4412
-    -0.9925 -0.6244
-    -0.2416 -0.8080
-    [torch.FloatTensor of size (4,2)]
-
+    tensor([[ 0.3986,-0.0568],
+            [-0.1147,-0.2616],
+            [-0.9861, 0.2326],
+            [ 1.3243, 0.4690]])
     >>> torch.prod(a, 1)
-
-    -0.1100
-     0.0808
-     0.6197
-     0.1952
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.0226, 0.0300,-0.2293, 0.6212])
 """)
 
 add_docstr(torch.pstrf, r"""
@@ -4158,35 +3268,21 @@ Example::
     >>> a = torch.randn(3, 3)
     >>> a = torch.mm(a, a.t()) # make symmetric positive definite
     >>> a
-
-     5.4417 -2.5280  1.3643
-    -2.5280  2.9689 -2.1368
-     1.3643 -2.1368  4.6116
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[  0.5851,  1.0774,  0.6974],
+            [  1.0774, 11.8762,  0.2004],
+            [  0.6974,  0.2004,  4.5812]])
     >>> u,piv = torch.pstrf(a)
     >>> u
-
-     2.3328  0.5848 -1.0837
-     0.0000  2.0663 -0.7274
-     0.0000  0.0000  1.1249
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 3.4462, 0.0582, 0.3126],
+            [ 0.0000, 2.1396, 0.3175],
+            [ 0.0000, 0.0000, 0.6217]])
     >>> piv
-
-     0
-     2
-     1
-    [torch.IntTensor of size (3,)]
-
+    tensor([ 1, 2, 0], dtype=torch.int32)
     >>> p = torch.eye(3).index_select(0,piv.long()).index_select(0,piv.long()).t() # make pivot permutation
     >>> torch.mm(torch.mm(p.t(),torch.mm(u.t(),u)),p) # reconstruct
-
-     5.4417  1.3643 -2.5280
-     1.3643  4.6116 -2.1368
-    -2.5280 -2.1368  2.9689
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[  0.5851,  1.0774,  0.6974],
+            [  1.0774, 11.8762,  0.2004],
+            [  0.6974,  0.2004,  4.5812]])
 """)
 
 add_docstr(torch.qr,
@@ -4218,33 +3314,21 @@ Example::
     >>> a = torch.Tensor([[12, -51, 4], [6, 167, -68], [-4, 24, -41]])
     >>> q, r = torch.qr(a)
     >>> q
-
-    -0.8571  0.3943  0.3314
-    -0.4286 -0.9029 -0.0343
-     0.2857 -0.1714  0.9429
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[-0.8571, 0.3943, 0.3314],
+            [-0.4286,-0.9029,-0.0343],
+            [ 0.2857,-0.1714, 0.9429]])
     >>> r
-
-     -14.0000  -21.0000   14.0000
-       0.0000 -175.0000   70.0000
-       0.0000    0.0000  -35.0000
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ -14.0000, -21.0000,  14.0000],
+            [   0.0000,-175.0000,  70.0000],
+            [   0.0000,   0.0000, -35.0000]])
     >>> torch.mm(q, r).round()
-
-      12  -51    4
-       6  167  -68
-      -4   24  -41
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[  12, -51,   4],
+            [   6, 167, -68],
+            [  -4,  24, -41]])
     >>> torch.mm(q.t(), q).round()
-
-     1 -0  0
-    -0  1  0
-     0  0  1
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1, 0, 0],
+            [ 0, 1, 0],
+            [ 0, 0, 1]])
 """)
 
 add_docstr(torch.rand,
@@ -4268,19 +3352,10 @@ Args:
 Example::
 
     >>> torch.rand(4)
-
-     0.9193
-     0.3347
-     0.3232
-     0.7715
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.3631, 0.3616, 0.4246, 0.6547])
     >>> torch.rand(2, 3)
-
-     0.5010  0.5140  0.0719
-     0.1435  0.5636  0.0538
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 0.3711, 0.8634, 0.7967],
+            [ 0.8214, 0.1980, 0.3899]])
 """)
 
 add_docstr(torch.rand_like,
@@ -4395,19 +3470,10 @@ Args:
 Example::
 
     >>> torch.randn(4)
-
-    -0.1145
-     0.0094
-    -1.1717
-     0.9846
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-1.9030, 0.3437, 0.7674,-0.0677])
     >>> torch.randn(2, 3)
-
-     1.4339  0.3351 -1.0999
-     1.5458 -0.9643 -0.3558
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 0.4241, 0.2144,-0.6882],
+            [ 0.7165,-0.4352, 0.4440]])
 """.format(**factory_common_args))
 
 add_docstr(torch.randn_like,
@@ -4446,12 +3512,7 @@ Args:
 Example::
 
     >>> torch.randperm(4)
-
-     2
-     1
-     3
-     0
-    [torch.LongTensor of size (4,)]
+    tensor([ 1, 3, 2, 0])
 """.format(**factory_common_args))
 
 add_docstr(torch.tensor,
@@ -4533,24 +3594,9 @@ Args:
 Example::
 
     >>> torch.range(1, 4)
-
-     1
-     2
-     3
-     4
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 2, 3, 4])
     >>> torch.range(1, 4, 0.5)
-
-     1.0000
-     1.5000
-     2.0000
-     2.5000
-     3.0000
-     3.5000
-     4.0000
-    [torch.FloatTensor of size (7,)]
-
+    tensor([ 1.0000, 1.5000, 2.0000, 2.5000, 3.0000, 3.5000, 4.0000])
 """.format(**factory_common_args))
 
 add_docstr(torch.arange,
@@ -4581,30 +3627,12 @@ Args:
 Example::
 
     >>> torch.arange(5)
-
-     0
-     1
-     2
-     3
-     4
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 0, 1, 2, 3, 4])
     >>> torch.arange(1, 4)
-
-     1
-     2
-     3
-    [torch.FloatTensor of size (3,)]
-
+    tensor([ 1, 2, 3])
     >>> torch.arange(1, 2.5, 0.5)
-
-     1.0000
-     1.5000
-     2.0000
-    [torch.FloatTensor of size (3,)]
-
+    tensor([ 1.0000, 1.5000, 2.0000])
 """.format(**factory_common_args))
-
 
 add_docstr(torch.remainder,
            r"""
@@ -4627,23 +3655,9 @@ Args:
 Example::
 
     >>> torch.remainder(torch.Tensor([-3, -2, -1, 1, 2, 3]), 2)
-
-     1
-     0
-     1
-     1
-     0
-     1
-    [torch.FloatTensor of size (6,)]
-
+    tensor([ 1, 0, 1, 1, 0, 1])
     >>> torch.remainder(torch.Tensor([1, 2, 3, 4, 5]), 1.5)
-
-     1.0000
-     0.5000
-     0.0000
-     1.0000
-     0.5000
-    [torch.FloatTensor of size (5,)]
+    tensor([ 1.0000, 0.5000, 0.0000, 1.0000, 0.5000])
 
 .. seealso::
 
@@ -4674,19 +3688,13 @@ Example::
     >>> x[1].fill_(2)
     >>> x[2].fill_(3)
     >>> x
-
-     1  1  1
-     2  2  2
-     3  3  3
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1, 1, 1],
+            [ 2, 2, 2],
+            [ 3, 3, 3]])
     >>> torch.renorm(x, 1, 0, 5)
-
-     1.0000  1.0000  1.0000
-     1.6667  1.6667  1.6667
-     1.6667  1.6667  1.6667
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1.0000, 1.0000, 1.0000],
+            [ 1.6667, 1.6667, 1.6667],
+            [ 1.6667, 1.6667, 1.6667]])
 """)
 
 add_docstr(torch.reshape,
@@ -4710,17 +3718,11 @@ Example::
 
     >>> a = torch.arange(4)
     >>> torch.reshape(a, (2, 2))
-     0  1
-     2  3
-    [torch.FloatTensor of size (2,2)]
-
+    tensor([[ 0, 1],
+            [ 2, 3]])
     >>> b = torch.tensor([[0, 1], [2, 3]])
     >>> torch.reshape(b, (-1,))
-     0
-     1
-     2
-     3
-    [torch.FloatTensor of size (4,)]
+    tensor([ 0, 1, 2, 3])
 """)
 
 
@@ -4739,21 +3741,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.2290
-     1.3409
-    -0.5662
-    -0.0899
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.6042, 0.7083,-1.7511,-1.6323])
     >>> torch.round(a)
-
-     1
-     1
-    -1
-    -0
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 1,-2,-2])
 """)
 
 add_docstr(torch.rsqrt,
@@ -4774,21 +3764,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.2290
-     1.3409
-    -0.5662
-    -0.0899
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.2532, 1.1526,-0.6192, 0.0728])
     >>> torch.rsqrt(a)
-
-     0.9020
-     0.8636
-        nan
-        nan
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.9874, 0.9314,    nan, 3.7073])
 """)
 
 add_docstr(torch.set_flush_denormal,
@@ -4809,18 +3787,12 @@ Example::
     >>> torch.set_flush_denormal(True)
     True
     >>> torch.DoubleTensor([1e-323])
-
-     0
-    [torch.DoubleTensor of size (1,)]
-
+    tensor([ 0], dtype=torch.float64)
     >>> torch.set_flush_denormal(False)
     True
     >>> torch.DoubleTensor([1e-323])
-
-    9.88131e-324 *
-      1.0000
-    [torch.DoubleTensor of size (1,)]
-
+    tensor(9.88131e-324 *
+           [ 1.0000], dtype=torch.float64)
 """)
 
 add_docstr(torch.set_num_threads,
@@ -4847,21 +3819,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.4972
-     1.3512
-     0.1056
-    -0.2650
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.4915, 0.6826, 0.4177, 0.2673])
     >>> torch.sigmoid(a)
-
-     0.3782
-     0.7943
-     0.5264
-     0.4341
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.3796, 0.6643, 0.6029, 0.5664])
 """)
 
 add_docstr(torch.sign,
@@ -4878,21 +3838,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.2476, 0.5797, 0.0894,-0.3893])
     >>> torch.sign(a)
-
-    -1
-     1
-     1
-     1
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 1, 1,-1])
 """)
 
 add_docstr(torch.sin,
@@ -4912,20 +3860,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.2290, 0.0086, 0.2041,-1.9237])
     >>> torch.sin(a)
-
-    -0.5944
-     0.2684
-     0.4322
-     0.9667
-    [torch.FloatTensor of size (4,)]
+    tensor([ 0.9422, 0.0086, 0.2027,-0.9384])
 """)
 
 add_docstr(torch.sinh,
@@ -4946,20 +3883,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9751, 0.2032,-0.5326,-0.6862])
     >>> torch.sinh(a)
-
-    -0.6804
-     0.2751
-     0.4619
-     1.7225
-    [torch.FloatTensor of size (4,)]
+    tensor([-1.1371, 0.2046,-0.5581,-0.7413])
 """)
 
 add_docstr(torch.sort,
@@ -4989,34 +3915,23 @@ Example::
     >>> x = torch.randn(3, 4)
     >>> sorted, indices = torch.sort(x)
     >>> sorted
-
-    -1.6747  0.0610  0.1190  1.4137
-    -1.4782  0.7159  1.0341  1.3678
-    -0.3324 -0.0782  0.3518  0.4763
-    [torch.FloatTensor of size (3,4)]
-
+    tensor([[-0.4275, 0.0844, 0.0947, 0.9113],
+            [-0.4826,-0.4485,-0.0136, 0.6970],
+            [-0.5388,-0.1899, 0.4707, 1.8420]])
     >>> indices
-
-     0  1  3  2
-     2  1  0  3
-     3  1  0  2
-    [torch.LongTensor of size (3,4)]
+    tensor([[ 3, 2, 1, 0],
+            [ 1, 2, 3, 0],
+            [ 0, 3, 2, 1]])
 
     >>> sorted, indices = torch.sort(x, 0)
     >>> sorted
-
-    -1.6747 -0.0782 -1.4782 -0.3324
-     0.3518  0.0610  0.4763  0.1190
-     1.0341  0.7159  1.4137  1.3678
-    [torch.FloatTensor of size (3,4)]
-
+    tensor([[-0.5388,-0.4826,-0.4485,-0.4275],
+            [ 0.6970, 0.0947, 0.0844,-0.1899],
+            [ 0.9113, 1.8420, 0.4707,-0.0136]])
     >>> indices
-
-     0  2  1  2
-     2  0  2  0
-     1  1  0  1
-    [torch.LongTensor of size (3,4)]
-
+    tensor([[ 2, 1, 1, 0],
+            [ 1, 0, 0, 2],
+            [ 0, 2, 2, 1]])
 """)
 
 add_docstr(torch.sqrt,
@@ -5036,21 +3951,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-     1.2290
-     1.3409
-    -0.5662
-    -0.0899
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.7515,-0.5967, 1.0396, 1.7786])
     >>> torch.sqrt(a)
-
-     1.1086
-     1.1580
-        nan
-        nan
-    [torch.FloatTensor of size (4,)]
-
+    tensor([    nan,    nan, 1.0196, 1.3336])
 """)
 
 add_docstr(torch.squeeze,
@@ -5113,16 +4016,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     0.1665  0.4876 -0.2155
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[-0.9145, 0.0512,-0.1322]])
     >>> torch.std(a)
-
-     0.3520
-    [torch.FloatTensor of size ()]
-
-
+    tensor(0.5129)
 
 .. function:: std(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
 
@@ -5148,21 +4044,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-
-     0.1889 -2.4856  0.0043  1.8169
-    -0.7701 -0.4682 -2.2410  0.4098
-     0.1919 -1.1856 -1.0361  0.9085
-     0.0173  1.0662  0.2143 -0.5576
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[ 1.3961,-0.1219, 1.6633,-2.0304],
+            [-1.1734, 0.0791,-0.6596,-0.9415],
+            [-0.4093,-1.1509,-1.6583, 1.1957],
+            [-1.0726,-1.8236,-0.9552, 1.5762]])
     >>> torch.std(a, dim=1)
-
-     1.7756
-     1.1025
-     1.0045
-     0.6725
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.6978, 0.5442, 1.2448, 1.4808])
 """)
 
 add_docstr(torch.sum,
@@ -5178,15 +4065,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-    -0.0281  1.0131 -0.0384
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[ 0.2016,-0.6022, 1.4252]])
     >>> torch.sum(a)
-
-     0.9466
-    [torch.FloatTensor of size ()]
-
+    tensor(1.0246)
 
 .. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
 
@@ -5208,21 +4089,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-
-    -0.4640  0.0609  0.1122  0.4784
-    -1.3063  1.6443  0.4714 -0.7396
-    -1.3561 -0.1959  1.0609 -1.9855
-     2.6833  0.5746 -0.5709 -0.4430
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[-0.8489,-0.5904,-0.2512, 0.9666],
+            [-1.2006,-0.9636,-0.5941, 0.1587],
+            [ 0.5016, 0.7989,-1.2696,-0.5652],
+            [-1.0580, 0.4050, 1.2237,-1.3784]])
     >>> torch.sum(a, 1)
-
-     0.1874
-     0.0698
-    -2.4767
-     2.2440
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.7239,-2.5996,-0.5344,-0.8076])
 """)
 
 add_docstr(torch.svd,
@@ -5271,39 +4143,23 @@ Example::
 
     >>> u, s, v = torch.svd(a)
     >>> u
-
-    -0.5911  0.2632  0.3554  0.3143  0.2299
-    -0.3976  0.2438 -0.2224 -0.7535 -0.3636
-    -0.0335 -0.6003 -0.4508  0.2334 -0.3055
-    -0.4297  0.2362 -0.6859  0.3319  0.1649
-    -0.4697 -0.3509  0.3874  0.1587 -0.5183
-     0.2934  0.5763 -0.0209  0.3791 -0.6526
-    [torch.FloatTensor of size (6,5)]
-
+    tensor([[-0.5911, 0.2632, 0.3554, 0.3143, 0.2299],
+            [-0.3976, 0.2438,-0.2224,-0.7535,-0.3636],
+            [-0.0335,-0.6003,-0.4508, 0.2334,-0.3055],
+            [-0.4297, 0.2362,-0.6859, 0.3319, 0.1649],
+            [-0.4697,-0.3509, 0.3874, 0.1587,-0.5183],
+            [ 0.2934, 0.5763,-0.0209, 0.3791,-0.6526]])
     >>> s
-
-     27.4687
-     22.6432
-      8.5584
-      5.9857
-      2.0149
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 27.4687, 22.6432,  8.5584,  5.9857,  2.0149])
     >>> v
-
-    -0.2514  0.8148 -0.2606  0.3967 -0.2180
-    -0.3968  0.3587  0.7008 -0.4507  0.1402
-    -0.6922 -0.2489 -0.2208  0.2513  0.5891
-    -0.3662 -0.3686  0.3859  0.4342 -0.6265
-    -0.4076 -0.0980 -0.4932 -0.6227 -0.4396
-    [torch.FloatTensor of size (5,5)]
-
+    tensor([[-0.2514, 0.8148,-0.2606, 0.3967,-0.2180],
+            [-0.3968, 0.3587, 0.7008,-0.4507, 0.1402],
+            [-0.6922,-0.2489,-0.2208, 0.2513, 0.5891],
+            [-0.3662,-0.3686, 0.3859, 0.4342,-0.6265],
+            [-0.4076,-0.0980,-0.4933,-0.6227,-0.4396]])
     >>> torch.dist(a, torch.mm(torch.mm(u, torch.diag(s)), v.t()))
-
-    1.00000e-05 *
-      1.0918
-    [torch.FloatTensor of size ()]
-
+    tensor(1.00000e-06 *
+           9.3738)
 """)
 
 add_docstr(torch.symeig,
@@ -5347,26 +4203,15 @@ Examples::
                           [-0.47, -6.39,  4.17,  0.00,  0.00],
                           [-7.20,  1.50, -1.51,  5.70,  0.00],
                           [-0.65, -6.34,  2.67,  1.80, -7.10]]).t()
-
     >>> e, v = torch.symeig(a, eigenvectors=True)
     >>> e
-
-    -11.0656
-     -6.2287
-      0.8640
-      8.8655
-     16.0948
-    [torch.FloatTensor of size (5,)]
-
+    tensor([-11.0656, -6.2287,  0.8640,  8.8655, 16.0948])
     >>> v
-
-    -0.2981 -0.6075  0.4026 -0.3745  0.4896
-    -0.5078 -0.2880 -0.4066 -0.3572 -0.6053
-    -0.0816 -0.3843 -0.6600  0.5008  0.3991
-    -0.0036 -0.4467  0.4553  0.6204 -0.4564
-    -0.8041  0.4480  0.1725  0.3108  0.1622
-    [torch.FloatTensor of size (5,5)]
-
+    tensor([[-0.2981,-0.6075, 0.4026,-0.3745, 0.4896],
+            [-0.5078,-0.2880,-0.4066,-0.3572,-0.6053],
+            [-0.0816,-0.3843,-0.6600, 0.5008, 0.3991],
+            [-0.0036,-0.4467, 0.4553, 0.6204,-0.4564],
+            [-0.8041, 0.4480, 0.1725, 0.3108, 0.1622]])
 """)
 
 add_docstr(torch.t,
@@ -5386,18 +4231,12 @@ Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
-
-     0.4834  0.6907  1.3417
-    -0.1300  0.5295  0.2321
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 0.8108,-0.8394, 1.0334],
+            [ 0.0658, 0.0582, 1.3144]])
     >>> torch.t(x)
-
-     0.4834 -0.1300
-     0.6907  0.5295
-     1.3417  0.2321
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.8108, 0.0658],
+            [-0.8394, 0.0582],
+            [ 1.0334, 1.3144]])
 """)
 
 add_docstr(torch.take,
@@ -5417,12 +4256,7 @@ Example::
     >>> src = torch.Tensor([[4, 3, 5],
                             [6, 7, 8]])
     >>> torch.take(src, torch.LongTensor([0, 2, 5]))
-
-     4
-     5
-     8
-    [torch.FloatTensor of size (3,)]
-
+    tensor([ 4, 5, 8])
 """)
 
 add_docstr(torch.tan,
@@ -5442,21 +4276,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-2.1777, 0.6909,-0.4350, 0.3724])
     >>> torch.tan(a)
-
-    -0.7392
-     0.2786
-     0.4792
-     3.7801
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.4401, 0.8269,-0.4647, 0.3906])
 """)
 
 add_docstr(torch.tanh,
@@ -5477,21 +4299,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.6366
-     0.2718
-     0.4469
-     1.3122
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-1.6690, 0.6976,-2.6046,-0.3456])
     >>> torch.tanh(a)
-
-    -0.5625
-     0.2653
-     0.4193
-     0.8648
-    [torch.FloatTensor of size (4,)]
-
+    tensor([-0.9314, 0.6029,-0.9891,-0.3325])
 """)
 
 add_docstr(torch.topk,
@@ -5526,39 +4336,9 @@ Example::
 
     >>> x = torch.arange(1, 6)
     >>> x
-
-     1
-     2
-     3
-     4
-     5
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 1, 2, 3, 4, 5])
     >>> torch.topk(x, 3)
-    (
-     5
-     4
-     3
-    [torch.FloatTensor of size (3,)]
-    ,
-     4
-     3
-     2
-    [torch.LongTensor of size (3,)]
-    )
-    >>> torch.topk(x, 3, 0, largest=False)
-    (
-     1
-     2
-     3
-    [torch.FloatTensor of size (3,)]
-    ,
-     0
-     1
-     2
-    [torch.LongTensor of size (3,)]
-    )
-
+    (tensor([ 5, 4, 3]), tensor([ 4, 3, 2]))
 """)
 
 add_docstr(torch.trace,
@@ -5571,18 +4351,11 @@ Example::
 
     >>> x = torch.arange(1, 10).view(3, 3)
     >>> x
-
-     1  2  3
-     4  5  6
-     7  8  9
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 1, 2, 3],
+            [ 4, 5, 6],
+            [ 7, 8, 9]])
     >>> torch.trace(x)
-
-     15
-    [torch.FloatTensor of size ()]
-
-
+    tensor(15)
 """)
 
 add_docstr(torch.transpose,
@@ -5606,18 +4379,12 @@ Example::
 
     >>> x = torch.randn(2, 3)
     >>> x
-
-     0.5983 -0.0341  2.4918
-     1.5981 -0.5265 -0.8735
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 0.2868, 0.5723,-0.1833],
+            [-0.4611,-0.2070,-0.8966]])
     >>> torch.transpose(x, 0, 1)
-
-     0.5983  1.5981
-    -0.0341 -0.5265
-     2.4918 -0.8735
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.2868,-0.4611],
+            [ 0.5723,-0.2070],
+            [-0.1833,-0.8966]])
 """)
 
 add_docstr(torch.tril,
@@ -5647,44 +4414,30 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
-
-     1.3225  1.7304  1.4573
-    -0.3052 -0.3111 -0.1809
-     1.2469  0.0064 -1.6250
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[-2.6689, 0.5136,-0.3310],
+            [ 0.0283,-0.1964, 1.3552],
+            [ 0.2352,-0.0978,-0.1995]])
     >>> torch.tril(a)
-
-     1.3225  0.0000  0.0000
-    -0.3052 -0.3111  0.0000
-     1.2469  0.0064 -1.6250
-    [torch.FloatTensor of size (3,3)]
+    tensor([[-2.6689, 0.0000, 0.0000],
+            [ 0.0283,-0.1964, 0.0000],
+            [ 0.2352,-0.0978,-0.1995]])
 
     >>> b = torch.randn(4, 6)
     >>> b
-
-     0.2762  0.1640  0.3947 -0.8633 -0.4150  2.4491
-    -2.8177 -1.0580  0.3659 -0.0797  0.2294  1.3660
-    -1.8665 -0.4127 -0.7031 -0.4697 -0.2383 -0.1321
-     1.0998  0.2726  0.2512  0.4557  0.7012 -0.9356
-    [torch.FloatTensor of size (4,6)]
-
+    tensor([[ 1.2533,-0.4561, 0.0404, 0.5277, 0.1971, 0.3311],
+            [-1.2716, 0.4713, 0.7830,-1.1385,-0.5697,-0.2502],
+            [ 0.7545, 0.0236, 0.1781,-0.7480,-0.6593, 0.1381],
+            [ 1.0722,-0.3921, 1.8804,-0.5161, 0.3937, 0.2090]])
     >>> torch.tril(b, diagonal=1)
-
-     0.2762  0.1640  0.0000  0.0000  0.0000  0.0000
-    -2.8177 -1.0580  0.3659  0.0000  0.0000  0.0000
-    -1.8665 -0.4127 -0.7031 -0.4697  0.0000  0.0000
-     1.0998  0.2726  0.2512  0.4557  0.7012  0.0000
-    [torch.FloatTensor of size (4,6)]
-
+    tensor([[ 1.2533,-0.4561, 0.0000, 0.0000, 0.0000, 0.0000],
+            [-1.2716, 0.4713, 0.7830, 0.0000, 0.0000, 0.0000],
+            [ 0.7545, 0.0236, 0.1781,-0.7480, 0.0000, 0.0000],
+            [ 1.0722,-0.3921, 1.8804,-0.5161, 0.3937, 0.0000]])
     >>> torch.tril(b, diagonal=-1)
-
-     0.0000  0.0000  0.0000  0.0000  0.0000  0.0000
-    -2.8177  0.0000  0.0000  0.0000  0.0000  0.0000
-    -1.8665 -0.4127  0.0000  0.0000  0.0000  0.0000
-     1.0998  0.2726  0.2512  0.0000  0.0000  0.0000
-    [torch.FloatTensor of size (4,6)]
-
+    tensor([[ 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000],
+            [-1.2716, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000],
+            [ 0.7545, 0.0236, 0.0000, 0.0000, 0.0000, 0.0000],
+            [ 1.0722,-0.3921, 1.8804, 0.0000, 0.0000, 0.0000]])
 """)
 
 add_docstr(torch.triu,
@@ -5714,58 +4467,38 @@ Example::
 
     >>> a = torch.randn(3, 3)
     >>> a
-
-     1.3225  1.7304  1.4573
-    -0.3052 -0.3111 -0.1809
-     1.2469  0.0064 -1.6250
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[-1.2854, 1.1212,-1.6957],
+            [-1.2683,-0.5423, 0.3580],
+            [ 1.2592, 1.7133,-0.0543]])
     >>> torch.triu(a)
-
-     1.3225  1.7304  1.4573
-     0.0000 -0.3111 -0.1809
-     0.0000  0.0000 -1.6250
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[-1.2854, 1.1212,-1.6957],
+            [ 0.0000,-0.5423, 0.3580],
+            [ 0.0000, 0.0000,-0.0543]])
     >>> torch.triu(a, diagonal=1)
-
-     0.0000  1.7304  1.4573
-     0.0000  0.0000 -0.1809
-     0.0000  0.0000  0.0000
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[ 0.0000, 1.1212,-1.6957],
+            [ 0.0000, 0.0000, 0.3580],
+            [ 0.0000, 0.0000, 0.0000]])
     >>> torch.triu(a, diagonal=-1)
-
-     1.3225  1.7304  1.4573
-    -0.3052 -0.3111 -0.1809
-     0.0000  0.0064 -1.6250
-    [torch.FloatTensor of size (3,3)]
+    tensor([[-1.2854, 1.1212,-1.6957],
+            [-1.2683,-0.5423, 0.3580],
+            [ 0.0000, 1.7133,-0.0543]])
 
     >>> b = torch.randn(4, 6)
     >>> b
-
-     0.2762  0.1640  0.3947 -0.8633 -0.4150  2.4491
-    -2.8177 -1.0580  0.3659 -0.0797  0.2294  1.3660
-    -1.8665 -0.4127 -0.7031 -0.4697 -0.2383 -0.1321
-     1.0998  0.2726  0.2512  0.4557  0.7012 -0.9356
-    [torch.FloatTensor of size (4,6)]
-
+    tensor([[-1.3315,-0.1520, 0.6089, 3.0959, 0.0362, 0.6969],
+            [ 1.0844,-0.2548,-1.0292, 0.1561, 1.3963,-2.0246],
+            [ 0.0780,-0.3539,-0.5711,-0.1344,-0.1901,-1.1720],
+            [ 0.4704,-1.4574, 0.2859, 1.4060, 0.8205, 0.6944]])
     >>> torch.tril(b, diagonal=1)
-
-     0.0000  0.1640  0.3947 -0.8633 -0.4150  2.4491
-     0.0000  0.0000  0.3659 -0.0797  0.2294  1.3660
-     0.0000  0.0000  0.0000 -0.4697 -0.2383 -0.1321
-     0.0000  0.0000  0.0000  0.0000  0.7012 -0.9356
-    [torch.FloatTensor of size (4,6)]
-
-    >>> torch.tril(a, diagonal=-1)
-
-     0.2762  0.1640  0.3947 -0.8633 -0.4150  2.4491
-    -2.8177 -1.0580  0.3659 -0.0797  0.2294  1.3660
-     0.0000 -0.4127 -0.7031 -0.4697 -0.2383 -0.1321
-     0.0000  0.0000  0.2512  0.4557  0.7012 -0.9356
-    [torch.FloatTensor of size (4,6)]
-
+    tensor([[-1.3315,-0.1520, 0.0000, 0.0000, 0.0000, 0.0000],
+            [ 1.0844,-0.2548,-1.0292, 0.0000, 0.0000, 0.0000],
+            [ 0.0780,-0.3539,-0.5711,-0.1344, 0.0000, 0.0000],
+            [ 0.4704,-1.4574, 0.2859, 1.4060, 0.8205, 0.0000]])
+    >>> torch.tril(b, diagonal=-1)
+    tensor([[ 0.0000, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000],
+            [ 1.0844, 0.0000, 0.0000, 0.0000, 0.0000, 0.0000],
+            [ 0.0780,-0.3539, 0.0000, 0.0000, 0.0000, 0.0000],
+            [ 0.4704,-1.4574, 0.2859, 0.0000, 0.0000, 0.0000]])
 """)
 
 add_docstr(torch.trtrs,
@@ -5807,29 +4540,16 @@ Examples::
 
     >>> A = torch.randn(2, 2).triu()
     >>> A
-
-    -1.8793  0.1567
-     0.0000 -2.1972
-    [torch.FloatTensor of size (2,2)]
-
+    tensor([[ 0.8505,-2.8528],
+            [ 0.0000,-0.9370]])
     >>> b = torch.randn(2, 3)
     >>> b
-
-     1.8776 -0.0759  1.6590
-    -0.5676  0.4771  0.7477
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[-0.0288, 1.1330, 0.0546],
+            [ 0.7299, 0.0709, 0.4899]])
     >>> torch.trtrs(b, A)
-    (
-    -0.9775  0.0223 -0.9112
-     0.2583 -0.2172 -0.3403
-    [torch.FloatTensor of size (2,3)]
-    ,
-    -1.8793  0.1567
-     0.0000 -2.1972
-    [torch.FloatTensor of size (2,2)]
-    )
-
+    (tensor([[-2.6467, 1.0783,-1.6897],
+             [-0.7790,-0.0757,-0.5229]]), tensor([[ 0.8505,-2.8528],
+             [ 0.0000,-0.9370]]))
 """)
 
 add_docstr(torch.trunc,
@@ -5847,21 +4567,9 @@ Example::
 
     >>> a = torch.randn(4)
     >>> a
-
-    -0.4972
-     1.3512
-     0.1056
-    -0.2650
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1.8863, 1.9316, 0.0068, 0.0137])
     >>> torch.trunc(a)
-
-    -0
-     1
-     0
-    -0
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 1, 1, 0, 0])
 """)
 
 add_docstr(torch.unsqueeze,
@@ -5886,18 +4594,12 @@ Example::
 
     >>> x = torch.Tensor([1, 2, 3, 4])
     >>> torch.unsqueeze(x, 0)
-
-     1  2  3  4
-    [torch.FloatTensor of size (1,4)]
-
+    tensor([[ 1, 2, 3, 4]])
     >>> torch.unsqueeze(x, 1)
-
-     1
-     2
-     3
-     4
-    [torch.FloatTensor of size (4,1)]
-
+    tensor([[ 1],
+            [ 2],
+            [ 3],
+            [ 4]])
 """)
 
 add_docstr(torch.var,
@@ -5917,14 +4619,9 @@ Example::
 
     >>> a = torch.randn(1, 3)
     >>> a
-
-     1.4529 -0.0128  0.6240
-    [torch.FloatTensor of size (1,3)]
-
+    tensor([[-2.0114, 1.7955, 0.4028]])
     >>> torch.var(a)
-
-     0.5401
-    [torch.FloatTensor of size ()]
+    tensor(3.7100)
 
 
 .. function:: var(input, dim, keepdim=False, unbiased=True, out=None) -> Tensor
@@ -5951,21 +4648,12 @@ Example::
 
     >>> a = torch.randn(4, 4)
     >>> a
-
-    -1.2738 -0.3058  0.1230 -1.9615
-     0.8771 -0.5430 -0.9233  0.9879
-     1.4107  0.0317 -0.6823  0.2255
-    -1.3854  0.4953 -0.2160  0.2435
-    [torch.FloatTensor of size (4,4)]
-
+    tensor([[ 0.7724,-0.4358, 0.1213,-0.8872],
+            [-0.1135,-0.9109,-1.0608,-0.1378],
+            [-0.7669, 0.3998, 0.0694, 0.5522],
+            [ 0.2010,-0.3103, 1.5876,-0.4783]])
     >>> torch.var(a, 1)
-
-     0.8859
-     0.9509
-     0.7548
-     0.6949
-    [torch.FloatTensor of size (4,)]
-
+    tensor([ 0.5141, 0.2505, 0.3472, 0.8786])
 """)
 
 add_docstr(torch.zeros,
@@ -5987,22 +4675,12 @@ Args:
 Example::
 
     >>> torch.zeros(2, 3)
-
-     0  0  0
-     0  0  0
-    [torch.FloatTensor of size (2,3)]
+    tensor([[ 0, 0, 0],
+            [ 0, 0, 0]])
 
     >>> torch.zeros(5)
-
-     0
-     0
-     0
-     0
-     0
-    [torch.FloatTensor of size (5,)]
-
+    tensor([ 0, 0, 0, 0, 0])
 """.format(**factory_common_args))
-
 
 add_docstr(torch.zeros_like,
            r"""
@@ -6028,11 +4706,8 @@ Example::
 
     >>> input = torch.FloatTensor(2, 3)
     >>> torch.zeros_like(input)
-
-     0  0  0
-     0  0  0
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 0, 0, 0],
+            [ 0, 0, 0]])
 """.format(**factory_like_common_args))
 
 add_docstr(torch.btrifact_with_info,
@@ -6083,11 +4758,8 @@ Example::
     >>> A_LU = torch.btrifact(A)
     >>> x = torch.btrisolve(b, *A_LU)
     >>> torch.norm(torch.bmm(A, x.unsqueeze(2)) - b.unsqueeze(2))
-
-    1.00000e-08 *
-      7.1293
-    [torch.FloatTensor of size ()]
-
+    tensor(1.00000e-06 *
+           7.4506)
 """)
 
 add_docstr(torch.empty,
@@ -6127,11 +4799,8 @@ Example::
 
     >>> input = torch.LongTensor(2,3)
     >>> input.new(input.size())
-
-    1.3996e+14  1.3996e+14  1.3996e+14
-    4.0000e+00  0.0000e+00  0.0000e+00
-    [torch.LongTensor of size (2,3)]
-
+    tensor([[ 9.4360e+13, 2.8000e+01, 4.2950e+09],
+            [ 7.5751e+18, 7.1428e+18, 7.5955e+18]])
 """.format(**factory_like_common_args))
 
 add_docstr(torch.full,
@@ -6149,7 +4818,6 @@ Args:
     {layout}
     {device}
     {requires_grad}
-
 """.format(**factory_common_args))
 
 add_docstr(torch.full_like,
@@ -6167,9 +4835,7 @@ Args:
     {layout}
     {device}
     {requires_grad}
-
 """.format(**factory_like_common_args))
-
 
 add_docstr(torch.stft,
            r"""
@@ -6242,10 +4908,7 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
-
-    0.3690
-    [torch.FloatTensor of size ()]
-
+    tensor(1.2091)
 """)
 
 add_docstr(torch.where,
@@ -6278,19 +4941,13 @@ Example::
     >>> x = torch.randn(3, 2)
     >>> y = torch.ones(3, 2)
     >>> x
-
-    -2.2068  1.2589
-    -0.9796 -0.7586
-    -0.5561  0.5734
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.6205, 0.1039],
+            [ 0.1169, 0.3129],
+            [-1.8398, 0.9264]])
     >>> torch.where(x > 0, x, y)
-
-     1.0000  1.2589
-     1.0000  1.0000
-     1.0000  0.5734
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 0.6205, 0.1039],
+            [ 0.1169, 0.3129],
+            [ 1.0000, 0.9264]])
 """)
 
 add_docstr(torch.logdet,
@@ -6316,15 +4973,9 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
-
-    1.9386
-    [torch.FloatTensor of size ()]
-
+    tensor(1.7120)
     >>> torch.logdet(A)
-
-    0.6620
-    [torch.FloatTensor of size ()]
-
+    tensor(0.5377)
 """)
 
 add_docstr(torch.slogdet,
@@ -6353,24 +5004,11 @@ Example::
 
     >>> A = torch.randn(3, 3)
     >>> torch.det(A)
-
-    -0.3534
-    [torch.FloatTensor of size ()]
-
+    tensor(0.6231)
     >>> torch.logdet(A)
-
-    nan
-    [torch.FloatTensor of size ()]
-
+    tensor(-0.4730)
     >>> torch.slogdet(A)
-    (
-    -1
-    [torch.FloatTensor of size ()]
-    ,
-    -1.0402
-    [torch.FloatTensor of size ()]
-    )
-
+    (tensor(1), tensor(-0.4730))
 """)
 
 add_docstr(torch.fft,

@@ -696,14 +696,11 @@ Example::
     >>> index = torch.LongTensor([0, 4, 2])
     >>> x.index_add_(0, index, t)
     >>> x
-
-      2   3   4
-      1   1   1
-      8   9  10
-      1   1   1
-      5   6   7
-    [torch.FloatTensor of size (5,3)]
-
+    tensor([[  2,  3,  4],
+            [  1,  1,  1],
+            [  8,  9, 10],
+            [  1,  1,  1],
+            [  5,  6,  7]])
 """)
 
 add_docstr_all('index_copy_',
@@ -731,14 +728,11 @@ Example::
     >>> index = torch.LongTensor([0, 4, 2])
     >>> x.index_copy_(0, index, t)
     >>> x
-
-     1  2  3
-     0  0  0
-     7  8  9
-     0  0  0
-     4  5  6
-    [torch.FloatTensor of size (5,3)]
-
+    tensor([[ 1, 2, 3],
+            [ 0, 0, 0],
+            [ 7, 8, 9],
+            [ 0, 0, 0],
+            [ 4, 5, 6]])
 """)
 
 add_docstr_all('index_fill_',
@@ -758,12 +752,9 @@ Example::
     >>> index = torch.LongTensor([0, 2])
     >>> x.index_fill_(1, index, -1)
     >>> x
-
-    -1  2 -1
-    -1  5 -1
-    -1  8 -1
-    [torch.FloatTensor of size (3,3)]
-
+    tensor([[-1, 2,-1],
+            [-1, 5,-1],
+            [-1, 8,-1]])
 """)
 
 add_docstr_all('index_put_',
@@ -1083,18 +1074,12 @@ Example::
 
     >>> x = torch.Tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
     >>> x.narrow(0, 0, 2)
-
-     1  2  3
-     4  5  6
-    [torch.FloatTensor of size (2,3)]
-
+    tensor([[ 1, 2, 3],
+            [ 4, 5, 6]])
     >>> x.narrow(1, 1, 2)
-
-     2  3
-     5  6
-     8  9
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 2, 3],
+            [ 5, 6],
+            [ 8, 9]])
 """)
 
 add_docstr_all('ndimension',
@@ -1262,10 +1247,8 @@ Example::
     >>> src = torch.Tensor([[4, 3, 5],
                             [6, 7, 8]])
     >>> src.put_(torch.LongTensor([1, 3]), torch.Tensor([9, 10]))
-
-      4   9   5
-     10   7   8
-    [torch.FloatTensor of size (2,3)]
+    tensor([[  4,  9,  5],
+            [ 10,  7,  8]])
 """)
 
 add_docstr_all('qr',
@@ -1345,17 +1328,12 @@ Example::
 
     >>> x = torch.Tensor([1, 2, 3])
     >>> x.repeat(4, 2)
-
-     1  2  3  1  2  3
-     1  2  3  1  2  3
-     1  2  3  1  2  3
-     1  2  3  1  2  3
-    [torch.FloatTensor of size (4,6)]
-
+    tensor([[ 1, 2, 3, 1, 2, 3],
+            [ 1, 2, 3, 1, 2, 3],
+            [ 1, 2, 3, 1, 2, 3],
+            [ 1, 2, 3, 1, 2, 3]])
     >>> x.repeat(4, 2, 1).size()
-
     torch.Size([4, 2, 3])
-
 """)
 
 add_docstr_all('reshape',
@@ -1389,11 +1367,8 @@ Example::
     >>> x = torch.Tensor([[1, 2], [3, 4], [5, 6]])
     >>> x.resize_(2, 2)
     >>> x
-
-     1  2
-     3  4
-    [torch.FloatTensor of size (2,2)]
-
+    tensor([[ 1, 2],
+            [ 3, 4]])
 """)
 
 add_docstr_all('resize_as_',
@@ -1468,25 +1443,17 @@ Example::
 
     >>> x = torch.rand(2, 5)
     >>> x
-
-     0.4319  0.6500  0.4080  0.8760  0.2355
-     0.2609  0.4711  0.8486  0.8573  0.1029
-    [torch.FloatTensor of size (2,5)]
-
+    tensor([[ 0.3222, 0.4184, 0.8658, 0.3755, 0.1320],
+            [ 0.1817, 0.6388, 0.1126, 0.0436, 0.7993]])
     >>> torch.zeros(3, 5).scatter_(0, torch.LongTensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
-
-     0.4319  0.4711  0.8486  0.8760  0.2355
-     0.0000  0.6500  0.0000  0.8573  0.0000
-     0.2609  0.0000  0.4080  0.0000  0.1029
-    [torch.FloatTensor of size (3,5)]
+    tensor([[ 0.3222, 0.6388, 0.1126, 0.3755, 0.1320],
+            [ 0.0000, 0.4184, 0.0000, 0.0436, 0.0000],
+            [ 0.1817, 0.0000, 0.8658, 0.0000, 0.7993]])
 
     >>> z = torch.zeros(2, 4).scatter_(1, torch.LongTensor([[2], [3]]), 1.23)
     >>> z
-
-     0.0000  0.0000  1.2300  0.0000
-     0.0000  0.0000  0.0000  1.2300
-    [torch.FloatTensor of size (2,4)]
-
+    tensor([[ 0.0000, 0.0000, 1.2300, 0.0000],
+            [ 0.0000, 0.0000, 0.0000, 1.2300]])
 """)
 
 add_docstr_all('select',
@@ -1907,33 +1874,18 @@ Example::
 
     >>> x = torch.arange(1, 8)
     >>> x
-
-     1
-     2
-     3
-     4
-     5
-     6
-     7
-    [torch.FloatTensor of size (7,)]
-
+    tensor([ 1, 2, 3, 4, 5, 6, 7])
     >>> x.unfold(0, 2, 1)
-
-     1  2
-     2  3
-     3  4
-     4  5
-     5  6
-     6  7
-    [torch.FloatTensor of size (6,2)]
-
+    tensor([[ 1, 2],
+            [ 2, 3],
+            [ 3, 4],
+            [ 4, 5],
+            [ 5, 6],
+            [ 6, 7]])
     >>> x.unfold(0, 2, 2)
-
-     1  2
-     3  4
-     5  6
-    [torch.FloatTensor of size (3,2)]
-
+    tensor([[ 1, 2],
+            [ 3, 4],
+            [ 5, 6]])
 """)
 
 add_docstr_all('uniform_',
@@ -2035,19 +1987,13 @@ Example::
     >>> x.size()
     torch.Size([3, 1])
     >>> x.expand(3, 4)
-
-     1  1  1  1
-     2  2  2  2
-     3  3  3  3
-    [torch.FloatTensor of size (3,4)]
-
+    tensor([[ 1, 1, 1, 1],
+            [ 2, 2, 2, 2],
+            [ 3, 3, 3, 3]])
     >>> x.expand(-1, 4)   # -1 means not changing the size of that dimension
-
-     1  1  1  1
-     2  2  2  2
-     3  3  3  3
-    [torch.FloatTensor of size (3,4)]
-
+    tensor([[ 1, 1, 1, 1],
+            [ 2, 2, 2, 2],
+            [ 3, 3, 3, 3]])
 """)
 
 add_docstr_all('zero_',
