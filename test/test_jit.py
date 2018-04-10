@@ -2353,8 +2353,15 @@ class TestScript(TestCase):
                 x, _ = pad_packed_sequence(x)
                 return x
 
-        x = torch.ones(T, B, C, requires_grad=True)
-        seq_lens = torch.ones(B, dtype=torch.int32)
+        x = np.ones((T, B, C))
+        seq_lens = np.array([3, 3, 2, 2, 1], dtype=np.int32)
+        # set padding value so we can test equivalence
+        for b in range(B):
+            if seq_lens[b] < T:
+                x[seq_lens[b]:, b, :] = 0
+        seq_lens = torch.from_numpy(seq_lens)
+        x = torch.autograd.Variable(torch.from_numpy(x), requires_grad=True)
+
         m = PadPackedWrapper()
         m_traced = torch.jit.trace(x, seq_lens)(m)
 
@@ -2369,6 +2376,7 @@ class TestScript(TestCase):
         loss_traced.backward()
         grad_traced = x.grad.clone()
 
+        self.assertEqual(y_traced, x)
         self.assertEqual(y_traced, y)
         self.assertEqual(grad, grad_traced)
 
