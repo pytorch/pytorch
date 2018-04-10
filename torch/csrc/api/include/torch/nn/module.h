@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
@@ -90,13 +91,13 @@ class Module {
 
  protected:
   /// Inserts the parameters into the parameters_ map.
-  void register_parameters(const detail::OrderedDict<Tensor>& parameters);
+  void register_parameters(detail::OrderedDict<Tensor>&& parameters);
 
   /// Inserts the buffers into the buffers_ map.
-  void register_buffers(const detail::OrderedDict<Tensor>& buffers);
+  void register_buffers(detail::OrderedDict<Tensor>&& buffers);
 
   /// Inserts the modules into the modules_ map.
-  void register_modules(const detail::OrderedDict<Module*>& modules);
+  void register_modules(detail::OrderedDict<Module*>&& modules);
 
  private:
   /// The module's name (e.g. "LSTM").
@@ -126,4 +127,9 @@ class CloneableModule : public Module {
     return std::unique_ptr<Module>(new Derived(static_cast<Derived&>(*this)));
   }
 };
+
+/// A type trait whose `::value` member is true if `M` derives from `Module`.
+template <typename M>
+using is_module = std::is_base_of<Module, typename std::decay<M>::type>;
+
 }} // namespace torch::nn

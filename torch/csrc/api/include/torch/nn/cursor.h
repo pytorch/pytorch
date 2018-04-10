@@ -5,6 +5,7 @@ namespace torch { namespace nn {
 // breadth-first policy. They have `begin()` and `end()` and can be used like
 // containers for iteration
 struct ModuleCursor {};
+
 struct ParameterCursor {};
 struct BufferCursor {};
 

@@ -77,11 +77,15 @@ const std::string& Module::name() const noexcept {
   return name_;
 }
 
-void Module::register_parameters(
-    const detail::OrderedDict<Tensor>& parameters) {}
+void Module::register_parameters(detail::OrderedDict<Tensor>&& parameters) {
+  parameters_.update(std::move(parameters));
+}
 
-void Module::register_buffers(const detail::OrderedDict<Tensor>& buffers) {}
+void Module::register_buffers(detail::OrderedDict<Tensor>&& buffers) {
+  buffers_.update(std::move(buffers));
+}
 
-void Module::register_modules(const detail::OrderedDict<Module*>& modules) {}
-
+void Module::register_modules(detail::OrderedDict<Module*>&& modules) {
+  children_.update(std::move(modules));
+}
 }} // namespace torch::nn

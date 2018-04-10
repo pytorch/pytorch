@@ -34,6 +34,12 @@ class OrderedDict {
     return values_.back();
   }
 
+  void update(OrderedDict&& other) {
+    for (size_t i = 0; i < other.size(); ++i) {
+      insert(std::move(other.keys_[i]), std::move(other.values_[i]));
+    }
+  }
+
   T* find(const std::string& str) noexcept {
     auto iterator = index_.find(str);
     if (iterator == index_.end()) {
@@ -64,7 +70,15 @@ class OrderedDict {
     TORCH_ERROR("No such key: %s", name.c_str());
   }
 
+  const std::vector<std::string>& keys() const noexcept {
+    return keys_;
+  }
+
   const std::vector<T>& values() const noexcept {
+    return values_;
+  }
+
+  std::vector<T>& values() noexcept {
     return values_;
   }
 
@@ -78,6 +92,7 @@ class OrderedDict {
 
  private:
   std::unordered_map<std::string, size_t> index_;
+  std::vector<std::string> keys_;
   std::vector<T> values_;
 };
 }} // namespace torch::detail
