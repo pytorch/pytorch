@@ -42,4 +42,15 @@ class GetPrependDimGradient : public GradientMakerBase {
 
 REGISTER_GRADIENT(PrependDim, GetPrependDimGradient);
 
+
+class GetMergeDimGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "ResizeLike", "", vector<string>{GO(0),I(0)}, vector<string>{GI(0)});
+  }
+};
+
+REGISTER_GRADIENT(MergeDim, GetMergeDimGradient);
+
 } // namespace caffe2
