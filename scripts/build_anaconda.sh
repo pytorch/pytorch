@@ -80,7 +80,6 @@ append_to_section () {
 # add_package <package_name> <optional package version specifier>
 # Takes a package name and version and finagles the meta.yaml to specify that
 add_package () {
-  remove_lines_with $1
   append_to_section 'build' "- $1 $2"
   append_to_section 'run' "- $1 $2"
 }
@@ -145,7 +144,7 @@ if [[ -n $CUDA_VERSION ]]; then
     echo "No CuDNN version given. Caffe2 will still build against whatever"
     echo "CuDNN that it finds first, and will break if there is no CuDNN found."
   fi
-  echo "Detected CUDA_VERSION of $CUDA_VERSION"
+  echo "Detected CUDA_VERSION $CUDA_VERSION"
 fi
 
 
@@ -193,6 +192,7 @@ portable_sed "s#path:  \.\..*#path: $PYTORCH_ROOT#" $META_YAML
 ###########################################################
 # Build the package name and build string depending on gcc and CUDA
 ###########################################################
+# TODO follow pytorch and always have the same name but change build strings
 PACKAGE_NAME='caffe2'
 BUILD_STRING='py{{py}}'
 if [[ -n $BUILD_INTEGRATED ]]; then
@@ -318,9 +318,9 @@ fi
 ###########################################################
 # Build Caffe2 with conda-build
 ###########################################################
-CONDA_CAFFE2_CMAKE_ARGS=${CAFFE2_CMAKE_ARGS[@]} conda build $CONDA_BUILD_DIR $CONDA_CHANNEL ${CONDA_BUILD_ARGS[@]} "$@"
+CONDA_CAFFE2_CMAKE_ARGS=${CAFFE2_CMAKE_ARGS[@]} conda build $CONDA_BUILD_DIR ${CONDA_CHANNEL[@]} ${CONDA_BUILD_ARGS[@]} "$@"
 
 # Install Caffe2 from the built package into the local conda environment
 if [ -n "$CONDA_INSTALL_LOCALLY" ]; then
-  conda install -y $CONDA_CHANNEL $PACKAGE_NAME --use-local
+  conda install -y ${CONDA_CHANNEL[@]} $PACKAGE_NAME --use-local
 fi

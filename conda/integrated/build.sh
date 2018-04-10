@@ -21,7 +21,7 @@
 
 set -ex
 
-# Pytorch environment variables
+# Pytorch environment variables needed during the build
 export CMAKE_LIBRARY_PATH=$PREFIX/lib:$PREFIX/include:$CMAKE_LIBRARY_PATH
 export CMAKE_PREFIX_PATH=$PREFIX
 # compile for Kepler, Kepler+Tesla, Maxwell, Pascal, Volta
@@ -33,27 +33,32 @@ export PYTORCH_BUILD_VERSION=$PKG_VERSION
 export PYTORCH_BUILD_NUMBER=$PKG_BUILDNUM
 export NCCL_ROOT_DIR=/usr/local/cuda
 
+# Validate some configurations, try to fail as early as possible
+if [[ -n $PACKAGE_CUDA_DIR ]]; then
+  if [[ -z $PACKAGE_CUDA_DIR || -z $CUDA_VERSION || -z $CUDNN_VERSION ]]; then
+    echo "Packaging CUDA libs along with the Pytorch binaries is only allowed"
+    echo "if PACKAGE_CUDA_DIR, CUDA_VERSION, and CUDNN_VERSION are all set."
+    echo "This should only be used when building binaries for distribution"
+    exit 1
+  fi
+fi
+
 
 ###########################################################
 # Build Caffe2
 ###########################################################
 PYTHON_ARGS="$(python ./scripts/get_python_cmake_flags.py)"
-
-# Install under specified prefix
 CMAKE_ARGS=()
 CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
-CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 
 # Build Caffe2
-mkdir -p caffe2_build
-cd caffe2_build
+mkdir -p caffe2_build && pushd caffe2_build
 cmake "${CMAKE_ARGS[@]}" "$PYTHON_ARGS" $CONDA_CAFFE2_CMAKE_ARGS ..
 if [ "$(uname)" == 'Darwin' ]; then
   make "-j$(sysctl -n hw.ncpu)"
 else
   make "-j$(nproc)"
 fi
-
 make install/fast
 popd
 
@@ -67,18 +72,18 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   MACOSX_DEPLOYMENT_TARGET=10.9 python setup.py install
   exit 0
 fi
-
-# Install
 python setup.py install
 
-###########################################################
-# Copy over CUDA .so files from system locations to the conda build dir
-###########################################################
-if [[ -z $PACKAGE_CUDA_LIBS ]]; then
+
+
+#########################################################################
+# Copy over CUDA .so files from system locations to the conda build dir #
+#########################################################################
+if [[ -z $PACKAGE_CUDA_DIR ]]; then
   exit 0
 fi
 
-# Rename .so files with their hashes included
+# Function to rename .so files with their hashes appended to them
 fname_with_sha256() {
   HASH=$(sha256sum $1 | cut -c1-8)
   DIRNAME=$(dirname $1)
@@ -92,50 +97,46 @@ fname_with_sha256() {
   fi
 }
 
+# This is the install location on the Pytorch docker images used to build the
+# pytorch binaries
+PACKAGE_CUDA_DIR="/usr/local/cuda/lib64/"
+
+# These are all the CUDA related libaries needed by Pytorch and Caffe2
 # for some reason if we use exact version numbers for CUDA9 .so files 
 # (like .so.9.0.176), we see segfaults during dlopen somewhere
 # deep inside these libs.
-# hence for CUDA9, use .9.0, and dont use hashed names
-DEPS_LIST=(
-    "/usr/local/cuda/lib64/libcudart.so.9.0"
-    "/usr/local/cuda/lib64/libnvToolsExt.so.1"
-    "/usr/local/cuda/lib64/libcublas.so.9.0"
-    "/usr/local/cuda/lib64/libcurand.so.9.0"
-    "/usr/local/cuda/lib64/libcusparse.so.9.0"
-    "/usr/local/cuda/lib64/libnvrtc.so.9.0"
-    "/usr/local/cuda/lib64/libnvrtc-builtins.so"
-    "/usr/local/cuda/lib64/libcudnn.so.7"
-    "/usr/local/cuda/lib64/libnccl.so.2"
-)
-
+# hence for CUDA9, use e.g. '.9.0', and don't use hashed names
 DEPS_SONAME=(
-    "libcudart.so.9.0"
-    "libnvToolsExt.so.1"
-    "libcublas.so.9.0"
-    "libcurand.so.9.0"
-    "libcusparse.so.9.0"
-    "libnvrtc.so.9.0"
-    "libnvrtc-builtins.so"
-    "libcudnn.so.7"
-    "libnccl.so.2"
+  "libcuda.so.1"
+  "libcudart.so.${CUDA_VERSION:0:3}"
+  "libnvToolsExt.so.1"
+  "libcublas.so.${CUDA_VERSION:0:3}"
+  "libcurand.so.${CUDA_VERSION:0:3}"
+  "libcusparse.so.${CUDA_VERSION:0:3}"
+  "libnvrtc.so.${CUDA_VERSION:0:3}"
+  "libnvrtc-builtins.so"
+  "libcudnn.so.${CUDNN_VERSION:0:1}"
 )
+if [[ -n $PYTORCH_USE_NCCL ]]; then
+  DEPS_SONAME+=("libnccl.so.$NCCL_VERSION:0:1")
+fi
 
 # Loop through .so, renaming and moving all of them
 patched=()
-for filepath in "${DEPS_LIST[@]}"
+for filename in "${DEPS_SONAME[@]}"
 do
-	filename=$(basename $filepath)
+	filepath="$PACKAGE_CUDA_DIR/$filename"
 	destpath=$SP_DIR/torch/lib/$filename
 	if [[ "$filepath" != "$destpath" ]]; then
-      echo "Copying $filepath to $destpath"
-	    cp $filepath $destpath
+    echo "Copying $filepath to $destpath"
+	  cp $filepath $destpath
 	fi
 
 	patchedpath=$(fname_with_sha256 $destpath)
 	patchedname=$(basename $patchedpath)
 	if [[ "$destpath" != "$patchedpath" ]]; then
-      echo "Moving $destpath to $patchedpath"
-	    mv $destpath $patchedpath
+    echo "Moving $destpath to $patchedpath"
+	  mv $destpath $patchedpath
 	fi
 
 	patched+=("$patchedname")
@@ -143,7 +144,7 @@ do
 done
 
 # run patchelf to fix the so names to the hashed names
-for ((i=0;i<${#DEPS_LIST[@]};++i));
+for ((i=0;i<${#DEPS_SONAME[@]};++i));
 do
 	find $SP_DIR/torch -name '*.so*' | while read sofile; do
 	  origname=${DEPS_SONAME[i]}
