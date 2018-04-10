@@ -124,8 +124,18 @@ def _with_file_like(f, mode, body):
             f.close()
 
 
+def _is_compressed_file(f):
+    compress_modules = ['gzip']
+    try:
+        return f.__module__ in compress_modules
+    except AttributeError:
+        return False
+
+
 def _is_real_file(f):
     """Checks if f is backed by a real file (has a fileno)"""
+    if _is_compressed_file(f):
+        return False
     try:
         return f.fileno() >= 0
     except io.UnsupportedOperation:
@@ -476,7 +486,7 @@ def _load(f, map_location, pickle_module):
 
     deserialized_storage_keys = pickle_module.load(f)
 
-    offset = f.tell() if f_is_real_file else None
+    offset = f.tell() if _is_real_file(f) else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
         deserialized_objects[key]._set_from_file(f, offset, f_is_real_file)
