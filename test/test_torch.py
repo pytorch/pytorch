@@ -2346,6 +2346,24 @@ class TestTorch(TestCase):
         self.assertEqual(t.min(), 0)
         self.assertEqual(t.max(), ub - 1)
 
+    def test_random_neg_values(self):
+        def run_test(tname, use_cuda):
+            res = torch.rand(SIZE, SIZE).type(tname)
+            if use_cuda:
+                res = res.cuda()
+            res.random_(-10, -1)
+            self.assertLessEqual(res.max().item(), 9)
+            self.assertGreaterEqual(res.min().item(), -10)
+
+        signed_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor',
+                        'torch.IntTensor', 'torch.ShortTensor']
+        cuda_available = torch.cuda.is_available()
+
+        for tname in signed_types:
+            run_test(tname, False)
+            if cuda_available:
+                run_test(tname, True)
+
     def assertIsOrdered(self, order, x, mxx, ixx, task):
         SIZE = 4
         if order == 'descending':
