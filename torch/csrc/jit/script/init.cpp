@@ -266,11 +266,11 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
 }
 
 static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const Module & m) {
-  for(auto & params : m.get_parameters()) {
-    values.push_back(params.slot());
+  for(auto & param : m.get_parameters()) {
+    values.push_back(param->slot());
   }
   for(const auto & sub : m.get_modules()) {
-    gatherParametersAndBuffers(values, *sub.module);
+    gatherParametersAndBuffers(values, *sub->module);
   }
 }
 
@@ -309,23 +309,20 @@ void initJitScriptBindings(PyObject* module) {
       .def("_get_modules", [](Module& self) -> py::tuple {
         auto & modules = self.get_modules();
         py::tuple result(modules.size());
-        for(size_t i = 0; i < modules.size(); ++i) {
-          auto & nm = modules[i];
-          result[i] = std::make_pair(nm.name, nm.module);
+        size_t index = 0;
+        for (auto& item : self.get_modules()) {
+          result[index++] = std::make_pair(item.key, item->module);
         }
         return result;
       })
       .def("_get_parameters", [](Module& self) -> py::tuple {
-        auto & parameters = self.get_parameters();
-        py::tuple result(parameters.size());
-        for(size_t i = 0; i < parameters.size(); ++i) {
-          auto & p = parameters[i];
-          py::tuple r(3);
-          result[i] = std::make_tuple(
-            p.name,
-            static_cast<const autograd::Variable&>(*p.slot()),
-            p.is_buffer);
-
+        py::tuple result(self.get_parameters().size());
+        size_t index = 0;
+        for (auto& parameter : self.get_parameters()) {
+          result[index++] = std::make_tuple(
+            parameter.key,
+            static_cast<const autograd::Variable&>(*parameter->slot()),
+            parameter->is_buffer);
         }
         return result;
       })
@@ -348,9 +345,12 @@ void initJitScriptBindings(PyObject* module) {
         return bool(self.find_method(name));
       })
       .def("_method_names", [](Module& self) {
-        return fmap(self.get_methods(), [](const std::unique_ptr<Method> & m) {
-          return m->name();
-        });
+        std::vector<std::string> method_names;
+        method_names.reserve(self.get_methods().size());
+        for (auto& method : self.get_methods()) {
+          method_names.push_back((*method)->name());
+        }
+        return method_names;
       })
       .def("_create_method_from_trace", [](
         Module& self,

@@ -176,14 +176,14 @@ struct Module : public std::enable_shared_from_this<Module> {
     return modules.get(name).module;
   }
 
-  const std::vector<NamedModule>& get_modules() const {
-    return modules.values();
+  const detail::OrderedDict<NamedModule>& get_modules() const {
+    return modules;
   }
-  const  std::vector<NamedParameter>& get_parameters() const {
-    return parameters.values();
+  const  detail::OrderedDict<NamedParameter>& get_parameters() const {
+    return parameters;
   }
-  const  std::vector<std::unique_ptr<Method>>& get_methods() const {
-    return methods.values();
+  const  detail::OrderedDict<std::unique_ptr<Method>>& get_methods() const {
+    return methods;
   }
 
   NamedParameter* find_parameter(const std::string& name) {
