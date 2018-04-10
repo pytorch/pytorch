@@ -21,7 +21,7 @@ bool CopyFromGLOp<T>::RunOnDevice() {
 
   auto *X0blob = OperatorBase::Inputs()[0];
   auto X0 = GLContext::getGLTensor<T>(X0blob);
-  //LOG(ERROR) << "[C2DEBUG] Copy X0 " << X0->dims();
+  VLOG(2) << "[C2DEBUG] Copy X0 " << X0->dims();
   std::vector<const Blob*> inputsBlob;
   inputsBlob.push_back(X0blob);
 

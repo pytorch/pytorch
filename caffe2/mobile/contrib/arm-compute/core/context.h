@@ -154,15 +154,12 @@ public:
   }
 
   template <typename... Ts> bool Resize(Ts... dim_source) {
-    //LOG(ERROR) << "[C2DEBUG] before " << dims_;
     bool need_allocation = SetDims(dim_source...);
-    //LOG(ERROR) << "[C2DEBUG] after " << dims_;
     for (int i = 0; i < dims_.size(); i++) {
       shape_.set(dims_.size() - i - 1, dims_[i]);
     }
     if (need_allocation) {
       // TODO: Make it type generic
-      //LOG(ERROR) << "[C2DEBUG] resize need_allocation";
       tensor_->allocator()->free();
       #ifdef ACL_USE_FLOAT32
       tensor_->allocator()->init(arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F32));
@@ -187,7 +184,7 @@ public:
         Timer timer;
         fillGLTensor(b);
         auto millis = timer.MilliSeconds();
-        //LOG(ERROR) << "[C2DEBUG] fillGLTensor timer: " << millis;
+        VLOG(2) << "[C2DEBUG] fillGLTensor timer: " << millis;
       }
     }
   }
@@ -199,7 +196,7 @@ public:
   void fillGLTensor(const Blob *b) const {
     if (b->IsType<TensorCPU>()) {
       auto &Xcpu = b->Get<TensorCPU>();
-      //LOG(ERROR) << "[C2DEBUG] fillGLTensor dims: " << Xcpu.dims();
+      VLOG(2) << "[C2DEBUG] fillGLTensor dims: " << Xcpu.dims();
       T *buffer = map();
       char *byte_buffer = (char *)buffer;
       auto info = tensor_->info();
@@ -338,7 +335,7 @@ private:
 
 template<typename T = DataType>
 void getTensorCPU(const GLTensor<T>& g_, TensorCPU& g) {
-  //LOG(ERROR) << " [C2DEBUG] getTensorCPU " << g_.dims();
+  VLOG(2) << " [C2DEBUG] getTensorCPU " << g_.dims();
   g.Resize(g_.dims());
   g_.map();
   auto tensor = g_.get_underlying();

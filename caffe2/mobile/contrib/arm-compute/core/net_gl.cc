@@ -6,7 +6,6 @@
 #include <set>
 #include <unordered_map>
 #include <unordered_set>
-#include <thread>
 
 #include "caffe2/core/operator.h"
 #include "caffe2/core/static_tracepoint.h"
@@ -63,11 +62,11 @@ bool GLNet::Run() {
   if (first_run_) {
     first_run_ = false;
     for (auto& op: operators_) {
-      //LOG(ERROR) << "[C2DEBUG] configure " << ProtoDebugString(op->debug_def());
+      VLOG(2) << "[C2DEBUG] configure " << ProtoDebugString(op->debug_def());
       op->Run();
     }
     for (auto& op: operators_) {
-      //LOG(ERROR) << "[C2DEBUG] second run " << ProtoDebugString(op->debug_def());
+      VLOG(2) << "[C2DEBUG] second run " << ProtoDebugString(op->debug_def());
       op->Run();
     }
     // Change the parameters for GenerateProposals
@@ -86,8 +85,7 @@ bool GLNet::Run() {
   int i = 0;
   //Timer timer;
   for (auto& op : operators_) {
-    //LOG(ERROR) << "[C2DEBUG] running " << ProtoDebugString(op->debug_def()) << " " << i;
-    //LOG(ERROR) << "[C2DEBUG] running " << op->debug_def().type() << " " << i;
+    VLOG(2) << "[C2DEBUG] running " << ProtoDebugString(op->debug_def()) << " " << i;
     ++i;
     //timer.Start();
     bool res = op->Run();
@@ -167,14 +165,6 @@ vector<float> GLNet::TEST_Benchmark(
       int idx = 0;
       for (auto& op : operators_) {
         const string& op_type = op->debug_def().type();
-        if (i == 0) { // Gather flops on the first run.
-          auto* schema = OpSchemaRegistry::Schema(op_type);
-          if (schema && schema->HasCostInferenceFunction()) {
-            vector<TensorShape> shapes = op->InputTensorShapes();
-            //flops_per_op[idx] =
-            //    schema->InferCost(op->debug_def(), shapes).flops;
-          }
-        }
         timer.Start();
         CAFFE_ENFORCE(
             op->Run(),
@@ -183,12 +173,11 @@ vector<float> GLNet::TEST_Benchmark(
             "(",
             op_type,
             ") has failed.");
-        // if (opengl_device_[idx] && op_type != "CopyFromGL") {
-        //   Blob *gpu_out_blob = ws_->GetBlob(output_blobs_[idx]);
-        //   //LOG(ERROR) << "[C2DEBUG] trying to sync " << " " << op_type << " " << idx << " " << output_blobs_[idx];
-        //   auto &g_ = gpu_out_blob->Get<GLTensor<DataType>>();
-        //   g_.sync();
-        // }
+        if (opengl_device_[idx] && op_type != "CopyFromGL") {
+          Blob *gpu_out_blob = ws_->GetBlob(output_blobs_[idx]);
+          auto &g_ = gpu_out_blob->Get<GLTensor<DataType>>();
+          g_.sync();
+        }
         float spent = timer.MilliSeconds();
         time_per_op[idx] += spent;
         time_per_op_type[op_type] += spent;

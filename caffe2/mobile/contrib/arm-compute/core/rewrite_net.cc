@@ -243,7 +243,7 @@ bool tryConvertToOpenGL(const NetDef& predictNet,
                         std::unordered_set<std::string> cpuOps) {
   try {
     // Throws if unsupported operators are found.
-    LOG(ERROR) << "[C2DEBUG] in tryConvertToOpenGL";
+    VLOG(2) << "[C2DEBUG] in tryConvertToOpenGL";
     *glPredictNet = rewritePredictNetForOpenGL(predictNet, runFusion, cpuOps);
     dumpDefForOpenGL(*glPredictNet);
     // Throws if unsupported parameters are found.

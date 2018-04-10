@@ -43,7 +43,7 @@ bool GLConvOp<T>::RunOnDevice() {
     OperatorBase::Outputs()[0]->template GetMutable<GLTensor<T>>();
 
   const int N = X_->dim32(0), H = X_->dim32(2), W = X_->dim32(3), C = X_->dim32(1);
-  //LOG(ERROR) << "[C2DEBUG] Conv " << N << " " << H << " " << W << " " << C;
+  LOG(INFO) << "[C2DEBUG] Conv " << N << " " << H << " " << W << " " << C;
   CAFFE_ENFORCE_EQ(kernel_.size(), 2,
                    "Only 2d convolution is supported with ARM compute backend");
 
@@ -93,11 +93,9 @@ bool GLConvOp<T>::RunOnDevice() {
     TensorCPU fakeY;
     ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
     Y->ResizeLike(fakeY);
-      //LOG(ERROR) << "Conv [C2DEBUG] Y->dims " << Y->dims();
     Y->allocate();
     conv_.run();
   } else {
-    // hack
     X_->lazy_allocate(Xblob, second_run_, true);
     TensorCPU fakeX;
     fakeX.Resize(X_->dims());
@@ -105,17 +103,13 @@ bool GLConvOp<T>::RunOnDevice() {
     ConvPoolOpBase<GLContext>::SetOutputSize(fakeX, &fakeY, filter_->dim32(0));
     bool need_allocation = Y->ResizeLike(fakeY, true);
     if (need_allocation) {
-      LOG(ERROR) << "[C2DEBUG] conv allocate";
       Y->allocate();
     }
     conv_.configure(
                     X_->get_underlying(), filter_->get_underlying(), bias_->get_underlying(),
                     Y->get_underlying(),
                     arm_compute::PadStrideInfo(stride_[0], stride_[1], pads_[0], pads_[1]));
-    Timer timer;
     conv_.run();
-    auto millis = timer.MilliSeconds();
-    //LOG(ERROR) << "[C2DEBUG]Conv " << millis;
  }
 
   return true;
