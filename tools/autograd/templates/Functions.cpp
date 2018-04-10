@@ -1015,24 +1015,32 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
     // Do inverse C2C and project onto real plane because grad can be
     // asymmetrical so C2R can't be used.
     if (onesided) {
-      // if onesided, make it two sided
-      std::vector<int64_t> batched_signal_size(signal_ndim + 2);
-      batched_signal_size[0] = self.size(0);
-      for (int64_t i = 1; i <= signal_ndim; i++) {
-        batched_signal_size[i] = checked_signal_sizes[i - 1];
-      }
-      batched_signal_size[signal_ndim + 1] = 2;
-      auto complex_full_grad = grad.type().tensor(batched_signal_size);
-      int64_t last_dim_slice = grad.size(signal_ndim);
-      complex_full_grad.narrow(signal_ndim, 0, last_dim_slice).copy_(grad);
-      int64_t zero_length = checked_signal_sizes[signal_ndim - 1] - last_dim_slice;
+      // Forward is R2C (onesided)
+      // Think of onesided R2C rfft as
+      //     1. view as complex numbers (fill complex dim with zeros)
+      //     2. C2C fft
+      //     3. discard half of results
+      // So backward is
+      //     1. fill the other half with zeros (with `zero_grad_shape` below)
+      //        (C2C ifft only take twosided inputs so we need to fill here)
+      //     2. inverse C2C ifft
+      //     3. discard the complex dim
+      int64_t zero_length = checked_signal_sizes[signal_ndim - 1] - grad.size(signal_ndim);
+      auto complex_full_grad = grad;
       if (zero_length > 0) {
-        complex_full_grad.narrow(signal_ndim, last_dim_slice, zero_length).zero_();
+        std::vector<int64_t> zero_grad_shape(signal_ndim + 2);
+        zero_grad_shape[0] = self.size(0);
+        for (int64_t i = 1; i < signal_ndim; i++) {
+          zero_grad_shape[i] = checked_signal_sizes[i - 1];
+        }
+        zero_grad_shape[signal_ndim] = zero_length;
+        zero_grad_shape[signal_ndim + 1] = 2;
+        complex_full_grad =  at::cat({ grad, at::zeros(grad.type(), zero_grad_shape) }, signal_ndim);
       }
       gI = _fft_with_size(complex_full_grad, signal_ndim,
                           /* complex_input */ true, /* complex_output */ true,
                           !inverse, checked_signal_sizes, normalized,
-                          /* onesided */ false, batched_signal_size).select(-1, 0);
+                          /* onesided */ false, complex_full_grad.sizes()).select(-1, 0);
     } else {
       gI = _fft_with_size(grad, signal_ndim, /* complex_input */ true,
                           /* complex_output */ true, !inverse,

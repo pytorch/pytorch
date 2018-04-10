@@ -6038,7 +6038,7 @@ Ignoring the batch dimension, it computes the following expression:
         \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
          e^{-j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
-where :math:`d`=:attr:`signal_ndim` is number of dimensions for the
+where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
 signal, and :math:`N_i` is the size of signal dimension :math:`i`.
 
 This method supports 1D, 2D and 3D complex-to-complex transforms, indicated
@@ -6046,21 +6046,22 @@ by :attr:`signal_ndim`. :attr:`input` must be a tensor with last dimension
 of size 2, representing the real and imaginary components of complex
 numbers, and should have ``signal_ndim + 1`` dimensions or ``signal_ndim + 2``
 dimensions with batched data. If :attr:`normalized` is set to ``True``, this
-returns the normalized Fourier transform results, i.e., divided by
-:math:`\sqrt{\prod_{i=1}^d N_i}`, to become a unitary operator.
+normalizes the result by dividing it with :math:`\sqrt{\prod_{i=1}^K N_i}` so
+that the operator is unitary.
 
 Returns the real and the imaginary parts together as one tensor of the same
 shape of :attr:`input`.
 
-The inverse of this function is :func:`ifft`.
+The inverse of this function is :func:`~torch.ifft`.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Check
-    :meth:`torch.backends.mkl.is_available` to see if MKL is installed.
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
     input (Tensor): the input tensor
-    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
         Default: ``False``
 
@@ -6133,29 +6134,30 @@ expression:
 .. math::
     X[\omega_1, \dots, \omega_d] =
         \frac{1}{\prod_{i=1}^d N_i} \sum_{n_1=0}^{N_1} \dots \sum_{n_d=0}^{N_d} x[n_1, \dots, n_d]
-         e^{j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
+         e^{\ j\ 2 \pi \sum_{i=0}^d \frac{\omega_i n_i}{N_i}},
 
-where :math:`d`=:attr:`signal_ndim` is number of dimensions for the
+where :math:`d` = :attr:`signal_ndim` is number of dimensions for the
 signal, and :math:`N_i` is the size of signal dimension :math:`i`.
 
-The argument specifications are almost identical with :func:`fft`. However,
-if :attr:`normalized` is set to ``True``, this instead returns the results
-multiplied by :math:`\sqrt{\prod_{i=1}^d N_i}`, to become a unitary
-operator. Therefore, to invert an :func:`fft`, the :attr:`normalized`
-argument should be set identically for :func:`ifft`.
+The argument specifications are almost identical with :func:`~torch.fft`.
+However, if :attr:`normalized` is set to ``True``, this instead returns the
+results multiplied by :math:`\sqrt{\prod_{i=1}^d N_i}`, to become a unitary
+operator. Therefore, to invert a :func:`~torch.fft`, the :attr:`normalized`
+argument should be set identically for :func:`~torch.fft`.
 
 Returns the real and the imaginary parts together as one tensor of the same
 shape of :attr:`input`.
 
-The inverse of this function is :func:`fft`.
+The inverse of this function is :func:`~torch.fft`.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Check
-    :meth:`torch.backends.mkl.is_available` to see if MKL is installed.
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
     input (Tensor): the input tensor
-    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
         Default: ``False``
 
@@ -6211,15 +6213,15 @@ rfft(input, signal_ndim, normalized=False, onesided=True) -> Tensor
 Real-to-complex Discrete Fourier Transform
 
 This method computes the real-to-complex discrete Fourier transform. It is
-mathematically equivalent with :func:`fft` with differences only in formats
-of the input and output.
+mathematically equivalent with :func:`~torch.fft` with differences only in
+formats of the input and output.
 
 This method supports 1D, 2D and 3D real-to-complex transforms, indicated
 by :attr:`signal_ndim`. :attr:`input` must be a tensor with ``signal_ndim``
 dimensions or ``signal_ndim + 1`` dimensions with batched data. If
-:attr:`normalized` is set to ``True``, this returns the normalized Fourier
-transform results, i.e., divided by :math:`\sqrt{\prod_{i=1}^d N_i}`, to
-become a unitary operator.
+:attr:`normalized` is set to ``True``, this normalizes the result by multiplying
+it with :math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
+:math:`N_i` is the size of signal dimension :math:`i`.
 
 The real-to-complex Fourier transform results follow conjugate symmetry:
 
@@ -6227,21 +6229,23 @@ The real-to-complex Fourier transform results follow conjugate symmetry:
     X[\omega_1, \dots, \omega_d] = X^*[N_1 - \omega_1, \dots, N_d - \omega_d],
 
 where the index arithmetic is computed modulus the size of the corresponding
-dimension. Therefore, :attr:`onesided` controls whether to avoid redundancy
-in the output results. If set to ``True`` (default), the output will not be
-full complex result of shape :math:`(* \times 2)`, where :math:`*` is the
-shape of :attr:`input`, but instead the last dimension will be halfed as
+dimension, :math:`\ ^*` is the conjugate operator, and
+:math:`d` = :attr:`signal_ndim`. :attr:`onesided` flag controls whether to avoid
+redundancy in the output results. If set to ``True`` (default), the output will
+not be full complex result of shape :math:`(*, 2)`, where :math:`*` is the shape
+of :attr:`input`, but instead the last dimension will be halfed as of size
 :math:`\lfloor \frac{N_d}{2} \rfloor + 1`.
 
-The inverse of this function is :func:`irfft`.
+The inverse of this function is :func:`~torch.irfft`.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Check
-    :meth:`torch.backends.mkl.is_available` to see if MKL is installed.
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
     input (Tensor): the input tensor
-    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
         Default: ``False``
     onesided (bool, optional): controls whether to return half of results to
@@ -6271,44 +6275,47 @@ This method computes the complex-to-real inverse discrete Fourier transform.
 It is mathematically equivalent with :func:`ifft` with differences only in
 formats of the input and output.
 
-The argument specifications are almost identical with :func:`ifft`. Similar
-to :func:`ifft`, if :attr:`normalized` is set to ``True``, this instead
-returns the results multiplied by :math:`\sqrt{\prod_{i=1}^K N_i}`, to
-become a unitary operator.
+The argument specifications are almost identical with :func:`~torch.ifft`.
+Similar to :func:`~torch.ifft`, if :attr:`normalized` is set to ``True``,
+this normalizes the result by multiplying it with
+:math:`\sqrt{\prod_{i=1}^K N_i}` so that the operator is unitary, where
+:math:`N_i` is the size of signal dimension :math:`i`.
 
 Due to the conjugate symmetry, :attr:`input` do not need to contain the full
 complex frequency values. Roughly half of the values will be sufficient, as
-is the case when :attr:`input` is given by :func:`rfft` with
+is the case when :attr:`input` is given by :func:`~torch.rfft` with
 ``rfft(signal, onesided=True)``. In such case, set the :attr:`onesided`
 argument of this method to ``True``. Moreover, the original signal shape
 information can sometimes be lost, optionally set :attr:`signal_sizes` to be
 the size of the original signal (without batch dimension if in batched mode) to
 recover it with correct shape.
 
-Therefore, to invert an :func:`rfft`, the :attr:`normalized` and
-:attr:`onesided` arguments should be set identically for :func:`irfft`, and
-preferrably a :func:`signal_sizes` is given to avoid size mismatch. See the
+Therefore, to invert an :func:`~torch.rfft`, the :attr:`normalized` and
+:attr:`onesided` arguments should be set identically for :func:`~torch.irfft`,
+and preferrably a :attr:`signal_sizes` is given to avoid size mismatch. See the
 example below for a case of size mismatch.
 
-See :func:`rfft` for details on conjugate symmetry.
+See :func:`~torch.rfft` for details on conjugate symmetry.
 
-The inverse of this function is :func:`rfft`.
+The inverse of this function is :func:`~torch.rfft`.
 
 .. warning::
-    Genearlly speaking, the input of this function should contain values
+    Generally speaking, the input of this function should contain values
     following conjugate symmetry. Note that even if :attr:`onesided` is
     ``True``, often symmetry on some part is still needed. When this
-    requirement is not satisfied, the behavior is undefined. Since
-    :func:`torch.autograd.gradcheck` estimates numerical Jacobian with point
-    perturbations, this method will almost certainly fail the check.
+    requirement is not satisfied, the behavior of :func:`~torch.irfft` is
+    undefined. Since :func:`torch.autograd.gradcheck` estimates numerical
+    Jacobian with point perturbations, :func:`~torch.irfft` will almost
+    certainly fail the check.
 
 .. warning::
     For CPU tensors, this method is currently only available with MKL. Check
-    :meth:`torch.backends.mkl.is_available` to see if MKL is installed.
+    :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
     input (Tensor): the input tensor
-    signal_ndim (int): the number of dimensions in each signal, can only be 1, 2 or 3
+    signal_ndim (int): the number of dimensions in each signal.
+        :attr:`signal_ndim` can only be 1, 2 or 3
     normalized (bool, optional): controls whether to return normalized results.
         Default: ``False``
     onesided (bool, optional): controls whether :attr:`input` was halfed to avoid

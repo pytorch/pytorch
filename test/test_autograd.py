@@ -1860,6 +1860,7 @@ class TestAutograd(TestCase):
                 def ifft(fx):
                     return fx.ifft(signal_ndim, normalized=normalized)
 
+                # Use output of fft(x) for inverse fft, due to symmetry requirements
                 fx = fft(x).detach()
                 fx.requires_grad = True
                 gradcheck(ifft, [fx])
@@ -1903,6 +1904,7 @@ class TestAutograd(TestCase):
                         return fx.irfft(signal_ndim, normalized=normalized,
                                         onesided=onesided, signal_sizes=signal_sizes)
 
+                    # Use output of rfft(x) for inverse rfft, due to symmetry requirements
                     fx = rfft(x).detach()
                     fx.requires_grad = True
                     gradcheck(irfft, [fx])
