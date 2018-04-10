@@ -10,7 +10,9 @@ import torch.onnx
 # ONNX symbolics
 import torch.onnx.utils
 
+from collections import Iterable
 from functools import partial
+import itertools
 
 # EDITING THIS FILE? READ THIS FIRST!
 #
@@ -855,3 +857,62 @@ def GRU_symbolic_builder(input_size, hidden_size, num_layers, batch_first, dropo
         return prev_output, h_outs
 
     return symbolic
+
+
+def rnn_trace_override_symbolic(cell_type, func, sym, g, input, weights, hiddens, batch_sizes):
+    num_layers = len(weights)
+    num_weights = 0
+    for x in weights:
+        num_weights += len(x)
+    weights_per_layer = num_weights // num_layers
+    has_batch_sizes = batch_sizes is not None
+
+    def forward_flattened_wrapper(input, *args):
+        args_offset = 0
+        weights = []
+        for _ in range(num_layers):
+            weights.append(args[args_offset:args_offset + weights_per_layer])
+            args_offset += weights_per_layer
+        if has_batch_sizes:
+            hiddens = args[args_offset:-1]
+            batch_sizes = args[-1]
+        else:
+            hiddens = args[args_offset:]
+            batch_sizes = None
+        outputs = func(input, weights, hiddens, batch_sizes)
+        outs_flattened = [outputs[0]]
+        for o in outputs[1]:
+            outs_flattened.append(o)
+        return tuple(outs_flattened)
+
+    def symbolic_flattened_wrapper(g, input, *args):
+        args_offset = 0
+        weights = []
+        for _ in range(num_layers):
+            weights.append(args[args_offset:args_offset + weights_per_layer])
+            args_offset += weights_per_layer
+        if has_batch_sizes:
+            hiddens = args[args_offset:-1]
+            hiddens = hiddens[0] if len(hiddens) == 1 else list(hiddens)
+            batch_sizes = args[-1]
+        else:
+            hiddens = args[args_offset:]
+            hiddens = hiddens[0] if len(hiddens) == 1 else list(hiddens)
+            batch_sizes = None
+        return sym(g, input, weights, hiddens, batch_sizes)
+    flattened_weights = []
+    for x in weights:
+        for y in x:
+            flattened_weights.append(y)
+    if not isinstance(hiddens, Iterable):
+        hiddens = [hiddens]
+    inputs = list(itertools.chain.from_iterable(
+        [[input], flattened_weights, hiddens,
+            [batch_sizes] if batch_sizes else []]))
+    outputs = g.wrapPyFuncWithSymbolic(
+        forward_flattened_wrapper,
+        inputs,
+        3 if cell_type == 'LSTM' else 2,
+        symbolic_flattened_wrapper
+    )
+    return tuple(o for o in outputs)
