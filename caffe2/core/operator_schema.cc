@@ -195,6 +195,22 @@ OpSchema& OpSchema::TensorInferenceFunction(
   return *this;
 }
 
+OpSchema::TensorInferenceFunctionType OpSchema::NeedsAllInputShapes(
+    TensorInferenceFunctionType f) {
+  return [f](const OperatorDef& def, const vector<TensorShape>& in) {
+    for (const auto& in_ts : in) {
+      if (in_ts.unknown_shape()) {
+        vector<TensorShape> out(def.output().size());
+        for (auto& out_ts : out) {
+          out_ts.set_unknown_shape(true);
+        }
+        return out;
+      }
+    }
+    return f(def, in);
+  };
+}
+
 OpSchema& OpSchema::InheritOnnxSchema(const std::string& onnx_schema_name) {
   onnx_schema_ = onnx_schema_name;
   return *this;

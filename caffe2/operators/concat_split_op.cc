@@ -94,8 +94,9 @@ OPERATOR_SCHEMA(Concat)
         "add_axis",
         "Pass 1 to add the axis specified in arg 'axis' to all "
         "input tensors")
-    .TensorInferenceFunction([](const OperatorDef& def,
-                                const vector<TensorShape>& in) {
+    .TensorInferenceFunction(OpSchema::NeedsAllInputShapes(
+      [](const OperatorDef& def,
+         const vector<TensorShape>& in) {
       ArgumentHelper helper(def);
       const int axis = helper.HasArgument("axis")
           ? helper.GetSingleArgument<int>("axis", -1)
@@ -164,7 +165,7 @@ OPERATOR_SCHEMA(Concat)
       return vector<TensorShape>{
           CreateTensorShape(out_shape, in[0].data_type()),
           CreateTensorShape(split_shape, TensorProto::INT32)};
-    })
+    }))
     .CostInferenceFunction(CostInferenceForConcat)
     .DeviceInferenceFunction(concatOpDevInfer)
     .SetDoc("Concatenate a list of tensors into a single tensor")
