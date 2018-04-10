@@ -20,12 +20,12 @@ class DummyName {
   void Reset(const std::unordered_set<std::string>& used_names);
 
   void AddName(const std::string& new_used) {
-    get_used_names().insert(new_used);
+    used_names_.insert(new_used);
   }
 
  private:
-  std::unordered_set<std::string>& get_used_names();
-  size_t counter_;
+  std::unordered_set<std::string> used_names_;
+  size_t counter_{0};
 };
 
 inline AttributeProto MakeAttribute(
