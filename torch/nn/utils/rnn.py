@@ -288,8 +288,8 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     # assuming trailing dimensions and type of all the Variables
     # in sequences are same and fetching those from sequences[0]
     max_size = sequences[0].size()
-    max_len, trailing_dims = max_size[0], max_size[1:]
-    prev_l = max_len
+    trailing_dims = max_size[1:]
+    max_len = max([s.size(0) for s in sequences])
     if batch_first:
         out_dims = (len(sequences), max_len) + trailing_dims
     else:
@@ -298,10 +298,6 @@ def pad_sequence(sequences, batch_first=False, padding_value=0):
     out_variable = Variable(sequences[0].data.new(*out_dims).fill_(padding_value))
     for i, variable in enumerate(sequences):
         length = variable.size(0)
-        # temporary sort check, can be removed when we handle sorting internally
-        if prev_l < length:
-            raise ValueError("lengths array has to be sorted in decreasing order")
-        prev_l = length
         # use index notation to prevent duplicate references to the variable
         if batch_first:
             out_variable[i, :length, ...] = variable
