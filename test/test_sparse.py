@@ -852,7 +852,7 @@ class TestSparse(TestCase):
                         include_size = include_size or use_cuda
                         dtype = torch.float64
                         long_dtype = torch.int64
-                        device = -1 if not use_cuda else torch.device(torch.cuda.device_count() - 1)
+                        device = torch.device('cpu') if not use_cuda else torch.device(torch.cuda.device_count() - 1)
                         indices = torch.tensor(([0], [2]), dtype=long_dtype) if use_tensor_idx else ([0], [2])
                         values = torch.tensor([1.], dtype=dtype) if use_tensor_val else 1.
                         if include_size:
