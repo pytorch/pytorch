@@ -19,6 +19,7 @@ cmake -DNO_CUDA:BOOL=$NO_CUDA \
       -DCMAKE_INSTALL_PREFIX:STRING=$INSTALL_PREFIX \
       -DCMAKE_INSTALL_MESSAGE=NEVER \
       -DVERBOSE=${VERBOSE:-0} \
+      -DWerror=${WERROR:-0} \
       -G "$GENERATE" \
       $SCRIPTPATH/libtorch
 $MAKE -j "$JOBS"
