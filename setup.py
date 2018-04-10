@@ -542,7 +542,7 @@ else:
         # https://bugs.llvm.org/show_bug.cgi?id=21629
         '-Wno-missing-braces'
     ]
-    if os.getenv('WERROR'):
+    if check_env_flag('WERROR'):
         extra_compile_args.append('-Werror')
 
 cwd = os.path.dirname(os.path.abspath(__file__))
