@@ -12,6 +12,7 @@ import sys
 import tempfile
 
 import torch
+from torch.utils import cpp_extension
 
 TESTS = [
     'autograd',
@@ -76,6 +77,13 @@ def run_test(python, test_module, test_directory, options):
 
 
 def test_cpp_extensions(python, test_module, test_directory, options):
+    try:
+        cpp_extension.verify_ninja_availability()
+    except RuntimeError:
+        print(
+            'Ninja is not available. Skipping C++ extensions test. '
+            "Install ninja with 'pip install ninja' or 'conda install ninja'.")
+        return 0
     return_code = shell('{} setup.py install --root ./install'.format(python),
                         os.path.join(test_directory, 'cpp_extensions'))
     if return_code != 0:
