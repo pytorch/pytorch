@@ -1909,6 +1909,26 @@ class TestTorch(TestCase):
     def test_diagonal(self):
         self._test_diagonal(self, dtype=torch.float32, device='cpu')
 
+    @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
+    def test_diagonal_multidim(self):
+        x = torch.randn(10, 11, 12, 13)
+        xn = x.numpy()
+        result = torch.diagonal(x, 2, 2, 3)
+        expected = xn.diagonal(2, 2, 3)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertTrue(np.allclose(expected, result.numpy()))
+        result = torch.diagonal(x, 2)
+        expected = torch.diagonal(x, 2, 0, 1)
+        self.assertEqual(expected, result)
+        result = torch.diagonal(x, -2, 1, 2)
+        expected = xn.diagonal(-2, 1, 2)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertTrue(np.allclose(expected, result.numpy()))
+        result = torch.diagonal(x, 0, -2, -1)
+        expected = xn.diagonal(0, -2, -1)
+        self.assertEqual(expected.shape, result.shape)
+        self.assertTrue(np.allclose(expected, result.numpy()))
+
     @staticmethod
     def _test_diagflat(self, dtype, device):
         # Basic sanity test
