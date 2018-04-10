@@ -1566,6 +1566,7 @@ class TestCuda(TestCase):
     def test_random_neg_values(self):
         TestTorch._test_random_neg_values(self, use_cuda=True)
 
+
 def load_ignore_file():
     from os.path import join, dirname
     global ignores
