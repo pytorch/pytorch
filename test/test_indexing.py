@@ -156,6 +156,11 @@ class TestIndexing(TestCase):
         self.assertEqual(a[0, 1], a[zero, one])
         self.assertEqual(a[0, one], a[zero, 1])
 
+        # indexing by a scalar should slice (not copy)
+        self.assertEqual(a[0, 1].data_ptr(), a[zero, one].data_ptr())
+        self.assertEqual(a[1].data_ptr(), a[one.int()].data_ptr())
+        self.assertEqual(a[1].data_ptr(), a[one.short()].data_ptr())
+
         # scalar indexed with scalar
         r = torch.tensor(0.).normal_()
         with self.assertRaises(RuntimeError):
