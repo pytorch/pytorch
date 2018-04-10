@@ -1907,6 +1907,10 @@ def pad(input, pad, mode='constant', value=0):
                 5D input tensor with padding of the form
                 `(padLeft, padRight, padTop, padBottom, padFront, padBack)`. No "reflect" implementation.
 
+    See :class:`torch.nn.ConstantPad2d`, :class:`torch.nn.ReflectionPad2d`, and
+    :class:`torch.nn.ReplicationPad2d` for concrete examples on how each of the
+    padding modes works.
+
     Args:
         input (Variable): `Nd` tensor
         pad (tuple): m-elem tuple, where :math:`\frac{m}{2} \leq` input dimensions and :math:`m` is even.
@@ -1917,7 +1921,7 @@ def pad(input, pad, mode='constant', value=0):
 
         >>> t4d = torch.Tensor(3, 3, 4, 2)
         >>> p1d = (1, 1) # pad last dim by 1 on each side
-        >>> out = F.pad(t4d, p1d, "constant", 0)
+        >>> out = F.pad(t4d, p1d, "constant", 0)  # effectively zero padding
         >>> print(out.data.size())
         torch.Size([3, 3, 4, 4])
         >>> p2d = (1, 1, 2, 2) # pad last dim by (1, 1) and 2nd to last by (2, 2)
@@ -1929,31 +1933,34 @@ def pad(input, pad, mode='constant', value=0):
         >>> out = F.pad(t4d, p3d, "constant", 0)
         >>> print(out.data.size())
         torch.Size([3, 9, 7, 3])
+
     """
     assert len(pad) % 2 == 0, 'Padding length must be divisible by 2'
     assert len(pad) // 2 <= input.dim(), 'Padding length too large'
     if mode == 'constant':
         return ConstantPadNd.apply(input, pad, value)
-    elif input.dim() == 3:
-        assert len(pad) == 2, '3D tensors expect 2 values for padding'
-        if mode == 'reflect':
-            return torch._C._nn.reflection_pad1d(input, pad)
-        elif mode == 'replicate':
-            return torch._C._nn.replication_pad1d(input, pad)
-    elif input.dim() == 4:
-        assert len(pad) == 4, '4D tensors expect 4 values for padding'
-        if mode == 'reflect':
-            return torch._C._nn.reflection_pad2d(input, pad)
-        elif mode == 'replicate':
-            return torch._C._nn.replication_pad2d(input, pad)
-    elif input.dim() == 5:
-        assert len(pad) == 6, '5D tensors expect 6 values for padding'
-        if mode == 'reflect':
-            raise NotImplementedError
-        elif mode == 'replicate':
-            return torch._C._nn.replication_pad3d(input, pad)
     else:
-        raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
+        assert value == 0, 'Padding mode "{}"" doesn\'t take in value argument'.format(mode)
+        if input.dim() == 3:
+            assert len(pad) == 2, '3D tensors expect 2 values for padding'
+            if mode == 'reflect':
+                return torch._C._nn.reflection_pad1d(input, pad)
+            elif mode == 'replicate':
+                return torch._C._nn.replication_pad1d(input, pad)
+        elif input.dim() == 4:
+            assert len(pad) == 4, '4D tensors expect 4 values for padding'
+            if mode == 'reflect':
+                return torch._C._nn.reflection_pad2d(input, pad)
+            elif mode == 'replicate':
+                return torch._C._nn.replication_pad2d(input, pad)
+        elif input.dim() == 5:
+            assert len(pad) == 6, '5D tensors expect 6 values for padding'
+            if mode == 'reflect':
+                raise NotImplementedError
+            elif mode == 'replicate':
+                return torch._C._nn.replication_pad3d(input, pad)
+        else:
+            raise NotImplementedError("Only 3D, 4D, 5D padding with non-constant padding are supported for now")
 
 
 # distance
