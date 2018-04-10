@@ -6,6 +6,9 @@ from torch.nn.utils.rnn import PackedSequence
 import warnings
 
 import torch.onnx
+# This import monkey-patches graph manipulation methods on Graph, used for the
+# ONNX symbolics
+import torch.onnx.utils
 
 from functools import partial
 
