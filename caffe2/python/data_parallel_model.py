@@ -42,6 +42,7 @@ def Parallelize(
     param_update_builder_fun=None,
     optimizer_builder_fun=None,
     post_sync_builder_fun=None,
+    net_transformer_fun=None,
     devices=None,
     rendezvous=None,
     net_type='dag',
@@ -80,6 +81,13 @@ def Parallelize(
                         Alternative to param_update_builder_fun, allows one
                         to add an optimizer for the whole model. Called only
                         once, without name or devicescope.
+      net_transformer_fun:
+                        Optional function to transform the network after the
+                        network is built. It will be called once (NOT once per
+                        GPU.)
+                        Signature:
+                        net_transformer_fun(
+                            model, num_devices, device_prefix, device_type)
       post_sync_builder_fun:
                         Function applied after initial parameter sync has been
                         completed, such as keeping multi-precision parameters
@@ -144,6 +152,7 @@ def Parallelize(
     # Store some information in the model -- a bit ugly
     model_helper_obj._devices = devices
     model_helper_obj._rendezvous = rendezvous
+    model_helper_obj._barrier_net = None
     model_helper_obj._broadcast_context = None
     model_helper_obj._grad_names = []
 
@@ -217,13 +226,21 @@ def Parallelize(
     model_helper_obj._computed_param_names =\
         list(viewkeys(computed_params_grouped))
 
+    if has_parameter_updates:
+        log.info("Adding gradient operators")
+        _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
+
+    if net_transformer_fun:
+        net_transformer_fun(
+            model_helper_obj,
+            len(devices),
+            model_helper_obj._device_prefix,
+            model_helper_obj._device_type)
+
     if not has_parameter_updates:
         log.info("Parameter update function not defined --> only forward")
         _InferBlobDevice(model_helper_obj)
         return
-
-    log.info("Adding gradient operators")
-    _AddGradientOperators(devices, model_helper_obj, losses_by_gpu)
 
     if combine_spatial_bn:
         assert(cpu_device), \
@@ -419,6 +436,7 @@ def Parallelize_BMUF(
 
     model_helper_obj._devices = devices
     model_helper_obj._rendezvous = rendezvous
+    model_helper_obj._barrier_net = None
     model_helper_obj._broadcast_context = None
     model_helper_obj._shared_model = False
     master_dev_opt = core.DeviceOption(model_helper_obj._device_type, master_device)
@@ -678,34 +696,38 @@ def RunNet(model, num_iterations):
             workspace.RunNet(net_iter, num_iterations)
 
 
-barrier_instance = 0
-
-
 def Synchronize(model, timeout_sec=_DEFAULT_TIMEOUT_SEC):
     if model._rendezvous is None or model._rendezvous['num_shards'] <= 1:
         # Single host case
         return
 
-    log.info("Creating synchronization barrier net")
-    assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
-    global barrier_instance
-    instance = barrier_instance
-    barrier_instance += 1
-    barrier_net = core.Net("sync_barrier_net_" + str(instance))
-    comm_world = _CreateOrCloneCommonWorld(
-        barrier_net,
-        "sync_barrier_cw_" + str(instance),
-        rendezvous=model._rendezvous,
-        status_blob="sync_barrier_cw_status_" + str(instance),
-        timeout_sec=timeout_sec,
-    )
-    barrier_net.Barrier(
-        inputs=[comm_world],
-        outputs=[],
-        engine=model._rendezvous['engine'],
-        status_blob="sync_barrier_status_" + str(instance),
-    )
-    workspace.RunNetOnce(barrier_net)
+    if model._barrier_net is None:
+        log.info("Creating synchronization barrier net")
+        assert model._rendezvous['engine'] == 'GLOO', "Engine does not support barrier"
+        barrier_init_net = core.Net("sync_barrier_init_net")
+        comm_world = _CreateOrCloneCommonWorld(
+            barrier_init_net,
+            "sync_barrier_cw",
+            rendezvous=model._rendezvous,
+            status_blob="sync_barrier_cw_status",
+            timeout_sec=timeout_sec,
+        )
+        workspace.RunNetOnce(barrier_init_net)
+        barrier_net = core.Net("sync_barrier_net")
+        barrier_net.Barrier(
+            inputs=[comm_world],
+            outputs=[],
+            engine=model._rendezvous['engine'],
+            status_blob="sync_barrier_status",
+        )
+        workspace.CreateNet(barrier_net)
+        model._barrier_net = barrier_net
+        model._barrier_net_timeout = timeout_sec
+    assert model._barrier_net_timeout == timeout_sec, \
+        "Must use fixed timeout, {} != {}".format(
+            model._barrier_net_timeout, timeout_sec
+        )
+    workspace.RunNet(model._barrier_net)
 
 
 def ConvertNetForDevice(net, device=None):

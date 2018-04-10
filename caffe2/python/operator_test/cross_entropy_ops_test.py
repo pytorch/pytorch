@@ -21,6 +21,13 @@ def sigmoid_cross_entropy_with_logits_grad(x, z):
     return z - sigmoid(x)
 
 
+def sigmoid_cross_entropy_with_logits_with_log_D_trick(x, z):
+    return -(2 * z - 1.) * np.log(sigmoid(x))
+
+
+def sigmoid_cross_entropy_with_logits_with_log_D_trick_grad(x, z):
+    return (2 * z - 1.) * (1 - sigmoid(x))
+
 class TestCrossEntropyOps(hu.HypothesisTestCase):
     @given(
         inputs=st.lists(
@@ -42,27 +49,44 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
                 ),
             )
         ),
+        log_D_trick=st.booleans(),
         **hu.gcs
     )
-    def test_sigmoid_cross_entropy_with_logits(self, inputs, gc, dc):
+    def test_sigmoid_cross_entropy_with_logits(
+        self, inputs, log_D_trick, gc, dc
+    ):
         logits, targets = inputs
 
         def sigmoid_xentr_logit_ref(logits, targets):
-            s = sigmoid_cross_entropy_with_logits(logits, targets)
+            s = (
+                sigmoid_cross_entropy_with_logits(logits, targets)
+                if not log_D_trick else
+                sigmoid_cross_entropy_with_logits_with_log_D_trick(
+                    logits, targets
+                )
+            )
             m = np.mean(s, axis=len(logits.shape) - 1)
             return (m, )
 
         def sigmoid_xentr_logit_grad_ref(g_out, outputs, fwd_inputs):
             fwd_logits, fwd_targets = fwd_inputs
             inner_size = fwd_logits.shape[-1]
-            m = fwd_targets - sigmoid(fwd_logits)
+            m = (
+                sigmoid_cross_entropy_with_logits_grad(fwd_logits, fwd_targets)
+                if not log_D_trick else
+                sigmoid_cross_entropy_with_logits_with_log_D_trick_grad(
+                    fwd_logits, fwd_targets
+                )
+            )
+            # m = fwd_targets - sigmoid(fwd_logits)
             g_in = -np.expand_dims(g_out, axis=-1) * m / inner_size
             return (g_in, None)
 
         op = core.CreateOperator(
-            'SigmoidCrossEntropyWithLogits',
-            ['logits', 'targets'],
-            ['xentropy'])
+            'SigmoidCrossEntropyWithLogits', ['logits', 'targets'],
+            ['xentropy'],
+            log_D_trick=log_D_trick
+        )
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
