@@ -49,10 +49,9 @@ else
   }
 fi
 
-# remove_lines_with: Given a string, removes any line that mentions that line from
-# the meta.yaml
+# remove_lines_with: Given a string, removes any line that contains it
 remove_lines_with () {
-  portable_sed "/$1/d" "${META_YAML}"
+  portable_sed "/$1/d" $META_YAML
 }
 
 # add_before <some marker> <some insertion> <in this file>
@@ -82,8 +81,8 @@ append_to_section () {
 # Takes a package name and version and finagles the meta.yaml to specify that
 add_package () {
   remove_lines_with $1
-  append_to_section 'build' $1 $2
-  append_to_section 'run' $1 $2
+  append_to_section 'build' "- $1 $2"
+  append_to_section 'run' "- $1 $2"
 }
 
 
@@ -188,7 +187,7 @@ else
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/normal"
 fi
 META_YAML="${CONDA_BUILD_DIR}/meta.yaml"
-portable_sed 's#path:  \.\..*#path: $PYTORCH_ROOT#' $META_YAML
+portable_sed "s#path:  \.\..*#path: $PYTORCH_ROOT#" $META_YAML
 
 
 ###########################################################
@@ -227,9 +226,9 @@ portable_sed "s/string:.*\$/string: ${BUILD_STRING}/" $META_YAML
 # Handle tests
 ###########################################################
 if [[ -n $SKIP_CONDA_TESTS ]]; then
-  remove_lines_with '/test:/d'
-  remove_lines_with '/imports:/d'
-  remove_lines_with '/caffe2.python.core/d'
+  remove_lines_with 'test:'
+  remove_lines_with 'imports:'
+  remove_lines_with 'caffe2.python.core'
 elif [[ -n $BUILD_INTEGRATED ]]; then
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'test' 'requires:'
@@ -247,23 +246,21 @@ fi
 # Set flags and package requirements
 ###########################################################
 # Add packages required for all Caffe2 builds
-add_package glog
-add_package gflags
-add_package leveldb
-add_package lmdb
-add_package opencv
+add_package 'glog'
+add_package 'gflags'
+add_package 'leveldb'
+add_package 'lmdb'
+add_package 'opencv'
 
 # Add packages required for pytorch
 if [[ -n $BUILD_INTEGRATED ]]; then
   remove_lines_with 'numpy'
-  append_to_section 'build' '- numpy 1.11.*'
-  append_to_section 'run' '- numpy >=1.11'
-  add_package cffi
+  add_package 'cffi'
+  add_package 'mkl' '>=2018'
+  add_package 'mkl-include'
+  add_package 'numpy' '>=1.11'
   append_to_section 'build' '- pyyaml'
   append_to_section 'build' '- setuptools'
-  append_to_section 'build' '- mkl'
-  append_to_section 'build' '- mkl-include'
-  append_to_section 'run' '- mkl >=2018'
   CAFFE2_CMAKE_ARGS+=("-DBLAS=MKL")
   if [[ -n $CUDA_VERSION ]]; then
     append_to_section 'features' features:
@@ -276,7 +273,6 @@ fi
 
 # Flags required for CUDA for Caffe2
 if [[ -n $CUDA_VERSION ]]; then
-  export BUILD_WITH_CUDA=1
   CAFFE2_CMAKE_ARGS+=("-DUSE_CUDA=ON")
   CAFFE2_CMAKE_ARGS+=("-DUSE_NCCL=ON")
 else
@@ -311,6 +307,11 @@ fi
 if [[ -z $SKIP_CONDA_TESTS && -n $UPLOAD_TO_CONDA ]]; then
   CONDA_BUILD_ARGS+=(" --user ${ANACONDA_USERNAME}")
   CONDA_BUILD_ARGS+=(" --token ${CAFFE2_ANACONDA_ORG_ACCESS_TOKEN}")
+fi
+
+# If building a redistributable, then package the CUDA libraries with it
+if [[ -n $CUDA_VERSION && -z $CONDA_INSTALL_LOCALLY ]]; then
+  export PACKAGE_CUDA_LIBS=1
 fi
 
 

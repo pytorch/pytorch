@@ -45,8 +45,8 @@ CMAKE_ARGS+=("-DCMAKE_INSTALL_PREFIX=$PREFIX")
 CMAKE_ARGS+=("-DCMAKE_PREFIX_PATH=$PREFIX")
 
 # Build Caffe2
-mkdir -p build
-cd build
+mkdir -p caffe2_build
+cd caffe2_build
 cmake "${CMAKE_ARGS[@]}" "$PYTHON_ARGS" $CONDA_CAFFE2_CMAKE_ARGS ..
 if [ "$(uname)" == 'Darwin' ]; then
   make "-j$(sysctl -n hw.ncpu)"
@@ -55,6 +55,7 @@ else
 fi
 
 make install/fast
+popd
 
 
 
@@ -73,7 +74,7 @@ python setup.py install
 ###########################################################
 # Copy over CUDA .so files from system locations to the conda build dir
 ###########################################################
-if [[ -z $BUILD_WITH_CUDA ]]; then
+if [[ -z $PACKAGE_CUDA_LIBS ]]; then
   exit 0
 fi
 
