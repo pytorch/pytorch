@@ -46,6 +46,10 @@ NNGraph::NodeRef getProducer(NNGraph::NodeRef n) {
   return inEdges.front()->tail();
 }
 
+bool hasConsumer(NNGraph::NodeRef n) {
+  return n->getOutEdges().size() != 0;
+}
+
 std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n) {
   assert(is<NeuralNetData>(n) && "getProducer only works with NeuralNetData types.");
   std::vector<NNGraph::NodeRef> out;
