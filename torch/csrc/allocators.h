@@ -1,23 +1,15 @@
-#ifndef THP_NUMPY_INC
-#define THP_NUMPY_INC
+#pragma once
 
+#include <Python.h>
 #include <type_traits>
 #include <memory>
 
+#include <TH/TH.h>
 #ifdef WITH_CUDA
 #include <THC/THC.h>
 #endif
 
-#ifdef WITH_NUMPY
-
-#ifndef WITH_NUMPY_IMPORT_ARRAY
-#define NO_IMPORT_ARRAY
-#endif
-#define PY_ARRAY_UNIQUE_SYMBOL __numpy_array_api
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <numpy/arrayobject.h>
-
-#endif
+#include "torch/csrc/utils/object_ptr.h"
 
 // Adapted from fblualib
 class ObjectPtrAllocator {
@@ -69,24 +61,8 @@ public:
 };
 #endif
 
-#ifdef WITH_NUMPY
-class NumpyArrayAllocator: public ObjectPtrAllocator {
-public:
-  NumpyArrayAllocator(PyObject *wrapped_array):
-      ObjectPtrAllocator(wrapped_array) {}
-
-  void* realloc(void* ptr, ptrdiff_t size);
-  void free(void* ptr);
-};
-#endif
-
 extern THAllocator THObjectPtrAllocator;
 extern THAllocator THStorageWeakRefAllocator;
 #ifdef WITH_CUDA
 extern THCDeviceAllocator THCStorageWeakRefAllocator;
-#endif
-#ifdef WITH_NUMPY
-extern THAllocator THNumpyArrayAllocator;
-#endif
-
 #endif

@@ -266,7 +266,9 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     // Extract columns:
     THNN_(im2col)(
       THTensor_(data)(gradOutput_n),
-      nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
+      nOutputPlane, outputHeight, outputWidth,
+      inputHeight, inputWidth,
+      kH, kW, padH, padW, dH, dW,
       dilationH, dilationW,
       THTensor_(data)(gradColumns)
     );
@@ -390,7 +392,9 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
       // Extract columns:
       THNN_(im2col)(
         THTensor_(data)(gradOutput_n),
-        nOutputPlane, outputHeight, outputWidth, kH, kW, padH, padW, dH, dW,
+        nOutputPlane, outputHeight, outputWidth,
+        inputHeight, inputWidth,
+        kH, kW, padH, padW, dH, dW,
         dilationH, dilationW,
         THTensor_(data)(columns)
       );

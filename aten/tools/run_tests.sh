@@ -13,7 +13,10 @@ $BUILD_ROOT/src/ATen/test/dlconvertor_test
 $BUILD_ROOT/src/ATen/test/native_test
 $BUILD_ROOT/src/ATen/test/scalar_tensor_test
 $BUILD_ROOT/src/ATen/test/undefined_tensor_test
+if [[ -x $BUILD_ROOT/src/ATen/test/cudnn_test ]]; then
+  $BUILD_ROOT/src/ATen/test/cudnn_test
+fi
 if [ "$VALGRIND" == "ON" ]
 then
-  valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic -n
+  valgrind --suppressions=`dirname $0`/valgrind.sup --error-exitcode=1 $BUILD_ROOT/src/ATen/test/basic "[cpu]"
 fi

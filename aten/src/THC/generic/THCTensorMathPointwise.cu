@@ -37,7 +37,9 @@
 
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  log, THCNumerics<real>::log,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(lgamma, THCNumerics<real>::lgamma, Real)
+IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(log10, THCNumerics<real>::log10, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(log1p, THCNumerics<real>::log1p, Real)
+IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( log2, THCNumerics<real>::log2,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  exp, THCNumerics<real>::exp,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(expm1, THCNumerics<real>::expm1, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  cos, THCNumerics<real>::cos,   Real)
@@ -208,87 +210,6 @@ void THCTensor_(polygamma)(THCState* state, THCTensor* self_, int64_t n, THCTens
   THCudaCheck(cudaGetLastError());
 }
 
-void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, real value) {
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ == src) {
-    if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(1))) {
-      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, 1>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(2))) {
-      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, 2>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(3))) {
-      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, 3>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-1))) {
-      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, -1>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-2))) {
-      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, -2>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else {
-      // fallback implementation using pow
-      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, -3>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src);
-
-    if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(1))) {
-      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, 1>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(2))) {
-      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, 2>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(3))) {
-      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, 3>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-1))) {
-      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, -1>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-2))) {
-      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, -2>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    } else {
-      // fallback implementation using pow
-      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, -3>(value))) {
-        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-      }
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
-void THCTensor_(tpow)(THCState *state, THCTensor *self_, real value, THCTensor *src)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
-  if (self_ == src) {
-    if (!THC_pointwiseApply1(state, self_, TensorTPowOp<real>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  } else {
-    THCTensor_(resizeAs)(state, self_, src);
-
-    if (!THC_pointwiseApply2(state, self_, src, TensorTPowOp<real>(value))) {
-      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
-    }
-  }
-
-  THCudaCheck(cudaGetLastError());
-}
-
 THC_API void
 THCTensor_(lerp)(THCState *state, THCTensor *result, THCTensor *a, THCTensor *b, real w)
 {
@@ -434,6 +355,90 @@ THCTensor_(cpow)(THCState *state, THCTensor *self_, THCTensor *src1, THCTensor *
   THCudaCheck(cudaGetLastError());
 }
 
+void THCTensor_(pow)(THCState *state, THCTensor *self_, THCTensor *src, real value) {
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ == src) {
+    if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(1))) {
+      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, 1>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(2))) {
+      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, 2>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(3))) {
+      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, 3>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-1))) {
+      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, -1>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-2))) {
+      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, -2>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+#endif
+    } else {
+      // fallback implementation using pow
+      if (!THC_pointwiseApply1(state, self_, TensorPowOp<real, -3>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src);
+
+    if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(1))) {
+      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, 1>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(2))) {
+      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, 2>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(3))) {
+      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, 3>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+#if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-1))) {
+      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, -1>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    } else if (THCNumerics<real>::eq(value, ScalarConvert<int, real>::to(-2))) {
+      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, -2>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+#endif
+    } else {
+      // fallback implementation using pow
+      if (!THC_pointwiseApply2(state, self_, src, TensorPowOp<real, -3>(value))) {
+        THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+      }
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
+
+void THCTensor_(tpow)(THCState *state, THCTensor *self_, real value, THCTensor *src)
+{
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src));
+  if (self_ == src) {
+    if (!THC_pointwiseApply1(state, self_, TensorTPowOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  } else {
+    THCTensor_(resizeAs)(state, self_, src);
+
+    if (!THC_pointwiseApply2(state, self_, src, TensorTPowOp<real>(value))) {
+      THArgCheck(false, 2, CUTORCH_DIM_WARNING);
+    }
+  }
+
+  THCudaCheck(cudaGetLastError());
+}
 THC_API void
 THCTensor_(cdiv)(THCState* state, THCTensor *self_, THCTensor *src1, THCTensor *src2)
 {

@@ -38,7 +38,6 @@ class Resize(Function):
         ctx.input_sizes = tensor.size()
         if tensor.is_contiguous():
             result = tensor.new(tensor).contiguous().view(*sizes)
-            ctx.mark_shared_storage((tensor, result))
             return result
         else:
             return tensor.contiguous().view(*sizes)

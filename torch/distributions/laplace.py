@@ -17,10 +17,10 @@ class Laplace(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of the distribution
-        scale (float or Tensor or Variable): scale of the distribution
+        loc (float or Tensor): mean of the distribution
+        scale (float or Tensor): scale of the distribution
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.real
     has_rsample = True
 
@@ -36,13 +36,13 @@ class Laplace(Distribution):
     def stddev(self):
         return (2 ** 0.5) * self.scale
 
-    def __init__(self, loc, scale):
+    def __init__(self, loc, scale, validate_args=None):
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
-        super(Laplace, self).__init__(batch_shape)
+        super(Laplace, self).__init__(batch_shape, validate_args=validate_args)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -52,8 +52,20 @@ class Laplace(Distribution):
         return self.loc - self.scale * u.sign() * torch.log1p(-u.abs())
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         return -torch.log(2 * self.scale) - torch.abs(value - self.loc) / self.scale
+
+    def cdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        return 0.5 - 0.5 * (value - self.loc).sign() * torch.expm1(-(value - self.loc).abs() / self.scale)
+
+    def icdf(self, value):
+        if self._validate_args:
+            self._validate_sample(value)
+        term = value - 0.5
+        return self.loc - self.scale * (term).sign() * torch.log1p(-2 * term.abs())
 
     def entropy(self):
         return 1 + torch.log(2 * self.scale)

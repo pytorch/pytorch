@@ -7,7 +7,6 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
                          THTensor *gradOutput,
                          THTensor *weight,
                          int kW, int kH) {
-  int ndims = input->nDimension;
   THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
                   "3D or 4D input tensor expected but got: %s");
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
@@ -148,7 +147,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
 
   real *weight_data;
   real *gradOutput_data;
-  real *input_data, *gradInput_data;
+  real *gradInput_data;
 
   int64_t k;
 
@@ -166,8 +165,6 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   weight_data = THTensor_(data)(weight);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   gradOutput_data = THTensor_(data)(gradOutput);
-
-  input_data = THTensor_(data)(input);
 
   THTensor_(resizeAs)(gradInput, input);
   gradInput_data = THTensor_(data)(gradInput);

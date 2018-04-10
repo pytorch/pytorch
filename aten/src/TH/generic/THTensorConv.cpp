@@ -582,7 +582,7 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
 {
   int64_t nInputPlane, nInputRows, nInputCols;
   int64_t nKernelPlane, nKernelRows, nKernelCols;
-  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t nOutputRows, nOutputCols;
   int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
@@ -609,7 +609,6 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   nKernelPlane = kernel->size[0];
   nKernelRows = kernel->size[1];
   nKernelCols = kernel->size[2];
-  nOutputPlane = nInputPlane * kernel->size[0];
 
   THArgCheck(nInputRows >= nKernelRows && nInputCols >= nKernelCols , 2, "covn2DRevger : Input image is smaller than kernel");
 
@@ -800,7 +799,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
 {
   int64_t nInputPlane, nInputRows, nInputCols;
   int64_t nKernelPlane, nKernelRows, nKernelCols;
-  int64_t nOutputPlane, nOutputRows, nOutputCols;
+  int64_t nOutputRows, nOutputCols;
   int64_t istride0, kstride0;
 
   THTensor *input;
@@ -830,7 +829,6 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   nKernelPlane = kernel->size[0];
   nKernelRows = kernel->size[1];
   nKernelCols = kernel->size[2];
-  nOutputPlane = nInputPlane * kernel->size[0];
 
   THArgCheck((nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv2Dger : Input image is smaller than kernel");
 
@@ -1445,7 +1443,7 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
 {
   int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
   int64_t nKernelPlane, nKernelDepth, nKernelRows, nKernelCols;
-  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t nOutputDepth, nOutputRows, nOutputCols;
   int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
@@ -1475,7 +1473,6 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   nKernelDepth= kernel->size[1];
   nKernelRows = kernel->size[2];
   nKernelCols = kernel->size[3];
-  nOutputPlane = nInputPlane * kernel->size[0];
 
   THArgCheck(nInputDepth >= nKernelDepth && nInputRows >= nKernelRows && nInputCols >= nKernelCols , 2, "conv3DRevger : Input image is smaller than kernel");
 
@@ -1532,7 +1529,7 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
 {
   int64_t nInputPlane, nInputDepth, nInputRows, nInputCols;
   int64_t nKernelPlane, nKernelDepth, nKernelRows, nKernelCols;
-  int64_t nOutputPlane, nOutputDepth, nOutputRows, nOutputCols;
+  int64_t nOutputDepth, nOutputRows, nOutputCols;
   int64_t istride0, kstride0;
   THTensor *input;
   THTensor *kernel;
@@ -1564,7 +1561,6 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   nKernelDepth = kernel->size[1];
   nKernelRows  = kernel->size[2];
   nKernelCols  = kernel->size[3];
-  nOutputPlane = nInputPlane * kernel->size[0];
 
   THArgCheck((nInputDepth >= nKernelDepth
               && nInputRows >= nKernelRows

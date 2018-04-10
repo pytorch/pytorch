@@ -141,8 +141,8 @@ template <typename Dtype, typename Acctype, typename DeviceTensor1, typename Dev
 __global__ void BatchNormalizationUpdateOutputInference_kernel(
     const DeviceTensor3 input,
     DeviceTensor3 output,
-    DeviceTensor1 runningMean,
-    DeviceTensor1 runningVar,
+    const DeviceTensor1 runningMean,
+    const DeviceTensor1 runningVar,
     const DeviceTensor1 weight,
     const DeviceTensor1 bias,
     Acctype epsilon) {
@@ -196,8 +196,12 @@ __global__ void BatchNormalizationUpdateOutput_kernel(
     Acctype unbiasedVar = varN / (N - 1);
     saveMean[plane] = ScalarConvert<Acctype, Dtype>::to(mean);
     saveStd[plane] = ScalarConvert<Acctype, Dtype>::to(invStd);
-    runningMean[plane] = ScalarConvert<Acctype, Dtype>::to((1 - momentum) * runningMean[plane] + momentum * mean);
-    runningVar[plane] = ScalarConvert<Acctype, Dtype>::to((1 - momentum) * runningVar[plane] + momentum * unbiasedVar);
+    if (runningMean.data() != NULL) {
+      runningMean[plane] = ScalarConvert<Acctype, Dtype>::to((1 - momentum) * runningMean[plane] + momentum * mean);
+    }
+    if (runningVar.data() != NULL) {
+      runningVar[plane] = ScalarConvert<Acctype, Dtype>::to((1 - momentum) * runningVar[plane] + momentum * unbiasedVar);
+    }
   }
 
   // Write normalized and update the output

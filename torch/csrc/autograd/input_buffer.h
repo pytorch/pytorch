@@ -5,7 +5,6 @@
 // values in-place (adding an input twice will accumulate the result).
 // This behaviour needed and used only in backward graphs.
 
-#include <Python.h>
 #include <vector>
 #include <utility>
 #include <memory>

@@ -102,11 +102,10 @@ def parse_header(path):
 
 
 def load_backend(t, lib, generic_functions, mixins=tuple()):
-    lib_handle = importlib.import_module(lib)
     backend_name = 'THNN{}Backend'.format(t)
     backend = type(backend_name, mixins + (THNNBackendBase,), {})()
     for function in generic_functions:
         full_fn_name = '{}{}'.format(t, function.name)
-        fn = getattr(lib_handle, full_fn_name)
+        fn = getattr(lib, full_fn_name)
         backend.register_method(function.name, fn)
     return backend

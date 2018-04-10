@@ -20,16 +20,16 @@
   scalar_check:
     output: reduce || self_->isScalar()
 
-- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true)
+- name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, bool size_average=true, bool reduce=true)
   cname: MultiMarginCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
-- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true)
+- name: multilabel_margin_loss(Tensor self, LongTensor target, bool size_average=true, bool reduce=true)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
     is_target: target_->isScalar()
 
 - name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, bool size_average=true, int64_t ignore_index=-100, bool reduce=True)
@@ -51,10 +51,10 @@
   scalar_check:
     output: reduce || self_->isScalar()
 
-- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true)
+- name: soft_margin_loss(Tensor self, Tensor target, bool size_average=true, bool reduce=true)
   cname: SoftMarginCriterion
   scalar_check:
-    output: 'true'
+    output: reduce || self_->isScalar()
 
 # Activation functions
 
@@ -206,17 +206,17 @@
 # Note: The upsampling backwards functions also include an IntList input_size
 # parameter, which is added by nn_parse.py
 
-- name: upsample_linear1d(Tensor self, IntList[1] output_size)
+- name: upsample_linear1d(Tensor self, IntList[1] output_size, bool align_corners)
   cname: TemporalUpSamplingLinear
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_bilinear2d(Tensor self, IntList[2] output_size)
+- name: upsample_bilinear2d(Tensor self, IntList[2] output_size, bool align_corners)
   cname: SpatialUpSamplingBilinear
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_trilinear3d(Tensor self, IntList[3] output_size)
+- name: upsample_trilinear3d(Tensor self, IntList[3] output_size, bool align_corners)
   cname: VolumetricUpSamplingTrilinear
   scalar_check:
     grad_input: 'false'

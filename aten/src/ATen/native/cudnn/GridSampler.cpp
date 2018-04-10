@@ -27,7 +27,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 // TODO: descriptor checking
 

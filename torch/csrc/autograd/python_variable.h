@@ -12,11 +12,6 @@ struct THPVariable {
     PyObject_HEAD
     // Payload
     torch::autograd::Variable cdata;
-    // Tensor this wraps (corresponds to Python attr 'data').
-    // It assumed that a THPVariable is *uniquely* identified by the
-    // tensor it wraps.
-    // Invariant: v->data == v->cdata->data
-    PyObject* data;
     // Hooks to be run on backwards pass (corresponds to Python attr
     // '_backwards_hooks', set by 'register_hook')
     PyObject* backward_hooks;
@@ -25,10 +20,19 @@ struct THPVariable {
 THP_API PyObject *THPVariableClass;
 
 bool THPVariable_initModule(PyObject *module);
-PyObject * THPVariable_Wrap(torch::autograd::Variable var);
-PyObject * THPVariable_get_data(THPVariable *self);
+THP_API PyObject * THPVariable_Wrap(torch::autograd::Variable var);
 
 inline bool THPVariable_Check(PyObject *obj)
 {
   return THPVariableClass && PyObject_IsInstance(obj, THPVariableClass);
+}
+
+inline torch::autograd::Variable& THPVariable_Unpack(PyObject* obj) {
+  auto var = (THPVariable*)obj;
+  return var->cdata;
+}
+
+inline at::Tensor& THPVariable_UnpackData(PyObject* obj) {
+  auto var = (THPVariable*)obj;
+  return var->cdata.data();
 }

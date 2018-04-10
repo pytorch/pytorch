@@ -8,7 +8,7 @@ IF(POLICY CMP0026)
 ENDIF()
 
 IF(MSVC AND NOT "${CMAKE_BUILD_TYPE}" MATCHES "Debug")
-  SET(MSVC_OPT_FLAG "/Ox ")
+  SET(MSVC_OPT_FLAG "/Ox /fp:strict ")
 ELSE()
   SET(MSVC_OPT_FLAG "")
 ENDIF()
@@ -45,7 +45,54 @@ IF(NOT MSVC AND NOT "${CMAKE_C_COMPILER_ID}" MATCHES "Clang")
   SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAtomic.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
   SET_SOURCE_FILES_PROPERTIES(${PROJECT_SOURCE_DIR}/src/TH/THAllocator.c PROPERTIES COMPILE_FLAGS "-fno-openmp")
 ENDIF()
-########################
+
+FILE(GLOB cpu_kernel_cpp_in RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cpu/*.cpp")
+
+LIST(APPEND CPU_CAPABILITY_NAMES "DEFAULT")
+IF(MSVC)
+  LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}")
+ELSE(MSVC)
+  LIST(APPEND CPU_CAPABILITY_FLAGS "-O3")
+ENDIF(MSVC)
+
+IF(CXX_AVX_FOUND)
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX_CPU_DEFINITION")
+  LIST(APPEND CPU_CAPABILITY_NAMES "AVX")
+  IF(MSVC)
+    LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX")
+  ELSE(MSVC)
+    LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx")
+  ENDIF(MSVC)
+ENDIF(CXX_AVX_FOUND)
+
+IF(CXX_AVX2_FOUND)
+  SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DHAVE_AVX2_CPU_DEFINITION")
+  LIST(APPEND CPU_CAPABILITY_NAMES "AVX2")
+  IF(MSVC)
+    LIST(APPEND CPU_CAPABILITY_FLAGS "${MSVC_OPT_FLAG}/arch:AVX2")
+  ELSE(MSVC)
+    LIST(APPEND CPU_CAPABILITY_FLAGS "-O3 -mavx2")
+  ENDIF(MSVC)
+ENDIF(CXX_AVX2_FOUND)
+
+list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
+math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
+
+FOREACH(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
+  FOREACH(IMPL ${cpu_kernel_cpp_in})
+    LIST(GET CPU_CAPABILITY_NAMES ${i} CPU_CAPABILITY)
+    SET(NEW_IMPL ${CMAKE_CURRENT_BINARY_DIR}/${IMPL}.${CPU_CAPABILITY}.cpp)
+    CONFIGURE_FILE(${IMPL} ${NEW_IMPL} COPYONLY)
+    SET(cpu_kernel_cpp ${NEW_IMPL} ${cpu_kernel_cpp}) # Create list of copies
+    LIST(GET CPU_CAPABILITY_FLAGS ${i} FLAGS)
+    IF(MSVC)
+      SET(MACRO_FLAG "/DCPU_CAPABILITY=${CPU_CAPABILITY} /DCPU_CAPABILITY_${CPU_CAPABILITY}")
+    ELSE(MSVC)
+      SET(MACRO_FLAG "-DCPU_CAPABILITY=${CPU_CAPABILITY} -DCPU_CAPABILITY_${CPU_CAPABILITY}")
+    ENDIF(MSVC)
+    SET_SOURCE_FILES_PROPERTIES(${NEW_IMPL} PROPERTIES COMPILE_FLAGS "${FLAGS} ${MACRO_FLAG}")
+  ENDFOREACH()
+ENDFOREACH()
 
 ################################################################################
 # Helper functions
@@ -79,10 +126,6 @@ endfunction()
 IF ($ENV{TH_BINARY_BUILD})
   MESSAGE(STATUS "TH_BINARY_BUILD detected. Statically linking libstdc++")
   SET(CMAKE_CXX_FLAGS "-static-libstdc++ ${CMAKE_CXX_FLAGS}")
-  IF (UNIX AND NOT APPLE)
-    # hiding statically linked library symbols, this flag is not available for the linker under macOS
-    SET(CMAKE_CXX_FLAGS "-Wl,--exclude-libs,libstdc++.a ${CMAKE_CXX_FLAGS}")
-  ENDIF(UNIX AND NOT APPLE)
 ENDIF()
 
 # Can be compiled standalone
@@ -101,8 +144,16 @@ FILE(GLOB base_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.cpp")
 FILE(GLOB native_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/*.cpp")
 FILE(GLOB native_cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cudnn/*.cpp")
 FILE(GLOB native_cuda_cu RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/cuda/*.cu")
+FILE(GLOB native_mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkl/*.cpp")
+FILE(GLOB native_mkldnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "native/mkldnn/*.cpp")
+
+FILE(GLOB_RECURSE cuda_h
+     RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}"
+     "cuda/*.cuh" "cuda/*.h" "cudnn/*.cuh" "cudnn/*.h")
 
 FILE(GLOB cudnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "cudnn/*.cpp")
+FILE(GLOB mkl_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkl/*.cpp")
+FILE(GLOB mkldnn_cpp RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "mkldnn/*.cpp")
 
 FILE(GLOB all_python RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "*.py")
 
@@ -148,7 +199,7 @@ ADD_CUSTOM_TARGET(aten_files_are_generated
 )
 
 
-SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS})
+SET(all_cpp ${base_cpp} ${native_cpp} ${native_cudnn_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 
 INCLUDE_DIRECTORIES(${ATen_CPU_INCLUDE})
 IF(NOT NO_CUDA)
@@ -160,7 +211,14 @@ IF(NOT NO_CUDA)
   IF(CUDNN_FOUND)
     SET(all_cpp ${all_cpp} ${cudnn_cpp})
   ENDIF()
+  IF(AT_MKL_ENABLED)
+    SET(all_cpp ${all_cpp} ${mkl_cpp})
+  ENDIF()
 endif()
+
+IF(AT_MKLDNN_ENABLED)
+  SET(all_cpp ${all_cpp} ${mkldnn_cpp})
+ENDIF()
 
 filter_list(generated_h generated_cpp "\\.h$")
 
@@ -177,7 +235,16 @@ ELSE()
 ENDIF()
 ADD_DEPENDENCIES(ATen aten_files_are_generated)
 
-SET_TARGET_PROPERTIES(ATen PROPERTIES VERSION 1 SOVERSION 1)
+set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb/tbb_remote")
+set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
+set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
+set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
+set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
+set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
+add_subdirectory(${PROJECT_SOURCE_DIR}/src/ATen/cpu/tbb)
+set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
+target_include_directories(tbb_static PUBLIC ${TBB_ROOT_DIR}/include)
+target_link_libraries(ATen tbb_static)
 
 if(NOT ${CMAKE_VERSION} VERSION_LESS "3.1")
     SET_PROPERTY(TARGET ATen PROPERTY CXX_STANDARD 11)
@@ -244,9 +311,19 @@ ELSE(NOT C_HAS_THREAD)
   SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DTH_HAVE_THREAD")
 ENDIF(NOT C_HAS_THREAD)
 
-if (NNPACK_FOUND)
-  target_link_libraries(ATen ${NNPACK_LIBRARIES})
-endif(NNPACK_FOUND)
+if(MKLDNN_FOUND)
+  target_link_libraries(ATen ${MKLDNN_LIBRARIES})
+endif(MKLDNN_FOUND)
+
+# ---[ Configure cpuinfo
+IF(NOT TARGET cpuinfo)
+  SET(CPUINFO_BUILD_TOOLS OFF CACHE BOOL "")
+  SET(CPUINFO_BUILD_UNIT_TESTS OFF CACHE BOOL "")
+  SET(CPUINFO_BUILD_MOCK_TESTS OFF CACHE BOOL "")
+  SET(CPUINFO_BUILD_BENCHMARKS OFF CACHE BOOL "")
+  ADD_SUBDIRECTORY("cpu/cpuinfo")
+ENDIF()
+TARGET_LINK_LIBRARIES(ATen cpuinfo)
 
 IF(CUDA_FOUND)
   TARGET_LINK_LIBRARIES(ATen
@@ -254,6 +331,7 @@ IF(CUDA_FOUND)
     ${CUDA_cusparse_LIBRARY}
     ${CUDA_curand_LIBRARY})
   CUDA_ADD_CUBLAS_TO_TARGET(ATen)
+  CUDA_ADD_CUFFT_TO_TARGET(ATen)
 
   if(CUDNN_FOUND)
     target_link_libraries(ATen ${CUDNN_LIBRARIES})
@@ -262,21 +340,12 @@ IF(CUDA_FOUND)
   IF(USE_MAGMA)
     TARGET_LINK_LIBRARIES(ATen ${MAGMA_LIBRARIES})
     IF ($ENV{TH_BINARY_BUILD})
-      # because magma is linked statically and it wants a BLAS,
-      # we need to link the BLAS lib against THC. Usually TH will
-      # load a BLAS library and it's all fine, but in the binary builds,
-      # TH uses static linkage to MKL, so it doesn't have all symbols that
-      # magma needs. So in this case, explicitly find a BLAS and link against it
-      # just like in TH
-      SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../TH/cmake ${CMAKE_MODULE_PATH})
-      FIND_PACKAGE(BLAS)
-      IF(BLAS_FOUND)
-        TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
-      ELSE(BLAS_FOUND)
-        MESSAGE(FATAL_ERROR "Binary build needs blas to be found here")
-      ENDIF(BLAS_FOUND)
+      TARGET_LINK_LIBRARIES(ATen "${BLAS_LIBRARIES};${BLAS_LIBRARIES};${BLAS_LIBRARIES}")
     ENDIF($ENV{TH_BINARY_BUILD})
   ENDIF(USE_MAGMA)
+  IF ($ENV{ATEN_STATIC_CUDA})
+    TARGET_LINK_LIBRARIES(ATen "${CUDA_TOOLKIT_ROOT_DIR}/lib64/libculibos.a")
+  ENDIF($ENV{ATEN_STATIC_CUDA})
 ENDIF()
 
 INSTALL(TARGETS ATen
@@ -298,6 +367,11 @@ ENDFOREACH()
 FOREACH(HEADER ${generated_h})
   INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${HEADER}
   DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
+ENDFOREACH()
+FOREACH(HEADER ${cuda_h})
+  # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
+  GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
 INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)

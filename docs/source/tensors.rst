@@ -102,6 +102,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: addr
    .. automethod:: addr_
    .. automethod:: apply_
+   .. automethod:: argmax
+   .. automethod:: argmin
    .. automethod:: asin
    .. automethod:: asin_
    .. automethod:: atan
@@ -114,6 +116,9 @@ view of a storage and defines numeric operations on it.
    .. automethod:: bernoulli_
    .. automethod:: bmm
    .. automethod:: byte
+   .. automethod:: btrifact
+   .. automethod:: btrifact_with_info
+   .. automethod:: btrisolve
    .. automethod:: cauchy_
    .. automethod:: ceil
    .. automethod:: ceil_
@@ -134,6 +139,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: cumprod
    .. automethod:: cumsum
    .. automethod:: data_ptr
+   .. automethod:: det
    .. automethod:: diag
    .. automethod:: dim
    .. automethod:: dist
@@ -196,9 +202,14 @@ view of a storage and defines numeric operations on it.
    .. automethod:: lerp
    .. automethod:: lerp_
    .. automethod:: log
+   .. automethod:: log_
+   .. automethod:: logdet
+   .. automethod:: log10
+   .. automethod:: log10_
    .. automethod:: log1p
    .. automethod:: log1p_
-   .. automethod:: log_
+   .. automethod:: log2
+   .. automethod:: log2_
    .. automethod:: log_normal_
    .. automethod:: long
    .. automethod:: lt
@@ -252,6 +263,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: renorm
    .. automethod:: renorm_
    .. automethod:: repeat
+   .. automethod:: reshape
    .. automethod:: resize_
    .. automethod:: resize_as_
    .. automethod:: round
@@ -272,6 +284,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: sinh
    .. automethod:: sinh_
    .. automethod:: size
+   .. automethod:: slogdet
    .. automethod:: sort
    .. automethod:: split
    .. automethod:: sqrt
@@ -311,6 +324,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: type_as
    .. automethod:: unfold
    .. automethod:: uniform_
+   .. automethod:: unique
    .. automethod:: unsqueeze
    .. automethod:: unsqueeze_
    .. automethod:: var

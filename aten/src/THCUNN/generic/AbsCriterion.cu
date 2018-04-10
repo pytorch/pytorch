@@ -12,7 +12,7 @@ void THNN_(AbsCriterion_updateOutput)(
            bool sizeAverage,
            bool reduce)
 {
-  THCUNN_check_nElement(state, input, target);
+  THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
   if (!reduce) {
@@ -51,13 +51,13 @@ void THNN_(AbsCriterion_updateGradInput)(
            bool sizeAverage,
            bool reduce)
 {
-  THCUNN_check_nElement(state, input, target);
+  THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradOutput, gradInput);
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
   if (!reduce) {
-    THCUNN_check_nElement(state, gradOutput, input);
+    THCUNN_check_shape(state, gradOutput, input);
     THC_pointwiseApply3(state, input, target, gradInput,
                         abs_updateGradInput_no_reduce_functor<real>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);

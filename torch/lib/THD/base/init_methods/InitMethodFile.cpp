@@ -150,35 +150,27 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
   return std::make_tuple(master_port, master_addrs, ranks);
 }
 
-rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
-                  std::size_t order) {
-  if (assigned_rank >= 0) {
-    return assigned_rank;
-  } else {
-    std::vector<bool> taken_ranks(ranks.size());
-    for (auto rank : ranks) {
-      if (rank >= 0)
-        taken_ranks[rank] = true;
-    }
-
-    auto unassigned = std::count(ranks.begin(), ranks.begin() + order, -1) + 1;
-    rank_type rank = 0;
-    while (true) {
-      if (!taken_ranks[rank]) unassigned--;
-      if (unassigned == 0) break;
-      rank++;
-    }
-
-    return rank;
-  }
-}
-
 } // anonymous namespace
 
 
+InitMethod::Config initFile(std::string argument,
+                            int world_size_r,
+                            std::string group_name,
+                            int assigned_rank) {
 
-InitMethod::Config initFile(std::string file_path, rank_type world_size,
-                            std::string group_name, int assigned_rank) {
+  group_name.append("#"); // To make sure it's not empty
+  std::string file_path = argument.substr(7); // chop "file://"
+  rank_type world_size;
+  try {
+    world_size = convertToRank(world_size_r);
+  } catch(std::exception& e) {
+    if (world_size_r == -1) {
+      throw std::invalid_argument("world_size is not set - it is required for "
+                                  "`file://` init methods with this backend");
+    }
+    throw std::invalid_argument("invalid world_size");
+  }
+
   InitMethod::Config config;
   int fd;
   std::size_t order;

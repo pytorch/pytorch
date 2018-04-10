@@ -1,3 +1,4 @@
+import random
 import torch
 import torch.multiprocessing as multiprocessing
 from torch._C import _set_worker_signal_handlers, _update_worker_pids, \
@@ -19,7 +20,7 @@ else:
 
 
 class ExceptionWrapper(object):
-    r"Wraps an exception plus traceback to communicate across threads"
+    r"""Wraps an exception plus traceback to communicate across threads"""
 
     def __init__(self, exc_info):
         self.exc_type = exc_info[0]
@@ -27,7 +28,7 @@ class ExceptionWrapper(object):
 
 
 _use_shared_memory = False
-"""Whether to use shared memory in default_collate"""
+r"""Whether to use shared memory in default_collate"""
 
 
 def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, worker_id):
@@ -41,6 +42,7 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
     _set_worker_signal_handlers()
 
     torch.set_num_threads(1)
+    random.seed(seed)
     torch.manual_seed(seed)
 
     if init_fn is not None:
@@ -97,7 +99,7 @@ numpy_type_map = {
 
 
 def default_collate(batch):
-    "Puts each data field into a tensor with outer dimension batch size"
+    r"""Puts each data field into a tensor with outer dimension batch size"""
 
     error_msg = "batch must contain tensors, numbers, dicts or lists; found {}"
     elem_type = type(batch[0])
@@ -151,7 +153,7 @@ def pin_memory_batch(batch):
 
 
 _SIGCHLD_handler_set = False
-"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
+r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
 handler needs to be set for all DataLoaders in a process."""
 
 
@@ -180,8 +182,8 @@ def _set_SIGCHLD_handler():
     _SIGCHLD_handler_set = True
 
 
-class DataLoaderIter(object):
-    "Iterates once over the DataLoader's dataset, as specified by the sampler"
+class _DataLoaderIter(object):
+    r"""Iterates once over the DataLoader's dataset, as specified by the sampler"""
 
     def __init__(self, loader):
         self.dataset = loader.dataset
@@ -196,7 +198,8 @@ class DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queue = multiprocessing.SimpleQueue()
+            self.index_queues = [multiprocessing.SimpleQueue() for _ in range(self.num_workers)]
+            self.worker_queue_idx = 0
             self.worker_result_queue = multiprocessing.SimpleQueue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
@@ -209,8 +212,9 @@ class DataLoaderIter(object):
             self.workers = [
                 multiprocessing.Process(
                     target=_worker_loop,
-                    args=(self.dataset, self.index_queue, self.worker_result_queue, self.collate_fn,
-                          base_seed + i, self.worker_init_fn, i))
+                    args=(self.dataset, self.index_queues[i],
+                          self.worker_result_queue, self.collate_fn, base_seed + i,
+                          self.worker_init_fn, i))
                 for i in range(self.num_workers)]
 
             if self.pin_memory or self.timeout > 0:
@@ -290,7 +294,8 @@ class DataLoaderIter(object):
         indices = next(self.sample_iter, None)
         if indices is None:
             return
-        self.index_queue.put((self.send_idx, indices))
+        self.index_queues[self.worker_queue_idx].put((self.send_idx, indices))
+        self.worker_queue_idx = (self.worker_queue_idx + 1) % self.num_workers
         self.batches_outstanding += 1
         self.send_idx += 1
 
@@ -307,18 +312,24 @@ class DataLoaderIter(object):
         # Probably the best way to do this is by moving the sample pushing
         # to a separate thread and then just sharing the data queue
         # but signalling the end is tricky without a non-blocking API
-        raise NotImplementedError("DataLoaderIterator cannot be pickled")
+        raise NotImplementedError("_DataLoaderIter cannot be pickled")
 
     def _shutdown_workers(self):
         try:
             if not self.shutdown:
                 self.shutdown = True
                 self.done_event.set()
-                # if worker_manager_thread is waiting to put
-                while not self.data_queue.empty():
-                    self.data_queue.get()
-                for _ in self.workers:
-                    self.index_queue.put(None)
+                # if worker_manager_thread is waiting to put, make place for it
+                try:
+                    while not self.data_queue.empty():
+                        self.data_queue.get()
+                except FileNotFoundError:
+                    # FileNotFoundError can happen when we rebuild the fd
+                    # fetched from the queue but the socket is already closed
+                    # from the worker side (e.g. due to Python shutting down).
+                    pass
+                for q in self.index_queues:
+                    q.put(None)
                 # done_event should be sufficient to exit worker_manager_thread,
                 # but be safe here and put another None
                 self.worker_result_queue.put(None)
@@ -334,7 +345,7 @@ class DataLoaderIter(object):
 
 
 class DataLoader(object):
-    """
+    r"""
     Data loader. Combines a dataset and a sampler, and provides
     single- or multi-process iterators over the dataset.
 
@@ -371,9 +382,11 @@ class DataLoader(object):
               this value in :attr:`worker_init_fn`, which can be used to set other seeds
               (e.g. NumPy) before data loading.
 
-    .. warning:: If ``spawn'' start method is used, :attr:`worker_init_fn` cannot be an
+    .. warning:: If ``spawn`` start method is used, :attr:`worker_init_fn` cannot be an
                  unpicklable object, e.g., a lambda function.
     """
+
+    __initialized = False
 
     def __init__(self, dataset, batch_size=1, shuffle=False, sampler=None, batch_sampler=None,
                  num_workers=0, collate_fn=default_collate, pin_memory=False, drop_last=False,
@@ -392,14 +405,18 @@ class DataLoader(object):
 
         if batch_sampler is not None:
             if batch_size > 1 or shuffle or sampler is not None or drop_last:
-                raise ValueError('batch_sampler is mutually exclusive with '
-                                 'batch_size, shuffle, sampler, and drop_last')
+                raise ValueError('batch_sampler option is mutually exclusive '
+                                 'with batch_size, shuffle, sampler, and '
+                                 'drop_last')
+            self.batch_size = None
+            self.drop_last = None
 
         if sampler is not None and shuffle:
-            raise ValueError('sampler is mutually exclusive with shuffle')
+            raise ValueError('sampler option is mutually exclusive with '
+                             'shuffle')
 
         if self.num_workers < 0:
-            raise ValueError('num_workers cannot be negative; '
+            raise ValueError('num_workers option cannot be negative; '
                              'use num_workers=0 to disable multiprocessing.')
 
         if batch_sampler is None:
@@ -412,9 +429,17 @@ class DataLoader(object):
 
         self.sampler = sampler
         self.batch_sampler = batch_sampler
+        self.__initialized = True
+
+    def __setattr__(self, attr, val):
+        if self.__initialized and attr in ('batch_size', 'sampler', 'drop_last'):
+            raise ValueError('{} attribute should not be set after {} is '
+                             'initialized'.format(attr, self.__class__.__name__))
+
+        super(DataLoader, self).__setattr__(attr, val)
 
     def __iter__(self):
-        return DataLoaderIter(self)
+        return _DataLoaderIter(self)
 
     def __len__(self):
         return len(self.batch_sampler)

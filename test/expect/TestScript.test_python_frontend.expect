@@ -1,0 +1,61 @@
+(def
+  (ident fn)
+  (list
+    (param (ident x) (tensor_type))
+    (param (ident y) (tensor_type))
+    (param (ident z) (tensor_type)))
+  (list
+    (assign
+      (list (variable (ident q)))
+      (=)
+      (-
+        (+
+          (variable (ident x))
+          (variable (ident y)))
+        (apply
+          (.
+            (variable (ident z))
+            (ident sigmoid))
+          (list)
+          (list))))
+    (expression statement
+      (list
+        (apply
+          (variable (ident print))
+          (list (variable (ident q)))
+          (list))))
+    (assign
+      (list (variable (ident w)))
+      (=)
+      (unary minus
+        (variable (ident z))))
+    (if
+      (and
+        (and
+          (not (variable (ident x)))
+          (not (variable (ident y))))
+        (variable (ident z)))
+      (list
+        (assign
+          (list (variable (ident m)))
+          (=)
+          (if
+            (not (variable (ident z)))
+            (variable (ident x))
+            (variable (ident y)))))
+      (list))
+    (while
+      (and
+        (<
+          (variable (ident x))
+          (variable (ident y)))
+        (>
+          (variable (ident y))
+          (variable (ident z))))
+      (list
+        (assign
+          (list (variable (ident q)))
+          (=)
+          (variable (ident x)))))
+    (return
+      (list (variable (ident x))))))

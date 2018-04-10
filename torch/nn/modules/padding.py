@@ -6,22 +6,35 @@ from .. import functional as F
 # TODO: grad_output size asserts in THNN
 
 
-class ConstantPad1d(Module):
+class _ConstantPadNd(Module):
+
+    def __init__(self, value):
+        super(_ConstantPadNd, self).__init__()
+        self.value = value
+
+    def forward(self, input):
+        return F.pad(input, self.padding, 'constant', self.value)
+
+    def extra_repr(self):
+        return 'padding={}, value={}'.format(self.padding, self.value)
+
+
+class ConstantPad1d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in both boundaries. If a 2-tuple, uses (paddingLeft, paddingRight)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in both boundaries. If a 2-`tuple`, uses (`paddingLeft`, `paddingRight`)
 
     Shape:
         - Input: :math:`(N, C, W_{in})`
         - Output: :math:`(N, C, W_{out})` where
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ConstantPad1d(3, 3.5)
-        >>> input = autograd.Variable(torch.randn(16, 2, 480))
+        >>> input = torch.randn(16, 2, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ConstantPad1d((3, 5), 3.5)
@@ -30,37 +43,30 @@ class ConstantPad1d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad1d, self).__init__()
+        super(ConstantPad1d, self).__init__(value)
         self.padding = _pair(padding)
-        self.value = value
-
-    def forward(self, input):
-        return F.pad(input, self.padding, 'constant', self.value)
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
 
 
-class ConstantPad2d(Module):
+class ConstantPad2d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
-    For Nd-padding, use nn.functional.pad().
+    For Nd-padding, use :meth:`nn.functional.pad()`.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 4-tuple, uses (paddingLeft, paddingRight, paddingTop, paddingBottom)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 4-`tuple`, uses (`paddingLeft`, `paddingRight`,
+            `paddingTop`, `paddingBottom`)
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = H_{in} + paddingTop + paddingBottom`
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ConstantPad2d(3, 3.5)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ConstantPad2d((3, 3, 6, 6), 3.5)
@@ -69,37 +75,29 @@ class ConstantPad2d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad2d, self).__init__()
+        super(ConstantPad2d, self).__init__(value)
         self.padding = _quadruple(padding)
-        self.value = value
-
-    def forward(self, input):
-        return F.pad(input, self.padding, 'constant', self.value)
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
 
 
-class ConstantPad3d(Module):
+class ConstantPad3d(_ConstantPadNd):
     r"""Pads the input tensor boundaries with a constant value.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 6-tuple, uses
-            (paddingLeft, paddingRight, paddingTop, paddingBottom, paddingFront, paddingBack)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 6-`tuple`, uses
+            (`paddingLeft`, `paddingRight`, `paddingTop`, `paddingBottom`, `paddingFront`, `paddingBack`)
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = D_{in} + paddingFront + paddingBack`
-          :math:`H_{out} = H_{in} + paddingTop + paddingBottom`
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`D_{out} = D_{in} + \textit{paddingFront} + \textit{paddingBack}`
+          :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ConstantPad3d(3, 3.5)
-        >>> input = autograd.Variable(torch.randn(16, 3, 10, 20, 30))
+        >>> input = torch.randn(16, 3, 10, 20, 30)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ConstantPad3d((3, 3, 6, 6, 0, 1), 3.5)
@@ -108,34 +106,35 @@ class ConstantPad3d(Module):
     """
 
     def __init__(self, padding, value):
-        super(ConstantPad3d, self).__init__()
+        super(ConstantPad3d, self).__init__(value)
         self.padding = _ntuple(6)(padding)
-        self.value = value
+
+
+class _ReflectionPadNd(Module):
 
     def forward(self, input):
-        return F.pad(input, self.padding, 'constant', self.value)
+        return F.pad(input, self.padding, 'reflect')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
+    def extra_repr(self):
+        return '{}'.format(self.padding)
 
 
-class ReflectionPad1d(Module):
+class ReflectionPad1d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 2-tuple, uses (paddingLeft, paddingRight)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 2-`tuple`, uses (`paddingLeft`, `paddingRight`)
 
     Shape:
         - Input: :math:`(N, C, W_{in})`
         - Output: :math:`(N, C, W_{out})` where
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ReflectionPad1d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 480))
+        >>> input = torch.randn(16, 3, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReflectionPad1d((3, 6))
@@ -147,31 +146,25 @@ class ReflectionPad1d(Module):
         super(ReflectionPad1d, self).__init__()
         self.padding = _pair(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'reflect')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
-
-class ReflectionPad2d(Module):
+class ReflectionPad2d(_ReflectionPadNd):
     r"""Pads the input tensor using the reflection of the input boundary.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 4-tuple, uses (paddingLeft, paddingRight, paddingTop, paddingBottom)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 4-`tuple`, uses (`paddingLeft`, `paddingRight`,
+            `paddingTop`, `paddingBottom`)
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = H_{in} + paddingTop + paddingBottom`
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ReflectionPad2d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReflectionPad2d((3, 3, 6, 6))
@@ -183,30 +176,32 @@ class ReflectionPad2d(Module):
         super(ReflectionPad2d, self).__init__()
         self.padding = _quadruple(padding)
 
+
+class _ReplicationPadNd(Module):
+
     def forward(self, input):
-        return F.pad(input, self.padding, 'reflect')
+        return F.pad(input, self.padding, 'replicate')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
+    def extra_repr(self):
+        return '{}'.format(self.padding)
 
 
-class ReplicationPad1d(Module):
+class ReplicationPad1d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 2-tuple, uses (paddingLeft, paddingRight)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 2-`tuple`, uses (`paddingLeft`, `paddingRight`)
 
     Shape:
         - Input: :math:`(N, C, W_{in})`
         - Output: :math:`(N, C, W_{out})` where
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ReplicationPad1d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 480))
+        >>> input = torch.randn(16, 3, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReplicationPad1d((3, 6))
@@ -218,31 +213,25 @@ class ReplicationPad1d(Module):
         super(ReplicationPad1d, self).__init__()
         self.padding = _pair(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'replicate')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
-
-class ReplicationPad2d(Module):
+class ReplicationPad2d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 4-tuple, uses (paddingLeft, paddingRight, paddingTop, paddingBottom)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 4-`tuple`, uses (`paddingLeft`, `paddingRight`,
+            `paddingTop`, `paddingBottom`)
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = H_{in} + paddingTop + paddingBottom`
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ReplicationPad2d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReplicationPad2d((3, 3, 6, 6))
@@ -254,33 +243,26 @@ class ReplicationPad2d(Module):
         super(ReplicationPad2d, self).__init__()
         self.padding = _quadruple(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'replicate')
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
-
-class ReplicationPad3d(Module):
+class ReplicationPad3d(_ReplicationPadNd):
     r"""Pads the input tensor using replication of the input boundary.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 6-tuple, uses (paddingLeft, paddingRight,
-            paddingTop, paddingBottom, paddingFront, paddingBack)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 6-`tuple`, uses (`paddingLeft`, `paddingRight`,
+            `paddingTop`, `paddingBottom`, `paddingFront`, `paddingBack`)
 
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})`
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
-          :math:`D_{out} = D_{in} + paddingFront + paddingBack`
-          :math:`H_{out} = H_{in} + paddingTop + paddingBottom`
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`D_{out} = D_{in} + \textit{paddingFront} + \textit{paddingBack}`
+          :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ReplicationPad3d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 8, 320, 480))
+        >>> input = torch.randn(16, 3, 8, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ReplicationPad3d((3, 3, 6, 6, 1, 1))
@@ -292,31 +274,25 @@ class ReplicationPad3d(Module):
         super(ReplicationPad3d, self).__init__()
         self.padding = _ntuple(6)(padding)
 
-    def forward(self, input):
-        return F.pad(input, self.padding, 'replicate')
-
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + str(self.padding) + ')'
-
 
 class ZeroPad2d(ConstantPad2d):
     r"""Pads the input tensor boundaries with zero.
 
     Args:
-        padding (int, tuple): the size of the padding. If is int, uses the same
-            padding in all boundaries. If a 4-tuple, uses (paddingLeft, paddingRight, paddingTop, paddingBottom)
+        padding (int, tuple): the size of the padding. If is `int`, uses the same
+            padding in all boundaries. If a 4-`tuple`, uses (`paddingLeft`, `paddingRight`,
+            `paddingTop`, `paddingBottom`)
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
-          :math:`H_{out} = H_{in} + paddingTop + paddingBottom`
-          :math:`W_{out} = W_{in} + paddingLeft + paddingRight`
+          :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
+          :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 
     Examples::
 
         >>> m = nn.ZeroPad2d(3)
-        >>> input = autograd.Variable(torch.randn(16, 3, 320, 480))
+        >>> input = torch.randn(16, 3, 320, 480)
         >>> output = m(input)
         >>> # using different paddings
         >>> m = nn.ZeroPad2d((3, 3, 6, 6))

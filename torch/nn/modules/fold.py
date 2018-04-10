@@ -48,7 +48,7 @@ class Fold(Module):
 
         >>> # output_size (3, 3) kernel_size (2, 2), dilation (1, 1), padding (0, 0), stride (1, 1)
         >>> fold = nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1))
-        >>> input = autograd.Variable(torch.randn(1, 36, 1))
+        >>> input = torch.randn(1, 36, 1)
         >>> output = unfold(input)
 
     .. _link:
@@ -68,13 +68,11 @@ class Fold(Module):
         return F.fold(input, self.output_size, self.kernel_size, self.dilation,
                       self.padding, self.stride)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'output_size=' + str(self.output_size) \
-            + ', kernel_size=' + str(self.kernel_size) \
-            + ', dilation=' + str(self.dilation) \
-            + ', padding=' + str(self.padding) \
-            + ', stride=' + str(self.stride) + ')'
+    def extra_repr(self):
+        return 'output_size={output_size}, kernel_size={kernel_size}, ' \
+            'dilation={dilation}, padding={padding}, stride={stride}'.format(
+                **self.__dict__
+            )
 
 
 class Unfold(Module):
@@ -121,7 +119,7 @@ class Unfold(Module):
 
         >>> # kernel_size (2, 2), dilation (1, 1), padding (0, 0), stride (1, 1)
         >>> unfold = nn.Unfold((3, 3), (1, 1), (0, 0), (1, 1))
-        >>> input = autograd.Variable(torch.randn(2, 4, 3, 3))
+        >>> input = torch.randn(2, 4, 3, 3)
         >>> output = unfold(input)
 
     .. _link:
@@ -140,9 +138,6 @@ class Unfold(Module):
         return F.unfold(input, self.kernel_size, self.dilation,
                         self.padding, self.stride)
 
-    def __repr__(self):
-        return self.__class__.__name__ + ' (' \
-            + 'kernel_size=' + str(self.kernel_size) \
-            + ', dilation=' + str(self.dilation) \
-            + ', padding=' + str(self.padding) \
-            + ', stride=' + str(self.stride) + ')'
+    def extra_repr(self):
+        return 'kernel_size={kernel_size}, dilation={dilation}, padding={padding},' \
+            ' stride={stride}'.format(**self.__dict__)

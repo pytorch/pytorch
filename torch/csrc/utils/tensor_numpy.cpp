@@ -1,5 +1,7 @@
 #include "tensor_numpy.h"
 
+#include "torch/csrc/utils/numpy_stub.h"
+
 #ifndef WITH_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
@@ -13,18 +15,15 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
 
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/autograd/python_variable.h"
 
 #include <ATen/ATen.h>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
 
-#define NO_IMPORT_ARRAY
-#define PY_ARRAY_UNIQUE_SYMBOL __numpy_array_api
-#define NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION
-#include <numpy/arrayobject.h>
-
 using namespace at;
+using namespace torch::autograd;
 
 namespace torch { namespace utils {
 
@@ -48,7 +47,6 @@ static std::vector<int64_t> to_aten_shape(int ndim, npy_intp* values) {
 }
 
 static int aten_to_dtype(const at::Type& type);
-static ScalarType dtype_to_aten(int dtype);
 
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   auto dtype = aten_to_dtype(tensor.type());
@@ -76,7 +74,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   // object of the ndarray to the tensor and disabling resizes on the storage.
   // This is not sufficient. For example, the tensor's storage may be changed
   // via Tensor.set_, which can free the underlying memory.
-  PyObject* py_tensor = createPyObject(tensor);
+  PyObject* py_tensor = THPVariable_Wrap(make_variable(tensor, false));
   if (!py_tensor) throw python_error();
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return NULL;
@@ -113,7 +111,7 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   }
 
   void* data_ptr = PyArray_DATA(array);
-  auto& type = CPU(dtype_to_aten(PyArray_TYPE(array)));
+  auto& type = CPU(numpy_dtype_to_aten(PyArray_TYPE(array)));
   Py_INCREF(obj);
   return type.tensorFromBlob(data_ptr, sizes, strides, [obj](void* data) {
     AutoGIL gil;
@@ -147,7 +145,7 @@ static int aten_to_dtype(const at::Type& type) {
   throw TypeError("NumPy conversion for %s is not supported", type.toString());
 }
 
-static ScalarType dtype_to_aten(int dtype) {
+ScalarType numpy_dtype_to_aten(int dtype) {
   switch (dtype) {
     case NPY_DOUBLE: return kDouble;
     case NPY_FLOAT: return kFloat;

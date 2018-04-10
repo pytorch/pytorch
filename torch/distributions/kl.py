@@ -17,6 +17,8 @@ from .geometric import Geometric
 from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
+from .logistic_normal import LogisticNormal
+from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag, _batch_inverse
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -112,9 +114,8 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    # verbose because of differening Variable/Tensor apis and lack of dtypes
     if isinstance(tensor, Variable):
-        return variable(float('inf')).type_as(tensor).expand_as(tensor)
+        return tensor.new_tensor(float('inf')).expand_as(tensor)
     else:
         return tensor.new([float('inf')]).expand_as(tensor)
 
@@ -124,6 +125,15 @@ def _x_log_x(tensor):
     Utility function for calculating x log x
     """
     return tensor * tensor.log()
+
+
+def _batch_trace_XXT(bmat):
+    """
+    Utility function for calculating the trace of XX^{T} with X having arbitrary trailing batch dimensions
+    """
+    mat_size = bmat.size(-1)
+    flat_trace = bmat.reshape(-1, mat_size * mat_size).pow(2).sum(-1)
+    return flat_trace.view(bmat.shape[:-2])
 
 
 def kl_divergence(p, q):
@@ -139,7 +149,7 @@ def kl_divergence(p, q):
         q (Distribution): A :class:`~torch.distributions.Distribution` object.
 
     Returns:
-        Variable or Tensor: A batch of KL divergences of shape `batch_shape`.
+        Tensor: A batch of KL divergences of shape `batch_shape`.
 
     Raises:
         NotImplementedError: If the distribution types have not been registered via
@@ -278,6 +288,19 @@ def _kl_laplace_laplace(p, q):
     return t1 + t2 + t3 - 1
 
 
+@register_kl(MultivariateNormal, MultivariateNormal)
+def _kl_multivariatenormal_multivariatenormal(p, q):
+    # From https://en.wikipedia.org/wiki/Multivariate_normal_distribution#Kullback%E2%80%93Leibler_divergence
+    if p.event_shape != q.event_shape:
+        raise ValueError("KL-divergence between two Multivariate Normals with\
+                          different event shapes cannot be computed")
+
+    term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
+    term2 = _batch_trace_XXT(torch.matmul(_batch_inverse(q.scale_tril), p.scale_tril))
+    term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
+    return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
+
+
 @register_kl(Normal, Normal)
 def _kl_normal_normal(p, q):
     var_ratio = (p.scale / q.scale).pow(2)
@@ -311,7 +334,12 @@ def _kl_poisson_poisson(p, q):
 def _kl_transformed_transformed(p, q):
     if p.transforms != q.transforms:
         raise NotImplementedError
-    return kl_divergence(p.base_dist, q.base_dist)
+    if p.event_shape != q.event_shape:
+        raise NotImplementedError
+    # extra_event_dim = len(p.event_shape) - len(p.base_dist.event_shape)
+    extra_event_dim = len(p.event_shape)
+    base_kl_divergence = kl_divergence(p.base_dist, q.base_dist)
+    return _sum_rightmost(base_kl_divergence, extra_event_dim)
 
 
 @register_kl(Uniform, Uniform)

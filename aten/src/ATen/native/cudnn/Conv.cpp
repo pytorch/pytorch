@@ -80,7 +80,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
 
-#include <ATen/Check.h>
+#include <ATen/TensorUtils.h>
 
 #include <functional>
 #include <iterator>
@@ -1204,7 +1204,8 @@ Tensor cudnn_convolution_backward_bias(
 
   // See Note [CuDNN broadcast padding].  Handle the left padding
   // ourselves, but use TensorDescriptor's pad argument to do the rest.
-  TensorDescriptor bdesc{grad_bias->expand({1, grad_bias->size(0)}), grad_output->dim()};
+  TensorDescriptor bdesc{grad_bias->expand({1, grad_bias->size(0)}),
+                         static_cast<size_t>(grad_output->dim())};
   TensorDescriptor odesc{*grad_output};
 
   auto handle = getCudnnHandle();

@@ -12,7 +12,7 @@ namespace {
 
 bool hasHandleOutput(Node *node) {
   auto last_output = node->outputs().back();
-  return last_output->typeOption() && last_output->typeOption()->kind() == TypeKind::HandleType;
+  return last_output->isHandle();
 }
 
 bool hasUsedHandle(Node *node) {
@@ -33,7 +33,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   }
 
   auto new_graph = std::make_shared<Graph>(state->graph->scope_root());
-  std::unordered_map<void*, Value*> new_buffer_map;
 
   torch::autograd::SymbolicContext ctx;
   ctx.graph = new_graph.get();
@@ -56,10 +55,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     n->setStage(input->stage());
     env[input] = n;
   }
-  for (auto kv : state->buffer_map) {
-    new_buffer_map[kv.first] = envFn(kv.second);
-  }
-
   // Put the new outputs in our environment map, and copy the type from the
   // input graph if they were not set by the symbolic. This is called only
   // with results of symbolic call (not for nodes that are just cloned).
@@ -80,9 +75,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
         // Allow symbolic() to skip specifying the type of the return node.
         // Unfortunately, they are on the hook for all internal nodes
         // (though in practice, the types are not computed.)
-        if (!outputs[i]->hasType()) {
-          outputs[i]->setType(old->typeOption());
-        }
+        outputs[i]->setType(old->type());
         // Copy over source location information to all nodes created by
         // the symbolic
         outputs[i]->node()->setSourceLocation(node->getSourceLocation());
@@ -153,7 +146,9 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     WithCurrentScope scope_guard(*ctx.graph, n->scope());
     py::object raw_output = onnx.attr("_run_symbolic_function")(ctx.graph, n, py_inputs, aten);
 
-    processSymbolicOutput(n->kind().toString(), n, raw_output);
+    // TODO: Assert it's an ATen identifier???
+    // (Sometimes it's not...)
+    processSymbolicOutput(n->kind().toUnqualString(), n, raw_output);
   };
 
   auto callPySymbolicMethod = [&](PythonOp* op) {
@@ -212,13 +207,7 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
     IR_ELSEIFM(PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
-      if (node->kind() == kUndefined) {
-        // Undefined nodes get passed into Convolution, but then they are
-        // removed.  We'll test for leftover Undefined in export.cpp
-        cloneNode(node);
-      } else {
-        callPySymbolicFunction(node);
-      }
+      callPySymbolicFunction(node);
     IR_END()
   }
   for (auto output : state->graph->outputs()) {
@@ -228,7 +217,6 @@ void ToONNX(std::shared_ptr<tracer::TracingState>& state, bool aten) {
   // Copy stage from original graph
   new_graph->setStage(state->graph->stage());
   state->graph = std::move(new_graph);
-  state->buffer_map = std::move(new_buffer_map);
 }
 
 }}

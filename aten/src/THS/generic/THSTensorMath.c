@@ -53,9 +53,7 @@ void THSTensor_(mul)(THSTensor *r_, THSTensor *t, real value) {
   }
 }
 
-/* floating point only, because that is what TH supports */
 /* TODO: add in-place support */
-#if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
 void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
   if (value == 0) {
     THError("cannot raise to zeroth power on sparse tensor");
@@ -83,6 +81,18 @@ void THSTensor_(pow)(THSTensor *r_, THSTensor *t_, real value) {
 
   THSTensor_(free)(t);
 }
+
+#if defined(THS_REAL_IS_FLOAT) || defined(THS_REAL_IS_DOUBLE)
+accreal THSTensor_(normall)(THSTensor *self, real value) {
+  THSTensor* self_coalesced = THSTensor_(newCoalesce)(self);
+  THTensor *self_coalesced_values = THSTensor_(newValues)(self_coalesced);
+  accreal result = THTensor_(normall)(self_coalesced_values, value);
+  THSTensor_(free)(self_coalesced);
+  THTensor_(free)(self_coalesced_values);
+  return result;
+}
+
+/* floating point only, because that is what TH supports */
 #endif
 
 void THSTensor_(div)(THSTensor *r_, THSTensor *t, real value) {
@@ -129,7 +139,6 @@ void THSTensor_(cadd)(THSTensor *r_, THSTensor *t, real value, THSTensor *src) {
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz, max_nnz = t_nnz + s_nnz;
   int t_coalesced = t->coalesced, s_coalesced = src->coalesced;
   int64_t nDimI = THSTensor_(nDimensionI)(src);
-  int64_t nDimV = THSTensor_(nDimensionV)(src);
   THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
   THTensor *t_values_ = THSTensor_(newValues)(t);
   THLongTensor *src_indices_ = THSTensor_(newIndices)(src);
@@ -216,7 +225,6 @@ void THSTensor_(cmul)(THSTensor *r_, THSTensor *t_, THSTensor *src_) {
   ptrdiff_t t_nnz = t->nnz, s_nnz = src->nnz;
   ptrdiff_t max_nnz = t_nnz < s_nnz ? t_nnz : s_nnz;
   int64_t nDimI = THSTensor_(nDimensionI)(src);
-  int64_t nDimV = THSTensor_(nDimensionV)(src);
   THLongTensor *t_indices_ = THSTensor_(newIndices)(t);
   THTensor *t_values_ = THSTensor_(newValues)(t);
   THLongTensor *src_indices_ = THSTensor_(newIndices)(src);
@@ -525,7 +533,6 @@ void THSTensor_(spcadd)(THTensor *r_, THTensor *dense, real value, THSTensor *sp
   THLongTensor  *indices = THSTensor_(newIndices)(sparse);
   THTensor      *values = THSTensor_(newValues)(sparse);
   THLongStorage *storage = THSTensor_(newSizeOf)(sparse);
-  int64_t       *sizes = storage->data;
   int64_t       nDim = THTensor_(nDimension)(dense);
   int64_t       nDimI = THSTensor_(nDimensionI)(sparse);
 

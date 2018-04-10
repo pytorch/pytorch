@@ -20,6 +20,13 @@ class Adagrad(Optimizer):
     """
 
     def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0):
+        if not 0.0 <= lr:
+            raise ValueError("Invalid learning rate: {}".format(lr))
+        if not 0.0 <= lr_decay:
+            raise ValueError("Invalid lr_decay value: {}".format(lr_decay))
+        if not 0.0 <= weight_decay:
+            raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
+
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay)
         super(Adagrad, self).__init__(params, defaults)
 

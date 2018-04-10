@@ -19,14 +19,14 @@ class FisherSnedecor(Distribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        df1 (float or Tensor or Variable): degrees of freedom parameter 1
-        df2 (float or Tensor or Variable): degrees of freedom parameter 2
+        df1 (float or Tensor): degrees of freedom parameter 1
+        df2 (float or Tensor): degrees of freedom parameter 2
     """
-    params = {'df1': constraints.positive, 'df2': constraints.positive}
+    arg_constraints = {'df1': constraints.positive, 'df2': constraints.positive}
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, df1, df2):
+    def __init__(self, df1, df2, validate_args=None):
         self.df1, self.df2 = broadcast_all(df1, df2)
         self._gamma1 = Gamma(self.df1 * 0.5, self.df1)
         self._gamma2 = Gamma(self.df2 * 0.5, self.df2)
@@ -35,7 +35,7 @@ class FisherSnedecor(Distribution):
             batch_shape = torch.Size()
         else:
             batch_shape = self.df1.size()
-        super(FisherSnedecor, self).__init__(batch_shape)
+        super(FisherSnedecor, self).__init__(batch_shape, validate_args=validate_args)
 
     @property
     def mean(self):
@@ -61,7 +61,8 @@ class FisherSnedecor(Distribution):
         return Y
 
     def log_prob(self, value):
-        self._validate_log_prob_arg(value)
+        if self._validate_args:
+            self._validate_sample(value)
         ct1 = self.df1 * 0.5
         ct2 = self.df2 * 0.5
         ct3 = self.df1 / self.df2

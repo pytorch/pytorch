@@ -3,6 +3,7 @@
 #include <Python.h>
 #include <stdint.h>
 #include <stdexcept>
+#include "torch/csrc/Exceptions.h"
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
@@ -45,20 +46,15 @@ inline bool THPUtils_checkLong(PyObject* obj) {
 }
 
 inline int64_t THPUtils_unpackLong(PyObject* obj) {
-  if (PyLong_Check(obj)) {
-    int overflow;
-    long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
-    if (overflow != 0) {
-      throw std::runtime_error("Overflow when unpacking long");
-    }
-    return (int64_t)value;
+  int overflow;
+  long long value = PyLong_AsLongLongAndOverflow(obj, &overflow);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
   }
-#if PY_MAJOR_VERSION == 2
-  if (PyInt_Check(obj)) {
-    return PyInt_AS_LONG(obj);
+  if (overflow != 0) {
+    throw std::runtime_error("Overflow when unpacking long");
   }
-#endif
-  throw std::runtime_error("Could not unpack long");
+  return (int64_t)value;
 }
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
@@ -89,5 +85,9 @@ inline double THPUtils_unpackDouble(PyObject* obj) {
     return (double)PyInt_AS_LONG(obj);
   }
 #endif
-  throw std::runtime_error("Could not unpack double");
+  double value = PyFloat_AsDouble(obj);
+  if (value == -1 && PyErr_Occurred()) {
+    throw python_error();
+  }
+  return value;
 }

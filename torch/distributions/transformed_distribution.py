@@ -18,7 +18,9 @@ class TransformedDistribution(Distribution):
     maximum shape of its base distribution and its transforms, since transforms
     can introduce correlations among events.
     """
-    def __init__(self, base_distribution, transforms):
+    arg_constraints = {}
+
+    def __init__(self, base_distribution, transforms, validate_args=None):
         self.base_dist = base_distribution
         if isinstance(transforms, Transform):
             self.transforms = [transforms, ]
@@ -32,11 +34,7 @@ class TransformedDistribution(Distribution):
         event_dim = max([len(self.base_dist.event_shape)] + [t.event_dim for t in self.transforms])
         batch_shape = shape[:len(shape) - event_dim]
         event_shape = shape[len(shape) - event_dim:]
-        super(TransformedDistribution, self).__init__(batch_shape, event_shape)
-
-    @constraints.dependent_property
-    def params(self):
-        return self.base_dist.params  # TODO add params of transforms?
+        super(TransformedDistribution, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     @constraints.dependent_property
     def support(self):
@@ -49,20 +47,22 @@ class TransformedDistribution(Distribution):
     def sample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped sample or sample_shape shaped batch of
-        samples if the distribution parameters are batched. Samples first from base distribution
-        and applies `transform()` for every transform in the list.
+        samples if the distribution parameters are batched. Samples first from
+        base distribution and applies `transform()` for every transform in the
+        list.
         """
-        x = self.base_dist.sample(sample_shape)
-        for transform in self.transforms:
-            x = transform(x)
-        return x
+        with torch.no_grad():
+            x = self.base_dist.sample(sample_shape)
+            for transform in self.transforms:
+                x = transform(x)
+            return x
 
     def rsample(self, sample_shape=torch.Size()):
         """
         Generates a sample_shape shaped reparameterized sample or sample_shape
         shaped batch of reparameterized samples if the distribution parameters
-        are batched. Samples first from base distribution and applies `transform()`
-        for every transform in the list.
+        are batched. Samples first from base distribution and applies
+        `transform()` for every transform in the list.
         """
         x = self.base_dist.rsample(sample_shape)
         for transform in self.transforms:
@@ -71,8 +71,8 @@ class TransformedDistribution(Distribution):
 
     def log_prob(self, value):
         """
-        Scores the sample by inverting the transform(s) and computing the score using the score
-        of the base distribution and the log abs det jacobian
+        Scores the sample by inverting the transform(s) and computing the score
+        using the score of the base distribution and the log abs det jacobian.
         """
         event_dim = len(self.event_shape)
         log_prob = 0.0
@@ -82,6 +82,45 @@ class TransformedDistribution(Distribution):
             log_prob -= _sum_rightmost(transform.log_abs_det_jacobian(x, y),
                                        event_dim - transform.event_dim)
             y = x
+
         log_prob += _sum_rightmost(self.base_dist.log_prob(y),
                                    event_dim - len(self.base_dist.event_shape))
         return log_prob
+
+    def _monotonize_cdf(self, value):
+        """
+        This conditionally flips ``value -> 1-value`` to ensure :meth:`cdf` is
+        monotone increasing.
+        """
+        sign = 1
+        for transform in self.transforms:
+            sign = sign * transform.sign
+        if sign is 1:
+            return value
+        return sign * (value - 0.5) + 0.5
+
+    def cdf(self, value):
+        """
+        Computes the cumulative distribution function by inverting the
+        transform(s) and computing the score of the base distribution.
+        """
+        for transform in self.transforms[::-1]:
+            value = transform.inv(value)
+        if self._validate_args:
+            self.base_dist._validate_sample(value)
+        value = self.base_dist.cdf(value)
+        value = self._monotonize_cdf(value)
+        return value
+
+    def icdf(self, value):
+        """
+        Computes the inverse cumulative distribution function using
+        transform(s) and computing the score of the base distribution.
+        """
+        value = self._monotonize_cdf(value)
+        if self._validate_args:
+            self.base_dist._validate_sample(value)
+        value = self.base_dist.icdf(value)
+        for transform in self.transforms:
+            value = transform(value)
+        return value

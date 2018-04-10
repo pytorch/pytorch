@@ -7,7 +7,7 @@ from torch.distributions.transformed_distribution import TransformedDistribution
 class LogNormal(TransformedDistribution):
     r"""
     Creates a log-normal distribution parameterized by
-    `mean` and `std` where::
+    `loc` and `scale` where::
 
         X ~ Normal(loc, scale)
         Y = exp(X) ~ LogNormal(loc, scale)
@@ -20,15 +20,15 @@ class LogNormal(TransformedDistribution):
         [torch.FloatTensor of size 1]
 
     Args:
-        loc (float or Tensor or Variable): mean of log of distribution
-        scale (float or Tensor or Variable): standard deviation of log ofthe distribution
+        loc (float or Tensor): mean of log of distribution
+        scale (float or Tensor): standard deviation of log ofthe distribution
     """
-    params = {'loc': constraints.real, 'scale': constraints.positive}
+    arg_constraints = {'loc': constraints.real, 'scale': constraints.positive}
     support = constraints.positive
     has_rsample = True
 
-    def __init__(self, loc, scale):
-        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform())
+    def __init__(self, loc, scale, validate_args=None):
+        super(LogNormal, self).__init__(Normal(loc, scale), ExpTransform(), validate_args=validate_args)
 
     @property
     def loc(self):

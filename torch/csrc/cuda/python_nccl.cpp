@@ -6,12 +6,14 @@
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/cuda/THCP.h"
 #include "torch/csrc/cuda/nccl.h"
+#include "torch/csrc/Exceptions.h"
 
 #include <nccl.h>
 #include <sstream>
 #include <unordered_map>
 
 using namespace at;
+using namespace torch;
 using namespace torch::cuda::nccl;
 using namespace torch::cuda::nccl::detail;
 
@@ -304,12 +306,11 @@ static std::vector<at::Tensor> extract_tensors(PyObject* obj) {
   Py_ssize_t length = PySequence_Fast_GET_SIZE(seq.get());
   for (Py_ssize_t i = 0; i < length; i++) {
     PyObject* item = PySequence_Fast_GET_ITEM(seq.get(), i);
-    if (THPVariable_Check(item)) {
-      auto var = (THPVariable*) item;
-      list.emplace_back(var->cdata.data());
-    } else {
-      list.emplace_back(torch::createTensor(item));
+    if (!THPVariable_Check(item)) {
+      throw TypeError("expected Tensor at %d (got %s)", (int)i, Py_TYPE(item)->tp_name);
     }
+    auto var = (THPVariable*) item;
+    list.emplace_back(var->cdata.data());
   }
   return list;
 }

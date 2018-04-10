@@ -13,7 +13,7 @@
 namespace torch { namespace onnx {
 
 using DataType = onnx_TensorProto_DataType;
-using Dimension = onnx_TypeProto_TensorShapeProto_Dimension;
+using Dimension = onnx_TensorShapeProto_Dimension;
 
 // Note [Unique vector]
 // ~~~~~~~~~~~~~~~~~~~~
@@ -188,8 +188,8 @@ DEFINE_CONST(GRAPHS)
 // These are NOT COMPLETE wrappers. If you find something is missing, add it!
 
 class AttributeProto;
-class TypeProtoTensorShapeProto;
-class TypeProtoTensorTypeProto;
+class TensorShapeProto;
+class TypeProtoTensor;
 class TensorProto;
 class TypeProto;
 class ValueInfoProto;
@@ -202,6 +202,7 @@ private:
   std::string name; // namespace ValueInfoProto.
   unique_vector<int64_t> dims;
   at::Tensor raw_data;
+  std::string dump;
 public:
   TensorProto() : MicroProto(onnx_TensorProto_init_default) {
     proto.dims       = list<int64_t>(&dims);
@@ -210,14 +211,16 @@ public:
   void add_dims(int64_t d) { dims.emplace_back(new int64_t(d)); }
   // Google Protobuf divergence!
   void set_raw_data(const at::Tensor& t) { proto.raw_data = string_from_tensor(&raw_data, t); }
+  void set_external_data_present() { proto.raw_data = string(&dump, "__EXTERNAL"); }
   void set_data_type(onnx_TensorProto_DataType t) { proto.has_data_type = true; proto.data_type = t; }
+  std::string get_name() const { return name; }
 };
 
-class TypeProtoTensorShapeProto : public MicroProto<onnx_TypeProto_TensorShapeProto> {
+class TensorShapeProto : public MicroProto<onnx_TensorShapeProto> {
 private:
   unique_vector<Dimension> dims;
 public:
-  TypeProtoTensorShapeProto() : MicroProto(onnx_TypeProto_TensorShapeProto_init_default) {
+  TensorShapeProto() : MicroProto(onnx_TensorShapeProto_init_default) {
     proto.dim = list<Dimension>(&dims);
   }
   void add_dim(std::int64_t d) {
@@ -228,25 +231,25 @@ public:
   }
 };
 
-class TypeProtoTensorTypeProto : public MicroProto<onnx_TypeProto_TensorTypeProto> {
+class TypeProtoTensor : public MicroProto<onnx_TypeProto_Tensor> {
 private:
-  std::unique_ptr<TypeProtoTensorShapeProto> shape;
+  std::unique_ptr<TensorShapeProto> shape;
 public:
-  TypeProtoTensorTypeProto() : MicroProto(onnx_TypeProto_TensorTypeProto_init_default) {}
+  TypeProtoTensor() : MicroProto(onnx_TypeProto_Tensor_init_default) {}
   void set_data_type(onnx_TensorProto_DataType t) { proto.has_elem_type = true; proto.elem_type = t; }
-  TypeProtoTensorShapeProto* mutable_shape() {
-    proto.shape = msg<TypeProtoTensorShapeProto, onnx_TypeProto_TensorShapeProto_fields>(&shape);
+  TensorShapeProto* mutable_shape() {
+    proto.shape = msg<TensorShapeProto, onnx_TensorShapeProto_fields>(&shape);
     return shape.get();
   }
 };
 
 class TypeProto : public MicroProto<onnx_TypeProto> {
 private:
-  std::unique_ptr<TypeProtoTensorTypeProto> tensor_type;
+  std::unique_ptr<TypeProtoTensor> tensor_type;
 public:
   TypeProto() : MicroProto(onnx_TypeProto_init_default) {}
-  TypeProtoTensorTypeProto* mutable_tensor_type() {
-    proto.tensor_type = msg<TypeProtoTensorTypeProto, onnx_TypeProto_TensorTypeProto_fields>(&tensor_type);
+  TypeProtoTensor* mutable_tensor_type() {
+    proto.tensor_type = msg<TypeProtoTensor, onnx_TypeProto_Tensor_fields>(&tensor_type);
     return tensor_type.get();
   }
 };

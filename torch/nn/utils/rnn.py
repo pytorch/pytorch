@@ -2,6 +2,7 @@ from collections import namedtuple
 
 import torch
 from torch.autograd import Variable
+import torch.onnx
 
 
 from .._functions.packing import PackPadded
@@ -10,7 +11,7 @@ PackedSequence_ = namedtuple('PackedSequence', ['data', 'batch_sizes'])
 
 
 class PackedSequence(PackedSequence_):
-    r"""Holds the data and list of batch_sizes of a packed sequence.
+    r"""Holds the data and list of :attr:`batch_sizes` of a packed sequence.
 
     All RNN modules accept packed sequences as inputs.
 
@@ -20,14 +21,25 @@ class PackedSequence(PackedSequence_):
 
         Batch sizes represent the number elements at each sequence step in
         the batch, not the varying sequence lengths passed to
-        :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `d`
-        the ``PackedSequence`` would be ``adbc`` with ``batch_sizes=[2,1,1]``.
+        :func:`pack_padded_sequence`.  For instance, given data  ``abc`` and `x`
+        the :class:`PackedSequence` would contain data ``axbc`` with
+        ``batch_sizes=[2,1,1]``.
 
     Attributes:
         data (Variable): Variable containing packed sequence
-        batch_sizes (list[int]): list of integers holding information about
-            the batch size at each sequence step
+        batch_sizes (Variable): Variable of integers holding
+            information about the batch size at each sequence step
+
     """
+    def __new__(cls, *args):
+        # support being called as `PackedSequence(data, batch_sizes)`
+        if len(args) == 2:
+            return super(PackedSequence, cls).__new__(cls, *args)
+        # support being called as `PackedSequence((data, batch_sizes))`
+        else:
+            assert len(args) == 1
+            return super(PackedSequence, cls).__new__(cls, *args[0])
+
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
         if self.is_cuda:
@@ -80,12 +92,22 @@ class PackedSequence(PackedSequence_):
         return self.data.is_cuda
 
 
+def _symbolic_pack_padded_sequence(g, input, lengths, batch_first=False):
+    if batch_first:
+        input = g.op('Transpose', input, perm_i=[1, 0, 2])
+    # There currently is no PackPadded operator in ONNX. We rely on an
+    # optimization pass to remove this later. It is an error if all
+    # PackPadded operators cannot be optimized out.
+    return g.op("prim::PackPadded", input, lengths, outputs=2)
+
+
+@torch.onnx.symbolic_override_first_arg_based(_symbolic_pack_padded_sequence)
 def pack_padded_sequence(input, lengths, batch_first=False):
     r"""Packs a Variable containing padded sequences of variable length.
 
-    Input can be of size ``TxBx*`` where T is the length of the longest sequence
-    (equal to ``lengths[0]``), B is the batch size, and * is any number of
-    dimensions (including 0). If ``batch_first`` is True ``BxTx*`` inputs are
+    Input can be of size ``T x B x *`` where `T` is the length of the longest sequence
+    (equal to ``lengths[0]``), `B` is the batch size, and `*` is any number of
+    dimensions (including 0). If ``batch_first`` is True ``B x T x *`` inputs are
     expected.
 
     The sequences should be sorted by length in a decreasing order, i.e.
@@ -93,56 +115,90 @@ def pack_padded_sequence(input, lengths, batch_first=False):
     shortest one.
 
     Note:
-        This function accept any input that has at least two dimensions. You
+        This function accepts any input that has at least two dimensions. You
         can apply it to pack the labels, and use the output of the RNN with
         them to compute the loss directly. A Variable can be retrieved from
         a :class:`PackedSequence` object by accessing its ``.data`` attribute.
 
     Arguments:
         input (Variable): padded batch of variable length sequences.
-        lengths (list[int]): list of sequences lengths of each batch element.
-        batch_first (bool, optional): if ``True``, the input is expected in BxTx*
+        lengths (Variable): list of sequences lengths of each batch element.
+        batch_first (bool, optional): if ``True``, the input is expected in ``B x T x *``
             format.
 
     Returns:
         a :class:`PackedSequence` object
     """
+    if isinstance(lengths, list):
+        lengths = Variable(torch.LongTensor(lengths))
+
     data, batch_sizes = PackPadded.apply(input, lengths, batch_first)
 
-    return PackedSequence(data, list(batch_sizes.data))
+    return PackedSequence(data, batch_sizes)
 
 
-def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
+def _symbolic_pad_packed_sequence(g, input, batch_first=False, padding_value=0.0, total_length=None):
+    if total_length is not None:
+        raise ValueError("_symbolic_pad_packed_sequence only supports total_length=None")
+    # See comment on _symbolic_pack_padded_sequence
+    data, lengths = g.op("prim::PadPacked", input.data, input.batch_sizes, outputs=2)
+    if batch_first:
+        data = g.op('Transpose', data, perm_i=[1, 0, 2])
+    return data, lengths
+
+
+@torch.onnx.symbolic_override_packed_sequence_based(_symbolic_pad_packed_sequence)
+def pad_packed_sequence(sequence, batch_first=False, padding_value=0.0, total_length=None):
     r"""Pads a packed batch of variable length sequences.
 
     It is an inverse operation to :func:`pack_padded_sequence`.
 
-    The returned Variable's data will be of size TxBx*, where T is the length
-    of the longest sequence and B is the batch size. If ``batch_first`` is True,
-    the data will be transposed into BxTx* format.
+    The returned Variable's data will be of size ``T x B x *``, where `T` is the length
+    of the longest sequence and `B` is the batch size. If ``batch_first`` is True,
+    the data will be transposed into ``B x T x *`` format.
 
     Batch elements will be ordered decreasingly by their length.
 
+    .. note::
+        :attr:`total_length` is useful to implement the
+        ``pack sequence -> recurrent network -> unpack sequence`` pattern in a
+        :class:`~torch.nn.Module` wrapped in :class:`~torch.nn.DataParallel`.
+        See :ref:`this FAQ section <pack-rnn-unpack-with-data-parallelism>` for
+        details.
+
     Arguments:
         sequence (PackedSequence): batch to pad
-        batch_first (bool, optional): if ``True``, the output will be in BxTx*
+        batch_first (bool, optional): if ``True``, the output will be in ``B x T x *``
             format.
         padding_value (float, optional): values for padded elements.
+        total_length (int, optional): if not ``None``, the output will be padded to
+            have length :attr:`total_length`. This method will throw :class:`ValueError`
+            if :attr:`total_length` is less than the max sequence length in
+            :attr:`sequence`.
 
     Returns:
-        Tuple of Variable containing the padded sequence, and a list of lengths
-        of each sequence in the batch.
+        Tuple of Variable containing the padded sequence, and Variable
+        containing the list of lengths of each sequence in the batch.
+
     """
     var_data, batch_sizes = sequence
-    max_batch_size = batch_sizes[0]
-    output = var_data.data.new(len(batch_sizes), max_batch_size, *var_data.size()[1:]).fill_(padding_value)
+    max_batch_size = int(batch_sizes[0])
+    max_seq_length = batch_sizes.size(0)
+    if total_length is not None:
+        if total_length < max_seq_length:
+            raise ValueError("Expected total_length to be at least the length "
+                             "of the longest sequence in input, but got "
+                             "total_length={} and max sequence length being {}"
+                             .format(total_length, max_seq_length))
+        max_seq_length = total_length
+    output = var_data.data.new(max_seq_length, max_batch_size, *var_data.size()[1:]).fill_(padding_value)
     output = Variable(output)
 
     lengths = []
     data_offset = 0
-    prev_batch_size = batch_sizes[0]
+    prev_batch_size = int(batch_sizes[0])
     prev_i = 0
-    for i, batch_size in enumerate(batch_sizes + [0]):
+    for i, batch_size in enumerate(batch_sizes.tolist() + [0]):
         if batch_size != prev_batch_size:
             l = prev_batch_size * (i - prev_i)
             tmp = var_data[data_offset:data_offset + l]
@@ -158,22 +214,26 @@ def pad_packed_sequence(sequence, batch_first=False, padding_value=0):
 
     if batch_first:
         output = output.transpose(0, 1)
-    return output, lengths
+    # This Variable doesn't actually have any history (well,
+    # technically it does; it's just untracked), it is purely here to
+    # make ONNX export easier. That is to say, from an autodiff
+    # standpoint this doesn't make any sense.
+    return output, Variable(torch.LongTensor(lengths))
 
 
-def pad_sequence(sequences, batch_first=False):
+def pad_sequence(sequences, batch_first=False, padding_value=0):
     r"""Pad a list of variable length Variables with zero
 
     ``pad_sequence`` stacks a list of Variables along a new dimension,
     and padds them to equal length. For example, if the input is list of
-    sequences with size ``Lx*`` and if batch_first is False, and ``TxBx*``
+    sequences with size ``L x *`` and if batch_first is False, and ``T x B x *``
     otherwise. The list of sequences should be sorted in the order of
     decreasing length.
 
-    B is batch size. It's equal to the number of elements in ``sequences``.
-    T is length longest sequence.
-    L is length of the sequence.
-    * is any number of trailing dimensions, including none.
+    `B` is batch size. It's equal to the number of elements in ``sequences``.
+    `T` is length of the longest sequence.
+    `L` is length of the sequence.
+    `*` is any number of trailing dimensions, including none.
 
     Example:
         >>> from torch.nn.utils.rnn import pad_sequence
@@ -184,19 +244,20 @@ def pad_sequence(sequences, batch_first=False):
         torch.Size([25, 3, 300])
 
     Note:
-        This function returns a Variable of size TxBx* or BxTx* where T is the
+        This function returns a Variable of size ``T x B x *`` or ``B x T x *`` where `T` is the
             length of longest sequence.
         Function assumes trailing dimensions and type of all the Variables
             in sequences are same.
 
     Arguments:
         sequences (list[Variable]): list of variable length sequences.
-        batch_first (bool, optional): output will be in BxTx* if True, or in
-            TxBx* otherwise
+        batch_first (bool, optional): output will be in ``B x T x *`` if True, or in
+            ``T x B x *`` otherwise
+        padding_value (float, optional): value for padded elements.
 
     Returns:
-        Variable of size ``T x B x * `` if batch_first is False
-        Variable of size ``B x T x * `` otherwise
+        Variable of size ``T x B x *`` if batch_first is False
+        Variable of size ``B x T x *`` otherwise
     """
 
     # assuming trailing dimensions and type of all the Variables
@@ -209,12 +270,12 @@ def pad_sequence(sequences, batch_first=False):
     else:
         out_dims = (max_len, len(sequences)) + trailing_dims
 
-    out_variable = Variable(sequences[0].data.new(*out_dims).zero_())
+    out_variable = Variable(sequences[0].data.new(*out_dims).fill_(padding_value))
     for i, variable in enumerate(sequences):
         length = variable.size(0)
         # temporary sort check, can be removed when we handle sorting internally
         if prev_l < length:
-                raise ValueError("lengths array has to be sorted in decreasing order")
+            raise ValueError("lengths array has to be sorted in decreasing order")
         prev_l = length
         # use index notation to prevent duplicate references to the variable
         if batch_first:
@@ -228,8 +289,8 @@ def pad_sequence(sequences, batch_first=False):
 def pack_sequence(sequences):
     r"""Packs a list of variable length Variables
 
-    ``sequences`` should be a list of Variables of size ``Lx*``, where L is
-    the length of a sequence and * is any number of trailing dimensions,
+    ``sequences`` should be a list of Variables of size ``L x *``, where `L` is
+    the length of a sequence and `*` is any number of trailing dimensions,
     including zero. They should be sorted in the order of decreasing length.
 
     Example:

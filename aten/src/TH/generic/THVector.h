@@ -30,7 +30,9 @@ TH_API void THVector_(log)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(lgamma)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(digamma)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(trigamma)(real *y, const real *x, const ptrdiff_t n);
+TH_API void THVector_(log10)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(log1p)(real *y, const real *x, const ptrdiff_t n);
+TH_API void THVector_(log2)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(sigmoid)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(exp)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(expm1)(real *y, const real *x, const ptrdiff_t n);
@@ -57,8 +59,5 @@ TH_API void THVector_(frac)(real *y, const real *x, const ptrdiff_t n);
 TH_API void THVector_(cinv)(real *y, const real *x, const ptrdiff_t n);
 
 #endif /* floating point only part */
-
-/* Initialize the dispatch pointers */
-TH_API void THVector_(vectorDispatchInit)(void);
 
 #endif

@@ -11,7 +11,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           bool sizeAverage,
           int p,
           THTensor *weights,
-          accreal margin_)
+          accreal margin_,
+          bool reduce)
 {
   real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data, *weights_data;
@@ -22,7 +23,6 @@ void THNN_(MultiMarginCriterion_updateOutput)(
 
   THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
 	     "vector or matrix expected");
-  THTensor_(resize1d)(output, 1);
 
   if (input->nDimension == 1)
   {
@@ -51,32 +51,65 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   target_data = THIndexTensor_(data)(target);
   weights_data = weights ? THTensor_(data)(weights) : NULL;
 
-  sum = 0;
-  for (t = 0; t < nframe; t++)
+  if (!reduce)
   {
-    THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
-    real input_target = input_data[target_idx];
-    for (d = 0; d < dim; d++)
+    THTensor_(resize1d)(output, nframe);
+
+    for (t = 0; t < nframe; t++)
     {
-      real z = margin - input_target + input_data[d];
-      if (d == target_idx)
-        continue;
+      sum = 0;
+      THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+      real input_target = input_data[target_idx];
+      for (d = 0; d < dim; d++)
+      {
+        real z = margin - input_target + input_data[d];
+        if (d == target_idx)
+          continue;
 
-      if (z > 0) {
-        real h = (p==1) ? z : z*z;
-        if(weights_data)
-          h *= weights_data[target_idx];
-        sum += h;
+        if (z > 0) {
+          real h = (p==1) ? z : z*z;
+          if(weights_data)
+            h *= weights_data[target_idx];
+          sum += h;
+        }
       }
+
+      sum /= dim;
+      THTensor_fastSet1d(output, t, sum);
+      input_data += dim;
     }
-    input_data += dim;
   }
+  else
+  {
+    THTensor_(resize1d)(output, 1);
 
-  sum /= dim;
-  if(sizeAverage)
-    sum /= nframe;
+    sum = 0;
+    for (t = 0; t < nframe; t++)
+    {
+      THIndex_t target_idx = target_data[t] - TH_INDEX_BASE;
+      real input_target = input_data[target_idx];
+      for (d = 0; d < dim; d++)
+      {
+        real z = margin - input_target + input_data[d];
+        if (d == target_idx)
+          continue;
 
-  THTensor_(set1d)(output, 0, sum);
+        if (z > 0) {
+          real h = (p==1) ? z : z*z;
+          if(weights_data)
+            h *= weights_data[target_idx];
+          sum += h;
+        }
+      }
+      input_data += dim;
+    }
+
+    sum /= dim;
+    if(sizeAverage)
+      sum /= nframe;
+
+    THTensor_(set1d)(output, 0, sum);
+  }
 
   THTensor_(free)(input);
   THIndexTensor_(free)(target);
@@ -88,11 +121,13 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
+          THTensor *gradOutput,
           THTensor *gradInput,
           bool sizeAverage,
           int p,
           THTensor *weights,
-          accreal margin_)
+          accreal margin_,
+          bool reduce)
 {
   real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   real *input_data;
@@ -119,13 +154,14 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 	       "inconsistent target size");
   }
 
-  g = (sizeAverage ? 1./((real)(nframe*dim)) : 1./((real)dim));
+  g = (sizeAverage && reduce ? 1./((real)(nframe*dim)) : 1./((real)dim));
 
   input = THTensor_(newContiguous)(input);
   target = THIndexTensor_(newContiguous)(target);
   input_data = THTensor_(data)(input);
 
   THTensor_(resizeAs)(gradInput, input);
+  THArgCheck(THTensor_(isContiguous)(gradInput), 5, "gradInput must be contiguous");
   gradInput_data = THTensor_(data)(gradInput);
 
   target_data = THIndexTensor_(data)(target);
@@ -158,6 +194,26 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
 
     input_data += dim;
     gradInput_data += dim;
+  }
+  gradInput_data = THTensor_(data)(gradInput);
+
+  if (reduce)
+  {
+    THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
+    for (t = 0; t < nframe * dim; t++) {
+      gradInput_data[t] *= THTensor_fastGet1d(gradOutput, 0);
+    }
+  }
+  else
+  {
+    THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, nframe);
+    for (t = 0; t < nframe; t++)
+    {
+      for (d = 0; d < dim; d++)
+      {
+        gradInput_data[t * dim + d] *= THTensor_fastGet1d(gradOutput, t);
+      }
+    }
   }
 
   THTensor_(free)(input);

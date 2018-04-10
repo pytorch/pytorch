@@ -1,10 +1,10 @@
-#include "Python.h"
 #include "VariableType.h"
 
 // ${generated_comment}
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/generated/Functions.h"
@@ -28,7 +28,6 @@ using namespace at;
 using namespace torch::autograd::generated;
 
 namespace torch { namespace autograd {
-
 // Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
 
 // The overloaded accessors are convenient for the generated code (since we
@@ -43,7 +42,7 @@ template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context)
+  : Type(context, /*is_variable_or_undefined=*/true)
   , baseType(baseType) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
@@ -74,7 +73,7 @@ std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::u
   return baseType->storageWithAllocator(size, std::move(allocator));
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), false);
+  return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
 }
 std::unique_ptr<Generator> VariableType::generator() const {
   return baseType->generator();
@@ -157,14 +156,14 @@ std::vector<at::Type*> VariableType::allTypes() {
 
 Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
   if (!t.defined()) {
-    runtime_error("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
+    AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor for argument #%d '%s'",
         pos, name);
   }
   if (!isVariableType(t.type())) {
-    runtime_error("Expected object of type Variable but found type %s for argument #%d '%s'",
+    AT_ERROR("Expected object of type Variable but found type %s for argument #%d '%s'",
         t.type().toString(), pos, name);
   }
-  return static_cast<Variable&>(const_cast<Tensor&>(t));
+  return as_variable_ref(const_cast<Tensor&>(t));
 }
 
 Tensor & VariableType::unpack(const Tensor & t, const char * name, int pos) {
@@ -187,12 +186,12 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   for (size_t i = 0; i < tl.size(); ++i) {
     const auto &t = tl[i];
     if (!t.defined()) {
-      runtime_error("Expected a Tensor of type Variable but found an undefined Tensor at position #%d "
+      AT_ERROR("Expected a Tensor of type Variable but found an undefined Tensor at position #%d "
                     "for iterable argument #%d '%s'",
                     i, pos, name);
     }
     if (!isVariableType(t.type())) {
-      runtime_error("Expected object of type Variable but found type %s at position #%d "
+      AT_ERROR("Expected object of type Variable but found type %s at position #%d "
                     "for iterable argument #%d '%s'",
                     t.type().toString(), i, pos, name);
     }
@@ -201,38 +200,41 @@ std::vector<at::Tensor> VariableType::unpack(at::TensorList tl, const char *name
   return ret;
 }
 
+// Assumed that saved tensor lists are never inplace outputs
+static std::vector<SavedVariable> make_saved_variable_list(TensorList tensors) {
+  return fmap(tensors, [](const Tensor& tensor) -> SavedVariable {
+      return SavedVariable{tensor, false /* is output */}; });
+}
+
+template <typename... Tensors, size_t... Is>
+std::tuple<Tensors...> as_variable_impl(
+    std::tuple<Tensors...> tensors,
+    Indices<Is...>) {
+  // Expand the integer parameter pack into a sequence of Variable
+  // constructions. This turns into (boolean omitted):
+  // Variable(std::get<0>(tensors)), Variable(std::get<1>(tensors)), ...
+  return std::tuple<Tensors...>(
+      make_variable(std::get<Is>(tensors), /*requires_grad=*/false)...);
+}
+
+template <typename... Tensors>
+std::tuple<Tensors...> as_variable(std::tuple<Tensors...> tensors) {
+  // `sizeof...(Tensors)` gets us the size of the `Tensors` parameter pack at
+  // compile time. We use it to parameterize a `MakeIndices` class, which will
+  // expand into an Indices object containing the numbers 0 to
+  // sizeof...(Tensors) - 1.
+  return as_variable_impl(
+      tensors, typename MakeIndices<sizeof...(Tensors)>::indices());
+}
+
 static Tensor as_variable(Tensor tensor) {
-  return make_variable(std::move(tensor));
-}
-
-static std::tuple<Tensor, Tensor>
-as_variable(std::tuple<Tensor, Tensor> tensors) {
-  return std::make_tuple<>(
-      make_variable(std::move(std::get<0>(tensors))),
-      make_variable(std::move(std::get<1>(tensors))));
-}
-
-static std::tuple<Tensor, Tensor, Tensor>
-as_variable(std::tuple<Tensor, Tensor, Tensor> tensors) {
-  return std::make_tuple<>(
-      make_variable(std::move(std::get<0>(tensors))),
-      make_variable(std::move(std::get<1>(tensors))),
-      make_variable(std::move(std::get<2>(tensors))));
-}
-
-static std::tuple<Tensor, Tensor, Tensor, Tensor>
-as_variable(std::tuple<Tensor, Tensor, Tensor, Tensor> tensors) {
-  return std::make_tuple<>(
-      make_variable(std::move(std::get<0>(tensors))),
-      make_variable(std::move(std::get<1>(tensors))),
-      make_variable(std::move(std::get<2>(tensors))),
-      make_variable(std::move(std::get<3>(tensors))));
+  return make_variable(std::move(tensor), /*requires_grad=*/false);
 }
 
 static std::vector<Tensor> as_variable(TensorList tl) {
   std::vector<Tensor> variables;
   for (auto& t : tl) {
-    variables.emplace_back(make_variable(std::move(t)));
+    variables.emplace_back(make_variable(std::move(t), /*requires_grad=*/false));
   }
   return variables;
 }
@@ -244,14 +246,6 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   }
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
-
-#ifndef WITH_SCALARS
-static void ensure_no_aten_scalars(Tensor & data) {
-  if (data.defined() && data.dim() == 0) {
-    data.as_strided_({1}, {1});
-  }
-}
-#endif
 
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   bool out = false;
@@ -286,33 +280,33 @@ static void check_no_requires_grad(const Tensor& tensor, const char* name) {
 static void check_inplace(const Tensor& tensor) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.requires_grad() && var.is_leaf() && GradMode::is_enabled()) {
-    at::runtime_error(
+    AT_ERROR(
       "a leaf Variable that requires grad has been used in an in-place operation.");
   }
 }
 
 static void throw_error_out_requires_grad(const char* name) {
-  at::runtime_error(
+  AT_ERROR(
       "%s(): functions with out=... arguments don't support automatic differentiation, "
       "but one of the arguments requires grad.", name);
 }
 
 static void rebase_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
-    auto& var = static_cast<Variable&>(tensor);
-    grad_fn->num_inputs = 1;
-    var.rebase_history(0, std::move(grad_fn));
+    auto& var = as_variable_ref(tensor);
+    grad_fn->set_num_inputs(1);
+    var.rebase_history({std::move(grad_fn), 0});
   }
 }
 
 static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->num_inputs = tensors.size();
-    int output_nr = 0;
+    grad_fn->set_num_inputs(tensors.size());
+    uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
-        auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
-        var.rebase_history(output_nr, grad_fn);
+        auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
+        var.rebase_history({grad_fn, output_nr});
       }
       output_nr++;
     }
@@ -323,22 +317,19 @@ static void rebase_history(TensorList tensors, std::shared_ptr<Function> grad_fn
 // overload for functions with multiple differentiable outputs.
 static void set_history(Tensor& tensor, std::shared_ptr<Function> grad_fn) {
   if (grad_fn && tensor.defined()) {
-    auto& var = static_cast<Variable&>(tensor);
-    grad_fn->num_inputs = 1;
-    var.get()->output_nr = 0;
-    var.get()->_grad_fn = std::move(grad_fn);
+    auto& var = as_variable_ref(tensor);
+    autograd::create_gradient_edge(var, std::move(grad_fn));
   }
 }
 
 static void set_history(TensorList tensors, std::shared_ptr<Function> grad_fn) {
   if (grad_fn) {
-    grad_fn->num_inputs = tensors.size();
-    int64_t output_nr = 0;
+    grad_fn->set_num_inputs(tensors.size());
+    uint32_t output_nr = 0;
     for (auto& tensor : tensors) {
       if (tensor.defined()) {
-        auto& var = static_cast<Variable&>(const_cast<Tensor&>(tensor));
-        var.get()->output_nr = output_nr;
-        var.get()->_grad_fn = grad_fn;
+        auto& var = as_variable_ref(const_cast<Tensor&>(tensor));
+        var.set_gradient_edge({grad_fn, output_nr});
       }
       output_nr++;
     }
@@ -361,9 +352,8 @@ template<typename... Args> inline variable_list flatten(Args&&... args) {
   return out; // RVO
 }
 
-static void increment_version(const Tensor & t) {
-  auto& var = static_cast<const Variable&>(t);
-  var.version_counter().increment();
+static void increment_version(Tensor & t) {
+  as_variable_ref(t).bump_version();
 }
 
 static bool isFloatingPoint(ScalarType s) {
@@ -381,8 +371,8 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
   requires_grad &= isFloatingPoint(self.type().scalarType());
   if (requires_grad) {
     grad_fn = std::make_shared<CopyBackwards>();
-    grad_fn->next_functions = get_next_functions(self, src);
-    grad_fn->num_inputs = 1;
+    grad_fn->set_next_edges(collect_next_edges(self, src));
+    grad_fn->set_num_inputs(1);
     grad_fn->src_type = &src.type();
     grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
   }
@@ -394,8 +384,8 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
 
 Tensor & VariableType::resize_(Tensor & self, IntList size) const {
   auto& self_ = unpack(self, "self", 0);
-  if (static_cast<Variable&>(self).requires_grad()) {
-    at::runtime_error("cannot resize variables that require grad");
+  if (as_variable_ref(self).requires_grad()) {
+    AT_ERROR("cannot resize variables that require grad");
   }
   baseType->resize_(self_, size);
   return self;
@@ -404,8 +394,8 @@ Tensor & VariableType::resize_(Tensor & self, IntList size) const {
 Tensor & VariableType::resize_as_(Tensor & self, const Tensor & the_template) const {
   auto& self_ = unpack(self, "self", 0);
   auto& the_template_ = unpack(the_template, "the_template", 1);
-  if (static_cast<Variable&>(self).requires_grad()) {
-    at::runtime_error("cannot resize variables that require grad");
+  if (as_variable_ref(self).requires_grad()) {
+    AT_ERROR("cannot resize variables that require grad");
   }
   baseType->resize_as_(self_, the_template_);
   return self;
@@ -419,12 +409,12 @@ Tensor VariableType::contiguous(const Tensor & self) const {
   return self.clone();
 }
 
-static std::vector<int64_t> to_arg_sizes(TensorList tensors, int64_t dim) {
-  std::vector<int64_t> arg_sizes(tensors.size());
+static std::vector<std::vector<int64_t>> to_args_sizes(TensorList tensors) {
+  std::vector<std::vector<int64_t>> args_sizes(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    arg_sizes[i] = tensors[i].size(dim);
+    args_sizes[i] = tensors[i].sizes();
   }
-  return arg_sizes;
+  return args_sizes;
 }
 
 ${type_derived_method_definitions}

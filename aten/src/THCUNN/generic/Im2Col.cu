@@ -84,7 +84,9 @@ void THNN_(Im2Col_updateOutput)(
     im2col(
       THCState_getCurrentStream(state),
       THCTensor_(data)(state, input_n),
-      nInputPlane, inputHeight, inputWidth, kH, kW, padH, padW, sH, sW,
+      nInputPlane, inputHeight, inputWidth,
+      outputHeight, outputWidth,
+      kH, kW, padH, padW, sH, sW,
       dH, dW, THCTensor_(data)(state, output_n));
   }
 

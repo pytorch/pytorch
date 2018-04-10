@@ -197,7 +197,7 @@ THNN_(FeatureLPPooling_updateOutput)(
     THNN_(FeatureLPPooling_upcastCPU)(input, batchMode);
 
   // Make sure the feature dimension is properly sized
-  THArgCheck(inputDesc.size[1] >= width, 3,
+  THArgCheck(inputDesc.size[1] >= (FEATURE_LP_SIZE_TYPE) width, 3,
              "input: feature dimension must be >= width");
 
   // Make sure that width and stride are within range
@@ -228,7 +228,7 @@ THNN_(FeatureLPPooling_updateOutput)(
              outputFeature < FEATURE_LP_CAST_TYPE outputDesc.size[1]; ++outputFeature) {
 
           accreal v = (accreal) 0;
-          for (i = 0; i < width; ++i) {
+          for (i = 0; i < (FEATURE_LP_SIZE_TYPE) width; ++i) {
             FEATURE_LP_SIZE_TYPE inputFeature = outputFeature * stride + i;
             if (inputFeature >= FEATURE_LP_CAST_TYPE inputDesc.size[1]) {
               break;
@@ -279,7 +279,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
     THNN_(FeatureLPPooling_upcastCPU)(output, batchMode);
 
   // Make sure the feature dimension is properly sized
-  THArgCheck(inputDesc.size[1] >= width, 3,
+  THArgCheck(inputDesc.size[1] >= (FEATURE_LP_SIZE_TYPE) width, 3,
              "input: feature dimension must be >= width");
 
   // Make sure that width and stride are within range
@@ -333,7 +333,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
             continue;
           }
 
-          for (i = 0; i < width; ++i) {
+          for (i = 0; i < (FEATURE_LP_SIZE_TYPE) width; ++i) {
             FEATURE_LP_SIZE_TYPE inputFeature = outputFeature * stride + i;
             THAssert(inputFeature < inputDesc.size[1]);
 

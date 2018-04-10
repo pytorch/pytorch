@@ -180,6 +180,10 @@ THC_API void THCTensor_(mode)(THCState *state,
 
   // Resize output value, index Tensors to appropriate sizes (i.e. the same as
   // the input Tensor, except at dim=dimension, the size is 1)
+  TensorUtils<THCTensor>::preserveReduceDimSemantics(
+      state, values, ndim, dimension, keepdim);
+  TensorUtils<THCudaLongTensor>::preserveReduceDimSemantics(
+      state, indices, ndim, dimension, keepdim);
   dim = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(dim, dimension, 1);
   THCTensor_(resize)(state, values, dim, NULL);

@@ -16,20 +16,20 @@ class Linear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, in\_features)` where `*` means any number of
+        - Input: :math:`(N, *, in\_features)` where :math:`*` means any number of
           additional dimensions
         - Output: :math:`(N, *, out\_features)` where all but the last dimension
           are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
-            (out_features x in_features)
-        bias:   the learnable bias of the module of shape (out_features)
+            `(out_features x in_features)`
+        bias:   the learnable bias of the module of shape `(out_features)`
 
     Examples::
 
         >>> m = nn.Linear(20, 30)
-        >>> input = autograd.Variable(torch.randn(128, 20))
+        >>> input = torch.randn(128, 20)
         >>> output = m(input)
         >>> print(output.size())
     """
@@ -54,16 +54,15 @@ class Linear(Module):
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'in_features=' + str(self.in_features) \
-            + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None) + ')'
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, bias={}'.format(
+            self.in_features, self.out_features, self.bias is not None
+        )
 
 
 class Bilinear(Module):
     r"""Applies a bilinear transformation to the incoming data:
-    :math:`y = x_1 * A * x_2 + b`
+    :math:`y = x_1 A x_2 + b`
 
     Args:
         in1_features: size of each first input sample
@@ -73,19 +72,22 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, in1\_features)`, :math:`(N, in2\_features)`
-        - Output: :math:`(N, out\_features)`
+        - Input: :math:`(N, *, \text{in1_features})`, :math:`(N, *, \text{in2_features})`
+          where :math:`*` means any number of additional dimensions. All but the last
+          dimension of the inputs should be the same.
+        - Output: :math:`(N, *, \text{out_features})` where all but the last dimension
+          are the same shape as the input.
 
     Attributes:
         weight: the learnable weights of the module of shape
-            (out_features x in1_features x in2_features)
-        bias:   the learnable bias of the module of shape (out_features)
+            `(out_features x in1_features x in2_features)`
+        bias:   the learnable bias of the module of shape `(out_features)`
 
     Examples::
 
         >>> m = nn.Bilinear(20, 30, 40)
-        >>> input1 = autograd.Variable(torch.randn(128, 20))
-        >>> input2 = autograd.Variable(torch.randn(128, 30))
+        >>> input1 = torch.randn(128, 20)
+        >>> input2 = torch.randn(128, 30)
         >>> output = m(input1, input2)
         >>> print(output.size())
     """
@@ -112,11 +114,9 @@ class Bilinear(Module):
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'in1_features=' + str(self.in1_features) \
-            + ', in2_features=' + str(self.in2_features) \
-            + ', out_features=' + str(self.out_features) \
-            + ', bias=' + str(self.bias is not None) + ')'
+    def extra_repr(self):
+        return 'in1_features={}, in2_features={}, out_features={}, bias={}'.format(
+            self.in1_features, self.in2_features, self.out_features, self.bias is not None
+        )
 
 # TODO: PartialLinear - maybe in sparse?

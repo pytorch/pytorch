@@ -11,7 +11,7 @@
 //     "norm(Scalar p, int64_t dim, bool keepdim=False)",
 //     "norm(Scalar p=2)",
 //   });
-//   PyObject* parsed_args[3];
+//   ParsedArgs<3> parsed_args;
 //   auto r = parser.parse(args, kwargs, parsed_args);
 //   if (r.idx == 0) {
 //     norm(r.scalar(0), r.int64(1), r.bool(0));
@@ -26,32 +26,47 @@
 #include <vector>
 #include <ATen/ATen.h>
 
-#include "torch/csrc/THP.h"
-#include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/Exceptions.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/Device.h"
+#include "torch/csrc/Dtype.h"
 #include "torch/csrc/DynamicTypes.h"
+#include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Generator.h"
+#include "torch/csrc/autograd/python_variable.h"
+#include "torch/csrc/autograd/generated/VariableType.h"
+#include "torch/csrc/tensor/python_tensor.h"
+#include "torch/csrc/utils/device.h"
+#include "torch/csrc/utils/object_ptr.h"
+#include "torch/csrc/utils/python_numbers.h"
+#include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/numpy_stub.h"
 
 namespace torch {
 
 enum class ParameterType {
   TENSOR, SCALAR, INT64, DOUBLE, TENSOR_LIST, INT_LIST, GENERATOR,
-  BOOL, STORAGE, PYOBJECT
+  BOOL, STORAGE, PYOBJECT, DTYPE, LAYOUT, DEVICE, STRING
 };
 
 struct FunctionParameter;
 struct FunctionSignature;
 struct PythonArgs;
 
+// Contains bound Python arguments in declaration order
+template<int N>
+struct ParsedArgs {
+  PyObject* args[N];
+};
+
 struct PythonArgParser {
   explicit PythonArgParser(std::vector<std::string> fmts);
 
-  PythonArgs parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
+  template<int N>
+  inline PythonArgs parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst);
 
 private:
   [[noreturn]]
   void print_error(PyObject* args, PyObject* kwargs, PyObject* dst[]);
+  PythonArgs raw_parse(PyObject* args, PyObject* kwargs, PyObject* dst[]);
 
   std::vector<FunctionSignature> signatures_;
   std::string function_name;
@@ -78,6 +93,12 @@ struct PythonArgs {
   inline std::vector<int64_t> intlistWithDefault(int i, std::vector<int64_t> default_intlist);
   inline at::Generator* generator(int i);
   inline std::unique_ptr<at::Storage> storage(int i);
+  inline const THPDtype& dtype(int i);
+  inline const THPDtype& dtypeWithDefault(int i, const THPDtype& default_dtype);
+  inline const THPLayout& layout(int i);
+  inline Device device(int i);
+  inline int64_t deviceInt64(int i);
+  inline std::string string(int i);
   inline PyObject* pyobject(int i);
   inline int64_t toInt64(int i);
   inline int64_t toInt64WithDefault(int i, int64_t default_int);
@@ -125,8 +146,19 @@ struct FunctionParameter {
     bool default_bool;
     int64_t default_int;
     double default_double;
+    THPDtype* default_dtype;
+    THPLayout* default_layout;
   };
 };
+
+template<int N>
+inline PythonArgs PythonArgParser::parse(PyObject* args, PyObject* kwargs, ParsedArgs<N>& dst) {
+  if (N < max_args) {
+    throw ValueError("dst does not have enough capacity, expected %d (got %d)",
+        (int)max_args, N);
+  }
+  return raw_parse(args, kwargs, dst.args);
+}
 
 inline at::Tensor PythonArgs::tensor(int i) {
   if (!args[i]) return at::Tensor();
@@ -136,7 +168,8 @@ inline at::Tensor PythonArgs::tensor(int i) {
     // a test for Py_None here; instead, you need to mark the argument
     // as *allowing none*; you can do this by writing 'Tensor?' instead
     // of 'Tensor' in the ATen metadata.
-    throw TypeError("expected Variable as argument %d, but got %s", i, THPUtils_typename(args[i]));
+    throw TypeError("expected Variable as argument %d, but got %s", i,
+        Py_TYPE(args[i])->tp_name);
   }
   return reinterpret_cast<THPVariable*>(args[i])->cdata;
 }
@@ -147,10 +180,15 @@ inline at::Scalar PythonArgs::scalar(int i) {
 
 inline at::Scalar PythonArgs::scalarWithDefault(int i, at::Scalar default_scalar) {
   if (!args[i]) return default_scalar;
-  if (PyFloat_Check(args[i])) {
-    return at::Scalar(THPUtils_unpackDouble(args[i]));
+  // Zero-dim tensors are converted to Scalars as-is. Note this doesn't currently
+  // handle most NumPy scalar types except np.float64.
+  if (THPVariable_Check(args[i])) {
+    return at::Scalar(((THPVariable*)args[i])->cdata);
   }
-  return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  if (THPUtils_checkLong(args[i])) {
+    return at::Scalar(static_cast<int64_t>(THPUtils_unpackLong(args[i])));
+  }
+  return at::Scalar(THPUtils_unpackDouble(args[i]));
 }
 
 inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
@@ -163,7 +201,7 @@ inline std::vector<at::Tensor> PythonArgs::tensorlist(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Variable as element %d in argument %d, but got %s",
-                 idx, i, THPUtils_typename(args[i]));
+                 idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -184,7 +222,7 @@ inline std::array<at::Tensor, N> PythonArgs::tensorlist_n(int i) {
     PyObject* obj = tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     if (!THPVariable_Check(obj)) {
       throw TypeError("expected Variable as element %d in argument %d, but got %s",
-                 idx, i, THPUtils_typename(args[i]));
+                 idx, i, Py_TYPE(args[i])->tp_name);
     }
     res[idx] = reinterpret_cast<THPVariable*>(obj)->cdata;
   }
@@ -218,31 +256,96 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(int i, std::vector<in
   return res;
 }
 
+inline const THPDtype& PythonArgs::dtypeWithDefault(int i, const THPDtype& default_dtype) {
+  if (!args[i]) return default_dtype;
+  return dtype(i);
+}
+
+inline const THPDtype& PythonArgs::dtype(int i) {
+  if (!args[i]) {
+    auto dtype = signature.params[i].default_dtype;
+    if (!dtype) {
+      const auto& type = torch::tensor::get_default_tensor_type();
+      dtype = torch::getDtype(type.scalarType(), type.is_cuda());
+    }
+    return *dtype;
+  }
+  return *reinterpret_cast<THPDtype*>(args[i]);
+}
+
+inline const THPLayout& PythonArgs::layout(int i) {
+  if (!args[i]) return *signature.params[i].default_layout;
+  return *reinterpret_cast<THPLayout*>(args[i]);
+}
+
+static std::string cuda_str = "cuda";
+static std::string cpu_str = "cpu";
+static std::string cuda_prefix = "cuda:";
+static std::string cpu_prefix = "cpu:";
+
+inline Device PythonArgs::device(int i) {
+  if (!args[i]) return Device(DeviceType::CPU, -1, true);  // TODO: use CUDA if default type is a cuda type.
+  if (THPDevice_Check(args[i])) {
+    auto device = reinterpret_cast<THPDevice*>(args[i]);
+    return device->device;
+  }
+  if (THPUtils_checkLong(args[i])) {
+    auto index = THPUtils_unpackLong(args[i]);
+    return Device(DeviceType::CUDA, index, index == -1);
+  }
+  std::string device_str = THPUtils_unpackString(args[i]);
+  if (device_str == cpu_str) {
+    return Device(DeviceType::CPU, -1, true);
+  } else if (device_str == cuda_str) {
+    return Device(DeviceType::CUDA, -1, true);
+  } else if (device_str.compare(0, cpu_prefix.length(), cpu_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cpu_prefix.length()));
+    return Device(DeviceType::CPU, device_index, false);
+  } else if (device_str.compare(0, cuda_prefix.length(), cuda_prefix) == 0) {
+    auto device_index = std::stoi(device_str.substr(cuda_prefix.length()));
+    return Device(DeviceType::CUDA, device_index, false);
+  }
+  throw torch::TypeError("only \"cuda\" and \"cpu\" are valid device types, got %s", device_str.c_str());
+}
+
+inline int64_t PythonArgs::deviceInt64(int i) {
+  auto dev = device(i);
+  return (dev.is_default || dev.type == DeviceType::CPU) ? -1 : dev.index;
+}
+
+inline std::string PythonArgs::string(int i) {
+  if (!args[i]) return "";
+  return THPUtils_unpackString(args[i]);
+}
+
 inline int64_t PythonArgs::toInt64(int i) {
-  return toInt64WithDefault(i, signature.params[i].default_int);
+  if (!args[i]) return signature.params[i].default_int;
+  return THPUtils_unpackLong(args[i]);
 }
 
 inline int64_t PythonArgs::toInt64WithDefault(int i, int64_t default_int) {
   if (!args[i]) return default_int;
-  return THPUtils_unpackLong(args[i]);
+  return toInt64(i);
 }
 
 inline double PythonArgs::toDouble(int i) {
-  return toDoubleWithDefault(i, signature.params[i].default_double);
+  if (!args[i]) return signature.params[i].default_double;
+  return THPUtils_unpackDouble(args[i]);
 }
 
 inline double PythonArgs::toDoubleWithDefault(int i, double default_double) {
   if (!args[i]) return default_double;
-  return THPUtils_unpackDouble(args[i]);
+  return toDouble(i);
 }
 
 inline bool PythonArgs::toBool(int i) {
-  return toBoolWithDefault(i, signature.params[i].default_bool);
+  if (!args[i]) return signature.params[i].default_bool;
+  return args[i] == Py_True;
 }
 
 inline bool PythonArgs::toBoolWithDefault(int i, bool default_bool) {
   if (!args[i]) return default_bool;
-  return args[i] == Py_True;
+  return toBool(i);
 }
 
 inline bool PythonArgs::isNone(int i) {
@@ -251,9 +354,6 @@ inline bool PythonArgs::isNone(int i) {
 
 inline at::Generator* PythonArgs::generator(int i) {
   if (!args[i]) return nullptr;
-  if (!THPGenerator_Check(args[i])) {
-    throw TypeError("expected Generator as argument %d, but got %s", i, THPUtils_typename(args[i]));
-  }
   return reinterpret_cast<THPGenerator*>(args[i])->cdata;
 }
 

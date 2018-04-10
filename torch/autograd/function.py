@@ -3,6 +3,7 @@ import torch._C as _C
 import torch.utils.hooks as hooks
 from torch._six import with_metaclass
 import functools
+import warnings
 from collections import OrderedDict
 
 
@@ -15,9 +16,7 @@ class _ContextMethodMixin(object):
         :func:`forward` **method.**
 
         Later, saved tensors can be accessed through the :attr:`saved_tensors`
-        attribute; or, if the corresponding Variable is needed (e.g. for double
-        backwards), those can be accessed through the :attr:`saved_variables`
-        attribute.  Before returning them to the user, a check is made, to ensure
+        attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
         Arguments can also be ``None``.
@@ -38,24 +37,10 @@ class _ContextMethodMixin(object):
         self.dirty_tensors = args
 
     def mark_shared_storage(self, *pairs):
-        """Marks that given pairs of distinct tensors are sharing storage.
-
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be pairs of
-        (input, output).**
-
-        If some of the outputs are going to be tensors sharing storage with
-        some of the inputs, all pairs of (input_arg, output_arg) should be
-        given to this function, to ensure correctness checking of in-place
-        modification. The only exception is when an output is exactly the same
-        tensor as input (e.g. in-place ops). In such case it's easy to conclude
-        that they're sharing data, so we don't require specifying such
-        dependencies.
-
-        This function is not needed in most functions. It's primarily used in
-        indexing and transpose ops.
-        """
-        self.shared_pairs = pairs
+        warnings.warn(
+            'mark_shared_storage is deprecated. '
+            'Tensors with shared storages are automatically tracked. Note '
+            'that calls to `set_()` are not tracked')
 
     def mark_non_differentiable(self, *args):
         """Marks outputs as non-differentiable.
@@ -123,7 +108,7 @@ class FunctionMeta(type):
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
     """Records operation history and defines formulas for differentiating ops.
 
-    Every operation performed on :class:`Variable` s creates a new function
+    Every operation performed on :class:`Tensor` s creates a new function
     object, that performs the computation, and records that it happened.
     The history is retained in the form of a DAG of functions, with edges
     denoting data dependencies (``input <- output``). Then, when backward is
@@ -135,7 +120,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
 
-    Each function is meant to be used only once (in the forward pass).
+    Each function object is meant to be used only once (in the forward pass).
 
     Attributes:
         requires_grad: Boolean indicating whether the :func:`backward` will
@@ -153,7 +138,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         >>>
         >>>     @staticmethod
         >>>     def backward(ctx, grad_output):
-        >>>         result, = ctx.saved_variables
+        >>>         result, = ctx.saved_tensors
         >>>         return grad_output * result
     """
 
@@ -167,12 +152,12 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     def forward(ctx, *args, **kwargs):
         """Performs the operation.
 
-        This function is to be overriden by all subclasses.
+        This function is to be overridden by all subclasses.
 
         It must accept a context ctx as the first argument, followed by any
         number of arguments (tensors or other types).
 
-        The context can be used to store variables that can be then retrieved
+        The context can be used to store tensors that can be then retrieved
         during the backward pass.
         """
         raise NotImplementedError
@@ -181,7 +166,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     def backward(ctx, *grad_outputs):
         """Defines a formula for differentiating the operation.
 
-        This function is to be overriden by all subclasses.
+        This function is to be overridden by all subclasses.
 
         It must accept a context ctx as the first argument, followed by as many
         outputs did :func:`forward` return, and it should return as many
@@ -189,7 +174,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         gradient w.r.t the given output, and each returned value should be the
         gradient w.r.t. the corresponding input.
 
-        The context can be used to retrieve variables saved during the forward
+        The context can be used to retrieve tensors saved during the forward
         pass.
         """
         raise NotImplementedError
@@ -200,30 +185,43 @@ def once_differentiable(fn):
 
     @functools.wraps(fn)
     def wrapper(ctx, *args):
-        tensor_args = [arg.data if isinstance(arg, Variable) else arg
-                       for arg in args]
-        outputs = fn(ctx, *tensor_args)
-        # XXX: this is only an approximation of these flags - there's no way
-        # to figure out if fn didn't use ctx.saved_variables and as a result
+        with torch.no_grad():
+            outputs = fn(ctx, *args)
+
+        if not torch.is_grad_enabled():
+            return outputs
+
+        # If any of the inputs have requires_grad=True, we force the outputs
+        # to have requires_grad=True but point to a grad_fn which throws an
+        # error message during (double) back-propagation.
+        # XXX: this is only an approximation of requires_grad - there's no way
+        # to figure out if fn didn't use ctx.saved_tensors and as a result
         # some Variables might require grad, even if no args do.
         # Unfortunately, this leads to unexpected error messages ("no nodes
         # require computing gradients"), but I don't have a better idea.
         # These functions would raise an error in backward anyway.
-        requires_grad = any(arg.requires_grad if isinstance(arg, Variable) else False
+        requires_grad = any(isinstance(arg, Variable) and arg.requires_grad
                             for arg in args)
-        if not torch.is_grad_enabled():
-            def err_fn(*args):
-                return args
-        else:
-            err_fn = torch._C._functions.DelayedError(
-                b"trying to differentiate twice a function that was marked"
-                b"with @once_differentiable")
+        if not requires_grad:
+            return outputs
+
+        err_fn = torch._C._functions.DelayedError(
+            b"trying to differentiate twice a function that was marked"
+            b"with @once_differentiable")
+
         if not isinstance(outputs, tuple):
-            var = (Variable(outputs, requires_grad=requires_grad)
-                   if outputs is not None else None)
-            return err_fn(var)
-        return err_fn(*[Variable(o, requires_grad=requires_grad) if o is not None else None
-                      for o in outputs])
+            outputs = (outputs,)
+
+        # Create aliases of each output that has requires_grad=True. We need
+        # at least one of the inputs to err_fn to require grad so that the
+        # output will have a grad_fn.
+        def fake_requires_grad(var):
+            if var is not None:
+                var = var.detach()
+                var.requires_grad = True
+            return var
+
+        return err_fn(*[fake_requires_grad(v) for v in outputs])
     return wrapper
 
 
@@ -233,7 +231,7 @@ def traceable(fn_cls):
     Traceable functions have additional restrictions - they can't pass any
     data-dependent values to backward (e.g. Prod passes the output, which makes
     it non-traceable), and their backward should be implemented entirely in terms
-    of operations on autograd Variables in all cases.
+    of operations on autograd Tensors in all cases.
 
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).
@@ -267,7 +265,7 @@ def _nested_map(condition, fn, condition_msg=None):
     return _map
 
 
-def _iter_filter(condition, skip_unknown=False, condition_msg=None):
+def _iter_filter(condition, allow_unknown=False, condition_msg=None):
     def _iter(obj):
         if condition(obj):
             yield obj
@@ -277,7 +275,9 @@ def _iter_filter(condition, skip_unknown=False, condition_msg=None):
             for o in obj:
                 for var in _iter(o):
                     yield var
-        elif not skip_unknown:
+        elif allow_unknown:
+            yield obj
+        else:
             raise ValueError("Auto nesting doesn't know how to process "
                              "an input object of type " + torch.typename(obj) +
                              (". Accepted types: " + condition_msg +
@@ -295,19 +295,24 @@ def _unflatten(input, proto):
         if not isinstance(proto, (list, tuple)):
             return input[0], input[1:]
         for e in proto:
-            res_e, input = unflatten_helper(input, e)
-            res.append(res_e)
+            if e is None:
+                res.append(e)
+            else:
+                res_e, input = unflatten_helper(input, e)
+                res.append(res_e)
         return type(proto)(res), input
 
     return unflatten_helper(input, proto)[0]
 
 
 _iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), condition_msg="Variables")
-_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), skip_unknown=True)
+_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), allow_unknown=True)
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
 _iter_tensors = _iter_filter(torch.is_tensor, condition_msg="Tensors")
-_iter_None_tensors = _iter_filter(lambda o: o is None or torch.is_tensor(o), condition_msg="Tensors or None")
+_iter_None_tensors = _iter_filter(
+    lambda o: o is None or torch.is_tensor(o) or isinstance(o, torch.autograd.Variable),
+    condition_msg="Tensors or None")
 _map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable),
                                    lambda o: o.data, condition_msg="Variables")
 

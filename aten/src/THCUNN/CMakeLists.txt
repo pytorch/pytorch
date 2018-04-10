@@ -73,6 +73,7 @@ ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricDilatedMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFractionalMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullConvolution.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricFullDilatedConvolution.cu
+${CMAKE_CURRENT_SOURCE_DIR}/VolumetricGridSamplerBilinear.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxPooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricMaxUnpooling.cu
 ${CMAKE_CURRENT_SOURCE_DIR}/VolumetricReplicationPadding.cu
@@ -84,5 +85,9 @@ set(ATen_CUDA_INCLUDE ${ATen_CUDA_INCLUDE}
   "${CMAKE_CURRENT_SOURCE_DIR}"
 PARENT_SCOPE)
 
-INSTALL(FILES THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN")
-INSTALL(FILES generic/THCUNN.h DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN/generic")
+FILE(GLOB_RECURSE thcunn_h RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "*.cuh" "*.h")
+FOREACH(HEADER ${thcunn_h})
+  # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
+  GET_FILENAME_COMPONENT(DIR ${HEADER} DIRECTORY)
+  INSTALL(FILES ${HEADER} DESTINATION ${ATEN_INSTALL_INCLUDE_SUBDIR}/THCUNN)
+ENDFOREACH()

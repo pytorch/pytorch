@@ -23,7 +23,7 @@ class Min(Module):
             self._output = self.output.new()
         if self._indices is None:
             self._indices = \
-                (torch.cuda.LongTensor() if torch.typename(self.output) == 'torch.cuda.FloatTensor'
+                (torch.cuda.LongTensor() if self.output.type() == 'torch.cuda.FloatTensor'
                  else torch.LongTensor())
 
     def updateOutput(self, input):

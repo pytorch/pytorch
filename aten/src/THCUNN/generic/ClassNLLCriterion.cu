@@ -57,7 +57,10 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         toDeviceTensor<THCIndex_t, 1>(state, target),
         toDeviceTensor<real, 1>(state, output),
         weights ? THCTensor_(data)(state, weights) : NULL,
+        n_classes,
         ignore_index);
+
+    THCudaCheck(cudaGetLastError());
 
     if (weights) {
       THCTensor_(free)(state, weights);
@@ -177,8 +180,11 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         toDeviceTensor<real, 1>(state, gradOutput),
         toDeviceTensor<real, 2>(state, gradInput),
         weights ? THCTensor_(data)(state, weights) : NULL,
+        n_classes,
         ignore_index);
- 
+
+    THCudaCheck(cudaGetLastError());
+
     if (weights) {
       THCTensor_(free)(state, weights);
     }

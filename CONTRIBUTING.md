@@ -72,6 +72,28 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+## Unit testing
+
+PyTorch's testing is located under `test/`. Run the entire test suite with
+
+```
+python test/run_test.py
+```
+
+or run individual test files, like `python test/test_nn.py`, for individual test suites.
+
+### Better local unit tests with pytest
+We don't officially support `pytest`, but it works well with our `unittest` tests and offers
+a number of useful features for local developing. Install it via `pip install pytest`.
+
+If you want to just run tests that contain a specific substring, you can use the `-k` flag:
+
+```
+pytest test/test_nn.py -k Loss -v
+```
+
+The above is an example of testing a change to Loss functions: this command runs tests such as
+`TestNN.test_BCELoss` and `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
 ## Writing documentation
 
@@ -212,3 +234,27 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
 
 Hope this helps, and thanks for considering to contribute.
+
+## Caffe2 notes
+
+In 2018, we merged Caffe2 into the PyTorch source repository.  While the
+steady state aspiration is that Caffe2 and PyTorch share code freely,
+in the meantime there will be some separation.
+
+If you submit a PR to only PyTorch or only Caffe2 code, CI will only
+run for the project you edited.  The logic for this is implemented
+in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
+can look at this to see what path prefixes constitute changes.
+This also means if you ADD a new top-level path, or you start
+sharing code between projects, you need to modify these files.
+
+There are a few "unusual" directories which, for historical reasons,
+are Caffe2/PyTorch specific.  Here they are:
+
+- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
+  `scripts` are Caffe2-specific.  Don't put PyTorch code in them without
+  extra coordination.
+
+- `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
+  PyTorch-specific.  Don't put Caffe2 code in them without extra
+  coordination.

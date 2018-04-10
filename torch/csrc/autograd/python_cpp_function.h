@@ -19,24 +19,24 @@ template<typename Ctor>
 PyObject* CppFunction_pynew(PyTypeObject *type, PyObject *args, PyObject *kwds)
 {
   THPObjectPtr obj(type->tp_alloc(type, 0));
-  if (!obj) return NULL;
+  if (!obj) return nullptr;
   THPCppFunction* f = (THPCppFunction*)obj.get();
   HANDLE_TH_ERRORS
   new (&f->cdata) std::shared_ptr<Function>(Ctor()(args));
   END_HANDLE_TH_ERRORS
   if (!f->cdata) {
-    return NULL;
+    return nullptr;
   }
   return obj.release();
 }
 
 #define THP_FUNCTION_DEFAULT_METHODS \
-  {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, NULL}, \
-  {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, NULL}
+  {(char*)"_register_hook_dict", (PyCFunction)THPCppFunction_register_hook_dict, METH_O, nullptr}, \
+  {(char*)"register_hook", (PyCFunction)THPCppFunction_register_hook, METH_O, nullptr}
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES \
-  {(char*)"next_functions", (getter)THPCppFunction_next_functions, NULL, NULL, NULL}, \
-  {(char*)"requires_grad", (getter)THPCppFunction_requires_grad, NULL, NULL, NULL}
+  {(char*)"next_functions", (getter)THPCppFunction_next_functions, nullptr, nullptr, nullptr}, \
+  {(char*)"requires_grad", (getter)THPCppFunction_requires_grad, nullptr, nullptr, nullptr}
 
 PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook);
 PyObject* THPCppFunction_requires_grad(THPCppFunction* self);
@@ -50,7 +50,7 @@ PyObject* registerFunctionHook(Function& fn, PyObject* hook);
 
 template<typename Ctor>
 PyTypeObject* createForwardFunctionPyTypeObject(PyTypeObject& type, const char* name,
-  PyGetSetDef* function_properties=NULL, PyMethodDef* function_methods=NULL)
+  PyGetSetDef* function_properties=nullptr, PyMethodDef* function_methods=nullptr)
 {
   type.tp_new = &CppFunction_pynew<Ctor>;
   return _initFunctionPyTypeObject(type, name, function_properties, function_methods);

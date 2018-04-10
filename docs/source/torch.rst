@@ -9,6 +9,7 @@ Tensors
 .. autofunction:: set_default_tensor_type
 .. autofunction:: numel
 .. autofunction:: set_printoptions
+.. autofunction:: set_flush_denormal
 
 
 Creation Ops
@@ -23,6 +24,7 @@ Creation Ops
 .. autofunction:: range
 .. autofunction:: zeros
 .. autofunction:: zeros_like
+.. autofunction:: empty_like
 
 Indexing, Slicing, Joining, Mutating Ops
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -32,6 +34,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: index_select
 .. autofunction:: masked_select
 .. autofunction:: nonzero
+.. autofunction:: reshape
 .. autofunction:: split
 .. autofunction:: squeeze
 .. autofunction:: stack
@@ -112,7 +115,9 @@ Pointwise Ops
 .. autofunction:: frac
 .. autofunction:: lerp
 .. autofunction:: log
+.. autofunction:: log10
 .. autofunction:: log1p
+.. autofunction:: log2
 .. autofunction:: mul
 .. autofunction:: neg
 .. autofunction:: pow
@@ -132,6 +137,8 @@ Pointwise Ops
 
 Reduction Ops
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: argmax
+.. autofunction:: argmin
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
@@ -142,6 +149,7 @@ Reduction Ops
 .. autofunction:: prod
 .. autofunction:: std
 .. autofunction:: sum
+.. autofunction:: unique
 .. autofunction:: var
 
 
@@ -151,6 +159,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
 .. autofunction:: lt
@@ -173,6 +182,8 @@ Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
 .. autofunction:: cross
 .. autofunction:: diag
+.. autofunction:: diagflat
+.. autofunction:: diagonal
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace
@@ -201,6 +212,8 @@ BLAS and LAPACK Operations
 .. autofunction:: gesv
 .. autofunction:: inverse
 .. autofunction:: det
+.. autofunction:: logdet
+.. autofunction:: slogdet
 .. autofunction:: matmul
 .. autofunction:: mm
 .. autofunction:: mv

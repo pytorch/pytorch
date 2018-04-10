@@ -162,13 +162,14 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
                "replacement");
   }
 
-  // It is possible that prob_dist is non-contiguous
-  THCTensor* probDistContig =
-    THCTensor_(newContiguous)(state, prob_dist);
+  int free_prob_dist = 0;
 
   // Restructure data for 2d
   if (inputSize == 1) {
-    THCTensor_(resize2d)(state, probDistContig, 1, numCategories);
+    THCTensor *temp = THCTensor_(new)(state);
+    THCTensor_(unsqueeze1d)(state, temp, prob_dist, 0);
+    prob_dist = temp;
+    free_prob_dist = 1;
   }
 
   THCudaLongTensor_resize2d(state, self, numDist, n_sample);
@@ -181,7 +182,7 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   int maxShared = props->sharedMemPerBlock;
   int requiredShared = (numCategories < maxThreads ? numCategories : maxThreads)
                                 * (sizeof(real) * sizeof(accreal));
-                                
+
   if (n_sample == 1 && maxShared >= requiredShared) {
     // Optimized allocation-free implementation
     // To exploit greater parallelism for the sampling, generate the
@@ -201,7 +202,10 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
       numDist,
       numCategories,
       THCTensor_(data)(state, sampled),
-      THCTensor_(data)(state, probDistContig));
+      THCTensor_(data)(state, prob_dist),
+      THCTensor_(stride)(state, prob_dist, 0),
+      THCTensor_(stride)(state, prob_dist, 1)
+      );
     THCTensor_(free)(state, sampled);
   } else {
     // Generic, slow implementation with memory allocations
@@ -209,11 +213,11 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
     // For sampling without replacement, we modify the distribution
     // for subsequent samples in this space
     THCTensor* origDist = THCTensor_(new)(state);
-    THCTensor_(resizeAs)(state, origDist, probDistContig);
-    THCTensor_(copy)(state, origDist, probDistContig);
+    THCTensor_(resizeAs)(state, origDist, prob_dist);
+    THCTensor_(copy)(state, origDist, prob_dist);
 
     THCTensor* normDist = THCTensor_(new)(state);
-    THCTensor_(resizeAs)(state, normDist, probDistContig);
+    THCTensor_(resizeAs)(state, normDist, prob_dist);
 
     THCTensor* prefixSum = THCTensor_(new)(state);
 
@@ -289,14 +293,10 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
   // Revert data restructuring based on input sizes
   if (inputSize == 1) {
     THCudaLongTensor_resize1d(state, self, n_sample);
-
-    // Unfortunately, if prob_dist is contiguous already,
-    // newContiguous is not a private copy, so we have to restructure
-    // this too, so as to not affect prob_dist
-    THCTensor_(resize1d)(state, probDistContig, numCategories);
   }
-
-  THCTensor_(free)(state, probDistContig);
+  if (free_prob_dist) {
+    THCTensor_(free)(state, prob_dist);
+  }
 }
 
 THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_probs, THCudaLongTensor *_J, THCTensor *_q){
@@ -308,10 +308,10 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
   THCudaLongTensor *larger = THCudaLongTensor_newWithSize1d(state, inputsize);
   THCudaLongTensor *smaller_short = THCudaLongTensor_newWithSize1d(state, inputsize);
   THCudaLongTensor *larger_short = THCudaLongTensor_newWithSize1d(state, inputsize);
-  
+
   THCudaLongTensor_resize1d(state, _J, inputsize);
   THCTensor_(resize1d)(state, _q, inputsize);
-  
+
   real one = ScalarConvert<int64_t, real>::to(1);
   int inputBlockDim = THCCeilDiv((int)inputsize + BLOCK_SIZE - 1, BLOCK_SIZE);
   aliasMultinomialFilter
@@ -325,7 +325,7 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
                      THCudaLongTensor_data(state, larger_short),
                      one, inputsize
                      );
-  
+
   THCudaLongTensor_nonzero(state, smaller_short, smaller);
   THCudaLongTensor_nonzero(state, larger_short, larger);
   int h_large_c = THCudaLongTensor_nElement(state, larger_short);
@@ -347,7 +347,7 @@ THC_API void THCTensor_(multinomialAliasSetup)(THCState *state, THCTensor *_prob
                       THCudaLongTensor_data(state, _J),
                       inputsize, q_max
                       );
-  
+
   THCudaLongTensor_free(state, smaller);
   THCudaLongTensor_free(state, larger);
   THCudaLongTensor_free(state, smaller_short);

@@ -1,6 +1,8 @@
 #ifndef TH_GENERAL_INC
 #define TH_GENERAL_INC
 
+#define __STDC_FORMAT_MACROS
+
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -42,6 +44,12 @@
 # define TH_UNREACHABLE __builtin_unreachable();
 #endif
 
+#if defined(__GNUC__) && ((__GNUC__ > 2) || (__GNUC__ == 2 && __GNUC_MINOR__ > 4))
+# define TH_UNUSED __attribute__((unused))
+#else
+# define TH_UNUSED
+#endif
+
 #ifndef M_PI
 # define M_PI 3.14159265358979323846
 #endif
@@ -60,6 +68,7 @@ typedef struct {
 
 
 TH_API double THLog1p(const double x);
+TH_API double THLog2(const double x);
 TH_API double THExpm1(const double x);
 TH_API THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim);
 TH_API TH_NO_RETURN void _THError(const char *file, const int line, const char *fmt, ...);
@@ -141,6 +150,12 @@ do {                                                                  \
 __inline double log1p(double x) { return THLog1p(x); }
 #else
 inline double log1p(double x) { return THLog1p(x); }
+#endif
+
+#if defined(_MSC_VER)
+__inline double log2(double x) { return THLog2(x); }
+#else
+inline double log2(double x) { return THLog2(x); }
 #endif
 
 #if defined(_MSC_VER)

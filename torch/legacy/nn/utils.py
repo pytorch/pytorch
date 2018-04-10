@@ -24,7 +24,7 @@ def recursiveType(param, type, tensorCache={}):
     elif isinstance(param, Module) or isinstance(param, Criterion):
         param.type(type, tensorCache)
     elif torch.is_tensor(param):
-        if torch.typename(param) != type:
+        if param.type() != type:
             key = param._cdata
             if key in tensorCache:
                 newparam = tensorCache[key]

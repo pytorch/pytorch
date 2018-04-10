@@ -3,16 +3,20 @@
 // Python bindings for torch.* functions implemented through ATen.
 //
 // The functions are bound as static methods on a class
-// torch._C._VariableFunctions which is also aliased as Variable._torch.
+// torch._C._VariableFunctions which is also aliased as Variable._torch
+// and also copied into 'torch' module.
 
 #include <Python.h>
 
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/utils/wrap_outputs.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_numpy.h"
+#include "torch/csrc/utils/tensor_layouts.h"
 
 #include "python_torch_functions_dispatch.h"
 
@@ -25,24 +29,18 @@ using namespace torch::autograd::utils;
 namespace torch { namespace autograd {
 
 static Tensor set_requires_grad(Tensor self, bool requires_grad) {
-  static_cast<Variable&>(self).get()->_requires_grad = requires_grad;
+  as_variable_ref(self).set_requires_grad(requires_grad);
   return self;
 }
 
-static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp(min, max);
-}
-static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_min(min);
-}
-static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
-  return self.clamp_max(max);
+static void check_out_type_matches(Tensor result, const THPDtype &dtype, const THPLayout& layout) {
+  const auto& type = torch::getType(dtype, layout);
+  if (result.type() != type) {
+    AT_ERROR(
+        "type corresponding to %s does not match type of out parameter (%s)",
+        type.toString(),
+        result.type().toString());
+  }
 }
 
 // The Python clamp() syntax has to be mapped to one of three C++ functions
@@ -50,19 +48,33 @@ static PyObject * THPVariable_clamp(PyObject* module, PyObject* args, PyObject* 
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "clamp(Tensor input, Scalar min=None, Scalar max=None)",
+    "clamp(Tensor input, Scalar min=None, Scalar max=None, *, Tensor out=None)",
   });
-  PyObject* parsed_args[4];
+
+  ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (!r.isNone(1) && !r.isNone(2)) {
-    return THPVariable_Wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
+    if (!r.isNone(3)) {
+        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2), r.tensor(3)));
+    } else {
+        return wrap(dispatch_clamp(r.tensor(0), r.scalar(1), r.scalar(2)));
+    }
   } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
+    if (!r.isNone(3)) {
+        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1), r.tensor(3)));
+    } else {
+        return wrap(dispatch_clamp_min(r.tensor(0), r.scalar(1)));
+    }
   } else if (!r.isNone(2)) {
-    return THPVariable_Wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
+    if (!r.isNone(3)) {
+        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2), r.tensor(3)));
+    } else {
+        return wrap(dispatch_clamp_max(r.tensor(0), r.scalar(2)));
+    }
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");
   }
+  Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -70,14 +82,43 @@ static PyObject * THPVariable_from_numpy(PyObject* module, PyObject* arg)
 {
   HANDLE_TH_ERRORS
   auto data = torch::utils::tensor_from_numpy(arg);
-  return THPVariable_Wrap(make_variable(std::move(data)));
+  return THPVariable_Wrap(make_variable(std::move(data), /*requires_grad=*/false));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_variable(PyObject* self, PyObject* args, PyObject* kwargs)
+static PyObject * THPVariable__promote_types(PyObject* self, PyObject* args, PyObject* kwargs)
 {
   HANDLE_TH_ERRORS
-  return THPVariable_Wrap(torch::utils::variable_data_factory(default_type(), args, kwargs));
+  static PythonArgParser parser({
+    "_promote_types(Dtype type1, Dtype type2)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  if (r.idx == 0) {
+    auto& d1 = r.dtype(0);
+    auto& d2 = r.dtype(1);
+    if (d1.is_cuda != d2.is_cuda) {
+      AT_ERROR("_promote_types only supports dtypes being both on cpu or cuda.  Got %s and %s",
+               d1.is_cuda ? "true" : "false", d2.is_cuda ? "true" : "false");
+    }
+    ScalarType promoted = at::promoteTypes(d1.scalar_type, d2.scalar_type);
+    return torch::autograd::utils::wrap(torch::getDtype(promoted, d1.is_cuda));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_sparse_coo_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::sparse_coo_tensor_ctor(default_type(), args, kwargs));
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * THPVariable_tensor(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+  HANDLE_TH_ERRORS
+  return THPVariable_Wrap(torch::utils::tensor_ctor(default_type(), args, kwargs));
   END_HANDLE_TH_ERRORS
 }
 
@@ -87,8 +128,14 @@ ${py_methods}
 
 static PyMethodDef torch_functions[] = {
   {"clamp", (PyCFunction)THPVariable_clamp, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"dsmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   {"from_numpy", (PyCFunction)THPVariable_from_numpy, METH_STATIC | METH_O, NULL},
-  {"variable", (PyCFunction)THPVariable_variable, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"hsmm", (PyCFunction)THPVariable_hspmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"_promote_types", (PyCFunction)THPVariable__promote_types, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"saddmm", (PyCFunction)THPVariable_sspaddmm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"sparse_coo_tensor", (PyCFunction)THPVariable_sparse_coo_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"spmm", (PyCFunction)THPVariable_mm, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
+  {"tensor", (PyCFunction)THPVariable_tensor, METH_VARARGS | METH_KEYWORDS | METH_STATIC, NULL},
   ${py_method_defs}
   {NULL}
 };

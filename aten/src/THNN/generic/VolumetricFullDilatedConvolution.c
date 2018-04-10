@@ -5,6 +5,7 @@
 static void THNN_(vol2col)(
   const real *data_vol, const int channels,
   const int depth, const int height, const int width,
+  const int depth_col, const int height_col, const int width_col,
   const int kT, const int kH, const int kW,
   const int pT, const int pH, const int pW,
   const int dT, const int dH, const int dW,
@@ -12,9 +13,6 @@ static void THNN_(vol2col)(
   real *data_col)
 {
   int c, t, h, w;
-  int depth_col  = (depth  + 2 * pT - (dilationT * (kT - 1) + 1)) / dT + 1;
-  int height_col = (height + 2 * pH - (dilationH * (kH - 1) + 1)) / dH + 1;
-  int width_col  = (width  + 2 * pW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int channels_col = channels * kT * kH * kW;
   for (c = 0; c < channels_col; ++c)
   {
@@ -375,6 +373,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
     THNN_(vol2col)(
       THTensor_(data)(gradOutput_n),
       nOutputPlane, outputDepth, outputHeight, outputWidth,
+      inputDepth, inputHeight, inputWidth,
       kT, kH, kW,
       pT, pH, pW,
       dT, dH, dW,
@@ -510,6 +509,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
       THNN_(vol2col)(
         THTensor_(data)(gradOutput_n), nOutputPlane,
         outputDepth, outputHeight, outputWidth,
+        inputDepth, inputHeight, inputWidth,
         kT, kH, kW,
         pT, pH, pW,
         dT, dH, dW,

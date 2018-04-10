@@ -8,8 +8,8 @@ int main()
    auto && T = CPU(kFloat);
    std::cout << "hello\n";
    APMeter meter;
-   Tensor output = T.randn({10, 7});
-   Tensor target = T.zeros({10, 7});
+   Tensor output = at::randn(T, {10, 7});
+   Tensor target = at::zeros(T, {10, 7});
    for(uint64_t n = 0; n < 10; ++n) {
      Tensor row = target.select(0,n);
      auto row_d = row.data<float>();

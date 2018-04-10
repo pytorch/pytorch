@@ -60,7 +60,7 @@ additional comments::
             # None. Thanks to the fact that additional trailing Nones are
             # ignored, the return statement is simple even when the function has
             # optional inputs.
-            input, weight, bias = ctx.saved_variables
+            input, weight, bias = ctx.saved_tensors
             grad_input = grad_weight = grad_bias = None
 
             # These needs_input_grad checks are optional and there only to
@@ -104,7 +104,7 @@ numerical approximations using small finite differences::
 
     from torch.autograd import gradcheck
 
-    # gradchek takes a tuple of tensor as input, check if your gradient
+    # gradcheck takes a tuple of tensors as input, check if your gradient
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
     input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)
@@ -132,7 +132,7 @@ Since :mod:`~torch.nn` heavily utilizes :mod:`~torch.autograd`, adding a new
 :class:`Module` requires implementing a :class:`~torch.autograd.Function`
 that performs the operation and can compute the gradient. From now on let's
 assume that we want to implement a ``Linear`` module and we have the function
-implementated as in the listing above. There's very little code required to
+implemented as in the listing above. There's very little code required to
 add this. Now, there are two functions that need to be implemented:
 
 - ``__init__`` (*optional*) - takes in arguments such as kernel sizes, numbers
@@ -155,8 +155,7 @@ This is how a ``Linear`` module can be implemented::
             # they won't appear in .parameters() (doesn't apply to buffers), and
             # won't be converted when e.g. .cuda() is called. You can use
             # .register_buffer() to register buffers.
-            # nn.Parameters can never be volatile and, different than Variables,
-            # they require gradients by default.
+            # nn.Parameters require gradients by default.
             self.weight = nn.Parameter(torch.Tensor(output_features, input_features))
             if bias:
                 self.bias = nn.Parameter(torch.Tensor(output_features))
@@ -173,6 +172,13 @@ This is how a ``Linear`` module can be implemented::
         def forward(self, input):
             # See the autograd section for explanation of what happens here.
             return LinearFunction.apply(input, self.weight, self.bias)
+
+        def extra_repr(self):
+            # (Optional)Set the extra information about this module. You can test
+            # it by printing an object of this class.
+            return 'in_features={}, out_features={}, bias={}'.format(
+                self.in_features, self.out_features, self.bias is not None
+            )
 
 
 Writing custom C extensions

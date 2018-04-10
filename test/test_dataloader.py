@@ -63,6 +63,26 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t[i], source[i][0])
             self.assertEqual(l[i], source[i][1])
 
+    def test_single_tensor(self):
+        t = torch.randn(5, 10)
+        source = TensorDataset(t)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t[i], source[i][0])
+
+    def test_many_tensors(self):
+        t0 = torch.randn(5, 10, 2, 3, 4, 5)
+        t1 = torch.randn(5, 10)
+        t2 = torch.randn(5, 10, 2, 5)
+        t3 = torch.randn(5, 10, 3, 7)
+        source = TensorDataset(t0, t1, t2, t3)
+        self.assertEqual(len(source), 5)
+        for i in range(5):
+            self.assertEqual(t0[i], source[i][0])
+            self.assertEqual(t1[i], source[i][1])
+            self.assertEqual(t2[i], source[i][2])
+            self.assertEqual(t3[i], source[i][3])
+
 
 class TestConcatDataset(TestCase):
 
@@ -279,6 +299,14 @@ class TestDataLoader(TestCase):
                                  math.ceil(float(len(loader.dataset)) / loader.batch_size))
                 return
 
+    def test_invalid_assign_after_init(self):
+        dl = DataLoader(self.dataset)
+        for attr in ('batch_size', 'sampler', 'drop_last'):
+            def fn():
+                setattr(dl, attr, {})
+
+            self.assertRaises(ValueError, fn)
+
     def test_sequential(self):
         self._test_sequential(DataLoader(self.dataset))
 
@@ -300,6 +328,7 @@ class TestDataLoader(TestCase):
             self.assertTrue(input.is_pinned())
             self.assertTrue(target.is_pinned())
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_multiple_dataloaders(self):
         loader1_it = iter(DataLoader(self.dataset, num_workers=1))
         loader2_it = iter(DataLoader(self.dataset, num_workers=2))
@@ -310,6 +339,7 @@ class TestDataLoader(TestCase):
         next(loader1_it)
         next(loader2_it)
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     @unittest.skip("temporarily disable until flaky failures are fixed")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
@@ -327,6 +357,7 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_timeout(self):
         p = ErrorTrackingProcess(target=_test_timeout)
         p.start()
@@ -339,6 +370,7 @@ class TestDataLoader(TestCase):
         finally:
             p.terminate()
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_worker_seed(self):
         num_workers = 6
         dataset = SynchronizedSeedDataset(num_workers, num_workers)
@@ -348,6 +380,7 @@ class TestDataLoader(TestCase):
             seeds.add(batch[0])
         self.assertEqual(len(seeds), num_workers)
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_worker_init_fn(self):
         dataset = SeedDataset(4)
         dataloader = DataLoader(dataset, batch_size=2, num_workers=2,
@@ -362,15 +395,19 @@ class TestDataLoader(TestCase):
     def test_shuffle_batch(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_sequential_workers(self):
         self._test_sequential(DataLoader(self.dataset, num_workers=4))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_seqential_batch_workers(self):
         self._test_sequential(DataLoader(self.dataset, batch_size=2, num_workers=4))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_shuffle_workers(self):
         self._test_shuffle(DataLoader(self.dataset, shuffle=True, num_workers=4))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_shuffle_batch_workers(self):
         self._test_shuffle(DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4))
 
@@ -393,10 +430,12 @@ class TestDataLoader(TestCase):
                 self.assertEqual(len(input), 3)
                 self.assertEqual(input, self.data[offset:offset + 3])
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_batch_sampler(self):
         self._test_batch_sampler()
         self._test_batch_sampler(num_workers=4)
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
@@ -423,9 +462,11 @@ class TestDataLoader(TestCase):
     def test_error(self):
         self._test_error(DataLoader(ErrorDataset(100), batch_size=2, shuffle=True))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     def test_error_workers(self):
         self._test_error(DataLoader(ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4))
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_partial_workers(self):
         "check that workers exit even if the iterator is not exhausted"
@@ -517,6 +558,7 @@ class TestStringDataLoader(TestCase):
     def setUp(self):
         self.dataset = StringDataset()
 
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     def test_shuffle_pin_memory(self):
         loader = DataLoader(self.dataset, batch_size=2, shuffle=True, num_workers=4, pin_memory=True)
@@ -566,6 +608,45 @@ class TestDictDataLoader(TestCase):
         for batch_ndx, sample in enumerate(loader):
             self.assertTrue(sample['a_tensor'].is_pinned())
             self.assertTrue(sample['another_dict']['a_number'].is_pinned())
+
+
+class TestWorkerQueueDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+        self.worker_id = None
+
+    def worker_init_fn(self, worker_id):
+        self.worker_id = worker_id
+
+    def __getitem__(self, item):
+        return self.worker_id, self.data[item]
+
+    def __len__(self):
+        return len(self.data)
+
+
+class TestIndividualWorkerQueue(TestCase):
+    def setUp(self):
+        self.dataset = TestWorkerQueueDataset([i for i in range(128)])
+
+    def _run_ind_worker_queue_test(self, batch_size, num_workers):
+        loader = DataLoader(
+            self.dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers,
+            worker_init_fn=self.dataset.worker_init_fn
+        )
+        current_worker_idx = 0
+        for i, (worker_ids, sample) in enumerate(loader):
+            self.assertEqual(worker_ids.tolist(), [current_worker_idx] * batch_size)
+            self.assertEqual(sample.tolist(), [j for j in range(i * batch_size, (i + 1) * batch_size)])
+            current_worker_idx += 1
+            if current_worker_idx == num_workers:
+                current_worker_idx = 0
+
+    @unittest.skipIf(IS_WINDOWS, "FIXME: Intermittent CUDA out-of-memory error")
+    def test_ind_worker_queue(self):
+        for batch_size in (8, 16, 32, 64):
+            for num_workers in range(1, 6):
+                self._run_ind_worker_queue_test(batch_size=batch_size, num_workers=num_workers)
 
 
 if __name__ == '__main__':

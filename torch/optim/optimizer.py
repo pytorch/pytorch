@@ -11,6 +11,11 @@ required = object()
 class Optimizer(object):
     """Base class for all optimizers.
 
+    .. warning::
+        Parameters need to be specified as collections that have a deterministic
+        ordering that is consistent between runs. Examples of objects that don't
+        satisfy those properties are sets and iterators over values of dictionaries.
+
     Arguments:
         params (iterable): an iterable of :class:`Variable` s or
             :class:`dict` s. Specifies what Variables should be optimized.
@@ -113,8 +118,8 @@ class Optimizer(object):
             if torch.is_tensor(value):
                 # Floating-point types are a bit special here. They are the only ones
                 # that are assumed to always match the type of params.
-                if any(tp in type(param.data).__name__ for tp in {'Half', 'Float', 'Double'}):
-                    value = value.type_as(param.data)
+                if param.is_floating_point():
+                    value = value.type_as(param)
                 value = value.cuda(param.get_device()) if param.is_cuda else value.cpu()
                 return value
             elif isinstance(value, dict):
@@ -175,6 +180,9 @@ class Optimizer(object):
         params = param_group['params']
         if isinstance(params, Variable):
             param_group['params'] = [params]
+        elif isinstance(params, set):
+            raise TypeError('optimizer parameters need to be organized in ordered collections, but '
+                            'the ordering of tensors in sets will change between runs. Please use a list instead.')
         else:
             param_group['params'] = list(params)
 

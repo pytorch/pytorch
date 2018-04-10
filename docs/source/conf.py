@@ -66,7 +66,7 @@ master_doc = 'index'
 
 # General information about the project.
 project = 'PyTorch'
-copyright = '2017, Torch Contributors'
+copyright = '2018, Torch Contributors'
 author = 'Torch Contributors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -98,6 +98,9 @@ pygments_style = 'sphinx'
 # If true, `todo` and `todoList` produce output, else they produce nothing.
 todo_include_todos = True
 
+# Disable docstring inheritance
+autodoc_inherit_docstrings = False
+
 
 # -- Options for HTML output ----------------------------------------------
 
@@ -117,12 +120,12 @@ html_theme_options = {
     'logo_only': True,
 }
 
-html_logo = '_static/img/pytorch-logo-dark.svg'
+html_logo = '_static/img/pytorch-logo-dark-unstable.png'
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['_static']
+html_static_path = ['_static', '_images']
 
 # html_style_path = 'css/pytorch_theme.css'
 html_context = {

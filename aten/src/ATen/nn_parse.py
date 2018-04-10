@@ -286,18 +286,22 @@ def backward_declaration(base, thnn_functions):
                   if arg['name'] != 'inplace']
     arguments += base['buffers']
 
+    if 'upsample' in base['name']:
+        # Add input_size as parameter to upsample backwards functions
+        # Note that input_size is 4-dim for upsample_xxx2d
+        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
+        input_size_arg = {'type': 'IntList', 'name': 'input_size', 'size': size}
+        for output_size_idx, arg in enumerate(arguments):
+            if arg['name'] == 'output_size':
+                break
+        arguments.insert(output_size_idx + 1, input_size_arg)
+
     # outputs from the forward may be inputs to the backwards
     for arg in arguments:
         if 'output' in arg:
             del arg['output']
 
     arguments += unique_args([output_arguments(f) for f in thnn_functions])
-
-    if 'upsample' in base['name']:
-        # Add input_size as parameter to upsample backwards functions
-        # Note that input_size is 4-dim for upsample_xxx2d
-        size = 2 + int(re.search(r'(\d+)d', base['name']).group(1))
-        arguments.append({'type': 'IntList', 'name': 'input_size', 'size': size})
 
     def initialize_output_arg(arg):
         # the mask array<bool, N> specifies which return values to compute
@@ -350,7 +354,7 @@ def backward_declaration(base, thnn_functions):
             pass
         else:
             base_name = arg['name'][len('grad_'):] if arg['name'] != 'grad_input' else 'self'
-            if base_name in [arg['name'] for arg in arguments]:
+            if base_name in [a['name'] for a in arguments]:
                 scalar_check[arg['name']] = base_name + '_->isScalar()'
             else:
                 raise ValueError(("Could not infer scalar_check for {} argument of func {} because {} "
