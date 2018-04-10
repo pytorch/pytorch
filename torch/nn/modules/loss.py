@@ -31,26 +31,20 @@ class L1Loss(_Loss):
     r"""Creates a criterion that measures the mean absolute value of the
     element-wise difference between input `x` and target `y`:
 
-    The loss can be described as:
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = \left| x_n - y_n \right|,
+        \ell(x, y) = L = \left| x - y \right|,
 
-    where :math:`N` is the batch size. If reduce is ``True``, then:
+    If :attr:`reduce` is ``True``, then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
         \end{cases}
-
-    `x` and `y` arbitrary shapes with a total of `n` elements each.
-
-    The sum operation still operates over all the elements, and divides by `n`.
-
-    The division by `n` can be avoided if one sets the constructor argument
-    `size_average=False`.
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
@@ -110,18 +104,27 @@ class NLLLoss(_WeightedLoss):
     If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_{y_n} x_{n,y_n}, \quad
-        w_{c} = \text{weight}[c] \cdot \mathbb{1}\{c \not= \text{ignore_index}\},
+        \ell(x, y) = L = - w[y] \cdot x[y],
 
-    where :math:`N` is the batch size. If :attr:`reduce` is ``True`` (default),
-    then
+    where
+
+    .. math::
+        w[y] = \text{weight}[y] \cdot
+            \mathbb{1}\{y \not= \text{ignore_index}\}.
+
+    If :attr:`reduce` is ``True`` (default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
+<<<<<<< HEAD
+            \operatorname{sum}(L) / \operatorname{sum}(w[y]), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+=======
             \sum_{n=1}^N \frac{1}{\sum_{n=1}^N w_{y_n}} l_n, & \text{if}\;
             \text{size_average} = \text{True},\\
             \sum_{n=1}^N l_n,  & \text{if}\;
+>>>>>>> upstream/master
             \text{size_average} = \text{False}.
         \end{cases}
 
@@ -205,6 +208,37 @@ class NLLLoss2d(NLLLoss):
 class PoissonNLLLoss(_Loss):
     r"""Negative log likelihood loss with Poisson distribution of target.
 
+<<<<<<< HEAD
+    If :attr:`reduce` is ``False``, the loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = \begin{cases}
+            \exp(x) - y \cdot x + \log (y!),
+            & \text{if}\; \text{log_input} = \text{True},\\
+            x - y \cdot \log x + \log (y!),
+            & \text{if}\; \text{log_input} = \text{False},
+        \end{cases}
+
+    where the last term (:math:`\log (y!)`) can be omitted or approximised
+    with Stirling formula. The approximation is used for target values more
+    than 1. For targets less or equal to 1 zeros are added to the loss.
+
+    If :attr:`reduce` is ``True`` (default), then:
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
+
+    Args:
+        log_input (bool, optional): Default: ``True``.
+        full (bool, optional): whether to compute full loss, i. e. to add the
+            Stirling approximation term: :math:`\log (y_n!) = y_n \log y_n
+            - y_n + \frac{1}{2} \log (2 \pi y_n)`.
+=======
     The loss can be described as:
 
     .. math::
@@ -226,6 +260,7 @@ class PoissonNLLLoss(_Loss):
 
             .. math::
                 \text{target}*\log(\text{target}) - \text{target} + 0.5 * \log(2\pi\text{target}).
+>>>>>>> upstream/master
         size_average (bool, optional): By default, the losses are averaged over
             observations for each minibatch. However, if the field `size_average`
             is set to ``False``, the losses are instead summed for each minibatch.
@@ -270,23 +305,20 @@ class KLDivLoss(_Loss):
     This criterion expects a `target` `Tensor` of the same size as the
     `input` `Tensor`.
 
-    The loss can be described as:
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = y_n \odot \left( \log y_n - x_n \right),
+        \ell(x, y) = L = y \cdot \left( \log y - x \right).
 
-    where :math:`N` is the batch size. If reduce is ``True``, then:
+    If :attr:`reduce` is ``True`` (default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
         \end{cases}
-
-    By default, the losses are averaged for each minibatch over observations
-    **as well as** over dimensions. However, if the field
-    `size_average` is set to ``False``, the losses are instead summed.
 
     .. _Kullback-Leibler divergence:
         https://en.wikipedia.org/wiki/Kullback-Leibler_divergence
@@ -318,22 +350,25 @@ class KLDivLoss(_Loss):
 
 class MSELoss(_Loss):
     r"""Creates a criterion that measures the mean squared error between
-    `n` elements in the input `x` and target `y`.
+    the input `x` and target `y`.
 
-    The loss can be described as:
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = \left( x_n - y_n \right)^2,
+        \ell(x, y) = L = \left( x - y \right)^2,
 
-    where :math:`N` is the batch size. If reduce is ``True``, then:
+    If :attr:`reduce` is ``True`` (default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
         \end{cases}
 
+<<<<<<< HEAD
+=======
     The sum operation still operates over all the elements, and divides by `n`.
 
     The division by `n` can be avoided if one sets the internal variable
@@ -343,6 +378,7 @@ class MSELoss(_Loss):
     ``False``. These losses are not averaged and are not affected by
     `size_average`.
 
+>>>>>>> upstream/master
     Args:
         size_average (bool, optional): By default, the losses are averaged
            over observations for each minibatch. However, if the field
@@ -378,18 +414,20 @@ class BCELoss(_WeightedLoss):
     r"""Creates a criterion that measures the Binary Cross Entropy
     between the target and the output:
 
-    The loss can be described as:
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ y_n \cdot \log x_n + (1 - y_n) \cdot \log (1 - x_n) \right],
+        \ell(x, y) = L = - w \cdot \left[ y \cdot \log x
+              + (1 - y) \cdot \log (1 - x) \right].
 
-    where :math:`N` is the batch size. If reduce is ``True``, then
+    If :attr:`reduce` is ``True`` (default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -441,19 +479,20 @@ class BCEWithLogitsLoss(_Loss):
     followed by a `BCELoss` as, by combining the operations into one layer,
     we take advantage of the log-sum-exp trick for numerical stability.
 
-    The loss can be described as:
+    If :attr:`reduce` is ``False``, the loss can be described as:
 
     .. math::
-        \ell(x, y) = L = \{l_1,\dots,l_N\}^\top, \quad
-        l_n = - w_n \left[ t_n \cdot \log \sigma(x_n)
-        + (1 - t_n) \cdot \log (1 - \sigma(x_n)) \right],
+        \ell(x, y) = L = - w \cdot \left[ y \cdot \log \sigma(x)
+        + (1 - y) \cdot \log (1 - \sigma(x)) \right].
 
-    where :math:`N` is the batch size. If reduce is ``True``, then
+    If :attr:`reduce` is ``True`` (default), then:
 
     .. math::
         \ell(x, y) = \begin{cases}
-            \operatorname{mean}(L), & \text{if}\; \text{size_average} = \text{True},\\
-            \operatorname{sum}(L),  & \text{if}\; \text{size_average} = \text{False}.
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
         \end{cases}
 
     This is used for measuring the error of a reconstruction in for example
@@ -558,6 +597,15 @@ class MultiLabelMarginLoss(_Loss):
     r"""Creates a criterion that optimizes a multi-class multi-classification
     hinge loss (margin-based loss) between input `x`  (a 2D mini-batch `Tensor`)
     and output `y` (which is a 2D `Tensor` of target class indices).
+<<<<<<< HEAD
+
+    The loss function for :math:`n`-th sample in the mini-batch is:
+
+    .. math::
+        l_n = \sum_{\substack{i=1 \\ i \notin y_n}}^C
+        \sum_{\substack{j=1 \\ y_{n,j} \geq 0}}^C
+        \max \{0, x_{n,i} - x_{n,y_{n,j}} + 1\}.
+=======
     For each sample in the mini-batch:
 
     .. math::
@@ -565,9 +613,25 @@ class MultiLabelMarginLoss(_Loss):
 
     where `i == 0` to `x.size(0)`, `j == 0` to `y.size(0)`,
     :math:`y[j] \geq 0`, and :math:`i \neq y[j]` for all `i` and `j`.
+>>>>>>> upstream/master
 
-    `y` and `x` must have the same size.
+    Here, the criterion only considers the first non-negative `y[n, :]`
+    targets. This allows for different samples to have variable amounts
+    of target classes.
 
+<<<<<<< HEAD
+    And the total loss functions is
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \frac{1}{N} \sum_{i=1}^N l_n, & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \sum_{i=1}^N l_n,  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
+
+    where :math:`N` is the batch size.
+=======
     The criterion only considers a contiguous block of non-negative targets that
     starts at the front.
 
@@ -588,6 +652,7 @@ class MultiLabelMarginLoss(_Loss):
           is the number of classes.
         - Target: :math:`(C)` or :math:`(N, C)`, same shape as the input.
         - Output: scalar. If `reduce` is False, then `(N)`.
+>>>>>>> upstream/master
     """
     def __init__(self, size_average=True, reduce=True):
         super(MultiLabelMarginLoss, self).__init__(size_average, reduce)
@@ -603,6 +668,18 @@ class SmoothL1Loss(_Loss):
     element-wise error falls below 1 and an L1 term otherwise.
     It is less sensitive to outliers than the `MSELoss` and in some cases
     prevents exploding gradients (e.g. see "Fast R-CNN" paper by Ross Girshick).
+<<<<<<< HEAD
+    Also known as the Huber loss.
+
+    If :attr:`reduce` is ``False``, the loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = \begin{cases}
+            \frac{1}{2} \left(x - y\right)^2, &
+            \text{if}\ \left|x - y\right| < 1,\\
+            \left|x - y\right| - \frac{1}{2}, &
+            \text{otherwise}.
+=======
     Also known as the Huber loss:
 
     .. math::
@@ -615,13 +692,18 @@ class SmoothL1Loss(_Loss):
         \begin{cases}
         0.5 (x_i - y_i)^2, & \text{if } |x_i - y_i| < 1 \\
         |x_i - y_i| - 0.5, & \text{otherwise }
+>>>>>>> upstream/master
         \end{cases}
 
-    `x` and `y` arbitrary shapes with a total of `n` elements each
-    the sum operation still operates over all the elements, and divides by `n`.
+    If :attr:`reduce` is ``True`` (default), then:
 
-    The division by `n` can be avoided if one sets the internal variable
-    `size_average` to ``False``
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
 
     Args:
         size_average (bool, optional): By default, the losses are averaged
@@ -654,6 +736,22 @@ class SoftMarginLoss(_Loss):
     logistic loss between input tensor `x` and target tensor `y` (containing 1 or
     -1).
 
+<<<<<<< HEAD
+    The loss function is
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False},
+        \end{cases}
+
+    where
+
+    .. math::
+        L = \log \left[ 1 + \exp (-y \cdot x) \right].
+=======
     .. math::
         \text{loss}(x, y) = \sum_i \frac{\log(1 + \exp(-y[i]*x[i]))}{\text{x.nelement}()}
 
@@ -672,6 +770,7 @@ class SoftMarginLoss(_Loss):
         - Target: Same shape as input.
         - Output: scalar. If reduce is ``False``, then same shape as the input
 
+>>>>>>> upstream/master
     """
     def __init__(self, size_average=True, reduce=True):
         super(SoftMarginLoss, self).__init__(size_average, reduce)
@@ -697,6 +796,21 @@ class CrossEntropyLoss(_WeightedLoss):
     This criterion expects a class index (0 to `C-1`) as the
     `target` for each value of a 1D tensor of size `minibatch`
 
+<<<<<<< HEAD
+    If :attr:`reduce` is ``False``, the loss can be described as:
+
+    .. math::
+        \ell(x, y) = L = - w[y] \cdot p[y],
+
+    where
+
+    .. math::
+        p = \log \left( \operatorname{Softmax}(x) \right), \quad
+        w[y] = \text{weight}[y] \cdot
+            \mathbb{1}\{y \not= \text{ignore_index}\}.
+
+    If :attr:`reduce` is ``True`` (default), then
+=======
     The loss can be described as:
 
     .. math::
@@ -707,8 +821,15 @@ class CrossEntropyLoss(_WeightedLoss):
 
     .. math::
         \text{loss}(x, class) = weight[class] \left(-x[class] + \log\left(\sum_j \exp(x[j])\right)\right)
+>>>>>>> upstream/master
 
-    The losses are averaged across observations for each minibatch.
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{sum}(L) / \operatorname{sum}(w[y]), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to each class.
@@ -750,12 +871,32 @@ class CrossEntropyLoss(_WeightedLoss):
 
 class MultiLabelSoftMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-label one-versus-all
+<<<<<<< HEAD
+    loss based on max-entropy, between input `x` and target `y`.
+
+    The loss function is
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \operatorname{mean}(L), & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \operatorname{sum}(L),  & \text{if}\;
+            \text{size_average} = \text{False},
+        \end{cases}
+
+    where
+
+    .. math::
+        L = - \left[ y \cdot \log \frac{1}{1+e^{-x}}
+        + (1-y) \log \frac{e^{-x}}{1+e^{-x}} \right].
+=======
     loss based on max-entropy, between input `x` and target `y` of size `(N, C)`.
     For each sample in the minibatch:
 
     .. math::
         loss(x, y) = - \sum_i y[i] * \log((1 + \exp(-x[i]))^{-1})
                          + (1-y[i]) * \log\left(\frac{\exp(-x[i])}{(1 + \exp(-x[i]))}\right)
+>>>>>>> upstream/master
 
     where `i == 0` to `x.nElement()-1`, `y[i]  in {0,1}`.
 
@@ -795,6 +936,28 @@ class CosineEmbeddingLoss(_Loss):
 
     The loss function for each sample is:
 
+<<<<<<< HEAD
+    The loss function for :math:`n`-th sample in the mini-batch is:
+
+    .. math::
+        l_n = \begin{cases}
+            1 - \cos\left(x_n^{(1)}, x_n^{(2)}\right), & \text{if}\; y = 1,\\
+            \max \left\{0, \cos\left(x_n^{(1)}, x_n^{(2)}\right)
+                - \Delta\right\}, & \text{if}\; y = -1,
+        \end{cases}
+
+    and the total loss functions is
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \frac{1}{N} \sum_{i=1}^N l_n, & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \sum_{i=1}^N l_n,  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
+
+    where :math:`N` is the batch size.
+=======
     .. math::
         \text{loss}(x, y) =
         \begin{cases}
@@ -813,6 +976,7 @@ class CosineEmbeddingLoss(_Loss):
             observations for each minibatch depending on :attr:`size_average`. When
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
             ignores :attr:`size_average`. Default: ``True``
+>>>>>>> upstream/master
     """
 
     def __init__(self, margin=0, size_average=True, reduce=True):
@@ -832,6 +996,25 @@ class MarginRankingLoss(_Loss):
     If `y == 1` then it assumed the first input should be ranked higher
     (have a larger value) than the second input, and vice-versa for `y == -1`.
 
+<<<<<<< HEAD
+    The loss function for :math:`n`-th sample in the mini-batch is:
+
+    .. math::
+        l_n = \max \left\{ 0, -y_n \left(x^{(1)}_n - x^{(2)}_n\right)
+        + \Delta \right\},
+
+    and the total loss functions is
+
+    .. math::
+        \ell(x, y) = \begin{cases}
+            \frac{1}{N} \sum_{i=1}^N l_n, & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \sum_{i=1}^N l_n,  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
+
+    where :math:`N` is the batch size.
+=======
     The loss function for each sample in the mini-batch is:
 
     .. math::
@@ -852,6 +1035,7 @@ class MarginRankingLoss(_Loss):
         - Input: :math:`(N, D)` where `N` is the batch size and `D` is the size of a sample.
         - Target: :math:`(N)`
         - Output: scalar. If `reduce` is False, then `(N)`.
+>>>>>>> upstream/master
     """
 
     def __init__(self, margin=0, size_average=True, reduce=True):
@@ -865,6 +1049,13 @@ class MarginRankingLoss(_Loss):
 
 class MultiMarginLoss(_WeightedLoss):
     r"""Creates a criterion that optimizes a multi-class classification hinge
+<<<<<<< HEAD
+    loss (margin-based loss) between input `x` (a 2D mini-batch `Tensor` of
+    shape :math:`(N, C)`) and output `y` (which is a 1D tensor of target class
+    indices of shape :math:`(N)`, and :math:`0 < y_i <= C`).
+
+    The loss function for :math:`n`-th sample in the mini-batch is:
+=======
     loss (margin-based loss) between input `x` (a 2D mini-batch `Tensor`) and
     output `y` (which is a 1D tensor of target class indices,
     :math:`0 \leq y \leq \text{x.size}(1)`):
@@ -876,13 +1067,25 @@ class MultiMarginLoss(_WeightedLoss):
         \text{loss}(x, y) = \frac{\sum_i \max(0, \text{margin} - x[y] + x[i]))^p}{\text{x.size}(0)}
 
     where `i == 0` to `x.size(0)` and :math:`i \neq y`.
-
-    Optionally, you can give non-equal weighting on the classes by passing
-    a 1D `weight` tensor into the constructor.
-
-    The loss function then becomes:
+>>>>>>> upstream/master
 
     .. math::
+        l_n = \frac{1}{C}\sum_{\substack{i=1 \\ i \not= y_n}}^C
+         w_{y_n} \cdot \max \{0, x_{n,i} - x_{n,y_n} + \Delta \}^p.
+
+    and the total loss functions is
+
+    .. math::
+<<<<<<< HEAD
+        \ell(x, y) = \begin{cases}
+            \frac{1}{N} \sum_{i=1}^N l_n, & \text{if}\;
+            \text{size_average} = \text{True},\\
+            \sum_{i=1}^N l_n,  & \text{if}\;
+            \text{size_average} = \text{False}.
+        \end{cases}
+
+    where :math:`N` is the batch size.
+=======
         \text{loss}(x, y) = \frac{\sum_i \max(0, w[y] * (\text{margin} - x[y] - x[i]))^p)}{\text{x.size}(0)}
 
     Args:
@@ -901,6 +1104,7 @@ class MultiMarginLoss(_WeightedLoss):
             :attr:`reduce` is ``False``, returns a loss per batch element instead and
             ignores :attr:`size_average`. Default: ``True``
 
+>>>>>>> upstream/master
     """
 
     def __init__(self, p=1, margin=1, weight=None, size_average=True, reduce=True):
@@ -931,7 +1135,12 @@ class TripletMarginLoss(_Loss):
     The loss function for each sample in the mini-batch is:
 
     .. math::
+<<<<<<< HEAD
+        L(a, p, n) = \frac{1}{N} \left( \sum_{i=1}^N \max \{d(a_i, p_i)
+            - d(a_i, n_i) + {\rm margin}, 0\} \right)
+=======
         L(a, p, n) = \max \{d(a_i, p_i) - d(a_i, n_i) + {\rm margin}, 0\}
+>>>>>>> upstream/master
 
     where :math:`d(x_i, y_i) = \left\lVert {\bf x}_i - {\bf y}_i \right\rVert_p`.
 
