@@ -148,6 +148,14 @@ class OpSchema {
   OpSchema& TensorInferenceFunction(TensorInferenceFunctionType function);
 
   /**
+   * A wrapper that makes an infer tensor function to return unknown
+   * shape for all outputs if any one of the inputs has unknown shape
+   */
+
+  static TensorInferenceFunctionType NeedsAllInputShapes(
+      TensorInferenceFunctionType f);
+
+  /**
    * @brief Sets the corresponding onnx schema name
    */
   OpSchema& InheritOnnxSchema(const std::string& onnx_schema_name);
