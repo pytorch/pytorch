@@ -181,15 +181,16 @@ class Caffe2Backend(Backend):
         super(Caffe2Backend, cls).run_node(node, inputs, device=device, outputs_info=outputs_info)
 
         device_option = get_device_option(Device(device))
-        with Workspace(), core.DeviceScope(device_option):  # temporary!
+        ws = Workspace()
+        with core.DeviceScope(device_option):  # temporary!
             if isinstance(inputs, dict):
                 for key, value in inputs.items():
-                    workspace.FeedBlob(key, value)
+                    ws.FeedBlob(key, value)
             else:
                 assert len(node.input) == len(inputs), "{}: expected {} but got {}".format(
                     node.op_type, len(node.input), len(inputs))
                 for key, value in zip(node.input, inputs):
-                    workspace.FeedBlob(key, value)
+                    ws.FeedBlob(key, value)
 
             ops = []
             cbackend = C.Caffe2Backend()
@@ -207,8 +208,8 @@ class Caffe2Backend(Backend):
                 for op in ops2:
                     op.device_option.CopyFrom(device_option)
                 print("\nC++:\n{}\nPython:\n{}".format(ops, ops2))
-            workspace.RunOperatorsOnce(ops)
-            output_values = [workspace.FetchBlob(name) for name in node.output]
+            ws.RunOperatorsOnce(ops)
+            output_values = [ws.FetchBlob(name) for name in node.output]
             return namedtupledict('Outputs', node.output)(*output_values)
 
     @classmethod
