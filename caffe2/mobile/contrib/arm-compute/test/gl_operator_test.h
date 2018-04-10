@@ -88,40 +88,33 @@ void compareNetResult4D(Workspace& ws,
   }
   Blob *cpu_out = ws.GetBlob(cpu_blob);
   Blob *gpu_out = ws.GetBlob(gpu_blob);
-  //auto &g_ = gpu_out->Get<GLTensor<T>>();
 
   EXPECT_NE(nullptr, cpu_out);
   EXPECT_NE(nullptr, gpu_out);
 
-  //TensorCPU g;
   auto &t = cpu_out->Get<TensorCPU>();
-  auto &g = gpu_out->Get<TensorCPU>();
-/*   g.Resize(g_.dims()); */
-/*   T *buffer = g_.map(); */
-/*   char *byte_buffer = (char *)buffer; */
-/*   auto info = g_.get_underlying()->info(); */
-
-/*   CAFFE_ENFORCE(byte_buffer != NULL); */
-/*   auto C = t.dim32(1); */
-/*   auto H = t.dim32(2); */
-/*   auto W = t.dim32(3); */
-/* #define get_elem(_a, _b, _c)                                            \ */
-/*   (half *)&byte_buffer[info->offset_element_in_bytes(                   \ */
-/*       arm_compute::Coordinates(_a, _b, _c))] */
   int diff_num = 0;
-  /* for (auto c = 0; c < C; ++c) { */
-  /*   for (auto h = 0; h < H; ++h) { */
-  /*     for (auto w = 0; w < W; ++w) { */
-  for (auto i = 0; i < t.size(); ++i) {
-    auto t_elem = t.data<float>()[i];
-    auto g_elem = g.data<float>()[i];
-    if (!isnan(t_elem) && (std::abs(t_elem - g_elem) > tol + tol * std::abs(t_elem))) {
-      diff_num++;
+  if (gpu_out->IsType<TensorCPU>()) {
+    auto& g = gpu_out->Get<TensorCPU>();
+    for (auto i = 0; i < t.size(); ++i) {
+      auto t_elem = t.data<float>()[i];
+      auto g_elem = g.data<float>()[i];
+      if (!isnan(t_elem) && (std::abs(t_elem - g_elem) > tol + tol * std::abs(t_elem))) {
+        diff_num++;
+      }
     }
-    CHECK(diff_num <= 0.03 * t.size());
+  } else if (gpu_out->IsType<GLTensor<T>>()) {
+    TensorCPU g;
+    getTensorCPU(gpu_out->Get<GLTensor<T>>(), g);
+    for (auto i = 0; i < t.size(); ++i) {
+      auto t_elem = t.data<float>()[i];
+      auto g_elem = g.data<float>()[i];
+      if (!isnan(t_elem) && (std::abs(t_elem - g_elem) > tol + tol * std::abs(t_elem))) {
+        diff_num++;
+      }
+    }
   }
-  //#undef get_elem
-  //  g_.unmap();
+  CHECK(diff_num <= 0.03 * t.size());
 }
 
 

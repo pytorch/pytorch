@@ -130,11 +130,11 @@ vector<float> GLNet::TEST_Benchmark(
 
   auto last_blob = output_blobs_[output_blobs_.size() - 1];
   Blob *gpu_out_blob = ws_->GetBlob(last_blob);
-  // if (gpu_out_blob->IsType<GLTensor<DataType>>()) {
-  //   auto &g_ = gpu_out_blob->Get<GLTensor<half>>();
-  //   // Enforce gpu execution
-  //   g_.sync();
-  // }
+  if (gpu_out_blob->IsType<GLTensor<DataType>>()) {
+    auto &g_ = gpu_out_blob->Get<GLTensor<DataType>>();
+    // Enforce gpu execution
+    g_.sync();
+  }
 
   std::cout << "Main runs." << std::endl;
   CAFFE_ENFORCE(
@@ -146,10 +146,10 @@ vector<float> GLNet::TEST_Benchmark(
   for (int i = 0; i < main_runs; ++i) {
     CAFFE_ENFORCE(Run(), "Main run ", i, " has failed.");
   }
-  // if (gpu_out_blob->IsType<GLTensor<DataType>>()) {
-  //   auto &g_ = gpu_out_blob->Get<GLTensor<half>>();
-  //   g_.sync();
-  // }
+  if (gpu_out_blob->IsType<GLTensor<DataType>>()) {
+    auto &g_ = gpu_out_blob->Get<GLTensor<DataType>>();
+    g_.sync();
+  }
 
   auto millis = timer.MilliSeconds();
   std::cout << "Main run finished. Milliseconds per iter: "

@@ -12,6 +12,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/timer.h"
 
 #include "arm_compute/core/GLES_COMPUTE/OpenGLES.h"
 #include "arm_compute/runtime/GLES_COMPUTE/GCFunctions.h"
@@ -26,8 +27,6 @@
 #include "utils/Utils.h"
 #include "include/half/half.hpp"
 
-
-#include "caffe2/core/timer.h"
 namespace caffe2 {
 
 typedef half_float::half half;
@@ -68,8 +67,7 @@ public:
         X_raw_ptr = new GLTensor<T>();
         X_raw_ptr->ResizeLike(Xcpu);
       }
-      deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(
-                                                           X_raw_ptr, [](const GLTensor<T> *X) { delete X; });
+      deleted_unique_ptr<const GLTensor<T>> X_unique_ptr(X_raw_ptr, [](const GLTensor<T> *X) { delete X; });
       return X_unique_ptr;
     }
     const GLTensor<T> *X_raw_ptr;
@@ -167,11 +165,9 @@ public:
       //LOG(ERROR) << "[C2DEBUG] resize need_allocation";
       tensor_->allocator()->free();
       #ifdef ACL_USE_FLOAT32
-      tensor_->allocator()->init(
-                                 arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F32));
+      tensor_->allocator()->init(arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F32));
       #else
-      tensor_->allocator()->init(
-                                 arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F16));
+      tensor_->allocator()->init(arm_compute::TensorInfo(shape_, 1, arm_compute::DataType::F16));
       #endif
     } else {
       tensor_->info()->set_tensor_shape(shape_);
