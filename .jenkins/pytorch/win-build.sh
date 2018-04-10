@@ -32,13 +32,13 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-aws s3 cp s3://ossci-windows/mkl_with_headers.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl
+aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl
 set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
 set LIB=%cd%\\mkl\\lib;%LIB
 
 :: Install MAGMA
-aws s3 cp s3://ossci-windows/magma_cuda90_release.7z magma_cuda90_release.7z --quiet && 7z x -aoa magma_cuda90_release.7z -omagma_cuda90_release
-set MAGMA_HOME=%cd%\\magma_cuda90_release
+aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+set MAGMA_HOME=%cd%\\magma
 
 :: Install clcache
 aws s3 cp s3://ossci-windows/clcache.7z clcache.7z --quiet && 7z x -aoa clcache.7z -oclcache
