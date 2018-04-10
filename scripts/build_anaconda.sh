@@ -186,7 +186,7 @@ else
   CONDA_BUILD_DIR="${CONDA_BUILD_DIR}/caffe2/normal"
 fi
 META_YAML="${CONDA_BUILD_DIR}/meta.yaml"
-portable_sed "s#path:  \.\..*#path: $PYTORCH_ROOT#" $META_YAML
+portable_sed "s#path:.*#path: $PYTORCH_ROOT#" $META_YAML
 
 
 ###########################################################
