@@ -520,9 +520,13 @@
 
 - func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randint_like(Tensor self, int64_t low, int64_t high, *, Type dtype) -> Tensor
   variants: function
+  python_default_init:
+    dtype: self.type()
 
 - func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
