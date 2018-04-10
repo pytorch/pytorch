@@ -46,6 +46,10 @@ REGISTER_GRADIENT(PrependDim, GetPrependDimGradient);
 class GetMergeDimGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
   vector<OperatorDef> GetGradientDefs() override {
+    CAFFE_ENFORCE( Def().input(0) != Def().output(0),
+        "Cannot compute gradient of MergeDim when in-place.",
+        ProtoDebugString(Def()));
+    
     return SingleGradientDef(
         "ResizeLike", "", vector<string>{GO(0),I(0)}, vector<string>{GI(0)});
   }
